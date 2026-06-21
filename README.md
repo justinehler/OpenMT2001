@@ -30,20 +30,32 @@ Build instructions will be maintained for supported platforms as the public sour
 
 ---
 
-# 4. Contributing
+# 4. Maintainer model
 
-Contributions are welcome once the public source tree is available. Useful areas include file format research, engine implementation, platform support, documentation, testing, accessibility, and tooling for validating original installations.
+OpenMT2001 is a public, MIT-licensed project maintained as a personal development effort.
 
-Please do not submit proprietary game files, extracted assets, copyrighted media, or material copied from the original executable or data files.
+The source is published so that others can study, build, modify, and fork it under the terms of the MIT License. However, this repository is not operated as a community-led open-source project. Pull requests, design proposals, roadmap requests, and general support requests should not be expected to receive review or acceptance.
+
+Issues and Discussions are open for bug reports, compatibility notes, research findings, and useful project context. Reports may be reviewed and acted on at the maintainer's discretion, but there is no guarantee of response, fix, release timeline, or ongoing support.
+
+Development direction, scope, and release timing are decided by the maintainer.
 
 ---
 
-# 5. Licence
+# 5. Contributing
+
+OpenMT2001 is not currently accepting outside code contributions. You are welcome to fork the project, modify it, and distribute your own work under the terms of the MIT License.
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for the repository contribution policy.
+
+---
+
+# 6. Licence
 
 OpenMT2001 is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
 ---
 
-# 6. Disclaimer
+# 7. Disclaimer
 
 OpenMT2001 is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Hasbro, Deep Red Games, Infogrames, Atari, or any other rights holder.
