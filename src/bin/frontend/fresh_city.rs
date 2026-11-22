@@ -776,8 +776,8 @@ impl<'data> Session<'data> {
         };
         let selected=catalog.find_directory(input.scenario.as_bytes()).ok_or("scenario missing from original level catalog")?;
         let id=catalog.levels[selected].id();
-        if !(200001..=200016).contains(&id) && !matches!(id, 100000..=100007 | 100009..=100012 | 400001 | 400002) {
-            return Err("fresh-city initialization requires a supported scenario, Tutorial 1 through 7 or internal Tutorials 9 through 12, Bonus or Sandbox".into());
+        if !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
+            return Err("fresh-city initialization requires a supported scenario, Tutorials 1 through 12, Bonus or Sandbox".into());
         }
         if !catalog.select(id,false){return Err("scenario is not a single-player catalog entry".into());}
         catalog.difficulty=input.difficulty as u32;
@@ -880,7 +880,7 @@ impl<'data> Session<'data> {
         let mut saved_player_metadata = [[0u8; 48]; 6];
         if !load_mode {
         let mut pending = openmt2001::player_script::PendingRoster::default();
-        if matches!(id, 100000..=100007 | 100009..=100012) {
+        if matches!(id, 100000..=100012) {
             // Original 4a84cd..4a851b: tutorial players.lua is optional. When
             // absent, 4a6a20 registers slot 0 as kind 0, character 0.
             match fs::read(input.scripts.join(format!("{}/players.lua", input.scenario))) {
@@ -1085,7 +1085,7 @@ impl<'data> Session<'data> {
             player_style_indices: std::array::from_fn(|i|i32::from_le_bytes(input.image.at(0x53c9dc+i as u32*4,4).unwrap().try_into().unwrap())),
             difficulty: input.difficulty as usize,
             // The original sixteen campaign registrations use mode2.
-            tutorial_state: u8::from(matches!(id, 100000..=100007 | 100009..=100012)),
+            tutorial_state: u8::from(matches!(id, 100000..=100012)),
             catalog,
             campaign_profile: profile_path,
             setup: None,
@@ -1135,7 +1135,7 @@ impl<'data> Session<'data> {
         if self.tutorial_state != 1 {
             return Ok(());
         }
-        if self.catalog.selected_level().is_some_and(|level| matches!(level.id(), 100001..=100007 | 100009..=100012)) {
+        if self.catalog.selected_level().is_some_and(|level| matches!(level.id(), 100001..=100012)) {
             self.scripts.bind_tutorial_camera()?;
         }
         let context = self.world.script_context(

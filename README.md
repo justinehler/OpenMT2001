@@ -59,8 +59,8 @@ Browser execution is not currently supported.
 
 Documented original blockers are fixed by default. Use `--strict-v14` to retain
 the original behavior; see [compatibility modes](COMPATIBILITY.md) for the
-intentional differences. Tutorial 8 remains withheld while its rights path is
-investigated.
+intentional differences. All original tutorial entries are now available;
+connected original-input checks cover their supported flows.
 Passing initialization or selected tutorial flows does not establish complete
 campaign playability.
 

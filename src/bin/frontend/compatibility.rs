@@ -9,11 +9,11 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// Intentional modern departure for Tutorial5's documented v1.4 blocker:
+    /// Intentional modern departure for Tutorial5's documented v1.4 blocker and the measured Tutorial8 startup blocker:
     /// https://www.gamepressure.com/download/monopoly-tycoon-14-patch/z3135e5
     /// Preserve authored rights only across the fresh ownership reset. This is
-    /// not a claim of full native equivalence. Tutorial8 remains excluded until
-    /// separately proven; saves and strict evidence flows retain native bytes.
+    /// not a claim of full native equivalence. Tutorial8 is a measured engine compatibility policy, not a proven native
+    /// defect. Saves and strict evidence flows retain native bytes.
     pub fn repair_startup_rights(
         self,
         id: u32,
@@ -21,14 +21,12 @@ impl Mode {
         before: &[(u8, u32); 52],
         after: &mut [[u8; 380]; 52],
     ) -> usize {
-        if self != Self::Modern || load_mode || id != 100004 {
+        if self != Self::Modern || load_mode || !matches!(id, 100004 | 100008) {
             return 0;
         }
         let mut repaired = 0;
         for (&(owner, rights), row) in before.iter().zip(after.iter_mut()) {
-            if owner != 0 && row[0x05] == owner && rights != 0
-                && row[0x78..0x7c] == [0; 4]
-            {
+            if owner != 0 && row[0x05] == owner && rights != 0 && row[0x78..0x7c] == [0; 4] {
                 row[0x78..0x7c].copy_from_slice(&rights.to_le_bytes());
                 repaired += 1;
             }
@@ -56,11 +54,17 @@ mod tests {
         assert_eq!(Mode::default(), Mode::Modern);
         let (before, mut after) = fixture();
         let native = after;
-        assert_eq!(Mode::Modern.repair_startup_rights(100004, false, &before, &mut after), 52);
-        for i in 0..52 {
-            let mut expected = native[i];
-            expected[0x78..0x7c].copy_from_slice(&before[i].1.to_le_bytes());
-            assert_eq!(after[i], expected);
+        for id in [100004, 100008] {
+            after = native;
+            assert_eq!(
+                Mode::Modern.repair_startup_rights(id, false, &before, &mut after),
+                52
+            );
+            for i in 0..52 {
+                let mut expected = native[i];
+                expected[0x78..0x7c].copy_from_slice(&before[i].1.to_le_bytes());
+                assert_eq!(after[i], expected);
+            }
         }
     }
 
@@ -70,7 +74,9 @@ mod tests {
         for mode in [Mode::Modern, Mode::StrictV14] {
             for load in [false, true] {
                 for id in [0, 100000, 100003, 100004, 100005, 100008, 200001, 400001] {
-                    if mode == Mode::Modern && !load && id == 100004 { continue; }
+                    if mode == Mode::Modern && !load && matches!(id, 100004 | 100008) {
+                        continue;
+                    }
                     let mut after = native;
                     assert_eq!(mode.repair_startup_rights(id, load, &before, &mut after), 0);
                     assert_eq!(after, native);
@@ -88,11 +94,17 @@ mod tests {
         before[2].1 = 0;
         after[3][0x78..0x7c].copy_from_slice(&0xabcdef01u32.to_le_bytes());
         let native = after;
-        assert_eq!(Mode::Modern.repair_startup_rights(100004, false, &before, &mut after), 48);
+        assert_eq!(
+            Mode::Modern.repair_startup_rights(100004, false, &before, &mut after),
+            48
+        );
         assert_eq!(&after[..4], &native[..4]);
         // Applying the policy twice cannot overwrite established rights.
         let repaired = after;
-        assert_eq!(Mode::Modern.repair_startup_rights(100004, false, &before, &mut after), 0);
+        assert_eq!(
+            Mode::Modern.repair_startup_rights(100004, false, &before, &mut after),
+            0
+        );
         assert_eq!(after, repaired);
     }
 }

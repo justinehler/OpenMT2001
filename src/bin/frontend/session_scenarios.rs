@@ -17,6 +17,7 @@ pub fn register_sources(runtime: &mut Runtime, root: &Path) -> Result<(), String
         "developedmap",
         "cheapbuiltbigmap",
         "monopolymap",
+        "shoppingmap",
     ] {
         let relative = format!("MAPS/{map}.lua");
         let bytes = std::fs::read(root.join(&relative)).map_err(|e| format!("{relative}: {e}"))?;
@@ -30,7 +31,7 @@ pub fn register_sources(runtime: &mut Runtime, root: &Path) -> Result<(), String
     }
     // Original Tutorial 3's initializer explicitly reuses Tutorial 1's
     // supplied ownership/population preferences.
-    for tutorial_preferences in ["TUTORIAL1/initialpref.lua", "TUTORIAL4/initialpref.lua", "TUTORIAL9/initialpref.lua", "TUTORIAL12/initialpref.lua"] {
+    for tutorial_preferences in ["TUTORIAL1/initialpref.lua", "TUTORIAL4/initialpref.lua", "TUTORIAL8/initialpref.lua", "TUTORIAL9/initialpref.lua", "TUTORIAL12/initialpref.lua"] {
         let bytes = std::fs::read(root.join(tutorial_preferences))
             .map_err(|error| format!("{tutorial_preferences}: {error}"))?;
         runtime.script_buffer(&format!("scripts/{tutorial_preferences}"), &bytes)?;
@@ -616,6 +617,232 @@ mod tests {
     #[ignore = "requires original Tutorial5 scripts and assets; modern documented-blocker repair"]
     fn original_tutorial_five_compatibility_flow() {
         tutorial_three_to_five(Some(crate::compatibility::Mode::Modern));
+    }
+
+
+    #[test]
+    #[ignore = "requires supplied original Tutorial8 inputs"]
+    fn original_tutorial_eight_strict_rights_gate() {
+        tutorial_eight(crate::compatibility::Mode::StrictV14);
+    }
+    #[test]
+    #[ignore = "requires supplied original Tutorial8 inputs"]
+    fn original_tutorial_eight_three_business_flow() {
+        tutorial_eight(crate::compatibility::Mode::Modern);
+    }
+    fn tutorial_eight(mode: crate::compatibility::Mode) {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let build = read("OPENMT2001_BUILD_FILE");
+        let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let index = openmt2001::archive::ArchiveIndex::parse(
+            &directory, archive.len() as u64).unwrap();
+        let parameters = read("OPENMT2001_PARAMETERS");
+        let timetable = read("OPENMT2001_TIMETABLE");
+        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let scripts = executable_path.parent().unwrap().join("scripts");
+        let language = executable_path.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let names = super::super::character_names(&image, &language).unwrap();
+        let era_styles = load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            .parent().unwrap()).unwrap();
+        let installer = Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            .parent().unwrap().parent().unwrap().to_path_buf();
+        let offsets = fs::read(language.join("tycoon.off")).unwrap();
+        let text = fs::read(language.join("tycoon.bin")).unwrap();
+        let mut at = 0;
+        let strings = offsets.chunks_exact(2).map(|length| {
+            let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
+            let value = &text[at..end];
+            at = end;
+            value
+        }).collect::<Vec<_>>();
+        assert_eq!(at, text.len());
+        let assets = super::super::CommandAssets { image: &image, board: &board, file: &file };
+
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        }
+        let scratch = Scratch(std::path::PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").unwrap())
+            .join(format!("tutorial8-{}-{}", std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
+        fs::create_dir_all(&scratch.0).unwrap();
+        let profile = scratch.0.join("progress.profile");
+        let mut session = Session::initialize_campaign_compatible(Inputs {
+            image:&image,board:&board,file:&file,
+            people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
+            vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
+            transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),
+            road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts:&scripts,
+            parameters:std::str::from_utf8(&parameters).unwrap(),era_styles,
+            timetable:std::str::from_utf8(&timetable).unwrap(),
+            scenario:crate::scenarios::find(100008).unwrap().token,difficulty:0,
+            selected_character:0,profile_name:b"Tutorial8",character_names:&names,
+        },Policy{seed:0x12345678,auxiliary_prior_bytes:[0;0x11c]},
+            crate::campaign_store::load_catalog(&image,&scripts).unwrap(),profile.clone(),mode).unwrap();
+        let mut host=crate::live_host::Host::new([0.,20.,0.]);
+        host.begin_presentation(&session).unwrap();
+        host.frame(&mut session,&assets,20);
+        let prompt_assets=crate::prompt::Assets::load(&index,&archive,&installer,&strings).unwrap();
+        let ack=|session:&mut Session<'_>,host:&mut crate::live_host::Host,id| {
+            let status=host.status(session);
+            let request=status.prompts.last().copied().unwrap();
+            assert_eq!(request.dismissal_id,id);
+            let mut modal=crate::prompt::State::default();
+            let _=modal.submit(request);
+            let bounds=prompt_assets.button_at(status.tutorial_interaction.prompt_offset());
+            modal.cursor([(bounds[0]+bounds[2])*0.5,(bounds[1]+bounds[3])*0.5]);
+            assert_eq!(modal.left_button(true,bounds),None);
+            assert_eq!(modal.left_button_with(false,bounds,|_,id| {
+                session.dispatch_session_event("InterfacePromptDismiss",id as i32,&assets,false).unwrap();
+            }),Some(id));
+        };
+        let buildings=|session:&Session<'_>| session.world.buildings.iter().filter(|row|row[0x3f]!=0).count();
+        assert_eq!(buildings(&session),4,"original shoppingmap supplies four buildings");
+        let businesses_before=session.world.ledgers.businesses.iter().filter(|row|row[0x21c]!=0).count();
+        ack(&mut session,&mut host,2);
+        assert_eq!(host.status(&session).tutorial_enabled_controls,vec![73]);
+        host.tutorial_event(&mut session,&assets,73).unwrap();
+        assert_eq!(host.status(&session).tutorial_message.unwrap().dismissal_id,4);
+        assert!(host.status(&session).tutorial_enabled_controls.contains(&23));
+        let scene=session.scene(&build,openmt2001::render_scene::OriginalAssets{
+            executable:&executable,directory:&directory,archive:&archive},
+            &read("OPENMT2001_SUNCOLS"),None,true).unwrap();
+        let locator_assets=crate::locator::Assets::load(&index,&archive,&installer,&strings,&executable).unwrap();
+        let mut locator=locator_assets.runtime_state(&crate::locator::RuntimeInputs::from_world(&session.world)).unwrap();
+        locator.attach_polls(Some(crate::consumer_polls::Poll::from_runtime(&session.world).unwrap()));
+        let poll_point=(0..640).step_by(4).flat_map(|x|(0..480).step_by(4).map(move|y|[x,y]))
+            .find(|&point|locator.tutorial_control_at(&locator_assets,Some(point))==Some(23)).unwrap();
+        locator.mouse(&locator_assets,&scene,Some(poll_point),true);
+        locator.mouse(&locator_assets,&scene,Some(poll_point),false);
+        assert_eq!(locator.take_tutorial_control(),Some(23));
+        host.tutorial_event(&mut session,&assets,23).unwrap();
+        let status=host.status(&session);
+        assert_eq!(status.tutorial_message.unwrap().dismissal_id,5);
+        let kentucky=(0..52).find(|&id|status.tutorial_interaction.callback(
+            crate::tutorial_two_interaction::Pick::Block{category_id:id})==Some(0)).unwrap();
+        assert!(!host.tutorial_pick(&mut session,&assets,crate::tutorial_two_interaction::Pick::Block{
+            category_id:(kentucky+1)%52}).unwrap());
+        assert!(host.tutorial_pick(&mut session,&assets,crate::tutorial_two_interaction::Pick::Block{category_id:kentucky}).unwrap());
+        ack(&mut session,&mut host,6);
+        assert!(host.tutorial_pick(&mut session,&assets,crate::tutorial_two_interaction::Pick::BlockEntry{category_id:kentucky}).unwrap());
+        assert_eq!(host.status(&session).tutorial_message.unwrap().dismissal_id,8);
+        let context=crate::build_panel::Context::from_session(&session,kentucky as usize).unwrap();
+        host.tutorial_event(&mut session,&assets,11).unwrap();
+        println!("Tutorial8 {mode:?}: Kentucky{id} owner{owner} current{current} rights{rights} pending{pending} entry{entry:?}",
+            id=kentucky,owner=context.category_record[5],current=context.current_owner,
+            rights=u32::from_le_bytes(context.category_record[0x78..0x7c].try_into().unwrap()),
+            pending=context.category_record[0x6d],entry=context.entry());
+        if mode==crate::compatibility::Mode::StrictV14 {
+            assert_eq!(context.entry(),crate::build_panel::Entry::Message{text:1202,show_rights_action:true});
+            assert_eq!(&context.category_record[0x78..0x7c],&[0;4]);
+            return;
+        }
+        assert_eq!(context.entry(),crate::build_panel::Entry::Open);
+        let planning_assets=crate::build_view::Assets::load(&index,&archive,&installer,&strings,&executable).unwrap();
+        let click=|planning:&mut crate::build_view::State,point:[i32;2]|{
+            planning.pointer(Some(point));planning.mouse(true);planning.mouse(false);
+            planning.take_tutorial_control()
+        };
+        for (ordinal,use_index) in [1,12,4].into_iter().enumerate() {
+            if ordinal!=0 {host.tutorial_event(&mut session,&assets,11).unwrap();}
+            let status=host.status(&session);
+            assert_eq!(status.tutorial_build_type,0);
+            assert_eq!(status.tutorial_build_use,use_index);
+            assert!(!status.tutorial_enabled_controls.contains(&98));
+            assert!(!status.tutorial_enabled_controls.contains(&99));
+            host.tutorial_event(&mut session,&assets,98).unwrap();
+            let mut planning=planning_assets.open(crate::build_panel::Context::from_session(&session,kentucky as usize).unwrap()).unwrap();
+            planning.set_tutorial_build_type(status.tutorial_build_type);
+            planning.set_tutorial_build_use(status.tutorial_build_use);
+            assert_eq!(click(&mut planning,[100,155]),None);
+            assert_eq!(planning.step,0,"wrong type rejected");
+            assert_eq!(click(&mut planning,[100,100]),Some(86));
+            host.tutorial_event(&mut session,&assets,86).unwrap();
+            assert_eq!(click(&mut planning,[100,186]),Some(87));
+            host.tutorial_event(&mut session,&assets,87).unwrap();
+            assert_eq!(planning.step,1,"wrong use rejected");
+            'uses: for scroll in 0..45 {
+                if scroll>0 {planning.scroll(-1);}
+                for row in 0..10 {
+                    if click(&mut planning,[100,150+row*18])==Some(87) {
+                        host.tutorial_event(&mut session,&assets,87).unwrap();
+                        if planning.step==2 {break 'uses;}
+                    }
+                }
+            }
+            assert_eq!(planning.step,2,"authored use must be selectable through the actual list");
+            let block=board.blocks.iter().find(|block|block.id==kentucky as usize).unwrap();
+            let mut navigation=crate::navigation::block_entry([block.center[0],0.,block.center[1]]);
+            let (eye,target)=navigation.tick([false;4]);
+            planning.project_grid(openmt2001::flyby::CameraSample{eye,target,up:[0.,1.,0.],vertical_fov:45.},block.center).unwrap();
+            let centers=crate::build_panel::cell_centers(planning.grid.as_ref().unwrap());
+            let mut placed=false;
+            'footprints:for width in 1..=6usize {for depth in 1..=6usize {
+                for x in 0..=7-width {for y in 0..=7-depth {
+                    let start=centers[x*7+y].map(|v|v as i32);
+                    let end=centers[(x+width-1)*7+y+depth-1].map(|v|v as i32);
+                    planning.pointer(Some(start));if !planning.tutorial_drag_at(){continue;}
+                    planning.mouse(true);planning.pointer(Some(end));planning.mouse(false);
+                    if planning.take_placement_request(){placed=true;break 'footprints;}
+                }}
+            }}
+            assert!(placed,"legal footprint for authored use{use_index}");
+            let choices=host.complete_build_drag(&mut session,&assets).unwrap();
+            planning.apply_placement_choices(choices);
+            let request=planning.request().unwrap();
+            let quote=session.inspect_build(&request,&assets).unwrap();
+            assert!(quote.allowed(),"legal original catalog build use{use_index}");
+            planning.quote_request=Some(request.clone());planning.quote=Some(quote);planning.needs_quote=false;
+            assert_eq!(click(&mut planning,[140,550]),Some(97));
+            assert!(planning.submit);
+            host.tutorial_event(&mut session,&assets,97).unwrap();
+            let queued=session.live_commands.snapshot().unwrap().len();
+            assert!(session.submit_build(&request,&assets,|event|Err(format!("unexpected synchronous construction {event:?}"))).unwrap().submitted);
+            assert_eq!(buildings(&session),4+ordinal);
+            host.set_running(true);
+            assert_eq!(session.live_commands.snapshot().unwrap().len(),queued+1);
+            // Build command admission creates a pending structure first. Wait
+            // through genuine pending-world construction and delayed Open too.
+            for _ in 0..1000 {
+                host.frame(&mut session,&assets,40);
+                assert!(host.status(&session).failure.is_none());
+                if session.world.ledgers.businesses.iter().filter(|row|row[0x21c]!=0).count()==businesses_before+ordinal+1 {break;}
+            }
+            assert_eq!(session.world.ledgers.businesses.iter().filter(|row|row[0x21c]!=0).count(),businesses_before+ordinal+1,
+                "running pending-world construction must open the authored business");
+            assert_eq!(buildings(&session),5+ordinal);
+            let new_business=session.world.ledgers.businesses.iter().filter(|row|row[0x21c]!=0).nth(businesses_before+ordinal).unwrap();
+            assert_eq!(u32::from_le_bytes(new_business[4..8].try_into().unwrap()),request.business);
+            let building_slot=u16::from_le_bytes(new_business[8..10].try_into().unwrap()) as usize;
+            let building=&session.world.buildings[building_slot];
+            assert_ne!(building[0x3f],0);
+            assert_eq!(u32::from_le_bytes(building[0x40..0x44].try_into().unwrap()),0x617628+kentucky*380);
+            assert_eq!(request.kind,0);
+            println!("Tutorial8 built use{use_index}, catalog{}, slot{building_slot}, origin{:?}, size{:?}, height{}",request.business,request.origin,request.size,request.height);
+            assert_eq!(host.status(&session).tutorial_message.unwrap().dismissal_id,9+ordinal as u32,
+                "genuine internal99 advances the original hub exactly once");
+            host.frame(&mut session,&assets,40);
+            assert_eq!(buildings(&session),5+ordinal);
+        }
+        assert_eq!(buildings(&session),7);
+        assert_eq!(session.world.ledgers.businesses.iter().filter(|row|row[0x21c]!=0).count(),businesses_before+3);
+        host.tutorial_event(&mut session,&assets,73).unwrap();
+        ack(&mut session,&mut host,12);
+        ack(&mut session,&mut host,13);
+        host.frame(&mut session,&assets,20);
+        assert!(host.status(&session).tutorial_completed);
+        let recorded=fs::read(&profile).unwrap();
+        host.frame(&mut session,&assets,40);
+        assert_eq!(fs::read(&profile).unwrap(),recorded);
+        let mut progression=crate::campaign_store::load_catalog(&image,&scripts).unwrap();
+        crate::campaign_store::load_progress(&mut progression,&profile).unwrap();
+        assert!(progression.levels.iter().find(|level|level.id()==100008).unwrap().completed()[0]);
+        assert!(progression.levels.iter().find(|level|level.id()==100009).unwrap().unlocked());
     }
 
     fn tutorial_three_to_five(fifth_mode: Option<crate::compatibility::Mode>) {

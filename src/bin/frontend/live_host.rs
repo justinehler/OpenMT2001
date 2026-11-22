@@ -958,6 +958,14 @@ impl Host {
                             if matches!(id, 30 | 32) && matches!(command, level_script::Command::TutorialEnableControlAndChildren) {
                                 self.tutorial_enabled_controls.insert(6);
                             }
+                            if id == 104 && matches!(command, level_script::Command::TutorialEnableControlAndChildren) {
+                                // Native420f20..4228e9 publishes these same-manager
+                                // descendants before publishing manager104. Internal
+                                // callbacks88/99 and property-rights91 are not nodes.
+                                self.tutorial_enabled_controls.extend([
+                                    86, 87, 89, 90, 92, 93, 94, 95, 96, 97, 98, 100, 101, 102,
+                                ]);
+                            }
                         } else {
                             self.tutorial_enabled_controls.remove(&id);
                             if matches!(id, 30 | 32) { self.tutorial_enabled_controls.remove(&6); }

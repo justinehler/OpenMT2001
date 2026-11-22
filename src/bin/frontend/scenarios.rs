@@ -22,9 +22,9 @@ pub const TUTORIALS: [Scenario; 13] = [
     tutorial(12, "TUTORIAL12"),
 ];
 /// Tutorials supported by the retained session host and its compatibility policy.
-/// Tutorial5 uses the documented compatibility repair by default; Tutorial8 remains held.
+/// Tutorials5/8 use the documented modern startup repair by default.
 pub const fn live_tutorial(id: u32) -> bool {
-    matches!(id, 100000..=100007 | 100009..=100012)
+    matches!(id, 100000..=100012)
 }
 const fn tutorial(n: u32, token: &'static str) -> Scenario {
     Scenario { id: 100000 + n, token, map: None }

@@ -605,9 +605,8 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
         assert_eq!(image.f32_at(0x4dc19c).unwrap(), 91.);
         assert!(crate::scenarios::live_tutorial(id),
             "Tutorial5 is available with the modern repair; these strict inputs retain the original defect");
-        // Tutorial8 is deliberately rejected by the internal fresh-city
-        // initializer. Its supplied script has the same authored conflict;
-        // inspect source bytes without executing the rejected level.
+        // Tutorial8 has its own paired strict/modern acceptance. These reads
+        // retain the authored preferences as evidence without changing inputs.
         let scripts = inputs.maps.parent().unwrap();
         let eighth_pref = fs::read(scripts.join("TUTORIAL8/initialpref.lua")).unwrap();
         assert!(eighth_pref.windows(b"Block[KENTUCKY_AVENUE].owner = 1".len())
