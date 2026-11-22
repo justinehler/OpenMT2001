@@ -72,6 +72,7 @@ pub enum SurfaceMode {
 /// Vertices contain position xyz, diffuse RGB, then UV. Optional specular RGB
 /// is added after texturing. Facade blend supplies its original diffuse alpha
 /// and secondary coordinates explicitly; ordinary static draws are opaque in alpha.
+#[derive(Clone, Copy)]
 pub struct TexturedDraw<'a> {
     /// Optional separate camera, used by the origin-centered sky draw.
     pub view_projection: Option<[f32; 16]>,
@@ -87,6 +88,7 @@ pub struct TexturedDraw<'a> {
     pub secondary: Option<SecondaryTexture<'a>>,
 }
 
+#[derive(Clone, Copy)]
 pub struct SecondaryTexture<'a> {
     pub uv: &'a [[f32; 2]],
     pub diffuse_alpha: u8,
@@ -453,6 +455,7 @@ impl Renderer {
             *scene = self.prepare(draws, camera, fog)?;
             return Ok(());
         }
+        let mut updates = Vec::with_capacity(draws.len());
         for (index, draw) in draws.iter().enumerate() {
             let primary = self.upload_texture(draw.width, draw.height, draw.rgba, draw.mipmaps)?;
             let secondary = draw.secondary.as_ref().map(|image|
@@ -461,7 +464,7 @@ impl Renderer {
             if old.mode == draw.mode && old.texture == primary.0
                 && old.secondary.as_ref().map(|image| &image.0)
                     == secondary.as_ref().map(|image| &image.0) {
-                self.update_dynamic_surface(scene, index, draw, camera, fog)?;
+                updates.push((index, *draw));
             } else {
                 let values = camera_uniform(draw.view_projection.unwrap_or(camera), fog)?;
                 let uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -471,6 +474,10 @@ impl Renderer {
                 scene.draws[index] = self.upload_draw(draw, uniform, 0)?;
             }
         }
+        self.update_dynamic_vertices_batch(scene, &updates)?;
+        let cameras = draws.iter().map(|draw|
+            draw.view_projection.unwrap_or(camera)).collect::<Vec<_>>();
+        self.update_cameras(scene, &cameras, fog)?;
         Ok(())
     }
 
@@ -583,6 +590,16 @@ impl Renderer {
     pub fn update_dynamic_vertices_batch(
         &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
     ) -> Result<(), String> {
+        self.update_dynamic_vertices_batch_with_limit(
+            scene, updates, self.device.limits().max_buffer_size)
+    }
+
+    fn update_dynamic_vertices_batch_with_limit(
+        &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
+        upload_limit: u64,
+    ) -> Result<(), String> {
+        let oversized = updates.iter().fold(0u64, |bytes, (_, draw)|
+            bytes.saturating_add(draw.vertices.len() as u64 * 56)) > upload_limit;
         let mut expanded = Vec::<[f32; 14]>::new();
         let mut copies = Vec::with_capacity(updates.len());
         for (index, draw) in updates {
@@ -591,8 +608,20 @@ impl Renderer {
             let offset = expanded.len() as u64 * 56;
             let vertices = expand_vertices(draw)?;
             let bytes = vertices.len() as u64 * 56;
-            expanded.extend(vertices);
+            if !oversized { expanded.extend(vertices); }
             copies.push((*index, draw.vertices.len() as u32, offset, bytes));
+        }
+        // Several individually valid surfaces can exceed the limit for one
+        // upload allocation. Preserve the existing per-surface path in that
+        // case, after all input validation and before any retained mutation.
+        // Oversized input is validated one surface at a time above, without
+        // allocating a concatenation of the complete scene.
+        if oversized {
+            drop(expanded);
+            for (index, draw) in updates {
+                self.update_dynamic_vertices(scene, *index, draw)?;
+            }
+            return Ok(());
         }
         for &(index, count, _, bytes) in &copies {
             let surface = &mut scene.draws[index];
@@ -1083,6 +1112,18 @@ mod depth_tests {
         // prefix and count win, while the already-grown allocation is retained.
         renderer.update_dynamic_vertices_batch(&mut scene,
             &[(0, make(&larger)), (0, make(triangle.as_slice()))]).unwrap();
+        assert_eq!(scene.draws[0].count, 3);
+        assert_eq!(scene.draws[0].vertices, retained);
+        // Force the upload-size fallback without a large GPU allocation.
+        renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
+            &[(0, make(&larger)), (1, make(&[]))], 0).unwrap();
+        assert_eq!(scene.draws[0].count, 9);
+        assert_eq!(scene.draws[1].count, 0);
+        assert!(renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
+            &[(0, make(&[])), (99, make(&[]))], 0).is_err());
+        assert_eq!(scene.draws[0].count, 9);
+        renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
+            &[(0, make(triangle.as_slice()))], 0).unwrap();
         assert_eq!(scene.draws[0].count, 3);
         assert_eq!(scene.draws[0].vertices, retained);
         renderer.queue.submit([]);

@@ -6623,6 +6623,153 @@ mod tests {
         assert_eq!(levels.effects, Levels::default().effects);
     }
 
+    // Whole original-data city assemblies plus visible retained-resource probes.
+    #[cfg(feature = "capture")]
+    #[test]
+    #[ignore = "requires supplied originals and GPU"]
+    fn original_city_refresh_matches_independent_prepare() {
+        // Parent must supply a unique on-disk directory; never use shared /tmp.
+        let parent = PathBuf::from(std::env::var("OPENMT2001_EQ_SCRATCH").unwrap());
+        assert!(parent.is_absolute() && parent.is_dir());
+        let owned = parent.join(format!("city-refresh-{}", std::process::id()));
+        fs::create_dir(&owned).expect("scratch must be uniquely owned");
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { fs::remove_dir_all(&self.0).unwrap(); }
+        }
+        let _cleanup = Cleanup(owned.clone());
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let save = read("OPENMT2001_SAVE_ONE");
+        let map = read("OPENMT2001_INTRO_MAP");
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        eprintln!("equivalence adapter: {}", renderer.adapter_name);
+        let compare = |fresh: &openmt2001::render::PreparedScene,
+                       retained: &openmt2001::render::PreparedScene, label: &str| {
+            let a = owned.join("fresh.png");
+            let b = owned.join("retained.png");
+            crate::capture_test::capture_standalone(&renderer, fresh, a.to_str().unwrap());
+            crate::capture_test::capture_standalone(&renderer, retained, b.to_str().unwrap());
+            assert_eq!(fs::read(a).unwrap(), fs::read(b).unwrap(), "{label}");
+        };
+        for saved in [true, false] {
+            let mut retained = None;
+            let mut previous_materials = None;
+            let mut material_transition = false;
+            for hour in [9, 10, 11, 21, 9] {
+                // Complete independent assembly, original order, no worker/world step.
+                let scene = render_scene::assemble(Request {
+                    build_file: &build, source: if saved { Source::Save(&save) } else { Source::Map(std::str::from_utf8(&map).unwrap()) },
+                    original: Some(OriginalAssets { executable: &executable,
+                        directory: &directory, archive: &archive }),
+                    suncols: Some(&suncols), phase: Some(hour), camera: None,
+                    width: 1280, height: 960, animated: true,
+                }).unwrap();
+                let materials = scene.draws.iter().map(|d| (d.mode, d.secondary.as_ref().map(|t| {
+                    use std::hash::Hasher;
+                    let mut hash = std::collections::hash_map::DefaultHasher::new();
+                    hash.write(t.rgba.as_ref());
+                    (t.width, t.height, t.mipmaps, hash.finish())
+                }))).collect::<Vec<_>>();
+                if let Some(old) = &previous_materials { material_transition |= old != &materials; }
+                previous_materials = Some(materials);
+                let draws = scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>();
+                let fresh = renderer.prepare(&draws, scene.camera, scene.fog).unwrap();
+                if let Some(old) = &mut retained {
+                    renderer.refresh_prepared(old, &draws, scene.camera, scene.fog).unwrap();
+                } else { retained = Some(renderer.prepare(&draws, scene.camera, scene.fog).unwrap()); }
+                compare(&fresh, retained.as_ref().unwrap(), &format!("complete city hour {hour}"));
+            }
+            assert!(material_transition, "fixture must exercise day/night material or secondary transition");
+        }
+        // Visible diagnostic contract probes supplement potentially occluded city data.
+        // No invented city assembly/lighting rules: these are explicitly synthetic.
+        use openmt2001::render::{SurfaceMode, TexturedDraw, SecondaryTexture};
+        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        let triangle = [[-0.8,-0.8,0.2,1.,1.,1.,0.,0.],
+                        [0.8,-0.8,0.2,1.,1.,1.,1.,0.],
+                        [0.,0.8,0.2,1.,1.,1.,0.5,1.]];
+        let mut retained = None;
+        let mut previous_pixels = None;
+        for case in 0..10 {
+            let count = [3,6,3,0,3,3,3,3,3,3][case];
+            let mut vertices = triangle.repeat(count / 3);
+            if count == 6 { for v in &mut vertices[3..] { v[0] *= 0.5; v[1] += 0.1; } }
+            let uv = vec![[0.3,0.7]; count];
+            let specular = vec![[0.1,0.0,0.0]; count];
+            let alpha = vec![128; count];
+            let primary = [255, if case < 5 { 80 } else { 180 }, 20, 255];
+            let secondary = [20, 40, if case == 7 { 100 } else { 240 }, 255];
+            let blend = case >= 6;
+            let draw = TexturedDraw {
+                view_projection: (case >= 5).then_some(identity), vertices: &vertices,
+                specular: Some(&specular), diffuse_alpha: Some(&alpha),
+                mode: if blend { SurfaceMode::FacadeBlend } else { SurfaceMode::StaticLit },
+                width: 1, height: 1, rgba: &primary, mipmaps: case >= 7,
+                secondary: blend.then_some(SecondaryTexture { uv: &uv, diffuse_alpha: 120,
+                    width: 1, height: 1, rgba: &secondary, mipmaps: case >= 7 }),
+            };
+            let mut camera = identity;
+            if case >= 5 { camera[12] = 0.2; } // override must win
+            let draws = if case == 8 { Vec::new() } else { vec![draw] };
+            let fog = (case >= 5).then_some(openmt2001::render::EyeFog { color: 0x406080, start: 0.0, end: 2.0 });
+            let fresh = renderer.prepare(&draws, camera, fog).unwrap();
+            if let Some(old) = &mut retained {
+                renderer.refresh_prepared(old, &draws, camera, fog).unwrap();
+            } else { retained = Some(renderer.prepare(&draws, camera, fog).unwrap()); }
+            compare(&fresh, retained.as_ref().unwrap(), &format!("probe {case}"));
+            let pixels = fs::read(owned.join("fresh.png")).unwrap();
+            if matches!(case, 3|4|5|7) { assert_ne!(previous_pixels.as_ref().unwrap(), &pixels,
+                "geometry/texture controls must visibly change"); }
+            previous_pixels = Some(pixels);
+        }
+        // Replace only one of two surfaces, leaving a shared camera allocation
+        // beside a standalone replacement buffer. Then update both geometries,
+        // global camera/fog and a per-draw override across further refreshes.
+        let mut mixed = None;
+        let mut previous = None;
+        for case in 0..5 {
+            let left = triangle.iter().map(|v| {
+                let mut v = *v; v[0] = v[0] * 0.4 - 0.5; v
+            }).collect::<Vec<_>>();
+            let right = triangle.iter().map(|v| {
+                let mut v = *v; v[0] = v[0] * 0.4 + 0.5; v
+            }).collect::<Vec<_>>();
+            let left_pixels = [255, if case == 0 { 20 } else { 180 }, 20, 255];
+            let right_pixels = [20, 120, if case < 3 { 255 } else { 80 }, 255];
+            let mut camera = identity;
+            camera[13] = case as f32 * 0.07;
+            let fog = Some(openmt2001::render::EyeFog {
+                color: 0x406080, start: 0.0, end: 2.0,
+            });
+            let draws = [
+                TexturedDraw { view_projection: None,
+                    vertices: if case == 4 { &[] } else { &left },
+                    specular: None, diffuse_alpha: None, mode: SurfaceMode::StaticLit,
+                    width:1, height:1, rgba:&left_pixels, mipmaps:false, secondary:None },
+                TexturedDraw { view_projection: Some(identity), vertices:&right,
+                    specular: None, diffuse_alpha: None, mode: SurfaceMode::StaticLit,
+                    width:1, height:1, rgba:&right_pixels, mipmaps:false, secondary:None },
+            ];
+            let fresh = renderer.prepare(&draws, camera, fog).unwrap();
+            if let Some(old) = &mut mixed {
+                renderer.refresh_prepared(old, &draws, camera, fog).unwrap();
+            } else { mixed = Some(renderer.prepare(&draws, camera, fog).unwrap()); }
+            compare(&fresh, mixed.as_ref().unwrap(), &format!("mixed buffers {case}"));
+            let pixels = fs::read(owned.join("fresh.png")).unwrap();
+            if let Some(previous) = &previous {
+                assert_ne!(previous, &pixels, "mixed controls must visibly change");
+            }
+            previous = Some(pixels);
+        }
+    }
+
     #[cfg(feature = "capture")]
     #[test]
     #[ignore = "requires original intro assets and GPU"]
