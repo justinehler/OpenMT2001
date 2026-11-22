@@ -651,6 +651,7 @@ pub fn run() -> Result<(), Error> {
     let mut save_root = None;
     let mut profile_root = crate::profile::default_directory();
     let mut language = PathBuf::from("work/patch14/payload/US/language/usa");
+    let mut compatibility = crate::compatibility::Mode::default();
     let mut skip_splash = false;
     let mut menu_onload = false;
     let mut exit_after = None;
@@ -697,6 +698,7 @@ pub fn run() -> Result<(), Error> {
                     .ok_or("--language requires patched language directory")?
                     .into()
             }
+            "--strict-v14" => compatibility = crate::compatibility::Mode::StrictV14,
             "--skip-splash" => skip_splash = true,
             "--menu" => {
                 skip_splash = true;
@@ -723,7 +725,7 @@ pub fn run() -> Result<(), Error> {
             }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit requires Enter confirmation. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit requires Enter confirmation. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }
@@ -739,6 +741,7 @@ pub fn run() -> Result<(), Error> {
     let intro_music_loading = load_intro_music(music_decoder.clone(), music_path.clone());
     let (intro_sender, intro_loading) = std::sync::mpsc::channel();
     let paths = crate::intro::Paths {
+        compatibility,
         installer: root,
         ffmpeg,
         scene: scene_root,

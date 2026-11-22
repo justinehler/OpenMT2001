@@ -10,6 +10,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
     let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
     let executable = read("OPENMT2001_EXE");
     let inputs = Arc::new(SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
         time_runtime: Default::default(),
         style: test_board_style(&executable),
         profile_root: PathBuf::from("work/save/v2-auction-worker-profile"),

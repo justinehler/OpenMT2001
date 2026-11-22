@@ -603,16 +603,22 @@ mod tests {
     #[test]
     #[ignore = "requires supplied v1.4 Tutorial 3 scripts and original assets"]
     fn original_tutorial_three_strategic_flow() {
-        tutorial_three_to_five(false);
+        tutorial_three_to_five(None);
     }
 
     #[test]
-    #[ignore = "requires original inputs; investigates unresolved Tutorial5 rights admission"]
+    #[ignore = "requires original inputs; verifies strict v1.4 Tutorial5 rights defect"]
     fn original_tutorial_five_rights_frontier() {
-        tutorial_three_to_five(true);
+        tutorial_three_to_five(Some(crate::compatibility::Mode::StrictV14));
     }
 
-    fn tutorial_three_to_five(include_fifth: bool) {
+    #[test]
+    #[ignore = "requires original Tutorial5 scripts and assets; modern documented-blocker repair"]
+    fn original_tutorial_five_compatibility_flow() {
+        tutorial_three_to_five(Some(crate::compatibility::Mode::Modern));
+    }
+
+    fn tutorial_three_to_five(fifth_mode: Option<crate::compatibility::Mode>) {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
@@ -956,12 +962,12 @@ mod tests {
         assert!(progression.levels.iter().find(|level|level.id()==100003).unwrap().completed()[0]);
         assert!(progression.levels.iter().find(|level|level.id()==100004).unwrap().unlocked());
         println!("Tutorial4: property/auction flow completed; Tutorial5 unlocked");
-        if !include_fifth {
+        if fifth_mode.is_none() {
             fs::remove_file(&profile).unwrap();
             return;
         }
         let fifth_token=crate::scenarios::find(100004).unwrap().token;
-        let mut fifth=Session::initialize_campaign(Inputs{
+        let mut fifth=Session::initialize_campaign_compatible(Inputs{
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -970,8 +976,9 @@ mod tests {
             parameters:std::str::from_utf8(&parameters).unwrap(),era_styles:era_styles.clone(),
             timetable:std::str::from_utf8(&timetable).unwrap(),scenario:fifth_token,difficulty:0,
             selected_character:0,profile_name:b"Tutorial3",character_names:&names,
-        },Policy{seed:0x12345678,auxiliary_prior_bytes:[0;0x11c]},progression,profile.clone()).unwrap();
+        },Policy{seed:0x12345678,auxiliary_prior_bytes:[0;0x11c]},progression,profile.clone(),fifth_mode.unwrap()).unwrap();
         let mut fifth_host=crate::live_host::Host::new([0.,20.,0.]);
+        fifth_host.begin_presentation(&fifth).unwrap();
         fifth_host.frame(&mut fifth,&assets,20);
         let fifth_start=fifth_host.status(&fifth);
         assert!(fifth_start.failure.is_none(),"Tutorial5 connected startup: {:?}",fifth_start.failure);
@@ -1008,6 +1015,15 @@ mod tests {
         // Original41ff49 and the Main producer emit11 after inspecting the
         // entry, including when the rights panel denies the planner.
         fifth_host.tutorial_event(&mut fifth,&assets,11).unwrap();
+        if fifth_mode == Some(crate::compatibility::Mode::StrictV14) {
+            assert_eq!(context.entry(), crate::build_panel::Entry::Message {
+                text: 1202, show_rights_action: true,
+            });
+            assert_eq!(&context.category_record[0x78..0x7c], &[0; 4]);
+            println!("Tutorial5 strict: original v1.4 rights gate1202 retained");
+            fs::remove_file(&profile).unwrap();
+            return;
+        }
         assert!(matches!(context.entry(),crate::build_panel::Entry::Open),
             "Tutorial5 Pacific admission {:?}; category{pacific} owner{} current{} rights{} pending{}",
             context.entry(),context.category_record[5],context.current_owner,
@@ -1097,36 +1113,26 @@ mod tests {
         for dismissal in [13,14]{
             fifth.dispatch_session_event("InterfacePromptDismiss",dismissal,&assets,false).unwrap();
         }
-        assert_eq!(fifth_host.status(&fifth).prompts.last().unwrap().dismissal_id,15);
-        let planner_point=|planning:&mut crate::build_view::State,point:[i32;2],id:u32|{
-            planning.pointer(Some(point));assert_eq!(planning.tutorial_control_at(),Some(id));
-            planning.mouse(true);planning.mouse(false);planning.take_tutorial_control()
-        };
-        // The actual track midpoint changes floor count when this use admits
-        // multiple heights, rather than clicking an already-clamped arrow.
-        assert_eq!(planner_point(&mut planning,[240,298],93),Some(93));
-        fifth_host.tutorial_event(&mut fifth,&assets,93).unwrap();
-        assert_eq!(fifth_host.status(&fifth).prompts.last().unwrap().dismissal_id,16);
-        refresh_quote(&mut planning,&mut fifth);
-        assert_eq!(planner_point(&mut planning,[196,357],95),Some(95));
-        fifth_host.tutorial_event(&mut fifth,&assets,95).unwrap();
-        assert_eq!(fifth_host.status(&fifth).prompts.last().unwrap().dismissal_id,17);
-        refresh_quote(&mut planning,&mut fifth);
-        let before_design=planning.request().unwrap().packed_model;
-        let mut changed=false;
-        for point in [[88,414],[350,414]]{
-            if let Some(control)=planner_point(&mut planning,point,92){
-                assert_eq!(control,92);
-                assert_ne!(planning.request().unwrap().packed_model,before_design);
-                fifth_host.tutorial_event(&mut fifth,&assets,control).unwrap();
-                changed=true;break;
-            }else{
-                assert_eq!(planning.request().unwrap().packed_model,before_design,
-                    "an unchanged native design emits no tutorial callback");
-            }
+        let mut next_modal = fifth_host.status(&fifth);
+        assert_eq!(next_modal.prompts.last().unwrap().dismissal_id,15);
+        // These are original modal prompts, not required widget callbacks.
+        // Acknowledging15/16/17 advances the authored floor/quality/design
+        // explanations; do not invent callbacks93/95/92 beneath an active modal.
+        let prompt_assets = crate::prompt::Assets::load(&index, &archive, &installer, &strings).unwrap();
+        for dismissal in [15, 16, 17] {
+            let request = next_modal.prompts.last().copied().unwrap();
+            assert_eq!(request.dismissal_id, dismissal);
+            let mut modal = crate::prompt::State::default();
+            let _ = modal.submit(request);
+            let bounds = prompt_assets.button_at(next_modal.tutorial_interaction.prompt_offset());
+            modal.cursor([(bounds[0]+bounds[2])*0.5, (bounds[1]+bounds[3])*0.5]);
+            assert_eq!(modal.left_button(true, bounds), None);
+            assert_eq!(modal.left_button_with(false, bounds, |_, id| {
+                fifth.dispatch_session_event("InterfacePromptDismiss", id as i32, &assets, false).unwrap();
+            }), Some(dismissal));
+            next_modal = fifth_host.status(&fifth);
         }
-        assert!(changed,"original model columns permit an actual design change");
-        assert_eq!(fifth_host.status(&fifth).tutorial_message.unwrap().dismissal_id,18);
+        assert_eq!(next_modal.tutorial_message.unwrap().dismissal_id,18);
         refresh_quote(&mut planning,&mut fifth);
         let request=planning.request().unwrap();
         let queued=fifth.live_commands.snapshot().unwrap().len();
@@ -1134,17 +1140,36 @@ mod tests {
         assert!(planning.submit);
         // Native424a28 dispatches97 before the construction producer424abe.
         fifth_host.tutorial_event(&mut fifth,&assets,97).unwrap();
-        assert_eq!(fifth_host.status(&fifth).prompts.last().unwrap().dismissal_id,19);
+        let accepted_status = fifth_host.status(&fifth);
+        assert_eq!(accepted_status.prompts.last().unwrap().dismissal_id,19);
         let submission=fifth.submit_build(&request,&assets,|event|
             Err(format!("Tutorial5 legal queued build unexpectedly executed synchronously: {event:?}"))).unwrap();
         assert!(submission.submitted);
         assert_eq!(fifth.live_commands.snapshot().unwrap().len(),queued+1);
-        fifth_host.frame(&mut fifth,&assets,100);
+        // The live worker runs independently of the displayed prompt. Allow
+        // the genuine25-tick command delay before acknowledging the final text.
+        let buildings_before = fifth.world.buildings.iter().filter(|row| row[0x3f] != 0).count();
+        fifth_host.set_running(true);
+        for _ in 0..100 {
+            fifth_host.frame(&mut fifth,&assets,40);
+            assert!(fifth_host.status(&fifth).failure.is_none(),"Tutorial5 queued construction failed");
+            if fifth.live_commands.snapshot().unwrap().len() < queued+1 { break; }
+        }
+        assert!(fifth.live_commands.snapshot().unwrap().len() < queued+1,
+            "the actual running scheduler must consume the delayed construction");
+        assert!(fifth.world.buildings.iter().filter(|row| row[0x3f] != 0).count() > buildings_before,
+            "legal submission must create an actual retained building");
         let status=fifth_host.status(&fifth);
-        assert!(status.failure.is_none(),"Tutorial5 actual construction: {:?}",status.failure);
-        assert!(fifth.live_commands.snapshot().unwrap().len()<queued+1,
-            "actual scheduler consumes the construction command");
-        fifth.dispatch_session_event("InterfacePromptDismiss",19,&assets,false).unwrap();
+        let request = accepted_status.prompts.last().copied().unwrap();
+        assert_eq!(request.dismissal_id,19);
+        let mut modal=crate::prompt::State::default();
+        let _=modal.submit(request);
+        let bounds=prompt_assets.button_at(status.tutorial_interaction.prompt_offset());
+        modal.cursor([(bounds[0]+bounds[2])*0.5,(bounds[1]+bounds[3])*0.5]);
+        assert_eq!(modal.left_button(true,bounds),None);
+        assert_eq!(modal.left_button_with(false,bounds,|_,id| {
+            fifth.dispatch_session_event("InterfacePromptDismiss",id as i32,&assets,false).unwrap();
+        }),Some(19));
         fifth_host.frame(&mut fifth,&assets,20);
         assert!(fifth_host.status(&fifth).tutorial_completed);
         let recorded=fs::read(&profile).unwrap();

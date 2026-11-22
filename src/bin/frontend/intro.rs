@@ -42,6 +42,7 @@ fn city_snapshot_interval(construction_active: bool) -> std::time::Duration {
 }
 
 pub struct Paths {
+    pub compatibility: crate::compatibility::Mode,
     pub installer: PathBuf,
     pub ffmpeg: PathBuf,
     pub scene: PathBuf,
@@ -187,6 +188,7 @@ impl Assets {
             paths.quality
         );
         let inputs = Arc::new(SceneInputs {
+            compatibility: paths.compatibility,
             style,
             time_runtime: Default::default(),
             profile_root,
@@ -236,6 +238,7 @@ impl Assets {
 }
 
 struct SceneInputs {
+    compatibility: crate::compatibility::Mode,
     style: openmt2001::board_style::Style,
     /// Native560a1c/560a20 persist across level widget reconstruction.
     time_runtime: Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
@@ -1085,7 +1088,7 @@ impl SceneInputs {
         };
         // Reproducible preview policy. These unspecified prior bytes are not
         // original captured stack data, nor is seed0 the original host seed.
-        let mut session = crate::fresh_city::Session::initialize_campaign_with_style(
+        let mut session = crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
             crate::fresh_city::Inputs {
                 image: &image,
                 board: &board,
@@ -1120,6 +1123,7 @@ impl SceneInputs {
             setup.catalog.clone(),
             setup.profile_path.clone(),
             &self.style,
+            self.compatibility,
         )?;
         eprintln!(
             "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; deterministic host seed0 / auxiliary prior bytes zero; player roster initialized; live worker enabled",
@@ -6901,6 +6905,7 @@ mod tests {
             let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
             let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
             let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
@@ -6962,6 +6967,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
@@ -7092,6 +7098,7 @@ mod tests {
         let language = installer.join("US/language/usa");
         let executable = read("OPENMT2001_EXE");
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
@@ -7136,6 +7143,7 @@ mod tests {
             let executable = read("OPENMT2001_EXE");
             let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
             let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
@@ -7211,6 +7219,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
@@ -8284,6 +8293,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),

@@ -1,4 +1,6 @@
 //! Native boot host. Shared simulation and asset modules do not depend on it.
+#[path = "frontend/compatibility.rs"]
+mod compatibility;
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_notice.rs"]

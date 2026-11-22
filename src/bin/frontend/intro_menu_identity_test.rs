@@ -13,6 +13,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
         let language = executable_path.parent().unwrap().parent().unwrap()
             .join("US/language/usa");
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable), time_runtime: Default::default(),
             profile_root: std::env::temp_dir().join("omt-v2-gui-regression"),
             character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
@@ -110,6 +111,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 .unwrap()
                 .join("US/language/usa");
             let inputs = Arc::new(SceneInputs {
+            compatibility: crate::compatibility::Mode::default(),
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
                 profile_root: PathBuf::from(format!(
@@ -163,7 +165,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
             let profile =
                 crate::campaign_store::profile_path(&inputs.profile_root, b"Tutorial menu worker");
             crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
-            for id in [100004, 100008] {
+            for id in [100008] {
                 menu.open_tutorial("Tutorial menu worker", catalog.clone(), profile.clone());
                 menu.activate(2 + (id - 100000) as usize);
                 menu.activate(0);
@@ -179,7 +181,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 );
             }
             let (camera, _) = fresh_city_camera();
-            for id in [100005, 100006, 100007, 100009, 100010, 100011, 100012] {
+            for id in [100004, 100005, 100006, 100007, 100009, 100010, 100011, 100012] {
                 assert!(crate::scenarios::live_tutorial(id));
                 crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
                 menu.open_tutorial("Tutorial menu worker", catalog.clone(), profile.clone());

@@ -379,7 +379,7 @@ impl<'data> Session<'data> {
             file: input.file,
         };
         let mut session =
-            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style)?;
+            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14)?;
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());
         }

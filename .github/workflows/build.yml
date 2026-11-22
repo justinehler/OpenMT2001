@@ -34,4 +34,4 @@ jobs:
       - name: Build native game
         run: cargo +1.99.0 build --locked --features native --bin game
       - name: Test native host with synthetic inputs
-        run: cargo +1.99.0 test --locked --features native --bin game
+        run: cargo +1.99.0 test --locked --features native,capture --bin game

@@ -21,10 +21,10 @@ pub const TUTORIALS: [Scenario; 13] = [
     tutorial(11, "TUTORIAL11"),
     tutorial(12, "TUTORIAL12"),
 ];
-/// Original-input tutorial startup and GUI control paths currently accepted.
-/// Tutorial5 and Tutorial8 retain unresolved rights/startup gates.
+/// Tutorials supported by the retained session host and its compatibility policy.
+/// Tutorial5 uses the documented compatibility repair by default; Tutorial8 remains held.
 pub const fn live_tutorial(id: u32) -> bool {
-    matches!(id, 100000..=100003 | 100005..=100007 | 100009..=100012)
+    matches!(id, 100000..=100007 | 100009..=100012)
 }
 const fn tutorial(n: u32, token: &'static str) -> Scenario {
     Scenario { id: 100000 + n, token, map: None }

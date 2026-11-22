@@ -719,7 +719,7 @@ impl<'data> Session<'data> {
     }
 
     pub fn initialize(input: Inputs<'_, 'data>, policy: Policy) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, None, None, false, None)
+        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14)
     }
 
     /// Start from the host's loaded campaign profile, preserving its unlocks
@@ -730,7 +730,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog,
         profile_path: std::path::PathBuf,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14)
     }
 
     pub fn initialize_campaign_with_style(
@@ -738,7 +738,26 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style))
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14)
+    }
+
+    /// Start with the host-selected compatibility policy. Legacy entry points
+    /// above deliberately retain the original v1.4 ownership result.
+    pub fn initialize_campaign_compatible(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
+        compatibility: crate::compatibility::Mode,
+    ) -> Result<Self, String> {
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility)
+    }
+
+    pub fn initialize_campaign_with_style_and_compatibility(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
+        style: &openmt2001::board_style::Style,
+        compatibility: crate::compatibility::Mode,
+    ) -> Result<Self, String> {
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility)
     }
 
     fn initialize_with_catalog(mut input: Inputs<'_, 'data>, policy: Policy,
@@ -746,6 +765,7 @@ impl<'data> Session<'data> {
         profile_path: Option<std::path::PathBuf>,
         load_mode: bool,
         style: Option<&openmt2001::board_style::Style>,
+        compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
         if !(0..=2).contains(&input.difficulty){return Err("campaign difficulty outside three levels".into());}
         let mut catalog=if let Some(catalog)=supplied_catalog {catalog} else {
@@ -963,6 +983,11 @@ impl<'data> Session<'data> {
         world.city.ai_demand.ready = demand_ready;
         let mut ownership_lists = std::mem::take(&mut roster.ai_ownership);
         let ownership_catalog = world.catalog.info.clone();
+        // Retain script-authored values before the native ownership reset.
+        let authored_rights = std::array::from_fn(|index| {
+            let row = &world.categories[index];
+            (row[0x05], u32::from_le_bytes(row[0x78..0x7c].try_into().unwrap()))
+        });
         let ownership_result = roster.initialize_ownership(&mut world, input.image, &mut |ownership, event| {
             use openmt2001::category_ownership::Seam;
             match event {
@@ -984,6 +1009,7 @@ impl<'data> Session<'data> {
         });
         roster.ai_ownership = ownership_lists;
         ownership_result?;
+        compatibility.repair_startup_rights(id, load_mode, &authored_rights, &mut world.categories);
         }
         openmt2001::traffic::road::routes::RoadRoutes::from_bytes(
             &input.road_routes,

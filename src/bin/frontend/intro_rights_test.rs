@@ -110,6 +110,7 @@ fn saved_worker_rights_input_and_native_delay() {
         .unwrap()
         .join("US/language/usa");
     let inputs = Arc::new(SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
         style: test_board_style(&executable),
         time_runtime: Default::default(),
         profile_root: PathBuf::from("work/frontend/rights-worker-profile"),
@@ -555,6 +556,7 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
         let language = executable_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let inputs = SceneInputs {
+            compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable),
             time_runtime: Default::default(),
             profile_root: PathBuf::from("work/frontend/tutorial-disabled-rights-profile"),
@@ -601,8 +603,8 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
         // toggle 26, not the property panel's Activate Rights child 91.
         assert_eq!(image.f32_at(0x4dbddf).unwrap(), 26.);
         assert_eq!(image.f32_at(0x4dc19c).unwrap(), 91.);
-        assert!(!crate::scenarios::live_tutorial(id),
-            "authored tutorial omits EnableControl(91) for the blocked rights child");
+        assert!(crate::scenarios::live_tutorial(id),
+            "Tutorial5 is available with the modern repair; these strict inputs retain the original defect");
         // Tutorial8 is deliberately rejected by the internal fresh-city
         // initializer. Its supplied script has the same authored conflict;
         // inspect source bytes without executing the rejected level.
