@@ -4632,7 +4632,9 @@ impl Intro {
                         information: None,
                         details_visible: true,
                         details_pressed: false,
-                        detail_icons: self.assets.navigation.prepare_details(&self.renderer)?,
+                        detail_icons: if refreshing && self.inspection.is_some() {
+                            Default::default()
+                        } else { self.assets.navigation.prepare_details(&self.renderer)? },
                         detail_bounds: self.assets.navigation.detail_bounds,
                         navigator: self
                             .assets
@@ -4645,7 +4647,9 @@ impl Intro {
                         tooltip: None,
                         tooltip_state: None,
                         icon_tooltip_dwell: crate::tooltip::IconDwell::default(),
-                        navigation: self.assets.navigation.prepare(&self.renderer)?,
+                        navigation: if refreshing && self.inspection.is_some() {
+                            Default::default()
+                        } else { self.assets.navigation.prepare(&self.renderer)? },
                         navigation_bounds: self.assets.navigation.bounds,
                         navigation_pressed: false,
                         double_click: crate::navigation::DoubleClick::default(),
@@ -4680,6 +4684,10 @@ impl Intro {
                     match result {
                         Ok(mut view) => {
                             if refreshing && let Some(previous) = &mut self.inspection {
+                                // These five overlay states depend only on this Intro's
+                                // immutable navigation assets and renderer, not city reports.
+                                view.detail_icons = std::mem::take(&mut previous.detail_icons);
+                                view.navigation = std::mem::take(&mut previous.navigation);
                                 view.auction_requests = previous.auction_requests.take();
                                 view.auction_audio_requests = previous.auction_audio_requests.take();
                                 view.auction_audio_player = std::mem::replace(
