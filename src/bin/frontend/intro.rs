@@ -1515,6 +1515,13 @@ impl SceneInputs {
                 .map_err(|e| e.to_string())?;
         let input_elapsed = started.elapsed();
         let hour = session.world.clock.hour();
+        let profile_snapshot = std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS").is_some();
+        let cache_observation = profile_snapshot.then(|| (
+            cache.hour,
+            cache.city.is_some(),
+            cache.buildings.as_slice() == session.world.buildings.as_slice(),
+            cache.scaffolds_active,
+        ));
         let mut reuse_city = false;
         let mut updated_city_draws = Vec::new();
         let mut assembly_elapsed = std::time::Duration::ZERO;
@@ -1692,12 +1699,17 @@ impl SceneInputs {
             &session.world, player_info.as_ref().unwrap())?;
         let city_prestige = Some(crate::city_prestige::Prestige::from_runtime(
             &session.world, &board)?);
-        if std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS").is_some() {
+        if let Some((previous_hour, had_city, buildings_equal, previous_scaffolds)) = cache_observation {
             eprintln!(
-                "Live snapshot: inputs {input_elapsed:?}, assembly {assembly_elapsed:?}, appearance {appearance_elapsed:?}, scaffold {scaffold_elapsed:?}, city {:?}, render resources {:?}, total {:?}",
+                "Live snapshot: inputs {input_elapsed:?}, assembly {assembly_elapsed:?}, appearance {appearance_elapsed:?}, scaffold {scaffold_elapsed:?}, city cumulative {:?}, actors/resources host elapsed {:?}, reports host elapsed {:?}, total host elapsed {:?}",
                 city_elapsed,
-                render_elapsed,
+                render_elapsed.saturating_sub(city_elapsed),
+                started.elapsed().saturating_sub(render_elapsed),
                 started.elapsed()
+            );
+            eprintln!(
+                "Snapshot cache tick{} previous_hour{previous_hour} hour{hour} had_city{had_city} buildings_equal{buildings_equal} previous_scaffolds{previous_scaffolds} scaffolds{has_scaffolds} reuse_city{reuse_city} draws{}; host elapsed durations include waits; not thread CPU time or GPU execution",
+                session.world.clock.timing[0], scene.draws.len(),
             );
         }
         Ok(LoadedInspection {
@@ -4390,6 +4402,8 @@ impl Intro {
                         index
                     });
                     let draws = scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>();
+                    let profile_prepare = std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS")
+                        .map(|_| Instant::now());
                     let mut prepared = if refreshing && loaded.reuse_city {
                         // Worker snapshots preserve this exact city/material layout.
                         // Keep GPU textures and update only camera-dependent geometry/actors.
@@ -4403,6 +4417,13 @@ impl Intro {
                     } else {
                         self.renderer.prepare(&draws, scene.camera, scene.fog)?
                     };
+                    if let Some(started) = profile_prepare {
+                        eprintln!(
+                            "Snapshot frontend tick{:?} refreshing{refreshing} reuse_city{} full_prepare{} draws{} prepare_or_take host elapsed {:?}; includes waits, excludes subsequent updates and GPU execution",
+                            loaded.logic_tick, loaded.reuse_city,
+                            !(refreshing && loaded.reuse_city), draws.len(), started.elapsed(),
+                        );
+                    }
                     if refreshing && loaded.reuse_city {
                         for index in environment_changed {
                             let draw = &scene.draws[index];
