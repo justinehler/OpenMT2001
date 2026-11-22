@@ -50,3 +50,17 @@ animation frames. Strict mode retains the recovered low-level load behavior.
 
 Saves with a modern runtime extension retain their explicitly serialized
 model and controller state instead of applying this import repair.
+
+## Ambient tree lighting
+
+The recovered renderer transforms sunlight by each tree's scaled basis before
+indexing a 256-entry lighting palette. A supplied-save engine test reached an
+out-of-range index during the afternoon daylight update. The original lookup
+has no bounds check; this does not establish its visible result or a crash in
+the original executable.
+
+Modern mode saturates the trunk's palette index to the nearest valid endpoint,
+keeping valid indices unchanged. Strict mode keeps the checked low-level
+lookup and reports an error for this unsupported out-of-table case. It does
+not emulate arbitrary adjacent original memory. Cached original normals and
+textures, foliage lighting, placement and simulation remain unchanged.

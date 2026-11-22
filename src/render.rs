@@ -52,6 +52,8 @@ pub enum SurfaceMode {
     /// Original 4ec120/4ec270 result particle points, expanded to camera
     /// billboards with ARGB modulation and no depth writes.
     ResultParticles,
+    /// Original tree state10: two-sided GREATER64 cutout, ONE/ZERO, depth writes and LESSEQUAL.
+    TreeFoliage,
     /// Original sun/moon textured quads, state1 with depth disabled.
     Celestial,
     /// Original state18, two cloud layers with additive blending and no culling.
@@ -128,6 +130,7 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     star_pipeline: wgpu::RenderPipeline,
     result_particle_pipeline: wgpu::RenderPipeline,
+    tree_foliage_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
     static_opaque_pipeline: wgpu::RenderPipeline,
@@ -192,14 +195,16 @@ impl Renderer {
                 None
             } else {
                 let component = wgpu::BlendComponent {
-                    src_factor: if mode == SurfaceMode::Clouds {
+                    src_factor: if matches!(mode, SurfaceMode::Clouds | SurfaceMode::TreeFoliage) {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
                         wgpu::BlendFactor::SrcAlpha
                     } else {
                         wgpu::BlendFactor::Zero
                     },
-                    dst_factor: if mode == SurfaceMode::Clouds {
+                    dst_factor: if mode == SurfaceMode::TreeFoliage {
+                        wgpu::BlendFactor::Zero
+                    } else if mode == SurfaceMode::Clouds {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
                         wgpu::BlendFactor::OneMinusSrcAlpha
@@ -266,7 +271,7 @@ impl Renderer {
                             )
                         {
                             wgpu::CompareFunction::Always
-                        } else if static_lit || mode == SurfaceMode::UiDepth {
+                        } else if static_lit || matches!(mode, SurfaceMode::UiDepth | SurfaceMode::TreeFoliage) {
                             wgpu::CompareFunction::LessEqual
                         } else {
                             wgpu::CompareFunction::Less
@@ -286,6 +291,7 @@ impl Renderer {
                         | SurfaceMode::Celestial
                         | SurfaceMode::StaticLit
                         | SurfaceMode::StaticOpaque => "static_fragment",
+                        SurfaceMode::TreeFoliage => "tree_fragment",
                         SurfaceMode::FacadeBlend => "facade_fragment",
                         SurfaceMode::Clouds => "cloud_fragment",
                         SurfaceMode::Stars
@@ -313,6 +319,7 @@ impl Renderer {
         let sky_pipeline = make_pipeline(SurfaceMode::Sky);
         let star_pipeline = make_pipeline(SurfaceMode::Stars);
         let result_particle_pipeline = make_pipeline(SurfaceMode::ResultParticles);
+        let tree_foliage_pipeline = make_pipeline(SurfaceMode::TreeFoliage);
         let celestial_pipeline = make_pipeline(SurfaceMode::Celestial);
         let cloud_pipeline = make_pipeline(SurfaceMode::Clouds);
         let static_opaque_pipeline = make_pipeline(SurfaceMode::StaticOpaque);
@@ -337,6 +344,7 @@ impl Renderer {
             sky_pipeline,
             star_pipeline,
             result_particle_pipeline,
+            tree_foliage_pipeline,
             celestial_pipeline,
             cloud_pipeline,
             static_pipeline,
@@ -906,6 +914,7 @@ impl Renderer {
             SurfaceMode::Sky => &self.sky_pipeline,
             SurfaceMode::Stars => &self.star_pipeline,
             SurfaceMode::ResultParticles => &self.result_particle_pipeline,
+            SurfaceMode::TreeFoliage => &self.tree_foliage_pipeline,
             SurfaceMode::Celestial => &self.celestial_pipeline,
             SurfaceMode::Clouds => &self.cloud_pipeline,
             SurfaceMode::StaticLit => &self.static_pipeline,
@@ -1063,6 +1072,76 @@ fn expand_vertices(draw: &TexturedDraw<'_>) -> Result<Vec<[f32; 14]>, String> {
 #[cfg(all(test, feature = "capture"))]
 mod depth_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GPU"]
+    fn tree_cutout_replacement_depth_culling_and_fog() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        // Draw full-screen triangles in the supplied order, then read a pixel.
+        let pixel = |layers: &[(f32, [f32; 3], u8, u8, bool)], fog| {
+            let vertices: Vec<_> = layers.iter().map(|&(z, rgb, _, _, reverse)| {
+                let mut v = [[-1.,-1.,z,rgb[0],rgb[1],rgb[2],0.,0.],
+                    [3.,-1.,z,rgb[0],rgb[1],rgb[2],0.,0.],
+                    [-1.,3.,z,rgb[0],rgb[1],rgb[2],0.,0.]];
+                if reverse { v.swap(1, 2); }
+                v
+            }).collect();
+            let textures: Vec<_> = layers.iter().map(|l| [255,255,255,l.2]).collect();
+            let alpha: Vec<_> = layers.iter().map(|l| [l.3; 3]).collect();
+            let draws: Vec<_> = vertices.iter().enumerate().map(|(i, v)| TexturedDraw {
+                view_projection: None, vertices: v, specular: None,
+                diffuse_alpha: Some(&alpha[i]), mode: SurfaceMode::TreeFoliage,
+                width: 1, height: 1, rgba: &textures[i], mipmaps: false, secondary: None,
+            }).collect();
+            let prepared = renderer.prepare(&draws, identity, fog).unwrap();
+            let size = wgpu::Extent3d { width: 8, height: 8, depth_or_array_layers: 1 };
+            let texture = |format, usage| renderer.device.create_texture(&wgpu::TextureDescriptor {
+                label: None, size, mip_level_count: 1, sample_count: 1,
+                dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[],
+            });
+            let color = texture(COLOR_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+            let depth = texture(DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
+            renderer.draw_prepared(&color.create_view(&Default::default()),
+                &depth.create_view(&Default::default()), &prepared);
+            let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+                label: None, size: 256 * 8,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = renderer.device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo {
+                texture: &color, mip_level: 0, origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            }, wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
+                offset: 0, bytes_per_row: Some(256), rows_per_image: Some(8),
+            } }, size);
+            renderer.queue.submit([encoder.finish()]);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| sender.send(result).unwrap());
+            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            receiver.recv().unwrap().unwrap();
+            let bytes = buffer.slice(..).get_mapped_range().unwrap();
+            let at = 4 * 256 + 4 * 4;
+            [bytes[at], bytes[at+1], bytes[at+2], bytes[at+3]]
+        };
+        let red = (0.8, [1.,0.,0.], 255, 255, false);
+        let green = (0.2, [0.,1.,0.], 65, 255, false);
+        let blue = (0.5, [0.,0.,1.], 255, 255, false);
+        assert_eq!(pixel(&[red, (green.0, green.1, 64, 255, false)], None), [255,0,0,255]);
+        assert_eq!(pixel(&[red, green], None), [0,255,0,65]);
+        assert_eq!(pixel(&[red, green, blue], None), [0,255,0,65]);
+        assert_eq!(pixel(&[red, (green.0, green.1, 64, 255, false), blue], None), [0,0,255,255]);
+        assert_eq!(pixel(&[red, green, (0.2, blue.1, 255, 255, false)], None), [0,0,255,255]);
+        assert_eq!(pixel(&[red, (green.0, green.1, 65, 255, true)], None), [0,255,0,65]);
+        assert_eq!(pixel(&[red, (green.0, green.1, 128, 127, false)], None), [255,0,0,255]);
+        let fogged = pixel(&[green], Some(EyeFog { color: 0xff0000ff, start: 0., end: 2. }));
+        assert_eq!(fogged[0], 0);
+        assert!((127..=128).contains(&fogged[1]) && (127..=128).contains(&fogged[2]));
+        assert_eq!(fogged[3], 65);
+    }
 
     #[test]
     #[ignore = "requires GPU"]

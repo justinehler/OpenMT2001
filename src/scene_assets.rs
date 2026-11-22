@@ -132,6 +132,14 @@ pub fn scenery_mesh_uvs(
 /// Mixed original004df1f0 page order. Dedicated pages are closed slots;
 /// shared placement uses the existing256-page algorithm without treating
 /// dedicated image dimensions as free space for later images.
+/// Original archive cache-hit pages: source pixels and flags are already
+/// processed. This explicit path must not be used for uncached source images.
+pub fn cached_scenery_pages(records: &[SceneryTexture<'_>])
+    -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {
+    scenery_pages_with_material_loader(records, |record|
+        (std::sync::Arc::from(record.texels), record.header[0]))
+}
+
 pub fn scenery_pages(
     records: &[SceneryTexture<'_>],
 ) -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {

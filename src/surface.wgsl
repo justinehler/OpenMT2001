@@ -109,3 +109,15 @@ fn star_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSample(surface_texture, surface_sampler, in.uv);
     return apply_fog(vec4(in.color * texel.rgb, in.diffuse_alpha * texel.a), in.eye_depth);
 }
+
+// Original state10: alpha test GREATER64, replacement blending and normal
+// city eye-depth fog. Preserve partial alpha for the ONE/ZERO output.
+@fragment
+fn tree_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let texel = textureSampleBias(surface_texture, surface_sampler, in.uv, -2.5);
+    let color = texel * vec4(in.color, in.diffuse_alpha);
+    if color.a <= 64.0 / 255.0 {
+        discard;
+    }
+    return apply_fog(color, in.eye_depth);
+}

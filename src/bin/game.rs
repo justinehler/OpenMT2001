@@ -121,6 +121,8 @@ mod session_validation;
 
 #[path = "frontend/people_scene.rs"]
 pub mod people_scene;
+#[path = "frontend/tree_scene.rs"]
+pub mod tree_scene;
 #[path = "frontend/object_scene.rs"]
 pub mod object_scene;
 #[path = "frontend/vehicle_scene.rs"]

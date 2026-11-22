@@ -38,6 +38,7 @@ pub mod x87;
 pub mod script_events;
 pub mod sky;
 pub mod texture;
+pub mod trees;
 
 pub mod ai_ownership;
 pub mod ai_business;

@@ -1514,6 +1514,7 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         SurfaceMode::Diagnostic | SurfaceMode::StaticOpaque => 6,
         SurfaceMode::StaticLit => 7,
         SurfaceMode::FacadeBlend => 8,
+        SurfaceMode::TreeFoliage => 9,
         SurfaceMode::ResultParticles => 9,
         SurfaceMode::Overlay | SurfaceMode::UiDepth => 9,
     });
@@ -1736,9 +1737,16 @@ impl Scene {
         Ok(Some(changed_draws))
     }
 
-    /// Recompute original 004c5a70/004c4840 daylight at the retained
-    /// 00822950 hour and 00822948 within-hour counter. Static building
-    /// palettes are rebuilt on the existing hourly snapshot boundary.
+    /// Immutable inputs shared by retained camera-dependent scene layers.
+    pub fn viewport_size(&self) -> Option<[u32; 2]> {
+        self.animation.as_ref().map(|state| [state.width, state.height])
+    }
+    pub fn daylight_time(&self) -> Option<(u32, u32)> {
+        self.animation.as_ref()?.daylight_time
+    }
+
+    /// Recompute original daylight at the retained hour and within-hour counter.
+    /// Static building palettes use the existing hourly snapshot boundary.
     pub fn advance_daylight(&mut self, phase: u32, counter: u32,
         camera: crate::flyby::CameraSample) -> Result<Vec<usize>, String> {
         let state = self.animation.as_mut().ok_or("scene was not prepared for animation")?;

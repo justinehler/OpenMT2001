@@ -459,6 +459,7 @@ struct LoadedInspection {
     city_rights: Option<crate::city_rights::Rights>,
     city_prestige: Option<crate::city_prestige::Prestige>,
     comparison: Option<crate::comparison::Data>,
+    trees: Option<crate::tree_scene::Layer>,
     people: Option<crate::people_scene::Layer>,
     vehicles: Option<crate::vehicle_scene::Layer>,
     transport: Option<crate::transport_scene::Layer>,
@@ -482,6 +483,7 @@ struct SnapshotCache {
     static_details: Option<crate::static_detail::Resources>,
     #[cfg(test)]
     static_detail_ranges: Vec<std::ops::Range<usize>>,
+    trees: Option<std::sync::Arc<crate::tree_scene::Resources>>,
     people: Option<crate::people_scene::Resources>,
     vehicles: Option<crate::vehicle_scene::Resources>,
     transport: Option<crate::transport_scene::Resources>,
@@ -1611,6 +1613,13 @@ impl SceneInputs {
         }
         let scaffold_elapsed = scaffold_started.elapsed();
         let city_elapsed = started.elapsed();
+        if cache.trees.is_none() {
+            cache.trees = Some(std::sync::Arc::new(crate::tree_scene::Resources::load(
+                &image, &index, &self.archive, &self.suncols,
+            )?));
+        }
+        let mut trees = crate::tree_scene::Layer::new(cache.trees.as_ref().unwrap().clone(), self.compatibility);
+        trees.attach(&mut scene);
         if cache.people.is_none() {
             cache.people = Some(crate::people_scene::Resources::new(
                 session,
@@ -1745,6 +1754,7 @@ impl SceneInputs {
             detail_visibility,
             status: None,
             fresh_session: None,
+            trees: Some(trees),
             people: Some(people),
             vehicles: Some(vehicles),
             transport: Some(transport),
@@ -1820,6 +1830,7 @@ impl SceneInputs {
             block_information: None,
             city_prestige: None,
             fresh_session: None,
+            trees: None,
             people: None,
             vehicles: None,
             transport: None,
@@ -1886,6 +1897,7 @@ struct Inspection {
     property_pending: Option<PendingPropertyInspection>,
     rights_pending: Option<PendingRightsInspection>,
     comparison: Option<crate::comparison::View>,
+    trees: Option<crate::tree_scene::Layer>,
     people: Option<crate::people_scene::Layer>,
     people_pending: Option<mpsc::Receiver<Result<crate::people_scene::Layer, String>>>,
     last_people_query: Instant,
@@ -3993,6 +4005,9 @@ impl Intro {
             }
             view.reframe_pending = false;
             let mut changed = view.scene.reframe(view.camera)?;
+            if let Some(trees) = &mut view.trees {
+                changed.extend(trees.reframe(&mut view.scene, view.camera)?);
+            }
             changed.extend(view.detail_visibility.reframe(&mut view.scene, view.camera,
                 view.settings_menu.graphics.distance)?);
             if let Some(locator) = &mut view.locator {
@@ -4041,8 +4056,11 @@ impl Intro {
                     view.environment_pending = None;
                     view.environment_tick = snapshot.tick;
                     if view.environment_time != Some((snapshot.hour, snapshot.counter)) {
-                        let changed = view.scene.advance_daylight(
+                        let mut changed = view.scene.advance_daylight(
                             snapshot.hour, snapshot.counter, view.camera)?;
+                        if let Some(trees) = &mut view.trees {
+                            changed.extend(trees.reframe(&mut view.scene, view.camera)?);
+                        }
                         for index in changed {
                             let draw = &view.scene.draws[index];
                             self.renderer.update_dynamic_surface(
@@ -4171,6 +4189,9 @@ impl Intro {
             if view.camera != sample {
                 view.camera = sample;
                 let mut changed = view.scene.reframe(sample)?;
+                if let Some(trees) = &mut view.trees {
+                    changed.extend(trees.reframe(&mut view.scene, sample)?);
+                }
                 let draw_distance = u32::from(view.settings_menu.graphics.distance);
                 changed.extend(view.detail_visibility.reframe(&mut view.scene, sample,
                     view.settings_menu.graphics.distance)?);
@@ -4187,7 +4208,7 @@ impl Intro {
                 for (i, draw) in view.scene.draws.iter().enumerate() {
                     if changed.contains(&i) {
                         self.renderer.update_dynamic_surface(&mut view.prepared, i,
-                            &draw.borrowed(), view.scene.camera, view.scene.fog)?;
+                            &draw.borrowed(), draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
                     } else {
                         self.renderer.update_camera(&view.prepared, i,
                             draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
@@ -4387,6 +4408,7 @@ impl Intro {
                     environment_changed.extend(loaded.updated_city_draws);
                     environment_changed.sort_unstable();
                     environment_changed.dedup();
+                    let mut trees = loaded.trees;
                     let people = loaded.people;
                     let vehicles = loaded.vehicles;
                     let transport = loaded.transport;
@@ -4435,7 +4457,7 @@ impl Intro {
                     }
                     // Upload complete retained buffers first, then update this snapshot's
                     // camera. A cached scene may have been created from another view.
-                    if people.is_some() || vehicles.is_some() || transport.is_some() {
+                    if trees.is_some() || people.is_some() || vehicles.is_some() || transport.is_some() {
                         for i in scene.reframe(inspection_camera)? {
                             self.renderer.update_dynamic_surface(
                                 &mut prepared,
@@ -4458,6 +4480,15 @@ impl Intro {
                         draw_distance as u8)? {
                         self.renderer.update_dynamic_vertices(&mut prepared, i,
                             &scene.draws[i].borrowed())?;
+                    }
+                    if let Some(trees) = &mut trees {
+                        for i in trees.reframe(&mut scene, inspection_camera)? {
+                            let draw = &scene.draws[i];
+                            self.renderer.update_dynamic_surface(
+                                &mut prepared, i, &draw.borrowed(),
+                                draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                            )?;
+                        }
                     }
                     if let Some(people) = &people {
                         for i in people.reframe(&mut scene, inspection_camera, draw_distance)? {
@@ -4610,6 +4641,7 @@ impl Intro {
                         property_pending: None,
                         rights_pending: None,
                         comparison: loaded.comparison.map(crate::comparison::View::new),
+                        trees,
                         people,
                         people_pending: None,
                         last_people_query: Instant::now(),
@@ -5465,6 +5497,9 @@ impl Intro {
                         if tick != view.environment_tick || view.environment_time != Some((hour, counter)) {
                             let mut changed = view.scene.advance_environment(tick, view.camera.eye)?;
                             changed.extend(view.scene.advance_daylight(hour, counter, view.camera)?);
+                            if let Some(trees) = &mut view.trees {
+                                changed.extend(trees.reframe(&mut view.scene, view.camera)?);
+                            }
                             changed.sort_unstable();
                             changed.dedup();
                             for index in changed {
