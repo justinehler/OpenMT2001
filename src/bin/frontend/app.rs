@@ -138,7 +138,7 @@ struct App {
     presenter: Option<Presenter>,
     stage: usize,
     since: Instant,
-    stream: Option<rodio::OutputStream>,
+    audio_bus: crate::audio_bus::Bus,
     sink: Option<rodio::Sink>,
     ui_click_sinks: Vec<rodio::Sink>,
     intro_music_loading: Option<std::sync::mpsc::Receiver<Result<Vec<f32>, String>>>,
@@ -185,12 +185,9 @@ impl FrameProfile {
 }
 impl App {
     fn play_menu_light_click(&mut self) {
-        if self.stream.is_none() {
-            self.stream = rodio::OutputStreamBuilder::open_default_stream().ok();
-        }
-        if let Some(stream) = &self.stream {
+        if let Some(mixer) = self.audio_bus.mixer() {
             self.ui_click_sinks.retain(|sink| !sink.empty());
-            let sink = rodio::Sink::connect_new(stream.mixer());
+            let sink = rodio::Sink::connect_new(mixer);
             sink.set_volume(self.intro.as_ref().map_or(1., |intro| {
                 f32::from(intro.ui_effects_level()) / 100.
             }));
@@ -225,11 +222,8 @@ impl App {
         match loading.try_recv() {
             Ok(Ok(samples)) => {
                 self.intro_music_loading = None;
-                if self.stream.is_none() {
-                    self.stream = rodio::OutputStreamBuilder::open_default_stream().ok();
-                }
-                if let Some(stream) = &self.stream {
-                    let sink = rodio::Sink::connect_new(stream.mixer());
+                if let Some(mixer) = self.audio_bus.mixer() {
+                    let sink = rodio::Sink::connect_new(mixer);
                     sink.append(rodio::buffer::SamplesBuffer::new(2, 44_100, samples).repeat_infinite());
                     self.sink = Some(sink);
                     self.intro_music_playing = true;
@@ -294,19 +288,18 @@ impl ApplicationHandler for App {
                 self.since = Instant::now();
                 self.launched = self.since;
                 if self.stage == 0 {
-                    match rodio::OutputStreamBuilder::open_default_stream() {
-                        Ok(stream) => {
-                            let sink = rodio::Sink::connect_new(stream.mixer());
+                    match self.audio_bus.mixer() {
+                        Some(mixer) => {
+                            let sink = rodio::Sink::connect_new(mixer);
                             sink.append(rodio::buffer::SamplesBuffer::new(
                                 2,
                                 44100,
                                 std::mem::take(&mut self.assets.audio),
                             ));
                             self.sink = Some(sink);
-                            self.stream = Some(stream);
                         }
-                        Err(e) => {
-                            eprintln!("Audio device unavailable; playing movie silently: {e}")
+                        None => {
+                            eprintln!("Audio device unavailable; playing movie silently")
                         }
                     }
                     eprintln!("Boot stage: Infogrames movie");
@@ -772,7 +765,7 @@ pub fn run() -> Result<(), Error> {
         presenter: None,
         stage: if skip_splash { 3 } else { 0 },
         since: now,
-        stream: None,
+        audio_bus: crate::audio_bus::Bus::new(),
         sink: None,
         ui_click_sinks: Vec::new(),
         intro_music_loading: Some(intro_music_loading),
