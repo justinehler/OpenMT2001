@@ -30,5 +30,5 @@ Strict mode and saved loads retain their previous behavior.
 
 This is a documented compatibility choice based on the measured engine path;
 it does not establish that the original executable has a Tutorial 8 defect.
-Its connected check constructs the authored bakery, bar and greengrocer,
+Its connected check constructs the authored bakery, grocery store and cafe,
 then verifies completion and the next unlock through profile reload.

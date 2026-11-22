@@ -748,7 +748,9 @@ mod tests {
             planning.pointer(Some(point));planning.mouse(true);planning.mouse(false);
             planning.take_tutorial_control()
         };
-        for (ordinal,use_index) in [1,12,4].into_iter().enumerate() {
+        // Supplied US prompt bodies2157..2159 request Bakery, Grocery Store,
+        // and Cafe. Stale Lua comments name different businesses.
+        for (ordinal,(use_index,expected_business)) in [(1,0u32),(12,5),(4,12)].into_iter().enumerate() {
             if ordinal!=0 {host.tutorial_event(&mut session,&assets,11).unwrap();}
             let status=host.status(&session);
             assert_eq!(status.tutorial_build_type,0);
@@ -795,6 +797,8 @@ mod tests {
             let choices=host.complete_build_drag(&mut session,&assets).unwrap();
             planning.apply_placement_choices(choices);
             let request=planning.request().unwrap();
+            assert_eq!(request.business,expected_business,
+                "Tutorial8 use{use_index} must construct the business named by its supplied US prompt");
             let quote=session.inspect_build(&request,&assets).unwrap();
             assert!(quote.allowed(),"legal original catalog build use{use_index}");
             planning.quote_request=Some(request.clone());planning.quote=Some(quote);planning.needs_quote=false;
