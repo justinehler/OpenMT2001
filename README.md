@@ -57,6 +57,12 @@ Windows, Linux and macOS are the target native platforms. Fresh platform
 verification is in progress; this source import is not a tested binary release.
 Browser execution is not currently supported.
 
+Tutorials 5 and 8 are currently withheld from the live selector while their
+construction-rights paths are investigated. The Tutorial 5 failure matches a
+[reported original v1.4 tutorial limitation](https://www.gamepressure.com/download/monopoly-tycoon-14-patch/z3135e5).
+Passing initialization or selected tutorial flows does not establish complete
+campaign playability.
+
 ---
 
 # 3. Building the project

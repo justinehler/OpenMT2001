@@ -64,7 +64,9 @@ mod tests {
                 Ok(())
             }
         }
-        let bytes=fs::read("work/economy/native-tutorial-auction-order.bin").unwrap();
+        let path = std::env::var_os("OPENMT2001_NATIVE_TUTORIAL_AUCTION_ORDER")
+            .expect("set OPENMT2001_NATIVE_TUTORIAL_AUCTION_ORDER to the private original comparison fixture");
+        let bytes=fs::read(path).unwrap();
         assert_eq!(&bytes[..8],b"MTTAOR01");
         let mut words=bytes[8..].chunks_exact(4).map(|b|u32::from_le_bytes(b.try_into().unwrap()));
         assert_eq!(words.next(),Some(0x037f));assert_eq!(words.next(),Some(3));
@@ -601,6 +603,16 @@ mod tests {
     #[test]
     #[ignore = "requires supplied v1.4 Tutorial 3 scripts and original assets"]
     fn original_tutorial_three_strategic_flow() {
+        tutorial_three_to_five(false);
+    }
+
+    #[test]
+    #[ignore = "requires original inputs; investigates unresolved Tutorial5 rights admission"]
+    fn original_tutorial_five_rights_frontier() {
+        tutorial_three_to_five(true);
+    }
+
+    fn tutorial_three_to_five(include_fifth: bool) {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
@@ -636,7 +648,8 @@ mod tests {
         // Tutorial 3 starts on Pacific Avenue and reuses the wired compass
         // control before opening the Strategic View information sequence.
         let tutorial_three = crate::scenarios::find(100002).unwrap();
-        let profile = std::path::PathBuf::from(format!("work/economy/tutorial3-{}.profile", std::process::id()));
+        let profile = std::path::PathBuf::from(format!("work/economy/tutorial3-{}-{}.profile", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         if profile.exists() { fs::remove_file(&profile).unwrap(); }
         let mut third = Session::initialize_campaign(Inputs {
             image: &image, board: &board, file: &file,
@@ -790,6 +803,7 @@ mod tests {
         assert!(completed.failure.is_none(), "Tutorial 3 completion: {:?}", completed.failure);
         assert!(completed.tutorial_completed);
         assert!(third.catalog.selected_level().unwrap().completed()[0]);
+        println!("Tutorial3: original script flow completed and progression recorded");
         let recorded = fs::read(&profile).unwrap();
         third_host.frame(&mut third, &assets, 20);
         assert_eq!(fs::read(&profile).unwrap(), recorded, "completion is recorded once");
@@ -941,6 +955,11 @@ mod tests {
         crate::campaign_store::load_progress(&mut progression,&profile).unwrap();
         assert!(progression.levels.iter().find(|level|level.id()==100003).unwrap().completed()[0]);
         assert!(progression.levels.iter().find(|level|level.id()==100004).unwrap().unlocked());
+        println!("Tutorial4: property/auction flow completed; Tutorial5 unlocked");
+        if !include_fifth {
+            fs::remove_file(&profile).unwrap();
+            return;
+        }
         let fifth_token=crate::scenarios::find(100004).unwrap().token;
         let mut fifth=Session::initialize_campaign(Inputs{
             image:&image,board:&board,file:&file,
@@ -1284,7 +1303,15 @@ mod tests {
         business.inspection=Some(session.inspect_business_operations(owned_slot,business_assets.bounds(),&image).unwrap());
         let control=business_control(&mut business,10);
         host.tutorial_event(&mut session,&assets,control).unwrap();
-        assert!(host.tutorial_event(&mut session,&assets,7).is_err(),"native callback7 is not a registered enabled control");
+        // Callback7 comes from an admitted numeric producer, not a registered
+        // enabled widget. Queued disabled widget input is ignored without mutation.
+        let commands_before = session.hooks.commands.len();
+        let businesses_before = session.world.ledgers.businesses.clone();
+        let prompt_before = host.status(&session).tutorial_message.unwrap().dismissal_id;
+        host.tutorial_event(&mut session,&assets,7).unwrap();
+        assert_eq!(session.hooks.commands.len(), commands_before);
+        assert_eq!(session.world.ledgers.businesses, businesses_before);
+        assert_eq!(host.status(&session).tutorial_message.unwrap().dismissal_id, prompt_before);
         let mut adjustment=adjustment_assets.open_for_owner(&scene,owned,owner).unwrap().unwrap();
         let target=adjustment.edit_target.expect("owned retail adjustment admits actual edits");
         assert!(adjustment_control(&mut adjustment,41).is_none(),"numeric callback waits for authoritative edit");
