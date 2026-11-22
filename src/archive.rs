@@ -131,10 +131,9 @@ impl ArchiveIndex {
     /// either slash as a separator.  This is an application helper; it does
     /// not assert that the original game used these lookup semantics.
     pub fn find(&self, requested_path: &str) -> Option<&ArchiveEntry> {
-        let key = normalized_key(requested_path);
         self.entries
             .iter()
-            .find(|entry| normalized_key(&entry.path) == key)
+            .find(|entry| normalized_paths_equal(&entry.path, requested_path))
     }
 }
 
@@ -228,8 +227,14 @@ fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
-fn normalized_key(path: &str) -> String {
-    path.replace('\\', "/").to_ascii_lowercase()
+fn normalized_paths_equal(left: &str, right: &str) -> bool {
+    // Both original transformations preserve byte length. Non-ASCII UTF-8
+    // bytes remain exact; only ASCII case and slash direction are folded.
+    let byte = |value: u8| {
+        if value == b'\\' { b'/' } else { value.to_ascii_lowercase() }
+    };
+    left.len() == right.len()
+        && left.bytes().zip(right.bytes()).all(|(a, b)| byte(a) == byte(b))
 }
 
 #[cfg(test)]
@@ -255,6 +260,79 @@ mod tests {
                 .copy_from_slice(&value.to_le_bytes());
         }
         bytes
+    }
+
+
+    fn legacy_find<'a>(index: &'a ArchiveIndex, path: &str) -> Option<&'a ArchiveEntry> {
+        let key = path.replace('\\', "/").to_ascii_lowercase();
+        index.entries.iter().find(|entry|
+            entry.path.replace('\\', "/").to_ascii_lowercase() == key)
+    }
+
+    #[test]
+    fn lookup_matches_legacy_ascii_and_separator_rules() {
+        let bytes = fixture(b"x", 0, 1);
+        let mut index = ArchiveIndex::parse(&bytes, 2).unwrap();
+        let paths = ["", "GameData2\\Foo.tm", "gamedata2/foo.TM", "GAMEDATA2/FOO.TM",
+            "gamedata2//foo.tm", "./gamedata2/foo.tm", "foo.tm", "a\\b/c",
+            "A/B\\C", "Å\\ß.tm", "Å/ß.TM", "å/ß.tm", "İ.tm", "i.tm", "x\0y"];
+        for stored in paths {
+            index.entries[0].path = stored.into();
+            for requested in paths {
+                let expected = legacy_find(&index, requested).map(|entry| entry.offset);
+                assert_eq!(index.find(requested).map(|entry| entry.offset), expected,
+                    "stored {stored:?}, requested {requested:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn lookup_preserves_first_match_and_observes_public_entry_edits() {
+        let bytes = fixture(b"GameData2\\Foo.tm", 0, 1);
+        let mut index = ArchiveIndex::parse(&bytes, 2).unwrap();
+        let mut duplicate = index.entries[0].clone();
+        duplicate.path = "gamedata2/foo.TM".into();
+        duplicate.offset = 1;
+        duplicate.metadata[1] = 1;
+        index.entries.push(duplicate);
+        assert_eq!(index.find("GAMEDATA2/FOO.TM").unwrap().offset, 0);
+        index.entries[0].path = "another/file.tm".into();
+        assert_eq!(index.find("GAMEDATA2/FOO.TM").unwrap().offset, 1);
+        assert_eq!(index.find("ANOTHER\\FILE.TM").unwrap().offset, 0);
+    }
+
+    #[test]
+    #[ignore = "requires OPENMT2001_ARCHIVE_DIR and OPENMT2001_ARCHIVE_BIN"]
+    fn original_archive_lookup_matches_legacy_normalization() {
+        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let length = std::fs::metadata(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap().len();
+        let index = ArchiveIndex::parse(&directory, length).unwrap();
+        let mut queries = Vec::new();
+        for entry in &index.entries {
+            queries.push(entry.path.clone());
+            queries.push(entry.path.replace('\\', "/").to_ascii_uppercase());
+            queries.push(entry.path.replace('/', "\\").to_ascii_lowercase());
+        }
+        queries.extend(["", "not-present.tm", "gamedata2//not-present.tm"]
+            .into_iter().map(str::to_owned));
+        for query in &queries {
+            assert_eq!(index.find(query).map(|entry| entry as *const ArchiveEntry),
+                legacy_find(&index, query).map(|entry| entry as *const ArchiveEntry),
+                "{query:?}");
+        }
+        let start = std::time::Instant::now();
+        let before = queries.iter().fold(0u64, |sum, query|
+            sum.wrapping_add(legacy_find(&index, std::hint::black_box(query))
+                .map_or(0, |entry| entry.offset)));
+        let legacy = start.elapsed();
+        let start = std::time::Instant::now();
+        let after = queries.iter().fold(0u64, |sum, query|
+            sum.wrapping_add(index.find(std::hint::black_box(query))
+                .map_or(0, |entry| entry.offset)));
+        let optimized = start.elapsed();
+        assert_eq!(std::hint::black_box(before), std::hint::black_box(after));
+        eprintln!("Original archive {} entries / {} queries: legacy {legacy:?}, byte comparison {optimized:?}; host elapsed, not whole-game performance",
+            index.entries.len(), queries.len());
     }
 
     #[test]
