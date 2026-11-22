@@ -4685,28 +4685,24 @@ impl Intro {
                                 view.navigation = std::mem::take(&mut previous.navigation);
                                 view.auction_requests = previous.auction_requests.take();
                                 view.auction_audio_requests = previous.auction_audio_requests.take();
-                                view.auction_audio_player = std::mem::replace(
+                                std::mem::swap(
+                                    &mut view.auction_audio_player,
                                     &mut previous.auction_audio_player,
-                                    crate::live_host::auction_audio::Player::new(
-                                        self.assets.auction_audio.clone()),
                                 );
                                 view.transport_audio_requests = previous.transport_audio_requests.take();
-                                view.transport_audio_player = std::mem::replace(
+                                std::mem::swap(
+                                    &mut view.transport_audio_player,
                                     &mut previous.transport_audio_player,
-                                    crate::transport_audio::Player::new(
-                                        self.assets.transport_audio.clone()),
                                 );
                                 view.era_audio_requests = previous.era_audio_requests.take();
-                                view.era_audio_player = std::mem::replace(
+                                std::mem::swap(
+                                    &mut view.era_audio_player,
                                     &mut previous.era_audio_player,
-                                    crate::era_audio::Player::new(
-                                        self.assets.era_audio.clone()),
                                 );
                                 view.gameplay_sound_requests = previous.gameplay_sound_requests.take();
-                                view.gameplay_sound_player = std::mem::replace(
+                                std::mem::swap(
+                                    &mut view.gameplay_sound_player,
                                     &mut previous.gameplay_sound_player,
-                                    crate::gameplay_sound::Player::new(
-                                        self.assets.gameplay_sound.clone()),
                                 );
                                 view.auction = std::mem::take(&mut previous.auction);
                                 view.auction_panel = std::mem::take(&mut previous.auction_panel);
