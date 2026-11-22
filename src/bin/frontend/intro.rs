@@ -4445,14 +4445,9 @@ impl Intro {
                                 scene.fog,
                             )?;
                         }
-                        for (i, draw) in scene.draws.iter().enumerate() {
-                            self.renderer.update_camera(
-                                &prepared,
-                                i,
-                                draw.view_projection.unwrap_or(scene.camera),
-                                scene.fog,
-                            )?;
-                        }
+                        let cameras = scene.draws.iter().map(|draw|
+                            draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
+                        self.renderer.update_cameras(&prepared, &cameras, scene.fog)?;
                     }
                     let graphics_levels = self.inspection.as_ref().map_or(self.graphics_levels,
                         |view| view.settings_menu.graphics);
