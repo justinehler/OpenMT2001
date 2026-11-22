@@ -244,16 +244,21 @@ pub fn write_atlas_region(
     {
         return Err("atlas image or border exceeds page".into());
     }
-    // Original copies the image, extends top/bottom, then left/right including
-    // the new rows. Clamping source coordinates produces those same corners.
+    // Copy complete image rows, repeating the edge row for top/bottom padding.
+    // Extend the left/right pixels across those rows to retain the corners.
+    let width = image.width as usize * 4;
+    let stride = side as usize * 4;
     for row in y - vertical..y + image.height + vertical {
-        let source_y = row.saturating_sub(y).min(image.height - 1);
-        for col in x - horizontal..x + image.width + horizontal {
-            let source_x = col.saturating_sub(x).min(image.width - 1);
-            let from =
-                (u64::from(source_y) * u64::from(image.width) + u64::from(source_x)) as usize * 4;
-            let to = (u64::from(row) * u64::from(side) + u64::from(col)) as usize * 4;
-            page[to..to + 4].copy_from_slice(&image.texels[from..from + 4]);
+        let source_y = row.saturating_sub(y).min(image.height - 1) as usize;
+        let source = &image.texels[source_y * width..(source_y + 1) * width];
+        let start = row as usize * stride + x as usize * 4;
+        page[start..start + width].copy_from_slice(source);
+        let border_bytes = horizontal as usize * 4;
+        for pixel in page[start - border_bytes..start].chunks_exact_mut(4) {
+            pixel.copy_from_slice(&source[..4]);
+        }
+        for pixel in page[start + width..start + width + border_bytes].chunks_exact_mut(4) {
+            pixel.copy_from_slice(&source[width - 4..]);
         }
     }
     Ok([
@@ -664,6 +669,63 @@ pub fn page_mipmaps(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<Vec<u8>>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn atlas_row_copy_matches_clamped_pixels() {
+        let mut checked = 0;
+        for side in [1u32, 2, 4, 8, 16, 32, 64, 256] {
+            let mut dimensions = vec![1, 2, 3, side / 2, side];
+            dimensions.retain(|&n| n > 0 && n <= side);
+            dimensions.sort_unstable();
+            dimensions.dedup();
+            for &width in &dimensions {
+                for &height in &dimensions {
+                    let texels: Vec<_> = (0..width as usize * height as usize * 4)
+                        .map(|i| (i.wrapping_mul(73).wrapping_add(i / 7)) & 255)
+                        .map(|n| n as u8)
+                        .collect();
+                    for padding in [0u8, 1, 2, 255] {
+                        for flags in [0, 2] {
+                            let mut header = [0; 14];
+                            header[0] = flags;
+                            let image = super::TextureRecord { header, width, height, texels: &texels };
+                            for origin in [[0, 0], [1, 1], [u32::from(padding); 2], [side / 2; 2]] {
+                                let mut page = vec![0xa5; side as usize * side as usize * 4];
+                                let actual = super::write_atlas_region(&image, &mut page, side, origin, padding);
+                                let Ok(uv) = actual else {
+                                    assert!(page.iter().all(|&b| b == 0xa5));
+                                    continue;
+                                };
+                                let border = |size: u32| {
+                                    if flags & 2 != 0 || side <= size + u32::from(padding) * 2 {
+                                        0
+                                    } else {
+                                        u32::from(padding)
+                                    }
+                                };
+                                let [x, y] = origin;
+                                let mut expected = vec![0xa5; page.len()];
+                                for row in y - border(height)..y + height + border(height) {
+                                    for col in x - border(width)..x + width + border(width) {
+                                        let sy = row.saturating_sub(y).min(height - 1);
+                                        let sx = col.saturating_sub(x).min(width - 1);
+                                        let source = (sy * width + sx) as usize * 4;
+                                        let target = (row * side + col) as usize * 4;
+                                        expected[target..target + 4].copy_from_slice(&texels[source..source + 4]);
+                                    }
+                                }
+                                assert_eq!(page, expected, "side {side}, {width}x{height}, padding {padding}, flags {flags}, origin {origin:?}");
+                                assert_eq!(uv, [width as f32 / side as f32, height as f32 / side as f32,
+                                    x as f32 / side as f32, y as f32 / side as f32]);
+                                checked += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000, "only {checked} valid atlas writes checked");
+    }
+
     #[test]
     #[ignore = "requires original texture loader observations"]
     fn matches_native_texture_loader() {
