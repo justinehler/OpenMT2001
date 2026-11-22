@@ -2359,6 +2359,11 @@ impl Intro {
         self.audio_levels = snapshot.audio;
         self.graphics_levels = snapshot.graphics;
         self.gameplay_levels = snapshot.gameplay;
+        if let Some(menu) = &mut self.menu {
+            menu.settings_audio = snapshot.audio;
+            menu.settings.graphics = snapshot.graphics;
+            menu.settings.gameplay = snapshot.gameplay;
+        }
         Ok(())
     }
 
@@ -2366,6 +2371,11 @@ impl Intro {
         if let Some(view) = self.inspection.take() {
             self.graphics_levels = view.settings_menu.graphics;
             self.gameplay_levels = view.settings_menu.gameplay;
+            if let Some(menu) = &mut self.menu {
+                menu.settings_audio = self.audio_levels;
+                menu.settings.graphics = self.graphics_levels;
+                menu.settings.gameplay = self.gameplay_levels;
+            }
         }
     }
     fn apply_audio_levels(view: &mut Inspection, levels: crate::settings_menu::Levels) {
@@ -3873,6 +3883,7 @@ impl Intro {
     }
     pub fn inspection_unfocus(&mut self) {
         if let Some(view) = &mut self.inspection {
+            view.settings_menu.cancel_input();
             if let Some(comparison) = &mut view.comparison {
                 comparison.cancel_press();
             }
@@ -4258,6 +4269,12 @@ impl Intro {
 
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
         self.sync_profile_settings()?;
+        if self.inspection.is_none() && let Some(menu) = &self.menu {
+            let snapshot = menu.settings_snapshot();
+            self.audio_levels = snapshot.audio;
+            self.graphics_levels = snapshot.graphics;
+            self.gameplay_levels = snapshot.gameplay;
+        }
         self.persist_settings();
         // A host worker reuses the same original byte inputs and shared assembler.
         // Native startup enables gameplay; Space controls the host pause gate.

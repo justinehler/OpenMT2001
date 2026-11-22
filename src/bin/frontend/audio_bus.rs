@@ -8,6 +8,7 @@ pub struct Bus {
     mixer: Option<Mixer>,
     master: Option<rodio::Sink>,
     level: u8,
+    attempted: bool,
 }
 impl Bus {
     pub fn new() -> Self { Self { level: 100, ..Self::default() } }
@@ -23,8 +24,14 @@ impl Bus {
         self.master = Some(master);
     }
     pub fn mixer(&mut self) -> Option<&Mixer> {
-        if self.mixer.is_none() {
-            let stream = rodio::OutputStreamBuilder::open_default_stream().ok()?;
+        self.mixer_with(|| rodio::OutputStreamBuilder::open_default_stream().ok())
+    }
+    fn mixer_with(&mut self, open: impl FnOnce() -> Option<rodio::OutputStream>) -> Option<&Mixer> {
+        if self.mixer.is_none() && !self.attempted {
+            // A failed device probe must not repeat for every traffic/UI cue
+            // on the render thread. A new bus can try again on next launch.
+            self.attempted = true;
+            let stream = open()?;
             let channels = stream.config().channel_count();
             let sample_rate = stream.config().sample_rate();
             self.connect_to(stream.mixer(), channels, sample_rate);
@@ -45,6 +52,20 @@ impl Bus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unavailable_output_is_probed_once_across_repeated_cues() {
+        let mut bus = Bus::new();
+        let mut attempts = 0;
+        for _ in 0..1000 {
+            assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+        }
+        bus.set_level(40);
+        assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+        assert_eq!(attempts, 1);
+        let mut next_launch = Bus::new();
+        assert!(next_launch.mixer_with(|| { attempts += 1; None }).is_none());
+        assert_eq!(attempts, 2);
+    }
     #[test]
     fn master_level_changes_without_overwriting_child_positional_gain() {
         let (output, _source) = rodio::mixer::mixer(2, 44_100);

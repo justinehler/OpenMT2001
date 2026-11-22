@@ -531,6 +531,12 @@ pub struct View {
     pub prepared: Option<PreparedScene>,
 }
 impl View {
+    pub fn cancel_input(&mut self) {
+        self.pressed = None;
+        self.button_down = false;
+        self.click_latch = None;
+        self.shown = None;
+    }
     pub fn open(&mut self) { self.page=Some(Page::Main); self.pressed=None;
         self.button_down=false; self.click_latch=None; self.shown=None; }
     pub fn back(&mut self) {

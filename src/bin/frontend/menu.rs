@@ -17,6 +17,7 @@ use openmt2001::{
 use std::{fs, path::Path};
 
 pub struct Assets {
+    settings: crate::settings_menu::Assets,
     planning: crate::build_view::Assets,
     prompts: crate::prompt::Assets,
     event_list: crate::event_list::Assets,
@@ -166,6 +167,7 @@ impl Assets {
         let comparison =
             crate::comparison::Assets::load(index, archive, installer, &strings, executable)?;
         Ok(Self {
+            settings: crate::settings_menu::Assets::load(index, archive, installer, language)?,
             planning: crate::build_view::Assets::load(
                 index, archive, installer, &strings, executable,
             )?,
@@ -204,6 +206,8 @@ impl Assets {
     }
 }
 pub struct Menu {
+    pub settings: crate::settings_menu::View,
+    pub settings_audio: crate::settings_menu::Levels,
     profile: crate::profile::Profile,
     pub load: crate::load::Load,
     pub single: crate::singleplayer::SinglePlayer,
@@ -269,6 +273,20 @@ fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>,
     }
 }
 impl Menu {
+    pub fn cancel_input(&mut self) {
+        self.settings.cancel_input();
+        self.pressed = false;
+        self.pressed_origin = None;
+        self.light_click_target = None;
+    }
+    pub fn settings_snapshot(&self) -> crate::profile_settings::Snapshot {
+        crate::profile_settings::Snapshot {
+            audio: self.settings_audio,
+            graphics: self.settings.graphics,
+            gameplay: self.settings.gameplay,
+        }
+    }
+
     /// V2-owned Options record for the active player, keyed by the same
     /// reversible profile identity as campaign progress.
     pub fn current_settings_path(&self) -> Option<std::path::PathBuf> {
@@ -343,6 +361,8 @@ impl Menu {
     }
     pub fn new(mut assets: Assets) -> Self {
         Self {
+            settings: Default::default(),
+            settings_audio: Default::default(),
             profile: assets.profile.take().unwrap(),
             load: assets.load.take().unwrap(),
             single: assets.single.take().unwrap(),
@@ -377,6 +397,10 @@ impl Menu {
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
+        if self.settings.page.is_some() {
+            self.settings.drag(&self.assets.settings, Some(p), &mut self.settings_audio);
+            return;
+        }
         self.load.pointer(p);
         self.profile.pointer(p);
         self.single.pointer(p);
@@ -393,6 +417,9 @@ impl Menu {
     /// 443360 emits its light click on the first held entry and on a held
     /// leave/re-entry. The audio latch is separate from release activation.
     pub fn light_click_on_held_entry(&mut self) -> bool {
+        if self.settings.page.is_some() {
+            return self.settings.pointer_click_cue(&self.assets.settings, self.pointer_position);
+        }
         let page = if self.load.visible {
             if self.load.delete_pending() { MenuCuePage::LoadPrompt }
             else { MenuCuePage::Load }
@@ -440,6 +467,11 @@ impl Menu {
         .position(|&[l, t, r, b]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b)
     }
     pub fn mouse_button(&mut self, pressed: bool) {
+        if self.settings.page.is_some() {
+            self.settings.mouse(&self.assets.settings, self.pointer_position, pressed,
+                &mut self.settings_audio);
+            return;
+        }
         // A panel transition can change the hit target without a CursorMoved event.
         if pressed && let Some(point) = self.pointer_position {
             self.select(self.hit(point), false);
@@ -464,6 +496,7 @@ impl Menu {
         self.select(self.selected, pressed);
     }
     pub fn activate(&mut self) {
+        if self.settings.page.is_some() { return; }
         if self.single.visible {
             if let Some(i) = self.selected {
                 let count = self.single.count();
@@ -567,6 +600,14 @@ impl Menu {
             self.dirty = true;
             return;
         }
+        if self.selected == Some(5) {
+            self.settings.open();
+            self.selected = None;
+            self.pressed = false;
+            self.pressed_origin = None;
+            self.dirty = true;
+            return;
+        }
         if let Some(i) = self.selected {
             self.pending = Some(i);
             self.dirty = true;
@@ -576,6 +617,7 @@ impl Menu {
         self.profile.visible && self.profile.name.is_some()
     }
     pub fn navigate(&mut self, delta: i32) {
+        if self.settings.page.is_some() { return; }
         if self.pending.is_some() {
             return;
         }
@@ -616,6 +658,7 @@ impl Menu {
         }
     }
     pub fn scroll(&mut self, delta: i32) {
+        if self.settings.page.is_some() { return; }
         if self.single.visible {
             self.single.scroll(delta);
             self.dirty = true;
@@ -634,6 +677,7 @@ impl Menu {
         self.dirty = true;
     }
     pub fn back(&mut self) {
+        if self.settings.page.is_some() { self.settings.back(); return; }
         if self.single.visible {
             self.single.back();
             self.selected = None;
@@ -667,6 +711,14 @@ impl Menu {
         color: &wgpu::TextureView,
         depth: &wgpu::TextureView,
     ) -> Result<(), String> {
+        if self.settings.page.is_some() {
+            self.settings.update_levels(&self.assets.settings, renderer,
+                self.pointer_position, self.settings_audio)?;
+            if let Some(panel) = &self.settings.prepared {
+                renderer.draw_overlay(color, depth, panel);
+            }
+            return Ok(());
+        }
         if self.single.visible {
             if self.dirty {
                 self.prepared = Some(self.single.draw(renderer, self.selected, self.pressed)?);
@@ -945,5 +997,82 @@ mod light_click_tests {
         assert!(!release_activates_without_track(true, Some(12), Some(12), true));
         assert!(release_activates_without_track(true, Some(11), Some(11), false));
         assert!(!release_activates_without_track(true, Some(12), None, true));
+    }
+}
+
+#[cfg(test)]
+mod settings_route_tests {
+    #[test]
+    #[ignore = "requires original menu/settings assets; OPENMT2001_SCRIPTS points to scripts root"]
+    fn main_menu_settings_route_persists_selected_profile_for_launch() {
+        use super::*;
+        use crate::settings_menu::{Button, Page};
+        use crate::profile_settings::Snapshot;
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let executable = read("OPENMT2001_EXE");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
+        let root = std::env::current_dir().unwrap().join(format!("target/settings-route-{}-{}",
+            std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let assets = Assets::load(&index, &archive, installer, &language, &scripts,
+            root.clone(), root.join("saves"), &executable).unwrap();
+        let mut menu = Menu::new(assets);
+        menu.profile.store.names = vec!["Settings Player".into(), "Other Player".into()];
+        menu.profile.store.current = Some(0);
+        menu.profile.visible = false;
+        let path = menu.current_settings_path().unwrap();
+        let initial = Snapshot::load(&path).unwrap();
+        menu.settings_audio = initial.audio;
+        menu.settings.graphics = initial.graphics;
+        menu.settings.gameplay = initial.gameplay;
+        menu.selected = Some(5);
+        menu.activate(); // shared mouse-release / Enter activation path
+        assert_eq!(menu.settings.page, Some(Page::Main));
+        assert_eq!(menu.pending, None);
+        let click = |menu: &mut Menu, button| {
+            let bounds = menu.assets.settings.bounds(menu.settings.page.unwrap(), button).unwrap();
+            menu.pointer([(bounds[0]+bounds[2])/2., (bounds[1]+bounds[3])/2.]);
+            menu.mouse_button(true);
+            menu.mouse_button(false);
+        };
+        click(&mut menu, Button::Gameplay);
+        let track = menu.assets.settings.bounds(Page::Gameplay, Button::SensitivityTrack).unwrap();
+        menu.pointer([track[0], (track[1] + track[3]) / 2.]);
+        menu.mouse_button(true);
+        let held = menu.settings.gameplay;
+        menu.cancel_input(); // focus loss must cancel without activating a button
+        menu.pointer([track[2], (track[1] + track[3]) / 2.]);
+        assert_eq!(menu.settings.gameplay, held, "unheld motion after focus loss dragged slider");
+        assert_eq!(menu.settings.page, Some(Page::Gameplay));
+        click(&mut menu, Button::AutoRotate);
+        menu.back(); // Escape from Gameplay
+        assert_eq!(menu.settings.page, Some(Page::Main));
+        click(&mut menu, Button::Back);
+        assert_eq!(menu.settings.page, None);
+        assert_eq!(menu.current_settings_path(), Some(path.clone()));
+        assert_eq!(menu.profile.store.current, Some(0));
+        assert!(menu.single.request.is_none());
+        let launch = menu.settings_snapshot(); // same snapshot copied to Intro's launch levels
+        launch.save(&path).unwrap();
+        assert_eq!(Snapshot::load(&path).unwrap(), launch);
+        assert_eq!(launch.gameplay.auto_rotate, !initial.gameplay.auto_rotate);
+        assert_eq!(Snapshot::load(&crate::profile_settings::profile_path(&root, b"Other Player"))
+            .unwrap(), Snapshot::default());
+        menu.selected = Some(5);
+        menu.activate();
+        menu.back(); // Escape directly from Settings to menu
+        assert_eq!(menu.settings.page, None);
+        assert_eq!(menu.pending, None);
     }
 }
