@@ -1327,7 +1327,13 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             sun
         ));
     }
-    // Both original GTD and TT loaders apply004ff7a0 before caching/upload.
+    // Native 004ff880 cache hits preserve pixels. Retain the proven daylight
+    // secondary input independently of the legacy conversion used by other roles.
+    // sets[2] is the cached BuildingTextures collection loaded above; row 0 is
+    // the state-7 handle at 00689620 (004b7df8..004b7e21).
+    let cached_daylight_secondary = sets.get(2)
+        .and_then(|set| set.textures.first()).cloned();
+    // Preserve existing conversion for all other texture bindings.
     // Retain borrowed original inputs and own only the transformed pixels.
     let loaded_pixels: Vec<Vec<_>> = sets
         .iter()
@@ -1376,7 +1382,12 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         };
         let secondary = if family == 1 {
             facade_material.map(|m| {
-                let texture = &sets[2].textures[m.texture];
+                let texture = if m.texture == 0 && m.camera_coordinates {
+                    cached_daylight_secondary.as_ref()
+                        .expect("daylight facade requires cached BuildingTextures row 0")
+                } else {
+                    &sets[2].textures[m.texture]
+                };
                 SecondaryTexture {
                     uv: &facade_uvs[&(family, index)],
                     diffuse_alpha: m.diffuse_alpha,
@@ -2176,6 +2187,86 @@ mod tests {
         let mut structural = after.clone();
         structural[slot][0x2d] ^= 1;
         assert!(patched.patch_runtime_poses(&after, &structural).unwrap().is_none());
+    }
+
+    #[test]
+    #[ignore = "requires supplied original v1.4 geometry, map, sunlight and archive"]
+    fn daylight_facade_submits_cached_row_zero_without_reconversion() {
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build_file = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let map = read("OPENMT2001_MAP");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let collection = |path| {
+            let entry = index.find(path).unwrap();
+            TextureSet::parse(&archive[entry.offset as usize
+                ..(entry.offset + entry.length) as usize]).unwrap()
+        };
+        let cached = collection("gamedata2/BuildingTextures/textures.gtd");
+        let bases = collection("gamedata2/buildtextures/textures.gtd");
+        assert_eq!(cached.textures.len(), 29);
+        let day = &cached.textures[0];
+        assert_eq!((day.width, day.height, day.header[0]), (64, 64, 0x1000));
+        let converted_day = crate::texture::loader_pixels(day);
+        assert_ne!(converted_day, day.texels, "fixture must expose the extra saturation");
+        let night = &cached.textures[26];
+        let converted_night = crate::texture::loader_pixels(night);
+        let base_pixels: Vec<_> = bases.textures.iter()
+            .map(crate::texture::loader_pixels).collect();
+        let image = PeImage::parse(&executable).unwrap();
+        let board = Board::from_v14(&image).unwrap();
+        let file = BuildFile::parse(&build_file).unwrap();
+        let spec = scene::parse_static_map(std::str::from_utf8(&map).unwrap())
+            .unwrap().into_iter().next().unwrap();
+        let building = SceneBuilding::resolve(spec, &board, &file).unwrap();
+        let colors = crate::lighting::SunColors::parse(&suncols).unwrap();
+        // Independently choose both sides of native 004b7d9f's low-byte threshold.
+        let phase_for = |daylight| (0..24).find(|&phase| {
+            ((colors.sample(phase, 0).unwrap().diffuse & 255) * 2 >= 127) == daylight
+        }).expect("fixture needs both daylight and night");
+        let mut cache = crate::texture::LoaderCache::default();
+        for daylight in [true, false] {
+            for cached_loader in [false, true, true] {
+                let request = Request {
+                    build_file: &build_file, source: Source::Preview(building.clone()),
+                    original: Some(OriginalAssets {
+                        executable: &executable, directory: &directory, archive: &archive,
+                    }),
+                    suncols: Some(&suncols), phase: Some(phase_for(daylight)),
+                    camera: None, width: 1280, height: 960, animated: false,
+                };
+                let scene = if cached_loader {
+                    assemble_with_style_cached(request, None, &mut cache)
+                } else { assemble(request) }.unwrap();
+                let mut count = 0;
+                for draw in &scene.draws {
+                    if !matches!(draw.mode, SurfaceMode::FacadeBlend) { continue; }
+                    count += 1;
+                    assert!(!draw.vertices.is_empty());
+                    let secondary = draw.secondary.as_ref().unwrap();
+                    let expected = if daylight { day.texels } else { &converted_night };
+                    let record = if daylight { day } else { night };
+                    assert_eq!((secondary.width, secondary.height),
+                        (record.width, record.height));
+                    assert_eq!(secondary.rgba.as_ref(), expected,
+                        "actual submitted secondary must use the correct row and representation");
+                    assert!(secondary.mipmaps);
+                    assert_eq!(secondary.uv.len(), draw.vertices.len());
+                    let factor = (colors.sample(phase_for(daylight), 0).unwrap().diffuse & 255) * 2;
+                    assert_eq!(secondary.diffuse_alpha,
+                        if daylight { (factor / 6) as u8 } else { (255 - factor) as u8 });
+                    assert!(draw.mipmaps);
+                    assert!(bases.textures.iter().zip(&base_pixels).any(|(raw, pixels)|
+                        (draw.width, draw.height) == (raw.width, raw.height)
+                            && draw.rgba.as_ref() == pixels.as_slice()),
+                        "primary facade retains its existing loader conversion");
+                }
+                assert!(count > 0, "fixture must submit actual facade geometry");
+            }
+        }
     }
 
     #[test]
