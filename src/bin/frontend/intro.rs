@@ -6216,10 +6216,9 @@ impl Intro {
             };
             self.sidewalk_camera = camera;
             let changed = self.assets.scene.reframe(camera)?;
-            for index in changed {
-                self.renderer.update_dynamic_vertices(&mut self.prepared, index,
-                    &self.assets.scene.draws[index].borrowed())?;
-            }
+            let updates = changed.into_iter().map(|index|
+                (index, self.assets.scene.draws[index].borrowed())).collect::<Vec<_>>();
+            self.renderer.update_dynamic_vertices_batch(&mut self.prepared, &updates)?;
             let cameras = self.assets.scene.draws.iter().map(|draw|
                 draw.view_projection.unwrap_or(self.assets.scene.camera)).collect::<Vec<_>>();
             self.renderer.update_cameras(&self.prepared, &cameras, self.assets.scene.fog)?;
@@ -6623,6 +6622,136 @@ mod tests {
         // slider and arrow controls may change these levels.
         assert_eq!(levels.effects, Levels::default().effects);
     }
+
+    #[cfg(feature = "capture")]
+    #[test]
+    #[ignore = "requires original intro assets and GPU"]
+    fn menu_vertex_upload_batch_matches_individual_updates() {
+        for phase in [0, 12] { verify_menu_vertex_upload_phase(phase); }
+    }
+
+    #[cfg(feature = "capture")]
+    fn verify_menu_vertex_upload_phase(phase: u32) {
+        eprintln!("Vertex batch original-city phase{phase}");
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build_file = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let map = read("OPENMT2001_INTRO_MAP");
+        let camera = CameraSample { eye: [-53., 30., 74.], target: [-53., 5., 44.],
+            up: [0., 1., 0.], vertical_fov: 45. };
+        let mut scene = render_scene::assemble(Request {
+            build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
+            original: Some(OriginalAssets { executable: &executable,
+                directory: &directory, archive: &archive }),
+            suncols: Some(&suncols), phase: Some(phase), camera: Some(camera),
+            width: 1280, height: 960, animated: true,
+        }).unwrap();
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let borrowed = scene.draws.iter().map(|draw| draw.borrowed()).collect::<Vec<_>>();
+        let mut individual = renderer.prepare(&borrowed, scene.camera, scene.fog).unwrap();
+        let mut batch = renderer.prepare(&borrowed, scene.camera, scene.fog).unwrap();
+        renderer.update_dynamic_vertices_batch(&mut batch, &[]).unwrap();
+        let mut menu = MenuCamera::new(camera);
+        let mut old_time = std::time::Duration::ZERO;
+        let mut batch_time = std::time::Duration::ZERO;
+        let mut reframe_time = std::time::Duration::ZERO;
+        for tick in 0..100 {
+            let started = Instant::now();
+            let changed = scene.reframe(menu.sample(tick, 0.25)).unwrap();
+            reframe_time += started.elapsed();
+            let started = Instant::now();
+            for (index, draw) in scene.draws.iter().enumerate() {
+                if changed.contains(&index) {
+                    renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
+                        scene.camera, scene.fog).unwrap();
+                } else {
+                    renderer.update_camera(&individual, index,
+                        draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                }
+            }
+            old_time += started.elapsed();
+            let started = Instant::now();
+            let updates = changed.iter().map(|&index|
+                (index, scene.draws[index].borrowed())).collect::<Vec<_>>();
+            renderer.update_dynamic_vertices_batch(&mut batch, &updates).unwrap();
+            let cameras = scene.draws.iter().map(|draw|
+                draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
+            renderer.update_cameras(&batch, &cameras, scene.fog).unwrap();
+            batch_time += started.elapsed();
+            if [0, 50, 99].contains(&tick) {
+                let reference = format!("work/frontend/vertex-individual-{tick}.png");
+                let actual = format!("work/frontend/vertex-batch-{tick}.png");
+                crate::capture_test::capture_standalone(&renderer, &individual, &reference);
+                crate::capture_test::capture_standalone(&renderer, &batch, &actual);
+                assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap());
+                let fresh = format!("work/frontend/vertex-fresh-{tick}.png");
+                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
+                assert_eq!(fs::read(fresh).unwrap(),
+                    fs::read(format!("work/frontend/vertex-batch-{tick}.png")).unwrap());
+            } else {
+                // Flush staging uploads equally without adding offscreen rendering
+                // to the CPU preparation measurements.
+                renderer.queue.submit([]);
+                renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            }
+        }
+        // Individual APIs must still isolate each draw's camera and fog slots.
+        let alternate = scene.fog.map(|mut fog| { fog.color ^= 0x00ff0000; fog });
+        renderer.update_camera(&individual, 0, scene.camera, alternate).unwrap();
+        renderer.update_camera(&batch, 0, scene.camera, alternate).unwrap();
+        crate::capture_test::capture_standalone(&renderer, &individual,
+            "work/frontend/vertex-individual-fog.png");
+        crate::capture_test::capture_standalone(&renderer, &batch,
+            "work/frontend/vertex-batch-fog.png");
+        assert_eq!(fs::read("work/frontend/vertex-individual-fog.png").unwrap(),
+            fs::read("work/frontend/vertex-batch-fog.png").unwrap());
+        // A material replacement introduces a standalone uniform buffer. The
+        // batch API must update that live buffer as well as the retained arena.
+        let mut pixels = scene.draws[0].rgba.to_vec();
+        pixels[0] ^= 255;
+        scene.draws[0].rgba = pixels.into();
+        let extra = scene.draws[0].vertices.clone();
+        scene.draws[0].vertices.extend(extra);
+        if let Some(values) = &mut scene.draws[0].specular { values.extend(values.clone()); }
+        if let Some(values) = &mut scene.draws[0].diffuse_alpha { values.extend(values.clone()); }
+        if let Some(secondary) = &mut scene.draws[0].secondary { secondary.uv.extend(secondary.uv.clone()); }
+        renderer.update_dynamic_surface(&mut individual, 0, &scene.draws[0].borrowed(),
+            scene.camera, scene.fog).unwrap();
+        renderer.update_dynamic_vertices_batch(&mut batch, &[(0, scene.draws[0].borrowed())]).unwrap();
+        let borrowed = scene.draws.iter().map(|draw| draw.borrowed()).collect::<Vec<_>>();
+        renderer.refresh_prepared(&mut individual, &borrowed, scene.camera, scene.fog).unwrap();
+        renderer.refresh_prepared(&mut batch, &borrowed, scene.camera, scene.fog).unwrap();
+        let changed = scene.reframe(menu.sample(125, 0.5)).unwrap();
+        for (index, draw) in scene.draws.iter().enumerate() {
+            if changed.contains(&index) {
+                renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
+                    scene.camera, scene.fog).unwrap();
+
+            } else {
+                renderer.update_camera(&individual, index,
+                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+            }
+        }
+        let updates = changed.iter().map(|&index|
+            (index, scene.draws[index].borrowed())).collect::<Vec<_>>();
+        renderer.update_dynamic_vertices_batch(&mut batch, &updates).unwrap();
+        let cameras = scene.draws.iter().map(|draw|
+            draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
+        renderer.update_cameras(&batch, &cameras, scene.fog).unwrap();
+        crate::capture_test::capture_standalone(&renderer, &individual,
+            "work/frontend/vertex-individual-replaced.png");
+        crate::capture_test::capture_standalone(&renderer, &batch,
+            "work/frontend/vertex-batch-replaced.png");
+        assert_eq!(fs::read("work/frontend/vertex-individual-replaced.png").unwrap(),
+            fs::read("work/frontend/vertex-batch-replaced.png").unwrap());
+        eprintln!("Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}", scene.draws.len());
+    }
+
 
     #[cfg(feature = "capture")]
     #[test]

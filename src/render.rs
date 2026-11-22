@@ -577,6 +577,51 @@ impl Renderer {
         Ok(())
     }
 
+    /// Copy camera-dependent geometry with one temporary upload allocation.
+    /// Validate all inputs before changing retained buffers; camera/material
+    /// resources remain untouched. Queue order keeps these copies before draws.
+    pub fn update_dynamic_vertices_batch(
+        &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
+    ) -> Result<(), String> {
+        let mut expanded = Vec::<[f32; 14]>::new();
+        let mut copies = Vec::with_capacity(updates.len());
+        for (index, draw) in updates {
+            let surface = scene.draws.get(*index).ok_or("missing retained surface")?;
+            if surface.mode != draw.mode { return Err("dynamic surface material changed".into()); }
+            let offset = expanded.len() as u64 * 56;
+            let vertices = expand_vertices(draw)?;
+            let bytes = vertices.len() as u64 * 56;
+            expanded.extend(vertices);
+            copies.push((*index, draw.vertices.len() as u32, offset, bytes));
+        }
+        for &(index, count, _, bytes) in &copies {
+            let surface = &mut scene.draws[index];
+            if bytes > surface.vertices.size() {
+                surface.vertices = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("live population vertices"), size: bytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            surface.count = count;
+        }
+        if expanded.is_empty() { return Ok(()); }
+        let upload = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("batched dynamic vertex upload"),
+            contents: bytemuck::cast_slice(&expanded), usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("batched dynamic vertex copies"),
+        });
+        for &(index, _, offset, bytes) in &copies {
+            if bytes != 0 {
+                encoder.copy_buffer_to_buffer(&upload, offset, &scene.draws[index].vertices, 0, bytes);
+            }
+        }
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
     /// Upload independent per-draw camera/fog slots in one queue write. A GUI
     /// material refresh can introduce standalone buffers; retain its individual
     /// update behavior rather than assuming those buffers share this allocation.
@@ -989,6 +1034,60 @@ fn expand_vertices(draw: &TexturedDraw<'_>) -> Result<Vec<[f32; 14]>, String> {
 #[cfg(all(test, feature = "capture"))]
 mod depth_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GPU"]
+    fn batched_dynamic_vertex_validation_and_growth() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        let triangle = [[-1.,-1.,0.5,1.,0.,0.,0.,0.],
+            [1.,-1.,0.5,1.,0.,0.,1.,0.], [0.,1.,0.5,1.,0.,0.,0.5,1.]];
+        fn make(vertices: &[[f32; 8]]) -> TexturedDraw<'_> {
+            TexturedDraw { view_projection: None, vertices,
+                specular: None, diffuse_alpha: None, mode: SurfaceMode::Diagnostic,
+                width:1, height:1, rgba:&[255u8; 4], mipmaps:false, secondary:None }
+        }
+        let draws = [make(triangle.as_slice()), make(triangle.as_slice())];
+        let mut scene = renderer.prepare(&draws, identity, None).unwrap();
+        let cameras = scene.draws.iter().map(|draw| draw.camera.clone()).collect::<Vec<_>>();
+        let larger = triangle.repeat(3);
+        renderer.update_dynamic_vertices_batch(&mut scene,
+            &[(0, make(&larger)), (1, make(&[]))]).unwrap();
+        assert_eq!(scene.draws[0].count, 9);
+        assert_eq!(scene.draws[1].count, 0);
+        assert!(scene.draws[0].vertices.size() >= 9*56);
+        for (draw, camera) in scene.draws.iter().zip(&cameras) {
+            assert_eq!(&draw.camera, camera);
+            assert_eq!(draw.mode, SurfaceMode::Diagnostic);
+        }
+        let retained = scene.draws[0].vertices.clone();
+        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
+            &[(0, make(triangle.as_slice())), (99, make(&[]))]).is_err());
+        assert_eq!(scene.draws[0].count, 9);
+        assert_eq!(scene.draws[0].vertices, retained);
+        let mut invalid = make(triangle.as_slice());
+        invalid.specular = Some(&[]);
+        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
+            &[(0, make(&[])), (1, invalid)]).is_err());
+        assert_eq!(scene.draws[0].count, 9);
+        assert_eq!(scene.draws[1].count, 0);
+        let mut invalid_mode = make(&[]);
+        invalid_mode.mode = SurfaceMode::StaticLit;
+        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
+            &[(0, invalid_mode)]).is_err());
+        renderer.update_dynamic_vertices_batch(&mut scene, &[]).unwrap();
+        assert_eq!(scene.draws[0].count, 9);
+        // Match sequential writes when a caller repeats an index: the final
+        // prefix and count win, while the already-grown allocation is retained.
+        renderer.update_dynamic_vertices_batch(&mut scene,
+            &[(0, make(&larger)), (0, make(triangle.as_slice()))]).unwrap();
+        assert_eq!(scene.draws[0].count, 3);
+        assert_eq!(scene.draws[0].vertices, retained);
+        renderer.queue.submit([]);
+        renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
 
     #[test]
     fn texture_cache_reuses_exact_images_and_separates_layouts() {
