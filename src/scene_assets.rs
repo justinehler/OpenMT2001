@@ -284,6 +284,16 @@ pub fn tutor_textures<'a>(
     startup_textures(image, index, archive, display_width, &[8])
 }
 
+// Original cache hits compare only the query-length ASCII-folded prefix.
+// The first lexicographic key at or above the query is sufficient to decide
+// whether any registered name starts with it; registration order stays intact.
+fn registered_texture_name(keys: &std::collections::BTreeSet<String>, query: &str) -> bool {
+    let folded = query.to_ascii_lowercase();
+    keys.range::<str, _>((std::ops::Bound::Included(folded.as_str()), std::ops::Bound::Unbounded))
+        .next()
+        .is_some_and(|key| key.starts_with(folded.as_str()))
+}
+
 fn startup_textures<'a>(
     image: &PeImage<'_>,
     index: &ArchiveIndex,
@@ -292,7 +302,9 @@ fn startup_textures<'a>(
     groups: &[i32],
 ) -> Result<Vec<SceneryTexture<'a>>, String> {
     let panels = FontPanels::from_v14(image, index, archive, display_width)?;
-    let mut keys = panels.cache_keys;
+    let keys = panels.cache_keys;
+    let mut registered_names: std::collections::BTreeSet<_> = keys.iter()
+        .map(|key| key.to_ascii_lowercase()).collect();
     let panel_collection_count = panels.billboards.end;
     let mut result: Vec<_> = panels
         .textures
@@ -325,11 +337,7 @@ fn startup_textures<'a>(
             let mesh = CachedMesh::parse(data)?;
             for name in mesh.texture_names {
                 let key = name.rsplit('\\').next().unwrap();
-                if keys.iter().any(|seen| {
-                    seen.as_bytes()
-                        .get(..key.len())
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes()))
-                }) {
+                if registered_texture_name(&registered_names, key) {
                     continue;
                 }
                 if key.to_ascii_lowercase().contains(".gtd") {
@@ -352,7 +360,7 @@ fn startup_textures<'a>(
                     return Err("unsupported scenery texture collection".into());
                 }
                 let texture = set.textures.remove(0);
-                keys.push(key.to_owned());
+                registered_names.insert(key.to_ascii_lowercase());
                 if groups.contains(&group) {
                     result.push(SceneryTexture {
                         name: Some(key.to_owned()),
@@ -508,6 +516,65 @@ const SCENERY_STARTUP_MESHES: &[(i32, u8, &[u32])] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn indexed_texture_prefixes_match_linear_registration() {
+        let mut legacy = Vec::<String>::new();
+        let mut indexed = std::collections::BTreeSet::new();
+        let mut queries: Vec<String> = ["AlphaLong.tt", "alpha", "AlphaSuffix.tt", "ALPHALONG.TT",
+            "foo12", "foo", "foo123", "foobar", "FOO12", "f", "f/", "a\\b", "a/b",
+            "Ångström.tt", "ÅNGSTRöM.TT", "ångström.tt", "İmage", "image", "ß", "SS", ""]
+            .into_iter().map(str::to_owned).collect();
+        for n in 0..256 {
+            queries.extend([format!("Texture{n:04}Long.tt"), format!("TEXTURE{n:04}"),
+                format!("texture{n:04}long.TT"), format!("texture{n:04}long.tt.extra")]);
+        }
+        for query in queries {
+            let expected = legacy.iter().any(|seen| seen.as_bytes().get(..query.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(query.as_bytes())));
+            assert_eq!(super::registered_texture_name(&indexed, &query), expected, "{query:?}");
+            if !expected {
+                legacy.push(query.clone());
+                indexed.insert(query.to_ascii_lowercase());
+            }
+        }
+        assert!(super::registered_texture_name(&indexed, ""));
+        assert!(!super::registered_texture_name(&std::collections::BTreeSet::new(), ""));
+    }
+
+    #[test]
+    #[ignore = "requires supplied original archive and v1.4 executable"]
+    fn original_startup_texture_prefixes_match_linear_registration() {
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let exe = read("OPENMT2001_EXE");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index = crate::archive::ArchiveIndex::parse(&read("OPENMT2001_ARCHIVE_DIR"), archive.len() as u64).unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
+        let mut legacy = crate::panels::FontPanels::from_v14(&image, &index, &archive, 1280).unwrap().cache_keys;
+        let mut indexed: std::collections::BTreeSet<_> = legacy.iter().map(|key| key.to_ascii_lowercase()).collect();
+        let mut queries = 0;
+        for &(_, _, paths) in super::SCENERY_STARTUP_MESHES {
+            for &address in paths {
+                let path = image.at(address, 260).unwrap();
+                let end = path.iter().position(|&b| b == 0).unwrap();
+                let entry = index.find(std::str::from_utf8(&path[..end]).unwrap()).unwrap();
+                let mesh = crate::mesh::CachedMesh::parse(&archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+                for name in mesh.texture_names {
+                    let key = name.rsplit('\\').next().unwrap();
+                    let expected = legacy.iter().any(|seen| seen.as_bytes().get(..key.len())
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes())));
+                    assert_eq!(super::registered_texture_name(&indexed, key), expected, "{key:?}");
+                    if !expected && index.find(key).is_some() {
+                        legacy.push(key.to_owned());
+                        indexed.insert(key.to_ascii_lowercase());
+                    }
+                    queries += 1;
+                }
+            }
+        }
+        assert!(queries > 500);
+        eprintln!("Original startup prefix registry: {queries} query decisions matched the linear scan");
+    }
+
     #[test]
     #[ignore = "requires original scenery mesh UV observations and assets"]
     fn matches_native_scenery_mesh_uvs() {
