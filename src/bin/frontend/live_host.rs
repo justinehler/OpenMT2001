@@ -1,0 +1,2434 @@
+//! Host controls for the retained session. A failed simulation boundary latches
+//! a stop: resuming must never replay a partially completed original tick.
+pub mod auction_audio;
+use crate::{
+    fresh_city::{self, CommandAssets, Session},
+    prompt,
+};
+use openmt2001::{hourly, level_script, lua4::Value, scheduler};
+
+fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
+    u32::from_le_bytes(packet[4..8].try_into().unwrap()) == 0x26
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Status {
+    pub time_display: crate::time_panel::DisplayState,
+    pub cash_arrow: crate::cash_arrow::State,
+    pub pulse_lights: openmt2001::pulse_lights::PulseLights,
+    pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
+    pub stats: Option<crate::stats_panel::Snapshot>,
+    pub result_request: Option<ResultRequest>,
+    /// Original normal main57e760 and player-statistics57e778 panel visibility.
+    pub player_panels: [bool; 2],
+    /// Current original runtime+4 ledgers for the 412810 player report.
+    pub financial: Option<crate::player_info::Snapshot>,
+    /// Native current player's one-based ownership byte, not character ID.
+    pub business_owner: Option<u8>,
+    /// Current original 4112a0 resident counts and ratios for the City tab.
+    pub city_people_rows: Option<Vec<crate::city_people::Row>>,
+    pub tutorial_controls: TutorialControls,
+    pub tutorial_arrows: Vec<[i32; 2]>,
+    pub tutorial_message: Option<prompt::Request>,
+    pub tutorial_enabled_controls: Vec<u32>,
+    pub tutorial_interaction: crate::tutorial_two_interaction::State,
+    /// Ordered native Camera callbacks from the retained tutorial VM.
+    pub tutorial_camera_events: Vec<TutorialCameraAction>,
+    /// Effective native builder+788 gate; tutorial byte1 activates restriction,
+    /// while -1 permits either building type.
+    pub tutorial_build_type: i32,
+    /// Original builder+78c use-list index gate; 999 permits every row.
+    pub tutorial_build_use: i32,
+    pub tutorial_completed: bool,
+    /// Authoritative active-level tutorial byte for original disabled menus.
+    pub tutorial_session: bool,
+    /// Normal static EventList571378 shown by original Interface.CreateEventList.
+    pub event_list_visible: bool,
+    ///43bce0 clears the one-frame window's opening state at its first UI callback.
+    pub event_list_settled: bool,
+    pub card: Option<crate::card_panel::Panel>,
+    pub card_entry: crate::card_panel::Entry,
+    pub card_visual: crate::card_panel::EntryVisual,
+    /// Original822b0c/822b0e/822af4, retained independently of clock arithmetic.
+    pub day_night_flags: [u8; 3],
+    pub notices: Vec<crate::notifications::Notice>,
+    pub auction: Option<Auction>,
+    pub running: bool,
+    pub speed: u32,
+    pub script_paused: bool,
+    pub ticks: u32,
+    pub interface_ticks: u64,
+    pub year: u32,
+    pub hour: u32,
+    /// Original822d48 fraction within the625-tick hour.
+    pub hour_fraction: u32,
+    pub failure: Option<String>,
+    pub pending_presentation: Vec<u32>,
+    pub prompts: Vec<prompt::Request>,
+    pub auction_seconds: Option<i32>,
+    pub auction_notice: Option<crate::auction_notice::Notice>,
+    pub auction_locked_categories: Vec<usize>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TutorialControls {
+    pub all_disabled: bool,
+    pub picking_disabled: bool,
+    pub camera_disabled: bool,
+}
+/// Terminal diagnostics replace the intrusive city overlay. Emit only a state,
+/// speed or hour transition; clock polling must not flood the console.
+pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
+    if previous.is_none() {
+        eprintln!("[controls] Space pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal.");
+    }
+    if !status.pending_presentation.is_empty()
+        && previous.is_none_or(|previous| previous.pending_presentation != status.pending_presentation) {
+        eprintln!("[presentation] Pending callbacks: {:x?}", status.pending_presentation);
+    }
+    let key = |s: &Status| (s.running, s.script_paused, s.failure.is_some(),
+        s.speed, s.year, s.hour, s.stats.is_some(), s.tutorial_completed);
+    if previous.is_some_and(|previous| key(previous) == key(status)) { return; }
+    let state = if status.failure.is_some() { "STOPPED" }
+        else if status.tutorial_completed { "COMPLETED" }
+        else if status.script_paused { "PROMPT PAUSED" }
+        else if !status.running { "PAUSED" }
+        else { "RUNNING" };
+    eprintln!("[session] {state}: year {}, {:02}:{:02}, tick {}, speed {}x{}",
+        status.year, status.hour, status.hour_fraction * 60 / 625,
+        status.ticks, status.speed,
+        if status.stats.is_some() { ", statistics open" } else { "" });
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TutorialCameraAction {
+    Mode { mode: u32, target: u32 },
+    CityView,
+    PlanView,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResultRequest {
+    pub sequence: openmt2001::outcome_notice::Sequence,
+    pub characters: (u32, u32),
+    pub music_address: u32,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Auction {
+    pub controls: crate::auction_controls::State,
+    pub visible: bool,
+    /// 414160 disables the textureless title-right child in network mode.
+    pub hidden_bid_toggle_enabled: bool,
+    pub info: Option<crate::auction_panel::Info>,
+}
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum StatsAction { Open, Close, Cycle(bool), Toggle(usize) }
+
+pub struct Host {
+    pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
+    presentation_started: bool,
+    /// Native8b22dc denotes an active session, independently of player pause.
+    game_active: bool,
+    stats: Option<crate::stats_panel::State>,
+    cash_arrow: crate::cash_arrow::State,
+    player_panels: [bool; 2],
+    card: Option<crate::card_panel::Panel>,
+    card_visible: bool,
+    day_night_flags: [u8; 3],
+    notices: crate::notifications::Queue,
+    pub auction_renderer: Option<std::sync::mpsc::Sender<crate::auction_bridge::Request>>,
+    auction_actor_events: Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
+    pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
+    pub transport_audio: Option<std::sync::mpsc::Sender<crate::transport_audio::Request>>,
+    pub era_audio: Option<std::sync::mpsc::Sender<crate::era_audio::Request>>,
+    pub gameplay_sound: Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    auction: Option<Auction>,
+    pub running: bool,
+    pub failure: Option<String>,
+    /// Saved on the worker, rather than inferred from an asynchronous UI poll.
+    options_resume: Option<bool>,
+    pub policy: fresh_city::tick::Policy,
+    commands_seen: usize,
+    tutorial_started: bool,
+    tutorial_controls: TutorialControls,
+    tutorial_arrows: Vec<[i32; 2]>,
+    tutorial_message: Option<prompt::Request>,
+    tutorial_prompt: Option<prompt::Request>,
+    tutorial_enabled_controls: std::collections::BTreeSet<u32>,
+    tutorial_interaction: crate::tutorial_two_interaction::State,
+    tutorial_camera_events: Vec<TutorialCameraAction>,
+    tutorial_build_type: i32,
+    tutorial_build_use: i32,
+    tutorial_end_requested: Option<bool>,
+    tutorial_completed: bool,
+    event_list_visible: bool,
+    event_list_opening: bool,
+    tutorial_applied: bool,
+    pending_presentation: std::collections::BTreeSet<u32>,
+    pending_prompts: Vec<prompt::Request>,
+    interface_ticks: u64,
+    auction_seconds: Option<i32>,
+    result_request: Option<ResultRequest>,
+    result_applied: bool,
+    result_completed: bool,
+    outcome_callback_seen: bool,
+    outcome_context: Option<u32>,
+    result_context: Option<u32>,
+}
+impl Host {
+    ///4ba17e (fresh) /4bbd6b (loaded) shows the persistent normal Time
+    /// instance. Re-showing an already visible widget has no activation call.
+    pub fn begin_presentation(&mut self, session: &Session<'_>) -> Result<(), String> {
+        if self.presentation_started { return Ok(()); }
+        let cash = current_cash(session)?;
+        let mut runtime = self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?;
+        runtime.bind_panels();
+        runtime.show(cash, 0)?;
+        self.presentation_started = true;
+        self.game_active = true;
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn cash_arrow_state(&self) -> crate::cash_arrow::State {
+        self.cash_arrow
+    }
+    /// Consume original load-stage effects once, after the actual UI channels
+    /// exist. These calls already changed the loaded world during restoration.
+    pub fn apply_restored_presentation(
+        &mut self,
+        calls: Vec<openmt2001::category_ownership::Seam>,
+    ) -> Result<(), String> {
+        for call in calls {
+            ledger_ui_call(&mut self.cash_arrow, &self.gameplay_sound, call)?;
+        }
+        Ok(())
+    }
+    /// Original424010 completes the independent placement RNG stores, then88.
+    /// The visible builder enters state3 only after this callback returns.
+    pub fn complete_build_drag(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+    ) -> Result<[i32; 3], String> {
+        if self.failure.is_some() {
+            return Err("Stopped session cannot begin build placement".into());
+        }
+        let styles = session.era_styles.get(session.world.clock.calendar[2] as usize)
+            .ok_or("build era outside original parameter banks")?;
+        let choices = crate::build_panel::placement_choices(
+            &mut session.build_random_state,
+            styles.qualities.each_ref().map(Vec::len),
+        )?;
+        self.dispatch_tutorial_callback(session, assets, 88)?;
+        Ok(choices)
+    }
+    /// 465490 re-enters 464aa0 after a mode-2 auction record is restored.
+    /// The renderer exists only after the loaded inspection reaches the UI,
+    /// so the worker performs this ordered presentation step at that seam.
+    pub fn activate_saved_auction(&mut self, session: &mut Session<'_>) -> Result<(), String> {
+        if session.saved_game_mode != Some(2)
+            || session.world.city.auction.controller.reference == 0
+            || session.world.city.auction.controller.record[0x7d] == 0
+        {
+            return Ok(());
+        }
+        let prior = u32::from_le_bytes(session.world.city.auction.controller.record[0x150..0x154]
+            .try_into().unwrap());
+        if prior != 0 && prior != 3 {
+            return Err(format!("saved auction prior interface mode {prior} has no V2 presenter"));
+        }
+        let characters = session.roster.manager.players.iter()
+            .map(|player| u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()))
+            .collect::<Vec<_>>();
+        let (actor_sender, actor_events) = std::sync::mpsc::channel();
+        crate::auction_bridge::request(
+            &self.auction_renderer,
+            crate::auction_bridge::Operation::Prepare { characters, actor_events },
+        )?;
+        self.auction_actor_events = Some(actor_sender);
+        self.policy.ai_event_gate = false;
+        self.auction = Some(Auction::default());
+        let mut omitted = std::collections::BTreeSet::new();
+        let tutorial_state = session.tutorial_state;
+        let renderer = &self.auction_renderer;
+        let actor_events = &self.auction_actor_events;
+        let bid_gate = std::cell::Cell::new(false);
+        let gameplay_sound = &self.gameplay_sound;
+        let auction = &mut self.auction;
+        let cash = current_cash(session)?;
+        let time_runtime = &self.time_runtime;
+        openmt2001::ai_messages::offers::auction::activation::activate(
+            &mut session.world.city.auction.controller,
+            &mut session.world.city.auction.presentation,
+            &mut session.roster.manager.players,
+            &session.world.city.categories,
+            false,
+            |call, _, _| {
+                use openmt2001::ai_messages::offers::auction::activation::Call;
+                match call {
+                    Call::Ambient => crate::gameplay_sound::request(
+                        gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientCreate),
+                    Call::Camera => crate::auction_bridge::request(
+                        renderer, crate::auction_bridge::Operation::Activate),
+                    Call::Action(action) => {
+                        if action == openmt2001::ai_messages::offers::auction::Call::ShowPanel(0x565ba8) {
+                            time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
+                        } else { auction_action(action, auction, &mut omitted, tutorial_state,
+                            actor_events, &bid_gate)?; }
+                        Ok(0)
+                    }
+                    Call::RefreshPanel => { omitted.insert(0x414f90); Ok(0) }
+                    Call::NormalSpeed => Ok(0),
+                }
+            },
+        )?;
+        Ok(())
+    }
+
+    pub fn new(camera: [f32; 3]) -> Self {
+        Self {
+            time_runtime: Default::default(),
+            presentation_started: false,
+            game_active: false,
+            stats: None,
+            cash_arrow: crate::cash_arrow::State::default(),
+            player_panels: [true; 2],
+            card: None,
+            card_visible: false,
+            day_night_flags: [0; 3],
+            notices: Default::default(),
+            auction_renderer: None,
+            auction_actor_events: None,
+            auction_audio: None,
+            transport_audio: None,
+            era_audio: None,
+            gameplay_sound: None,
+            auction: None,
+            running: false,
+            failure: None,
+            options_resume: None,
+            commands_seen: 0,
+            tutorial_started: false,
+            tutorial_controls: TutorialControls::default(),
+            tutorial_arrows: Vec::new(),
+            tutorial_message: None,
+            tutorial_prompt: None,
+            tutorial_enabled_controls: Default::default(),
+            tutorial_interaction: Default::default(),
+            tutorial_camera_events: Vec::new(),
+            tutorial_build_type: -1,
+            tutorial_build_use: 999,
+            tutorial_end_requested: None,
+            tutorial_completed: false,
+            event_list_visible: false,
+            event_list_opening: false,
+            tutorial_applied: false,
+            pending_presentation: Default::default(),
+            pending_prompts: Vec::new(),
+            interface_ticks: 0,
+            auction_seconds: None,
+            result_request: None,
+            result_applied: false,
+            result_completed: false,
+            outcome_callback_seen: false,
+            outcome_context: None,
+            result_context: None,
+            policy: fresh_city::tick::Policy {
+                scheduler: scheduler::Controls {
+                    iterations: 1,
+                    abort: false,
+                    alternate_script_active: false,
+                    network_enabled: false,
+                    network_override: false,
+                    deadline: u32::MAX,
+                    gate_32: false,
+                    gate_32_offset: false,
+                    before_six_sound: 0,
+                },
+                calendar: openmt2001::clock::Controls {
+                    years_per_day: 0,
+                    suppress_rollover_query: false,
+                    rollover_events_enabled: true,
+                    autosave_disabled: true,
+                },
+                hourly: hourly::Controls {
+                    suppressed: false,
+                    world_mode: 1,
+                    before_six_sound: 0,
+                    network_enabled: false,
+                    network_override: false,
+                },
+                camera,
+                distance_disabled: false,
+                notifications: true,
+                // Local portable texture1 corresponds to the first original
+                //billboard-repeat registration687c78 selected by4b0c39.
+                effect_model: 1,
+                market_share_prior: [0.; 6],
+                player_message_prior: [0; 48],
+                ai_event_gate: false,
+            },
+        }
+    }
+    pub fn interface_ticks(&self) -> u64 { self.interface_ticks }
+    pub fn auction_save_state(&self) -> Option<crate::session_save::AuctionHostState> {
+        Some(crate::session_save::AuctionHostState {
+            controls: self.auction.as_ref().map(|auction| auction.controls.clone()).unwrap_or_default(),
+            visible: self.auction.as_ref().is_some_and(|auction| auction.visible),
+            interface_ticks: self.interface_ticks,
+            announcement_seconds: self.auction_seconds,
+        })
+    }
+    pub fn restore_auction_widgets(
+        &mut self,
+        state: Option<&crate::session_save::AuctionHostState>,
+        session: &Session<'_>,
+    ) -> Result<(), String> {
+        if let Some(state) = state {
+            self.interface_ticks = state.interface_ticks;
+            self.auction_seconds = state.announcement_seconds;
+            if session.saved_game_mode == Some(2) {
+                let auction = self.auction.as_mut()
+                    .ok_or("V2 auction widgets have no rebuilt auction scene")?;
+                let rebuilt_sound = auction.controls.timer.sound;
+                auction.controls = state.controls.clone();
+                auction.controls.timer.sound = rebuilt_sound;
+                auction.visible = state.visible;
+                auction.info = Some(crate::auction_panel::Info::from_session(session)?);
+                // V2 restores the retained phase-two widget group. Native
+                //464ee0 shows565b9c and565ba8 together (464f0f..464f41).
+                // Vanilla465490/464aa0 only rebuilds the scene/turn labels;
+                // it does not issue this show after the constructor reset.
+                // Reconstruct only Time visibility from the saved group,
+                // without replaying the phase setter or gameplay callbacks.
+                let mut runtime = self.time_runtime.lock()
+                    .map_err(|_| "Time runtime poisoned")?;
+                if state.visible { runtime.show(current_cash(session)?, 1)?; }
+                else { runtime.hide(1)?; }
+            } else {
+                // Announcement has not prepared a scene; settlement releases it.
+                self.auction = None;
+            }
+        }
+        Ok(())
+    }
+    pub fn set_running(&mut self, running: bool) {
+        let was_running = self.running;
+        self.running = running && self.failure.is_none() && self.options_resume.is_none();
+        if self.running != was_running {
+            eprintln!("[simulation] {}{}", if self.running { "RUNNING" } else { "PAUSED" },
+                if self.options_resume.is_some() { " (Options)" } else { "" });
+        }
+        if !self.running {
+            let _ = crate::transport_audio::submit(&self.transport_audio,
+                crate::transport_audio::Operation::Construction([[None; 2]; 4]));
+        }
+    }
+    pub fn options(&mut self, open: bool) {
+        if open {
+            if self.options_resume.is_none() {
+                self.options_resume = Some(self.running);
+                self.set_running(false);
+            }
+        } else if let Some(running) = self.options_resume.take() {
+            self.set_running(running);
+        }
+    }
+    /// Native 481910 chooses one or four logic/interface passes per timer
+    /// callback in an offline game; 481940 toggles between those settings.
+    pub fn set_fast(&mut self, fast: bool) {
+        if !self.policy.scheduler.network_enabled {
+            self.policy.scheduler.iterations = if fast { 4 } else { 1 };
+        }
+    }
+    pub fn toggle_speed(&mut self) {
+        self.set_fast(self.policy.scheduler.iterations == 1);
+    }
+    /// Original Manager12/2 reaches49dcb0; local games add pause reason0.
+    /// Repeated UI polls cannot reopen the modal or add another pause reason.
+    pub fn stats_action(&mut self, session:&mut Session<'_>,action:StatsAction)
+        -> Result<(),String> {
+        match action {
+            StatsAction::Open => {
+                if self.stats.is_some() {return Ok(());}
+                let state=crate::stats_panel::State::show(session.world.objective.kind,
+                    self.game_active,session.roster.manager.players.len())?;
+                if self.game_active && !self.policy.scheduler.network_enabled {
+                    let timers=&mut session.hooks.timers;
+                    session.world.pause.pause(0,|change,_|{change.apply(timers);Ok(())})?;
+                }
+                self.stats=Some(state);
+            }
+            StatsAction::Close => {
+                if self.stats.take().is_none() {return Ok(());}
+                if self.game_active && !self.policy.scheduler.network_enabled {
+                    let timers=&mut session.hooks.timers;
+                    session.world.pause.unpause(0,|change,_|{change.apply(timers);Ok(())})?;
+                }
+            }
+            StatsAction::Cycle(right) => {
+                if let Some(state)=&mut self.stats {
+                    state.cycle(right,session.world.objective.kind,self.game_active);
+                }
+            }
+            StatsAction::Toggle(slot) => {
+                if let Some(state)=&mut self.stats {state.toggle(slot)?;}
+            }
+        }
+        Ok(())
+    }
+    pub fn fail(&mut self, error: String) {
+        self.running = false;
+        let _ = crate::transport_audio::submit(&self.transport_audio,
+            crate::transport_audio::Operation::Construction([[None; 2]; 4]));
+        if self.failure.is_none() {
+            eprintln!("[simulation error] {error}");
+            eprintln!("[simulation] Stopped at an incomplete boundary; this session cannot safely resume.");
+            self.failure = Some(error);
+        }
+    }
+    pub fn status(&mut self, session: &Session<'_>) -> Status {
+        self.collect_script_prompts(session);
+        let prompts = std::mem::take(&mut self.pending_prompts);
+        let auction_notice =
+            match crate::auction_notice::Notice::from_session(session, self.auction_seconds) {
+                Ok(notice) => notice,
+                Err(error) => {
+                    self.fail(error);
+                    None
+                }
+            };
+        let mut auction = self.auction.clone();
+        if let Some(auction) = &mut auction {
+            auction.hidden_bid_toggle_enabled = !self.policy.scheduler.network_enabled;
+            match crate::auction_panel::Info::from_session(session) {
+                Ok(info) => auction.info = Some(info),
+                Err(error) => self.fail(error),
+            }
+        }
+        let notices = match self.notices.view(session) {
+            Ok(notices) => notices,
+            Err(error) => {
+                self.fail(error);
+                Vec::new()
+            }
+        };
+        let card_entry = match session
+            .roster
+            .manager
+            .players
+            .iter()
+            .find(|p| p.reference == session.roster.status.current_player)
+            .ok_or_else(|| "Card entry current player missing".to_string())
+            .and_then(|p| {
+                crate::card_panel::Entry::player(
+                    p,
+                    session.world.city.auction.controller.reference != 0
+                        && session.world.city.auction.controller.record[0x7c] != 0,
+                )
+            }) {
+            Ok(entry) => entry,
+            Err(error) => {
+                self.fail(error);
+                Default::default()
+            }
+        };
+        let financial = match crate::player_info::Snapshot::from_runtime(
+            &session.roster.manager,
+            &session.world.ledgers.players,
+            session.roster.status.current_player,
+        ) {
+            Ok(snapshot) => Some(snapshot),
+            Err(error) => {
+                self.fail(error);
+                None
+            }
+        };
+        let city_people_rows = match crate::city_people::Report::live_rows(&session.world) {
+            Ok(rows) => Some(rows),
+            Err(error) => {
+                self.fail(error);
+                None
+            }
+        };
+        let (time_display, card_visual) = {
+            let runtime = self.time_runtime.lock().expect("Time runtime poisoned");
+            let instance = usize::from(self.auction.is_some());
+            (runtime.widgets[instance].display(), runtime.chance_visuals[instance])
+        };
+        let stats=match self.stats.as_ref().map(|state|
+            crate::stats_panel::Snapshot::from_session(session,state)).transpose() {
+            Ok(snapshot)=>snapshot,
+            Err(error)=>{self.fail(error);None}
+        };
+        Status {
+            time_display,
+            cash_arrow: self.cash_arrow,
+            pulse_lights: session.pulse_lights.clone(),
+            demolition_points: session.demolition_points.clone(),
+            stats,
+            result_request: self.result_request,
+            player_panels: self.player_panels,
+            financial,
+            business_owner: session.roster.manager.players.iter()
+                .find(|p| p.reference == session.roster.status.current_player)
+                .map(|p| p.bytes[0x1bc].wrapping_add(1)),
+            city_people_rows,
+            tutorial_controls: self.tutorial_controls,
+            tutorial_arrows: self.tutorial_arrows.clone(),
+            tutorial_message: self.tutorial_message,
+            tutorial_enabled_controls: self.tutorial_enabled_controls.iter().copied().collect(),
+            tutorial_interaction: self.tutorial_interaction,
+            tutorial_camera_events: self.tutorial_camera_events.clone(),
+            tutorial_build_type: if session.tutorial_state==1 {self.tutorial_build_type}else{-1},
+            tutorial_build_use: if session.tutorial_state==1 {self.tutorial_build_use}else{999},
+            tutorial_completed: self.tutorial_completed,
+            tutorial_session: session.tutorial_state == 1,
+            event_list_visible: self.event_list_visible,
+            event_list_settled: self.event_list_visible && !self.event_list_opening,
+            card: self.card.filter(|_| self.card_visible),
+            card_visual,
+            card_entry,
+            day_night_flags: self.day_night_flags,
+            notices,
+            auction,
+            running: self.running,
+            speed: self.policy.scheduler.iterations,
+            script_paused: session.world.pause.has_reason(),
+            ticks: session.world.clock.timing[0],
+            interface_ticks: self.interface_ticks,
+            year: 1930 + session.world.clock.calendar[2] * 10 + session.world.clock.calendar[1],
+            hour: session.world.clock.hour(),
+            hour_fraction: session.world.clock.timing[2],
+            failure: self.failure.clone(),
+            pending_presentation: self.pending_presentation.iter().copied().collect(),
+            prompts,
+            auction_seconds: self.auction_seconds,
+            auction_notice,
+            auction_locked_categories: session
+                .world
+                .categories
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| (row[0x6c] == 1).then_some(i))
+                .collect(),
+        }
+    }
+    pub fn take_prompts(&mut self, session: &Session<'_>) -> Vec<prompt::Request> {
+        self.collect_script_prompts(session);
+        std::mem::take(&mut self.pending_prompts)
+    }
+    /// Deliver an enabled tutorial control action through the original Lua
+    /// CATCHEVENT, then close its nonmodal message when the script requests it.
+    pub fn tutorial_event(&mut self, session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>, control: u32) -> Result<(), String> {
+        if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
+            // Original48dc40 returns without dispatch when level+85c !=1.
+            // Campaign builder controls share these producers with tutorials.
+            return Ok(());
+        }
+        self.collect_script_prompts(session);
+        if !self.tutorial_enabled_controls.contains(&control) {
+            // Admission can change between the UI snapshot and this queued
+            // input. A disabled control has no callback or simulation mutation.
+            return Ok(());
+        }
+        self.dispatch_tutorial_callback(session, assets, control)
+    }
+    /// Native48dc40 receives a callback from an already admitted producer.
+    /// Callback7 from numeric/list edits differs from registered controls
+    /// 41..44/40. The producer owns input admission; this helper preserves the
+    /// original active-level byte gate and synchronous prompt continuation.
+    pub fn tutorial_producer_event(&mut self, session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>, control: u32, callback: u32) -> Result<(), String> {
+        if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
+            return Ok(());
+        }
+        self.collect_script_prompts(session);
+        if callback != 7 || !matches!(control, 40..=44) {
+            return Err(format!("Unsupported tutorial producer {control}/{callback}"));
+        }
+        if !self.tutorial_enabled_controls.contains(&control) {
+            return Ok(());
+        }
+        self.dispatch_tutorial_callback(session, assets, callback)
+    }
+    fn dispatch_tutorial_callback(&mut self, session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>, callback: u32) -> Result<(), String> {
+        if self.failure.is_some() || session.tutorial_state != 1 {
+            return Ok(());
+        }
+        self.collect_script_prompts(session);
+        let active = self.tutorial_message.or(self.tutorial_prompt);
+        let before = session.hooks.commands.len();
+        session.dispatch_session_event("TutorialEvent", callback as i32, assets, false)?;
+        if session.hooks.commands[before..].iter().any(|(command, _)|
+            matches!(command, level_script::Command::TutorialDismissPrompt)) {
+            // Native43bed0 skips dismissal when its active byte+345 is zero.
+            if let Some(message) = active {
+                session.dispatch_session_event("InterfacePromptDismiss",
+                    message.dismissal_id as i32, assets, false)?;
+            }
+        }
+        self.collect_script_prompts(session);
+        Ok(())
+    }
+    /// A committed 3D navigation pick is admitted by the original tutorial
+    /// whitelist before the retained CATCHEVENT_Picked3D callback. Native
+    /// 4c3929/4c3979 dispatch 0 for block selection, 4c3beb/4c3cf6 dispatch
+    /// 1 for block entry, and 4c3958 dispatches 2 for building selection.
+    /// The script owns dismissal and the following prompt.
+    pub fn tutorial_pick(&mut self, session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>, pick: crate::tutorial_two_interaction::Pick)
+        -> Result<bool, String> {
+        if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
+            return Ok(false);
+        }
+        self.collect_script_prompts(session);
+        let Some(callback) = self.tutorial_interaction.callback(pick) else {
+            return Ok(false);
+        };
+        // The original scripts also attach a 3D pick gate to a modal prompt
+        // (Tutorials 10/11 Navigator steps). Dismiss whichever presenter owns
+        // the active prompt before publishing its scripted successor.
+        let message = self.tutorial_message.or(self.tutorial_prompt)
+            .ok_or("Tutorial pick has no active prompt")?;
+        let before = session.hooks.commands.len();
+        session.dispatch_session_event("Picked3D", callback, assets, false)?;
+        if session.hooks.commands[before..].iter().any(|(command, _)|
+            matches!(command, level_script::Command::TutorialDismissPrompt)) {
+            session.dispatch_session_event("InterfacePromptDismiss",
+                message.dismissal_id as i32, assets, false)?;
+        }
+        self.collect_script_prompts(session);
+        Ok(true)
+    }
+    pub fn human_card(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        action: fresh_city::cards::Action,
+    ) -> Result<(), String> {
+        if self.failure.is_some() {
+            return Err("Stopped session cannot accept card controls".into());
+        }
+        if matches!(action, fresh_city::cards::Action::Open) {
+            let player = session
+                .roster
+                .manager
+                .players
+                .iter()
+                .find(|p| p.reference == session.roster.status.current_player)
+                .ok_or("Card current player missing")?;
+            if !crate::card_panel::Entry::player(
+                player,
+                session.world.city.auction.controller.reference != 0
+                    && session.world.city.auction.controller.record[0x7c] != 0,
+            )?
+            .can_open()
+            {
+                return Ok(());
+            }
+        }
+        if let fresh_city::cards::Action::Button { button, .. } = action
+            && (!self.card_visible
+                || !self
+                    .card
+                    .is_some_and(|p| p.buttons.get(button as usize) == Some(&true)))
+        {
+            return Ok(());
+        }
+        let network = [
+            self.policy.scheduler.network_enabled,
+            self.policy.scheduler.network_override,
+        ];
+        session.human_card(action, assets, network, |call, player| {
+            match call {
+                openmt2001::event_cards::human::Call::Present(card) => {
+                    self.card = Some(crate::card_panel::Panel::present(
+                        card,
+                        player,
+                        assets.image,
+                    )?)
+                }
+                openmt2001::event_cards::human::Call::Activate => {
+                    if !self.card_visible {
+                        self.pending_presentation.insert(0x41b430);
+                        let card = self.card.as_ref()
+                            .ok_or("Card activation has no presented panel")?.card;
+                        let positive = crate::gameplay_sound::card_open_positive(assets.image, card)?;
+                        crate::gameplay_sound::enqueue(
+                            &self.gameplay_sound,
+                            crate::gameplay_sound::Operation::CardOpen { positive },
+                        )?;
+                    }
+                    self.card_visible = true;
+                }
+                openmt2001::event_cards::human::Call::Close => self.card_visible = false,
+                other => return Err(format!("Unresolved card presentation {other:?}")),
+            }
+            Ok(())
+        })
+    }
+    pub fn business_operation(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        building: usize,
+        action: openmt2001::business_controls::Action,
+    ) -> Result<bool, String> {
+        if self.failure.is_some() {
+            return Err("Stopped session cannot accept building operations".into());
+        }
+        let network = [
+            self.policy.scheduler.network_enabled,
+            self.policy.scheduler.network_override,
+        ];
+        session.business_operation(building, action, assets.image, network, |call| {
+            match call {
+                openmt2001::business_controls::Call::Ui {
+                    address,
+                    arguments,
+                    count,
+                } => {
+                    if address == 0x43be20 && !network[0] {
+                        self.policy.scheduler.iterations = 1;
+                    }
+                    human_dialog_ui(
+                        &mut self.pending_prompts,
+                        address,
+                        [arguments[0], arguments[1], arguments[2], 0],
+                        count,
+                        None,
+                    )
+                }
+                // Building pending bytes were retained by the original producer;
+                // the next authoritative inspection determines disabled controls.
+                openmt2001::business_controls::Call::Disable(_)
+                | openmt2001::business_controls::Call::ClearConversionSelection => Ok(()),
+                other => Err(format!(
+                    "Unresolved building operation presentation {other:?}"
+                )),
+            }
+        })
+    }
+    pub fn property_rights(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        category: u32,
+        panel_mode: u8,
+        activate: bool,
+    ) -> Result<openmt2001::property_rights::Inspection, String> {
+        if activate {
+            if self.failure.is_some() {
+                return Err("Stopped session cannot activate building rights".into());
+            }
+            let inspection = session.activate_property_rights(category, panel_mode)?;
+            // Original 41ffef calls 4050d0 before 41fff4 publishes event91.
+            // Keep the worker transaction ahead of the tutorial continuation.
+            self.tutorial_event(session, assets, 91)?;
+            Ok(inspection)
+        } else {
+            session.inspect_property_rights(category, panel_mode)
+        }
+    }
+    pub fn inspect_property_offer(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        category: u32,
+        panel: openmt2001::property_offer::Panel,
+        initialize_amount: bool,
+    ) -> Result<crate::fresh_city::property::Inspection, String> {
+        session.inspect_property_offer_display(category, panel, initialize_amount,
+            self.auction.as_ref().is_some_and(|auction| auction.visible), assets)
+    }
+    pub fn property_offer(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        category: u32,
+        panel: openmt2001::property_offer::Panel,
+    ) -> Result<crate::fresh_city::property::Inspection, String> {
+        if self.failure.is_some() {
+            return Err("Stopped session cannot accept property offers".into());
+        }
+        let inspection = self.inspect_property_offer(session, assets, category, panel, false)?;
+        if inspection.panel.action_visible == 0 {
+            return Ok(inspection);
+        }
+        session.submit_property_offer_panel(category, inspection.panel, assets, |event| {
+            use openmt2001::{live_commands::Event, property_offer::Call};
+            match event {
+                Event::PropertyOffer(Call::Ui { address, arguments, count }) => {
+                    if openmt2001::construction::INSUFFICIENT_CASH_CALLS
+                        .iter().any(|(expected, _)| *expected == address)
+                    {
+                        if address == 0x43be20 && !self.policy.scheduler.network_enabled {
+                            self.policy.scheduler.iterations = 1;
+                        }
+                        human_dialog_ui(&mut self.pending_prompts, address,
+                            [arguments[0], arguments[1], arguments[2], 0], usize::from(count), None)
+                    } else if matches!(address,
+                        0x442960 | 0x441940 | 0x441220 | 0x42efb0 | 0x42ee70 | 0x442af0)
+                    {
+                        // The returned authoritative panel carries these widget
+                        // changes. The UI owns its geometry and pointer state.
+                        Ok(())
+                    } else {
+                        Err(format!("Unresolved property offer widget {address:08x}"))
+                    }
+                }
+                Event::PropertyOffer(Call::RefreshProperty)
+                | Event::PlayerMessageRoute {
+                    route: openmt2001::player_messages::Route::PropertyRefresh { .. }, ..
+                } => {
+                    self.pending_presentation.insert(0x405260);
+                    Ok(())
+                }
+                other => Err(format!("Unresolved property offer presentation {other:?}")),
+            }
+        })
+    }
+    fn collect_script_prompts(&mut self, session: &Session<'_>) {
+        for (command, arguments) in &session.hooks.commands[self.commands_seen..] {
+            match command {
+                level_script::Command::PlaySound => {
+                    let result = match arguments.as_slice() {
+                        [Value::Bytes(name)] => std::str::from_utf8(name)
+                            .map_err(|_| "script sound filename is not UTF-8".to_owned())
+                            .and_then(|name| crate::gameplay_sound::enqueue(
+                                &self.gameplay_sound,
+                                crate::gameplay_sound::Operation::Script {
+                                    name: name.to_owned(),
+                                },
+                            )),
+                        _ => Err("script sound requires one filename".to_owned()),
+                    };
+                    if let Err(error) = result { self.fail(error); }
+                }
+                level_script::Command::Prompt => match prompt_request(arguments) {
+                    Ok(request) => {
+                        self.tutorial_arrows.clear();
+                        if session.tutorial_state == 1 {
+                            self.tutorial_prompt = Some(request);
+                        }
+                        self.pending_prompts.push(request)
+                    },
+                    Err(error) => self.fail(error),
+                },
+                level_script::Command::TutorialDisableAllControls => {
+                    self.tutorial_controls.all_disabled = true;
+                    self.tutorial_enabled_controls.clear();
+                }
+                level_script::Command::TutorialDisableAllPicking => {
+                    self.tutorial_controls.picking_disabled = true;
+                    self.tutorial_interaction.disable_all_picking();
+                }
+                level_script::Command::TutorialDisableCameraControl =>
+                    self.tutorial_controls.camera_disabled = true,
+                level_script::Command::TutorialArrow => {
+                    if let [Value::Number(x), Value::Number(y)] = arguments.as_slice() {
+                        self.tutorial_arrows.push([*x as i32, *y as i32]);
+                    } else {
+                        self.fail("Tutorial arrow coordinates changed".into());
+                    }
+                }
+                level_script::Command::TutorialMessage => match prompt_request(arguments) {
+                    Ok(request) => {
+                        self.tutorial_arrows.clear();
+                        self.tutorial_prompt = None;
+                        self.tutorial_message = Some(request);
+                    }
+                    Err(error) => self.fail(error),
+                },
+                level_script::Command::TutorialDismissPrompt => {
+                    self.tutorial_message = None;
+                    self.tutorial_prompt = None;
+                    self.tutorial_arrows.clear();
+                }
+                level_script::Command::TutorialEnableControl
+                | level_script::Command::TutorialEnableControlAndChildren
+                | level_script::Command::TutorialDisableControl => {
+                    if let [Value::Number(value)] = arguments.as_slice() {
+                        let id = *value as u32;
+                        if matches!(command, level_script::Command::TutorialEnableControl | level_script::Command::TutorialEnableControlAndChildren) {
+                            self.tutorial_enabled_controls.insert(id);
+                            // Native4db910/48dd60 recursively enables descendants.
+                            // The retained owned-business group30 contains hyperlink6.
+                            if matches!(id, 30 | 32) && matches!(command, level_script::Command::TutorialEnableControlAndChildren) {
+                                self.tutorial_enabled_controls.insert(6);
+                            }
+                        } else {
+                            self.tutorial_enabled_controls.remove(&id);
+                            if matches!(id, 30 | 32) { self.tutorial_enabled_controls.remove(&6); }
+                        }
+                    } else {
+                        self.fail("Tutorial control identifier changed".into());
+                    }
+                }
+                level_script::Command::TutorialPositionPrompt => {
+                    if let [x, y] = arguments.as_slice() {
+                        let part = |value: &Value| match value {
+                            Value::Number(number) => Some(*number as f32),
+                            _ => None,
+                        };
+                        self.tutorial_interaction.position_prompt_parts(part(x), part(y));
+                    } else {
+                        self.fail("Tutorial prompt position arguments changed".into());
+                    }
+                }
+                level_script::Command::TutorialEnableBlockPicking => {
+                    match tutorial_pick_target(arguments) {
+                        Ok(target) => {
+                            self.tutorial_interaction.enable_block_picking(target);
+                            self.tutorial_controls.picking_disabled = false;
+                        }
+                        Err(error) => self.fail(error),
+                    }
+                }
+                level_script::Command::TutorialEnableBuildingPicking => {
+                    match tutorial_pick_target(arguments) {
+                        Ok(target) => {
+                            self.tutorial_interaction.enable_building_picking(target.map(|v| v as usize));
+                            self.tutorial_controls.picking_disabled = false;
+                        }
+                        Err(error) => self.fail(error),
+                    }
+                }
+                level_script::Command::TutorialCameraMode => {
+                    if let [Value::Number(mode), Value::Number(target)] = arguments.as_slice() {
+                        self.tutorial_camera_events.push(TutorialCameraAction::Mode {
+                            mode: *mode as u32,
+                            target: *target as u32,
+                        });
+                    } else {
+                        self.fail("Tutorial Camera.SetMode arguments changed".into());
+                    }
+                }
+                level_script::Command::TutorialCityView =>
+                    self.tutorial_camera_events.push(TutorialCameraAction::CityView),
+                level_script::Command::TutorialPlanView =>
+                    self.tutorial_camera_events.push(TutorialCameraAction::PlanView),
+                level_script::Command::TutorialBuildType => {
+                    if let [Value::Number(value)] = arguments.as_slice() {
+                        self.tutorial_build_type = *value as i32;
+                    } else {
+                        self.fail("Tutorial builder type requires its native integer".into());
+                    }
+                }
+                level_script::Command::TutorialBuildUse => {
+                    if let [Value::Number(value)] = arguments.as_slice() {
+                        self.tutorial_build_use = *value as i32;
+                    } else {
+                        self.fail("Tutorial builder use requires its native integer".into());
+                    }
+                }
+                level_script::Command::CreateEventList => {
+                    //43be20 returns immediately for an already visible instance.
+                    if !self.event_list_visible {
+                        self.event_list_visible = true;
+                        self.event_list_opening = true;
+                    }
+                }
+                level_script::Command::ResultEnd => {
+                    // All Game.End routes reach4ba1d0 and clear8b22dc at4ba291.
+                    // Player pause and result-sequence entry leave this byte set.
+                    self.game_active = false;
+                    self.running = false;
+                    //4ba1df/43c690 hides visible widgets in normal manager57e710.
+                    let hidden = self.time_runtime.lock()
+                        .map_err(|_| "Time runtime poisoned".to_owned())
+                        .and_then(|mut runtime| runtime.hide(0));
+                    if let Err(error) = hidden { self.fail(error); }
+                    if session.tutorial_state == 1 {
+                        self.tutorial_end_requested = Some(matches!(arguments.first(),
+                            Some(Value::Number(value)) if *value != 0.));
+                    }
+                }
+                _ => (),
+            }
+        }
+        self.commands_seen = session.hooks.commands.len();
+    }
+    pub fn tick(&mut self, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
+        self.collect_script_prompts(session);
+        if !self.running || self.failure.is_some() || session.world.pause.has_reason() {
+            if let Err(error) = crate::transport_audio::submit(&self.transport_audio,
+                crate::transport_audio::Operation::Construction([[None; 2]; 4])) {
+                self.fail(error);
+            }
+            return;
+        }
+        let omitted = &mut self.pending_presentation;
+        let transport_audio = self.transport_audio.clone();
+        let auction_audio = self.auction_audio.clone();
+        let camera = self.policy.camera;
+        let block_previous_tick = session.world.clock.timing[0];
+        let block_random_state = openmt2001::startup_rng::Snapshot::from_seed(session.policy.seed)
+            .state(0x8af3ec);
+        let mut construction_sounds = [[None; 2]; 4];
+        let era_audio = self.era_audio.clone();
+        let gameplay_sound = self.gameplay_sound.clone();
+        let day_night_flags = &mut self.day_night_flags;
+        let player_panels = &mut self.player_panels;
+        let prompts = &mut self.pending_prompts;
+        let auction_seconds = &mut self.auction_seconds;
+        let auction_renderer = &self.auction_renderer;
+        let auction_actor_events = std::cell::RefCell::new(self.auction_actor_events.take());
+        let bid_gate = std::cell::Cell::new(self.policy.ai_event_gate);
+        let auction = &mut self.auction;
+        let time_runtime = &self.time_runtime;
+        let outcome_callback_seen = &mut self.outcome_callback_seen;
+        let outcome_context = &mut self.outcome_context;
+        let notices = &mut self.notices;
+        let tutorial_state = session.tutorial_state;
+        let current_slot = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .find(|p| p.reference == session.roster.status.current_player)
+            .map(|p| p.bytes[0x1bc]);
+        let players: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|p| p.bytes.clone())
+            .collect();
+        let cash_arrow = std::cell::RefCell::new(self.cash_arrow);
+        let result = session.advance_session_with_animations(assets, &mut self.policy,
+            || {
+                cash_arrow.borrow_mut().advance();
+                if let Some(sender) = auction_actor_events.borrow().as_ref() {
+                    sender.send(crate::auction_bridge::ActorEvent::Advance)
+                        .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+                }
+                Ok(())
+            }, |event, _| {
+            use fresh_city::tick::Event;
+            match event {
+                Event::Command(openmt2001::live_commands::Event::Elimination(call)) => {
+                    use openmt2001::player_elimination::Call;
+                    match call {
+                        Call::PlayerUi { object } => {
+                            *player_panels
+                                .get_mut(object)
+                                .ok_or("elimination panel outside normal interface")? = false;
+                        }
+                        // Core ownership, accounting and timestamps precede these
+                        // original appearance refreshes. Scene snapshots read them.
+                        Call::BuildingOwner { .. } | Call::BuildingRefresh { .. } => {
+                            omitted.insert(0x4450a0);
+                        }
+                        // Session already disabled the optional command timer.
+                        Call::FinishLocal => {}
+                        other => return Err(format!("Live elimination requires {other:?}")),
+                    }
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::LeaseNotification(call)) => {
+                    human_dialog_ui(
+                        prompts,
+                        call.address,
+                        [call.arguments[0], call.arguments[1], call.arguments[2], 0],
+                        usize::from(call.argument_count),
+                        None,
+                    )?;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::OutcomeNotice { .. }) => Ok(0),
+                Event::Command(openmt2001::live_commands::Event::Outcome(call)) => {
+                    use openmt2001::outcome_notice::Call;
+                    match call {
+                        Call::Show => human_dialog_ui(prompts, 0x43be20, [0; 4], 0, None)?,
+                        Call::Pause | Call::Timers(_) => return Err(
+                            "Outcome pause/timers reached presentation before Session application"
+                                .into(),
+                        ),
+                        Call::Handler { callback, context } => {
+                            if callback == Some(0x48b490) { *outcome_callback_seen = true; }
+                            if let Some(context) = context { *outcome_context = Some(context); }
+                            prompts.iter_mut().rev().find_map(|r| r.dialog.as_mut())
+                                .ok_or("Outcome modal missing allocated prompt")?.outcome(call)?;
+                        }
+                        other => prompts
+                            .iter_mut()
+                            .rev()
+                            .find_map(|r| r.dialog.as_mut())
+                            .ok_or("Outcome modal missing allocated prompt")?
+                            .outcome(other)?,
+                    }
+                    Ok(0)
+                }
+                Event::HumanDialog { call, name } => {
+                    use openmt2001::human_messages::Call;
+                    match call {
+                        Call::Ui {
+                            address,
+                            arguments,
+                            count,
+                        } => human_dialog_ui(prompts, address, arguments, count, name)?,
+                        Call::Handler { callback, context } => {
+                            let dialog = prompts
+                                .iter_mut()
+                                .rev()
+                                .find_map(|r| r.dialog.as_mut())
+                                .ok_or("Human modal handler has no allocated prompt")?;
+                            dialog.callback = callback;
+                            dialog.handler_written = true;
+                            if let Some(context) = context {
+                                dialog.context = context;
+                                dialog.context_written = true;
+                            }
+                        }
+                        Call::Diagnostic => eprintln!("Original human inbox diagnostic"),
+                    }
+                    Ok(0)
+                }
+                Event::Player(openmt2001::player_tick::Event::Ui {
+                    address,
+                    arguments,
+                    count,
+                    ..
+                }) => {
+                    human_dialog_ui(
+                        prompts,
+                        address,
+                        [arguments[0], arguments[1], arguments[2], 0],
+                        count,
+                        None,
+                    )?;
+                    Ok(0)
+                }
+                Event::MarketShare(openmt2001::player_share::Call::Objective { message, detail }) => {
+                    // Native 48a150 creates the standard interface modal,
+                    // selects portrait 302, writes title/body language IDs,
+                    // and exposes one button 1435. It installs no callback.
+                    human_dialog_ui(prompts, 0x43be20, [0; 4], 0, None)?;
+                    for (address, arguments, count) in [
+                        (0x429af0, [302, 0, 0, 0], 1),
+                        (0x429820, [0, message, 0, 0], 3),
+                        (0x429820, [1, detail, 0, 0], 3),
+                        (0x429a60, [1, 0, 0, 0], 1),
+                        (0x4298b0, [0, 0x59b, 0, 0], 2),
+                    ] {
+                        human_dialog_ui(prompts, address, arguments, count, None)?;
+                    }
+                    Ok(0)
+                }
+                Event::MarketShare(openmt2001::player_share::Call::Refresh) => {
+                    // 43be20 refreshes the live manager widget. The explicit
+                    // Objective branch owns its modal text and button sequence.
+                    omitted.insert(0x43be20);
+                    Ok(0)
+                }
+                Event::MarketShare(openmt2001::player_share::Call::Kind1ProfileSelect { index }) => {
+                    // 42c430/42c470 format the selected name in the share
+                    // panel. They do not write the city or player records.
+                    if players.get(index as usize).is_none() {
+                        return Err("market-share profile player leaves roster".into());
+                    }
+                    omitted.insert(0x42c430);
+                    Ok(0)
+                }
+                Event::MarketShare(openmt2001::player_share::Call::ProfileSelect { index }) => {
+                    if players.get(index as usize).is_none() {
+                        return Err("market-share profile player leaves roster".into());
+                    }
+                    omitted.insert(0x42c470);
+                    Ok(0)
+                }
+                Event::MarketShare(openmt2001::player_share::Call::PlayerShare { .. }) => {
+                    // Native 42c4b0 updates the manager's visual share bars and
+                    // numeric labels. The accounting records are already live.
+                    omitted.insert(0x42c4b0);
+                    Ok(0)
+                }
+                Event::Calendar(openmt2001::level_runtime::CalendarEvent::Clock(
+                    openmt2001::clock::Event::Hour19,
+                )) => {
+                    //4805c0: three byte stores, no calls or simulation writes.
+                    *day_night_flags = [1, 1, 1];
+                    omitted.insert(0x4805c0);
+                    Ok(0)
+                }
+                Event::Calendar(openmt2001::level_runtime::CalendarEvent::Clock(
+                    openmt2001::clock::Event::Hour7,
+                )) => {
+                    //4805e0:822b0e remains1 while the other two bytes clear.
+                    //Night material/light rendering remains a disclosed feature.
+                    *day_night_flags = [0, 1, 0];
+                    omitted.insert(0x4805e0);
+                    Ok(0)
+                }
+                Event::Calendar(openmt2001::level_runtime::CalendarEvent::Hourly(
+                    openmt2001::hourly::Event::StopSound(handle),
+                )) => crate::era_audio::request(
+                    &era_audio, crate::era_audio::Operation::BeforeSixRelease(handle)),
+                Event::Command(openmt2001::live_commands::Event::AuctionScenePrepare) => {
+                    let characters = players
+                        .iter()
+                        .map(|p| {
+                            p.get(0x150..0x154)
+                                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                                .ok_or_else(|| {
+                                    "Auction player character record is truncated".to_owned()
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let (actor_sender, actor_receiver) = std::sync::mpsc::channel();
+                    let previous = crate::auction_bridge::request(
+                        auction_renderer,
+                        crate::auction_bridge::Operation::Prepare { characters,
+                            actor_events: actor_receiver },
+                    )?;
+                    *auction_actor_events.borrow_mut() = Some(actor_sender);
+                    bid_gate.set(false);
+                    *auction = Some(Auction::default());
+                    Ok(previous)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionActivation(
+                    openmt2001::ai_messages::offers::auction::activation::Call::Camera,
+                )) => crate::auction_bridge::request(
+                    auction_renderer,
+                    crate::auction_bridge::Operation::Activate,
+                ),
+                Event::Command(openmt2001::live_commands::Event::AuctionActivation(
+                    openmt2001::ai_messages::offers::auction::activation::Call::Ambient,
+                )) => crate::gameplay_sound::request(
+                    &gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientCreate),
+                Event::Command(openmt2001::live_commands::Event::AuctionTimeShow { cash }) => {
+                    time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionActivation(
+                    openmt2001::ai_messages::offers::auction::activation::Call::Action(call),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::AuctionAction(call))
+                | Event::Ai(openmt2001::ai_runtime::Call::AuctionAction(call)) => {
+                    auction_action(call, auction, omitted, tutorial_state,
+                        &auction_actor_events.borrow(), &bid_gate)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionActivation(
+                    openmt2001::ai_messages::offers::auction::activation::Call::RefreshPanel,
+                )) => {
+                    //414f90 is original participant labels/cash/status text.
+                    omitted.insert(0x414f90);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionActivation(
+                    openmt2001::ai_messages::offers::auction::activation::Call::NormalSpeed,
+                )) => Ok(0), // Session already changed scheduler.iterations to1.
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::CloseAnnouncement,
+                )) => {
+                    *auction_seconds = None;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::CategoryView(_),
+                )) => {
+                    //405260 refreshes the property panel; it does not move the
+                    //camera. Closure already cleared category+6c before this.
+                    omitted.insert(0x405260);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::CategoryStatus(_),
+                )) => {
+                    omitted.insert(0x41ed10);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::AudioReset4af140,
+                )) => {
+                    omitted.insert(0x4af140);
+                    crate::transport_audio::submit(
+                        &transport_audio,
+                        crate::transport_audio::Operation::Reset,
+                    )?;
+                    crate::gameplay_sound::enqueue(
+                        &gameplay_sound,
+                        crate::gameplay_sound::Operation::Reset,
+                    )?;
+                    auction_audio::enqueue(&auction_audio, auction_audio::Operation::Reset)?;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::ReleaseAmbient(handle),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::AuctionAdmission(
+                    openmt2001::ai_messages::offers::auction::admission::Call::ReleaseAmbient(handle),
+                )) => crate::gameplay_sound::request(
+                    &gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientRelease(handle)),
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::Tutorial(_),
+                )) if tutorial_state != 1 => Ok(0),
+                Event::Command(openmt2001::live_commands::Event::PropertyOwnership(
+                    call @ openmt2001::category_ownership::Seam::NativeUiCall {
+                        address: 0x4ad760 | 0x4c6290 | 0x4c62d0, ..
+                    },
+                )) => ledger_ui_call(&mut cash_arrow.borrow_mut(), &gameplay_sound, call),
+                Event::Command(openmt2001::live_commands::Event::PropertyOwnership(
+                    openmt2001::category_ownership::Seam::BuildingAppearance { .. },
+                )) => {
+                    omitted.insert(0x485520);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::PropertyTransferNotice {
+                    category,
+                    owner,
+                    ..
+                }) => {
+                    let mut packet = [u32::MAX; 10];
+                    packet[1] = u32::from(owner);
+                    packet[2] = 0;
+                    packet[7] = i32::from(category) as u32;
+                    notices.push(
+                        packet,
+                        current_slot.ok_or("Notification local player unresolved")?,
+                    );
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::ConstructionNotice {
+                    building,
+                    owner,
+                    structure_kind,
+                    business,
+                    business_kind,
+                    category,
+                }) => {
+                    notices.push(
+                        [
+                            u32::MAX,
+                            owner,
+                            1,
+                            building,
+                            structure_kind,
+                            business,
+                            business_kind,
+                            category,
+                            u32::MAX,
+                            u32::MAX,
+                        ],
+                        current_slot.ok_or("Notification local player unresolved")?,
+                    );
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::PropertyView(_))
+                | Event::Command(openmt2001::live_commands::Event::PlayerMessageRoute {
+                    route: openmt2001::player_messages::Route::PropertyRefresh { .. }, ..
+                })
+                | Event::Ai(openmt2001::ai_runtime::Call::MessageRoute {
+                    route: openmt2001::player_messages::Route::PropertyRefresh { .. },
+                    ..
+                }) => {
+                    // Core performs the original405260 category lock mutation
+                    // before this property-panel refresh boundary.
+                    omitted.insert(0x405260);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::PlayerMessageRoute {
+                    route: openmt2001::player_messages::Route::Broadcast, packet,
+                })
+                | Event::Ai(openmt2001::ai_runtime::Call::MessageRoute {
+                    route: openmt2001::player_messages::Route::Broadcast, packet,
+                }) if property_refresh_broadcast(&packet) => {
+                    // 451720 first calls 405260 for kind 0x26, then sends
+                    // the same packet to 48c1a0. Its 48c1c0 kind-0x26
+                    // branch only clears the one-shot dispatcher flag.
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::DemolitionNotice {
+                    owner, building, structure_kind, category,
+                }) => {
+                    notices.push([
+                        u32::MAX, owner as i32 as u32, 3, u32::from(building),
+                        structure_kind, u32::MAX, u32::MAX, category as i32 as u32,
+                        u32::MAX, u32::MAX,
+                    ], current_slot.ok_or("Demolition notification local player unresolved")?);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionClosure(
+                    openmt2001::ai_messages::offers::auction::closure::Call::RestorePresentation,
+                )) => {
+                    let result = crate::auction_bridge::request(
+                        auction_renderer,
+                        crate::auction_bridge::Operation::Restore,
+                    )?;
+                    time_runtime.lock().map_err(|_| "Time runtime poisoned")?.hide(1)?;
+                    *auction = None;
+                    *auction_actor_events.borrow_mut() = None;
+                    bid_gate.set(false);
+                    Ok(result)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionAdmission(
+                    openmt2001::ai_messages::offers::auction::admission::Call::ShowAnnouncement,
+                )) => {
+                    //43be20 visibility is already retained by the command adapter.
+                    //41d700 opens compact with empty seconds until its first update.
+                    *auction_seconds = None;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::AuctionAdmission(
+                    openmt2001::ai_messages::offers::auction::admission::Call::CategoryStatus(_),
+                )) => {
+                    //41ed10 updates category text and disables/cancels its open
+                    //planning/business panels. Status publishes the authoritative
+                    //category+6c locks to the interface; original status label is
+                    //still an explicit presentation omission.
+                    omitted.insert(0x41ed10);
+                    Ok(0)
+                }
+                // These slices belong to Hooks.commands. The authoritative
+                // command cursor below publishes each scripted prompt once.
+                Event::Script { .. } | Event::ScriptCommands(_) => Ok(0),
+                Event::Command(openmt2001::live_commands::Event::EventCardNotice(notice)) => {
+                    if notice.enabled {
+                        prompts.push(prompt::card_request(
+                            assets.image,
+                            players
+                                .get(notice.player)
+                                .ok_or("card notice player outside roster")?,
+                            notice,
+                        )?);
+                    }
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::EventCardDiagnostic {
+                    kind,
+                    used,
+                }) => {
+                    // Original diagnostic output only; the card decision already ran.
+                    eprintln!("Event card decision: kind {kind}, used {used}");
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::EventCardTargeted(
+                    openmt2001::event_cards::targeted::Call::Sound { actor_is_current },
+                )) => crate::gameplay_sound::request(
+                    &gameplay_sound,
+                    crate::gameplay_sound::Operation::Targeted { actor_is_current }),
+                // Reviewed original render-only state: animated texture tiles,
+                // category camera-distance cache and two particle systems.
+                // They are visible outstanding features, not
+                // substitutes for simulation callbacks.
+                Event::Tick(scheduler::Event::Helper(
+                    address @ (0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0),
+                )) => {
+                    omitted.insert(address);
+                    Ok(0)
+                }
+                Event::Tick(scheduler::Event::BeforeSixSound) => {
+                    crate::era_audio::request(
+                        &era_audio, crate::era_audio::Operation::BeforeSixCreate)
+                }
+                Event::TransportSound(call) => {
+                    if !matches!(call.id, 0 | 7 | 8 | 11) {
+                        omitted.insert(0x44f790);
+                    }
+                    crate::transport_audio::submit(
+                        &transport_audio,
+                        crate::transport_audio::Operation::Route(call),
+                    )?;
+                    Ok(0)
+                }
+                Event::EraMusic { era, repeat } => crate::era_audio::request(
+                    &era_audio, crate::era_audio::Operation::Select { era, repeat }),
+                Event::TransportEnvironment { call, position } => {
+                    let distance = camera.into_iter().zip(position)
+                        .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
+                    crate::transport_audio::submit(&transport_audio,
+                        crate::transport_audio::Operation::Environment { call, distance })?;
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::Construction(
+                    openmt2001::construction::Event::Appearance(_),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::BusinessSale(
+                    openmt2001::business_sale::Call::BuildingAppearance(_),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::BusinessTakeover(
+                    openmt2001::business_takeover::Call::BuildingAppearance(_),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::EventCardTargeted(
+                    openmt2001::event_cards::targeted::Call::BuildingAppearance { .. },
+                )) => {
+                    omitted.insert(0x485520);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::BusinessSale(
+                    openmt2001::business_sale::Call::BuildingPanel(_),
+                ))
+                | Event::Command(openmt2001::live_commands::Event::BusinessTakeover(
+                    openmt2001::business_takeover::Call::BuildingPanel(_),
+                )) => {
+                    //407660's unconditional building+3e clear is already applied
+                    //by the transaction. Selected building controls refresh with
+                    //the next authoritative scene snapshot.
+                    omitted.insert(0x407660);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::Construction(
+                    openmt2001::construction::Event::Posted { player, amount, .. },
+                )) => {
+                    ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound,
+                        current_slot.map(usize::from) == Some(player), amount,
+                        assets.image.f32_at(0x525040)?)
+                }
+                Event::Command(openmt2001::live_commands::Event::Demolition(
+                    openmt2001::demolition::Call::Post { owner, amount, .. },
+                )) => ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound,
+                    current_slot.map(i32::from) == Some(i32::from(owner) - 1), amount,
+                    assets.image.f32_at(0x525040)?),
+                Event::Command(openmt2001::live_commands::Event::Construction(
+                    openmt2001::construction::Event::RefreshInterface,
+                ))
+                | Event::Command(openmt2001::live_commands::Event::EventCardTargeted(
+                    openmt2001::event_cards::targeted::Call::RefreshInterface,
+                ))
+                | Event::Command(openmt2001::live_commands::Event::RefreshInterface)
+                | Event::Command(openmt2001::live_commands::Event::Demolition(
+                    openmt2001::demolition::Call::RefreshInterface,
+                )) => Ok(0),
+                Event::Command(openmt2001::live_commands::Event::Demolition(
+                    openmt2001::demolition::Call::RefreshBuilding { .. },
+                )) => {
+                    // Core applied4075e0's +3c clear. Selected interface drawing
+                    // is refreshed by the authoritative scene snapshot.
+                    omitted.insert(0x4075e0);
+                    Ok(0)
+                }
+                Event::Command(openmt2001::live_commands::Event::Business(
+                    openmt2001::business_binding::Call::RefreshBuilding { .. },
+                ))
+                | Event::Command(openmt2001::live_commands::Event::Detach(
+                    openmt2001::business_detach::Call::RefreshBuilding { .. },
+                )) => {
+                    omitted.insert(0x4450a0);
+                    Ok(0)
+                }
+                Event::Pending(
+                    openmt2001::live_commands::PendingCall::Refresh, None,
+                ) => {
+                    omitted.insert(0x41f410);
+                    Ok(0)
+                }
+                Event::Pending(
+                    openmt2001::live_commands::PendingCall::World(
+                        openmt2001::pending_world::Event::Progress { group, .. },
+                    ),
+                    Some(record),
+                ) => {
+                    let position = std::array::from_fn(|axis| {
+                        let at = 0x58 + axis * 4;
+                        f32::from_le_bytes(record[at..at + 4].try_into().unwrap())
+                    });
+                    crate::transport_audio::insert_construction_source(
+                        &mut construction_sounds, group, position, camera)?;
+                    Ok(0)
+                }
+                // Every other callback must be bound deliberately. In particular,
+                // controller/transaction outcomes may not be faked with success.
+                other => Err(format!("Live session requires {other:?}")),
+            }
+        });
+        // Logic-scheduled tutorial callbacks can append Camera/Interface
+        // commands before the next Status query. Consume them before moving
+        // the shared command cursor past this tick's script effects.
+        self.cash_arrow = cash_arrow.into_inner();
+        self.auction_actor_events = auction_actor_events.into_inner();
+        self.policy.ai_event_gate = bid_gate.get();
+        self.collect_script_prompts(session);
+        match result {
+            Ok(()) => {
+                if let Err(error) = crate::transport_audio::submit(
+                    &transport_audio,
+                    crate::transport_audio::Operation::RoadProximity {
+                        reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
+                        nearest: session.road_traffic.proximity.nearest,
+                    },
+                ) {
+                    self.fail(error);
+                }
+                // Native 4afcde updates the resident crowd bed immediately
+                // after 4af860's road ambience from the 52 live categories.
+                if let Err(error) = crate::transport_audio::submit(
+                    &transport_audio,
+                    crate::transport_audio::Operation::ResidentCrowd(
+                        crate::transport_audio::resident_crowd_weight(
+                            &session.world.city.categories,
+                            camera,
+                        ),
+                    ),
+                ) {
+                    self.fail(error);
+                }
+                if let Err(error) = crate::transport_audio::submit(
+                    &transport_audio,
+                    crate::transport_audio::Operation::Construction(construction_sounds),
+                ) {
+                    self.fail(error);
+                }
+                if let Err(error) = crate::transport_audio::submit(
+                    &transport_audio,
+                    crate::transport_audio::Operation::Blocks(
+                        Box::new(crate::transport_audio::block_audio::Snapshot::from_categories(
+                            &session.world.city.categories, camera, session.world.clock.hour(),
+                            session.world.clock.timing[0], block_previous_tick, block_random_state,
+                        )),
+                    ),
+                ) { self.fail(error); }
+            }
+            Err(error) => self.fail(error),
+        }
+    }
+    pub fn human_dialog_reply(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        reply: crate::human_dialog::Reply,
+    ) -> Result<(), String> {
+        if reply.callback == 0x48b490 {
+            // Button and timeout may race for the same modal. The first reply
+            // already initialized the original result script and dismissed it.
+            if self.result_context == Some(reply.context) {
+                return Ok(());
+            }
+            if !self.outcome_callback_seen || self.outcome_context != Some(reply.context) {
+                return Err("Outcome reply lacks matching original modal".into());
+            }
+            if self.result_request.is_some() || self.result_completed {
+                return Err("Outcome sequence was already requested".into());
+            }
+            let mut sequence = None;
+            let mut characters = None;
+            let mut music_address = None;
+            session.respond_outcome(reply.context, assets, |response| {
+                use openmt2001::outcome_notice::Response;
+                match response {
+                    Response::Characters { winner, loser } => characters = Some((winner, loser)),
+                    Response::Sequence(value) => sequence = Some(value),
+                    Response::Unlock(_) => (), // Session applied the original unlock.
+                    Response::Music { address } => music_address = Some(address),
+                }
+                Ok(())
+            })?;
+            self.result_request = Some(ResultRequest {
+                sequence: sequence.ok_or("Outcome response omitted result sequence")?,
+                characters: characters.ok_or("Outcome response omitted actor characters")?,
+                music_address: music_address.ok_or("Outcome response omitted music")?,
+            });
+            self.running = false;
+            // Original result entry 4b1881 clears retained city sound handles
+            // through 4af140 before winner/loser music starts.
+            let _ = crate::transport_audio::submit(
+                &self.transport_audio,
+                crate::transport_audio::Operation::Reset,
+            );
+            let _ = crate::gameplay_sound::enqueue(
+                &self.gameplay_sound,
+                crate::gameplay_sound::Operation::Reset,
+            );
+            let _ = auction_audio::enqueue(
+                &self.auction_audio,
+                auction_audio::Operation::Reset,
+            );
+            self.result_context = Some(reply.context);
+            self.outcome_callback_seen = false;
+            self.outcome_context = None;
+        } else if reply.callback != 0 {
+            session.respond_human_dialog(
+                reply.callback,
+                reply.button,
+                reply.context,
+                [
+                    self.policy.scheduler.network_enabled,
+                    self.policy.scheduler.network_override,
+                ],
+                |event| match event {
+                    openmt2001::live_commands::Event::PlayerMessageRoute {
+                        route: openmt2001::player_messages::Route::PropertyRefresh { .. },
+                        ..
+                    } => {
+                        self.pending_presentation.insert(0x405260);
+                        Ok(())
+                    }
+                    openmt2001::live_commands::Event::PlayerMessageRoute {
+                        route: openmt2001::player_messages::Route::Broadcast,
+                        packet,
+                    } if property_refresh_broadcast(&packet) => Ok(()),
+                    other => Err(format!("Human dialog reply requires {other:?}")),
+                },
+            )?;
+        }
+        if !self.policy.scheduler.network_enabled {
+            self.policy.scheduler.iterations = 1;
+        }
+        //429d50 closes only after the button callback; it dispatches nonzero
+        //slot+0c through the script VM before unlinking the old prompt.
+        if reply.context != 0 {
+            session.dispatch_session_event(
+                "InterfacePromptDismiss",
+                reply.context as i32,
+                assets,
+                false,
+            )?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub fn result_sequence(&self) -> Option<openmt2001::outcome_notice::Sequence> {
+        self.result_request.map(|request| request.sequence)
+    }
+    /// Consume the result hub's host effects before its event reply is visible.
+    pub fn dispatch_result_event(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        name: &str,
+    ) -> Result<(), String> {
+        session.dispatch_result_event(name, assets)?;
+        self.collect_script_prompts(session);
+        Ok(())
+    }
+    /// Called only after the original result sequence has finished presenting.
+    /// Retain the applied bit across I/O failure so retrying persistence cannot
+    /// increment attempts or unlock the next scenario twice.
+    pub fn complete_result_sequence(
+        &mut self,
+        session: &mut Session<'_>,
+    ) -> Result<openmt2001::outcome_notice::Sequence, String> {
+        if self.failure.is_some() {
+            return Err("Stopped result sequence cannot complete campaign".into());
+        }
+        let sequence = self.result_request.ok_or("No result sequence is active")?.sequence;
+        if self.result_completed {
+            return Err("Result sequence already completed".into());
+        }
+        let expected_end = if sequence == openmt2001::outcome_notice::Sequence::Lose { 2 } else { 1 };
+        if session.result_presentation().and_then(|result| result.end_requested) != Some(expected_end) {
+            return Err("Original result script has not requested completion".into());
+        }
+        self.collect_script_prompts(session);
+        crate::campaign_store::commit_result(
+            &mut session.catalog,
+            session.campaign_profile.as_deref(),
+            &mut self.result_applied,
+            sequence,
+        )?;
+        self.result_completed = true;
+        self.result_request = None;
+        Ok(sequence)
+    }
+    fn interface_tick(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+    ) -> Result<(), String> {
+        self.begin_presentation(session)?;
+        self.event_list_opening = false;
+        self.interface_ticks = self.interface_ticks.wrapping_add(1);
+        session.advance_interface_tick(
+            self.policy.scheduler.iterations,
+            self.policy.calendar.suppress_rollover_query,
+            |event| {
+                use openmt2001::ai_messages::offers::auction::announcement::Call;
+                match event {
+                    Call::CreateSound => {
+                        if self.auction_audio.is_some() {
+                            auction_audio::request(&self.auction_audio,
+                                auction_audio::Operation::Create(auction_audio::Kind::Announcement))
+                        } else {
+                            self.pending_presentation.insert(0x4ad760);
+                            Ok(0)
+                        }
+                    }
+                    Call::ReleaseSound(handle) => auction_audio::request(&self.auction_audio,
+                        auction_audio::Operation::Release(handle)),
+                    Call::Diagnostic(address) => {
+                        eprintln!("Auction announcement diagnostic {address:08x}");
+                        Ok(0)
+                    }
+                    Call::ClearSeconds => {
+                        self.auction_seconds = None;
+                        Ok(0)
+                    }
+                    Call::WriteSeconds(seconds) => {
+                        self.auction_seconds = Some(seconds);
+                        Ok(0)
+                    }
+                }
+            },
+        )?;
+        if self.policy.calendar.suppress_rollover_query
+            || session.world.city.pause.bytes[3] as i8 > 0
+        {
+            return Ok(());
+        }
+        //465490 switches GUI8b1050 to1 before any auction widget is shown.
+        //Normal GUI0/2/3 share the other manager. Hidden Time widgets do not
+        //receive428dc0, and their Chance caches survive subsequent city loads.
+        for _ in 0..self.policy.scheduler.iterations {
+            self.notices.tick();
+        }
+        let p = session.roster.manager.players.iter()
+            .find(|p| p.reference == session.roster.status.current_player)
+            .ok_or("Time current player missing")?;
+        let entry = crate::card_panel::Entry::player(p,
+            session.world.city.auction.controller.reference != 0
+                && session.world.city.auction.controller.record[0x7c] != 0)?;
+        let debt = *session.world.objective.cash_statuses.get(usize::from(p.bytes[0x1bc]))
+            .ok_or("Time debt status outside roster")? != 0;
+        let cash = current_cash(session)?;
+        let mode = if !self.game_active || self.stats.is_some() {4}
+            else{u32::from(self.auction.is_some())};
+        let mut runtime = self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?;
+        for (instance, passes) in crate::time_panel::instance_passes(mode,
+            self.policy.scheduler.iterations).into_iter().enumerate() {
+            if runtime.widgets[instance].visible {
+                for _ in 0..passes {
+                    runtime.chance_visuals[instance].tick(entry);
+                    runtime.tick(cash, debt, instance)?;
+                }
+            }
+        }
+        drop(runtime);
+        if !self.auction.as_ref().is_some_and(|a| a.visible) {
+            return Ok(());
+        }
+        let player = local_player(session)?;
+        let mut controls = std::mem::take(&mut self.auction.as_mut().unwrap().controls);
+        let result = (|| {
+            for _ in 0..self.policy.scheduler.iterations {
+                let bidder = bidder_view(session, player)?;
+                if controls.timer_visible {
+                    let no_sale = session.world.city.auction.controller.record[0x70] != 0;
+                    controls.timer.tick(
+                        bidder.current,
+                        player,
+                        bidder.winner,
+                        no_sale,
+                        |call| {
+                            use crate::auction_controls::TimerCall;
+                            match call {
+                                TimerCall::CreateSound => {
+                                    if self.auction_audio.is_some() {
+                                        auction_audio::request(&self.auction_audio,
+                                            auction_audio::Operation::Create(auction_audio::Kind::TurnTimer))
+                                    } else {
+                                        self.pending_presentation.insert(0x4ad760);
+                                        Ok(0)
+                                    }
+                                }
+                                TimerCall::ReleaseSound(handle) => auction_audio::request(
+                                    &self.auction_audio, auction_audio::Operation::Release(handle)),
+                                TimerCall::ClearText => {
+                                    controls.timer_text = None;
+                                    Ok(0)
+                                }
+                                TimerCall::WriteSeconds(seconds) => {
+                                    controls.timer_text =
+                                        Some(crate::auction_controls::TimerText::Seconds(seconds));
+                                    Ok(0)
+                                }
+                                TimerCall::Label { no_sale } => {
+                                    controls.timer_text =
+                                        Some(crate::auction_controls::TimerText::Label { no_sale });
+                                    Ok(0)
+                                }
+                            }
+                        },
+                    )?;
+                }
+                controls.tick(bidder, player, session.tutorial_state, |call| {
+                    use crate::auction_controls::TickCall;
+                    match call {
+                        TickCall::Withdraw(participant) => {
+                            self.apply_auction_action(
+                                session,
+                                assets,
+                                openmt2001::ai_messages::offers::auction::Command {
+                                    action: 2,
+                                    participant: u32::from(participant),
+                                    amount: 0,
+                                },
+                            )?;
+                            Ok(Some(bidder_view(session, player)?))
+                        }
+                        TickCall::Tutorial(control) if session.tutorial_state == 1 => {
+                            self.dispatch_tutorial_callback(session,assets,control)?;
+                            Ok(None)
+                        }
+                        _ => Ok(None),
+                    }
+                })?;
+            }
+            Ok(())
+        })();
+        self.auction.as_mut().unwrap().controls = controls;
+        result
+    }
+    pub(crate) fn apply_auction_action(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        command: openmt2001::ai_messages::offers::auction::Command,
+    ) -> Result<(), String> {
+        let tutorial_state = session.tutorial_state;
+        let bid_gate = std::cell::Cell::new(self.policy.ai_event_gate);
+        let result = session.apply_auction_action(command, assets, |event| match event {
+            openmt2001::live_commands::Event::AuctionTimeShow { cash } => {
+                self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
+                Ok(0)
+            }
+            openmt2001::live_commands::Event::AuctionAction(call) => auction_action(
+                call,
+                &mut self.auction,
+                &mut self.pending_presentation,
+                tutorial_state,
+                &self.auction_actor_events,
+                &bid_gate,
+            ),
+            other => Err(format!("Auction action requires {other:?}")),
+        });
+        self.policy.ai_event_gate = bid_gate.get();
+        result
+    }
+    pub fn auction_button(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        button: u32,
+    ) -> Result<(), String> {
+        if self.failure.is_some() {
+            return Err("Session stopped at an incomplete boundary".into());
+        }
+        // A queued release may outlive the panel it came from. Reject it before
+        // reading player/auction state belonging to the former presentation.
+        if self.auction.as_ref().is_none_or(|auction| !auction.visible) {
+            return Ok(());
+        }
+        if button == 5 {
+            if self.policy.scheduler.network_enabled { return Ok(()); }
+            // 414730 message12 index5 enters 414a31 and toggles565b9c+858.
+            // Its original input child is a textureless 16px title-right strip.
+            let next = !self.policy.ai_event_gate;
+            if let Some(sender) = &self.auction_actor_events {
+                sender.send(crate::auction_bridge::ActorEvent::BidVoiceGate(next))
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            }
+            self.policy.ai_event_gate = next;
+            return Ok(());
+        }
+        if self.auction.as_ref().is_none_or(|auction| button > 4
+            || auction.controls.buttons_enabled & (1 << button) == 0) {
+            return Ok(());
+        }
+        let player = local_player(session)?;
+        let view = bidder_view(session, player)?;
+        let auction = self.auction.as_mut().unwrap();
+        let mut controls = std::mem::take(&mut auction.controls);
+        let allowance = i32::from_le_bytes(assets.image.at(0x541c7c, 4)?.try_into().unwrap());
+        let result = controls.button(button, view.current, player, view.price, |call| {
+            use crate::auction_controls::Call;
+            match call {
+                Call::Affordable(amount) => Ok(openmt2001::construction::affordable(
+                    session.world.ledgers.players[usize::from(player)].cash,
+                    allowance,
+                    amount,
+                    false,
+                )),
+                Call::Action(command) => self
+                    .apply_auction_action(session, assets, command)
+                    .map(|_| true),
+                Call::Tutorial(control) if session.tutorial_state == 1 => {
+                    self.dispatch_tutorial_callback(session,assets,control)?;
+                    Ok(true)
+                }
+                _ => Ok(true),
+            }
+        });
+        self.auction.as_mut().unwrap().controls = controls;
+        if let Err(error) = &result {
+            self.fail(error.clone());
+        }
+        result
+    }
+    /// Dispatch actual registered50Hz interface and25Hz logic tasks in native
+    /// registration order. Publish both records around each callback so script
+    /// pause/group changes affect this same dispatch, including the next task.
+    pub fn frame(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        elapsed: i32,
+    ) {
+        if self.failure.is_some() {
+            return;
+        }
+        if session.tutorial_state == 1 {
+            self.collect_script_prompts(session);
+            if let Some(completed) = self.tutorial_end_requested {
+                self.running = false;
+                if completed && !self.tutorial_completed {
+                    // Native 4ba2bb selects the tutorial-specific mark-complete
+                    // branch; Catalog::finish ignores the Win/Lose distinction.
+                    if let Err(error) = crate::campaign_store::commit_result(
+                        &mut session.catalog,
+                        session.campaign_profile.as_deref(),
+                        &mut self.tutorial_applied,
+                        openmt2001::outcome_notice::Sequence::Win,
+                    ) {
+                        self.fail(error);
+                    } else {
+                        self.tutorial_completed = true;
+                    }
+                }
+                return;
+            }
+        }
+        if session.tutorial_state == 1 && !self.tutorial_started {
+            self.tutorial_started = true;
+            if let Err(error) = session.enter_tutorial_level(assets) {
+                self.fail(error);
+                return;
+            }
+            self.collect_script_prompts(session);
+        }
+        let indices: Vec<_> = session
+            .hooks
+            .timers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| {
+                matches!(
+                    u32::from_le_bytes(task[16..20].try_into().unwrap()),
+                    0x4ba580 | 0x481680
+                )
+                .then_some(index)
+            })
+            .collect();
+        if indices.len() != 2 {
+            self.fail("Missing original interface/logic timer registration".into());
+            return;
+        }
+        // The host's player pause freezes the logic accumulator as before;
+        // interface task time continues. Script pauses instead change the
+        // actual task enabled byte through the retained native group mask.
+        let indices: Vec<_> = indices
+            .into_iter()
+            .filter(|index| {
+                self.running
+                    || u32::from_le_bytes(session.hooks.timers[*index][16..20].try_into().unwrap())
+                        == 0x4ba580
+            })
+            .collect();
+        let mut tasks = indices
+            .iter()
+            .map(|index| session.hooks.timers[*index])
+            .collect();
+        let result = openmt2001::timers::dispatch(&mut tasks, elapsed, |_, address, tasks| {
+            for (i, index) in indices.iter().enumerate() {
+                session.hooks.timers[*index] = tasks[i];
+            }
+            match address {
+                0x4ba580 => self.interface_tick(session, assets)?,
+                0x481680 => self.tick(session, assets),
+                _ => return Err("Live interface/logic timer callback changed".into()),
+            }
+            for (i, index) in indices.iter().enumerate() {
+                tasks[i] = session.hooks.timers[*index];
+            }
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
+            Ok(())
+        });
+        for (i, index) in indices.iter().enumerate() {
+            session.hooks.timers[*index] = tasks[i];
+        }
+        if let Err(error) = result {
+            self.fail(error);
+        }
+    }
+}
+
+/// Original48a5a0 presentation after the account has already been posted.
+fn ledger_ui_post(
+    cash_arrow: &mut crate::cash_arrow::State,
+    sound: &Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    current: bool,
+    amount: f32,
+    threshold: f32,
+) -> Result<u32, String> {
+    use openmt2001::category_ownership::Seam;
+    if !current { return Ok(0); }
+    let sale = if amount > threshold { true }
+        else if amount < threshold || amount.is_nan() { false }
+        else { return Ok(0); };
+    let pulse = Seam::NativeUiCall { address: if sale { 0x4c6290 } else { 0x4c62d0 },
+        args: [0; 6], argument_count: 0 };
+    let cue = Seam::NativeUiCall { address: 0x4ad760,
+        args: [if sale { 0x541cc8 } else { 0x541cb4 }, 0, 0, 0, 1, 0x3c], argument_count: 6 };
+    if sale {
+        ledger_ui_call(cash_arrow, sound, cue)?;
+        ledger_ui_call(cash_arrow, sound, pulse)
+    } else {
+        ledger_ui_call(cash_arrow, sound, pulse)?;
+        ledger_ui_call(cash_arrow, sound, cue)
+    }
+}
+
+fn ledger_ui_call(
+    cash_arrow: &mut crate::cash_arrow::State,
+    sound: &Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    call: openmt2001::category_ownership::Seam,
+) -> Result<u32, String> {
+    use openmt2001::category_ownership::Seam;
+    match call {
+        Seam::NativeUiCall { address: 0x4ad760, args, argument_count: 6 } => {
+            let sale = match args {
+                [0x541cc8, 0, 0, 0, 1, 0x3c] => true,
+                [0x541cb4, 0, 0, 0, 1, 0x3c] => false,
+                _ => return Err("property transfer sound call changed".into()),
+            };
+            crate::gameplay_sound::enqueue(sound, crate::gameplay_sound::Operation::Ledger { sale })?;
+            Ok(0)
+        }
+        Seam::NativeUiCall { address: address @ (0x4c6290 | 0x4c62d0),
+            args: [0, 0, 0, 0, 0, 0], argument_count: 0 } => {
+            cash_arrow.start(address == 0x4c6290);
+            Ok(0)
+        }
+        _ => Err("unsupported property transfer presentation call".into()),
+    }
+}
+
+fn local_player(session: &Session<'_>) -> Result<u8, String> {
+    session
+        .roster
+        .manager
+        .players
+        .iter()
+        .find(|p| p.reference == session.roster.status.current_player)
+        .map(|p| p.bytes[0x1bc])
+        .ok_or("Auction current player missing".into())
+}
+fn bidder_view(
+    session: &Session<'_>,
+    player: u8,
+) -> Result<crate::auction_controls::Bidder, String> {
+    if player >= 6 {
+        return Err("Auction local player exceeds six participants".into());
+    }
+    let record = &session.world.city.auction.controller.record;
+    let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
+    Ok(crate::auction_controls::Bidder {
+        current: word(0x58),
+        winner: word(0x60),
+        price: word(0x6c),
+        passed: record[usize::from(player) * 12 + 0x10],
+        withdrawn: record[usize::from(player) * 12 + 0x12],
+    })
+}
+fn current_cash(session: &Session<'_>) -> Result<f32, String> {
+    let slot = session.roster.manager.players.iter()
+        .position(|player| player.reference == session.roster.status.current_player)
+        .ok_or("Time current player missing")?;
+    session.world.ledgers.players.get(slot).map(|player| player.cash)
+        .ok_or_else(|| "Time current account missing".into())
+}
+
+pub(crate) fn auction_action(
+    call: openmt2001::ai_messages::offers::auction::Call,
+    auction: &mut Option<Auction>,
+    omitted: &mut std::collections::BTreeSet<u32>,
+    tutorial_state: u8,
+    actor_events: &Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
+    bid_gate: &std::cell::Cell<bool>,
+) -> Result<u32, String> {
+    use openmt2001::ai_messages::offers::auction::Call;
+    let auction = auction
+        .as_mut()
+        .ok_or("Auction presentation action arrived without a prepared scene")?;
+    match call {
+        Call::ShowPanel(0x565b9c) => {
+            auction.visible = true;
+            // 4140b0 resets the hidden bid-voice/AI gate on panel reopen.
+            bid_gate.set(false);
+            if let Some(sender) = actor_events {
+                sender.send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            }
+        }
+        Call::ShowPanel(0x565b94) => (), // Original top panel is part of the renderer.
+        Call::ShowPanel(address @ (0x565ba4 | 0x565ba0)) => {
+            omitted.insert(address);
+        }
+        Call::ShowPanel(address) => return Err(format!("Unmapped auction panel{address:08x}")),
+        Call::ParticipantEffect { participant, kind } => {
+            if let Some(sender) = actor_events {
+                sender.send(crate::auction_bridge::ActorEvent::Effect { participant, kind })
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            } else {
+                omitted.insert(0x465980);
+            }
+        }
+        Call::Tutorial(_) if tutorial_state == 1 => {
+            return Err("Auction tutorial event needs its tutorial session".into());
+        }
+        Call::Tutorial(_) => (),
+        Call::RefreshTurn(_) => {
+            // Native tail updates selected character X7f9088 and refreshes the
+            // participant text414f90. Controller rotation already completed.
+            omitted.insert(0x4648b9);
+        }
+        Call::WithdrawNotice(participant) => {
+            if let Some(sender) = actor_events {
+                sender.send(crate::auction_bridge::ActorEvent::WithdrawNotice(participant))
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            } else {
+                omitted.insert(0x464769);
+            }
+        }
+    }
+    Ok(0)
+}
+
+fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
+    match arguments {
+        [Value::Nil] | [] => Ok(None),
+        [Value::Number(value)] if *value == -1. => Ok(None),
+        [Value::Number(value)] if value.is_finite() && *value >= 0.
+            && *value <= u32::MAX as f64 => Ok(Some(*value as u32)),
+        _ => Err("Tutorial 3D pick target changed".into()),
+    }
+}
+
+pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, String> {
+    let number = |at: usize| match arguments.get(at) {
+        Some(Value::Number(value)) if value.is_finite() => openmt2001::x87::Sum::from_f64(*value)
+            .map(|v| v.ftol_low_word() as u32)
+            .map_err(str::to_owned),
+        _ => Err("Live prompt requires original numeric language identifiers".to_owned()),
+    };
+    Ok(prompt::Request {
+        dialog: None,
+        card: None,
+        title: number(0)?,
+        body: number(1)?,
+        dismissal_id: match arguments.get(2) {
+            None | Some(Value::Nil) => 0,
+            _ => number(2)?,
+        },
+    })
+}
+
+fn human_dialog_ui(
+    prompts: &mut Vec<prompt::Request>,
+    address: u32,
+    arguments: [u32; 4],
+    count: usize,
+    name: Option<[u8; 96]>,
+) -> Result<(), String> {
+    if address == 0x43be20 && count == 0 {
+        prompts.push(prompt::Request {
+            title: 0,
+            body: 0,
+            dismissal_id: 0,
+            card: None,
+            dialog: Some(crate::human_dialog::Dialog::default()),
+        });
+        return Ok(());
+    }
+    prompts
+        .iter_mut()
+        .rev()
+        .find_map(|r| r.dialog.as_mut())
+        .ok_or("Human modal write has no allocated prompt")?
+        .ui(address, arguments, count, name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires original v1.4 executable"]
+    fn original_property_broadcast_dispatcher_is_inert_after_refresh() {
+        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&bytes).unwrap();
+        // 451720 has already called 405260 for kind 0x26. The following
+        // 48c1a0 dispatcher selects 48c3c6: clear flag and return.
+        let kind = 0x26u32;
+        let index = u32::from(image.at(0x48c3ec + kind - 0x22, 1).unwrap()[0]);
+        let target = u32::from_le_bytes(
+            image.at(0x48c3d0 + index * 4, 4).unwrap().try_into().unwrap(),
+        );
+        assert_eq!(target, 0x48c3c6);
+        assert_eq!(image.at(target, 9).unwrap(), &[0xc6, 0x46, 4, 0, 0x5e, 0x5b, 0x83, 0xc4, 0x34]);
+        let mut packet = [0u8; 0x30];
+        packet[4..8].copy_from_slice(&kind.to_le_bytes());
+        assert!(property_refresh_broadcast(&packet));
+        packet[4..8].copy_from_slice(&0x31u32.to_le_bytes());
+        assert!(!property_refresh_broadcast(&packet));
+    }
+    #[test]
+    fn faulted_tick_cannot_be_replayed_by_resume() {
+        let mut host = Host::new([0.; 3]);
+        host.set_running(true);
+        host.fail("failure after retained mutation".into());
+        host.set_running(true);
+        assert!(!host.running);
+        assert_eq!(
+            host.failure.as_deref(),
+            Some("failure after retained mutation")
+        );
+    }
+    #[test]
+    fn options_restore_worker_pause_state_and_cannot_resume_a_fault() {
+        let mut host = Host::new([0.; 3]);
+        for was_running in [false, true] {
+            host.set_running(was_running);
+            host.options(true);
+            host.options(true);
+            host.set_running(true);
+            assert!(!host.running, "Options must retain its pause during other queued input");
+            host.options(false);
+            assert_eq!(host.running, was_running);
+            host.options(false);
+            assert_eq!(host.running, was_running);
+        }
+        host.options(true);
+        host.fail("failure after retained mutation".into());
+        host.options(false);
+        assert!(!host.running);
+        host.fail("later stale action".into());
+        assert_eq!(host.failure.as_deref(), Some("failure after retained mutation"));
+    }
+    #[test]
+    fn scenario_prompt_preserves_callback_identity() {
+        assert_eq!(
+            prompt_request(&[
+                Value::Number(1898.),
+                Value::Number(1899.),
+                Value::Number(1.)
+            ])
+            .unwrap(),
+            prompt::Request {
+                dialog: None,
+                card: None,
+                title: 1898,
+                body: 1899,
+                dismissal_id: 1
+            }
+        );
+        assert_eq!(
+            prompt_request(&[Value::Number(1898.), Value::Number(1899.)])
+                .unwrap()
+                .dismissal_id,
+            0
+        );
+        assert!(prompt_request(&[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)]).is_err());
+    }
+}

@@ -1,0 +1,41 @@
+[package]
+name = "openmt2001"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+repository = "https://github.com/justinehler/OpenMT2001"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"], optional = true }
+bytemuck = { version = "1.25.2", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+glam = { version = "0.33.7", optional = true }
+image = { version = "0.25", default-features = false, features = ["tga"], optional = true }
+png = { version = "0.18.1", optional = true }
+pollster = { version = "1.0.1", optional = true }
+rodio = { version = "0.21", default-features = false, features = ["playback"], optional = true }
+wgpu = { version = "30.0.1", optional = true }
+winit = { version = "0.30", optional = true }
+
+[features]
+lua4 = []
+graphics = ["dep:wgpu", "dep:bytemuck", "dep:glam"]
+capture = ["graphics", "dep:pollster", "dep:png"]
+native = ["graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:arboard", "dep:chrono"]
+
+[build-dependencies]
+cc = "1.4.5"
+
+[[bin]]
+name = "capture"
+path = "src/bin/capture.rs"
+required-features = ["capture"]
+
+[[bin]]
+name = "game"
+path = "src/bin/game.rs"
+required-features = ["native"]

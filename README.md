@@ -12,21 +12,74 @@
 
 *Monopoly Tycoon* was developed by Deep Red Games and published by Infogrames. OpenMT2001 aims to preserve and extend the original game by providing a modern, portable engine, documented file formats, improved tooling, and support for current platforms while remaining compatible with legally owned copies of the original game data.
 
-The project includes format documentation and tooling for archives, scripts, textures, models, parameters, text resources, and other data used by the original release. It does not distribute proprietary game assets.
+The Rust engine source is available here. It is an incomplete reimplementation:
+rendering, menus, business management, opponents, audio and save continuation
+are implemented, but complete campaign, tutorial and audiovisual fidelity are
+still being verified. There is no finished release or guarantee of whole-game
+equivalence.
 
 ---
 
 # 2. Playing the game
 
-OpenMT2001 requires original *Monopoly Tycoon* game files to play. Users must provide their own legally obtained installation or media. The project does not include copyrighted art, audio, scenarios, trademarks, or other proprietary content from the original game.
+OpenMT2001 requires player-supplied Monopoly Tycoon files, preferably v1.4.
+No original executable, assets, scenarios, saves, compiler or decoder is
+distributed here. The engine reads the supplied executable as data; it does
+not launch it.
 
-Pre-built releases and setup instructions will be published as the project matures.
+Build the native game and run it with explicit paths:
+
+```sh
+cargo build --locked --release --features native --bin game
+cargo run --locked --release --features native --bin game -- \
+  --menu \
+  --assets "/path/to/extracted/installer" \
+  --scene-root "/path/to/game/max" \
+  --executable "/path/to/v1.4/mc.exe" \
+  --intro-map "/path/to/v1.4/scripts/MAPS/intromap.lua" \
+  --language "/path/to/v1.4/language/usa" \
+  --save-dir "/path/to/original/save/imports" \
+  --profile-dir "/path/to/writable/openmt2001-data"
+```
+
+These paths refer to separate parts of the supplied game data. The assets
+directory contains Standard/, scripts/ and parameters/; the scene directory
+contains archive.DIR, archive.bin and BuildEditorModels/BuildFile.dat.
+Preserve original files and use a separate writable profile directory.
+Modern saves include engine-specific runtime extensions; compatibility with
+loading those saves in the original executable is not established.
+
+Install FFmpeg on PATH, or specify --ffmpeg /path/to/ffmpeg, for original
+movie and compressed audio decoding. --menu skips the opening presentation.
+Run the game with --help for the complete argument list.
+
+Windows, Linux and macOS are the target native platforms. Fresh platform
+verification is in progress; this source import is not a tested binary release.
+Browser execution is not currently supported.
 
 ---
 
 # 3. Building the project
 
-Build instructions will be maintained for supported platforms as the public source tree is published. The project is designed around portable tooling and a clean separation between open-source engine code and user-supplied game data.
+Use Rust 1.99 or later and a C compiler for the optional Lua runtime. The
+native frontend uses wgpu, winit and the platform audio system. On Debian/Ubuntu,
+install the native development dependencies:
+
+```sh
+sudo apt-get install build-essential pkg-config libasound2-dev libxkbcommon-dev
+```
+
+The core and Lua tests need no original game files:
+
+```sh
+cargo test --locked --lib
+cargo test --locked --features lua4 --lib
+```
+
+Original-input comparisons and GPU checks are explicitly ignored by default.
+A passing synthetic test suite does not establish complete game fidelity.
+Native builds need graphics, audio and window-system support. The core library
+keeps simulation and asset decoding independent of the native host.
 
 ---
 
@@ -52,7 +105,7 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for the repository contribution po
 
 # 6. Licence
 
-OpenMT2001 is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+OpenMT2001’s project-owned implementation is licensed under the MIT License. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md), including the separate Lua 4.0 terms.
 
 ---
 

@@ -1,0 +1,615 @@
+//! Host-only save destination and atomic file publication.
+//! --save-dir is a read source; writes always use the selected V2 profile root.
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+/// V2 uses the campaign store's reversible profile key for save isolation.
+/// The extra `saves` child is supplied by the existing slot publisher.
+pub fn selected_profile_root(app_root: &Path, name: &[u8]) -> PathBuf {
+    let campaign = crate::campaign_store::profile_path(app_root, name);
+    profile_root_for_campaign(app_root, &campaign)
+        .expect("campaign_store produced an invalid profile identity")
+}
+
+pub fn profile_root_for_campaign(app_root: &Path, campaign: &Path) -> Option<PathBuf> {
+    let filename = campaign.file_name()?.to_str()?;
+    let key = profile_key(filename)?;
+    Some(app_root.join("profiles").join(key))
+}
+
+fn profile_key(filename: &str) -> Option<&str> {
+    let key = filename.strip_suffix(".lua")?;
+    (key.len().is_multiple_of(2) && !key.is_empty()
+        && key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        .then_some(key)
+}
+
+/// Old V2 releases placed all saves in one directory. Attribute a legacy
+/// row only when its intact extension record 1 identifies this profile.
+/// These paths are load-only: overwrite and Delete operate on scoped slots.
+pub fn matching_legacy_paths(app_root: &Path, campaign_filename: &str) -> Result<Vec<PathBuf>, String> {
+    if profile_key(campaign_filename).is_none() { return Ok(Vec::new()); }
+    reject_reference(app_root)?;
+    let directory = app_root.join("saves");
+    if directory.exists() {
+        let root = fs::canonicalize(app_root).map_err(|e| format!("Legacy profile root: {e}"))?;
+        let actual = fs::canonicalize(&directory).map_err(|e| format!("Legacy save directory: {e}"))?;
+        reject_reference(&actual)?;
+        if !actual.starts_with(root) {
+            return Err("Legacy V2 save directory escapes its profile root".into());
+        }
+    }
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("List legacy V2 saves: {error}")),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("List legacy V2 saves: {e}"))?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() { continue; }
+        let path = entry.path();
+        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sav")) { continue; }
+        let Some(owner) = fs::read(&path).ok()
+            .and_then(|bytes| {
+                let save = openmt2001::save::SaveFile::parse(&bytes).ok()?;
+                let extension = openmt2001::save::extension::Extension::parse(&save).ok()??;
+                extension.validate_runtime_section_set().ok()?;
+                std::str::from_utf8(extension.required(1).ok()?).ok().map(str::to_owned)
+            }) else { continue; };
+        if owner == campaign_filename { paths.push(path); }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+/// Profile Delete (native 4c1fd0) removes saves belonging to that profile.
+/// Re-registration repeats this cleanup so an interrupted earlier Delete
+/// cannot reveal old slots. Every directory is resolved before removing its
+/// known regular files; no recursive filesystem operation is used.
+pub fn clear_profile_saves(app_root: &Path, name: &[u8]) -> Result<(), String> {
+    reject_reference(app_root)?;
+    let app = match fs::canonicalize(app_root) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Profile save root: {error}")),
+    };
+    reject_reference(&app)?;
+    let profiles = app_root.join("profiles");
+    match fs::symlink_metadata(&profiles) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() { return Err("V2 profiles directory is not a regular directory".into()); }
+            let actual_profiles = fs::canonicalize(&profiles).map_err(|e| format!("V2 profiles directory: {e}"))?;
+            if actual_profiles.parent() != Some(app.as_path()) {
+                return Err("V2 profiles directory escapes the application root".into());
+            }
+            let selected = selected_profile_root(app_root, name);
+            match fs::symlink_metadata(&selected) {
+                Ok(metadata) => {
+                    if !metadata.file_type().is_dir() { return Err("Selected V2 profile is not a regular directory".into()); }
+                    let actual_selected = fs::canonicalize(&selected).map_err(|e| format!("Selected V2 profile: {e}"))?;
+                    if actual_selected.parent() != Some(actual_profiles.as_path()) {
+                        return Err("Selected V2 profile escapes its profile directory".into());
+                    }
+                    let saves = selected.join("saves");
+                    match fs::symlink_metadata(&saves) {
+                        Ok(metadata) => {
+                            if !metadata.file_type().is_dir() { return Err("Selected V2 saves is not a regular directory".into()); }
+                            let actual_saves = fs::canonicalize(&saves).map_err(|e| format!("Selected V2 saves: {e}"))?;
+                            if actual_saves.parent() != Some(actual_selected.as_path()) {
+                                return Err("Selected V2 saves escapes its profile".into());
+                            }
+                            let mut files = Vec::new();
+                            for entry in fs::read_dir(&saves).map_err(|e| format!("List profile saves: {e}"))? {
+                                let entry = entry.map_err(|e| format!("List profile saves: {e}"))?;
+                                if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                                    return Err("Unexpected non-file in selected V2 saves".into());
+                                }
+                                let path = entry.path();
+                                let is_save = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sav"));
+                                let is_stage = path.file_name().and_then(|s| s.to_str())
+                                    .is_some_and(|s| s.starts_with(".V2-") && s.ends_with(".tmp"));
+                                if !is_save && !is_stage { return Err("Unexpected file in selected V2 saves".into()); }
+                                files.push(path);
+                            }
+                            for path in files { fs::remove_file(path).map_err(|e| format!("Delete profile save: {e}"))?; }
+                            fs::remove_dir(&saves).map_err(|e| format!("Remove selected V2 saves: {e}"))?;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                        Err(error) => return Err(format!("Inspect selected V2 saves: {error}")),
+                    }
+                    fs::remove_dir(&selected).map_err(|e| format!("Remove selected V2 profile: {e}"))?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(format!("Inspect selected V2 profile: {error}")),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(format!("Inspect V2 profiles directory: {error}")),
+    }
+    let filename = crate::campaign_store::profile_path(app_root, name)
+        .file_name().ok_or("Invalid V2 profile name")?.to_string_lossy().into_owned();
+    for path in matching_legacy_paths(app_root, &filename)? {
+        if !fs::symlink_metadata(&path).map_err(|e| format!("Inspect legacy profile save: {e}"))?
+            .file_type().is_file() {
+            return Err("Legacy profile save is no longer a regular file".into());
+        }
+        fs::remove_file(path).map_err(|e| format!("Delete legacy profile save: {e}"))?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub struct Slot {
+    /// Basename including `.sav`; never a path supplied by the UI.
+    pub id: String,
+    pub name: String,
+    pub modified: Option<SystemTime>,
+    pub metadata: Result<[u32; 4], String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    NewName(String),
+    ExistingSlot(String),
+}
+
+/// Enumerate only writable V2-profile saves for the in-game Save Game panel.
+/// Original import directories remain load-only, even when the Load Game
+/// panel presents them alongside V2 slots.
+pub fn list_slots(profile_root: &Path) -> Result<Vec<Slot>, String> {
+    reject_reference(profile_root)?;
+    if !profile_root.exists() {
+        return Ok(Vec::new());
+    }
+    let root = fs::canonicalize(profile_root).map_err(|e| format!("Save profile root: {e}"))?;
+    reject_reference(&root)?;
+    let directory = root.join("saves");
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let canonical = fs::canonicalize(directory).map_err(|e| format!("Save directory: {e}"))?;
+    reject_reference(&canonical)?;
+    if !canonical.starts_with(&root) {
+        return Err("V2 save directory escapes its profile root".into());
+    }
+    let mut slots = Vec::new();
+    for entry in fs::read_dir(&canonical).map_err(|e| format!("List V2 saves: {e}"))? {
+        let entry = entry.map_err(|e| format!("List V2 saves: {e}"))?;
+        // Refuse links and subdirectories, including links into original inputs.
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sav")) {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else { continue };
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()).map(str::to_owned) else { continue };
+        if name.is_empty() { continue; }
+        let modified = entry.metadata().ok().and_then(|metadata| metadata.modified().ok());
+        let metadata = (|| {
+            let bytes = fs::read(&path).map_err(|e| format!("Read saved game: {e}"))?;
+            openmt2001::save::SaveFile::parse(&bytes)?.level_metadata()
+        })();
+        slots.push(Slot { id, name, modified, metadata });
+    }
+    slots.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(slots)
+}
+
+/// Original 497708 uses CRT localtime for the displayed hour/minute, then
+/// FileTimeToSystemTime for the date, so the date remains UTC near a local
+/// day boundary. GetDateFormatA is locale-sensitive; V2 uses the captured ISO date.
+pub fn format_modified_local(modified: Option<SystemTime>) -> Option<String> {
+    use chrono::Timelike;
+    let utc: chrono::DateTime<chrono::Utc> = modified?.into();
+    let local = utc.with_timezone(&chrono::Local);
+    Some(original_time_label(local.hour(), local.minute(),
+        &utc.format("%Y-%m-%d").to_string()))
+}
+
+fn original_time_label(hour: u32, minute: u32, date: &str) -> String {
+    // 49772c compares tm_hour to 12, subtracting 12 only when greater;
+    // the original thus labels 00:xx and 12:xx as 0:xxam and 12:xxam.
+    let (hour, suffix) = if hour > 12 { (hour - 12, "pm") } else { (hour, "am") };
+    format!("{hour}:{minute:02}{suffix} {date}")
+}
+
+fn reject_reference(path: &Path) -> Result<(), String> {
+    if path.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        name.eq_ignore_ascii_case("Original Distribution")
+            || name.eq_ignore_ascii_case("Original Game Evidence")
+    }) {
+        return Err("Save destination is inside immutable original reference inputs".into());
+    }
+    Ok(())
+}
+
+fn writable_directory(profile_root: &Path) -> Result<PathBuf, String> {
+    reject_reference(profile_root)?;
+    let root = if profile_root.exists() {
+        fs::canonicalize(profile_root).map_err(|e| format!("Save profile root: {e}"))?
+    } else {
+        let ancestor = profile_root.ancestors().find(|path| path.exists())
+            .ok_or("Save profile root has no existing ancestor")?;
+        reject_reference(&fs::canonicalize(ancestor).map_err(|e| format!("Save ancestor: {e}"))?)?;
+        fs::create_dir_all(profile_root).map_err(|e| format!("Create V2 profile root: {e}"))?;
+        fs::canonicalize(profile_root).map_err(|e| format!("Save profile root: {e}"))?
+    };
+    reject_reference(&root)?;
+    let directory = root.join("saves");
+    if directory.exists() {
+        reject_reference(&fs::canonicalize(&directory).map_err(|e| format!("Save directory: {e}"))?)?;
+    }
+    fs::create_dir_all(&directory).map_err(|e| format!("Create V2 save directory: {e}"))?;
+    let canonical = fs::canonicalize(&directory).map_err(|e| format!("Save directory: {e}"))?;
+    reject_reference(&canonical)?;
+    if !canonical.starts_with(&root) {
+        return Err("V2 save directory escapes its profile root".into());
+    }
+    Ok(canonical)
+}
+/// Test and programmatic export helper: allocate a unique V2 slot without a
+/// dialog name. Production Save Game uses `write_target` after confirmation.
+#[cfg(test)]
+pub fn write_new(profile_root: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+    openmt2001::save::SaveFile::parse(bytes)?;
+    let canonical = writable_directory(profile_root)?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("Save clock: {e}"))?
+        .as_millis();
+    for sequence in 0..1000u32 {
+        let name = format!("V2-{stamp}-{sequence:03}");
+        let temporary = canonical.join(format!(".{name}.tmp"));
+        let destination = canonical.join(format!("{name}.sav"));
+        if destination.exists() {
+            continue;
+        }
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Create V2 save: {e}")),
+        };
+        let result = (|| -> Result<(), String> {
+            file.write_all(bytes)
+                .map_err(|e| format!("Write V2 save: {e}"))?;
+            file.sync_all().map_err(|e| format!("Flush V2 save: {e}"))?;
+            drop(file);
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        match fs::hard_link(&temporary, &destination) {
+            Ok(()) => {
+                // The complete published slot is authoritative even if a
+                // temporary-name cleanup fails after publication.
+                if let Err(error) = fs::remove_file(&temporary) {
+                    eprintln!("Published V2 save; temporary cleanup failed: {error}");
+                }
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    continue;
+                }
+                return Err(format!("Publish V2 save: {error}"));
+            }
+        }
+        return Ok(destination);
+    }
+    Err("Unable to allocate a unique V2 save slot".into())
+}
+
+fn validate_stem(name: &str, max_bytes: usize) -> Result<(), String> {
+    if name.is_empty() || name.len() > max_bytes || name == "." || name == ".."
+        || name.ends_with(' ') || name.ends_with('.')
+        || name.chars().any(|c| c.is_control() || "\\/:*?\"<>|".contains(c))
+    {
+        return Err("Save name contains unsupported filename characters".into());
+    }
+    let device = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+    let device_bytes = device.as_bytes();
+    if ["CON", "PRN", "AUX", "NUL"].iter().any(|reserved| device.eq_ignore_ascii_case(reserved))
+        || (device_bytes.len() == 4 && (device_bytes[..3].eq_ignore_ascii_case(b"COM")
+            || device_bytes[..3].eq_ignore_ascii_case(b"LPT"))
+            && device_bytes[3].is_ascii_digit() && device_bytes[3] != b'0')
+    {
+        return Err("Save name is reserved by the operating system".into());
+    }
+    Ok(())
+}
+
+/// Publish a dialog-selected name or replace one listed V2 slot. Native
+/// 4bbe30 uses CreateFileA(CREATE_ALWAYS) after dialog acceptance; staging
+/// first preserves the previous complete file when serialization or I/O fails.
+pub fn write_target(profile_root: &Path, target: &Target, bytes: &[u8]) -> Result<PathBuf, String> {
+    openmt2001::save::SaveFile::parse(bytes)?;
+    let name = match target {
+        Target::NewName(name) => name.as_str(),
+        Target::ExistingSlot(id) => {
+            let (stem, extension) = id.rsplit_once('.')
+                .ok_or("Selected save slot has no .sav suffix")?;
+            if !extension.eq_ignore_ascii_case("sav") {
+                return Err("Selected save slot has no .sav suffix".into());
+            }
+            stem
+        }
+    };
+    validate_stem(name, 120)?;
+    let existing = list_slots(profile_root)?;
+    let destination_id = match target {
+        Target::NewName(_) => {
+            if existing.iter().any(|slot| slot.name.eq_ignore_ascii_case(name)) {
+                return Err("A saved game with this name already exists".into());
+            }
+            format!("{name}.sav")
+        }
+        Target::ExistingSlot(id) => {
+            if !existing.iter().any(|slot| slot.id == id.as_str()) {
+                return Err("Selected V2 save slot is no longer available".into());
+            }
+            id.clone()
+        }
+    };
+    let directory = writable_directory(profile_root)?;
+    let destination = directory.join(&destination_id);
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("Save clock: {e}"))?.as_nanos();
+    for sequence in 0..100u32 {
+        let temporary = directory.join(format!(".V2-{}-{nonce}-{sequence}.tmp", std::process::id()));
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Create V2 save: {error}")),
+        };
+        let result = file.write_all(bytes).and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Write V2 save: {error}"));
+        }
+        let publish = match target {
+            Target::NewName(_) => fs::hard_link(&temporary, &destination),
+            Target::ExistingSlot(_) => fs::rename(&temporary, &destination),
+        };
+        if let Err(error) = publish {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Publish V2 save: {error}"));
+        }
+        if matches!(target, Target::NewName(_))
+            && let Err(error) = fs::remove_file(&temporary)
+        {
+            eprintln!("Published V2 save; temporary cleanup failed: {error}");
+        }
+        return Ok(destination);
+    }
+    Err("Unable to allocate V2 save staging file".into())
+}
+
+/// Called only after the Save Game panel's original 497c70 confirmation.
+/// The opaque ID must still name a regular file in the writable V2 profile.
+pub fn delete_slot(profile_root: &Path, id: &str) -> Result<(), String> {
+    if !list_slots(profile_root)?.iter().any(|slot| slot.id == id) {
+        return Err("Selected V2 save slot is no longer available".into());
+    }
+    let path = writable_directory(profile_root)?.join(id);
+    if !fs::symlink_metadata(&path).map_err(|e| format!("Inspect V2 save: {e}"))?
+        .file_type().is_file()
+    {
+        return Err("Selected V2 save slot is no longer a regular file".into());
+    }
+    fs::remove_file(&path).map_err(|e| format!("Delete V2 save: {e}"))
+}
+
+/// Preserve untouched native camera bytes when available; replace only the
+/// recovered view triples 4c/58/64 with the live retained frontend pose.
+pub fn cameras(
+    prior: Option<[[u8; 196]; 2]>,
+    camera: openmt2001::flyby::CameraSample,
+) -> Result<[[u8; 196]; 2], String> {
+    if camera
+        .eye
+        .into_iter()
+        .chain(camera.target)
+        .chain(camera.up)
+        .any(|v| !v.is_finite())
+        || camera.up == [0.; 3]
+    {
+        return Err("Cannot save an invalid camera pose".into());
+    }
+    let mut rows = prior.unwrap_or([[0; 196]; 2]);
+    for row in &mut rows {
+        for (at, values) in [(0x4c, camera.eye), (0x58, camera.target), (0x64, camera.up)] {
+            for (i, value) in values.into_iter().enumerate() {
+                row[at + i * 4..at + i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const TERMINATOR: [u8; 8] = [255, 255, 255, 255, 0, 0, 0, 0];
+    #[test]
+    fn selected_profiles_isolate_save_overwrite_delete_and_legacy_rows() {
+        let app = std::env::temp_dir().join(format!("omt2-profile-saves-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&app).unwrap();
+        let alice = selected_profile_root(&app, b"Alice");
+        let bob = selected_profile_root(&app, b"Bob");
+        assert_ne!(alice, bob);
+        let native = |cash: u32| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&0x2000u32.to_le_bytes());
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            for word in [7u32, 12, cash, 3] { bytes.extend_from_slice(&word.to_le_bytes()); }
+            bytes.extend_from_slice(&TERMINATOR);
+            bytes
+        };
+        let alice_path = write_target(&alice, &Target::NewName("Shared".into()), &native(10)).unwrap();
+        let bob_path = write_target(&bob, &Target::NewName("Shared".into()), &native(20)).unwrap();
+        assert_eq!(list_slots(&alice).unwrap()[0].metadata, Ok([7, 12, 10, 3]));
+        assert_eq!(list_slots(&bob).unwrap()[0].metadata, Ok([7, 12, 20, 3]));
+        write_target(&alice, &Target::ExistingSlot("Shared.sav".into()), &native(30)).unwrap();
+        assert_eq!(list_slots(&alice).unwrap()[0].metadata, Ok([7, 12, 30, 3]));
+        assert_eq!(list_slots(&bob).unwrap()[0].metadata, Ok([7, 12, 20, 3]));
+        delete_slot(&bob, "Shared.sav").unwrap();
+        assert!(alice_path.exists() && !bob_path.exists());
+        assert!(delete_slot(&bob, "Shared.sav").is_err());
+
+        // A shared-directory save from an earlier V2 release remains intact,
+        // visible only for the owner recorded in its extension and load-only.
+        let legacy_directory = app.join("saves");
+        fs::create_dir_all(&legacy_directory).unwrap();
+        let mut legacy = native(40);
+        let owner = crate::campaign_store::profile_path(&app, b"Alice")
+            .file_name().unwrap().to_string_lossy().into_owned();
+        let records = (1..=13).map(|tag| (tag,
+            if tag == 1 { owner.as_bytes().to_vec() } else { Vec::new() }))
+            .collect::<Vec<_>>();
+        openmt2001::save::extension::append(&mut legacy, &records).unwrap();
+        let legacy_path = legacy_directory.join("Earlier.sav");
+        fs::write(&legacy_path, &legacy).unwrap();
+        assert_eq!(matching_legacy_paths(&app, &owner).unwrap(), vec![legacy_path.clone()]);
+        let bob_owner = crate::campaign_store::profile_path(&app, b"Bob")
+            .file_name().unwrap().to_string_lossy().into_owned();
+        assert!(matching_legacy_paths(&app, &bob_owner).unwrap().is_empty());
+        assert!(delete_slot(&alice, "Earlier.sav").is_err());
+        assert_eq!(fs::read(&legacy_path).unwrap(), legacy);
+        let bob_again = write_target(&bob, &Target::NewName("Keep".into()), &native(50)).unwrap();
+        let mut bob_legacy = native(60);
+        let bob_records = (1..=13).map(|tag| (tag,
+            if tag == 1 { bob_owner.as_bytes().to_vec() } else { Vec::new() }))
+            .collect::<Vec<_>>();
+        openmt2001::save::extension::append(&mut bob_legacy, &bob_records).unwrap();
+        let bob_legacy_path = legacy_directory.join("Bob earlier.sav");
+        fs::write(&bob_legacy_path, &bob_legacy).unwrap();
+        let unattributed = legacy_directory.join("Unattributed.sav");
+        fs::write(&unattributed, native(70)).unwrap();
+        clear_profile_saves(&app, b"Alice").unwrap();
+        assert!(!alice_path.exists() && !legacy_path.exists());
+        assert!(bob_again.exists() && bob_legacy_path.exists() && unattributed.exists());
+        assert!(list_slots(&alice).unwrap().is_empty());
+        assert!(matching_legacy_paths(&app, &owner).unwrap().is_empty());
+        // Recreating the same name begins with no stale slot identity.
+        write_target(&alice, &Target::NewName("New".into()), &native(80)).unwrap();
+        assert_eq!(list_slots(&alice).unwrap().len(), 1);
+        fs::remove_dir_all(app).unwrap();
+    }
+    #[test]
+    fn reference_roots_are_rejected_before_creating_files() {
+        for root in [
+            "Original Distribution/saves",
+            "original game evidence/nested",
+        ] {
+            assert!(
+                write_new(Path::new(root), &TERMINATOR)
+                    .unwrap_err()
+                    .contains("immutable")
+            );
+        }
+    }
+    #[test]
+    fn publication_produces_complete_distinct_loadable_slots() {
+        let root = std::env::temp_dir().join(format!("omt2-save-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let first = write_new(&root, &TERMINATOR).unwrap();
+        let second = write_new(&root, &TERMINATOR).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read(&first).unwrap(), TERMINATOR);
+        assert_eq!(fs::read(&second).unwrap(), TERMINATOR);
+        fs::remove_file(first).unwrap();
+        fs::remove_file(second).unwrap();
+        let _ = fs::remove_dir(root.join("saves"));
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
+    fn save_dialog_lists_only_profile_slots_with_metadata() {
+        let root = std::env::temp_dir().join(format!("omt2-save-list-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x2000u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        for word in [7u32, 12, 120.5f32.to_bits(), 3] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(&TERMINATOR);
+        let path = write_new(&root, &bytes).unwrap();
+        fs::write(root.join("saves").join("notes.txt"), b"not a save").unwrap();
+        let slots = list_slots(&root).unwrap();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].id, path.file_name().unwrap().to_string_lossy().to_string());
+        assert_eq!(slots[0].name, path.file_stem().unwrap().to_string_lossy().to_string());
+        assert_eq!(slots[0].metadata, Ok([7, 12, 120.5f32.to_bits(), 3]));
+        assert!(slots[0].modified.is_some());
+        assert!(list_slots(Path::new("Original Distribution/saves")).unwrap_err().contains("immutable"));
+        assert!(delete_slot(Path::new("Original Distribution/saves"), &slots[0].id)
+            .unwrap_err().contains("immutable"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn named_save_requires_explicit_existing_slot_for_atomic_replace() {
+        let root = std::env::temp_dir().join(format!("omt2-save-named-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let with_cash = |cash: u32| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&0x2000u32.to_le_bytes());
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            for word in [7u32, 12, cash, 3] { bytes.extend_from_slice(&word.to_le_bytes()); }
+            bytes.extend_from_slice(&TERMINATOR);
+            bytes
+        };
+        let first = with_cash(120.5f32.to_bits());
+        let revised = with_cash(97.25f32.to_bits());
+        let path = write_target(&root, &Target::NewName("test1-inprogressgame".into()), &first).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), first);
+        assert!(write_target(&root, &Target::NewName("test1-inprogressgame".into()), &revised)
+            .unwrap_err().contains("already exists"));
+        assert_eq!(fs::read(&path).unwrap(), first);
+        assert!(write_target(&root, &Target::ExistingSlot("../test1-inprogressgame.sav".into()), &revised)
+            .is_err());
+        assert!(write_target(&root, &Target::NewName("CON".into()), &revised).is_err());
+        assert!(write_target(&root, &Target::NewName("x".repeat(121)), &revised).is_err());
+        assert_eq!(fs::read(&path).unwrap(), first);
+        let id = list_slots(&root).unwrap().remove(0).id;
+        assert_eq!(write_target(&root, &Target::ExistingSlot(id), &revised).unwrap(), path);
+        assert_eq!(fs::read(&path).unwrap(), revised);
+        assert_eq!(list_slots(&root).unwrap()[0].metadata,
+            Ok([7, 12, 97.25f32.to_bits(), 3]));
+        assert!(delete_slot(&root, "../test1-inprogressgame.sav").is_err());
+        assert_eq!(fs::read(&path).unwrap(), revised);
+        delete_slot(&root, "test1-inprogressgame.sav").unwrap();
+        assert!(list_slots(&root).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn original_save_list_clock_keeps_native_noon_and_midnight_semantics() {
+        use chrono::Timelike;
+        assert_eq!(original_time_label(0, 5, "2026-06-21"), "0:05am 2026-06-21");
+        assert_eq!(original_time_label(12, 5, "2026-06-21"), "12:05am 2026-06-21");
+        assert_eq!(original_time_label(17, 21, "2026-06-21"), "5:21pm 2026-06-21");
+        let utc = chrono::DateTime::parse_from_rfc3339("2026-06-22T01:21:00Z")
+            .unwrap().with_timezone(&chrono::Utc);
+        let local = utc.with_timezone(&chrono::FixedOffset::west_opt(4 * 3600).unwrap());
+        assert_eq!(original_time_label(local.hour(), local.minute(),
+            &utc.format("%Y-%m-%d").to_string()), "9:21pm 2026-06-22");
+    }
+}

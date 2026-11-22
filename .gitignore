@@ -1,0 +1,6 @@
+/target/
+/work/
+/.local/
+/Original Distribution/
+/Original Game Evidence/
+*.local.json
