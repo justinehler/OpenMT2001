@@ -1064,7 +1064,7 @@ impl SceneInputs {
             }
             // Supplied v1.4 GAMESTART registers ID 400002 as "sandbox";
             // its hub creates the resident city and must run through Session.
-            crate::singleplayer::Preview::Sandbox => (400002, "SANDBOX"),
+            crate::singleplayer::Preview::Sandbox => (400002, "sandbox"),
         };
         if setup.catalog.find(scenario_id).is_none() {
             return Err(format!("level {scenario_id} is absent from the selected profile catalog"));
