@@ -415,12 +415,13 @@ pub fn apply_with_state_callback(
             players,
         )?;
     }
-    // Kind1 uses the same profile/effect pass when the day counter is beyond
-    // its special day-one notification branch. Kind2 always reaches it in
-    // the bounded market-share path; kind0 exits after the reset.
+    // 489bb5 skips the kind2 profile/removal pass while signed day < target.
+    // Both that path and the preceding-day notice still reach common cleanup.
+    // Kind1 profiles only beyond its special day-one notification branch.
     if controls.manager_kind == 2 && manager_target.wrapping_sub(1) as u32 == controls.day {
         // The target-match notification above returns directly to cleanup.
-    } else if controls.manager_kind == 2 || (controls.manager_kind == 1 && controls.day as i32 > 1)
+    } else if (controls.manager_kind == 2 && controls.day as i32 >= manager_target)
+        || (controls.manager_kind == 1 && controls.day as i32 > 1)
     {
         dispatch(
             &mut callback,
@@ -590,6 +591,60 @@ pub fn apply_with_state_callback(
 mod tests {
     use super::*;
     use crate::player_manager::Player;
+
+    #[test]
+    fn weakest_link_waits_until_authored_start_day() {
+        #[derive(Clone, Copy)]
+        enum Phase { Quiet, Notice, Removal }
+        // Original 489bb5's signed comparison skips profiles and removal
+        // before the target. The preceding day has only its notice callback.
+        for (target, day, phase) in [
+            (3., 0, Phase::Quiet), (3., 1, Phase::Quiet),
+            (3., 2, Phase::Notice), (3., 3, Phase::Removal),
+            (3., 4, Phase::Removal), (5., 1, Phase::Quiet),
+            (5., 4, Phase::Notice), (5., 5, Phase::Removal),
+            (3., u32::MAX, Phase::Quiet),
+            (3.75, 2, Phase::Notice), (3.75, 3, Phase::Removal),
+        ] {
+            let mut players: Vec<_> = (0..PLAYER_SLOTS).map(|slot| {
+                let mut bytes = vec![0; 0x220];
+                bytes[0x10] = 1;
+                bytes[0x1bc] = slot as u8;
+                bytes[0x1ac..0x1b0].copy_from_slice(&((slot as i32 + 1) * 10).to_le_bytes());
+                Some(Player { reference: 0x10000000 + slot as u32 * 0x1000,
+                    bytes, auxiliaries: Vec::new() })
+            }).collect();
+            let mut calls = Vec::new();
+            let result = apply_with_state_callback(Controls {
+                manager_kind: 2, manager_value: target, day,
+                player_count: PLAYER_SLOTS, network_enabled: false,
+                network_override: false, current_slot: 0,
+            }, None, [0.; PLAYER_SLOTS], &mut players, |call, _, _, _| {
+                calls.push(call);
+                Ok(CallbackEffect::default())
+            }).unwrap();
+            assert_eq!(result.min_index, 0);
+            match phase {
+                Phase::Quiet => assert!(calls.is_empty(),
+                    "before target {target}, day {day}: {calls:?}"),
+                Phase::Notice => assert!(matches!(calls.as_slice(),
+                    [Call::Objective { message: 0x6b5, detail: 0x6bd }])),
+                Phase::Removal => {
+                    assert!(matches!(calls.first(), Some(Call::Refresh)));
+                    assert!(calls.iter().any(|call| matches!(call,
+                        Call::CommandProducer { slot: 0 })));
+                    assert!(calls.iter().any(|call| matches!(call,
+                        Call::RemovePlayer { slot: 0 })));
+                    assert_eq!(calls.iter().filter(|call| matches!(call,
+                        Call::PlayerShare { .. })).count(), PLAYER_SLOTS);
+                }
+            }
+            for player in players.iter().flatten() {
+                assert_eq!(word(&player.bytes, 0x1ac), 0,
+                    "pre-target exit must still clear accumulated retail counters");
+            }
+        }
+    }
 
     struct Reader<'a> {
         bytes: &'a [u8],
