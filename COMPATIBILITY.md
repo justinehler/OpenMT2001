@@ -2,7 +2,7 @@
 
 The native game defaults to fixing documented original blockers. Start it with
 `--strict-v14` to disable intentional fixes and retain the recovered v1.4 rules
-for fresh sessions. This is a policy switch, not a claim that every part of the
+where documented below. This is a policy switch, not a claim that every part of the
 engine has achieved exact original behavior.
 
 ## Tutorial 5 construction rights
@@ -32,3 +32,21 @@ This is a documented compatibility choice based on the measured engine path;
 it does not establish that the original executable has a Tutorial 8 defect.
 Its connected check constructs the authored bakery, grocery store and cafe,
 then verifies completion and the next unlock through profile reload.
+
+## Imported resident models
+
+An original save imported by this engine can retain a freshly randomized
+resident model while restoring the saved resident's age. A loaded city was
+observed requesting frame 173 from teenage geometry containing 169 frames.
+The same preserved save records resident slot 315 as an older person.
+This is evidence about the engine's import path; it does not establish that
+the original executable crashes on that save.
+
+Modern mode binds imported residents to models selected from their saved age
+and pool identity, and updates the associated model frame counts. The repair
+runs at the idle load boundary, validates the retained frame, and preserves
+resident records, pose, frame, clocks and random streams. It does not clamp
+animation frames. Strict mode retains the recovered low-level load behavior.
+
+Saves with a modern runtime extension retain their explicitly serialized
+model and controller state instead of applying this import repair.

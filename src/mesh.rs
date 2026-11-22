@@ -283,7 +283,10 @@ impl<'a> CachedMesh<'a> {
     /// unsigned fields with the cached per-axis scale and offset (file+18/+24).
     pub fn positions(&self, frame: usize) -> Result<Vec<[f32; 3]>, String> {
         if frame >= self.frames {
-            return Err("mesh frame out of range".into());
+            return Err(format!(
+                "mesh frame out of range: requested {frame}, available {}, vertices {}, flags {:#x}",
+                self.frames, self.vertex_count, self.flags,
+            ));
         }
         if self.flags & 0x30 != 0 {
             let start = frame * self.vertex_count * 4;

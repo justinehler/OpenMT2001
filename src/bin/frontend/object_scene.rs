@@ -74,7 +74,8 @@ impl Model {
         })?
         };
         let prepared = openmt2001::people::prepare_mesh(source, source)?;
-        let positions = source.positions(frame)?;
+        let positions = source.positions(frame)
+            .map_err(|error| format!("moving-object model: {error}"))?;
         let mut parts = Vec::new();
         for part in prepared.parts {
             let material = usize::from(u16::from_le_bytes(

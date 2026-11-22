@@ -308,6 +308,66 @@ impl<'data> Session<'data> {
         Ok(())
     }
 
+    /// Modern imports recover the visual model from the saved resident identity.
+    /// Native 45be80 retains a freshly randomized model while overwriting age.
+    /// Keep that low-level contract and strict loads unchanged; modern runtime
+    /// extensions already serialize their actual model/controller state.
+    pub(crate) fn repair_imported_resident_models(
+        &mut self,
+        mode: crate::compatibility::Mode,
+        has_retained_runtime: bool,
+    ) -> Result<usize, String> {
+        if mode != crate::compatibility::Mode::Modern || has_retained_runtime {
+            return Ok(0);
+        }
+        let mut repairs = Vec::new();
+        for resident in self.world.ledgers.residents.nodes.iter().filter(|node| node.is_active()) {
+            if resident.age() > 4 {
+                return Err("imported resident age leaves model registry".into());
+            }
+            let row = usize::from(resident.model_variant());
+            let model = &self.resident_models[row];
+            let reference = resident.auxiliary_reference();
+            let slot = reference.checked_sub(1).ok_or("imported resident has no auxiliary")? as usize;
+            if slot >= self.world.creation.auxiliary.used() {
+                return Err("imported resident auxiliary is not allocated".into());
+            }
+            let auxiliary = &self.world.creation.auxiliary.slots()[slot];
+            let actual = u32::from_le_bytes(auxiliary[..4].try_into().unwrap());
+            if actual == model.reference {
+                continue;
+            }
+            let binding_index = self.population.bindings.iter()
+                .position(|binding| binding.auxiliary_reference == reference)
+                .ok_or("imported resident has no animation binding")?;
+            if self.population.bindings[binding_index].auxiliary_slot != slot {
+                return Err("imported resident animation binding selects another auxiliary".into());
+            }
+            if i16::from_le_bytes(auxiliary[0x2e..0x30].try_into().unwrap()) != -1 {
+                return Err("imported resident model repair requires an idle load boundary".into());
+            }
+            let frame = i16::from_le_bytes(auxiliary[0x2c..0x2e].try_into().unwrap());
+            let geometry = self.people.geometry_source(row, false).ok_or("imported resident geometry missing")?;
+            for lod in [false, true] {
+                let source = self.people.geometry_source(row, lod).ok_or("imported resident LOD missing")?;
+                if usize::try_from(frame).map_or(true, |frame| frame >= source.frames) {
+                    return Err("imported resident frame cannot be retained by identity model".into());
+                }
+            }
+            let frames = u16::try_from(geometry.frames).map_err(|_| "imported resident frame count overflow")?;
+            repairs.push((slot, binding_index, row, frames));
+        }
+        // Validate every repair before changing any retained state.
+        for &(slot, binding, row, frames) in &repairs {
+            let model = &self.resident_models[row];
+            openmt2001::resident::bind_auxiliary_model(
+                self.world.creation.auxiliary.get_mut(slot).unwrap(), model.reference, &model.definition,
+            );
+            self.population.bindings[binding].model_frame_count = frames;
+        }
+        Ok(repairs.len())
+    }
+
     /// Initialize the matching original level and consume a complete saved
     /// state. `input.scenario` and `input.difficulty` must designate the saved
     /// level; callers can derive them from the original GAMESTART catalog and
@@ -2467,7 +2527,70 @@ mod tests {
                 count,
                 session.world.clock.hour()
             );
+            let mut session = session;
+            assert_import_model_policy(&mut session);
         }
+    }
+
+    fn assert_import_model_policy(session: &mut Session<'_>) {
+        use crate::compatibility::Mode;
+        let nodes = session.world.ledgers.residents.nodes.iter()
+            .map(|n| (*n.as_bytes(), n.active_byte(), n.auxiliary_reference())).collect::<Vec<_>>();
+        let accounts = session.world.ledgers.residents.accounts.iter().map(|a| *a.as_bytes()).collect::<Vec<_>>();
+        let auxiliary = session.world.creation.auxiliary.slots().to_vec();
+        let bindings = |s: &Session<'_>| s.population.bindings.iter().map(|b|
+            (b.resident_reference, b.auxiliary_reference, b.auxiliary_slot, b.model_frame_count)).collect::<Vec<_>>();
+        let before_bindings = bindings(session);
+        let controllers = session.population.animations.records().to_vec();
+        let clock = session.world.clock.clone();
+        let rng = |s: &Session<'_>| [s.world.creation.identity_rng, s.world.creation.preference_rng,
+            s.world.creation.initialization_rng.constructor, s.world.creation.initialization_rng.movement,
+            s.world.creation.initialization_rng.objective, s.script_random_state, s.credit_random_state,
+            s.particle_random_state, s.policy.seed];
+        let before_rng = rng(session);
+        let mut expected = auxiliary.clone();
+        let mut expected_bindings = before_bindings.clone();
+        let mut changed = Vec::new();
+        for node in session.world.ledgers.residents.nodes.iter().filter(|node| node.is_active()) {
+            let slot = (node.auxiliary_reference() - 1) as usize;
+            let row = usize::from(node.model_variant());
+            let model = &session.resident_models[row];
+            if auxiliary[slot][..4] != model.reference.to_le_bytes() {
+                expected[slot][..4].copy_from_slice(&model.reference.to_le_bytes());
+                expected[slot][0x44..0xb8].copy_from_slice(&model.definition);
+                let binding = expected_bindings.iter_mut().find(|b| b.1 == node.auxiliary_reference()).unwrap();
+                assert_eq!(binding.2, slot);
+                binding.3 = session.people.geometry_source(row, false).unwrap().frames as u16;
+                changed.push(slot);
+            }
+        }
+        assert!(!changed.is_empty(), "supplied import must exercise a saved/fresh identity mismatch");
+        for (mode, retained) in [(Mode::StrictV14, false), (Mode::StrictV14, true), (Mode::Modern, true)] {
+            assert_eq!(session.repair_imported_resident_models(mode, retained).unwrap(), 0);
+            assert_eq!(session.world.creation.auxiliary.slots(), auxiliary);
+            assert_eq!(bindings(session), before_bindings);
+        }
+        // A late invalid candidate must not install any earlier valid repair.
+        let last = *changed.last().unwrap();
+        session.world.creation.auxiliary.get_mut(last).unwrap()[0x2c..0x2e].copy_from_slice(&i16::MAX.to_le_bytes());
+        let invalid = session.world.creation.auxiliary.slots().to_vec();
+        assert!(session.repair_imported_resident_models(Mode::Modern, false).is_err());
+        assert_eq!(session.world.creation.auxiliary.slots(), invalid);
+        assert_eq!(bindings(session), before_bindings);
+        session.world.creation.auxiliary.get_mut(last).unwrap()[0x2c..0x2e].copy_from_slice(&auxiliary[last][0x2c..0x2e]);
+        assert_eq!(session.repair_imported_resident_models(Mode::Modern, false).unwrap(), changed.len());
+        assert_eq!(session.world.creation.auxiliary.slots(), expected);
+        assert_eq!(bindings(session), expected_bindings);
+        assert_eq!(session.repair_imported_resident_models(Mode::Modern, false).unwrap(), 0);
+        assert_eq!(session.world.creation.auxiliary.slots(), expected);
+        assert_eq!(bindings(session), expected_bindings);
+        assert_eq!(session.world.ledgers.residents.nodes.iter().map(|n|
+            (*n.as_bytes(), n.active_byte(), n.auxiliary_reference())).collect::<Vec<_>>(), nodes);
+        assert_eq!(session.world.ledgers.residents.accounts.iter().map(|a| *a.as_bytes()).collect::<Vec<_>>(), accounts);
+        assert_eq!(session.population.animations.records(), controllers);
+        assert_eq!(session.world.clock, clock);
+        assert_eq!(rng(session), before_rng);
+        println!("Modern import repaired {} bindings; exact byte policy, strict/runtime exclusion, failure atomicity and idempotence passed", changed.len());
     }
 
     #[test]

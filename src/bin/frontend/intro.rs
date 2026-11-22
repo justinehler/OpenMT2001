@@ -1196,6 +1196,7 @@ impl SceneInputs {
             Some(&self.style),
         )?;
         let metadata = session.restore_v2_extension_with_image(&save, &image)?;
+        session.repair_imported_resident_models(self.compatibility, metadata.is_some())?;
         let saved_auction = metadata.as_ref().and_then(|metadata| metadata.auction.clone());
         let saved_interface_mode = metadata.as_ref().and_then(|metadata| metadata.interface_mode);
         if let Some(metadata) = metadata

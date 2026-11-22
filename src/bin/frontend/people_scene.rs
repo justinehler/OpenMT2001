@@ -455,7 +455,21 @@ impl Layer {
                 for &frame in &frames {
                     let positions = source.positions(
                         usize::try_from(frame).map_err(|_| "negative resident animation frame")?,
-                    )?;
+                    ).map_err(|error| {
+                        let matching = residents.iter().enumerate().filter(|(_, resident)|
+                            resident.row == row && i16::from_le_bytes(
+                                resident.auxiliary[0x2c..0x2e].try_into().unwrap()) == frame);
+                        let count = matching.clone().count();
+                        let slots = matching.take(8).map(|(slot, resident)| {
+                            let bytes = &resident.auxiliary;
+                            (slot, u32::from_le_bytes(bytes[..4].try_into().unwrap()),
+                             u16::from_le_bytes(bytes[0x2e..0x30].try_into().unwrap()),
+                             u32::from_le_bytes(bytes[0xb8..0xbc].try_into().unwrap()))
+                        }).collect::<Vec<_>>();
+                        format!("resident model row {row}, lod {lod}, variant {:?}, geometry {:?}, ticks {:?}, matching slots {count}, first8(slot,model,controller,flags) {slots:?}: {error}",
+                            session.people.path(row, lod), session.people.path(row & !3, lod),
+                            session.world.clock.timing)
+                    })?;
                     let mut parts = Vec::new();
                     for (part, page) in &model.parts {
                         let mut output = Part {
