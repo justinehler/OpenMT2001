@@ -835,17 +835,20 @@ impl<'data> Session<'data> {
                 building_base: 0x591318,
             },
         )?;
-        scripts.initialize(
-            level_startup::Sources {
-                default_hub: &read("DEFAULT/hub.lua")?,
-                scenario_name: input.scenario,
-                scenario_hub: &read(&format!("{}/hub.lua", input.scenario))?,
-            },
-            &mut world.script_state(&[None; 6]),
-            &context,
-            &mut geometry,
-            &mut hooks,
-        )?;
+        let default_hub = read("DEFAULT/hub.lua")?;
+        let scenario_hub = read(&format!("{}/hub.lua", input.scenario))?;
+        let sources = level_startup::Sources {
+            default_hub: &default_hub,
+            scenario_name: input.scenario,
+            scenario_hub: &scenario_hub,
+        };
+        if !load_mode && !matches!(id, 100000..=100012) {
+            scripts.initialize_active(sources, &mut world.script_state(&[None; 6]),
+                &context, &mut geometry, &mut hooks)?;
+        } else {
+            scripts.initialize(sources, &mut world.script_state(&[None; 6]),
+                &context, &mut geometry, &mut hooks)?;
+        }
         if matches!(id,100009|100012){
             let hub=read(&format!("{}/hub.lua",input.scenario))?;
             let compact:String=std::str::from_utf8(&hub).map_err(|e|e.to_string())?

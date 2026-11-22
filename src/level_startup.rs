@@ -296,6 +296,31 @@ impl Scripts {
         geometry: &mut impl crate::building_pool::GeometryBinding,
         hooks: &mut impl level_script::Hooks,
     ) -> Result<(), String> {
+        self.initialize_entry(sources, state, context, geometry, hooks, false)
+    }
+
+    /// Original4ba07d triggers Level synchronously before48cca0 creates players.
+    /// The trigger initializes once and retains any returned event delay.
+    pub fn initialize_active(
+        &mut self,
+        sources: Sources<'_>,
+        state: &mut level_script::State<'_>,
+        context: &level_script::Context<'_, '_>,
+        geometry: &mut impl crate::building_pool::GeometryBinding,
+        hooks: &mut impl level_script::Hooks,
+    ) -> Result<(), String> {
+        self.initialize_entry(sources, state, context, geometry, hooks, true)
+    }
+
+    fn initialize_entry(
+        &mut self,
+        sources: Sources<'_>,
+        state: &mut level_script::State<'_>,
+        context: &level_script::Context<'_, '_>,
+        geometry: &mut impl crate::building_pool::GeometryBinding,
+        hooks: &mut impl level_script::Hooks,
+        active: bool,
+    ) -> Result<(), String> {
         let mut handler = |id, args: &[crate::lua4::Value]| {
             self.bindings
                 .handle(id, args, state, &mut self.events, context, geometry, hooks)
@@ -304,8 +329,11 @@ impl Scripts {
             .execute("DEFAULT/hub.lua", sources.default_hub, &mut handler)?;
         self.runtime
             .execute(sources.scenario_name, sources.scenario_hub, &mut handler)?;
-        self.runtime
-            .call("EVENTINITIALISE_Level", &[0.], &mut handler)
+        if active {
+            self.runtime.execute("Level entry", b"C_TriggerEvent('Level',0,0)", &mut handler)
+        } else {
+            self.runtime.call("EVENTINITIALISE_Level", &[0.], &mut handler)
+        }
     }
 
     /// Tutorial 2 uses the original Camera table's view callbacks. Keep this

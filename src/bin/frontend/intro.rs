@@ -6993,14 +6993,18 @@ mod tests {
             ).unwrap();
             let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
                 up: [0., 1., 0.], vertical_fov: 45. };
-            for (preview, id) in [
-                (crate::singleplayer::Preview::Sandbox, 400002),
-                (crate::singleplayer::Preview::Scenario(400001), 400001),
-                (crate::singleplayer::Preview::Scenario(100001), 100001),
+            use crate::singleplayer::{Difficulty, Preview};
+            for (preview, id, difficulty, expected_cash, expected_people) in [
+                (Preview::Sandbox, 400002, Difficulty::Easy, Some(20000.), 500),
+                (Preview::Scenario(400001), 400001, Difficulty::Easy, Some(40000000.), 500),
+                (Preview::Scenario(400001), 400001, Difficulty::Medium, Some(30000000.), 500),
+                (Preview::Scenario(400001), 400001, Difficulty::Hard, Some(20000000.), 500),
+                (Preview::Scenario(200016), 200016, Difficulty::Easy, Some(8000.), 410),
+                (Preview::Scenario(100001), 100001, Difficulty::Easy, None, 0),
             ] {
                 let setup = crate::singleplayer::Setup {
                     preview,
-                    difficulty: crate::singleplayer::Difficulty::Easy,
+                    difficulty,
                     character_index: 4,
                     profile_name: b"Launch test".to_vec(),
                     catalog: catalog.clone(),
@@ -7009,6 +7013,22 @@ mod tests {
                 let mut cache = SnapshotCache::default();
                 let (loaded, session) = inputs.fresh_preview(setup, camera, &mut cache).unwrap();
                 assert_eq!(session.catalog.selected_level().unwrap().id(), id);
+                assert_eq!(session.world.ledgers.residents.active_count, expected_people);
+                if let Some(cash) = expected_cash {
+                    assert_eq!(session.world.player_money, cash);
+                    assert_eq!(session.world.ledgers.players[0].cash, cash);
+                }
+                if matches!(id, 400001 | 400002) {
+                    assert_eq!(session.roster.manager.players.len(), 1);
+                }
+                if id == 400001 {
+                    let row = session.world.catalog.info.row(42).unwrap();
+                    for (at, expected) in [(0x38,1), (0x3c,30), (0x48,1), (0x44,20), (0x40,6)] {
+                        assert_eq!(u32::from_le_bytes(row[at..at+4].try_into().unwrap()), expected);
+                    }
+                }
+                println!("Launch contract id{id} cash{} people{} roster{}", session.world.ledgers.players[0].cash,
+                    session.world.ledgers.residents.active_count, session.roster.manager.players.len());
                 if id != 100001 {
                     assert!(session.world.ledgers.residents.active_count > 0);
                 }
