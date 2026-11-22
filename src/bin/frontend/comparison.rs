@@ -344,7 +344,9 @@ impl Assets {
         exe: &[u8],
     ) -> Result<Self, String> {
         use crate::ui::{self, Surface};
-        let parts: Vec<_> = (0..12).collect();
+        // Parts4/5 are named runtime backings, not border artwork.
+        // Their opaque gray texture would obscure the city beneath the palette.
+        let parts: Vec<_> = (0..12).filter(|&part| part != 4 && part != 5).collect();
         let (mut closed, closed_regions) = ui::panel_frame_base(
             index,
             archive,
@@ -388,12 +390,22 @@ impl Assets {
         for (frame, surfaces) in [(0, &mut closed), (9, &mut open)] {
             let regions = openmt2001::ui_mesh::regions(&mesh, frame)?;
             let mut fill = Surface::solid();
+            let mut backing = Surface::solid();
             for (name, colors) in background_palette(frame, body) {
                 let region = regions
                     .iter()
                     .find(|r| r.name == name)
                     .ok_or("comparison background region")?;
-                fill.rect(region.bounds, colors);
+                if name == "P_STATS_LEFT_VERT" {
+                    fill.rect(region.bounds, colors);
+                } else {
+                    backing.rect(region.bounds, colors);
+                }
+            }
+            // Restore borders over the runtime body; retain the side gradient's
+            // existing order and all later dynamic row/widget surfaces.
+            if frame == 9 {
+                surfaces.insert(0, backing);
             }
             surfaces.push(fill);
         }
@@ -632,6 +644,63 @@ impl Assets {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires supplied original Comparison mesh and UI assets"]
+    fn original_comparison_background_materials() {
+        use crate::ui::{self, Surface};
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let exe = read("OPENMT2001_EXE");
+        let dir = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index = openmt2001::archive::ArchiveIndex::parse(&dir, archive.len() as u64).unwrap();
+        let path = "gamedata2/brand_new_panels/stats_panel.tm";
+        let entry = index.find(path).unwrap();
+        let mesh = openmt2001::mesh::CachedMesh::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+        let regions = openmt2001::ui_mesh::regions(&mesh, 9).unwrap();
+        for (name, part) in [("P_STATS_MODE_BACKING1", 4), ("P_STATS_STATS_BACKING", 5)] {
+            assert_eq!(regions.iter().find(|r| r.name == name).unwrap().part, part);
+            assert_eq!(mesh.parts[part].indices.len(), 12, "runtime fill covers a full placeholder quad");
+            assert!(mesh.texture_names[mesh.parts[part].texture as usize]
+                .eq_ignore_ascii_case("1NEW_MAYA_GREY_BORDER.TT"));
+        }
+        let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+        let assets = super::Assets::load(&index, &archive,
+            sun.parent().unwrap().parent().unwrap(), &[], &exe).unwrap();
+        let body = u32::from_le_bytes(openmt2001::pe::PeImage::parse(&exe).unwrap()
+            .at(0x5362c0, 4).unwrap().try_into().unwrap());
+        assert_eq!(body, 0xbb000a28);
+        for (state, frame) in [(0, 0), (1, 9)] {
+            let (border, _) = ui::panel_frame_base(&index, &archive, path,
+                &[0,1,2,3,6,7,8,9,10,11], frame).unwrap();
+            let submitted = &assets.base[state];
+            let offset = usize::from(frame == 9);
+            assert_eq!(submitted.len(), border.len() + offset + 1);
+            for (actual, original) in submitted[offset..offset + border.len()].iter().zip(&border) {
+                assert_eq!(actual.vertices, original.vertices, "retained border geometry/order");
+                assert_eq!(actual.pixels, original.pixels, "retained border material");
+                assert_eq!(actual.alpha, original.alpha, "retained border opacity");
+            }
+            let named = openmt2001::ui_mesh::regions(&mesh, frame).unwrap();
+            let mut side = Surface::solid();
+            let mut backing = Surface::solid();
+            for (name, colors) in super::background_palette(frame, body) {
+                let bounds = named.iter().find(|r| r.name == name).unwrap().bounds;
+                if name == "P_STATS_LEFT_VERT" { side.rect(bounds, colors); }
+                else { backing.rect(bounds, colors); }
+            }
+            let actual_side = submitted.last().unwrap();
+            assert_eq!(actual_side.vertices, side.vertices);
+            assert_eq!(actual_side.alpha, side.alpha, "intentional gray side gradient retained");
+            if frame == 9 {
+                let actual = &submitted[0];
+                assert_eq!(actual.vertices, backing.vertices, "navy body precedes every border");
+                assert_eq!(actual.alpha, [187; 12]);
+                assert_eq!(actual.pixels, [255; 4]);
+                assert_eq!(actual.draw().mode, openmt2001::render::SurfaceMode::Overlay);
+            }
+        }
+    }
     #[test]
     #[ignore = "private original comparison draw fixture"]
     fn matches_native_background_palette() {
