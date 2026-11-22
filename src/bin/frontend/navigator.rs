@@ -70,13 +70,21 @@ pub fn saved_owners(
         .collect()
 }
 impl Navigator {
-    pub fn load(index: &ArchiveIndex, archive: &[u8], blocks: &[Block]) -> Result<Self, String> {
+    pub fn load(index: &ArchiveIndex, archive: &[u8], blocks: &[Block], executable: &[u8]) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
             "gamedata2/brand_new_panels/new_nav_top.tm",
-            &[0, 1],
+            &[1],
         )?;
+        //43d010 resolves backing separately;43d0b0 fills it at depth0.5.
+        // Part0 is that full rectangle, not border artwork. Keep only part1
+        // textured; otherwise its opaque gray texture covers the palette fill.
+        let image = openmt2001::pe::PeImage::parse(executable)?;
+        let color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
+        let mut backing = Surface::solid();
+        backing.rect(*regions.first().ok_or("Navigator backing missing")?, [color; 4]);
+        surfaces.insert(0, backing);
         let bounds = *regions.get(2).ok_or("Navigator main window missing")?;
         let origin = origin(bounds);
         //4c0e9b loads generic textures at689f90;43db40 reads689fc0 (index12).
@@ -356,6 +364,41 @@ fn arrow_quad(origin: [f32; 2], eye: [f32; 2], angle: f32, tick: u32) -> [[f32; 
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "requires supplied original upper Navigator mesh"]
+    fn original_upper_navigator_regions() {
+        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let e = index.find("gamedata2/brand_new_panels/new_nav_top.tm").unwrap();
+        let mesh = openmt2001::mesh::CachedMesh::parse(
+            &archive[e.offset as usize..(e.offset + e.length) as usize]).unwrap();
+        let regions = openmt2001::ui_mesh::regions(&mesh, 0).unwrap();
+        assert_eq!(regions.iter().map(|r| (r.name.as_str(), r.part)).collect::<Vec<_>>(),
+            [("NAV_BACKING_MAIN", 0), ("NAV_BORDER01", 1), ("P_NAVIGATOR_MAINWINDOW", 2)]);
+        assert_eq!(regions[0].bounds, [530.3883666992188, 355.96807861328125,
+            637.0919189453125, 446.5613708496094]);
+        assert_eq!(mesh.parts[0].indices.len(), 12); // full backing: two triangles
+        assert_eq!(mesh.parts[1].indices.len(), 48); // border: four edge quads
+        assert_eq!(mesh.texture_names[mesh.parts[1].texture as usize], "1NEW_MAYA_GREY_BORDER.TT");
+        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        assert_eq!(image.at(0x5362c0, 4).unwrap(), &0xbb000a28u32.to_le_bytes());
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let navigator = super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap();
+        assert_eq!(navigator.surfaces.len(), 3, "backing, border and map keep dynamic indices stable");
+        let backing = &navigator.surfaces[0];
+        assert_eq!((backing.width, backing.height), (1, 1));
+        assert_eq!(backing.pixels, [255; 4]);
+        assert_eq!(backing.alpha, [187; 6], "original publish color alpha survives submission");
+        let [l,t,r,b] = regions[0].bounds;
+        let corners = [[l,t],[l,b],[r,b],[r,t]];
+        for (vertex, corner) in backing.vertices.iter().zip([0,1,2,0,2,3]) {
+            assert_eq!(vertex[..3], [corners[corner][0], corners[corner][1], 0.5]);
+            assert_eq!(vertex[3..6], [0., 10./255., 40./255.]);
+        }
+        assert_eq!(backing.draw().mode, openmt2001::render::SurfaceMode::Overlay);
+    }
+    #[test]
     #[ignore = "private saved cities and GPU"]
     fn saved_ownership_gpu() {
         use openmt2001::{
@@ -372,7 +415,7 @@ mod tests {
         let board = Board::from_v14(&image).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let nav = super::Navigator::load(&index, &archive, &board.blocks).unwrap();
+        let nav = super::Navigator::load(&index, &archive, &board.blocks, &exe).unwrap();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         if cfg!(target_os = "windows") {
             descriptor.backends = wgpu::Backends::DX12;

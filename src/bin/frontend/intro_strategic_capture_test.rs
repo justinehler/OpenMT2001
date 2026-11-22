@@ -117,7 +117,7 @@ fn capture_saved_preview_strategic_composition() {
         let time_assets = crate::time_panel::Assets::load(&index, &inputs.archive,
             &inputs.installer, &inputs.language, &inputs.executable).unwrap();
         let navigator = crate::navigator::Navigator::load(&index, &inputs.archive,
-            &board.blocks).unwrap();
+            &board.blocks, &inputs.executable).unwrap();
         let compass = navigation.prepare(&renderer).unwrap();
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
             let (mut loaded, session) = inputs.saved_preview(

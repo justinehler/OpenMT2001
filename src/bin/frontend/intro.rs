@@ -100,7 +100,7 @@ impl Assets {
         let navigation = crate::navigation::Navigation::load(&index, &archive, &executable)?;
         let mut selection = crate::selection::Assets::load(&executable, &index, &archive)?;
         style.apply_blocks(&mut selection.blocks)?;
-        let navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks)?;
+        let navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks, &executable)?;
         let tooltip = crate::tooltip::Tooltip::load(
             &index, &archive, &paths.installer, &paths.language)?;
         let result_actors = crate::auction_scene::Assets::load_result(
