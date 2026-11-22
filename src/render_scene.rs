@@ -855,9 +855,10 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             .map_err(|e| e.to_string())?;
         let scenery_records =
             crate::scene_assets::scenery_textures(&image, &directory, archive, 1280)?;
-        let (pages, scenery_regions) = crate::scene_assets::scenery_pages_with_loader(&scenery_records,
+        let (pages, scenery_regions) = crate::scene_assets::scenery_pages_with_material_loader(&scenery_records,
             |image| textures.as_deref_mut().map_or_else(
-                || crate::texture::loader_pixels(image).into(), |cache| cache.pixels(image)))?;
+                || (crate::texture::loader_pixels(image).into(), crate::texture::loader_flags(image)),
+                |cache| cache.pixels_and_flags(image)))?;
         scenery_pages = pages;
         let registered = |name: &str| {
             let key = name.rsplit('\\').next().unwrap();

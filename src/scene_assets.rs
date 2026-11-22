@@ -142,6 +142,16 @@ pub(crate) fn scenery_pages_with_loader(
     records: &[SceneryTexture<'_>],
     mut pixels: impl FnMut(&crate::texture::TextureRecord<'_>) -> std::sync::Arc<[u8]>,
 ) -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {
+    scenery_pages_with_material_loader(records, |record| {
+        let converted = pixels(record);
+        (converted, crate::texture::loader_flags(record))
+    })
+}
+
+pub(crate) fn scenery_pages_with_material_loader(
+    records: &[SceneryTexture<'_>],
+    mut material: impl FnMut(&crate::texture::TextureRecord<'_>) -> (std::sync::Arc<[u8]>, u32),
+) -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {
     let inputs: Vec<_> = records
         .iter()
         .map(|record| crate::atlas::Input {
@@ -190,9 +200,9 @@ pub(crate) fn scenery_pages_with_loader(
             }
             (shared_pages[region.page], region.origin)
         };
-        let pixels = pixels(&record.texture);
+        let (pixels, flags) = material(&record.texture);
         let mut loaded = record.texture.clone();
-        loaded.header[0] = crate::texture::loader_flags(&loaded);
+        loaded.header[0] = flags;
         loaded.texels = &pixels;
         let target = &mut pages[page];
         target.flags |= loaded.header[0] & 0xd000;
@@ -516,6 +526,34 @@ const SCENERY_STARTUP_MESHES: &[(i32, u8, &[u32])] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires supplied original archive and v1.4 executable"]
+    fn original_cached_scenery_materials_match_uncached_pages() {
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let exe = read("OPENMT2001_EXE");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index = crate::archive::ArchiveIndex::parse(&read("OPENMT2001_ARCHIVE_DIR"), archive.len() as u64).unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
+        let records = super::scenery_textures(&image, &index, &archive, 1280).unwrap();
+        assert_eq!(records.len(), 246);
+        let (expected_pages, expected_regions) = super::scenery_pages(&records).unwrap();
+        let mut cache = crate::texture::LoaderCache::default();
+        for _ in 0..3 {
+            let (pages, regions) = super::scenery_pages_with_material_loader(&records,
+                |record| cache.pixels_and_flags(record)).unwrap();
+            assert_eq!(pages.len(), expected_pages.len());
+            assert_eq!(regions.len(), expected_regions.len());
+            for (actual, expected) in pages.iter().zip(&expected_pages) {
+                assert_eq!((actual.side, actual.flags, actual.group), (expected.side, expected.flags, expected.group));
+                assert_eq!(actual.rgba, expected.rgba);
+            }
+            for (actual, expected) in regions.iter().zip(&expected_regions) {
+                assert_eq!(actual.page, expected.page);
+                assert_eq!(actual.uv.map(f32::to_bits), expected.uv.map(f32::to_bits));
+            }
+        }
+    }
+
     #[test]
     fn indexed_texture_prefixes_match_linear_registration() {
         let mut legacy = Vec::<String>::new();

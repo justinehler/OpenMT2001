@@ -23,8 +23,26 @@ struct LoaderEntry {
     hash: u64,
     source: Arc<[u8]>,
     pixels: Arc<[u8]>,
+    flags: Option<u32>,
 }
 impl LoaderCache {
+    /// Converted pixels and native alpha classification from the same source.
+    /// Flags are computed lazily and retained under the existing exact-content
+    /// cache key; pixel-only callers do not incur an additional scan.
+    pub fn pixels_and_flags(&mut self, image: &TextureRecord<'_>) -> (Arc<[u8]>, u32) {
+        let pixels = self.pixels(image);
+        let flags = self.flags_for_pixels(image, &pixels);
+        (pixels, flags)
+    }
+    fn flags_for_pixels(&mut self, image: &TextureRecord<'_>, pixels: &Arc<[u8]>) -> u32 {
+        // pixels() moves a hit or newly retained conversion to the back.
+        // Oversized conversions are not retained and must classify directly.
+        if let Some(entry) = self.entries.back_mut().filter(|entry| Arc::ptr_eq(&entry.pixels, pixels)) {
+            *entry.flags.get_or_insert_with(|| loader_flags(image))
+        } else {
+            loader_flags(image)
+        }
+    }
     pub fn pixels(&mut self, image: &TextureRecord<'_>) -> Arc<[u8]> {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         image.texels.hash(&mut hash);
@@ -45,7 +63,7 @@ impl LoaderCache {
                 self.bytes -= removed.source.len() + removed.pixels.len();
             }
             self.entries.push_back(LoaderEntry {
-                header: image.header, hash, source: Arc::from(image.texels), pixels: pixels.clone(),
+                header: image.header, hash, source: Arc::from(image.texels), pixels: pixels.clone(), flags: None,
             });
             self.bytes += bytes;
         }
@@ -69,6 +87,43 @@ fn cached_original_loader_preserves_pixels_and_detects_changed_source() {
     assert_eq!(next.as_ref(), loader_pixels(&record));
     assert!(!Arc::ptr_eq(&first, &next));
     assert_eq!(cache.entries.len(), 2);
+}
+
+#[test]
+fn cached_loader_flags_follow_source_and_header_changes() {
+    let mut cache = LoaderCache::default();
+    let source = [34, 67, 91, 255, 255, 0, 100, 255];
+    let image = TextureRecord { header: [0; RECORD_WORDS], width: 2, height: 1, texels: &source };
+    let first = cache.pixels(&image);
+    assert_eq!(cache.entries.back().unwrap().flags, None);
+    let (pixels, flags) = cache.pixels_and_flags(&image);
+    assert!(Arc::ptr_eq(&first, &pixels));
+    assert_eq!(flags, loader_flags(&image));
+    assert_eq!(cache.entries.back().unwrap().flags, Some(flags));
+    let (repeated, repeated_flags) = cache.pixels_and_flags(&image);
+    assert!(Arc::ptr_eq(&pixels, &repeated));
+    assert_eq!(repeated_flags, flags);
+
+    let mut alpha = source;
+    alpha[3] = 127;
+    let changed = TextureRecord { texels: &alpha, ..image.clone() };
+    let (pixels, changed_flags) = cache.pixels_and_flags(&changed);
+    assert_eq!(pixels.as_ref(), loader_pixels(&changed));
+    assert_eq!(changed_flags, loader_flags(&changed));
+    assert_ne!(changed_flags, flags);
+    let mut header = changed.header;
+    header[0] = 0x10000002;
+    let changed_header = TextureRecord { header, ..changed.clone() };
+    let (_, header_flags) = cache.pixels_and_flags(&changed_header);
+    assert_eq!(header_flags, loader_flags(&changed_header));
+    assert_ne!(header_flags, changed_flags);
+
+    // An output not retained in this cache must not borrow another entry's
+    // flags. This also covers the path used by over-budget conversions.
+    let unrelated: Arc<[u8]> = loader_pixels(&image).into();
+    assert_eq!(cache.flags_for_pixels(&image, &unrelated), loader_flags(&image));
+    assert_eq!(cache.entries.back().unwrap().flags, Some(header_flags));
+    assert_eq!(cache.pixels_and_flags(&image).1, flags);
 }
 
 const COUNT_SIZE: usize = 4;
