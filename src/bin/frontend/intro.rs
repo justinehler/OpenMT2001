@@ -6087,6 +6087,13 @@ impl Intro {
             Self::draw_tutorial_visual(
                 &self.assets, &self.menu, &self.renderer,
                 &self.color_view, &self.depth_view, view)?;
+            if let Some(menu)=&self.menu {
+                view.stats_panel.update(menu.stats_assets(),&self.renderer,
+                    view.live_status.as_ref().and_then(|status|status.stats.as_ref()))?;
+                if let Some(panel)=&view.stats_panel.prepared {
+                    self.renderer.draw_overlay(&self.color_view,&self.depth_view,panel);
+                }
+            }
             if view.prompts.request().is_some()
                 && let Some(menu) = &self.menu
             {
