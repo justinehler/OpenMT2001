@@ -11,7 +11,7 @@ use std::{
 
 /// Resolve original Windows filenames on case-sensitive hosts without allowing
 /// registration strings to escape the supplied scripts directory.
-fn original_path(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+pub(super) fn original_path(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
     let name = name.replace('\\', "/");
     let mut path = root.to_path_buf();
     for component in Path::new(&name).components() {

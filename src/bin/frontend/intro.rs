@@ -1158,6 +1158,13 @@ impl SceneInputs {
             .ok_or("saved catalog level is missing")?;
         let scenario = std::str::from_utf8(level.directory())
             .map_err(|_| "saved scenario directory is not UTF-8")?;
+        // Catalog names retain Windows casing; use the supplied directory's
+        // spelling for the session's hub, player and AI reads on Linux.
+        let scenario_path = crate::campaign_store::original_path(scripts, scenario)?
+            .ok_or("saved scenario script directory is missing")?;
+        let scenario = scenario_path.strip_prefix(scripts)
+            .map_err(|_| "saved scenario directory is outside scripts")?
+            .to_str().ok_or("saved scenario directory is not UTF-8")?;
         let difficulty = i32::try_from(difficulty).map_err(|_| "saved difficulty exceeds signed range")?;
         let board = self.styled_board(&image)?;
         let file = openmt2001::build_file::BuildFile::parse(&self.build_file)?;
@@ -4687,6 +4694,9 @@ impl Intro {
                                 view.dust = std::mem::take(&mut previous.dust);
                                 view.time_pressed = previous.time_pressed.take();
                                 view.game_options = std::mem::take(&mut previous.game_options);
+                                // A scene snapshot carries render state, not the selected
+                                // profile identity. Keep the worker's writable save scope.
+                                view.save_profile_root = previous.save_profile_root.take();
                                 view.save_dialog = std::mem::take(&mut previous.save_dialog);
                                 view.save_pending = previous.save_pending.take();
                                 view.save_delete_pending = previous.save_delete_pending.take();
