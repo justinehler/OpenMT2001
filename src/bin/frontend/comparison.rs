@@ -205,6 +205,15 @@ impl View {
             dirty: true,
         }
     }
+    /// Keep fresh data and enabled metrics; retain only valid user choices.
+    pub fn retain_ui_from(&mut self, old: &Self) {
+        self.state.open = old.state.open;
+        if self.state.enabled.get(old.state.mode) == Some(&true) {
+            self.state.mode = old.state.mode;
+        }
+        self.cancel_press();
+        self.prepared = None;
+    }
     pub fn contains(&self, point: [i32; 2]) -> bool {
         let [x, y] = point.map(|v| v as f32 * 0.5);
         (4. ..=if self.state.open { 190.4 } else { 30.4 }).contains(&x)
@@ -851,5 +860,30 @@ mod tests {
             assert_eq!(order(&values), expected);
         }
         assert_eq!(at, b.len());
+    }
+}
+
+#[cfg(test)]
+mod refresh_ui_tests {
+    use super::*;
+    #[test]
+    fn selected_metric_survives_new_objective_and_values_without_input_capture() {
+        let mut old = View::new(Data { objective: 0, rows: vec![(0, [1.; 9])] });
+        old.state.mode = 4; old.state.open = false;
+        old.pressed = Some(2); old.hover = Some(2);
+        let mut new = View::new(Data { objective: 1, rows: vec![(1, [42.; 9])] });
+        assert_eq!(new.state.mode, 6);
+        new.retain_ui_from(&old);
+        assert_eq!(new.state.mode, 4);
+        assert!(!new.state.open);
+        assert_eq!(new.data.objective, 1);
+        assert_eq!(new.data.values(4), vec![(1, 42.)]);
+        assert!(!new.state.enabled[7]);
+        assert!(new.pressed.is_none() && new.hover.is_none() && new.prepared.is_none() && new.dirty);
+        old.state.mode = 7; old.state.open = true;
+        let mut fallback = View::new(new.data.clone()); fallback.retain_ui_from(&old);
+        assert!(fallback.state.open); assert_eq!(fallback.state.mode, 6);
+        old.state.mode = usize::MAX; fallback.retain_ui_from(&old);
+        assert_eq!(fallback.state.mode, 6);
     }
 }

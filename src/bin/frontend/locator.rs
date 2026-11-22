@@ -3302,7 +3302,102 @@ pub struct Locator {
     pub dirty: bool,
     pub prepared: Option<PreparedScene>,
 }
+// An offset is meaningful only while its anchor identity still exists.
+fn remap_scroll<T, K: PartialEq>(old: &[T], offset: usize, new: &[T], visible: usize, key: impl Fn(&T) -> K) -> usize {
+    old.get(offset).and_then(|anchor| {
+        let mut matches = new.iter().enumerate().filter(|(_, r)| key(r) == key(anchor));
+        let first = matches.next()?.0;
+        matches.next().is_none().then_some(first)
+    })
+        .unwrap_or(0).min(new.len().saturating_sub(visible))
+}
+
 impl Locator {
+    /// Apply only presentation choices to a fully attached authoritative snapshot.
+    pub fn retain_ui_from(&mut self, old: &Self, assets: &Assets, old_scene: &Scene, scene: &Scene) -> Result<(), String> {
+        // A building row is identified by its runtime slot, not its scene index.
+        let owned_key = |row: &OwnedRow, scene: &Scene| -> Option<(bool, usize)> {
+            match row.building {
+                Some(index) => scene.inspection_buildings.get(index)?.runtime_slot
+                    .map(|slot| (true, slot)),
+                None if row.label != u32::MAX => Some((false, row.label as usize)),
+                None => None,
+            }
+        };
+        let anchor = old.owned_rows.get(old.owned_scroll).and_then(|r| owned_key(r, old_scene));
+        let scroll = anchor.and_then(|key| self.owned_rows.iter().position(|r| owned_key(r, scene) == Some(key)))
+            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(assets.owned_visible()));
+        self.retain_ui_choices(old, assets.visible(), assets.owned_visible())?;
+        self.owned_scroll = scroll;
+        Ok(())
+    }
+
+    fn retain_ui_choices(&mut self, old: &Self, visible: usize, owned_visible: usize) -> Result<(), String> {
+        // Resolve the financial roster slot, never the old roster position.
+        let selected = old.player.players.get(old.player.selected)
+            .and_then(|slot| self.player.players.iter().position(|p| p == slot))
+            .or_else(|| self.player.players.iter().position(|p| Some(*p) == self.player.current))
+            .unwrap_or(0);
+        let rows = self.player.players.get(selected)
+            .map(|&slot| crate::player_info::report(&self.player.records[slot], old.player.today))
+            .transpose()?.unwrap_or_default();
+        self.player.selected = selected;
+        self.player.today = old.player.today;
+        self.player.scroll = old.player.scroll.min(rows.len().saturating_sub(19));
+        self.player.rows = rows;
+
+        self.open = old.open;
+        self.city_info = old.city_info && self.city_people.is_some();
+        self.poll_info = old.poll_info && self.polls.is_some();
+        self.player_info = old.player_info && !self.player.players.is_empty();
+        self.people_mode = old.people_mode.min(3);
+        self.ownership_mode = old.ownership_mode && self.ownership.is_some();
+        self.rights_mode = old.rights_mode && self.rights.is_some();
+        self.prestige_mode = old.prestige_mode && self.prestige.is_some();
+        self.my_business = old.my_business;
+        if self.commodity != old.commodity {
+            std::mem::swap(&mut self.rows, &mut self.other_rows);
+        }
+        self.commodity = old.commodity;
+        self.selected = old.selected.filter(|id| self.rows.iter().any(|r| r.kind == *id));
+        self.other_selected = old.other_selected.filter(|id| self.other_rows.iter().any(|r| r.kind == *id));
+        self.scroll = remap_scroll(&old.rows, old.scroll, &self.rows, visible, |r| r.kind);
+        self.other_scroll = remap_scroll(&old.other_rows, old.other_scroll, &self.other_rows, visible, |r| r.kind);
+        // Owned building indices belong to different scenes. Anchor only to the
+        // preceding category header; do not copy a building or its numeric index.
+        self.owned_scroll = old.owned_rows.iter().take(old.owned_scroll.saturating_add(1))
+            .rposition(|r| r.label & 0x8000_0000 != 0 && r.label != u32::MAX)
+            .and_then(|i| self.owned_rows.iter().position(|r| r.label == old.owned_rows[i].label && r.building.is_none()))
+            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(owned_visible));
+        self.ownership_scroll = if self.prestige_mode {
+            match (&old.prestige, &self.prestige) {
+                (Some(a), Some(b)) => remap_scroll(&a.rows, old.ownership_scroll, &b.rows, 17, Clone::clone),
+                _ => 0,
+            }
+        } else if self.ownership_mode {
+            // Group header identity is roster slot; category identity is block ID.
+            let keys = |report: &crate::city_ownership::Ownership| {
+                report.groups.iter().enumerate().flat_map(|(slot, group)| {
+                    std::iter::once((0, slot)).chain(if group.is_empty() {
+                        vec![(1, slot)]
+                    } else { group.iter().map(|&id| (2, id)).collect() }.into_iter())
+                }).collect::<Vec<_>>()
+            };
+            match (&old.ownership, &self.ownership) {
+                (Some(a), Some(b)) => remap_scroll(&keys(a), old.ownership_scroll, &keys(b), 17, |r| *r),
+                _ => 0,
+            }
+        } else { 0 };
+        self.pending_category = None;
+        self.poll_category = None; // Recomputed from the remapped Inspection hit.
+        self.pressed = None;
+        self.hover = None;
+        self.tutorial_activated = None;
+        self.prepared = None;
+        self.dirty = true;
+        Ok(())
+    }
+
     ///40d8f2 stores the descriptor tooltip ID at each of the four icon
     /// children +0x34. Use the same hit test as the visible icon controls.
     pub fn icon_tooltip_at(&self, assets: &Assets, point: [i32; 2]) -> Option<u32> {
@@ -5269,3 +5364,140 @@ mod tests {
 #[cfg(test)]
 #[path = "property_panel_test.rs"]
 mod property_panel_tests;
+
+#[cfg(test)]
+mod refresh_ui_tests {
+    use super::*;
+    fn fresh() -> Locator {
+        Locator {
+            city_info: false,
+            city_people: None,
+            people_mode: 0,
+            polls: None,
+            poll_category: None,
+            poll_info: false,
+            ownership: None,
+            rights: None,
+            rights_mode: false,
+            ownership_mode: false,
+            prestige: None,
+            prestige_mode: false,
+            ownership_scroll: 0,
+            pending_category: None,
+            player_info: false,
+            player: crate::player_info::State::new(&[]).unwrap(),
+            saved_panels: false,
+            catalog: None,
+            owned_rows: Vec::new(),
+            my_business: true,
+            owned_scroll: 0,
+            owned_eligible: [false; 52],
+            other_rows: Vec::new(),
+            commodity: false,
+            other_selected: None,
+            other_scroll: 0,
+            rows: Vec::new(),
+            open: false,
+            selected: None,
+            scroll: 0,
+            pressed: None,
+            hover: None,
+            tutorial_activated: None,
+            dirty: true,
+            prepared: None,
+        }
+    }
+    fn report(value: i32) -> crate::city_people::Report {
+        crate::city_people::Report { initialized: true, markers: vec![], rows: vec![crate::city_people::Row { style: 0, label: 1, value }] }
+    }
+    fn rows(ids: &[u32]) -> Vec<Row> { ids.iter().map(|&kind| Row { label: kind + 100, kind }).collect() }
+    #[test]
+    fn two_refreshes_keep_poll_choice_and_new_reports_cancel_input() {
+        let mut old = fresh();
+        old.attach_people(report(1));
+        old.city_info = false;
+        old.poll_info = true;
+        old.people_mode = 3;
+        old.pressed = Some(Action::Toggle);
+        old.hover = Some(Action::Poll);
+        old.pending_category = Some(8);
+        old.tutorial_activated = Some(12);
+        for value in [2, 3] {
+            let mut new = fresh();
+            new.attach_people(report(value));
+            new.attach_polls(Some(std::array::from_fn(|_| crate::consumer_polls::Poll { residents: value as u16, ..Default::default() })));
+            new.retain_ui_choices(&old, 2, 2).unwrap();
+            assert_eq!(new.open, old.open);
+            assert!(new.poll_info && !new.city_info && !new.player_info);
+            assert_eq!(new.people_mode, 3);
+            assert_eq!(new.city_people.as_ref().unwrap().rows[0].value, value);
+            assert_eq!(new.polls.as_ref().unwrap()[8].residents, value as u16);
+            assert!(new.pressed.is_none() && new.hover.is_none() && new.pending_category.is_none());
+            assert!(new.tutorial_activated.is_none() && new.prepared.is_none() && new.dirty);
+            new.open = false;
+            old = new;
+        }
+    }
+    #[test]
+    fn commodity_orientation_and_stable_scroll_remap_then_removal() {
+        let mut old = fresh();
+        old.commodity = true;
+        old.rows = rows(&[5, 6, 7, 8]); old.other_rows = rows(&[10, 11, 12]);
+        old.selected = Some(6); old.other_selected = Some(11);
+        old.scroll = 1; old.other_scroll = 1;
+        let mut new = fresh();
+        new.rows = rows(&[11, 12, 13]); new.other_rows = rows(&[6, 7, 8]);
+        new.retain_ui_choices(&old, 1, 1).unwrap();
+        assert!(new.commodity);
+        assert_eq!(new.rows, rows(&[6, 7, 8]));
+        assert_eq!((new.selected, new.other_selected), (Some(6), Some(11)));
+        assert_eq!((new.scroll, new.other_scroll), (0, 0));
+        let mut shorter = fresh();
+        shorter.rows = rows(&[99]); shorter.other_rows = rows(&[1]);
+        shorter.retain_ui_choices(&new, 19, 19).unwrap();
+        assert_eq!((shorter.selected, shorter.other_selected), (None, None));
+        assert_eq!((shorter.scroll, shorter.other_scroll, shorter.owned_scroll), (0, 0, 0));
+    }
+    #[test]
+    fn financial_slot_and_period_use_new_records_with_fallback() {
+        let mut record = [0u8; 440]; record[0xc] = 1;
+        let mut old = fresh();
+        old.player = crate::player_info::State::new(&[record, record, record]).unwrap();
+        old.player.players = vec![2, 0, 1]; old.player.selected = 0;
+        old.player.today = false; old.player.scroll = 999;
+        old.player_info = true;
+        let mut changed = record;
+        changed[0xa0 - 4 + 152..0xa0 + 152].copy_from_slice(&42f32.to_le_bytes());
+        let mut new = fresh();
+        new.player = crate::player_info::State::new(&[record, record, changed]).unwrap();
+        new.retain_ui_choices(&old, 19, 19).unwrap();
+        assert_eq!(new.player.players[new.player.selected], 2);
+        assert!(!new.player.today);
+        assert_eq!(new.player.records[2], changed);
+        assert_eq!(new.player.rows, crate::player_info::report(&changed, false).unwrap());
+        assert!(new.player.rows.iter().any(|r| r.amount == 42f32.to_bits()));
+        assert_eq!(new.player.scroll, new.player.rows.len().saturating_sub(19));
+        let mut missing = fresh();
+        missing.player = crate::player_info::State::new(&[record, record]).unwrap();
+        missing.player.current = Some(1);
+        missing.retain_ui_choices(&new, 19, 19).unwrap();
+        assert_eq!(missing.player.players[missing.player.selected], 1);
+        let mut empty = fresh(); empty.retain_ui_choices(&missing, 19, 19).unwrap();
+        assert!(!empty.player_info && empty.player.rows.is_empty());
+        assert_eq!((empty.player.selected, empty.player.scroll), (0, 0));
+    }
+    #[test]
+    fn missing_categories_reset_scroll_and_page_capabilities() {
+        use crate::city_prestige::{Prestige, Row as P};
+        let prestige = |rows| Prestige { rows, values: [0.; 52], overlay_categories: vec![] };
+        let mut old = fresh(); old.city_info = true; old.prestige_mode = true;
+        old.prestige = Some(prestige((0..25).map(P::Block).collect())); old.ownership_scroll = 5;
+        let mut new = fresh(); new.city_people = Some(report(2));
+        new.prestige = Some(prestige((5..25).map(P::Block).collect()));
+        new.retain_ui_choices(&old, 19, 19).unwrap();
+        assert_eq!(new.ownership_scroll, 0);
+        let mut gone = fresh(); gone.retain_ui_choices(&new, 19, 19).unwrap();
+        assert!(!gone.city_info && !gone.prestige_mode);
+        assert_eq!(gone.ownership_scroll, 0);
+    }
+}

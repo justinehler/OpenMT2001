@@ -4759,6 +4759,19 @@ impl Intro {
                                         building,
                                     })
                                 });
+                                // Attachments and selected-building remapping are complete.
+                                // Transfer choices into fresh reports, never old report payloads.
+                                if let (Some(locator), Some(old)) = (&mut view.locator, &previous.locator) {
+                                    locator.retain_ui_from(old, menu.locator_assets(), &previous.scene, &view.scene)?;
+                                    locator.select_poll_category(view.selected.and_then(|hit|
+                                        self.assets.selection.blocks.get(hit.category).map(|block| block.id)));
+                                    locator.pointer(menu.locator_assets(), if view.strategic && view.adjustment.is_none() {
+                                        view.pointer
+                                    } else { None });
+                                }
+                                if let (Some(comparison), Some(old)) = (&mut view.comparison, &previous.comparison) {
+                                    comparison.retain_ui_from(old);
+                                }
                                 if let Some(mut adjustment) = previous.adjustment.take()
                                     && menu.adjustment_assets().refresh(
                                         &view.scene, &previous.scene, &mut adjustment,
