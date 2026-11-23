@@ -2994,6 +2994,20 @@ impl Intro {
         pressed: bool,
     ) -> Result<(), String> {
         use winit::keyboard::NamedKey;
+        // Releases must retire held arrows even when a modal consumes the event.
+        // Keep admitted taps until the camera callback consumes them.
+        if !pressed && let Some(view) = &mut self.inspection {
+            let index = match key {
+                NamedKey::ArrowRight => Some(0),
+                NamedKey::ArrowLeft => Some(1),
+                NamedKey::ArrowDown => Some(2),
+                NamedKey::ArrowUp => Some(3),
+                _ => None,
+            };
+            if let Some(i) = index {
+                view.keys[i] = false;
+            }
+        }
         if self.inspection.as_ref().is_some_and(|view| {
             view.result.is_some() || view.result_pending.is_some()
                 || view.live_status.as_ref().is_some_and(|status| status.result_request.is_some())

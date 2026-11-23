@@ -294,3 +294,184 @@ fn prompt_swallowed_right_edges_block_whitelisted_collapsed_info_dispatch() {
         .join()
         .unwrap();
 }
+
+// Direct Intro handler/production callback coverage; App routing is source-joined
+// separately. Reuses the supplied snapshot constructor above, without a worker.
+#[test]
+#[ignore = "requires X11/GPU, supplied original assets/SAVE_ONE, ffmpeg and OPENMT2001_TOOLBAR_RIGHT_TEST_ROOT; direct Intro arrow regression"]
+#[allow(deprecated)]
+fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let root = PathBuf::from(std::env::var("OPENMT2001_TOOLBAR_RIGHT_TEST_ROOT").unwrap());
+            assert!(
+                root.is_dir(),
+                "supply an existing owned disk scratch parent"
+            );
+            let scratch = root.join(format!(
+                "camera-arrow-release-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&scratch).unwrap();
+            struct Cleanup(PathBuf);
+            impl Drop for Cleanup {
+                fn drop(&mut self) {
+                    let _ = fs::remove_dir_all(&self.0);
+                }
+            }
+            let cleanup = Cleanup(scratch.clone());
+            let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+            let save_bytes = fs::read(&original).unwrap();
+            let save = scratch.join("fixture.sav");
+            fs::write(&save, &save_bytes).unwrap();
+            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let params = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let directory = PathBuf::from(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap());
+            let mut builder = EventLoop::builder();
+            builder.with_x11().with_any_thread(true);
+            let event_loop = builder.build().unwrap();
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_inner_size(winit::dpi::PhysicalSize::new(1280, 960)),
+                    )
+                    .unwrap(),
+            );
+            let presenter = pollster::block_on(Presenter::new(window)).unwrap();
+            let assets = Assets::load(Paths {
+                compatibility: crate::compatibility::Mode::Modern,
+                installer: params.parent().unwrap().parent().unwrap().to_path_buf(),
+                ffmpeg: PathBuf::from(
+                    std::env::var("OPENMT2001_FFMPEG").unwrap_or_else(|_| "ffmpeg".into()),
+                ),
+                scene: directory.parent().unwrap().to_path_buf(),
+                executable: exe.clone(),
+                map: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap()),
+                quality: "low".into(),
+                language: exe
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("US/language/usa"),
+                profile_root: scratch.join("profiles"),
+                save_root: scratch.join("saves"),
+            })
+            .unwrap();
+            let mut intro = Intro::new(&presenter, assets).unwrap();
+            intro.open_menu();
+            install_snapshot(&mut intro, &presenter, &save, false);
+            use winit::keyboard::NamedKey;
+            // The shared fixture deliberately starts disabled and prompted.
+            // Establish ordinary admitted input, rather than seed held bits.
+            {
+                let view = intro.inspection.as_mut().unwrap();
+                view.prompts = crate::prompt::State::default();
+                view.stats_requested = false;
+                view.result = None;
+                view.result_pending = None;
+                view.game_options.open = false;
+                view.save_dialog.visible = false;
+                view.planning = None;
+                view.planning_pending = None;
+                view.adjustment = None;
+                view.auction.scene = None;
+                view.strategic = false;
+                view.building_camera = false;
+                let status = view.live_status.as_mut().unwrap();
+                status.stats = None;
+                status.result_request = None;
+                status.tutorial_controls.all_disabled = false;
+                status.tutorial_controls.camera_disabled = false;
+                assert!(!status.tutorial_controls.all_disabled);
+                assert!(!status.tutorial_controls.camera_disabled);
+                assert!(view.prompts.request().is_none());
+                assert!(view.saved_camera, "supplied snapshot uses the existing saved helper");
+                assert_eq!(view.keys, [false; 4]);
+                assert_eq!(view.taps, [false; 4]);
+            }
+            // Force an actual production callback due without sleeping or
+            // asserting on interpolated/pixel pose equality.
+            fn due_callback(intro: &mut Intro) {
+                let due = {
+                    let view = intro.inspection.as_mut().unwrap();
+                    let due = (view.started.elapsed().as_secs_f64() * 50.).floor() as usize;
+                    view.tick = due;
+                    due
+                };
+                intro.inspection_update().unwrap();
+                assert!(intro.inspection.as_ref().unwrap().tick > due);
+            }
+            for (index, key) in [NamedKey::ArrowRight, NamedKey::ArrowLeft,
+                NamedKey::ArrowDown, NamedKey::ArrowUp].into_iter().enumerate() {
+                intro.inspection_key(key, true).unwrap();
+                assert!(intro.inspection.as_ref().unwrap().keys[index]);
+                assert!(intro.inspection.as_ref().unwrap().taps[index]);
+                due_callback(&mut intro);
+                assert_eq!(intro.inspection.as_ref().unwrap().taps, [false; 4],
+                    "initial admitted tap must be consumed before modal release");
+
+                // This is the actual unconditional Stats-request key gate,
+                // controlled explicitly; no naturally opened Stats claim.
+                intro.inspection.as_mut().unwrap().stats_requested = true;
+                intro.inspection_key(key, false).unwrap();
+                let view = intro.inspection.as_ref().unwrap();
+                assert!(view.stats_requested);
+                assert_eq!(view.keys, [false; 4]);
+                assert_eq!(view.taps, [false; 4]);
+                intro.inspection_key(key, true).unwrap();
+                let view = intro.inspection.as_ref().unwrap();
+                assert!(view.stats_requested, "blocked press must not dismiss gate");
+                assert_eq!(view.keys, [false; 4]);
+                assert_eq!(view.taps, [false; 4]);
+                let center = view.controls.center;
+                due_callback(&mut intro);
+                due_callback(&mut intro);
+                assert_eq!(intro.inspection.as_ref().unwrap().controls.center, center,
+                    "released held input must not apply new control translation");
+                intro.inspection.as_mut().unwrap().stats_requested = false;
+                due_callback(&mut intro);
+                assert_eq!(intro.inspection.as_ref().unwrap().controls.center, center);
+
+                // A quick admitted tap survives its release until production
+                // consumption, then cannot repeat on a subsequent callback.
+                intro.inspection_key(key, true).unwrap();
+                intro.inspection_key(key, false).unwrap();
+                let view = intro.inspection.as_ref().unwrap();
+                assert_eq!(view.keys, [false; 4]);
+                assert!(view.taps[index]);
+                assert_eq!(view.taps.iter().filter(|&&tap| tap).count(), 1);
+                let center = view.controls.center;
+                due_callback(&mut intro);
+                let view = intro.inspection.as_ref().unwrap();
+                assert_eq!(view.taps, [false; 4]);
+                assert_ne!(view.controls.center, center, "actual callback must consume the tap");
+                let after = view.controls.center;
+                due_callback(&mut intro);
+                assert_eq!(intro.inspection.as_ref().unwrap().controls.center, after,
+                    "consumed tap must not translate again");
+            }
+            intro.inspection_key(NamedKey::ArrowRight, true).unwrap();
+            assert!(intro.inspection.as_ref().unwrap().keys[0]);
+            assert!(intro.inspection.as_ref().unwrap().taps[0]);
+            intro.inspection_unfocus();
+            assert_eq!(intro.inspection.as_ref().unwrap().keys, [false; 4]);
+            assert_eq!(intro.inspection.as_ref().unwrap().taps, [false; 4]);
+            assert_eq!(fs::read(&original).unwrap(), save_bytes);
+            drop(intro);
+            drop(presenter);
+            drop(event_loop);
+            drop(cleanup);
+            assert!(!scratch.exists());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
