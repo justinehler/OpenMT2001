@@ -400,6 +400,63 @@ fn scenario_cup_rect(row: usize, cup: usize) -> [f32; 4] {
     let top = 98. + SCENARIO_ROW_HEIGHT * row as f32;
     [left, top, left + 17., top + 14.]
 }
+
+// Ordinary campaign description: 499707..499848 builds a Font2 rich-text
+// child from Info8 minus the always-reserved scrollbar. 440650 sets inset3;
+// 441279..44129d subtracts both insets before 4e7a90 wraps with glyph gap -1.
+// Custom, Tutorial and Character keep their independent layout contracts.
+struct CampaignDescription {
+    offsets: Vec<usize>,
+    text: Vec<u8>,
+    child: [f32; 4],
+    origin: [f32; 2],
+    visible: usize,
+}
+impl CampaignDescription {
+    fn new(tab: &[u8], text: &[u8], bounds: [f32; 4]) -> Result<Self, String> {
+        let [left, top, right, bottom] = bounds;
+        let strip = SCENARIO_INFO_SCROLL[2] - SCENARIO_INFO_SCROLL[0];
+        let child = [left, top, right - strip, bottom];
+        // Keep the fractional mesh edges until native toward-zero conversion.
+        let width = (f64::from(child[2]) - f64::from(left) - 6.).trunc();
+        if bounds.iter().any(|v| !v.is_finite()) || bottom <= top
+            || width < 1. || width > f64::from(i32::MAX) {
+            return Err("invalid campaign description bounds".into());
+        }
+        let (offsets, text) = crate::prompt::wrap_with_gap(tab, text, width as i32, -1)?;
+        Ok(Self {
+            offsets, text, child,
+            // 4406a0 style0: integer left + inset3 + 2, integer(top+3).
+            origin: [left.trunc() + 5., (top + 3.).trunc()],
+            // Preserve the existing whole-row capacity, independent of inset.
+            // W height10 + native vertical gap2 remains a 12-unit pitch.
+            visible: ((bottom - top) / SCENARIO_ROW_HEIGHT) as usize,
+        })
+    }
+    fn rows(&self) -> impl Iterator<Item = &[u8]> {
+        self.offsets.windows(2).map(|range| {
+            let end = range[1].saturating_sub(1).min(self.text.len());
+            &self.text[range[0].min(end)..end]
+        })
+    }
+    fn limit(&self) -> usize {
+        self.offsets.len().saturating_sub(1).saturating_sub(self.visible)
+    }
+    fn wheel(&self, first: usize, delta: i32) -> usize {
+        (first as i64 + i64::from(delta)).clamp(0, self.limit() as i64) as usize
+    }
+    fn paint(&self, pages: &mut [Surface], tab: &[u8], first: usize) -> Result<(), String> {
+        // Use exactly the same visible-row capacity as limit/wheel/track.
+        // ui::text retains its existing glyph renderer and child-edge clipping.
+        for (line, text) in self.rows().skip(first).take(self.visible).enumerate() {
+            ui::text(pages, tab, text,
+                [self.origin[0], self.origin[1] + line as f32 * SCENARIO_ROW_HEIGHT,
+                    self.child[2], self.child[3]], false, 0xffffffff)?;
+        }
+        Ok(())
+    }
+}
+
 fn character_biography_lines(tab: &[u8], encoded: &[u8], width: f32,
 )
     -> Result<Vec<Vec<u8>>, String> {
@@ -657,7 +714,14 @@ impl SinglePlayer {
         self.description_first = next;
         changed
     }
+    fn campaign_description(&self) -> Result<CampaignDescription, String> {
+        CampaignDescription::new(&self.scenario_list_tab,
+            &self.scenario_record_text(false), self.scenario.bounds[24])
+    }
     fn scenario_description_limit(&self) -> usize {
+        if self.custom.is_none() {
+            return self.campaign_description().map(|layout| layout.limit()).unwrap_or(0);
+        }
         let text = self.scenario_record_text(false);
         let b = self.scenario.bounds[24];
         let visible = ((b[3] - b[1]) / SCENARIO_ROW_HEIGHT) as usize;
@@ -840,6 +904,12 @@ impl SinglePlayer {
         }
     }
     pub fn scroll(&mut self, delta: i32) {
+        if self.custom.is_none() && !self.tutorial_screen && !self.character_screen {
+            if let Ok(layout) = self.campaign_description() {
+                self.description_first = layout.wheel(self.description_first, delta);
+            }
+            return;
+        }
         if self.custom.is_some() && !self.character_screen && self.pointer_position.is_some_and(|p| p[0] < 320.) {
             let max = self.custom_list_limit(); let c = self.custom.as_mut().unwrap(); c.first = (c.first as i32 + delta).clamp(0,max as i32) as usize; return;
         }
@@ -1265,15 +1335,20 @@ impl SinglePlayer {
                     0xffffffff,
                 )?;
             }
-            for (line, text) in wrap_lines(&self.scenario_list_tab,
-                &selected_description, b[24][2] - b[24][0],
-            )?
-                .iter().skip(self.description_first).enumerate() {
-                let top = b[24][1] + line as f32 * SCENARIO_ROW_HEIGHT;
-                if top + SCENARIO_ROW_HEIGHT > b[24][3] { break; }
-                ui::text(&mut scenario_list_fonts, &self.scenario_list_tab, text,
-                    [b[24][0], top, b[24][2], b[24][3]], false, 0xffffffff,
-                )?;
+            if self.custom.is_none() {
+                self.campaign_description()?.paint(&mut scenario_list_fonts,
+                    &self.scenario_list_tab, self.description_first)?;
+            } else {
+                for (line, text) in wrap_lines(&self.scenario_list_tab,
+                    &selected_description, b[24][2] - b[24][0],
+                )?
+                    .iter().skip(self.description_first).enumerate() {
+                    let top = b[24][1] + line as f32 * SCENARIO_ROW_HEIGHT;
+                    if top + SCENARIO_ROW_HEIGHT > b[24][3] { break; }
+                    ui::text(&mut scenario_list_fonts, &self.scenario_list_tab, text,
+                        [b[24][0], top, b[24][2], b[24][3]], false, 0xffffffff,
+                    )?;
+                }
             }
             // 499817/49994e attach original 43f510 children beside the
             // description and list. The 17 scenario rows fit the native
@@ -1634,5 +1709,265 @@ mod participant_biography_contract_tests {
         assert_eq!(menu.single.inspected_slot,0,"arrows return inspection to human");
         assert_eq!(menu.single.character,(human+1)%10);
         assert_eq!(menu.single.biography_first.get(),1,"arrow clear also retains first");
+    }
+}
+
+#[cfg(test)]
+mod campaign_description_tests {
+    use super::*;
+
+    // Independent, deliberately unequal synthetic advances expose >= versus >,
+    // gap0 versus -1, reserved-strip arithmetic, paint insets and clipping.
+    fn synthetic_font() -> Vec<u8> {
+        let mut tab = vec![0; 4 + 64 * 44];
+        tab[..4].copy_from_slice(&64u32.to_le_bytes());
+        for glyph in 0..64 {
+            let at = 4 + glyph * 44;
+            let width: i32 = match glyph { 0 => 3, 2 => 4, _ => 5 };
+            tab[at + 32..at + 36].copy_from_slice(&width.to_le_bytes());
+            tab[at + 36..at + 40].copy_from_slice(&6i32.to_le_bytes());
+        }
+        tab
+    }
+    fn vertices(pages: &[Surface]) -> Vec<[f32; 8]> {
+        pages.iter().flat_map(|page| page.vertices.iter().copied()).collect()
+    }
+    fn extent(points: &[[f32; 8]]) -> [f32; 4] {
+        assert!(!points.is_empty());
+        points.iter().fold([f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY],
+            |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])])
+    }
+    #[test]
+    fn campaign_description_reserves_strip_insets_and_native_break_boundary() {
+        let tab = synthetic_font();
+        // Advances 4+2+3 == 9: native >= breaks at the previous space.
+        let exact = CampaignDescription::new(&tab, &[1, 0, 2], [0., 0., 31., 24.]).unwrap();
+        assert_eq!(exact.offsets, [0, 2, 4]);
+        assert_eq!(exact.rows().collect::<Vec<_>>(), [&[1][..], &[2][..]]);
+        assert_eq!(exact.child, [0., 0., 15., 24.]);
+        assert_eq!(exact.origin, [5., 3.]);
+        assert_eq!(exact.visible, 2);
+        let wider = CampaignDescription::new(&tab, &[1, 0, 2], [0., 0., 32., 24.]).unwrap();
+        assert_eq!(wider.offsets, [0, 4]);
+        // Preserve fractional edges until truncation: both budgets truncate9.
+        let fractional = CampaignDescription::new(&tab, &[1, 0, 2], [0.8, 0.8, 32.2, 24.8]).unwrap();
+        assert_eq!(fractional.offsets, exact.offsets);
+        assert_eq!(fractional.origin, [5., 3.]);
+        assert!(CampaignDescription::new(&tab, &[1], [0., 0., 22., 24.]).is_err());
+        assert!(CampaignDescription::new(&tab, &[1], [0., f32::NAN, 31., 24.]).is_err());
+        let forced = CampaignDescription::new(&tab, &[1, 28, 46, 2], [0., 0., 100., 24.]).unwrap();
+        assert_eq!(forced.offsets, [0, 3, 5]);
+        let empty = CampaignDescription::new(&tab, &[], [0., 0., 31., 24.]).unwrap();
+        assert_eq!(empty.offsets, [0]);
+        assert_eq!(empty.rows().count(), 0);
+        assert_eq!(empty.limit(), 0);
+    }
+    #[test]
+    fn campaign_description_paints_same_capacity_and_wheel_track_frontier() {
+        let tab = synthetic_font();
+        let text: Vec<u8> = (0..21).flat_map(|i| {
+            let glyph = if i % 2 == 0 { 1 } else { 2 };
+            if i == 20 { vec![glyph] } else { vec![glyph, 0] }
+        }).collect();
+        let layout = CampaignDescription::new(&tab, &text, [0., 0., 31., 24.]).unwrap();
+        assert_eq!(layout.rows().count(), 21);
+        assert_eq!(layout.visible, 2);
+        assert_eq!(layout.limit(), 19);
+        assert_eq!(layout.wheel(0, -1), 0);
+        assert_eq!(layout.wheel(0, i32::MAX), 19);
+        assert_eq!(layout.wheel(19, i32::MIN), 0);
+        let track = ui::slider_track(SCENARIO_INFO_SCROLL, true);
+        assert_eq!(ui::slider_selection(track, track[3], layout.limit() as i32, true), 19);
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, 0).unwrap();
+        let p = vertices(&pages);
+        assert_eq!(p.len(), 12); // two actual glyph quads, not all21 rows
+        assert_eq!(extent(&p[..6]), [4.5, 2.5, 9.5, 8.5]);
+        assert_eq!(extent(&p[6..]), [4.5, 14.5, 8.5, 20.5]);
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, 19).unwrap();
+        let p = vertices(&pages);
+        assert_eq!(p.len(), 12);
+        assert_eq!(extent(&p[..6]), [4.5, 2.5, 8.5, 8.5]);
+        assert_eq!(extent(&p[6..]), [4.5, 14.5, 9.5, 20.5]);
+        // Height exactly divisible by12 retains its original capacity even
+        // with the3-unit paint inset; the final row is not silently dropped.
+        assert_eq!(CampaignDescription::new(&tab, &text, [0., 0., 31., 23.9]).unwrap().visible, 1);
+    }
+
+    // Original bytes remain external. These Linux-host ignored checks use
+    // sha256sum on the bytes actually read, never shell interpolation.
+    fn guard(bytes: &[u8], expected: &str) {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped())
+            .spawn().expect("supplied fixture checks require sha256sum");
+        child.stdin.take().unwrap().write_all(bytes).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(std::str::from_utf8(&output.stdout).unwrap().split_whitespace().next(), Some(expected));
+    }
+    fn guarded(path: &Path, expected: &str) -> Vec<u8> {
+        let bytes = fs::read(path).unwrap(); guard(&bytes, expected); bytes
+    }
+    struct Supplied {
+        tab: Vec<u8>,
+        directory: Vec<u8>,
+        archive: Vec<u8>,
+        executable: Vec<u8>,
+        installer: PathBuf,
+        strings: Vec<Vec<u8>>,
+    }
+    impl Supplied {
+        fn read() -> Self {
+            let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                .parent().unwrap().parent().unwrap().to_path_buf();
+            let tab = guarded(&installer.join("Standard/fonts/tahoma11noantip.tab"),
+                "0bb10874f0ccac54cb6bfba360aecb713c870d9b74325beb36404a0b683f1976");
+            // Explicit patched language directory: the old installer row1961
+            // is different. Reject it instead of blessing an unrelated string.
+            let language = PathBuf::from(std::env::var("OPENMT2001_SCENARIO_LANGUAGE").unwrap());
+            let off = guarded(&language.join("tycoon.off"),
+                "54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d");
+            let bin = guarded(&language.join("tycoon.bin"),
+                "4d5e302035f3579d2c0cb8cd35a58abae5ea6d8159e6c3661bef091fedff6c38");
+            assert_eq!(off.len() % 2, 0);
+            let mut at = 0;
+            let strings = off.chunks_exact(2).map(|n| {
+                let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                let row = bin.get(at..end).unwrap().to_vec(); at = end; row
+            }).collect::<Vec<_>>();
+            assert_eq!(at, bin.len());
+            let executable = guarded(&PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap()),
+                "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b");
+            let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+            let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+            let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+            for (name, hash) in [
+                ("gamedata2\\brand_new_panels\\SP_Scenario_V2.tm", "3eaa5eb0db10b0cd8ad7439818d7fda5219e25373bf615aea505d024ebf66792"),
+                ("gamedata2\\font640\\textures.gtd", "21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912"),
+                ("gamedata2\\GenericTextures640\\textures.gtd", "10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4"),
+            ] {
+                let entry = index.find(name).unwrap();
+                guard(&archive[entry.offset as usize..(entry.offset + entry.length) as usize], hash);
+            }
+            Self { tab, directory, archive, executable, installer, strings }
+        }
+        fn panel(&self) -> SinglePlayer {
+            let index = ArchiveIndex::parse(&self.directory, self.archive.len() as u64).unwrap();
+            let refs = self.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            let mut panel = SinglePlayer::new(&index, &self.archive, &self.installer, &refs, &self.executable).unwrap();
+            // Supplied-component render only: no catalog/script/profile IO,
+            // launch or authored progress claim. Production draw uses real assets.
+            panel.visible = true;
+            panel.scenario_rows = vec![0];
+            panel.difficulty = 1;
+            panel
+        }
+    }
+    #[test]
+    #[ignore = "requires SHA-pinned original assets, patched language and sha256sum"]
+    fn supplied_starting_out_description_offsets_paint_and_scroll() {
+        let supplied = Supplied::read();
+        let mut panel = supplied.panel();
+        let text = &supplied.strings[1961];
+        guard(text, "08cc9190c846393acc2558d0e414be60f05999d82269bd9ac2d020f95bb57cbf");
+        assert_eq!(text.len(), 256);
+        assert_eq!(panel.scenario_record_text(false), *text);
+        assert_eq!(level_labels(crate::scenarios::CAMPAIGN[0].id), Some((1960, 1961)));
+        assert_eq!(panel.scenario_list_tab, supplied.tab);
+        let image = PeImage::parse(&supplied.executable).unwrap();
+        assert_eq!(image.at(0x49979b, 5).unwrap(), &[0xbb, 2, 0, 0, 0]);
+        assert_eq!(image.at(0x4997d3, 5).unwrap(), &[0xe8, 0x98, 0x73, 0xfa, 0xff]);
+        assert_eq!(image.at(0x54cac4, 31).unwrap(), b"gamedata\\fonts\\tahoma11noantip\0");
+        let original_bounds = panel.scenario.bounds[24];
+        assert_eq!(original_bounds, [334.33594, 201.953, 604.44995, 396.0419]);
+        let index = ArchiveIndex::parse(&supplied.directory, supplied.archive.len() as u64).unwrap();
+        let payload = |name| {
+            let e = index.find(name).unwrap();
+            &supplied.archive[e.offset as usize..(e.offset + e.length) as usize]
+        };
+        let font = TextureSet::parse(payload("gamedata2\\font640\\textures.gtd")).unwrap();
+        assert_eq!(panel.scenario_list_fonts.len(), 2);
+        for (actual, original) in panel.scenario_list_fonts.iter().zip(&font.textures[4..6]) {
+            let expected = Surface::new(original);
+            assert_eq!((actual.width, actual.height, &actual.pixels), (expected.width, expected.height, &expected.pixels));
+        }
+        let generic = TextureSet::parse(payload("gamedata2\\GenericTextures640\\textures.gtd")).unwrap();
+        assert_eq!(generic.textures[105].width, 16);
+        assert_eq!(SCENARIO_INFO_SCROLL[2] - SCENARIO_INFO_SCROLL[0], 16.);
+        let layout = panel.campaign_description().unwrap();
+        assert_eq!(layout.offsets, [0, 31, 67, 108, 148, 181, 217, 257]);
+        assert_eq!(layout.rows().map(<[u8]>::len).collect::<Vec<_>>(), [30, 35, 40, 39, 32, 35, 39]);
+        assert_eq!(layout.origin, [339., 204.]);
+        assert_eq!(layout.visible, 16);
+        assert_eq!(layout.limit(), 0);
+        assert_eq!(panel.scenario_description_limit(), 0);
+        assert_eq!(super::scenario_scroll_hit(0, 1, [596., 210.]), None);
+        let mut pages = panel.scenario_list_fonts.clone();
+        layout.paint(&mut pages, &supplied.tab, 0).unwrap();
+        let actual = vertices(&pages);
+        assert_eq!(actual.len(), 1248);
+        assert_eq!(extent(&actual), [338.5, 205.5, 585.5, 290.5]);
+        let bounds = extent(&actual);
+        assert!(bounds[0] >= 338.5 && bounds[2] <= layout.child[2]);
+        assert!(bounds[1] >= 203.5 && bounds[3] <= layout.child[3]);
+        // Compare the first row against the real production ui::text renderer,
+        // independent of the layout helper's row iterator/origin calculation.
+        let mut first = panel.scenario_list_fonts.clone();
+        ui::text(&mut first, &supplied.tab, &text[..30],
+            [339., 204., 588.44995, 396.0419], false, 0xffffffff).unwrap();
+        assert_eq!(vertices(&first).len(), 144);
+        assert_eq!(extent(&vertices(&first)), [338.5, 205.5, 544.5, 218.5]);
+        for (actual, expected) in pages.iter().zip(&first) {
+            assert_eq!(&actual.vertices[..expected.vertices.len()], expected.vertices.as_slice());
+        }
+        panel.scroll(i32::MAX);
+        assert_eq!(panel.description_first, 0);
+        // Full-height supplied descriptions naturally fit. Explicitly shrink
+        // only this test component to24px: real rows, synthetic overflow viewport.
+        panel.scenario.bounds[24][3] = original_bounds[1] + 24.;
+        assert_eq!(panel.scenario_description_limit(), 5);
+        panel.scroll(i32::MAX);
+        assert_eq!(panel.description_first, 5);
+        let tail = panel.campaign_description().unwrap();
+        assert_eq!(tail.rows().skip(5).map(<[u8]>::len).collect::<Vec<_>>(), [35, 39]);
+        let mut pages = panel.scenario_list_fonts.clone();
+        tail.paint(&mut pages, &supplied.tab, 5).unwrap();
+        assert_eq!(vertices(&pages).len(), 378);
+        assert_eq!(extent(&vertices(&pages)), [338.5, 205.5, 576.5, tail.child[3] - 0.5]);
+        panel.scroll(i32::MIN);
+        assert_eq!(panel.description_first, 0);
+        assert!(panel.drag_track(Some(8), [596., 377.])); // one row: base6+track2
+        assert_eq!(panel.description_first, 5);
+        panel.scenario.bounds[24] = original_bounds;
+        panel.scroll(0);
+        assert_eq!(panel.description_first, 0);
+        assert!(panel.request.is_none() && panel.profile_path.is_none() && panel.catalog.is_none());
+        assert_eq!(panel.scenario_rows, [0]);
+        assert_eq!(panel.difficulty, 1);
+    }
+
+    #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires SHA-pinned supplied assets, offscreen GPU and output directory"]
+    fn capture_starting_out_description_component() {
+        let supplied = Supplied::read();
+        let mut panel = supplied.panel();
+        let output = PathBuf::from(std::env::var("OPENMT2001_DESCRIPTION_CAPTURE_DIR").unwrap());
+        assert!(output.is_dir());
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let prepared = panel.draw(&renderer, None, false).unwrap();
+        crate::capture_test::capture_standalone(&renderer, &prepared,
+            output.join("starting-out-medium-description.png").to_str().unwrap());
+        panel.scenario.bounds[24][3] = panel.scenario.bounds[24][1] + 24.;
+        panel.scroll(i32::MAX);
+        assert_eq!(panel.description_first, 5);
+        let prepared = panel.draw(&renderer, None, false).unwrap();
+        crate::capture_test::capture_standalone(&renderer, &prepared,
+            output.join("starting-out-synthetic-viewport-tail.png").to_str().unwrap());
+        assert!(panel.request.is_none() && panel.profile_path.is_none());
     }
 }
