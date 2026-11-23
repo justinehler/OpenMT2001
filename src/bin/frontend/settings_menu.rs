@@ -446,9 +446,9 @@ impl Assets {
                     crate::ui::text_widget_style9(&mut font3,&self.tab3,self.label(label),
                         panel.regions[label_region],0xffffffff)?;
                 }
-                crate::ui::text_widget_style9(&mut font1,&self.tab1,self.label(1588),
+                crate::ui::text_widget_style9(&mut font3,&self.tab3,self.label(1588),
                     panel.regions[17],0xffffffff)?;
-                crate::ui::text_widget_style9(&mut font1,&self.tab1,self.label(1594),
+                crate::ui::text_widget_style9(&mut font3,&self.tab3,self.label(1594),
                     panel.regions[24],0xffffffff)?;
                 let bounds=panel.regions[27].map(f32::trunc);
                 let [left,right]=crate::ui::slider_arrows(bounds,false);
