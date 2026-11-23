@@ -78,7 +78,7 @@ impl Assets {
         };
         let name = "gamedata2/brand_new_panels/main_panel_v2.tm";
         let (base, _) =
-            ui::panel_frame_base(index, archive, name, &(0..12).collect::<Vec<_>>(), 9)?;
+            ui::panel_frame_base(index, archive, name, &(0..9).collect::<Vec<_>>(), 9)?;
         let mesh = CachedMesh::parse(payload(name)?)?;
         let image = PeImage::parse(exe)?;
         // 4087c2 uses neutral owner gray when the building has no owner.
@@ -1230,5 +1230,149 @@ mod tests {
         assert!(!state.tutorial_control_pressed());
         assert_eq!(state.info, 0);
         assert_eq!(state.take_tutorial_control(), None);
+    }
+}
+
+
+// Shared only by these two supplied component fixtures; no production API.
+#[cfg(test)]
+pub(crate) mod facing_fixture {
+    use super::*;
+    use std::path::PathBuf;
+    pub struct Inputs {
+        pub directory: Vec<u8>, pub archive: Vec<u8>, pub executable: Vec<u8>,
+        pub installer: PathBuf, pub strings: Vec<Vec<u8>>,
+    }
+    fn guard(bytes: &[u8], expected: &str) {
+        use std::io::Write;
+        use std::process::{Command,Stdio};
+        let mut child=Command::new("sha256sum").stdin(Stdio::piped())
+            .stdout(Stdio::piped()).spawn().expect("fixture SHA guards need sha256sum");
+        child.stdin.take().unwrap().write_all(bytes).unwrap();
+        let result=child.wait_with_output().unwrap(); assert!(result.status.success());
+        assert_eq!(std::str::from_utf8(&result.stdout).unwrap().split_whitespace().next(),Some(expected));
+    }
+    pub fn same(a: &Surface,b: &Surface) {
+        assert_eq!(a.vertices,b.vertices); assert_eq!(a.alpha,b.alpha);
+        assert_eq!((a.width,a.height),(b.width,b.height)); assert_eq!(a.pixels,b.pixels);
+        assert!(matches!(a.draw().mode,openmt2001::render::SurfaceMode::Overlay));
+    }
+    fn area(positions: &[[f32;3]], ids: [usize;3]) -> f64 {
+        let [a,b,c]=ids.map(|id|[f64::from(positions[id][0]),-f64::from(positions[id][1])]);
+        (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+    }
+    #[test]
+    fn own_pose_oracle_distinguishes_reversed_and_degenerate_faces() {
+        let p=[[0.,0.,7.],[0.,-2.,7.],[3.,-2.,7.],[1.5,-1.,7.]];
+        assert_eq!(area(&p,[0,1,2]),-6.); assert_eq!(area(&p,[0,2,1]),6.);
+        assert_eq!(area(&p,[0,3,2]),0.); assert_eq!(area(&p,[0,0,1]),0.);
+        assert_eq!(area(&p.map(|[x,y,z]|[x,-y,z]),[0,1,2]),6.);
+        assert_eq!(area(&p.map(|[x,y,_]|[x+10.,y-8.,-99.]),[0,1,2]),-6.);
+    }
+    impl Inputs {
+        pub fn read() -> Self {
+            let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+            let directory=read("OPENMT2001_ARCHIVE_DIR");
+            guard(&directory,"8ecb0d18a3896eba61db9ff6edc10869a84a64229169b52f0f7d981b81980d52");
+            let archive=read("OPENMT2001_ARCHIVE_BIN");let executable=read("OPENMT2001_EXE");
+            guard(&executable,"1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b");
+            let parameter=PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let installer=parameter.parent().unwrap().parent().unwrap().to_path_buf();
+            guard(&fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(), "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be");
+            guard(&fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap(), "7df258462744a70bce18516dd6d79239cd0fd434c7e100ce4ef8ad399d36c644");
+            guard(&fs::read(installer.join("Standard/fonts/tahoma11noantip.tab")).unwrap(), "0bb10874f0ccac54cb6bfba360aecb713c870d9b74325beb36404a0b683f1976");
+            guard(&fs::read(installer.join("Standard/fonts/cust640p.tab")).unwrap(), "082d6a0488289a0926ee3b2e279882a03c31922e6f1ec6aa75e56a6ffc1d72d5");
+            guard(&fs::read(installer.join("Standard/fonts/board/usa/tycoon.off")).unwrap(), "0cb07d00caba4717e0ae7ee5a757ce9e2a18eb3b3013d5812e9da485a1090f3a");
+            guard(&fs::read(installer.join("Standard/fonts/board/usa/tycoon.bin")).unwrap(), "42696b634f2b7517a645516317341cf40ed2d25efe6931e033f65c527a3d28e1");
+            guard(&fs::read(installer.join("scripts/DEFAULT/commoditysettings.lua")).unwrap(), "9dc3e30cf2fca8743611e5a0c6f2f88de51b97b584d9ad65ba6c51573500cdde");
+            let executable_path=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let language=std::env::var_os("OPENMT2001_FACING_LANGUAGE").map(PathBuf::from)
+                .unwrap_or_else(||executable_path.parent().unwrap().parent().unwrap().join("US/language/usa"));
+            let offsets=fs::read(language.join("tycoon.off")).unwrap();
+            let bytes=fs::read(language.join("tycoon.bin")).unwrap();
+            guard(&offsets,"54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d");
+            guard(&bytes,"4d5e302035f3579d2c0cb8cd35a58abae5ea6d8159e6c3661bef091fedff6c38");
+            let mut at=0; let raw=offsets.chunks_exact(2).map(|n| {
+                let end=at+u16::from_le_bytes(n.try_into().unwrap())as usize;
+                let row=&bytes[at..end];at=end;row
+            }).collect::<Vec<_>>(); assert_eq!(at,bytes.len());
+            let strings=crate::tooltip::localized_strings(&installer,&raw).unwrap();
+            let result=Self{directory,archive,executable,installer,strings};
+            for (name,hash) in [
+                ("gamedata2/brand_new_panels/main_panel_v2.tm","b405f1b5146fdc6ea76a13984a7cd97f54c13ce41cb26f752c4ffec62549eab1"),
+                ("1New_Maya_grey_border.tt","31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f"),
+                ("1New_Maya_alphablack50.tt","7b53dfc9bd46c56b5ce2082645586fa328c46590a86e9a79be676393bded0f92"),
+                ("gamedata2/GenericTextures640/textures.gtd","10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4"),
+                ("gamedata2/font640/textures.gtd","21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912"),
+            ] {guard(result.payload(name),hash);}
+            result
+        }
+        pub fn index(&self)->ArchiveIndex {ArchiveIndex::parse(&self.directory,self.archive.len()as u64).unwrap()}
+        pub fn payload(&self,name:&str)->&[u8] {
+            let index=self.index();let e=index.find(name).unwrap();
+            &self.archive[e.offset as usize..(e.offset+e.length)as usize]
+        }
+        pub fn open_borders(&self,actual:&[Surface])->Vec<openmt2001::ui_mesh::Region> {
+            assert_eq!(actual.len(),9,"only nine front-facing borders, in source order");
+            let mesh=CachedMesh::parse(self.payload("gamedata2/brand_new_panels/main_panel_v2.tm")).unwrap();
+            assert_eq!((mesh.vertex_count,mesh.parts.len(),mesh.frames),(196,49,10));
+            let p=mesh.positions(9).unwrap();let uv=mesh.uvs();
+            let regions=openmt2001::ui_mesh::regions(&mesh,9).unwrap();assert_eq!(regions.len(),49);
+            assert_eq!(regions.iter().map(|r|r.part).collect::<Vec<_>>(),(0..49).collect::<Vec<_>>());
+            let (_,bounds)=ui::panel_frame_base(&self.index(),&self.archive,
+                "gamedata2/brand_new_panels/main_panel_v2.tm",&(0..9).collect::<Vec<_>>(),9).unwrap();
+            for (i,r) in regions.iter().enumerate() {
+                let ids=mesh.parts[r.part].vertex_indices().collect::<Vec<_>>();
+                let expected=[ids.iter().map(|&j|p[j][0]).fold(f32::INFINITY,f32::min),
+                    ids.iter().map(|&j|-p[j][1]).fold(f32::INFINITY,f32::min),
+                    ids.iter().map(|&j|p[j][0]).fold(f32::NEG_INFINITY,f32::max),
+                    ids.iter().map(|&j|-p[j][1]).fold(f32::NEG_INFINITY,f32::max)];
+                assert_eq!(r.bounds,expected);assert_eq!(bounds[i],expected);
+            }
+            let mut counts=[0usize;2];
+            for (i,part) in mesh.parts[..12].iter().enumerate() {
+                let ids=part.vertex_indices().collect::<Vec<_>>();
+                for t in ids.chunks_exact(3) {let a=area(&p,t.try_into().unwrap());
+                    assert!(a.is_finite()&&a!=0.);if i<9 {assert!(a<0.);counts[0]+=1;}
+                    else {assert!(a>0.);counts[1]+=1;}}
+                let tex=TextureSet::parse(self.payload(mesh.texture_names[part.texture as usize])).unwrap();
+                if i<9 {let mut expected=Surface::new(&tex.textures[0]);
+                    for j in ids {expected.vertices.push([p[j][0],-p[j][1],0.5,1.,1.,1.,uv[j][0],uv[j][1]]);expected.alpha.push(255);}
+                    same(&actual[i],&expected);
+                }else{assert!(tex.textures[0].texels.chunks_exact(4).all(|p|p==[0,0,0,137]));}
+            }
+            assert_eq!(counts,[18,6]);
+            for (i,name) in [(9,"P_MAIN_MAIN_WINDOW"),(10,"P_MAIN_VERTCAL_BAR_BACKING"),
+                (11,"P_MAIN_TITLE_AREA_BACKING")] {assert_eq!(regions[i].name,name);}
+            regions
+        }
+    }
+    #[test]
+    #[ignore="SHA-pinned supplied mesh/material/PE/font/language assets; CPU component only"]
+    fn supplied_business_constructor_keeps_front_borders_and_all_owner_palettes() {
+        let f=Inputs::read();let index=f.index();
+        let strings=f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let assets=Assets::load(&index,&f.archive,&f.installer,&strings,&f.executable).unwrap();
+        let regions=f.open_borders(&assets.base);assert_eq!(assets.bounds,regions[9].bounds);
+        let mesh=CachedMesh::parse(f.payload("gamedata2/brand_new_panels/main_panel_v2.tm")).unwrap();
+        let image=PeImage::parse(&f.executable).unwrap();assert_eq!(assets.title_backgrounds.len(),11);
+        for (i,actual) in assets.title_backgrounds.iter().enumerate() {
+            let colors=if i==0 {[0xff808080,0xff808080,0x55808080,0x55808080]}else{
+                let c=u32::from_le_bytes(image.at(0x541af0+(i as u32-1)*40,4).unwrap().try_into().unwrap());
+                let faded=(c&0x00ff_ffff)|(((c>>24)/3)<<24);[c,c,faded,faded]};
+            same(actual,&ui::mpp_background_title(&mesh,9,&image,Some(colors)).unwrap());
+        }
+    }
+    #[cfg(feature="capture")]
+    pub fn capture(surfaces:&[Surface],path:&str) {
+        let mut d=wgpu::InstanceDescriptor::new_without_display_handle();if cfg!(windows){d.backends=wgpu::Backends::DX12;}
+        let renderer=pollster::block_on(Renderer::new(d)).unwrap();
+        let view=[2./640.,0.,0.,0.,0.,-2./480.,0.,0.,0.,0.,1.,0.,-1.,1.,0.,1.];
+        let mut checker=Surface::solid();for row in 0..15 {for col in 0..20 {
+            let c=if (row+col)%2==0{0xfff04020}else{0xff1040e0};
+            checker.rect([col as f32*32.,row as f32*32.,(col+1)as f32*32.,(row+1)as f32*32.],[c;4]);}}
+        let underlay=renderer.prepare(&[checker.draw()],view,None).unwrap();
+        let panel=renderer.prepare(&surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),view,None).unwrap();
+        crate::capture_test::capture_overlay(&renderer,&underlay,&panel,path);
     }
 }

@@ -246,7 +246,7 @@ impl Assets {
             index,
             archive,
             "gamedata2/brand_new_panels/main_panel_v2.tm",
-            &(0..12).collect::<Vec<_>>(),
+            &(0..9).collect::<Vec<_>>(),
             9,
         )?;
         let payload = |name: &str| -> Result<&[u8], String> {
@@ -5634,6 +5634,68 @@ mod ordinary_toolbar_assets_tests {
             let panel=assets.ordinary_toolbar_scene(&renderer,q,&input,&state,false).unwrap();
             crate::capture_test::capture_standalone(&renderer,&panel,
                 out.join("toolbar-closed-disabled-lease.png").to_str().unwrap());
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod open_facing_fixture {
+    use super::*;
+    use crate::business_view::facing_fixture::{Inputs,same};
+    #[test]
+    #[ignore="SHA-pinned supplied mesh/PE/font/language and default commodity script; actual Assets::load, no city/GPU"]
+    fn supplied_locator_open_bases_and_unchanged_closed_toolbar() {
+        let f=Inputs::read();let index=f.index();let strings=f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        // Normal Locator constructor evaluates its existing commodity grouping
+        // script. This fixture opens no Session, world, scene or gameplay loop.
+        let assets=Assets::load(&index,&f.archive,&f.installer,&strings,&f.executable).unwrap();
+        assert_eq!(assets.base.len(),10);assert_eq!(assets.property_base.len(),10);
+        let regions=f.open_borders(&assets.base[..9]);f.open_borders(&assets.property_base[..9]);
+        assert_eq!(assets.bounds,regions[9].bounds);
+        let mesh=openmt2001::mesh::CachedMesh::parse(f.payload("gamedata2/brand_new_panels/main_panel_v2.tm")).unwrap();
+        let image=PeImage::parse(&f.executable).unwrap();
+        same(&assets.base[9],&ui::mpp_background(&mesh,9,&image).unwrap());
+        same(&assets.property_base[9],&ui::mpp_background_title(&mesh,9,&image,Some([0;4])).unwrap());
+        assert_eq!(assets.property_title_bounds,regions[11].bounds);
+        for color in [0xff808080,0xff10b030] {
+            let actual=assets.property_background(color);assert_eq!(actual.len(),12);
+            for (a,b) in actual[..10].iter().zip(&assets.property_base){same(a,b);}
+            let faded=(color&0x00ff_ffff)|(((color>>24)/3)<<24);let mut title=Surface::solid();
+            title.rect(regions[11].bounds,[color,color,faded,faded]);same(&actual[10],&title);
+            same(&actual[11],&assets.property_title_icon);
+        }
+        // Frame0 remains the old complete explicit part list, not frame9's
+        // new list. Compare every original vertex/UV/material and strip fill.
+        let (mut closed,closed_bounds)=ui::panel_frame_base(&index,&f.archive,
+            "gamedata2/brand_new_panels/main_panel_v2.tm",&(0..12).collect::<Vec<_>>(),0).unwrap();
+        assert_eq!(closed_bounds.len(),49);assert_eq!(closed.len(),12);
+        let closed_regions=openmt2001::ui_mesh::regions(&mesh,0).unwrap();
+        let strip=closed_regions.iter().find(|r|r.name=="P_MAIN_VERTCAL_BAR_BACKING").unwrap().bounds;
+        let mut fill=Surface::solid();fill.rect(strip,[0xff777777,0x66777777,0x66777777,0xff777777]);closed.push(fill);
+        assert_eq!(assets.toolbar_closed_base.len(),13);
+        for (a,b) in assets.toolbar_closed_base.iter().zip(&closed){same(a,b);}
+        let mut state=crate::utility_report::View::default();state.select(Some(33));
+        state.open_property_offer(33);state.details=true;state.scroll=3;
+        let before=(state.property_offer_open(),state.property_rights_open(),state.details,state.scroll);
+        let q=toolbar_collapse::Policy{category:33,shown:true,nonzero_kind:true,
+            lease_available:false,build_allowed:true,tutorial_allowed:[true;3]};
+        let input=toolbar_collapse::Input::default();
+        let collapsed=assets.toolbar_surfaces(q,&input,&state,false);
+        assert_eq!(collapsed.len(),19);
+        for (a,b) in collapsed[..13].iter().zip(&closed){same(a,b);}
+        let opened=assets.toolbar_surfaces(q,&input,&state,true);assert_eq!(opened.len(),6,
+            "open side overlay adds controls only, no second body/title/base");
+        for side in 0..3 {same(&opened[side*2+1],&collapsed[13+side*2+1]);}
+        assert_eq!(before,(state.property_offer_open(),state.property_rights_open(),state.details,state.scroll));
+        assert!(assets.toolbar_surfaces(toolbar_collapse::Policy{shown:false,..q},&input,&state,false).is_empty());
+        #[cfg(feature="capture")]
+        if let Ok(prefix)=std::env::var("OPENMT2001_FACING_CAPTURE_PREFIX") {
+            // Actual loaded base/palette component diagnostics, not full city,
+            // report/control/retained Locator choices or native acceptance.
+            crate::business_view::facing_fixture::capture(&assets.base,&format!("{prefix}-locator-open-base.png"));
+            crate::business_view::facing_fixture::capture(&assets.property_background(0xff10b030),&format!("{prefix}-property-open-base.png"));
+            crate::business_view::facing_fixture::capture(&collapsed,&format!("{prefix}-toolbar-closed.png"));
         }
     }
 }
