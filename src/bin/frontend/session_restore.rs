@@ -434,23 +434,26 @@ impl<'data> Session<'data> {
             return Err("saved difficulty differs from selected level input".into());
         }
         let mut catalog = catalog;
+        let mut restored_map = None;
         if let Some(ext) = openmt2001::save::extension::Extension::parse(&save)? {
             ext.validate_runtime_section_set()?;
-            if ext.version == 5 {
-                let row = ext.required(18)?;
-                if row.len() != 16 { return Err("invalid Skirmish selection record".into()); }
-                let word = |at| u32::from_le_bytes(row[at..at+4].try_into().unwrap());
-                let target = f32::from_bits(word(4));
-                if word(0) != metadata[0] || !(300000..=300006).contains(&word(0))
-                    || word(8) != 0 || word(12) != 1 || !target.is_finite() {
-                    return Err("unsupported Skirmish save capability".into());
+            if matches!(ext.version, 5 | 6) {
+                let selection = crate::skirmish_maps::Selection::decode(ext.version, ext.required(18)?)?;
+                if selection.level_id != metadata[0] {
+                    return Err("Skirmish map selection differs from native level metadata".into());
                 }
                 let retained = if let Some(catalog) = catalog.as_mut() { catalog } else {
                     catalog = Some(crate::campaign_store::load_catalog(input.image, input.scripts)?);
                     catalog.as_mut().unwrap()
                 };
-                let index = retained.find(word(0)).ok_or("saved Skirmish missing from catalog")?;
-                retained.levels[index].set_objective_target(target);
+                let index = retained.find(selection.level_id).ok_or("saved Skirmish missing from catalog")?;
+                let level = &mut retained.levels[index];
+                if level.single_player() || !level.directory().eq_ignore_ascii_case(
+                    format!("net{}", selection.level_id-300000).as_bytes()) {
+                    return Err("saved Skirmish directory differs from native level metadata".into());
+                }
+                level.set_objective_target(selection.target);
+                restored_map = Some(selection.map);
             }
         }
         let assets = CommandAssets {
@@ -463,6 +466,7 @@ impl<'data> Session<'data> {
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());
         }
+        if let Some(map) = restored_map { session.skirmish_map = Some(map); }
         if let Some(calls) = presentation {
             session.restore_original_state_with_presentation(&save, &assets, Some(calls))?;
         } else {

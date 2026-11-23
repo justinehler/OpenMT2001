@@ -1,4 +1,6 @@
 //! Native boot host. Shared simulation and asset modules do not depend on it.
+#[path = "frontend/skirmish_maps.rs"]
+mod skirmish_maps;
 #[path = "frontend/skirmish_setup.rs"]
 mod skirmish_setup;
 #[path = "frontend/skirmish_roster.rs"]

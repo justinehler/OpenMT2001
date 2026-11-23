@@ -123,7 +123,7 @@ impl SkirmishLaunch {
     fn validate(&self) -> Result<(), String> {
         use openmt2001::skirmish::roster::Kind;
         // Bounded original supplied map support; never join a caller path.
-        if self.map != "empty.lua" || !(0..=2).contains(&self.difficulty)
+        if !(0..=2).contains(&self.difficulty)
             || !self.target.is_finite() || !(2..=6).contains(&self.participants.len())
             || self.participants[0].kind != Kind::Human {
             return Err("invalid offline Skirmish launch".into());
@@ -155,6 +155,8 @@ pub struct Session<'data> {
     pub tutorial_state: u8,
     /// Original level manager and selected record, from GAMESTART registrations.
     pub catalog: openmt2001::level_catalog::Catalog,
+    /// Retained source provenance; cold loads restore materialized state, never replay a map.
+    pub skirmish_map: Option<crate::skirmish_maps::MapIdentity>,
     /// V2-owned profile path, attached by the host after profile selection.
     pub campaign_profile: Option<std::path::PathBuf>,
     /// Original68b478=-1; offline startup does not register450410.
@@ -903,6 +905,12 @@ impl<'data> Session<'data> {
         }
         if !catalog.select(id,skirmish.is_some() || saved_net){return Err("scenario is not a single-player catalog entry".into());}
         catalog.difficulty=input.difficulty as u32;
+        let resolved_skirmish_map = if let Some(launch) = &skirmish {
+            Some(crate::skirmish_maps::Catalog::discover(input.scripts)?
+                .resolve(input.scripts, &launch.map)?)
+        } else { None };
+        let skirmish_map = resolved_skirmish_map.as_ref().map(|map| map.identity.clone())
+            .or_else(|| saved_net.then_some(crate::skirmish_maps::MapIdentity::MaterializedUnknown));
         let configuration = openmt2001::resident::Configuration::before_defaults(
             input.parameters,
             input.timetable,
@@ -983,11 +991,11 @@ impl<'data> Session<'data> {
         }
         if let Some(launch) = &skirmish {
             //4ba07d: Level has executed; the extra multiplayer map precedes48cca0.
-            let bytes = read("MAPS/empty.lua")?;
+            let resolved = resolved_skirmish_map.as_ref().ok_or("selected Skirmish map absent")?;
             let mut state = world.script_state(&[None; 6]);
             let bindings = &mut scripts.bindings;
             let events = &mut scripts.events;
-            scripts.runtime.execute("scripts/maps/empty.lua", &bytes,
+            scripts.runtime.execute(&format!("scripts/maps/{}", launch.map), &resolved.bytes,
                 &mut |id,args| bindings.handle(id,args,&mut state,events,&context,&mut geometry,&mut hooks))?;
             if world.objective.kind != launch.objective_kind || world.objective.target != launch.target {
                 return Err("authored Skirmish objective differs from confirmed setup".into());
@@ -1256,6 +1264,7 @@ impl<'data> Session<'data> {
             // The original sixteen campaign registrations use mode2.
             tutorial_state: u8::from(matches!(id, 100000..=100012)),
             catalog,
+            skirmish_map,
             campaign_profile: profile_path,
             setup: None,
             network_command_timer: None,
@@ -4864,7 +4873,17 @@ mod skirmish_session_acceptance {
     #[test]
     #[ignore = "requires supplied originals; bounded net1 cold reload Host continuation"]
     fn original_net1_skirmish_cold_reload_continuation() {
-        std::thread::Builder::new().stack_size(64*1024*1024).spawn(|| {
+        skirmish_map_cold_reload_continuation("empty.lua");
+    }
+
+    #[test]
+    #[ignore = "requires supplied originals; selected-map v6 NET1 cold reload Host continuation"]
+    fn original_net1_monopoly_map_cold_reload_continuation() {
+        skirmish_map_cold_reload_continuation("monopolymap.lua");
+    }
+
+    fn skirmish_map_cold_reload_continuation(map: &'static str) {
+        std::thread::Builder::new().stack_size(64*1024*1024).spawn(move || {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -4888,11 +4907,27 @@ mod skirmish_session_acceptance {
             .unwrap()
             .join("US/language/usa");
 
+        use crate::skirmish_maps::{MapIdentity, Selection};
+        // Read the actual supplied launch file, never manufacture or patch it.
+        let authored = if map == "monopolymap.lua" {
+            let path = crate::campaign_store::original_path(scripts, "MAPS/monopolymap.lua")
+                .unwrap().unwrap();
+            let bytes = fs::read(path).unwrap();
+            assert_eq!(bytes.len(), 222);
+            let checksum = bytes.iter().fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
+            assert_eq!(checksum, 15_786);
+            let specs = openmt2001::scene::parse_static_map(std::str::from_utf8(&bytes).unwrap()).unwrap();
+            assert_eq!(specs.len(), 2);
+            Some((MapIdentity::Named { basename: map.into(), checksum, source_len: 222 }, specs))
+        } else {
+            assert_eq!(map, "empty.lua");
+            None
+        };
         let names = character_names(&image, &language).unwrap();
         use openmt2001::skirmish::roster::{Kind, Participant};
         let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
         let launch = SkirmishLaunch {
-            level_id:300001, directory:"net1".into(), map:"empty.lua".into(),
+            level_id:300001, directory:"net1".into(), map:map.into(),
             objective_kind:6, target:3500., difficulty:1,
             participants:vec![
                 Participant{kind:Kind::Human,token:Some(4),name:b"Fixture Player".to_vec(),ready:true,difficulty:2},
@@ -4931,6 +4966,91 @@ mod skirmish_session_acceptance {
         let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
         let mut session = Session::initialize_skirmish(inputs(), policy(), catalog, launch).unwrap();
         let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        // Resolve source names through original tables; variation240/96 is not
+        // a BuildFile model index, and +170 is a local registered model handle.
+        let check_authored = |state: &Session<'_>, specs: &[openmt2001::scene::BuildingSpec]| {
+            let mut identities = Vec::new();
+            for spec in specs {
+                let scene = openmt2001::scene::SceneBuilding::resolve(spec.clone(), &board, &file).unwrap();
+                let category_reference = openmt2001::building_geometry::V14_CATEGORY_BASE
+                    + scene.block_id as u32 * openmt2001::building_geometry::CATEGORY_STRIDE;
+                let [x,y,w,d] = spec.lot;
+                let endpoints = [x,y,x+w-1,y+d-1];
+                let matches: Vec<_> = state.world.buildings.iter().enumerate()
+                    .filter(|(_, row)| row[0x3f] != 0 && word(*row,0x40) == category_reference
+                        && row[4..8] == endpoints).collect();
+                assert_eq!(matches.len(), 1, "authored lot missing or duplicated: {:?}", spec.lot);
+                let (slot, row) = matches[0];
+                assert_eq!(word(row,0), slot as u32);
+                assert_eq!(row[8], spec.height);
+                assert_eq!(word(row,0x20), spec.variation);
+                assert_eq!(word(row,0x24), u32::from(spec.kind));
+                assert_eq!(row[0x2c], spec.quality);
+                assert_eq!([f32::from_bits(word(row,0xc)),f32::from_bits(word(row,0x10))], scene.center);
+                assert_eq!(row[0x2d], state.world.categories[scene.block_id][5]);
+                let business_slot = word(row,0x1c) as usize;
+                let business = &state.world.ledgers.businesses[business_slot];
+                assert_ne!(business[0x21c], 0);
+                assert_eq!(word(business,0x210), business_slot as u32);
+                assert_eq!(u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize, slot);
+                assert_eq!(spec.businesses.len(), 1);
+                let request = openmt2001::map_script::Business::from_arguments(&[
+                    openmt2001::lua4::Value::Number(slot as f64),
+                    openmt2001::lua4::Value::Bytes(spec.businesses[0].as_bytes().to_vec()),
+                ], &state.world.catalog.info).unwrap().unwrap();
+                assert_eq!(word(business,4), request.kind);
+                assert_eq!(word(business,0), word(state.world.catalog.info.row(request.kind as usize).unwrap(),0xc));
+                let binding = state.models.bindings.get(&slot).unwrap();
+                assert_eq!(word(row,0x170), binding.handle);
+                assert_ne!(binding.handle, 0);
+                let model = &state.models.models[binding.handle as usize-1];
+                let prepared = openmt2001::geometry::prepare(&scene.layers);
+                let positions: Vec<_> = openmt2001::geometry::facade_positions(&prepared).into_iter()
+                    .chain(openmt2001::roof::mesh(&prepared).positions)
+                    .map(|p| scene.local_position(p)).collect();
+                assert!(!positions.is_empty());
+                assert_eq!(model.positions, positions);
+                let bytes: Vec<_> = positions.iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
+                assert_eq!(model.definition, openmt2001::mesh::model_definition(&bytes).unwrap());
+                assert_eq!(binding.translation, std::array::from_fn(|i| f32::from_bits(word(row,0x58+i*4))));
+                identities.push((slot,business_slot));
+            }
+            assert_ne!(identities[0].0, identities[1].0);
+            assert_ne!(identities[0].1, identities[1].1);
+            identities
+        };
+        let authored_identities = authored.as_ref().map(|(identity,specs)| {
+            assert_eq!(session.skirmish_map.as_ref(), Some(identity));
+            assert_eq!(session.world.buildings.iter().filter(|row| row[0x3f] != 0).count(), 2);
+            assert_eq!(session.world.ledgers.businesses.iter().filter(|row| row[0x21c] != 0).count(), 2);
+            let identities = check_authored(&session, specs);
+            for &(building,business) in &identities {
+                // Original AddBuilding/AddBusiness pass neutral owner0.
+                assert_eq!(session.world.buildings[building][0x2d], 0);
+                assert_eq!(session.world.ledgers.businesses[business][0xa], 0);
+            }
+            identities
+        });
+        let check_selection = |save: &openmt2001::save::SaveFile<'_>| {
+            let extension = openmt2001::save::extension::Extension::parse(save).unwrap().unwrap();
+            let (version, identity) = match &authored {
+                Some((identity,_)) => (6,identity.clone()),
+                None => (5,MapIdentity::LegacyEmpty),
+            };
+            assert_eq!(extension.version, version);
+            let payload = extension.required(18).unwrap();
+            if version == 6 {
+                assert_eq!(payload[..28].chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect::<Vec<_>>(),
+                    [300001,3500f32.to_bits(),1,1,222,15_786,map.len() as u32]);
+                assert_eq!(&payload[28..], b"monopolymap.lua");
+            }
+            assert_eq!(payload.len(), if version == 6 {28+map.len()} else {16});
+            let selection = Selection::decode(extension.version, payload).unwrap();
+            assert_eq!(selection.level_id, 300001);
+            assert_eq!(selection.target.to_bits(), 3500f32.to_bits());
+            assert_eq!(selection.map, identity);
+            assert_eq!(selection.encode(version).unwrap(), payload);
+        };
         assert_eq!(session.catalog.selected_level().unwrap().id(),300001);
         assert!(!session.catalog.selected_level().unwrap().single_player());
         assert_eq!(session.catalog.selected_level().unwrap().objective_target(),3500.);
@@ -4982,6 +5102,7 @@ mod skirmish_session_acceptance {
         let saved_path = crate::save_menu::write_new(&scratch.0, &bytes).unwrap();
         let bytes = fs::read(saved_path).unwrap();
         let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+        check_selection(&save);
         assert_eq!(save.level_metadata().unwrap()[0], 300001);
         assert_eq!(save.game_mode().unwrap(), 1);
         let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
@@ -4993,6 +5114,23 @@ mod skirmish_session_acceptance {
         assert_eq!(&resumed.saved_player_metadata[..2], &session.saved_player_metadata[..2]);
         assert!(resumed.campaign_profile.is_none());
         assert!(resumed.network_command_timer.is_none());
+        assert_eq!(resumed.skirmish_map, session.skirmish_map);
+        if let Some((identity,specs)) = &authored {
+            assert_eq!(resumed.skirmish_map.as_ref(), Some(identity));
+            assert_eq!(check_authored(&session, specs), *authored_identities.as_ref().unwrap());
+            assert_eq!(check_authored(&resumed, specs), *authored_identities.as_ref().unwrap());
+            assert_eq!(resumed.world.buildings.iter().filter(|r| r[0x3f] != 0).count(),
+                session.world.buildings.iter().filter(|r| r[0x3f] != 0).count());
+            assert_eq!(resumed.world.ledgers.businesses.iter().filter(|r| r[0x21c] != 0).count(),
+                session.world.ledgers.businesses.iter().filter(|r| r[0x21c] != 0).count());
+            for &(building,business) in authored_identities.as_ref().unwrap() {
+                assert_eq!(resumed.world.buildings[building][0x2d], session.world.buildings[building][0x2d]);
+                assert_eq!(resumed.world.ledgers.businesses[business], session.world.ledgers.businesses[business]);
+            }
+        }
+        let reexport = resumed.save_v2(&image, cameras, 1).unwrap();
+        let reexport_save = openmt2001::save::SaveFile::parse(&reexport).unwrap();
+        check_selection(&reexport_save);
         let mut other_host = crate::live_host::Host::new(camera.eye);
         other_host.running = true;
         // Both hosts restart at the same wall-frame boundary, as visible load does.

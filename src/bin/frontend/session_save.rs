@@ -153,7 +153,7 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
     let mut deferred = vec![false; native.len()];
     let Some(ext) = extension::Extension::parse(save)? else { return Ok(deferred); };
     ext.validate_runtime_section_set()?;
-    let modern_presentation = matches!(ext.version, 2..=5);
+    let modern_presentation = matches!(ext.version, 2..=6);
     let clock = save.clock()?;
     let mut input = Input::new(ext.required(9)?);
     let count = input.word()? as usize;
@@ -627,24 +627,19 @@ impl<'data> Session<'data> {
             .selected_level()
             .ok_or("save has no selected level")?;
         let version = if (300000..=300006).contains(&selected.id()) {
-            if selected.single_player()
-                || !selected.objective_target().is_finite()
-                || !selected
-                    .directory()
-                    .eq_ignore_ascii_case(format!("net{}", selected.id() - 300000).as_bytes())
-            {
+            if selected.single_player() || !selected.objective_target().is_finite()
+                || !selected.directory().eq_ignore_ascii_case(format!("net{}", selected.id()-300000).as_bytes()) {
                 return Err("unsupported saved Skirmish identity".into());
             }
-            // Independent selected+870, never inferred from active objective.
-            // Map0 and offline1 describe this bounded standard-map capability.
-            records.push((
-                18,
-                words([selected.id(), selected.objective_target().to_bits(), 0, 1]),
-            ));
-            5
-        } else {
-            4
-        };
+            // Independent selected+870 and retained map provenance, never inferred
+            // from the active objective or a reconstructed materialized city.
+            let map = self.skirmish_map.clone().ok_or("saved Skirmish provenance absent")?;
+            let version = if matches!(map, crate::skirmish_maps::MapIdentity::LegacyEmpty) { 5 } else { 6 };
+            records.push((18, crate::skirmish_maps::Selection {
+                level_id: selected.id(), target: selected.objective_target(), map,
+            }.encode(version)?));
+            version
+        } else { 4 };
         extension::append_version(&mut bytes, &records, version)?;
         // Check new due-now presentation boundaries before host publication.
         verified_modern_presentation_queue(&SaveFile::parse(&bytes)?)?;
@@ -672,26 +667,22 @@ impl<'data> Session<'data> {
         // from load_original. Never install record9 without checking that it
         // names the same native queue and packet deadlines.
         verified_modern_presentation_queue(save)?;
-        if ext.version == 5 {
-            let row = ext.required(18)?;
-            let selected = self
-                .catalog
-                .selected_level()
-                .ok_or("Skirmish selection absent")?;
-            if row.len() != 16 {
-                return Err("invalid Skirmish selection record".into());
-            }
-            let word = |at| u32::from_le_bytes(row[at..at + 4].try_into().unwrap());
-            if !(300000..=300006).contains(&word(0))
-                || word(0) != selected.id()
-                || word(4) != selected.objective_target().to_bits()
-                || word(8) != 0
-                || word(12) != 1
-                || !selected.objective_target().is_finite()
-            {
+        let restored_map = if matches!(ext.version, 5 | 6) {
+            let selection = crate::skirmish_maps::Selection::decode(ext.version, ext.required(18)?)?;
+            let selected = self.catalog.selected_level().ok_or("Skirmish selection absent")?;
+            if selection.level_id != selected.id() || selected.single_player()
+                || selection.target.to_bits() != selected.objective_target().to_bits()
+                || !selected.directory().eq_ignore_ascii_case(
+                    format!("net{}", selection.level_id-300000).as_bytes()) {
                 return Err("Skirmish extension differs from prepared selection".into());
             }
-        }
+            if self.skirmish_map.as_ref().is_some_and(|map|
+                !matches!(map, crate::skirmish_maps::MapIdentity::MaterializedUnknown)
+                    && map != &selection.map) {
+                return Err("Skirmish map differs from prepared provenance".into());
+            }
+            Some(selection.map)
+        } else { None };
         let has_auction = ext.records.contains_key(&14);
         let has_view = ext.records.contains_key(&15);
         ext.validate_runtime_section_set()?;
@@ -1130,6 +1121,7 @@ impl<'data> Session<'data> {
             self.demolition_effects = manager;
         }
         if let Some(continuation) = &mut auction { continuation.retain_activation_players(self); }
+        if let Some(map) = restored_map { self.skirmish_map = Some(map); }
         Ok(Some(Metadata { profile_filename, interface_mode, auction,
         }))
     }

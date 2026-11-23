@@ -113,22 +113,16 @@ impl Route {
         token: usize,
         save_root: PathBuf,
     ) -> Result<(), String> {
-        // Pinned policy: only the supplied standard zero-byte identity, at the
-        // native launch path, is supported. Enumeration path is not launch path.
-        let path = crate::campaign_store::original_path(&self.scripts, "MAPS/empty.lua")?
-            .ok_or("standard MAPS/empty.lua missing")?;
-        if !fs::read(path).map_err(|e| e.to_string())?.is_empty() {
-            return Err("standard empty.lua differs from pinned zero-byte map".into());
-        }
+        let maps = crate::skirmish_maps::Catalog::discover(&self.scripts)?;
         let exe = &self.executable;
         let scripts = &self.scripts;
-        self.setup = Some(setup::State::open(
-            catalog,
-            name,
-            Some(b"empty.lua".to_vec()),
-            self.setup_panel.options(),
+        let mut setup = setup::State::open(
+            catalog, name, None, self.setup_panel.options(),
             |l| objective(exe, scripts, l),
-        )?);
+        )?;
+        setup.set_maps(maps.names().iter().map(|name| name.as_bytes().to_vec()).collect(),
+            maps.default_index())?;
+        self.setup = Some(setup);
         self.profile = name.to_vec();
         self.token = token;
         self.save_root = save_root;
@@ -173,7 +167,8 @@ impl Route {
         if self.busy {
             return;
         }
-        if let Some(PointerTarget::Setup(action @ setup::Action::Scroll { part: 2, .. })) =
+        if let Some(PointerTarget::Setup(action @ (setup::Action::Scroll { part: 2, .. }
+            | setup::Action::MapScroll { part: 2 }))) =
             self.press
         {
             if let Some(state) = self.setup.as_mut().filter(|s| s.visible) {
@@ -317,7 +312,7 @@ impl Route {
             r.name_focused = self.keyboard == Some(PointerTarget::Name);
         } else if let Some(s) = self.setup.as_mut().filter(|s| s.visible) {
             s.name_focused = self.keyboard == Some(PointerTarget::Setup(setup::Action::Name));
-            if matches!(self.keyboard, Some(PointerTarget::Setup(setup::Action::Row(_)))) {
+            if matches!(self.keyboard, Some(PointerTarget::Setup(setup::Action::Row(_) | setup::Action::MapRow(_)))) {
                 self.activate_keyboard();
             }
         }
@@ -483,6 +478,8 @@ fn setup_action_id(action: setup::Action) -> usize {
         setup::Action::Name => 104,
         setup::Action::Difficulty(d) => 110 + d as usize,
         setup::Action::Row(r) => 200 + r,
+        setup::Action::MapRow(r) => 1000 + r,
+        setup::Action::MapScroll { part } => 140 + part,
         setup::Action::Scroll { description, part } => 120 + usize::from(description) * 10 + part,
     }
 }
@@ -616,5 +613,32 @@ mod keyboard_and_failure_tests {
         let selection = route.keyboard;
         route.navigate(1); // modal guard
         assert_eq!(route.keyboard, selection);
+    }
+}
+
+
+#[cfg(test)]
+mod map_action_routing_tests {
+    use super::*;
+    #[test]
+    fn map_actions_keep_row_identity_and_scroll_domain_distinct() {
+        let mut ids=std::collections::BTreeSet::new();
+        for a in [setup::Action::Ok,setup::Action::Back,setup::Action::Minus,
+            setup::Action::Plus,setup::Action::Name] {assert!(ids.insert(setup_action_id(a)));}
+        for d in 0..3 {assert!(ids.insert(setup_action_id(setup::Action::Difficulty(d))));}
+        for part in 0..3 {
+            for description in [false,true] {
+                assert!(ids.insert(setup_action_id(setup::Action::Scroll{description,part})));
+            }
+            assert!(ids.insert(setup_action_id(setup::Action::MapScroll{part})));
+        }
+        // Original map enumeration retains at most256 rows; this ID namespace
+        // is distinct from the supplied seven condition rows and generic actions.
+        for row in 0..256 {assert!(ids.insert(setup_action_id(setup::Action::MapRow(row))));}
+        for row in 0..7 {assert!(ids.insert(setup_action_id(setup::Action::Row(row))));}
+        assert!(!matching_release(Some(PointerTarget::Setup(setup::Action::MapRow(0))),
+            Some(PointerTarget::Setup(setup::Action::MapRow(1)))));
+        assert!(!matching_release(Some(PointerTarget::Setup(setup::Action::MapScroll{part:2})),
+            Some(PointerTarget::Setup(setup::Action::Scroll{description:false,part:2}))));
     }
 }

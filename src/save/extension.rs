@@ -8,6 +8,8 @@ pub const VERSION: u32 = 1;
 // VERSION2: base plus14 auction continuation OR15 strategic host view.
 // VERSION3: base plus16 independent placement RNG, optionally14 OR15.
 // VERSION4: VERSION3 plus17 complete portable dust pool and independent RNG.
+// VERSION5: VERSION4 plus18 legacy empty-map offline Skirmish selection.
+// VERSION6: same exact section set, with versioned map provenance in18.
 // The frontend validates each exact record set; this container keeps payloads
 // opaque and retains VERSION1 as the default for legacy append callers.
 pub struct Extension<'a> {
@@ -27,7 +29,7 @@ impl<'a> Extension<'a> {
             4 => self.records.contains_key(&16) && self.records.contains_key(&17)
                 && !(auction && view)
                 && self.records.len() == 15 + usize::from(auction || view),
-            5 => self.records.contains_key(&16) && self.records.contains_key(&17)
+            5 | 6 => self.records.contains_key(&16) && self.records.contains_key(&17)
                 && self.records.contains_key(&18) && !(auction && view)
                 && self.records.len() == 16 + usize::from(auction || view),
             _ => false,
@@ -49,7 +51,7 @@ impl<'a> Extension<'a> {
         let version = bytes
             .get(8..12)
             .map(|row| u32::from_le_bytes(row.try_into().unwrap()));
-        if bytes.get(..8) != Some(MAGIC) || !matches!(version, Some(1..=5)) {
+        if bytes.get(..8) != Some(MAGIC) || !matches!(version, Some(1..=6)) {
             return Err("unsupported V2 save extension version".into());
         }
         let mut at = 12;
@@ -89,7 +91,7 @@ pub fn append_version(
     records: &[(u32, Vec<u8>)],
     version: u32,
 ) -> Result<(), String> {
-    if !matches!(version, 1..=5) {
+    if !matches!(version, 1..=6) {
         return Err("unsupported V2 save extension output version".into());
     }
     let save = SaveFile::parse(native)?;
@@ -128,13 +130,13 @@ mod tests {
     use super::*;
     #[test]
     fn supported_runtime_versions_require_exact_records() {
-        for version in 1..=5 {
+        for version in 1..=6 {
             let mut records: std::collections::BTreeMap<u32, &[u8]> =
                 (1..=13).map(|tag| (tag, &[][..])).collect();
             if version == 2 { records.insert(15, &[]); }
             if version >= 3 { records.insert(16, &[]); }
             if version >= 4 { records.insert(17, &[]); }
-            if version == 5 { records.insert(18, &[]); }
+            if version >= 5 { records.insert(18, &[]); }
             let mut extension = Extension { version, records };
             extension.validate_runtime_section_set().unwrap();
             if version >= 3 {
@@ -144,7 +146,7 @@ mod tests {
                 assert!(extension.validate_runtime_section_set().is_err());
                 extension.records.remove(&15);
             }
-            if version == 5 {
+            if version >= 5 {
                 extension.records.remove(&18);
                 assert!(extension.validate_runtime_section_set().is_err());
                 extension.records.insert(18, &[]);
