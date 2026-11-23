@@ -6,7 +6,9 @@ use openmt2001::pe::PeImage;
 
 const EMITTER_LIMIT: usize = 30;
 const PARTICLES_PER_KIND: usize = 90;
-const POINT_CAPACITY: usize = 512;
+// Original454f10 ->4ebf40: capacity750, independent of flags0x200.
+// Shared with the dedicated result GPU owner; generic particles keep512.
+pub(super) const POINT_CAPACITY: usize = 750;
 const ANGLE_STEP: f64 = 0.017_453_292_5; // Original double at 525bb8.
 const DT: f32 = f32::from_bits(0x3dcccccd); // 52508c.
 const GRAVITY: f32 = f32::from_bits(0x3ca3d70b); // 525bc4.
@@ -497,6 +499,64 @@ impl Fireworks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collector_prefix_750_preserves_order_and_steps_rejected_tail() {
+        // Controlled original field contract, not an original capture: legal
+        // twenty-emitter phase2 state. Only launch slot0 and burst slots live,
+        // so secondary skips all source slots and admission consumes no RNG.
+        let fixture = |count: usize| {
+            let mut next_id = 0;
+            let particle = |id: usize| Particle { active: 1, life: 77, decrement: 3,
+                position: [id as f32, 2., -10.], velocity: [0.;3], size: 2.,
+                rgb: [id as u8, (id >> 8) as u8, 0x3d], alpha_table: (id & 1) as u8 };
+            let mut remaining = count - 20;
+            let mut emitters = vec![None; EMITTER_LIMIT];
+            for target in emitters.iter_mut().take(20) {
+                let launch = particle(next_id); next_id += 1;
+                let mut emitter = Emitter::new(0, 6., launch);
+                emitter.phase = 2;
+                let take = remaining.min(90);
+                for slot in 0..take {
+                    emitter.burst[slot] = Some(particle(next_id)); next_id += 1;
+                }
+                remaining -= take;
+                *target = Some(emitter);
+            }
+            assert_eq!((next_id, remaining), (count, 0));
+            Fireworks { emitter_count: 20, spawn_width: [80.,9.], origin: [-170.,0.,-100.],
+                rng: 0x12345678, emitters,
+                alpha: [std::array::from_fn(|i| i as u8), std::array::from_fn(|i| 255-i as u8)],
+                burst_countdown: -1, tick: 0, submitted_count: 0, points: Vec::new(), sounds: Vec::new() }
+        };
+        for count in [511, 512, 513, 749, 750, 751, 1820] {
+            let mut effect = fixture(count);
+            let points = effect.tick().unwrap().to_vec();
+            assert_eq!(effect.submitted_count(), count, "root count is not collector-clamped");
+            assert_eq!(points.len(), count.min(750));
+            for (id, point) in points.iter().enumerate() {
+                assert_eq!(point.position, [id as f32, 2., -10.], "ordered root prefix {id}");
+                let alpha = if id & 1 == 0 { 77u32 } else { 178 };
+                assert_eq!(point.argb, alpha << 24 | (id as u8 as u32) << 16
+                    | ((id >> 8) as u8 as u32) << 8 | 0x3d, "prior-life ARGB {id}");
+                assert_eq!(point.size, 2.);
+            }
+            // Collector refusal must never stop manager stepping. This checks
+            // every gathered particle, including ids750..1819 when present.
+            let mut stepped = 0;
+            for emitter in effect.emitters[..20].iter().flatten() {
+                for particle in emitter.launch.iter().chain(&emitter.burst).flatten() {
+                    assert_eq!((particle.life, particle.active), (74, 74));
+                    assert_eq!(particle.velocity, [0., -GRAVITY, 0.]);
+                    stepped += 1;
+                }
+            }
+            assert_eq!(stepped, count);
+            assert_eq!(effect.rng_state(), 0x12345678);
+            assert_eq!(effect.tick_count(), 1);
+            assert!(effect.take_sounds().is_empty());
+        }
+    }
 
     #[test]
     #[ignore = "requires original v1.4 executable and 200-frame result particle fixture"]

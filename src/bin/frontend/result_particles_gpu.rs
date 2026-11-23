@@ -1,10 +1,9 @@
 //! Camera-facing result points for the original 4ec120/4ec270 draw stream.
-use super::fireworks::Point;
+use super::fireworks::{Point, POINT_CAPACITY as RESULT_POINT_CAPACITY};
 use openmt2001::{flyby::CameraSample, render::SurfaceMode, render_scene::OwnedDraw};
 use std::sync::Arc;
 
-// Retained modern cap, intentionally unchanged in this material slice.
-// Original454f10 capacity is750; its0x200 argument is flags, not capacity.
+// Retained shared dust/pulse/generic admission. Result mode owns750 separately.
 const CAPACITY: usize = 512;
 const CORNERS: [[f32; 2]; 4] = [[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]];
 const UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
@@ -33,6 +32,11 @@ impl FireworkTexture {
     pub fn empty_draw(&self) -> OwnedDraw {
         let mut draw = empty_draw();
         draw.mode = SurfaceMode::ResultFireworks;
+        // The result path prepares once, then update_surface requires enough
+        // retained GPU capacity for the complete admitted collector prefix.
+        draw.vertices.resize(RESULT_POINT_CAPACITY * 6, [0.; 8]);
+        draw.specular.as_mut().unwrap().resize(RESULT_POINT_CAPACITY * 6, [0.; 3]);
+        draw.diffuse_alpha.as_mut().unwrap().resize(RESULT_POINT_CAPACITY * 6, 0);
         draw.width = self.width;
         draw.height = self.height;
         draw.rgba = self.rgba.clone();
@@ -91,9 +95,11 @@ pub fn fill_with_scale(
     camera: CameraSample,
     scale: f32,
 ) -> Result<(), String> {
-    if !matches!(draw.mode, SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks) {
-        return Err("result particle material changed".into());
-    }
+    let capacity = match draw.mode {
+        SurfaceMode::ResultParticles => CAPACITY,
+        SurfaceMode::ResultFireworks => RESULT_POINT_CAPACITY,
+        _ => return Err("result particle material changed".into()),
+    };
     let forward = normalize(std::array::from_fn(|axis| {
         camera.target[axis] - camera.eye[axis]
     }))?;
@@ -105,7 +111,7 @@ pub fn fill_with_scale(
         .as_mut()
         .ok_or("result particle alpha missing")?;
     alpha.clear();
-    for point in points.iter().take(CAPACITY) {
+    for point in points.iter().take(capacity) {
         let center = [point.position[0], point.position[1], -point.position[2]];
         let radius = point.size * scale;
         let rgb = [16, 8, 0].map(|shift| ((point.argb >> shift) & 255) as f32 / 255.);
@@ -142,6 +148,76 @@ mod tests {
     use glam::Mat4;
     #[cfg(feature = "capture")]
     use openmt2001::{camera, pe::PeImage, render::Renderer};
+
+    #[test]
+    fn result_750_and_shared_512_keep_ordered_point_fields() {
+        // Controlled no-asset field oracle: the original collector takes the
+        // first750, generic callers retain512. Geometry uses the established
+        // axis-aligned camera and radius=size*.5, not a mirrored fill helper.
+        let texture = FireworkTexture { width: 1, height: 1, rgba: Arc::from([255,255,255,255]) };
+        let mut result = texture.empty_draw();
+        let mut shared = empty_draw();
+        for (draw, count) in [(&result, 4500), (&shared, 3072)] {
+            assert_eq!(draw.vertices.len(), count);
+            assert_eq!(draw.specular.as_ref().unwrap().len(), count);
+            assert_eq!(draw.diffuse_alpha.as_ref().unwrap().len(), count);
+            assert_eq!(draw.borrowed().vertices.len(), count);
+        }
+        let points = (0..900).map(|id| Point { position: [id as f32*4.,8.,-16.], size: 2.,
+            argb: (((64+id%128) as u32) << 24) | ((id as u8 as u32) << 16)
+                | (((id >> 8) as u8 as u32) << 8) | 0x33 }).collect::<Vec<_>>();
+        let camera = CameraSample { eye: [0.;3], target: [0.,0.,-1.], up: [0.,1.,0.], vertical_fov: 45. };
+        for count in [0, 1, 511, 512, 513, 749, 750, 751, 900, 1, 750] {
+            fill(&mut result, &points[..count], camera).unwrap();
+            fill(&mut shared, &points[..count], camera).unwrap();
+            for (draw, limit) in [(&result, 750), (&shared, 512)] {
+                let admitted = count.min(limit);
+                assert_eq!(draw.vertices.len(), admitted*6);
+                assert_eq!(draw.specular.as_ref().unwrap().len(), admitted*6);
+                assert_eq!(draw.diffuse_alpha.as_ref().unwrap().len(), admitted*6);
+                assert_eq!(draw.borrowed().vertices.len(), admitted*6);
+                for id in 0..admitted {
+                    let x = id as f32 * 4.;
+                    let expected = [[x-1.,7.,16.], [x+1.,7.,16.], [x+1.,9.,16.],
+                        [x-1.,7.,16.], [x+1.,9.,16.], [x-1.,9.,16.]];
+                    let rgb = [(id as u8) as f32/255., ((id>>8) as u8) as f32/255., 51./255.];
+                    for (offset, position) in expected.into_iter().enumerate() {
+                        let vertex = &draw.vertices[id*6+offset];
+                        assert_eq!(vertex[..3], position, "ordered geometry point{id}");
+                        assert_eq!(vertex[3..6], rgb);
+                        assert_eq!(vertex[6..8], [[0.,1.], [1.,1.], [1.,0.],
+                            [0.,1.], [1.,0.], [0.,0.]][offset]);
+                        assert_eq!(draw.diffuse_alpha.as_ref().unwrap()[id*6+offset], (64+id%128) as u8);
+                        assert_eq!(draw.specular.as_ref().unwrap()[id*6+offset], [0.;3]);
+                    }
+                }
+            }
+        }
+        assert_eq!(result.mode, SurfaceMode::ResultFireworks);
+        assert_eq!(shared.mode, SurfaceMode::ResultParticles);
+    }
+
+    #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires GPU adapter; retained result750 allocation/update boundary"]
+    fn result_750_updates_prepared_surface_without_reallocation_api() {
+        let texture = FireworkTexture { width: 1, height: 1, rgba: Arc::from([255,255,255,255]) };
+        let mut draw = texture.empty_draw();
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let matrix = Mat4::IDENTITY.to_cols_array();
+        let mut prepared = renderer.prepare(&[draw.borrowed()], matrix, None).unwrap();
+        let camera = CameraSample { eye: [0.;3], target: [0.,0.,-1.], up: [0.,1.,0.], vertical_fov: 45. };
+        let points = vec![Point { position: [0.,0.,-1.], argb: 0x804080ff, size: 2. }; 751];
+        // update_surface is the actual result caller's bounded API, not the
+        // dynamic-growth API which could conceal an undersized initial draw.
+        for count in [513, 750, 1, 749, 751, 0, 750] {
+            fill(&mut draw, &points[..count], camera).unwrap();
+            assert_eq!(draw.borrowed().vertices.len(), count.min(750)*6);
+            renderer.update_surface(&mut prepared, 0, &draw.borrowed(), matrix, None).unwrap();
+        }
+    }
 
     #[test]
     #[ignore = "requires supplied original archive; no GPU"]
