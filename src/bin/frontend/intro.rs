@@ -14,11 +14,14 @@ use std::{
 #[path = "construction_scaffold.rs"]
 mod construction_scaffold;
 
+// Normal city reset004b9d40 loads53.0 from00545acc into renderer slot14.
+const NORMAL_CITY_VERTICAL_FOV: f32 = 53.;
+
 fn fresh_city_camera() -> (CameraSample, openmt2001::camera::BlockCamera) {
     // Normal4b9fa0->4b9d40 selects mode6 and writes4b9e5f..91. Mode6
     // has no pose callback at4e02d0, so it retains these exact floats.
     (CameraSample { eye: [26., 586., -695.], target: [26., 463., -595.],
-        up: [0., 1., 0.], vertical_fov: 45.,
+        up: [0., 1., 0.], vertical_fov: NORMAL_CITY_VERTICAL_FOV,
         },
      openmt2001::camera::BlockCamera { center: [51., 463., -595.],
         angle: -std::f32::consts::FRAC_PI_2, height: 586., radius: 100.,
@@ -293,8 +296,10 @@ pub(crate) fn detail_model_at_unit_scale(record: &[u8]) -> bool {
     status == 4 || record[0x74..0x78] == 1f32.to_le_bytes()
 }
 
-/// The original 483dd0 camera allocation is a 49-word copy of 93af60.
-/// 4e0590 submits its current eye/target/up triples at offsets 4c/58/64.
+/// The original483dd0 copies49 words into primary camera allocation0093af60.
+/// 004e0590 interpolates eye/target; 004b4430 submits their current4c/58 triples.
+/// The modern up input is at64. General original restore of that triple into
+/// renderer up is unproven; SAVE_ONE matches the renderer's default[0,1,0].
 /// Mode-specific orbit controls are not interchangeable, so derive V2's
 /// block controls from that visible pose for subsequent human input.
 fn saved_viewpoint(
@@ -326,6 +331,14 @@ fn saved_viewpoint(
     Ok((CameraSample { eye, target, up, vertical_fov,
         }, controls,
     ))
+}
+
+// Ordinary restore copies tag100 to0093af60; normal reset supplies its FOV.
+// Keep the generic saved_viewpoint helper available for other camera owners.
+fn normal_saved_city_viewpoint(
+    records: &[[u8; 196]; 2],
+) -> Result<(CameraSample, openmt2001::camera::BlockCamera), String> {
+    saved_viewpoint(&records[0], NORMAL_CITY_VERTICAL_FOV)
 }
 
 fn page_height(height: f32, up: bool) -> f32 {
@@ -1439,7 +1452,7 @@ impl SceneInputs {
                 session.campaign_profile = Some(profile);
         }
         let saved_viewpoint = session.saved_cameras.as_ref()
-            .map(|records| saved_viewpoint(&records[0], camera.vertical_fov))
+            .map(normal_saved_city_viewpoint)
             .transpose()?;
         let saved_prior_mode = saved_interface_mode
             .or_else(|| saved_auction.as_ref().map(|auction| auction.prior_mode)).or_else(|| {
@@ -7029,6 +7042,80 @@ mod tests {
     }
 
     #[test]
+    fn normal_city_entry_keeps_native_pose_with_53_degree_projection() {
+        let (sample, controls) = fresh_city_camera();
+        assert_eq!(sample.eye, [26., 586., -695.]);
+        assert_eq!(sample.target, [26., 463., -595.]);
+        assert_eq!(sample.up, [0., 1., 0.]);
+        assert_eq!(sample.vertical_fov, 53.);
+        assert_eq!(controls.center, [51., 463., -595.]);
+        assert_eq!(controls.height, 586.);
+        assert_eq!(controls.radius, 100.);
+        assert_eq!(controls.angle, -std::f32::consts::FRAC_PI_2);
+    }
+
+    #[test]
+    fn normal_saved_city_selects_primary_pose_and_owns_fov() {
+        let mut records = [[0u8; 196]; 2];
+        let poses = [
+            ([82., 120., -454.5], [82., 0.25, -374.5], [0., 1., 0.]),
+            ([410., 80., -60.], [10., 2., 20.], [0., 0., 1.]),
+        ];
+        for (record, (eye, target, up)) in records.iter_mut().zip(poses) {
+            for (offset, values) in [(0x4c, eye), (0x58, target), (0x64, up)] {
+                for (axis, value) in values.into_iter().enumerate() {
+                    let at = offset + axis * 4;
+                    record[at..at + 4].copy_from_slice(&f32::to_le_bytes(value));
+                }
+            }
+        }
+        let (sample, controls) = normal_saved_city_viewpoint(&records).unwrap();
+        assert_eq!((sample.eye, sample.target, sample.up), poses[0]);
+        assert_eq!(sample.vertical_fov, 53.);
+        assert_eq!(controls.radius, 80.);
+        assert_eq!(controls.height, 120.);
+        // Other owners retain the caller-selected FOV and record.
+        let generic = saved_viewpoint(&records[1], 61.).unwrap().0;
+        assert_eq!((generic.eye, generic.target, generic.up), poses[1]);
+        assert_eq!(generic.vertical_fov, 61.);
+        // An invalid primary must not silently select the usable backup.
+        records[0][0x4c..0x50].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(normal_saved_city_viewpoint(&records).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires supplied v1.4 PE and both original saves; read-only camera contract"]
+    fn supplied_normal_city_camera_matches_pe_fov_and_projection() {
+        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let word = |address| u32::from_le_bytes(image.at(address, 4).unwrap().try_into().unwrap());
+        assert_eq!(word(0x545acc), 53f32.to_bits(), "normal reset FOV data");
+        assert_eq!(word(0x52af24), 0x4f1550, "renderer slot14 projection setter");
+        assert_eq!(word(0x52b0bc), 0x3c0efa1e, "original half-degree factor");
+        assert_eq!(fresh_city_camera().0.vertical_fov.to_bits(), word(0x545acc));
+        for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
+            let bytes = fs::read(std::env::var(key).unwrap()).unwrap();
+            let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+            let records = save.cameras().unwrap().map(|row| *row);
+            let sample = normal_saved_city_viewpoint(&records).unwrap().0;
+            let primary = |offset| f32::from_le_bytes(
+                records[0][offset..offset + 4].try_into().unwrap());
+            assert_eq!(sample.eye, [primary(0x4c), primary(0x50), primary(0x54)], "{key}");
+            assert_eq!(sample.target, [primary(0x58), primary(0x5c), primary(0x60)], "{key}");
+            assert_eq!(sample.up, [primary(0x64), primary(0x68), primary(0x6c)], "{key}");
+            assert_eq!(sample.vertical_fov.to_bits(), word(0x545acc), "{key}");
+            let [near, far] = openmt2001::camera::city_clip(sample.eye[1]).unwrap();
+            let matrix = openmt2001::camera::projection(sample.vertical_fov, near, far,
+                1280, 960, [0., 1., 0., 1.]).unwrap();
+            // Original004f1480 full-clip focal scales at53 degrees and4:3.
+            // Specified viewport only; not a claim about the recording's aspect.
+            assert!((matrix[5] - 2.0056954286f32).abs() < 0.000001, "{key} vertical focal scale");
+            assert!((matrix[0] - 1.5042715714f32).abs() < 0.000001, "{key} aspect scaling");
+            assert_eq!((matrix[8], matrix[9], matrix[11], matrix[15]), (0., 0., 1., 0.));
+        }
+    }
+
+    #[test]
     #[ignore = "requires original board and supplied saved business memberships"]
     fn original_category_hyperlinks_keep_native_identity() {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
@@ -8282,9 +8369,11 @@ mod tests {
                     &inputs.suncols, Some(loaded.saved_viewpoint.unwrap().0), true,
                             ).unwrap();
                 let mut current_models = baseline.clone();
+                let mut current_cache = SnapshotCache::default();
+                let mut current_visibility = DetailVisibility::default();
                 inputs.append_current_appearance(
-                    &session, &mut current_models, &mut DetailVisibility::default(),
-                    &mut SnapshotCache::default(), false,
+                    &session, &mut current_models, &mut current_visibility,
+                    &mut current_cache, false,
                 ).unwrap();
                 assert_eq!(current_models.draws.len(), cache.city.as_ref().unwrap().draws.len(),
                     "live model appearance must submit the same original details");
@@ -8293,8 +8382,88 @@ mod tests {
                     .filter(|row| u32::from_le_bytes(row.row[..4].try_into().unwrap()) == 1)
                     .map(|row| if row.descriptor == 0x0108_0202 { 3 } else { 2 })
                     .sum::<usize>();
-                assert_eq!(cache.city.as_ref().unwrap().draws.len() - baseline.draws.len(),
-                    expected_draws, "saved details must reach the retained city");
+                assert_eq!(expected_draws, 105, "supplied active-row dynamic detail contract");
+                // Static inactive rows are batched into shared atlas pages, not
+                // counted by the active-row dynamic renderer-template formula.
+                let static_categories = baseline.inspection_buildings.iter().filter_map(|building| {
+                    let slot = building.runtime_slot?;
+                    let record = &session.world.buildings[slot];
+                    (record[0x3f] != 0 && detail_model_at_unit_scale(record)
+                        && session.models.appearance_candidates.get(&slot)?.renderer_templates.iter()
+                            .any(|row| crate::static_detail::supports(row.descriptor)
+                                && u32::from_le_bytes(row.row[..4].try_into().unwrap()) == 0))
+                        .then_some(building.category)
+                }).collect::<std::collections::BTreeSet<_>>();
+                assert!(!static_categories.is_empty(), "supplied save must exercise static details");
+                let check_details = |scene: &Scene, detail_cache: &SnapshotCache,
+                                     visibility: &DetailVisibility, base_draws: usize| {
+                    let mut end = base_draws;
+                    let mut static_draws = 0;
+                    let mut categories = std::collections::BTreeSet::new();
+                    for range in &detail_cache.static_detail_ranges {
+                        assert!(range.start >= end && range.end <= scene.draws.len(),
+                            "static ranges must be ordered, disjoint, and appended to the base");
+                        end = range.end;
+                        static_draws += range.len();
+                        for index in range.clone() {
+                            let draw = &scene.draws[index];
+                            assert!(!draw.vertices.is_empty(), "static page must contain geometry");
+                            let mut spans = visibility.spans.iter().filter(|span| span.draw == index)
+                                .collect::<Vec<_>>();
+                            spans.sort_by_key(|span| span.start);
+                            let mut vertex_end = 0;
+                            for span in spans {
+                                assert_eq!(span.start, vertex_end, "static spans must cover each page once");
+                                vertex_end += span.positions.len();
+                                assert!(static_categories.contains(&span.category),
+                                    "static category must own an eligible supported inactive row");
+                                categories.insert(span.category);
+                            }
+                            assert_eq!(vertex_end, draw.vertices.len(), "static page has untracked vertices");
+                        }
+                    }
+                    assert!(static_draws > 0, "supplied static rows must produce atlas pages");
+                    assert_eq!(categories, static_categories, "static category coverage");
+                    assert_eq!(scene.draws.len() - base_draws - static_draws, expected_draws,
+                        "saved dynamic details must retain the active-row count");
+                    static_draws
+                };
+                let retained = cache.city.as_ref().unwrap();
+                let static_draws = check_details(retained, &cache, &cache.detail_visibility,
+                    baseline.draws.len());
+                assert_eq!(check_details(&current_models, &current_cache, &current_visibility,
+                    baseline.draws.len()), static_draws, "saved/current static page count");
+                // Same immutable Session, pose, time and append helpers; only
+                // the scene projection input changes. No host tick or replay.
+                let control_camera = CameraSample { vertical_fov: 45.,
+                    ..loaded.saved_viewpoint.unwrap().0 };
+                let mut control = session.scene(&inputs.build_file,
+                    OriginalAssets { executable: &inputs.executable,
+                        directory: &inputs.directory, archive: &inputs.archive },
+                    &inputs.suncols, Some(control_camera), true).unwrap();
+                let control_base = control.draws.len();
+                assert_eq!(control_base, baseline.draws.len(), "FOV must not change base draw admission");
+                let mut control_cache = SnapshotCache::default();
+                let mut control_visibility = DetailVisibility::default();
+                inputs.append_saved_appearance(&session, &mut control, &mut control_visibility,
+                    &mut control_cache).unwrap();
+                inputs.append_current_appearance(&session, &mut control, &mut control_visibility,
+                    &mut control_cache, true).unwrap();
+                assert_eq!(check_details(&control, &control_cache, &control_visibility, control_base),
+                    static_draws, "45/53 static page count");
+                assert_eq!(control_cache.static_detail_ranges, cache.static_detail_ranges,
+                    "45/53 static page placement");
+                for (control_draw, saved_draw) in control.draws[control_base..].iter()
+                    .zip(&retained.draws[baseline.draws.len()..]) {
+                    assert_eq!(control_draw.vertices, saved_draw.vertices, "45/53 detail geometry");
+                    assert_eq!(control_draw.mode, saved_draw.mode, "45/53 detail material mode");
+                    assert_eq!(control_draw.specular, saved_draw.specular, "45/53 detail lighting");
+                    assert_eq!((control_draw.width, control_draw.height),
+                        (saved_draw.width, saved_draw.height), "45/53 detail atlas dimensions");
+                    assert_eq!(control_draw.rgba, saved_draw.rgba, "45/53 detail atlas pixels");
+                }
+                eprintln!("SAVE_ONE appearance: {expected_draws} dynamic draws + {static_draws} static pages; \
+                    static categories {static_categories:?}; identical45/53 detail submission");
                 let mut unchanged = cache.city.as_ref().unwrap().clone();
                 inputs.append_current_appearance(
                     &session, &mut unchanged, &mut DetailVisibility::default(),
@@ -8321,6 +8490,7 @@ mod tests {
             }
             let saved = session.saved_cameras.as_ref().unwrap();
             let (visible, controls) = loaded.saved_viewpoint.unwrap();
+            assert_eq!(visible.vertical_fov, 53., "ordinary saved owner retained menu FOV");
             let at = |offset: usize| {
                         f32::from_le_bytes(saved[0][offset..offset + 4].try_into().unwrap())
                     };

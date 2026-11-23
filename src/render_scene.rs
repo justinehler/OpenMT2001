@@ -1117,8 +1117,8 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         .unwrap_or((center + direction * distance * 1.05, center));
     let camera_up = request.camera.map_or([0., 1., 0.], |c| c.up);
     let fov = request.camera.map_or(45., |c| c.vertical_fov);
-    // Normal scene clipping is applied after the original 45-degree FOV setup.
-    // This overview's pose remains diagnostic until camera controls are recovered.
+    // Projection uses the explicit camera owner's FOV; normal city owners
+    // supply the original53 degrees. Camera-absent overview framing is diagnostic.
     let [near, far] = crate::camera::city_clip(camera_position.y)?;
     let projection = crate::camera::projection(
         fov,
