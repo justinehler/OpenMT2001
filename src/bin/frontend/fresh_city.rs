@@ -4882,6 +4882,186 @@ mod skirmish_session_acceptance {
         skirmish_map_cold_reload_continuation("monopolymap.lua");
     }
 
+    // Shared source-backed record/model checks; no Host or renderer execution.
+    fn check_authored_records(
+        state: &Session<'_>,
+        specs: &[openmt2001::scene::BuildingSpec],
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) -> Vec<(usize,usize)> {
+        let word = |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let mut identities = Vec::new();
+        for spec in specs {
+            let scene = openmt2001::scene::SceneBuilding::resolve(spec.clone(), board, file).unwrap();
+            let category_reference = openmt2001::building_geometry::V14_CATEGORY_BASE
+                + scene.block_id as u32 * openmt2001::building_geometry::CATEGORY_STRIDE;
+            let [x,y,w,d] = spec.lot;
+            let endpoints = [x,y,x+w-1,y+d-1];
+            let matches: Vec<_> = state.world.buildings.iter().enumerate()
+                .filter(|(_, row)| row[0x3f] != 0 && word(*row,0x40) == category_reference
+                    && row[4..8] == endpoints).collect();
+            assert_eq!(matches.len(), 1, "authored lot missing or duplicated: {:?}", spec.lot);
+            let (slot, row) = matches[0];
+            assert_eq!(word(row,0), slot as u32);
+            assert_eq!(row[8], spec.height);
+            assert_eq!(word(row,0x20), spec.variation);
+            assert_eq!(word(row,0x24), u32::from(spec.kind));
+            assert_eq!(row[0x2c], spec.quality);
+            assert_eq!([f32::from_bits(word(row,0xc)),f32::from_bits(word(row,0x10))], scene.center);
+            assert_eq!(row[0x2d], state.world.categories[scene.block_id][5]);
+            let business_slot = word(row,0x1c) as usize;
+            let business = &state.world.ledgers.businesses[business_slot];
+            assert_ne!(business[0x21c], 0);
+            assert_eq!(word(business,0x210), business_slot as u32);
+            assert_eq!(u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize, slot);
+            assert_eq!(spec.businesses.len(), 1);
+            let request = openmt2001::map_script::Business::from_arguments(&[
+                openmt2001::lua4::Value::Number(slot as f64),
+                openmt2001::lua4::Value::Bytes(spec.businesses[0].as_bytes().to_vec()),
+            ], &state.world.catalog.info).unwrap().unwrap();
+            assert_eq!(word(business,4), request.kind);
+            assert_eq!(word(business,0), word(state.world.catalog.info.row(request.kind as usize).unwrap(),0xc));
+            let binding = state.models.bindings.get(&slot).unwrap();
+            assert_eq!(word(row,0x170), binding.handle);
+            assert_ne!(binding.handle, 0);
+            let model = &state.models.models[binding.handle as usize-1];
+            let prepared = openmt2001::geometry::prepare(&scene.layers);
+            let positions: Vec<_> = openmt2001::geometry::facade_positions(&prepared).into_iter()
+                .chain(openmt2001::roof::mesh(&prepared).positions)
+                .map(|p| scene.local_position(p)).collect();
+            assert!(!positions.is_empty());
+            assert_eq!(model.positions, positions);
+            let bytes: Vec<_> = positions.iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
+            assert_eq!(model.definition, openmt2001::mesh::model_definition(&bytes).unwrap());
+            assert_eq!(binding.translation, std::array::from_fn(|i| f32::from_bits(word(row,0x58+i*4))));
+            identities.push((slot,business_slot));
+        }
+        let buildings: std::collections::BTreeSet<_> = identities.iter().map(|pair| pair.0).collect();
+        let businesses: std::collections::BTreeSet<_> = identities.iter().map(|pair| pair.1).collect();
+        assert_eq!(buildings.len(), specs.len(), "authored building identities must be unique");
+        assert_eq!(businesses.len(), specs.len(), "authored business identities must be unique");
+        identities
+    }
+
+    #[test]
+    #[ignore = "requires supplied originals; bounded sequential25-map NET1 startup only"]
+    fn original_25_skirmish_maps_net1_startup_matrix() {
+        let started = std::time::Instant::now();
+        std::thread::Builder::new().stack_size(64*1024*1024).spawn(move || {
+            let budget = std::time::Duration::from_secs(120);
+            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let executable = read("OPENMT2001_EXE");
+            let directory = read("OPENMT2001_ARCHIVE_DIR");
+            let archive = read("OPENMT2001_ARCHIVE_BIN");
+            let build = read("OPENMT2001_BUILD_FILE");
+            let parameters = read("OPENMT2001_PARAMETERS");
+            let timetable = read("OPENMT2001_TIMETABLE");
+            let road_routes = read("OPENMT2001_ROAD_ROUTE_TABLE");
+            let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+            let board = openmt2001::board::Board::from_v14(&image).unwrap();
+            let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+            let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+            let default_path = std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+            let scripts = default_path.parent().unwrap().parent().unwrap();
+            let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+                .parent().unwrap().parent().unwrap().join("US/language/usa");
+            let names = character_names(&image, &language).unwrap();
+            assert_eq!(names[0].as_slice(), b"Racecar");
+            assert_eq!(names[1].as_slice(), b"Wheelbarrow");
+            let era_styles = load_era_styles(
+                Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
+            let maps = crate::skirmish_maps::Catalog::discover(scripts).unwrap();
+            assert_eq!(maps.names().len(), 25, "requires actual supplied25-map catalog");
+            let mut seen = std::collections::BTreeSet::new();
+            let mut completed = 0;
+            use crate::skirmish_maps::MapIdentity;
+            use openmt2001::skirmish::roster::{Kind, Participant};
+            for (case, basename) in maps.names().iter().enumerate() {
+                assert!(started.elapsed() < budget, "120s total startup matrix budget before {basename}");
+                assert!(seen.insert(basename.to_ascii_lowercase()), "duplicate supplied basename: {basename}");
+                let case_started = std::time::Instant::now();
+                println!("NET1_MATRIX BEGIN case={}/25 map={basename} total_ms={}", case+1, started.elapsed().as_millis());
+                let resolved = maps.resolve(scripts, basename).unwrap();
+                let specs = openmt2001::scene::parse_static_map(std::str::from_utf8(&resolved.bytes).unwrap()).unwrap();
+                let source_len = u32::try_from(resolved.bytes.len()).unwrap();
+                let checksum = resolved.bytes.iter().fold(0u32, |sum,&byte| sum.wrapping_add(u32::from(byte)));
+                let expected_identity = if basename == "empty.lua" && resolved.bytes.is_empty() {
+                    MapIdentity::LegacyEmpty
+                } else {
+                    MapIdentity::Named { basename: basename.clone(), checksum, source_len }
+                };
+                assert_eq!(resolved.identity, expected_identity);
+                let expected_buildings = specs.len();
+                let expected_businesses: usize = specs.iter().map(|spec| spec.businesses.len()).sum();
+                let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
+                let launch = SkirmishLaunch {
+                    level_id: 300001, directory: "net1".into(), map: basename.clone(),
+                    objective_kind: 6, target: 2000., difficulty: 0,
+                    participants: vec![
+                        Participant { kind: Kind::Human, token: Some(0), name: names[0].clone(), ready: true, difficulty: 0 },
+                        Participant { kind: Kind::Ai, token: Some(1), name: names[1].clone(), ready: true, difficulty: 0 },
+                    ],
+                };
+                // Exactly one live Session per case; drop explicitly before the next map.
+                let session = Session::initialize_skirmish(Inputs {
+                    tree_locators: None, image: &image, board: &board, file: &file,
+                    people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
+                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
+                    transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
+                    road_routes: road_routes.clone(), scripts,
+                    parameters: std::str::from_utf8(&parameters).unwrap(), era_styles: era_styles.clone(),
+                    timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "NET1",
+                    difficulty: 0, selected_character: 0, profile_name: &names[0], character_names: &names,
+                }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0;0x11c] }, catalog, launch).unwrap();
+                assert_eq!(session.skirmish_map.as_ref(), Some(&expected_identity), "{basename}");
+                let selected = session.catalog.selected_level().unwrap();
+                assert_eq!(selected.id(), 300001);
+                assert!(!selected.single_player());
+                assert!(selected.directory().eq_ignore_ascii_case(b"net1"));
+                assert_eq!(selected.objective_target(), 2000.);
+                assert_eq!(session.world.objective.kind, 6);
+                assert_eq!(session.world.objective.target, 2000.);
+                assert_eq!(session.difficulty, 0);
+                assert_eq!(session.world.player_money, 8000.);
+                assert_eq!(session.roster.manager.players.len(), 2);
+                assert_eq!(session.roster.status.ai_count, 1);
+                let word = |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+                for (slot,token,kind) in [(0,0,0),(1,1,1)] {
+                    let saved = &session.saved_player_metadata[slot];
+                    assert_eq!(word(saved,0), token);
+                    assert_eq!(word(saved,4), kind);
+                    assert_eq!(word(saved,44), 0);
+                    assert_eq!(&saved[8..8+names[slot].len()], names[slot].as_slice());
+                    let player = &session.roster.manager.players[slot].bytes;
+                    assert_eq!(word(player,0x150), token);
+                    assert_eq!(word(player,0x154), kind);
+                }
+                assert!(session.campaign_profile.is_none());
+                assert!(session.network_command_timer.is_none());
+                let buildings = session.world.buildings.iter().filter(|row| row[0x3f] != 0).count();
+                let businesses = session.world.ledgers.businesses.iter().filter(|row| row[0x21c] != 0).count();
+                assert_eq!(buildings, expected_buildings, "{basename}: active building count");
+                assert_eq!(businesses, expected_businesses, "{basename}: active business count");
+                let identities = check_authored_records(&session, &specs, &board, &file);
+                assert_eq!(identities.len(), expected_buildings);
+                assert_eq!(session.models.bindings.len(), expected_buildings, "{basename}: exact model binding count");
+                for &(building,business) in &identities {
+                    assert_eq!(session.world.buildings[building][0x2d], 0);
+                    assert_eq!(session.world.ledgers.businesses[business][0xa], 0);
+                }
+                drop(session);
+                assert!(started.elapsed() < budget, "120s total startup matrix budget after {basename}");
+                completed += 1;
+                println!("NET1_MATRIX PASS case={}/25 map={basename} bytes={source_len} sum={checksum} specs={expected_buildings} buildings={buildings} businesses={businesses} bindings={} case_ms={} total_ms={}",
+                    case+1, identities.len(), case_started.elapsed().as_millis(), started.elapsed().as_millis());
+            }
+            assert_eq!(seen.len(), 25);
+            assert_eq!(completed, 25);
+            assert!(started.elapsed() < budget, "120s total startup matrix budget at completion");
+            println!("NET1_MATRIX COMPLETE cases=25 level=300001 difficulty=0 objective=6 target=2000 seed=12345678 host_frames=0 total_ms={}", started.elapsed().as_millis());
+        }).unwrap().join().unwrap();
+    }
+
     fn skirmish_map_cold_reload_continuation(map: &'static str) {
         std::thread::Builder::new().stack_size(64*1024*1024).spawn(move || {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
@@ -4966,55 +5146,9 @@ mod skirmish_session_acceptance {
         let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
         let mut session = Session::initialize_skirmish(inputs(), policy(), catalog, launch).unwrap();
         let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
-        // Resolve source names through original tables; variation240/96 is not
-        // a BuildFile model index, and +170 is a local registered model handle.
+        // Preserve the cold fixture's two-pair distinctness assertions.
         let check_authored = |state: &Session<'_>, specs: &[openmt2001::scene::BuildingSpec]| {
-            let mut identities = Vec::new();
-            for spec in specs {
-                let scene = openmt2001::scene::SceneBuilding::resolve(spec.clone(), &board, &file).unwrap();
-                let category_reference = openmt2001::building_geometry::V14_CATEGORY_BASE
-                    + scene.block_id as u32 * openmt2001::building_geometry::CATEGORY_STRIDE;
-                let [x,y,w,d] = spec.lot;
-                let endpoints = [x,y,x+w-1,y+d-1];
-                let matches: Vec<_> = state.world.buildings.iter().enumerate()
-                    .filter(|(_, row)| row[0x3f] != 0 && word(*row,0x40) == category_reference
-                        && row[4..8] == endpoints).collect();
-                assert_eq!(matches.len(), 1, "authored lot missing or duplicated: {:?}", spec.lot);
-                let (slot, row) = matches[0];
-                assert_eq!(word(row,0), slot as u32);
-                assert_eq!(row[8], spec.height);
-                assert_eq!(word(row,0x20), spec.variation);
-                assert_eq!(word(row,0x24), u32::from(spec.kind));
-                assert_eq!(row[0x2c], spec.quality);
-                assert_eq!([f32::from_bits(word(row,0xc)),f32::from_bits(word(row,0x10))], scene.center);
-                assert_eq!(row[0x2d], state.world.categories[scene.block_id][5]);
-                let business_slot = word(row,0x1c) as usize;
-                let business = &state.world.ledgers.businesses[business_slot];
-                assert_ne!(business[0x21c], 0);
-                assert_eq!(word(business,0x210), business_slot as u32);
-                assert_eq!(u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize, slot);
-                assert_eq!(spec.businesses.len(), 1);
-                let request = openmt2001::map_script::Business::from_arguments(&[
-                    openmt2001::lua4::Value::Number(slot as f64),
-                    openmt2001::lua4::Value::Bytes(spec.businesses[0].as_bytes().to_vec()),
-                ], &state.world.catalog.info).unwrap().unwrap();
-                assert_eq!(word(business,4), request.kind);
-                assert_eq!(word(business,0), word(state.world.catalog.info.row(request.kind as usize).unwrap(),0xc));
-                let binding = state.models.bindings.get(&slot).unwrap();
-                assert_eq!(word(row,0x170), binding.handle);
-                assert_ne!(binding.handle, 0);
-                let model = &state.models.models[binding.handle as usize-1];
-                let prepared = openmt2001::geometry::prepare(&scene.layers);
-                let positions: Vec<_> = openmt2001::geometry::facade_positions(&prepared).into_iter()
-                    .chain(openmt2001::roof::mesh(&prepared).positions)
-                    .map(|p| scene.local_position(p)).collect();
-                assert!(!positions.is_empty());
-                assert_eq!(model.positions, positions);
-                let bytes: Vec<_> = positions.iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
-                assert_eq!(model.definition, openmt2001::mesh::model_definition(&bytes).unwrap());
-                assert_eq!(binding.translation, std::array::from_fn(|i| f32::from_bits(word(row,0x58+i*4))));
-                identities.push((slot,business_slot));
-            }
+            let identities = check_authored_records(state, specs, &board, &file);
             assert_ne!(identities[0].0, identities[1].0);
             assert_ne!(identities[0].1, identities[1].1);
             identities

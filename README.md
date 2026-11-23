@@ -56,6 +56,13 @@ Restart the game after connecting or configuring an audio output if it started
 without sound. Settings are available from the main menu and in-game Options,
 and are stored separately for each engine profile.
 
+Offline Skirmish has a separate map selector. Supply both the v1.4
+`scripts/MAPS/multiplayer/` directory and its matching `scripts/MAPS/` launch
+files. The selected layout is applied when starting a new game; loading a save
+restores its materialized city without applying the layout again. Existing
+standard-layout saves remain supported. New selected-layout saves require a
+build with this feature; see [compatibility notes](COMPATIBILITY.md).
+
 Windows, Linux and macOS are the target native platforms. Fresh platform
 verification is in progress; this source import is not a tested binary release.
 Browser execution is not currently supported.

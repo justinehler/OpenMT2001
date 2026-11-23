@@ -64,3 +64,23 @@ keeping valid indices unchanged. Strict mode keeps the checked low-level
 lookup and reports an error for this unsupported out-of-table case. It does
 not emulate arbitrary adjacent original memory. Cached original normals and
 textures, foliage lighting, placement and simulation remain unchanged.
+
+## Offline Skirmish maps
+
+The map picker follows the supplied v1.4 executable's separate conditions and
+map lists. One preserved recording shows a different full-height conditions
+layout; its exact executable/resource pairing is unresolved, so equivalence to
+that recording is not claimed.
+
+Map names come from `scripts/MAPS/multiplayer/`, while fresh startup reads the
+matching `scripts/MAPS/` file. The engine uses a deterministic portable sort;
+the original used Windows filesystem enumeration order. Missing, ambiguous,
+unsafe or oversized inputs are refused, and an empty catalog disables OK.
+These host input boundaries apply in both compatibility modes.
+
+Selected-layout saves retain map provenance in an engine-specific version 6
+runtime extension. Existing version 5 standard-layout saves remain loadable.
+An imported materialized city whose source map is unknown retains that unknown
+identity instead of being labeled as the empty layout. Loading restores the
+saved city and does not execute the selected map script again. These extensions
+do not establish save compatibility with the original executable.
