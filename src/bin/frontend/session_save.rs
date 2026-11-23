@@ -2,10 +2,10 @@
 //! Native records use the checked 4bbe30 writer. The V2 extension preserves
 //! runtime allocations/RNG that the native format deliberately omits.
 use crate::fresh_city::Session;
-#[path = "session_save_transport.rs"]
-mod transport;
 #[path = "session_save_auction.rs"]
 mod auction;
+#[path = "session_save_transport.rs"]
+mod transport;
 pub use auction::{AuctionContinuation, AuctionHostState};
 use openmt2001::{
     live_commands::Command,
@@ -153,7 +153,7 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
     let mut deferred = vec![false; native.len()];
     let Some(ext) = extension::Extension::parse(save)? else { return Ok(deferred); };
     ext.validate_runtime_section_set()?;
-    let modern_presentation = matches!(ext.version, 2..=4);
+    let modern_presentation = matches!(ext.version, 2..=5);
     let clock = save.clock()?;
     let mut input = Input::new(ext.required(9)?);
     let count = input.word()? as usize;
@@ -204,7 +204,8 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
                     // load stream would dispatch an overdue packet here too.
                     if outer_due && packet_due {
                         if save.game_mode()? != 1 || save.auction()?.is_some() {
-                            return Err("V2 due-now takeover requires normal non-auction continuation".into());
+                            return Err("V2 due-now takeover requires normal non-auction continuation".into(),
+                                );
                         }
                         let pool = ext.required(4)?;
                         if pool.len() != 600*916 {return Err("V2 takeover building pool size differs".into());}
@@ -213,7 +214,8 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
                         let native = save.buildings()?.into_iter().find(|b|b.slot==command.building as usize)
                             .ok_or("V2 takeover target is not a retained native building")?;
                         if &row[..64] != native.bytes {
-                            return Err("V2 takeover target differs from native building prefix".into());
+                            return Err("V2 takeover target differs from native building prefix".into(),
+                                );
                         }
                         // Load rebuilds model binding+4c instead of restoring
                         // that source word. Only the linked structure branch
@@ -421,7 +423,8 @@ impl<'data> Session<'data> {
             pending: &pending,
             resident_accounts: &accounts,
             scheduled: &scheduled,
-            auction: auction_active.then_some(writer::Auction { record: &mut auction_record, countdown: self.world.auction.presentation.countdown }),
+            auction: auction_active.then_some(writer::Auction { record: &mut auction_record, countdown: self.world.auction.presentation.countdown,
+            }),
             objective: &objective,
             business_info: self.world.catalog.info.rows(),
             commodities: &self.world.commodities.rows,
@@ -589,7 +592,8 @@ impl<'data> Session<'data> {
         ));
         //4bbe30 updates auction+80 before writing its complete record.
         if auction_active { self.world.auction.controller.record[0x80..0x84].copy_from_slice(&auction_record[0x80..0x84]); }
-        let auction = if auction_active { Some(AuctionContinuation::capture(self, game_mode, host, interface_mode)?) } else { None };
+        let auction = if auction_active { Some(AuctionContinuation::capture(self, game_mode, host, interface_mode,
+            )?) } else { None };
         let mut records = vec![
                 (1, profile.unwrap_or("").as_bytes().to_vec()),
                 (2, players.0),
@@ -608,15 +612,40 @@ impl<'data> Session<'data> {
         // VERSION3 adds the independent native placement RNG (560a08).
         // Older extension records and native serialization retain their layout.
         records.push((16, words([self.build_random_state])));
-        validate_dust_bindings(&self.demolition_effects,&self.world.pending_world,&self.world.buildings)?;
-        records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?));
+        validate_dust_bindings(&self.demolition_effects,&self.world.pending_world,&self.world.buildings,
+        )?;
+        records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?,
+        ));
         if let Some(auction) = auction { records.push((14, auction.encode())); }
         else if interface_mode == 3 {
             // Native camera triples retain the pose, but the retained frontend's
             // strategic view is separate from the original game-mode global.
             records.push((15, words([interface_mode])));
         }
-        extension::append_version(&mut bytes, &records, 4)?;
+        let selected = self
+            .catalog
+            .selected_level()
+            .ok_or("save has no selected level")?;
+        let version = if (300000..=300006).contains(&selected.id()) {
+            if selected.single_player()
+                || !selected.objective_target().is_finite()
+                || !selected
+                    .directory()
+                    .eq_ignore_ascii_case(format!("net{}", selected.id() - 300000).as_bytes())
+            {
+                return Err("unsupported saved Skirmish identity".into());
+            }
+            // Independent selected+870, never inferred from active objective.
+            // Map0 and offline1 describe this bounded standard-map capability.
+            records.push((
+                18,
+                words([selected.id(), selected.objective_target().to_bits(), 0, 1]),
+            ));
+            5
+        } else {
+            4
+        };
+        extension::append_version(&mut bytes, &records, version)?;
         // Check new due-now presentation boundaries before host publication.
         verified_modern_presentation_queue(&SaveFile::parse(&bytes)?)?;
         Ok(bytes)
@@ -643,6 +672,26 @@ impl<'data> Session<'data> {
         // from load_original. Never install record9 without checking that it
         // names the same native queue and packet deadlines.
         verified_modern_presentation_queue(save)?;
+        if ext.version == 5 {
+            let row = ext.required(18)?;
+            let selected = self
+                .catalog
+                .selected_level()
+                .ok_or("Skirmish selection absent")?;
+            if row.len() != 16 {
+                return Err("invalid Skirmish selection record".into());
+            }
+            let word = |at| u32::from_le_bytes(row[at..at + 4].try_into().unwrap());
+            if !(300000..=300006).contains(&word(0))
+                || word(0) != selected.id()
+                || word(4) != selected.objective_target().to_bits()
+                || word(8) != 0
+                || word(12) != 1
+                || !selected.objective_target().is_finite()
+            {
+                return Err("Skirmish extension differs from prepared selection".into());
+            }
+        }
         let has_auction = ext.records.contains_key(&14);
         let has_view = ext.records.contains_key(&15);
         ext.validate_runtime_section_set()?;
@@ -651,7 +700,7 @@ impl<'data> Session<'data> {
             let value = state.word()?; state.end()?;
             Some(value)
         } else { None };
-        let demolition_effects = if ext.version == 4 {
+        let demolition_effects = if ext.version >= 4 {
             Some(openmt2001::save::demolition::decode(ext.required(17)?)?)
         } else { None };
         let interface_mode = if has_view {
@@ -1081,7 +1130,8 @@ impl<'data> Session<'data> {
             self.demolition_effects = manager;
         }
         if let Some(continuation) = &mut auction { continuation.retain_activation_players(self); }
-        Ok(Some(Metadata { profile_filename, interface_mode, auction }))
+        Ok(Some(Metadata { profile_filename, interface_mode, auction,
+        }))
     }
 }
 

@@ -433,13 +433,33 @@ impl<'data> Session<'data> {
         if metadata[3] as i32 != input.difficulty {
             return Err("saved difficulty differs from selected level input".into());
         }
+        let mut catalog = catalog;
+        if let Some(ext) = openmt2001::save::extension::Extension::parse(&save)? {
+            ext.validate_runtime_section_set()?;
+            if ext.version == 5 {
+                let row = ext.required(18)?;
+                if row.len() != 16 { return Err("invalid Skirmish selection record".into()); }
+                let word = |at| u32::from_le_bytes(row[at..at+4].try_into().unwrap());
+                let target = f32::from_bits(word(4));
+                if word(0) != metadata[0] || !(300000..=300006).contains(&word(0))
+                    || word(8) != 0 || word(12) != 1 || !target.is_finite() {
+                    return Err("unsupported Skirmish save capability".into());
+                }
+                let retained = if let Some(catalog) = catalog.as_mut() { catalog } else {
+                    catalog = Some(crate::campaign_store::load_catalog(input.image, input.scripts)?);
+                    catalog.as_mut().unwrap()
+                };
+                let index = retained.find(word(0)).ok_or("saved Skirmish missing from catalog")?;
+                retained.levels[index].set_objective_target(target);
+            }
+        }
         let assets = CommandAssets {
             image: input.image,
             board: input.board,
             file: input.file,
         };
         let mut session =
-            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14)?;
+            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14, None)?;
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());
         }

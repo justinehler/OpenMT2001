@@ -5,6 +5,10 @@
 //! bitmap metrics are native-checked, but line rasterization is a GPU approximation.
 //! Pending/quit prompts are development UI, not reconstructed original dialogs.
 use crate::ui::Surface;
+#[path = "preferred_token.rs"]
+pub mod preferred_token;
+#[path = "skirmish_route.rs"]
+pub mod skirmish_route;
 use openmt2001::{
     archive::ArchiveIndex,
     font::{Font, Layout},
@@ -17,6 +21,7 @@ use openmt2001::{
 use std::{fs, path::Path};
 
 pub struct Assets {
+    skirmish: Option<skirmish_route::Route>,
     settings: crate::settings_menu::Assets,
     planning: crate::build_view::Assets,
     prompts: crate::prompt::Assets,
@@ -167,13 +172,17 @@ impl Assets {
         let comparison =
             crate::comparison::Assets::load(index, archive, installer, &strings, executable)?;
         Ok(Self {
+            skirmish: Some(skirmish_route::Route::new(
+                index, archive, installer, scripts, &strings, executable,
+            )?),
             settings: crate::settings_menu::Assets::load(index, archive, installer, language)?,
             planning: crate::build_view::Assets::load(
                 index, archive, installer, &strings, executable,
             )?,
             prompts: crate::prompt::Assets::load(index, archive, installer, &strings)?,
             event_list: crate::event_list::Assets::load(index, archive, installer, &strings)?,
-            stats: crate::stats_panel::Assets::load(index, archive, installer, &strings, executable)?,
+            stats: crate::stats_panel::Assets::load(index, archive, installer, &strings, executable,
+            )?,
             cards: crate::card_panel::Assets::load(index, archive, installer, &strings)?,
             business: crate::business_view::Assets::load(
                 index, archive, installer, &strings, executable,
@@ -206,6 +215,8 @@ impl Assets {
     }
 }
 pub struct Menu {
+    pub skirmish: skirmish_route::Route,
+
     pub settings: crate::settings_menu::View,
     pub settings_audio: crate::settings_menu::Levels,
     profile: crate::profile::Profile,
@@ -259,10 +270,12 @@ fn release_activates(held: bool, origin: Option<usize>, selected: Option<usize>)
     held && origin == selected && selected.is_some()
 }
 fn release_activates_without_track(held: bool, origin: Option<usize>, selected: Option<usize>,
-    retained_track: bool) -> bool {
+    retained_track: bool,
+) -> bool {
     release_activates(held, origin, selected) && !retained_track
 }
-fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>, i: usize) -> State {
+fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>, i: usize,
+) -> State {
     let hover = selected == Some(i);
     State {
         // 443360 event5 held entry sets +0x330, but only event4 sets +0x334.
@@ -275,6 +288,7 @@ fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>,
 impl Menu {
     pub fn cancel_input(&mut self) {
         self.settings.cancel_input();
+        self.skirmish.cancel_input();
         self.pressed = false;
         self.pressed_origin = None;
         self.light_click_target = None;
@@ -292,13 +306,15 @@ impl Menu {
     pub fn current_settings_path(&self) -> Option<std::path::PathBuf> {
         let name = self.profile.store.names.get(self.profile.store.current?)?;
         Some(crate::profile_settings::profile_path(
-            &self.assets.profile_root, name.as_bytes()))
+            &self.assets.profile_root, name.as_bytes(),
+        ))
     }
 
     pub fn current_save_root(&self) -> Option<std::path::PathBuf> {
         let name = self.profile.store.names.get(self.profile.store.current?)?;
         Some(crate::save_menu::selected_profile_root(
-            &self.assets.profile_root, name.as_bytes()))
+            &self.assets.profile_root, name.as_bytes(),
+        ))
     }
 
     /// Reopen the selected V2 campaign record after a finished result scene.
@@ -361,6 +377,8 @@ impl Menu {
     }
     pub fn new(mut assets: Assets) -> Self {
         Self {
+            skirmish: assets.skirmish.take().unwrap(),
+
             settings: Default::default(),
             settings_audio: Default::default(),
             profile: assets.profile.take().unwrap(),
@@ -397,6 +415,7 @@ impl Menu {
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
+        if self.skirmish.error.is_none() && self.skirmish.visible() { self.skirmish.pointer(p); }
         if self.settings.page.is_some() {
             self.settings.drag(&self.assets.settings, Some(p), &mut self.settings_audio);
             return;
@@ -439,10 +458,18 @@ impl Menu {
             _ => false,
         });
         let target = generic_cue_target(page, self.selected, self.pressed,
-            self.pending.is_some(), enabled);
+            self.pending.is_some(), enabled,
+        );
         held_entry_click(&mut self.light_click_target, target)
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
+        if self.skirmish.error.is_some() {
+            let [l, t, r, b] = self.assets.prompts.button_at([0.; 2]);
+            return (p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b).then_some(0);
+        }
+        if self.skirmish.visible() {
+            return self.skirmish.hit(p);
+        }
         if self.single.visible {
             return self.single.hit(p);
         }
@@ -467,9 +494,16 @@ impl Menu {
         .position(|&[l, t, r, b]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b)
     }
     pub fn mouse_button(&mut self, pressed: bool) {
+        if self.skirmish.error.is_none() && self.skirmish.visible() {
+            self.skirmish.mouse(self.pointer_position, pressed);
+            self.pressed = pressed;
+            self.dirty = true;
+            return;
+        }
         if self.settings.page.is_some() {
             self.settings.mouse(&self.assets.settings, self.pointer_position, pressed,
-                &mut self.settings_audio);
+                &mut self.settings_audio,
+            );
             return;
         }
         // A panel transition can change the hit target without a CursorMoved event.
@@ -490,12 +524,24 @@ impl Menu {
             }
         } else if release_activates_without_track(self.pressed, self.pressed_origin, self.selected,
             self.profile.visible && self.profile.is_scroll_track(self.pressed_origin)
-                || self.single.visible && self.single.is_scroll_track(self.pressed_origin)) {
+                || self.single.visible && self.single.is_scroll_track(self.pressed_origin),
+        ) {
             self.activate();
         }
         self.select(self.selected, pressed);
     }
     pub fn activate(&mut self) {
+        if self.skirmish.error.is_some() {
+            self.skirmish.error = None;
+            self.dirty = true;
+            return;
+        }
+        if self.skirmish.visible() {
+            self.skirmish.activate_keyboard();
+            self.selected = None;
+            self.dirty = true;
+            return;
+        }
         if self.settings.page.is_some() { return; }
         if self.single.visible {
             if let Some(i) = self.selected {
@@ -512,6 +558,37 @@ impl Menu {
             match self.selected {
                 Some(4) => {
                     self.single_mode = false;
+                    self.selected = None;
+                }
+                Some(1) => {
+                    if let Some(current) = self.profile.store.current {
+                        let name = self.profile.store.names[current].as_bytes();
+                        let path =
+                            crate::campaign_store::profile_path(&self.assets.profile_root, name);
+                        let mut catalog = self.assets.catalog.clone();
+                        let result = crate::campaign_store::load_progress(&mut catalog, &path)
+                            .and_then(|()| {
+                                self.skirmish.open(
+                                    catalog,
+                                    name,
+                                    preferred_token::Token::load(&preferred_token::path(
+                                        &self.assets.profile_root,
+                                        name,
+                                    ))?
+                                    .index(),
+                                    crate::save_menu::selected_profile_root(
+                                        &self.assets.profile_root,
+                                        name,
+                                    ),
+                                )
+                            });
+                        if let Err(error) = result {
+                            self.skirmish.error = Some(error);
+                        }
+                    } else {
+                        self.single_mode = false;
+                        self.profile.visible = true;
+                    }
                     self.selected = None;
                 }
                 Some(i @ (0 | 2)) => {
@@ -542,8 +619,7 @@ impl Menu {
             if let Some(current) = self.profile.store.current {
                 let name = &self.profile.store.names[current];
                 let path = crate::campaign_store::profile_path(
-                    &self.assets.profile_root, name.as_bytes(),
-                );
+                    &self.assets.profile_root, name.as_bytes());
                 let mut catalog = self.assets.catalog.clone();
                 match crate::campaign_store::load_progress(&mut catalog, &path) {
                     Ok(()) => self.single.open_tutorial(name, catalog, path),
@@ -614,9 +690,15 @@ impl Menu {
         }
     }
     pub fn is_editing(&self) -> bool {
-        self.profile.visible && self.profile.name.is_some()
+        self.skirmish.is_editing() || (self.profile.visible && self.profile.name.is_some())
     }
     pub fn navigate(&mut self, delta: i32) {
+        if self.skirmish.error.is_some() { return; }
+        if self.skirmish.visible() {
+            self.skirmish.navigate(delta);
+            self.dirty = true;
+            return;
+        }
         if self.settings.page.is_some() { return; }
         if self.pending.is_some() {
             return;
@@ -640,6 +722,14 @@ impl Menu {
         self.select(Some(next), false);
     }
     pub fn input(&mut self, text: &str) {
+        if self.skirmish.error.is_some() {
+            return;
+        }
+        if self.skirmish.visible() {
+            self.skirmish.text(text);
+            self.dirty = true;
+            return;
+        }
         if self.profile.visible {
             self.profile.input(text);
             self.dirty = true;
@@ -652,12 +742,28 @@ impl Menu {
         }
     }
     pub fn erase(&mut self) {
+        if self.skirmish.error.is_some() {
+            return;
+        }
+        if self.skirmish.visible() {
+            self.skirmish.erase();
+            self.dirty = true;
+            return;
+        }
         if self.profile.visible {
             self.profile.erase();
             self.dirty = true;
         }
     }
     pub fn scroll(&mut self, delta: i32) {
+        if self.skirmish.error.is_some() {
+            return;
+        }
+        if self.skirmish.visible() {
+            self.skirmish.scroll(self.pointer_position, delta);
+            self.dirty = true;
+            return;
+        }
         if self.settings.page.is_some() { return; }
         if self.single.visible {
             self.single.scroll(delta);
@@ -677,6 +783,16 @@ impl Menu {
         self.dirty = true;
     }
     pub fn back(&mut self) {
+        if self.skirmish.error.is_some() {
+            self.skirmish.error = None;
+            self.dirty = true;
+            return;
+        }
+        if self.skirmish.visible() {
+            self.skirmish.back();
+            self.dirty = true;
+            return;
+        }
         if self.settings.page.is_some() { self.settings.back(); return; }
         if self.single.visible {
             self.single.back();
@@ -711,12 +827,25 @@ impl Menu {
         color: &wgpu::TextureView,
         depth: &wgpu::TextureView,
     ) -> Result<(), String> {
+        if let Some(error) = &self.skirmish.error {
+            let panel = self.assets.prompts.prepare_error(renderer, error)?;
+            renderer.draw_overlay(color, depth, &panel);
+            return Ok(());
+        }
         if self.settings.page.is_some() {
             self.settings.update_levels(&self.assets.settings, renderer,
-                self.pointer_position, self.settings_audio)?;
+                self.pointer_position, self.settings_audio,
+            )?;
             if let Some(panel) = &self.settings.prepared {
                 renderer.draw_overlay(color, depth, panel);
             }
+            return Ok(());
+        }
+        if self.skirmish.visible() {
+            let panel = self
+                .skirmish
+                .draw(renderer, self.pointer_position, self.pressed)?;
+            renderer.draw_overlay(color, depth, &panel);
             return Ok(());
         }
         if self.single.visible {
@@ -737,7 +866,8 @@ impl Menu {
                 let pressed_button = (self.pressed && self.selected.is_some_and(|i| i < 2))
                     .then_some(self.selected).flatten();
                 let panel = self.assets.prompts.prepare_dialog(renderer, dialog,
-                    self.pointer_position.unwrap_or([-1.; 2]), pressed_button)?;
+                    self.pointer_position.unwrap_or([-1.; 2]), pressed_button,
+                )?;
                 renderer.draw_overlay(color, depth, &panel);
             }
             return Ok(());
@@ -944,7 +1074,8 @@ impl Menu {
 #[cfg(test)]
 mod light_click_tests {
     use super::{MenuCuePage, generic_cue_target, held_entry_click, main_button_state,
-        release_activates, release_activates_without_track};
+        release_activates, release_activates_without_track,
+    };
 
     #[test]
     fn generic_button_first_held_entry_and_reentry_cue() {
@@ -1006,8 +1137,8 @@ mod settings_route_tests {
     #[ignore = "requires original menu/settings assets; OPENMT2001_SCRIPTS points to scripts root"]
     fn main_menu_settings_route_persists_selected_profile_for_launch() {
         use super::*;
-        use crate::settings_menu::{Button, Page};
         use crate::profile_settings::Snapshot;
+        use crate::settings_menu::{Button, Page};
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -1026,7 +1157,8 @@ mod settings_route_tests {
         impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
         let _cleanup = Cleanup(root.clone());
         let assets = Assets::load(&index, &archive, installer, &language, &scripts,
-            root.clone(), root.join("saves"), &executable).unwrap();
+            root.clone(), root.join("saves"), &executable,
+        ).unwrap();
         let mut menu = Menu::new(assets);
         menu.profile.store.names = vec!["Settings Player".into(), "Other Player".into()];
         menu.profile.store.current = Some(0);

@@ -18,13 +18,17 @@ fn fresh_city_camera() -> (CameraSample, openmt2001::camera::BlockCamera) {
     // Normal4b9fa0->4b9d40 selects mode6 and writes4b9e5f..91. Mode6
     // has no pose callback at4e02d0, so it retains these exact floats.
     (CameraSample { eye: [26., 586., -695.], target: [26., 463., -595.],
-        up: [0., 1., 0.], vertical_fov: 45. },
+        up: [0., 1., 0.], vertical_fov: 45.,
+        },
      openmt2001::camera::BlockCamera { center: [51., 463., -595.],
-        angle: -std::f32::consts::FRAC_PI_2, height: 586., radius: 100. })
+        angle: -std::f32::consts::FRAC_PI_2, height: 586., radius: 100.,
+        },
+    )
 }
 
 fn update_locator_financial(locator: &mut Option<crate::locator::Locator>,
-    status: &crate::live_host::Status) -> Result<(), String> {
+    status: &crate::live_host::Status,
+) -> Result<(), String> {
     if let (Some(locator), Some(snapshot)) = (locator, status.financial.as_ref()) {
         locator.apply_financial_snapshot(snapshot.clone())?;
     }
@@ -88,7 +92,8 @@ impl Assets {
         let build_file = read(paths.scene.join("BuildEditorModels/BuildFile.dat"))?;
         let executable = read(paths.executable)?;
         let style = crate::block_sidewalk_labels::load_style(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
+        )?;
         let directory = read(paths.scene.join("archive.DIR"))?;
         let archive = read(paths.scene.join("archive.bin"))?;
         let maps = paths.map.parent().ok_or("intro map parent")?.to_path_buf();
@@ -104,39 +109,53 @@ impl Assets {
         let tooltip = crate::tooltip::Tooltip::load(
             &index, &archive, &paths.installer, &paths.language)?;
         let result_actors = crate::auction_scene::Assets::load_result(
-            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
+        )?;
         let result_text = crate::fresh_city::result::text::Assets::load(
-            &index, &archive, &paths.installer, &paths.language)?;
+            &index, &archive, &paths.installer, &paths.language,
+        )?;
         let result_medallions = crate::fresh_city::result::medallions::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
+        )?;
         let result_audio = crate::fresh_city::result::audio::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer, &paths.ffmpeg)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer, &paths.ffmpeg,
+        )?;
         let auction_audio = crate::live_host::auction_audio::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
+        )?;
         let transport_audio = crate::transport_audio::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
+        )?;
         let era_audio = crate::era_audio::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer, &paths.ffmpeg)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer, &paths.ffmpeg,
+        )?;
         let gameplay_sound = crate::gameplay_sound::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
+        )?;
         let time_panel = crate::time_panel::Assets::load(&index, &archive, &paths.installer,
-            &paths.language, &executable)?;
+            &paths.language, &executable,
+        )?;
         let cash_arrow = crate::cash_arrow::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
+        )?;
         let dust = crate::dust_scene::Assets::load(&index, &archive)?;
         let game_options = crate::game_options::Assets::load(
             &index, &archive, &paths.installer, &paths.language)?;
         let save_dialog = crate::save_dialog::Assets::load(
             &index, &archive, &paths.installer, &paths.language)?;
         let settings_menu = crate::settings_menu::Assets::load(
-            &index, &archive, &paths.installer, &paths.language)?;
+            &index, &archive, &paths.installer, &paths.language,
+        )?;
         let sidewalk_labels = crate::block_sidewalk_labels::Assets::load(
-            &index, &archive, &paths.installer, &selection.blocks, &style)?;
+            &index, &archive, &paths.installer, &selection.blocks, &style,
+        )?;
         let tutorial_visual = crate::tutorial_visual::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
+        )?;
         let city_pulse = crate::city_pulse_scene::Assets::load(&index, &archive)?;
         let strategic_scene = crate::strategic_scene::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive, &selection.blocks)?;
+            &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive, &selection.blocks,
+        )?;
         let profile_root = paths.profile_root.clone();
         let menu = Some(crate::menu::Assets::load(
             &index,
@@ -179,7 +198,8 @@ impl Assets {
             width: 1280,
             height: 960,
             animated: true,
-        }, Some(&style))?;
+        }, Some(&style),
+        )?;
         eprintln!(
             "Intro assembled: {} buildings, {} triangle vertices, {} camera samples; {} track / hour {phase}",
             scene.building_count,
@@ -292,12 +312,15 @@ fn saved_viewpoint(
     }
     let angle = dz.atan2(dx);
     let controls = openmt2001::camera::BlockCamera {
-        center: [target[0] - angle.sin() * 25., target[1], target[2] + angle.cos() * 25.],
+        center: [target[0] - angle.sin() * 25., target[1], target[2] + angle.cos() * 25.,
+        ],
         angle,
         height: eye[1],
         radius,
     };
-    Ok((CameraSample { eye, target, up, vertical_fov }, controls))
+    Ok((CameraSample { eye, target, up, vertical_fov,
+        }, controls,
+    ))
 }
 
 fn page_height(height: f32, up: bool) -> f32 {
@@ -319,7 +342,8 @@ pub(crate) fn internal_pointer(position: [f64; 2], size: [u32; 2]) -> Option<[i3
 /// Saved non-block views may start outside the normal block pan clamp.
 /// Preserve their recorded pose during manual inspection; the arithmetic
 /// mirrors BlockCamera::tick before its final ±500 center clamp.
-fn saved_camera_tick(controls: &mut openmt2001::camera::BlockCamera, keys: [bool; 4])
+fn saved_camera_tick(controls: &mut openmt2001::camera::BlockCamera, keys: [bool; 4],
+)
     -> ([f32; 3], [f32; 3]) {
     let angle = f64::from(controls.angle);
     let sin = f64::from(angle.sin() as f32);
@@ -350,7 +374,8 @@ fn saved_camera_tick(controls: &mut openmt2001::camera::BlockCamera, keys: [bool
 /// right-button mouse delta. The horizontal orbit appears on the next tick.
 fn mode12_input_tick(controls: &mut openmt2001::camera::BlockCamera,
     saved_camera: bool, keys: [bool; 4], drag: [i32; 2],
-    sensitivity: i32, invert_vertical: bool)
+    sensitivity: i32, invert_vertical: bool,
+)
     -> Result<([f32; 3], [f32; 3]), String> {
     let mut pose = if saved_camera { saved_camera_tick(controls, keys) }
         else { controls.tick(keys) };
@@ -372,16 +397,19 @@ struct DetailSpan {
 }
 
 #[derive(Clone, Default)]
-struct DetailVisibility { spans: Vec<DetailSpan> }
+struct DetailVisibility { spans: Vec<DetailSpan>,
+}
 impl DetailVisibility {
     fn add(&mut self, scene: &Scene, category: usize, center: [f32; 2],
-        draw: usize, vertices: std::ops::Range<usize>, pivot_y: f32) -> Result<(), String> {
+        draw: usize, vertices: std::ops::Range<usize>, pivot_y: f32,
+    ) -> Result<(), String> {
         let source = scene.draws.get(draw).ok_or("detail span draw missing")?;
         let slice = source.vertices.get(vertices.clone()).ok_or("detail span leaves draw")?;
         if !slice.is_empty() {
             self.spans.push(DetailSpan {category,center,draw,start:vertices.start,
                 positions:slice.iter().map(|vertex| [vertex[0],vertex[1],vertex[2]])
-                    .collect(),pivot_y,presentation:None});
+                    .collect(),pivot_y,presentation:None,
+            });
         }
         Ok(())
     }
@@ -389,7 +417,8 @@ impl DetailVisibility {
     /// Original 4b7fd0 pass3 scales each descriptor's Y axis through the
     /// 50-unit depth band, then skips category details past far. Ordinary
     /// pass1 building materials remain submitted at every setting.
-    fn reframe(&mut self, scene: &mut Scene, camera: CameraSample, distance: u8)
+    fn reframe(&mut self, scene: &mut Scene, camera: CameraSample, distance: u8,
+    )
         -> Result<Vec<usize>, String> {
         let factor = crate::people_scene::Policy::distance_factor(u32::from(distance))?;
         let fade = crate::category_distance::Fade::from_factor(factor);
@@ -403,9 +432,11 @@ impl DetailVisibility {
                 scale
             } else {
                 let depth = openmt2001::camera::translated_scene_view(view,
-                    [span.center[0], 0., span.center[1]])[11];
+                    [span.center[0], 0., span.center[1]],
+                )[11];
                 let scale = if frustum.visible(span.category, span.center,
-                    scene.category_model_heights.get(&span.category).copied())? {
+                    scene.category_model_heights.get(&span.category).copied(),
+                )? {
                     fade.detail_scale(depth)
                 } else { None };
                 visibility.insert(span.category, scale);
@@ -420,7 +451,8 @@ impl DetailVisibility {
             for (vertex, &position) in vertices.iter_mut().zip(&span.positions) {
                 if let Some(scale) = scale {
                     vertex[..3].copy_from_slice(&[position[0],
-                        span.pivot_y + (position[1] - span.pivot_y) * scale, position[2]]);
+                        span.pivot_y + (position[1] - span.pivot_y) * scale, position[2],
+                    ]);
                 } else {
                     vertex[..3].copy_from_slice(&hidden);
                 }
@@ -492,6 +524,7 @@ struct SnapshotCache {
     scaffolds_active: bool,
 }
 enum WorkerStart {
+    Skirmish(crate::menu::skirmish_route::Request),
     Fresh(crate::singleplayer::Setup),
     Saved(PathBuf, Option<PathBuf>),
 }
@@ -616,7 +649,8 @@ enum FreshRequest {
     ToggleSpeed,
     DismissPrompt(u32, Option<mpsc::Sender<Vec<crate::prompt::Request>>>),
     TutorialControl(u32),
-    TutorialProducer { control: u32, event: u32 },
+    TutorialProducer { control: u32, event: u32,
+    },
     TutorialPick(crate::tutorial_two_interaction::Pick),
     Status {
         camera: [f32; 3],
@@ -641,7 +675,8 @@ enum FreshRequest {
     },
 }
 impl SceneInputs {
-    fn styled_board(&self, image: &openmt2001::pe::PeImage<'_>)
+    fn styled_board(&self, image: &openmt2001::pe::PeImage<'_>,
+    )
         -> Result<openmt2001::board::Board, String> {
         let mut board = openmt2001::board::Board::from_v14(image)?;
         self.style.apply_board(&mut board)?;
@@ -657,18 +692,22 @@ impl SceneInputs {
         self.session_worker(WorkerStart::Fresh(setup), camera, tx);
     }
     fn saved_worker(&self, path: PathBuf, save_profile_root: Option<PathBuf>, camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>) {
+        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+    ) {
         self.session_worker(WorkerStart::Saved(path, save_profile_root), camera, tx);
     }
     fn session_worker(&self, start: WorkerStart, camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>) {
+        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+    ) {
         let mut cache = SnapshotCache::default();
         let selected_save_root = match &start {
             WorkerStart::Saved(_, root) => root.clone(),
+            WorkerStart::Skirmish(request) => Some(request.save_root.clone()),
             WorkerStart::Fresh(_) => None,
         };
-        let is_saved_start = matches!(&start, WorkerStart::Saved(..));
+        let is_saved_start = matches!(&start, WorkerStart::Saved(..) | WorkerStart::Skirmish(..));
         let result = match start {
+            WorkerStart::Skirmish(request) => self.fresh_skirmish(request, camera, &mut cache),
             WorkerStart::Fresh(setup) => {
                 let retained = match setup.preview {
                     crate::singleplayer::Preview::Scenario(id) => {
@@ -685,7 +724,8 @@ impl SceneInputs {
                 }
             }
             WorkerStart::Saved(path, _) => self.saved_preview_with_selection(
-                &path, camera, &mut cache, Some(selected_save_root.as_deref())),
+                &path, camera, &mut cache, Some(selected_save_root.as_deref()),
+            ),
         };
         match result {
             Ok((mut loaded, mut session)) => {
@@ -693,8 +733,10 @@ impl SceneInputs {
                     selected_save_root
                 } else {
                     session.campaign_profile.as_ref()
-                        .and_then(|campaign| crate::save_menu::profile_root_for_campaign(
-                            &self.profile_root, campaign))
+                        .and_then(|campaign| {
+                        crate::save_menu::profile_root_for_campaign(
+                            &self.profile_root, campaign)
+                    })
                 };
                 loaded.save_profile_root = save_profile_root.clone();
                 let saved_auction = loaded.saved_auction.take();
@@ -735,7 +777,9 @@ impl SceneInputs {
                     }
                     if let Some(continuation) = saved_auction
                         && let Err(error) = continuation.apply(&mut session)
-                            .and_then(|()| host.restore_auction_widgets(continuation.host.as_ref(), &session))
+                            .and_then(|()| {
+                            host.restore_auction_widgets(continuation.host.as_ref(), &session)
+                        })
                     {
                         host.fail(error);
                     }
@@ -790,28 +834,34 @@ impl SceneInputs {
                             continue;
                         };
                         match request {
-                            FreshRequest::PropertyRights { category, panel_mode, activate, reply } => {
+                            FreshRequest::PropertyRights { category, panel_mode, activate, reply,
+                            } => {
                                 let _ = reply.send(host.property_rights(
-                                    &mut session, &assets, category, panel_mode, activate));
+                                    &mut session, &assets, category, panel_mode, activate,
+                                ));
                             }
                             FreshRequest::PropertyOffer { request, reply } => {
                                 let result = if request.submit {
                                     host.property_offer(&mut session, &assets,
-                                        request.category, request.panel)
+                                        request.category, request.panel,
+                                    )
                                 } else {
                                     host.inspect_property_offer(&mut session, &assets,
-                                        request.category, request.panel, request.initialize_amount)
+                                        request.category, request.panel, request.initialize_amount,
+                                    )
                                 };
                                 let _ = reply.send(result);
                             }
-                            FreshRequest::SaveSelected { target, camera, game_mode, interface_mode, reply } => {
+                            FreshRequest::SaveSelected { target, camera, game_mode, interface_mode, reply,
+                            } => {
                                 let result = (|| {
                                     let root = save_profile_root.as_deref()
                                         .ok_or("Save Game requires a selected V2 profile")?;
                                     let cameras = crate::save_menu::cameras(session.saved_cameras, camera)?;
                                     let auction = host.auction_save_state();
                                     let bytes = session.save_v2_with_auction_view(
-                                        &image, cameras, game_mode, auction, interface_mode)?;
+                                        &image, cameras, game_mode, auction, interface_mode,
+                                    )?;
                                     crate::save_menu::write_target(root, &target, &bytes)
                                 })();
                                 let _ = reply.send(result);
@@ -830,18 +880,26 @@ impl SceneInputs {
                                         hour: session.world.clock.hour(),
                                         counter: session.world.clock.timing[2],
                                     })
-                                    .ok_or("Result request has no retained script state".into()));
+                                    .ok_or("Result request has no retained script state".into(),
+                                        ),
+                                );
                             }
                             FreshRequest::ResultCredits { reply } => {
                                 let result = session.construct_result_credits(&image)
-                                    .and_then(|_| session.result_presentation().cloned()
-                                        .ok_or("Result credits lost retained script state".into()));
+                                    .and_then(|_| {
+                                        session.result_presentation().cloned()
+                                        .ok_or("Result credits lost retained script state".into(),
+                                        )
+                                    });
                                 let _ = reply.send(result);
                             }
                             FreshRequest::ResultEvent { name, reply } => {
                                 let result = host.dispatch_result_event(&mut session, &assets, name)
-                                    .and_then(|_| session.result_presentation().cloned()
-                                        .ok_or("Result event lost retained script state".into()));
+                                    .and_then(|_| {
+                                            session.result_presentation().cloned()
+                                        .ok_or("Result event lost retained script state".into(),
+                                            )
+                                        });
                                 let _ = reply.send(result);
                             }
                             FreshRequest::ResultComplete { reply } => {
@@ -899,11 +957,13 @@ impl SceneInputs {
                             FreshRequest::Vehicles { reply } => {
                                 let result = session.road_traffic
                                     .project(&mut session.world.road_network, 0.)
-                                    .and_then(|()| crate::vehicle_scene::Layer::from_resources(
+                                    .and_then(|()| {
+                                        crate::vehicle_scene::Layer::from_resources(
                                         &session,
                                         &self.suncols,
                                         cache.vehicles.as_ref().unwrap(),
-                                    ));
+                                    )
+                                    });
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Transport { reply } => {
@@ -913,12 +973,14 @@ impl SceneInputs {
                                         auxiliaries.push(*auxiliary);
                                         Ok(())
                                     })
-                                    .and_then(|()| crate::transport_scene::Layer::from_resources(
+                                    .and_then(|()| {
+                                        crate::transport_scene::Layer::from_resources(
                                         &session,
                                         &self.suncols,
                                         cache.transport.as_ref().unwrap(),
                                         auxiliaries,
-                                    ));
+                                    )
+                                    });
                                 let _ = reply.send(result);
                             }
                             FreshRequest::EditBusiness {
@@ -929,7 +991,8 @@ impl SceneInputs {
                                 let result = if host.failure.is_some() {
                                     Err("Stopped session cannot edit businesses".into())
                                 } else {
-                                    crate::business_edit::edit(&mut session, &assets, target, action)
+                                    crate::business_edit::edit(&mut session, &assets, target, action,
+                                    )
                                 };
                                 let _ = reply.send(result);
                             }
@@ -978,7 +1041,8 @@ impl SceneInputs {
                                 }
                             }
                             FreshRequest::TutorialProducer { control, event } => {
-                                if let Err(error) = host.tutorial_producer_event(&mut session, &assets, control, event) {
+                                if let Err(error) = host.tutorial_producer_event(&mut session, &assets, control, event,
+                                ) {
                                     host.fail(error);
                                 }
                             }
@@ -1054,24 +1118,15 @@ impl SceneInputs {
             }
         }
     }
-    fn fresh_preview(
+    fn fresh_skirmish(
         &self,
-        setup: crate::singleplayer::Setup,
+        request: crate::menu::skirmish_route::Request,
         camera: CameraSample,
         cache: &mut SnapshotCache,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
-        let (scenario_id, scenario_token) = match setup.preview {
-            crate::singleplayer::Preview::Scenario(id) => {
-                let scenario = crate::scenarios::find(id)?;
-                (id, scenario.token)
-            }
-            // Supplied v1.4 GAMESTART registers ID 400002 as "sandbox";
-            // its hub creates the resident city and must run through Session.
-            crate::singleplayer::Preview::Sandbox => (400002, "sandbox"),
-        };
-        if setup.catalog.find(scenario_id).is_none() {
-            return Err(format!("level {scenario_id} is absent from the selected profile catalog"));
-        }
+        let directory = request.launch.directory.clone();
+        let profile_name = request.launch.participants[0].name.clone();
+        let difficulty = request.launch.difficulty;
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
         let board = self.styled_board(&image)?;
         let file = openmt2001::build_file::BuildFile::parse(&self.build_file)?;
@@ -1084,16 +1139,27 @@ impl SceneInputs {
         let timetable = fs::read_to_string(self.installer.join("parameters/timetable.prm"))
             .map_err(|e| e.to_string())?;
         let scripts = self.maps.parent().ok_or("script directory missing")?;
-        let difficulty = match setup.difficulty {
-            crate::singleplayer::Difficulty::Easy => 0,
-            crate::singleplayer::Difficulty::Medium => 1,
-            crate::singleplayer::Difficulty::Hard => 2,
-        };
-        // Reproducible preview policy. These unspecified prior bytes are not
-        // original captured stack data, nor is seed0 the original host seed.
-        let mut session = crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
+        // Catalog directory spelling is logical Windows data. Resolve its
+        // actual supplied filesystem spelling before the Session's direct reads.
+        let hub_path =
+            crate::campaign_store::original_path(scripts, &format!("{directory}/hub.lua"))?
+                .ok_or("selected Skirmish hub missing")?;
+        let directory = hub_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .ok_or("selected Skirmish directory is not text")?
+            .to_owned();
+        // Sample once immediately before actual offline fresh Session construction.
+        // Tests may call initialize_skirmish with an injected Policy instead.
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs() as u32;
+        let mut session = crate::fresh_city::Session::initialize_skirmish_with_style(
             crate::fresh_city::Inputs {
-                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators),
+                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
+                ),
                 image: &image,
                 board: &board,
                 file: &file,
@@ -1114,21 +1180,106 @@ impl SceneInputs {
                 parameters: &parameters,
                 era_styles: crate::fresh_city::load_era_styles(&self.installer.join("parameters"))?,
                 timetable: &timetable,
-                scenario: scenario_token,
+                scenario: &directory,
                 difficulty,
-                selected_character: setup.character_index,
-                profile_name: &setup.profile_name,
+                selected_character: request.launch.participants[0]
+                    .token
+                    .ok_or("human token missing")?,
+                profile_name: &profile_name,
                 character_names: &self.character_names,
             },
             crate::fresh_city::Policy {
-                seed: 0,
+                seed,
                 auxiliary_prior_bytes: [0; 0x11c],
             },
-            setup.catalog.clone(),
-            setup.profile_path.clone(),
+            request.catalog,
+            request.launch,
             &self.style,
-            self.compatibility,
         )?;
+        let loaded = self.inspect_fresh(&mut session, camera, cache)?;
+        Ok((loaded, session))
+    }
+
+    fn fresh_preview(&self,
+        setup: crate::singleplayer::Setup, camera: CameraSample,
+        cache: &mut SnapshotCache,
+    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+        let (scenario_id, scenario_token) = match setup.preview {
+            crate::singleplayer::Preview::Scenario(id) => {
+                let scenario = crate::scenarios::find(id)?;
+                (id, scenario.token)
+            }
+            // Supplied v1.4 GAMESTART registers ID 400002 as "sandbox";
+            // its hub creates the resident city and must run through Session.
+            crate::singleplayer::Preview::Sandbox => (400002, "sandbox"),
+        };
+        if setup.catalog.find(scenario_id).is_none() {
+            return Err(format!(
+                "level {scenario_id} is absent from the selected profile catalog"
+            ));
+        }
+        let image = openmt2001::pe::PeImage::parse(&self.executable)?;
+        let board = self.styled_board(&image)?;
+        let file = openmt2001::build_file::BuildFile::parse(&self.build_file)?;
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&self.directory, self.archive.len() as u64)
+                .map_err(|e| e.to_string())?;
+        let people = openmt2001::people::PeopleModels::load(&image, &index, &self.archive)?;
+        let parameters = fs::read_to_string(self.installer.join("parameters/parameter.prm"))
+            .map_err(|e| e.to_string())?;
+        let timetable = fs::read_to_string(self.installer.join("parameters/timetable.prm"))
+            .map_err(|e| e.to_string())?;
+        let scripts = self.maps.parent().ok_or("script directory missing")?;
+        let difficulty = match setup.difficulty {
+            crate::singleplayer::Difficulty::Easy => 0,
+            crate::singleplayer::Difficulty::Medium => 1,
+            crate::singleplayer::Difficulty::Hard => 2,
+        };
+        // Reproducible preview policy. These unspecified prior bytes are not
+        // original captured stack data, nor is seed0 the original host seed.
+        let mut session =
+            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
+                crate::fresh_city::Inputs {
+                    tree_locators: Some(
+                        openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
+                    ),
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                    people,
+                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                        &image,
+                        &index,
+                        &self.archive,
+                    )?,
+                    road_routes: fs::read(self.installer.join("Standard/route_smalltable.bin"))
+                        .map_err(|e| format!("road route table: {e}"))?,
+                    transport_models: openmt2001::traffic::models::Models::from_original(
+                        &image,
+                        &index,
+                        &self.archive,
+                    )?,
+                    scripts,
+                    parameters: &parameters,
+                    era_styles: crate::fresh_city::load_era_styles(
+                        &self.installer.join("parameters"),
+                    )?,
+                    timetable: &timetable,
+                    scenario: scenario_token,
+                    difficulty,
+                    selected_character: setup.character_index,
+                    profile_name: &setup.profile_name,
+                    character_names: &self.character_names,
+                },
+                crate::fresh_city::Policy {
+                    seed: 0,
+                    auxiliary_prior_bytes: [0; 0x11c],
+                },
+                setup.catalog.clone(),
+                setup.profile_path.clone(),
+                &self.style,
+                self.compatibility,
+            )?;
         eprintln!(
             "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; deterministic host seed0 / auxiliary prior bytes zero; player roster initialized; live worker enabled",
             scenario_token,
@@ -1148,8 +1299,12 @@ impl SceneInputs {
     }
     /// `Some(None)` represents a menu with no active profile. Tests invoking
     /// saved_preview directly use the unrestricted read-only preview path.
-    fn saved_preview_with_selection(&self, path: &std::path::Path, camera: CameraSample,
-        cache: &mut SnapshotCache, selected_root: Option<Option<&std::path::Path>>,
+    fn saved_preview_with_selection(
+        &self,
+        path: &std::path::Path,
+        camera: CameraSample,
+        cache: &mut SnapshotCache,
+        selected_root: Option<Option<&std::path::Path>>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let save = openmt2001::save::SaveFile::parse(&bytes)?;
@@ -1158,7 +1313,8 @@ impl SceneInputs {
         let [id, _, _, difficulty] = save.level_metadata()?;
         let scripts = self.maps.parent().ok_or("script directory missing")?;
         let catalog = crate::campaign_store::load_catalog(&image, scripts)?;
-        let level = catalog.levels.get(catalog.find(id).ok_or("saved level is absent from original catalog")?)
+        let level = catalog.levels.get(catalog.find(id).ok_or("saved level is absent from original catalog")?,
+            )
             .ok_or("saved catalog level is missing")?;
         let scenario = std::str::from_utf8(level.directory())
             .map_err(|_| "saved scenario directory is not UTF-8")?;
@@ -1181,22 +1337,27 @@ impl SceneInputs {
         // An arbitrary original save has no authenticated V2 profile selection.
         let (mut session, restored_presentation) = crate::fresh_city::Session::load_original_with_presentation_style(
             crate::fresh_city::Inputs {
-                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators),
+                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
+                    ),
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &self.archive)?,
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(
-                    &image, &index, &self.archive)?,
+                    &image, &index, &self.archive,
+                    )?,
                 transport_models: openmt2001::traffic::models::Models::from_original(
-                    &image, &index, &self.archive)?,
+                    &image, &index, &self.archive,
+                    )?,
                 road_routes: fs::read(self.installer.join("Standard/route_smalltable.bin"))
                     .map_err(|e| format!("road route table: {e}"))?,
                 scripts, parameters: &parameters,
-                era_styles: crate::fresh_city::load_era_styles(&self.installer.join("parameters"))?,
+                era_styles: crate::fresh_city::load_era_styles(&self.installer.join("parameters"),
+                    )?,
                 timetable: &timetable, scenario, difficulty,
                 selected_character: 0, profile_name: b"Loaded original game",
                 character_names: &self.character_names,
             },
-            crate::fresh_city::Policy { seed: 0, auxiliary_prior_bytes: [0; 0x11c] },
+            crate::fresh_city::Policy { seed: 0, auxiliary_prior_bytes: [0; 0x11c],
+                },
             &bytes,
             Some(&self.style),
         )?;
@@ -1222,11 +1383,15 @@ impl SceneInputs {
             .map(|records| saved_viewpoint(&records[0], camera.vertical_fov))
             .transpose()?;
         let saved_prior_mode = saved_interface_mode
-            .or_else(|| saved_auction.as_ref().map(|auction| auction.prior_mode)).or_else(||
-            (session.saved_game_mode == Some(2)
+            .or_else(|| saved_auction.as_ref().map(|auction| auction.prior_mode)).or_else(|| {
+                (session.saved_game_mode == Some(2)
             && session.world.city.auction.controller.reference != 0)
-            .then(|| u32::from_le_bytes(session.world.city.auction.controller.record[0x150..0x154]
-                .try_into().unwrap())));
+            .then(|| {
+                        u32::from_le_bytes(session.world.city.auction.controller.record[0x150..0x154]
+                .try_into().unwrap(),
+                        )
+                    })
+            });
         let camera = saved_viewpoint.map_or(camera, |(sample, _)| sample);
         let mut loaded = self.inspect_fresh(&mut session, camera, cache)?;
         loaded.saved_viewpoint = saved_viewpoint;
@@ -1245,8 +1410,8 @@ impl SceneInputs {
             let glyphs = fs::read(self.language.join("tycoon.bin"))
                 .map_err(|e| format!("saved appearance language glyphs: {e}"))?;
             cache.appearance_assets = Some(crate::save_appearance::Assets::from_original(
-                &self.directory, &self.archive,
-            )?.with_language(&tab, &offsets, &glyphs)?);
+                &self.directory, &self.archive)?.with_language(&tab, &offsets, &glyphs)?,
+            );
         }
         Ok(())
     }
@@ -1255,17 +1420,19 @@ impl SceneInputs {
         &self,
         prepared: &std::collections::BTreeMap<usize,
             (openmt2001::scene::SceneBuilding,
-             openmt2001::save::appearance::ModelIdentity, u32)>,
+             openmt2001::save::appearance::ModelIdentity, u32,
+            ),
+        >,
         scene: &mut Scene,
         detail_visibility: &mut DetailVisibility,
         cache: &mut SnapshotCache,
         context: StaticAppearanceContext<'_, '_>,
     ) -> Result<(), String> {
         let started = Instant::now();
-        let instances = prepared.values().flat_map(|(building, identity, _)|
-            identity.renderer_templates.iter().filter(|row|
+        let instances = prepared.values().flat_map(|(building, identity, _)| {
+                identity.renderer_templates.iter().filter(|row|
                 crate::static_detail::supports(row.descriptor)).map(move |row| (building, row))
-        ).collect::<Vec<_>>();
+            }).collect::<Vec<_>>();
         if instances.is_empty() {
             return Ok(());
         }
@@ -1292,7 +1459,8 @@ impl SceneInputs {
             let center = context.board.blocks.iter().find(|block| block.id == span.category)
                 .ok_or("static detail category missing from board")?.center;
             detail_visibility.add(scene,span.category,center,first+span.draw,
-                span.vertices,span.pivot_y)?;
+                span.vertices,span.pivot_y,
+            )?;
         }
         #[cfg(test)]
         cache.static_detail_ranges.push(first..scene.draws.len());
@@ -1315,7 +1483,8 @@ impl SceneInputs {
             let name=&metadata[8..];
             let len=name.iter().position(|&byte|byte==0)
                 .ok_or("appearance owner metadata name unterminated")?;
-            (u32::from_le_bytes(metadata[..4].try_into().unwrap()),Some(&name[..len]))
+            (u32::from_le_bytes(metadata[..4].try_into().unwrap()),Some(&name[..len]),
+            )
         };
         let business=u32::from_le_bytes(record[0x1c..0x20].try_into().unwrap());
         let kind=if business==u32::MAX {-1} else {
@@ -1339,7 +1508,8 @@ impl SceneInputs {
         detail_visibility: &mut DetailVisibility,
         cache: &mut SnapshotCache,
     ) -> Result<(), String> {
-        use openmt2001::{save::{SavedBuilding, appearance, restore}, scene::SceneBuilding};
+        use openmt2001::{save::{SavedBuilding, appearance, restore}, scene::SceneBuilding,
+        };
         self.ensure_appearance_assets(cache)?;
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
         let board = self.styled_board(&image)?;
@@ -1352,7 +1522,8 @@ impl SceneInputs {
             let record = &session.world.buildings[slot];
             if record[0x3f] == 0 || !detail_model_at_unit_scale(record) { continue; }
             let source = SavedBuilding { slot, category: inspection.category,
-                bytes: record[..0x40].try_into().unwrap() };
+                bytes: record[..0x40].try_into().unwrap(),
+            };
             let building = SceneBuilding::from_saved(&source, &board, &file)?;
             let current = match appearance::model_identity(&file, building.selected, source.height()) {
                 Ok(identity) => identity,
@@ -1365,7 +1536,8 @@ impl SceneInputs {
                 continue;
             }
             let (class,text)=Self::appearance_payload(session,record,
-                cache.appearance_assets.as_ref().unwrap())?;
+                cache.appearance_assets.as_ref().unwrap(),
+            )?;
             labels.insert(slot,text);
             prepared.insert(slot, (building, identity.clone(), class));
         }
@@ -1393,12 +1565,15 @@ impl SceneInputs {
             for draw in range {
                 let index = first+draw;
                 detail_visibility.add(scene,building.block_id,center,index,
-                    0..scene.draws[index].vertices.len(),pivot_y)?;
+                    0..scene.draws[index].vertices.len(),pivot_y,
+                )?;
             }
         }
         self.append_static_appearance(&prepared,scene,detail_visibility,cache,
             StaticAppearanceContext { board:&board,image:&image,
-                hour:session.world.clock.hour() })?;
+                hour:session.world.clock.hour(),
+            },
+        )?;
         scene.diagnostics.push(format!(
             "Saved appearance: {} prepared buildings, {replacements} native-order detail replacements",
             prepared.len(),
@@ -1419,11 +1594,14 @@ impl SceneInputs {
         cache: &mut SnapshotCache,
         after_saved_refresh: bool,
     ) -> Result<(), String> {
-        use openmt2001::{save::{SavedBuilding, appearance}, scene::SceneBuilding};
-        if !scene.inspection_buildings.iter().any(|inspection|
-            inspection.runtime_slot.is_some_and(|slot|
+        use openmt2001::{save::{SavedBuilding, appearance}, scene::SceneBuilding,
+        };
+        if !scene.inspection_buildings.iter().any(|inspection| {
+            inspection.runtime_slot.is_some_and(|slot| {
                 session.world.buildings[slot][0x3f] != 0
-                && session.models.bindings.contains_key(&slot))) {
+                && session.models.bindings.contains_key(&slot)
+            })
+        }) {
             return Ok(());
         }
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
@@ -1448,7 +1626,8 @@ impl SceneInputs {
                 continue;
             }
             let source = SavedBuilding { slot, category: inspection.category,
-                bytes: record[..0x40].try_into().unwrap() };
+                bytes: record[..0x40].try_into().unwrap(),
+            };
             let building = SceneBuilding::from_saved(&source, &board, &file)?;
             let identity = match appearance::model_identity(&file, building.selected, source.height()) {
                 Ok(identity) => identity,
@@ -1466,7 +1645,8 @@ impl SceneInputs {
             let class=if openmt2001::building_geometry::refresh_appearance_on_bind(record) {
                 self.ensure_appearance_assets(cache)?;
                 let (class,text)=Self::appearance_payload(session,record,
-                    cache.appearance_assets.as_ref().unwrap())?;
+                    cache.appearance_assets.as_ref().unwrap(),
+                )?;
                 callbacks.push(slot);labels.insert(slot,text);class
             }else{10};
             prepared.insert(slot, (building, identity, class));
@@ -1491,12 +1671,15 @@ impl SceneInputs {
             for draw in range {
                 let index = first+draw;
                 detail_visibility.add(scene,building.block_id,center,index,
-                    0..scene.draws[index].vertices.len(),pivot_y)?;
+                    0..scene.draws[index].vertices.len(),pivot_y,
+                )?;
             }
         }
         self.append_static_appearance(&prepared,scene,detail_visibility,cache,
             StaticAppearanceContext { board:&board,image:&image,
-                hour:session.world.clock.hour() })?;
+                hour:session.world.clock.hour(),
+            },
+        )?;
         scene.diagnostics.push(format!(
             "Current appearance: {} checked models, {} unsupported model classes",
             prepared.len(), unsupported.values().sum::<usize>(),
@@ -1521,12 +1704,14 @@ impl SceneInputs {
         let input_elapsed = started.elapsed();
         let hour = session.world.clock.hour();
         let profile_snapshot = std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS").is_some();
-        let cache_observation = profile_snapshot.then(|| (
+        let cache_observation = profile_snapshot.then(|| {
+            (
             cache.hour,
             cache.city.is_some(),
             cache.buildings.as_slice() == session.world.buildings.as_slice(),
             cache.scaffolds_active,
-        ));
+        )
+        });
         let mut reuse_city = false;
         let mut updated_city_draws = Vec::new();
         let mut assembly_elapsed = std::time::Duration::ZERO;
@@ -1578,9 +1763,11 @@ impl SceneInputs {
             let appearance_started = Instant::now();
             if session.saved_game_mode.is_some() {
                 self.append_saved_appearance(session,&mut scene,&mut detail_visibility,cache)?;
-                self.append_current_appearance(session,&mut scene,&mut detail_visibility,cache,true)?;
+                self.append_current_appearance(session,&mut scene,&mut detail_visibility,cache,true,
+                )?;
             } else {
-                self.append_current_appearance(session,&mut scene,&mut detail_visibility,cache,false)?;
+                self.append_current_appearance(session,&mut scene,&mut detail_visibility,cache,false,
+                )?;
             }
             appearance_elapsed = appearance_started.elapsed();
             cache.hour = hour;
@@ -1624,12 +1811,14 @@ impl SceneInputs {
         let resources = cache.trees.as_ref().unwrap().clone();
         let mut trees = if let Some(state) = &session.models.tree_state {
             let pool = state.borrow();
-            if !cache.tree_instances.as_ref().is_some_and(|(revision, instances)|
-                *revision == pool.revision() && instances.matches(pool.pool())) {
+            if !cache.tree_instances.as_ref().is_some_and(|(revision, instances)| {
+                    *revision == pool.revision() && instances.matches(pool.pool())
+                }) {
                 cache.tree_instances = Some((pool.revision(), resources.instances(pool.pool().clone())?));
             }
             crate::tree_scene::Layer::with_instances(resources,
-                cache.tree_instances.as_ref().unwrap().1.clone(), self.compatibility)
+                cache.tree_instances.as_ref().unwrap().1.clone(), self.compatibility,
+            )
         } else {
             crate::tree_scene::Layer::new(resources, self.compatibility)
         };
@@ -1685,7 +1874,8 @@ impl SceneInputs {
         transport.attach(&mut scene);
         let render_elapsed = started.elapsed();
         let city_people = Some(crate::city_people::Report::from_world(
-            &session.world, &image, &session.roster.manager)?);
+            &session.world, &image, &session.roster.manager,
+        )?);
         let player_info = Some(crate::player_info::State::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
@@ -1717,11 +1907,14 @@ impl SceneInputs {
             .then(|| crate::locator::RuntimeInputs::from_world(&session.world));
         let consumer_polls = Some(crate::consumer_polls::Poll::from_runtime(&session.world)?);
         let city_ownership = Some(crate::city_ownership::Ownership::from_runtime(
-            &session.world, player_info.as_ref().unwrap())?);
+            &session.world, player_info.as_ref().unwrap(),
+        )?);
         let city_rights = crate::city_rights::Rights::from_runtime(
-            &session.world, player_info.as_ref().unwrap())?;
+            &session.world, player_info.as_ref().unwrap(),
+        )?;
         let city_prestige = Some(crate::city_prestige::Prestige::from_runtime(
-            &session.world, &board)?);
+            &session.world, &board,
+        )?);
         if let Some((previous_hour, had_city, buildings_equal, previous_scaffolds)) = cache_observation {
             eprintln!(
                 "Live snapshot: inputs {input_elapsed:?}, assembly {assembly_elapsed:?}, appearance {appearance_elapsed:?}, scaffold {scaffold_elapsed:?}, city cumulative {:?}, actors/resources host elapsed {:?}, reports host elapsed {:?}, total host elapsed {:?}",
@@ -1761,7 +1954,8 @@ impl SceneInputs {
             city_ownership,
             city_rights,
             navigator_owners: crate::navigator::runtime_owners(&session.world.categories,
-                &session.roster.manager, session.roster.status.current_player, &image)?,
+                &session.roster.manager, session.roster.status.current_player, &image,
+            )?,
             block_information,
             city_prestige,
             scene,
@@ -1815,7 +2009,8 @@ impl SceneInputs {
             width: 1280,
             height: 960,
             animated: true,
-        }, Some(&self.style))
+        }, Some(&self.style),
+        )
         .map(|scene| LoadedInspection {
             save_profile_root: None,
             logic_tick: None,
@@ -1984,7 +2179,8 @@ fn update_city_pulse(
     }
     Ok(())
 }
-enum ResultPhase { Flyby, CutScene }
+enum ResultPhase { Flyby, CutScene,
+}
 struct ResultView {
     state: crate::fresh_city::result::ResultPresentation,
     fireworks: Option<crate::fresh_city::result::fireworks::Fireworks>,
@@ -2078,7 +2274,8 @@ impl Inspection {
             }
             TutorialCameraAction::CityView => {
                 self.inertia = openmt2001::camera::BlockCameraInertia::new(
-                    self.camera.eye, self.camera.target);
+                    self.camera.eye, self.camera.target,
+                );
                 self.strategic = false;
                 self.return_camera = None;
                 self.reframe_pending = true;
@@ -2091,7 +2288,9 @@ impl Inspection {
                         business.slot == target as usize)
                     || building.saved_business.as_ref().is_some_and(|business|
                         business.slot == target as usize)
-                }).ok_or_else(|| format!("tutorial business {target} has no rendered building"))?;
+                }).ok_or_else(|| {
+                        format!("tutorial business {target} has no rendered building")
+                    })?;
                 let building = &self.scene.inspection_buildings[building_index];
                 let hit = inspection_hit(&selection.blocks, building.category, Some(building_index))
                     .ok_or("tutorial building category leaves original board")?;
@@ -2106,7 +2305,8 @@ impl Inspection {
                 ).ok_or("tutorial building camera lacks original entrance")?;
                 self.selected = Some(hit);
                 self.inertia = openmt2001::camera::BlockCameraInertia::new(
-                    self.camera.eye, self.camera.target);
+                    self.camera.eye, self.camera.target,
+                );
                 self.controls = controls;
                 self.building_angle = angle;
                 self.building_camera = true;
@@ -2125,8 +2325,9 @@ impl Inspection {
         Ok(())
     }
     fn send_tutorial_control(&mut self, id: u32) {
-        if self.live_status.as_ref().is_some_and(|status|
-            status.failure.is_none() && status.tutorial_enabled_controls.contains(&id))
+        if self.live_status.as_ref().is_some_and(|status| {
+            status.failure.is_none() && status.tutorial_enabled_controls.contains(&id)
+        })
             && let Some(sender) = &self._fresh_session {
             let _ = sender.send(FreshRequest::TutorialControl(id));
             self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
@@ -2221,9 +2422,12 @@ impl Inspection {
     }
     fn utility_category(&self, blocks: &[openmt2001::board::Block]) -> Option<usize> {
         let selected = self.selected.map(|hit| {
-            if hit.building.is_some_and(|i| self.scene.inspection_buildings.get(i)
-                .is_some_and(|building| !building_has_management_link(building))) {
-                crate::selection::Hit { category: hit.category, building: None }
+            if hit.building.is_some_and(|i| {
+                self.scene.inspection_buildings.get(i)
+                .is_some_and(|building| !building_has_management_link(building))
+            }) {
+                crate::selection::Hit { category: hit.category, building: None,
+                }
             } else {
                 hit
             }
@@ -2351,6 +2555,7 @@ pub struct Intro {
     menu_camera: Option<MenuCamera>,
     loading: Option<mpsc::Receiver<Result<LoadedInspection, String>>>,
     loading_from_setup: bool,
+    loading_skirmish: bool,
     refreshing_fresh: bool,
     inspection: Option<Inspection>,
     audio_levels: crate::settings_menu::Levels,
@@ -2439,15 +2644,18 @@ impl Intro {
         view: &Inspection,
     ) -> Result<(), String> {
         let Some(target) = view.live_status.as_ref()
-            .and_then(|status| status.tutorial_arrows.last()) else { return Ok(()) };
+            .and_then(|status| status.tutorial_arrows.last()) else { return Ok(());
+        };
         let origin = menu.as_ref().ok_or("tutorial prompt assets missing")?
             .prompt_assets().arrow_origin();
         // Frame 50 is the standing tutor pose in the original 90-frame mesh.
         // The native transition timing remains to be recovered.
-        let offset = view.live_status.as_ref().map_or([0.; 2], |status|
-            status.tutorial_interaction.prompt_offset());
+        let offset = view.live_status.as_ref().map_or([0.; 2], |status| {
+            status.tutorial_interaction.prompt_offset()
+        });
         let overlay = assets.tutorial_visual.prepare_positioned(
-            renderer, origin, [target[0] as f32, target[1] as f32], 50, offset)?;
+            renderer, origin, [target[0] as f32, target[1] as f32], 50, offset,
+        )?;
         renderer.draw_overlay(color_view, depth_view, &overlay);
         Ok(())
     }
@@ -2523,6 +2731,7 @@ impl Intro {
             menu_camera: None,
             loading: None,
             loading_from_setup: false,
+            loading_skirmish: false,
             refreshing_fresh: false,
             inspection: None,
             audio_levels: crate::settings_menu::Levels::default(),
@@ -2606,17 +2815,19 @@ impl Intro {
         pressed: bool,
     ) -> Result<(), String> {
         use winit::keyboard::NamedKey;
-        if self.inspection.as_ref().is_some_and(|view|
+        if self.inspection.as_ref().is_some_and(|view| {
             view.result.is_some() || view.result_pending.is_some()
-                || view.live_status.as_ref().is_some_and(|status| status.result_request.is_some())) {
+                || view.live_status.as_ref().is_some_and(|status| status.result_request.is_some())
+        }) {
             if pressed && key == NamedKey::Escape
                 && let Some(result) = self.inspection.as_mut().and_then(|view| view.result.as_mut()) {
                 result.bypass_input = true;
             }
             return Ok(());
         }
-        if self.inspection.as_ref().is_some_and(|view|
-            view.stats_requested || view.live_status.as_ref().is_some_and(|status|status.stats.is_some())) {
+        if self.inspection.as_ref().is_some_and(|view| {
+            view.stats_requested || view.live_status.as_ref().is_some_and(|status|status.stats.is_some())
+        }) {
             return Ok(());
         }
         if pressed && let Some(view) = &mut self.inspection {
@@ -2741,10 +2952,14 @@ impl Intro {
         use crate::save_dialog::Action;
         match action {
             Action::Back=>(),
-            Action::NewName(name)=>Self::submit_save_target(view,
-                crate::save_menu::Target::NewName(name)),
-            Action::ExistingSlot(id)=>Self::submit_save_target(view,
-                crate::save_menu::Target::ExistingSlot(id)),
+            Action::NewName(name)=> {
+                Self::submit_save_target(view,
+                crate::save_menu::Target::NewName(name))
+            }
+            Action::ExistingSlot(id)=> {
+                Self::submit_save_target(view,
+                crate::save_menu::Target::ExistingSlot(id))
+            }
             Action::DeleteSlot(id)=>{
                 if view.save_delete_pending.is_some() {return;}
                 let Some(sender)=&view._fresh_session else {
@@ -2755,7 +2970,9 @@ impl Intro {
                 match sender.send(FreshRequest::DeleteSave{id,reply}) {
                     Ok(())=>{view.save_delete_pending=Some(result);view.save_dialog.busy=true;
                         view.save_dialog.message=Some("Deleting...".into());}
-                    Err(_)=>view.save_dialog.message=Some("Delete failed: session closed".into()),
+                    Err(_)=> {
+                        view.save_dialog.message=Some("Delete failed: session closed".into())
+                    }
                 }
             }
         }
@@ -2769,7 +2986,8 @@ impl Intro {
         let (reply,result)=mpsc::channel();
         let request=FreshRequest::SaveSelected {target,camera:view.camera,
             game_mode:if view.auction.scene.is_some(){2}else{1},
-            interface_mode:if view.strategic{3}else{0},reply};
+            interface_mode:if view.strategic{3}else{0},reply,
+        };
         match sender.send(request) {
             Ok(())=>{view.save_pending=Some(result);view.save_dialog.busy=true;
                 view.save_dialog.message=Some("Saving...".into());}
@@ -2808,17 +3026,20 @@ impl Intro {
                 .map(|point| point.map(|v| v as f32 * 0.5));
             let auction_time = view.live_status.as_ref().is_some_and(|status| status.auction.is_some());
             if view.time_panel.cursor_held(&self.assets.time_panel,
-                time_pointer, auction_time, time_input && view.mouse_buttons[0]).is_some()
+                time_pointer, auction_time, time_input && view.mouse_buttons[0],
+                ).is_some()
                 && let Err(error) = view.gameplay_sound_player
                     .apply(crate::gameplay_sound::Operation::UiLightClick)
             {
                 eprintln!("Time held re-entry sound: {error}");
             }
             if let (Some(menu),Some(snapshot))=(&self.menu,
-                view.live_status.as_ref().and_then(|status|status.stats.as_ref())) {
+                view.live_status.as_ref().and_then(|status|status.stats.as_ref()),
+            ) {
                 let _=view.stats_panel.pointer(menu.stats_assets(),
                     view.pointer.map(|point|point.map(|v|v as f32*0.5)),
-                    view.mouse_buttons[0],snapshot);
+                    view.mouse_buttons[0],snapshot,
+                );
             }
             if matches!(view.settings_menu.page,
                 Some(crate::settings_menu::Page::Sound|crate::settings_menu::Page::Graphics|
@@ -2826,7 +3047,8 @@ impl Intro {
             {
                 let distance = view.settings_menu.graphics.distance;
                 if view.settings_menu.drag(&self.assets.settings_menu,
-                    view.pointer.map(|p| p.map(|v| v as f32*0.5)), &mut self.audio_levels)
+                    view.pointer.map(|p| p.map(|v| v as f32*0.5)), &mut self.audio_levels,
+                )
                 {
                     Self::apply_audio_levels(view, self.audio_levels);
                 }
@@ -2836,7 +3058,8 @@ impl Intro {
             }
             if view.settings_menu.page.is_some()
                 && view.settings_menu.pointer_click_cue(&self.assets.settings_menu,
-                    view.pointer.map(|p| p.map(|v| v as f32*0.5)))
+                    view.pointer.map(|p| p.map(|v| v as f32*0.5)),
+                )
                 && let Err(error)=view.gameplay_sound_player
                     .apply(crate::gameplay_sound::Operation::UiLightClick)
             {
@@ -2845,7 +3068,8 @@ impl Intro {
             if view.game_options.open && !view.save_dialog.visible
                 && view.settings_menu.page.is_none()
                 && view.game_options.pointer_click_cue(&self.assets.game_options,
-                    view.pointer.map(|p| p.map(|v| v as f32*0.5)))
+                    view.pointer.map(|p| p.map(|v| v as f32*0.5)),
+                )
                 && let Err(error)=view.gameplay_sound_player
                     .apply(crate::gameplay_sound::Operation::UiLightClick)
             {
@@ -2869,20 +3093,26 @@ impl Intro {
             }
             if view.auction.scene.is_some()
                 && let (Some(menu),Some(auction))=(&self.menu,
-                    view.live_status.as_ref().and_then(|status|status.auction.as_ref()))
+                    view.live_status.as_ref().and_then(|status|status.auction.as_ref()),
+                )
                 && view.auction_panel.pointer_click_cue(menu.auction_panel_assets(),auction,
                     view.pointer.filter(|_|view.prompts.request().is_none()
-                        && !view.stats_requested).map(|point|point.map(|v|v as f32*0.5)))
+                        && !view.stats_requested).map(|point|point.map(|v|v as f32*0.5)),
+                )
                 && let Err(error)=view.gameplay_sound_player
                     .apply(crate::gameplay_sound::Operation::UiLightClick)
             {
                 eprintln!("Auction held re-entry sound: {error}");
             }
             if let Some(planning)=&mut view.planning {
-                let occupied=view.live_status.as_ref().is_some_and(|status|
-                    status.event_list_visible && view.auction.scene.is_none())
-                    && self.menu.as_ref().is_some_and(|menu|view.pointer.is_some_and(|point|
-                        menu.event_list_assets().contains(point.map(|v|v as f32*0.5))));
+                let occupied=view.live_status.as_ref().is_some_and(|status| {
+                    status.event_list_visible && view.auction.scene.is_none()
+                })
+                    && self.menu.as_ref().is_some_and(|menu| {
+                    view.pointer.is_some_and(|point| {
+                        menu.event_list_assets().contains(point.map(|v|v as f32*0.5))
+                    })
+                });
                 planning.pointer(view.pointer.filter(|_|!occupied));
                 if planning.pointer_click_cue()
                     && let Err(error)=view.gameplay_sound_player
@@ -2898,8 +3128,10 @@ impl Intro {
             view.save_dialog.scroll(delta);
             return;
         }
-        if self.inspection.as_ref().is_some_and(|view|view.stats_requested
-            || view.live_status.as_ref().is_some_and(|status|status.stats.is_some())) {return;}
+        if self.inspection.as_ref().is_some_and(|view| {
+            view.stats_requested
+            || view.live_status.as_ref().is_some_and(|status|status.stats.is_some())
+        }) {return;}
         if self
             .inspection
             .as_ref()
@@ -2977,10 +3209,12 @@ impl Intro {
                 view.time_panel.cancel_input();view.time_pressed=None;
             }
             if let (Some(menu),Some(snapshot))=(&self.menu,
-                view.live_status.as_ref().and_then(|status|status.stats.as_ref())) {
+                view.live_status.as_ref().and_then(|status|status.stats.as_ref()),
+            ) {
                 if button==winit::event::MouseButton::Left {
                     if let Some(action)=view.stats_panel.pointer(menu.stats_assets(),
-                        view.pointer.map(|point|point.map(|v|v as f32*0.5)),pressed,snapshot)
+                        view.pointer.map(|point|point.map(|v|v as f32*0.5)),pressed,snapshot,
+                    )
                         && let Some(sender)=&view._fresh_session {
                         let _=sender.send(FreshRequest::Stats(action));
                         view.stats_requested=true;
@@ -2998,8 +3232,11 @@ impl Intro {
                     let action = if view.save_dialog.generic_prompt().is_some() {
                         self.menu.as_ref().and_then(|menu| {
                             let bounds=menu.prompt_assets().dialog_buttons(2);
-                            (bounds.len()==2).then(|| view.save_dialog.mouse_generic(
-                                pointer,pressed,[bounds[0],bounds[1]])).flatten()
+                            (bounds.len()==2).then(|| {
+                                    view.save_dialog.mouse_generic(
+                                pointer,pressed,[bounds[0],bounds[1]],
+                                    )
+                                }).flatten()
                         })
                     } else {
                         view.save_dialog.mouse(&self.assets.save_dialog,pointer,pressed)
@@ -3028,7 +3265,8 @@ impl Intro {
                     let pointer=view.pointer.map(|p| p.map(|v| v as f32*0.5));
                     let distance=view.settings_menu.graphics.distance;
                     if view.settings_menu.mouse(&self.assets.settings_menu,pointer,pressed,
-                        &mut self.audio_levels) {
+                        &mut self.audio_levels,
+                    ) {
                         Self::apply_audio_levels(view, self.audio_levels);
                     }
                     if view.settings_menu.graphics.distance != distance {
@@ -3079,21 +3317,30 @@ impl Intro {
                 }
                 return;
             }
-            let event_list_occupied = view.live_status.as_ref().is_some_and(|status|
-                status.event_list_visible && view.auction.scene.is_none())
-                && self.menu.as_ref().is_some_and(|menu| view.pointer.is_some_and(|point|
-                    menu.event_list_assets().contains(point.map(|v|v as f32*0.5))));
+            let event_list_occupied = view.live_status.as_ref().is_some_and(|status| {
+                    status.event_list_visible && view.auction.scene.is_none()
+                })
+                && self.menu.as_ref().is_some_and(|menu| {
+                    view.pointer.is_some_and(|point| {
+                        menu.event_list_assets().contains(point.map(|v|v as f32*0.5))
+                    })
+                });
             // Original tutorials enable selected controls while a prompt stays
             // open. Preserve a captured planning press through its release.
             if let Some(planning) = &mut view.planning {
                 planning.pointer(view.pointer.filter(|_|!event_list_occupied));
             }
             let prompt_input_occupied = view.prompts.request().is_some()
-                && (view.prompts.input_captured() || self.menu.as_ref().is_some_and(|menu|
-                    view.pointer.is_some_and(|pointer| menu.prompt_assets().input_occupied(
+                && (view.prompts.input_captured() || self.menu.as_ref().is_some_and(|menu| {
+                        view.pointer.is_some_and(|pointer| {
+                            menu.prompt_assets().input_occupied(
                         pointer.map(|value| value as f32 * 0.5),
-                        view.live_status.as_ref().map_or([0.;2], |status|
-                            status.tutorial_interaction.prompt_offset())))));
+                        view.live_status.as_ref().map_or([0.;2], |status| {
+                                    status.tutorial_interaction.prompt_offset()
+                                }),
+                            )
+                        })
+                    }));
             let tutorial_planning_hit = button == winit::event::MouseButton::Left
                 && !prompt_input_occupied
                 && view.planning.as_ref().is_some_and(|planning| {
@@ -3101,35 +3348,50 @@ impl Intro {
                         || planning.tutorial_drag_at()
                             && view.selected.is_some_and(|hit| hit.building.is_none())
                         || planning.tutorial_control_at().is_some_and(|id| {
-                            view.live_status.as_ref().is_some_and(|status|
-                                status.tutorial_enabled_controls.contains(&id))
+                            view.live_status.as_ref().is_some_and(|status| {
+                                status.tutorial_enabled_controls.contains(&id)
+                            })
                         })
                 });
             let tutorial_auction_hit = button == winit::event::MouseButton::Left
                 && view.auction.scene.is_some()
                 && (view.auction_panel.tutorial_control_pressed()
-                    || !prompt_input_occupied && self.menu.as_ref().is_some_and(|menu|
-                        view.live_status.as_ref().is_some_and(|status|
-                            status.auction.as_ref().is_some_and(|auction|
-                                view.auction_panel.tutorial_control_at(menu.auction_panel_assets(),
-                                    view.pointer.map(|p|p.map(|v|v as f32*0.5)),auction)
-                                    .is_some_and(|id|status.tutorial_enabled_controls.contains(&id))))));
+                    || !prompt_input_occupied && self.menu.as_ref().is_some_and(|menu| {
+                            view.live_status.as_ref().is_some_and(|status| {
+                                status.auction.as_ref().is_some_and(|auction| {
+                                    view.auction_panel.tutorial_control_at(menu.auction_panel_assets(),
+                                    view.pointer.map(|p|p.map(|v|v as f32*0.5)),auction,
+                                        )
+                                    .is_some_and(|id| {
+                                            status.tutorial_enabled_controls.contains(&id)
+                                        })
+                                })
+                            })
+                        }));
             let tutorial_locator_hit = button == winit::event::MouseButton::Left
                 && view.strategic
                 && self.menu.as_ref().zip(view.locator.as_ref()).is_some_and(|(menu, locator)| {
                     locator.tutorial_control_at(menu.locator_assets(), view.pointer)
-                        .is_some_and(|id| view.live_status.as_ref().is_some_and(|status|
-                            status.tutorial_enabled_controls.contains(&id)))
+                        .is_some_and(|id| {
+                                    view.live_status.as_ref().is_some_and(|status| {
+                                        status.tutorial_enabled_controls.contains(&id)
+                                    })
+                                })
                         || locator.tutorial_control_pressed()
-                });
+                },
+                    );
             let tutorial_property_hit = button == winit::event::MouseButton::Left
                 && !view.strategic && view.main_panel_visible() && view.details_visible
                 && self.menu.as_ref().zip(view.block_information.as_ref())
                     .zip(view.utility_category(&self.assets.selection.blocks)).is_some_and(|((menu, report), category)| {
                         menu.locator_assets().property_tutorial_control_at(
-                            &view.utility_report, view.pointer, report, category)
-                            .is_some_and(|id| view.live_status.as_ref().is_some_and(|status|
-                                status.tutorial_enabled_controls.contains(&id)))
+                            &view.utility_report, view.pointer, report, category,
+                            )
+                            .is_some_and(|id| {
+                                view.live_status.as_ref().is_some_and(|status| {
+                                    status.tutorial_enabled_controls.contains(&id)
+                                })
+                            })
                             || view.utility_report.tutorial_control_pressed()
                     });
             let tutorial_business_hit = button == winit::event::MouseButton::Left
@@ -3139,10 +3401,14 @@ impl Intro {
                     } else if !view.strategic && view.main_panel_visible() && view.details_visible
                         && view.operations.building.is_some() {
                         view.operations.tutorial_control_at(menu.business_assets(),
-                            view.pointer.map(|p| p.map(|v| v as f32 * 0.5)))
+                            view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        )
                     } else { None };
-                    !prompt_input_occupied && id.is_some_and(|id| view.live_status.as_ref().is_some_and(|status|
-                        status.tutorial_enabled_controls.contains(&id)))
+                    !prompt_input_occupied && id.is_some_and(|id| {
+                            view.live_status.as_ref().is_some_and(|status| {
+                                status.tutorial_enabled_controls.contains(&id)
+                            })
+                        })
                         || view.adjustment.as_ref().is_some_and(|a| a.tutorial_control_pressed())
                         || view.operations.tutorial_control_pressed()
                 });
@@ -3165,8 +3431,11 @@ impl Intro {
                         } else if let Some(id) = view
                             .prompts
                             .request_left_button(pressed, menu.prompt_assets().button_at(
-                                view.live_status.as_ref().map_or([0.; 2], |status|
-                                    status.tutorial_interaction.prompt_offset())))
+                                view.live_status.as_ref().map_or([0.; 2], |status| {
+                                    status.tutorial_interaction.prompt_offset()
+                                }),
+                            ),
+                        )
                         {
                             let _ = view.dismiss_prompt(id);
                         }
@@ -3181,9 +3450,12 @@ impl Intro {
                 && view.selected.is_some_and(|hit| hit.building.is_some())
                 && view.live_status.as_ref().is_some_and(|status|
                     status.tutorial_enabled_controls.contains(&14))
-                && self.menu.as_ref().is_some_and(|menu|
-                    view.pointer.is_some_and(|point| menu.business_assets()
-                        .go_to_block_contains(point.map(|value| value as f32 * 0.5))));
+                && self.menu.as_ref().is_some_and(|menu| {
+                    view.pointer.is_some_and(|point| {
+                        menu.business_assets()
+                        .go_to_block_contains(point.map(|value| value as f32 * 0.5))
+                    })
+                });
             let tutorial_control_hit = view.live_status.as_ref().is_some_and(|status| {
                 status.tutorial_enabled_controls.contains(&103) && view.over_navigator()
                     || status.tutorial_enabled_controls.contains(&73) && view.over_navigation()
@@ -3279,7 +3551,8 @@ impl Intro {
                             }
                             crate::time_panel::Button::Manager => {
                                 if let Some(sender)=&view._fresh_session {
-                                    let _=sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Open));
+                                    let _=sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Open,
+                                    ));
                                     view.stats_requested=true;
                                     view.keys=[false;4];view.taps=[false;4];view.drag=[0;2];
                                     view.last_status_query=Instant::now()-std::time::Duration::from_secs(1);
@@ -3303,9 +3576,11 @@ impl Intro {
                     let pointer=view.pointer.filter(|_|!prompt_input_occupied)
                         .map(|point|point.map(|v|v as f32*0.5));
                     let activation=view.auction_panel.mouse(menu.auction_panel_assets(),
-                        auction,pointer,pressed);
+                        auction,pointer,pressed,
+                    );
                     if view.auction_panel.pointer_click_cue(menu.auction_panel_assets(),
-                        auction,pointer)
+                        auction,pointer,
+                    )
                         && let Err(error)=view.gameplay_sound_player
                             .apply(crate::gameplay_sound::Operation::UiLightClick)
                     {
@@ -3350,8 +3625,9 @@ impl Intro {
                     let control = planning.take_tutorial_control();
                     if planning.take_placement_request() {
                         let (reply, receiver) = mpsc::channel();
-                        if view._fresh_session.as_ref().is_some_and(|sender|
-                            sender.send(FreshRequest::BuildDrag { reply }).is_ok())
+                        if view._fresh_session.as_ref().is_some_and(|sender| {
+                            sender.send(FreshRequest::BuildDrag { reply }).is_ok()
+                        })
                         {
                             planning.placement_pending = Some(receiver);
                         } else {
@@ -3491,7 +3767,8 @@ impl Intro {
                             view.adjustment = Some(panel);
                             let b = &view.scene.inspection_buildings[building];
                             let Some(hit) = inspection_hit(&self.assets.selection.blocks,
-                                b.category, Some(building)) else { return; };
+                                b.category, Some(building),
+                            ) else { return; };
                             view.selected = Some(hit);
                             if let Some((controls, angle)) = crate::navigation::building_entry(
                                 self.assets.selection.blocks[hit.category].center,
@@ -3547,9 +3824,14 @@ impl Intro {
                 }
             }
             if event_list_occupied && !(view.strategic
-                && view.locator.as_ref().is_some_and(|locator|locator.pressed()
-                    || self.menu.as_ref().is_some_and(|menu|view.pointer.is_some_and(|point|
-                        menu.locator_assets().contains(locator,point))))) {
+                && view.locator.as_ref().is_some_and(|locator| {
+                        locator.pressed()
+                    || self.menu.as_ref().is_some_and(|menu| {
+                                view.pointer.is_some_and(|point| {
+                                    menu.locator_assets().contains(locator,point)
+                                })
+                            })
+                    })) {
                 view.mouse_buttons=[false;2];view.drag=[0;2];view.double_click.clear();return;
             }
             view.locator_blocked = view.strategic
@@ -3574,11 +3856,13 @@ impl Intro {
                     {
                         view.double_click.clear();
                         let selected = locator.mouse(
-                            menu.locator_assets(), &view.scene, view.pointer, pressed);
+                            menu.locator_assets(), &view.scene, view.pointer, pressed,
+                        );
                         let tutorial_control = locator.take_tutorial_control();
                         if let Some(id) = tutorial_control
-                            && view.live_status.as_ref().is_some_and(|status|
-                                status.tutorial_enabled_controls.contains(&id))
+                            && view.live_status.as_ref().is_some_and(|status| {
+                                status.tutorial_enabled_controls.contains(&id)
+                            })
                         {
                             view.send_tutorial_control(id);
                         }
@@ -3698,8 +3982,9 @@ impl Intro {
                             view.block_information.as_ref().unwrap(),
                             category,
                         );
-                        let rights_enabled = view.live_status.as_ref().is_none_or(|status|
-                            !status.tutorial_session || status.tutorial_enabled_controls.contains(&91));
+                        let rights_enabled = view.live_status.as_ref().is_none_or(|status| {
+                            !status.tutorial_session || status.tutorial_enabled_controls.contains(&91)
+                        });
                         if view.utility_report.mouse_with_rights_admission(pressed, rights_enabled) {
                             let mut hyperlink_committed = false;
                             if let Some(slot) = view.utility_report.requested_slot.take()
@@ -3770,8 +4055,9 @@ impl Intro {
                         view.navigation_pressed = false;
                         if view.over_navigation() {
                             view.toggle_navigation(&self.assets.navigation);
-                            if view.live_status.as_ref().is_some_and(|status|
-                                status.tutorial_enabled_controls.contains(&73)) {
+                            if view.live_status.as_ref().is_some_and(|status| {
+                                status.tutorial_enabled_controls.contains(&73)
+                            }) {
                                 view.send_tutorial_control(73);
                             }
                         }
@@ -3779,9 +4065,7 @@ impl Intro {
                     }
                     if pressed
                         && !view.mouse_buttons[1]
-                        && !view.live_status.as_ref().is_some_and(|status| {
-                            status.tutorial_controls.picking_disabled
-                        })
+                        && !view.live_status.as_ref().is_some_and(|status| status.tutorial_controls.picking_disabled)
                         && view.scene_pointer().is_some() {
                         let picked = view.scene_pointer().and_then(|point| {
                             self.assets.selection.pick(
@@ -3801,10 +4085,11 @@ impl Intro {
                                 }
                                 _ => crate::tutorial_two_interaction::Pick::Block {
                                     category_id: self.assets.selection.blocks[hit.category].id as u32,
-                                }
+                                },
                             };
-                            view.live_status.as_ref().and_then(|status|
-                                status.tutorial_interaction.callback(pick).map(|_| pick))
+                            view.live_status.as_ref().and_then(|status| {
+                                status.tutorial_interaction.callback(pick).map(|_| pick)
+                            })
                         });
                         if view.live_status.as_ref().is_some_and(|status|
                             status.tutorial_interaction.has_pick_gate())
@@ -3849,13 +4134,15 @@ impl Intro {
                                     view.send_tutorial_pick(
                                         crate::tutorial_two_interaction::Pick::BlockEntry {
                                             category_id,
-                                        });
+                                        },
+                                    );
                                 }
                             }
                         } else if let Some(index) = view.selected {
                             if double
-                                && !view.live_status.as_ref().is_some_and(|status|
-                                    status.tutorial_interaction.has_pick_gate())
+                                && !view.live_status.as_ref().is_some_and(|status| {
+                                    status.tutorial_interaction.has_pick_gate()
+                                })
                                 && !view.live_status.as_ref().is_some_and(|status| {
                                     status
                                         .auction_locked_categories
@@ -3864,7 +4151,8 @@ impl Intro {
                                 && let (Some(building), Some(menu)) = (index.building, &self.menu)
                             {
                                 match menu.adjustment_assets().open_for_owner(&view.scene, building,
-                                    view.live_status.as_ref().and_then(|s| s.business_owner)) {
+                                    view.live_status.as_ref().and_then(|s| s.business_owner),
+                                ) {
                                     Ok(panel) => view.adjustment = panel,
                                     Err(error) => {
                                         eprintln!("Business Adjustment unavailable: {error}")
@@ -3996,7 +4284,8 @@ impl Intro {
                 } else {
                     mode12_input_tick(&mut view.controls, view.saved_camera, keys, view.drag,
                         i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                        view.settings_menu.gameplay.invert_vertical)?
+                        view.settings_menu.gameplay.invert_vertical,
+                    )?
                 };
                 view.drag = [0; 2];
                 let (eye, target) = pose;
@@ -4023,7 +4312,8 @@ impl Intro {
                 changed.extend(trees.reframe(&mut view.scene, view.camera)?);
             }
             changed.extend(view.detail_visibility.reframe(&mut view.scene, view.camera,
-                view.settings_menu.graphics.distance)?);
+                view.settings_menu.graphics.distance,
+            )?);
             if let Some(locator) = &mut view.locator {
                 locator.dirty = true;
             }
@@ -4044,7 +4334,8 @@ impl Intro {
             changed.dedup();
             for index in changed {
                 self.renderer.update_dynamic_vertices(&mut view.prepared, index,
-                    &view.scene.draws[index].borrowed())?;
+                    &view.scene.draws[index].borrowed(),
+                )?;
             }
             let cameras = view.scene.draws.iter().map(|draw|
                 draw.view_projection.unwrap_or(view.scene.camera)).collect::<Vec<_>>();
@@ -4053,7 +4344,8 @@ impl Intro {
         Ok(())
     }
     fn draw_result(&mut self, presenter: &Presenter) -> Result<bool, String> {
-        let Some(view) = self.inspection.as_mut() else { return Ok(false) };
+        let Some(view) = self.inspection.as_mut() else { return Ok(false);
+        };
         if view.result.is_none() && view.result_pending.is_none()
             && view.live_status.as_ref().is_some_and(|status| status.result_request.is_some()) {
             let sender = view._fresh_session.as_ref().ok_or("Result has no retained worker")?;
@@ -4071,7 +4363,8 @@ impl Intro {
                     view.environment_tick = snapshot.tick;
                     if view.environment_time != Some((snapshot.hour, snapshot.counter)) {
                         let mut changed = view.scene.advance_daylight(
-                            snapshot.hour, snapshot.counter, view.camera)?;
+                            snapshot.hour, snapshot.counter, view.camera,
+                        )?;
                         if let Some(trees) = &mut view.trees {
                             changed.extend(trees.reframe(&mut view.scene, view.camera)?);
                         }
@@ -4079,11 +4372,13 @@ impl Intro {
                             let draw = &view.scene.draws[index];
                             self.renderer.update_dynamic_surface(
                                 &mut view.prepared, index, &draw.borrowed(),
-                                draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
+                                draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog,
+                            )?;
                         }
                         for (index, draw) in view.scene.draws.iter().enumerate() {
                             self.renderer.update_camera(&view.prepared, index,
-                                draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
+                                draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog,
+                            )?;
                         }
                         view.environment_time = Some((snapshot.hour, snapshot.counter));
                     }
@@ -4103,7 +4398,8 @@ impl Intro {
                         (Some(setting), Some(seed)) => {
                             let image = openmt2001::pe::PeImage::parse(&self.assets.inputs.executable)?;
                             Some(crate::fresh_city::result::fireworks::Fireworks::new(
-                                &image, setting, seed)?)
+                                &image, setting, seed,
+                            )?)
                         }
                         (None, None) => None,
                         _ => return Err("result firework setting and seed differ".into()),
@@ -4126,12 +4422,15 @@ impl Intro {
                         &self.assets.inputs.suncols)?.sample(hour, counter)?;
                     let actor_poses = crate::auction_scene::result_layout(state.characters)?;
                     let actor_draws = self.assets.result_actors.draws_result(
-                        &actor_poses, &actor_light, view.camera.eye)?;
+                        &actor_poses, &actor_light, view.camera.eye,
+                    )?;
                     let actors = self.renderer.prepare(
                         &actor_draws.iter().map(|draw| draw.borrowed()).collect::<Vec<_>>(),
-                        view.scene.camera, view.scene.fog)?;
+                        view.scene.camera, view.scene.fog,
+                    )?;
                     let mut controller = crate::result_controller::Controller::new(
-                        state.bypass_enabled, state.credits, state.credit_rows);
+                        state.bypass_enabled, state.credits, state.credit_rows,
+                    );
                     controller.set_identifier(state.cut_scene_identifier);
                     let music_address = view.live_status.as_ref()
                         .and_then(|status| status.result_request)
@@ -4146,17 +4445,21 @@ impl Intro {
                         phase: ResultPhase::Flyby, controller, serviced_ticks: 0,
                         bypass_input: false, pending: None, credit_pending: None,
                         cutscene_pending: None, completed: None,
-                        actor_light, actors, actor_draws: actor_draws.len(), title: None });
+                        actor_light, actors, actor_draws: actor_draws.len(), title: None,
+                    });
                     view.keys = [false; 4];
                     view.taps = [false; 4];
                     view.drag = [0; 2];
                     view.mouse_buttons = [false; 2];
                 }
                 Err(mpsc::TryRecvError::Empty) => return Ok(true),
-                Err(mpsc::TryRecvError::Disconnected) => return Err("Result worker disconnected".into()),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("Result worker disconnected".into());
+                }
             }
         }
-        let Some(result) = view.result.as_mut() else { return Ok(false) };
+        let Some(result) = view.result.as_mut() else { return Ok(false);
+        };
         let service_tick = (result.started.elapsed().as_secs_f64() * 50.) as usize;
         if let Some(fireworks) = &mut result.fireworks {
             while result.fireworks_ticks < service_tick {
@@ -4164,8 +4467,7 @@ impl Intro {
                 fireworks.tick()?;
                 for cue in fireworks.take_sounds() {
                     view.gameplay_sound_player.apply(
-                        crate::gameplay_sound::Operation::ResultFirework(cue),
-                    )?;
+                        crate::gameplay_sound::Operation::ResultFirework(cue))?;
                 }
             }
         }
@@ -4182,7 +4484,8 @@ impl Intro {
             if ended {
                 let sender = view._fresh_session.as_ref().ok_or("Result worker missing at cutscene end")?;
                 let (reply, answer) = mpsc::channel();
-                sender.send(FreshRequest::ResultEvent { name: "CutSceneEnded", reply })
+                sender.send(FreshRequest::ResultEvent { name: "CutSceneEnded", reply,
+                    })
                     .map_err(|e| e.to_string())?;
                 result.cutscene_pending = Some(answer);
             }
@@ -4194,7 +4497,9 @@ impl Intro {
                     result.credit_pending = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => return Err("Result credits worker disconnected".into()),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("Result credits worker disconnected".into());
+                }
             }
         }
         if matches!(result.phase, ResultPhase::Flyby) {
@@ -4208,7 +4513,8 @@ impl Intro {
                 }
                 let draw_distance = u32::from(view.settings_menu.graphics.distance);
                 changed.extend(view.detail_visibility.reframe(&mut view.scene, sample,
-                    view.settings_menu.graphics.distance)?);
+                    view.settings_menu.graphics.distance,
+                )?);
                 let residents = if let Some(people) = &view.people {
                     people.reframe(&mut view.scene, sample, draw_distance)?
                 } else { 0..0 };
@@ -4222,27 +4528,32 @@ impl Intro {
                 for (i, draw) in view.scene.draws.iter().enumerate() {
                     if changed.contains(&i) {
                         self.renderer.update_dynamic_surface(&mut view.prepared, i,
-                            &draw.borrowed(), draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
+                            &draw.borrowed(), draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog,
+                        )?;
                     } else {
                         self.renderer.update_camera(&view.prepared, i,
-                            draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog)?;
+                            draw.view_projection.unwrap_or(view.scene.camera), view.scene.fog,
+                        )?;
                     }
                 }
                 let actor_poses = crate::auction_scene::result_layout(result.state.characters)?;
                 let actor_draws = self.assets.result_actors.draws_result(
-                    &actor_poses, &result.actor_light, sample.eye)?;
+                    &actor_poses, &result.actor_light, sample.eye,
+                )?;
                 if actor_draws.len() != result.actor_draws {
                     return Err("result actor draw count changed during flyby".into());
                 }
                 for (i, draw) in actor_draws.iter().enumerate() {
                     self.renderer.update_surface(&mut result.actors, i, &draw.borrowed(),
-                        view.scene.camera, view.scene.fog)?;
+                        view.scene.camera, view.scene.fog,
+                    )?;
                 }
             }
             if tick >= result.samples.len() && result.pending.is_none() {
                 let sender = view._fresh_session.as_ref().ok_or("Result worker missing at flyby end")?;
                 let (reply, answer) = mpsc::channel();
-                sender.send(FreshRequest::ResultEvent { name: "FlybyEnded", reply })
+                sender.send(FreshRequest::ResultEvent { name: "FlybyEnded", reply,
+                    })
                     .map_err(|e| e.to_string())?;
                 result.pending = Some(answer);
             }
@@ -4256,7 +4567,9 @@ impl Intro {
                         result.phase = ResultPhase::CutScene;
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
-                    Err(mpsc::TryRecvError::Disconnected) => return Err("Result event worker disconnected".into()),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err("Result event worker disconnected".into());
+                    }
                 }
             }
         }
@@ -4274,7 +4587,9 @@ impl Intro {
                     result.completed = Some(answer);
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => return Err("Result event worker disconnected".into()),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("Result event worker disconnected".into());
+                }
             }
         }
         if let Some(receiver) = &result.completed {
@@ -4286,17 +4601,21 @@ impl Intro {
                     return Ok(false);
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => return Err("Result completion worker disconnected".into()),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("Result completion worker disconnected".into());
+                }
             }
         }
         if let (Some(fireworks), Some(index)) = (&result.fireworks, result.fireworks_draw) {
             let draw = &mut view.scene.draws[index];
             crate::fresh_city::result::particles_gpu::fill(draw, fireworks.points(), view.camera)?;
             self.renderer.update_surface(
-                &mut view.prepared, index, &draw.borrowed(), view.scene.camera, None)?;
+                &mut view.prepared, index, &draw.borrowed(), view.scene.camera, None,
+            )?;
         }
         update_city_pulse(&self.assets.city_pulse, &self.renderer, view.pulse_draw,
-            view.pulse_state.as_ref(), view.camera, &mut view.scene, &mut view.prepared)?;
+            view.pulse_state.as_ref(), view.camera, &mut view.scene, &mut view.prepared,
+        )?;
         self.renderer.draw_prepared(&self.color_view, &self.depth_view, &view.prepared);
         self.renderer.draw_world_overlay(&self.color_view, &self.depth_view, &result.actors);
         let title_id = result.controller.title_visible().then(|| result.state.text_id()).flatten();
@@ -4304,11 +4623,13 @@ impl Intro {
         let text_alpha = result.controller.alpha();
         if (title_id.is_none() && credit_row.is_none()) || text_alpha == 0 {
             result.title = None;
-        } else if result.title.as_ref().is_none_or(|(id, row, alpha, _)|
-            *id != title_id || *row != credit_row || *alpha != text_alpha) {
+        } else if result.title.as_ref().is_none_or(|(id, row, alpha, _)| {
+            *id != title_id || *row != credit_row || *alpha != text_alpha
+        }) {
             let scene = if let Some(row) = credit_row {
                 self.assets.result_text.prepare_credit(
-                    &self.renderer, &result.state, row, text_alpha)?
+                    &self.renderer, &result.state, row, text_alpha,
+                )?
             } else {
                 self.assets.result_text.prepare(
                     &self.renderer, &result.state, text_alpha)?
@@ -4336,7 +4657,9 @@ impl Intro {
         // The worker retains its Lua VM and world until inspection is dismissed.
         if !self.refreshing_fresh
             && self.menu.as_ref().is_some_and(|m| {
-                if self.loading_from_setup {
+                if self.loading_skirmish {
+                    !m.skirmish.busy
+                } else if self.loading_from_setup {
                     !m.single.visible || !m.single.busy
                 } else {
                     !m.load.visible
@@ -4358,6 +4681,7 @@ impl Intro {
         if self.loading.is_none()
             && let Some(path) = self.menu.as_mut().and_then(|m| m.load.request.take())
         {
+            self.loading_skirmish = false;
             self.loading_from_setup = false;
             let save_profile_root = self.menu.as_ref().and_then(|m| m.current_save_root());
             let inputs = self.assets.inputs.clone();
@@ -4370,8 +4694,33 @@ impl Intro {
                 .map_err(|error| error.to_string())?;
         }
         if self.loading.is_none()
+            && let Some(request) = self.menu.as_mut().and_then(|m| m.skirmish.request.take())
+        {
+            self.loading_skirmish = true;
+            self.loading_from_setup = true;
+            let inputs = self.assets.inputs.clone();
+            let (tx, rx) = mpsc::channel();
+            self.loading = Some(rx);
+            if let Err(error) = std::thread::Builder::new()
+                .name("skirmish-simulation".into())
+                .stack_size(16 * 1024 * 1024)
+                .spawn(move || {
+                    inputs.session_worker(WorkerStart::Skirmish(request), inspection_camera, tx)
+                })
+            {
+                self.loading = None;
+                self.loading_skirmish = false;
+                self.loading_from_setup = false;
+                if let Some(menu) = self.menu.as_mut() {
+                    menu.skirmish.finish(Some(error.to_string()));
+                    menu.invalidate();
+                }
+            }
+        }
+        if self.loading.is_none()
             && let Some(preview) = self.menu.as_mut().and_then(|m| m.single.request.take())
         {
+            self.loading_skirmish = false;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
             let (tx, rx) = mpsc::channel();
@@ -4829,12 +5178,15 @@ impl Intro {
                                 // Attachments and selected-building remapping are complete.
                                 // Transfer choices into fresh reports, never old report payloads.
                                 if let (Some(locator), Some(old)) = (&mut view.locator, &previous.locator) {
-                                    locator.retain_ui_from(old, menu.locator_assets(), &previous.scene, &view.scene)?;
-                                    locator.select_poll_category(view.selected.and_then(|hit|
-                                        self.assets.selection.blocks.get(hit.category).map(|block| block.id)));
+                                    locator.retain_ui_from(old, menu.locator_assets(), &previous.scene, &view.scene,
+                                    )?;
+                                    locator.select_poll_category(view.selected.and_then(|hit| {
+                                        self.assets.selection.blocks.get(hit.category).map(|block| block.id)
+                                    }));
                                     locator.pointer(menu.locator_assets(), if view.strategic && view.adjustment.is_none() {
                                         view.pointer
-                                    } else { None });
+                                    } else { None },
+                                    );
                                 }
                                 if let (Some(comparison), Some(old)) = (&mut view.comparison, &previous.comparison) {
                                     comparison.retain_ui_from(old);
@@ -4865,7 +5217,9 @@ impl Intro {
                                 );
                             }
                             self.inspection = Some(view);
-                            if self.loading_from_setup {
+                            if self.loading_skirmish {
+                                menu.skirmish.finish(None);
+                            } else if self.loading_from_setup {
                                 menu.single.message = None;
                             } else {
                                 menu.load.message = None;
@@ -4873,7 +5227,9 @@ impl Intro {
                             presenter.window.set_title("OpenMT2001 - city inspection (simulation paused) / arrows pan, right-drag orbit/zoom, Esc returns");
                         }
                         Err(e) => {
-                            if self.loading_from_setup {
+                            if self.loading_skirmish {
+                                menu.skirmish.finish(Some(e));
+                            } else if self.loading_from_setup {
                                 menu.single.message = Some(e)
                             } else {
                                 menu.load.message = Some(e)
@@ -4955,9 +5311,11 @@ impl Intro {
         if !self
             .inspection
             .as_ref()
-            .is_some_and(|v| v.auction.scene.is_some() || v.prompts.request().is_some()
+            .is_some_and(|v| {
+            v.auction.scene.is_some() || v.prompts.request().is_some()
                 || v.result.is_some() || v.result_pending.is_some()
-                || v.live_status.as_ref().is_some_and(|s| s.result_request.is_some()))
+                || v.live_status.as_ref().is_some_and(|s| s.result_request.is_some())
+        })
         {
             self.inspection_update()?;
         }
@@ -5032,9 +5390,7 @@ impl Intro {
             if self.loading.is_none()
                 && view.vehicles_pending.is_none()
                 && view.last_vehicles_query.elapsed().as_millis() >= 40
-                && view.live_status.as_ref().is_some_and(|s| {
-                    s.running && !s.script_paused && s.failure.is_none()
-                })
+                && view.live_status.as_ref().is_some_and(|s| s.running && !s.script_paused && s.failure.is_none())
                 && let Some(sender) = &view._fresh_session
             {
                 let (reply, answer) = mpsc::channel();
@@ -5182,7 +5538,8 @@ impl Intro {
                         (view.selected.and_then(|h| h.building), &self.menu)
                 {
                     view.adjustment = menu.adjustment_assets().open_for_owner(&view.scene, i,
-                        view.live_status.as_ref().and_then(|s| s.business_owner))?;
+                        view.live_status.as_ref().and_then(|s| s.business_owner),
+                    )?;
                 }
                 if mode == 5
                     && let Some(hit) = view.selected
@@ -5209,9 +5566,11 @@ impl Intro {
                                 } else if let Some(menu) = &self.menu {
                                     let mut planning = menu.planning_assets().open(context)?;
                                     planning.set_tutorial_build_type(view.live_status.as_ref()
-                                        .map_or(-1, |status| status.tutorial_build_type));
+                                        .map_or(-1, |status| status.tutorial_build_type),
+                                    );
                                     planning.set_tutorial_build_use(view.live_status.as_ref()
-                                        .map_or(999, |status| status.tutorial_build_use));
+                                        .map_or(999, |status| status.tutorial_build_use),
+                                    );
                                     view.planning = Some(planning);
                                 }
                             }
@@ -5226,8 +5585,11 @@ impl Intro {
             }
             if let Some(planning) = &mut view.planning {
                 let occupied=view.live_status.as_ref().is_some_and(|status|status.event_list_visible)
-                    && self.menu.as_ref().is_some_and(|menu|view.pointer.is_some_and(|point|
-                        menu.event_list_assets().contains(point.map(|v|v as f32*0.5))));
+                    && self.menu.as_ref().is_some_and(|menu| {
+                        view.pointer.is_some_and(|point| {
+                            menu.event_list_assets().contains(point.map(|v|v as f32*0.5))
+                        })
+                    });
                 planning.pointer(view.pointer.filter(|_|!occupied));
                 let block = self
                     .assets
@@ -5335,7 +5697,9 @@ impl Intro {
                 let outcome = match receiver.try_recv() {
                     Ok(result) => Some(result),
                     Err(mpsc::TryRecvError::Empty) => None,
-                    Err(mpsc::TryRecvError::Disconnected) => Some(Err("Session closed before saving".into())),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        Some(Err("Session closed before saving".into()))
+                    }
                 };
                 if let Some(result) = outcome {
                     let message = match &result {
@@ -5359,7 +5723,9 @@ impl Intro {
                 let outcome=match receiver.try_recv() {
                     Ok(result)=>Some(result),
                     Err(mpsc::TryRecvError::Empty)=>None,
-                    Err(mpsc::TryRecvError::Disconnected)=>Some(Err("Session closed before deletion".into())),
+                    Err(mpsc::TryRecvError::Disconnected)=> {
+                        Some(Err("Session closed before deletion".into()))
+                    }
                 };
                 if let Some(result)=outcome {
                     if let Some(root) = view.save_profile_root.as_deref() {
@@ -5421,7 +5787,8 @@ impl Intro {
                         }
                         for &action in &status.tutorial_camera_events[view.tutorial_camera_seen..] {
                             view.apply_tutorial_camera(action,
-                                &self.assets.selection, &self.assets.navigation)?;
+                                &self.assets.selection, &self.assets.navigation,
+                            )?;
                         }
                         view.tutorial_camera_seen = status.tutorial_camera_events.len();
                         for request in status.prompts.drain(..) {
@@ -5470,9 +5837,11 @@ impl Intro {
                         }
                         view.pulse_state = Some(status.pulse_lights.clone());
                         view.time_panel.update(&self.assets.time_panel, &self.renderer, &status)?;
-                        view.cash_arrow.update(&self.assets.cash_arrow, &self.renderer, status.cash_arrow)?;
+                        view.cash_arrow.update(&self.assets.cash_arrow, &self.renderer, status.cash_arrow,
+                        )?;
                         view.dust.update(&self.assets.dust, &self.renderer, &status.demolition_points,
-                            view.camera, view.scene.camera)?;
+                            view.camera, view.scene.camera,
+                        )?;
                         view.game_options.set_save_disabled(status.tutorial_session);
                         view.live_status = Some(status);
                         view.status_pending = None;
@@ -5506,11 +5875,13 @@ impl Intro {
                 match reply.try_recv() {
                     Ok(clock) => {
                         view.environment_pending = None;
-                        view.time_panel.update_clock(&self.assets.time_panel, &self.renderer, clock)?;
+                        view.time_panel.update_clock(&self.assets.time_panel, &self.renderer, clock,
+                        )?;
                         let (tick, hour, counter) = (clock.ticks, clock.hour, clock.fraction);
                         if tick != view.environment_tick || view.environment_time != Some((hour, counter)) {
                             let mut changed = view.scene.advance_environment(tick, view.camera.eye)?;
-                            changed.extend(view.scene.advance_daylight(hour, counter, view.camera)?);
+                            changed.extend(view.scene.advance_daylight(hour, counter, view.camera,
+                            )?);
                             if let Some(trees) = &mut view.trees {
                                 changed.extend(trees.reframe(&mut view.scene, view.camera)?);
                             }
@@ -5519,11 +5890,13 @@ impl Intro {
                             for index in changed {
                                 let draw = &view.scene.draws[index];
                                 self.renderer.update_dynamic_vertices(
-                                    &mut view.prepared, index, &draw.borrowed())?;
+                                    &mut view.prepared, index, &draw.borrowed(),
+                                )?;
                             }
                             let cameras = view.scene.draws.iter().map(|draw|
                                 draw.view_projection.unwrap_or(view.scene.camera)).collect::<Vec<_>>();
-                            self.renderer.update_cameras(&view.prepared, &cameras, view.scene.fog)?;
+                            self.renderer.update_cameras(&view.prepared, &cameras, view.scene.fog,
+                            )?;
                             view.environment_tick = tick;
                             view.environment_time = Some((hour, counter));
                         }
@@ -5597,10 +5970,12 @@ impl Intro {
             }
             Self::draw_tutorial_visual(
                 &self.assets, &self.menu, &self.renderer,
-                &self.color_view, &self.depth_view, view)?;
+                &self.color_view, &self.depth_view, view,
+            )?;
             if let Some(menu)=&self.menu {
                 view.stats_panel.update(menu.stats_assets(),&self.renderer,
-                    view.live_status.as_ref().and_then(|status|status.stats.as_ref()))?;
+                    view.live_status.as_ref().and_then(|status|status.stats.as_ref()),
+                )?;
                 if let Some(panel)=&view.stats_panel.prepared {
                     self.renderer.draw_overlay(&self.color_view,&self.depth_view,panel);
                 }
@@ -5616,8 +5991,10 @@ impl Intro {
                 let panel = menu
                     .prompt_assets()
                     .prepare_positioned(&self.renderer, &view.prompts,
-                        view.live_status.as_ref().map_or([0.; 2], |status|
-                            status.tutorial_interaction.prompt_offset()))?;
+                        view.live_status.as_ref().map_or([0.; 2], |status| {
+                        status.tutorial_interaction.prompt_offset()
+                    }),
+                )?;
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
@@ -5627,8 +6004,10 @@ impl Intro {
             {
                 let panel = menu.prompt_assets()
                     .prepare_message_positioned(&self.renderer, &view.tutorial_message,
-                        view.live_status.as_ref().map_or([0.; 2], |status|
-                            status.tutorial_interaction.prompt_offset()))?;
+                        view.live_status.as_ref().map_or([0.; 2], |status| {
+                        status.tutorial_interaction.prompt_offset()
+                    }),
+                )?;
                 self.renderer.draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
             if let Some(status) = &view.live_status {
@@ -5674,17 +6053,22 @@ impl Intro {
                 && view.prompts.request().is_none() && view.adjustment.is_none()
                 && view.planning.is_none()
             {
-                view.pointer.and_then(|point| view.locator.as_ref().and_then(|locator|
-                    self.menu.as_ref().and_then(|menu|
-                        locator.icon_tooltip_at(menu.locator_assets(), point))))
+                view.pointer.and_then(|point| {
+                    view.locator.as_ref().and_then(|locator| {
+                        self.menu.as_ref().and_then(|menu|
+                        locator.icon_tooltip_at(menu.locator_assets(), point))
+                    })
+                })
             } else { None };
             let visible_icon = view.icon_tooltip_dwell.advance(icon);
             let tooltip_state = navigator_tooltip.or_else(||
                 visible_icon.zip(view.pointer));
             if tooltip_state != view.tooltip_state {
                 view.tooltip = tooltip_state
-                    .map(|(text_id, point)| self.assets.tooltip.prepare(
-                        &self.renderer, text_id, point))
+                    .map(|(text_id, point)| {
+                        self.assets.tooltip.prepare(
+                        &self.renderer, text_id, point)
+                    })
                     .transpose()?;
                 view.tooltip_state = tooltip_state;
             }
@@ -5700,8 +6084,9 @@ impl Intro {
                 if let Some(category) = locator.take_category_selection() {
                     view.selected = inspection_hit(&self.assets.selection.blocks, category, None);
                 }
-                locator.select_poll_category(view.selected.and_then(|hit|
-                    self.assets.selection.blocks.get(hit.category).map(|block| block.id)));
+                locator.select_poll_category(view.selected.and_then(|hit| {
+                    self.assets.selection.blocks.get(hit.category).map(|block| block.id)
+                }));
                 locator.pointer(
                     menu.locator_assets(),
                     if view.strategic && view.adjustment.is_none() {
@@ -5760,8 +6145,9 @@ impl Intro {
                     let response = match pending.reply.try_recv() {
                         Ok(result) => Some(result),
                         Err(mpsc::TryRecvError::Empty) => None,
-                        Err(mpsc::TryRecvError::Disconnected) =>
-                            Some(Err("Session closed before inspecting the property".into())),
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            Some(Err("Session closed before inspecting the property".into()))
+                        }
                     };
                     if let Some(result) = response {
                         view.utility_report.apply_property_inspection(pending.category, result);
@@ -5780,11 +6166,13 @@ impl Intro {
                             });
                         } else {
                             view.utility_report.apply_property_inspection(category,
-                                Err("Property offer failed: session closed".into()));
+                                Err("Property offer failed: session closed".into()),
+                            );
                         }
                     } else {
                         view.utility_report.apply_property_inspection(category,
-                            Err("Property offers require a running game session".into()));
+                            Err("Property offers require a running game session".into()),
+                        );
                     }
                 }
                 if let Some(pending) = &view.rights_pending {
@@ -5792,7 +6180,8 @@ impl Intro {
                         Ok(result) => Some(result),
                         Err(mpsc::TryRecvError::Empty) => None,
                         Err(mpsc::TryRecvError::Disconnected) =>
-                            Some(Err("Session closed before inspecting building rights".into())),
+                            Some(Err("Session closed before inspecting building rights".into(),
+                        )),
                     };
                     if let Some(result) = response {
                         view.utility_report.apply_rights_inspection(pending.category, result);
@@ -5814,11 +6203,13 @@ impl Intro {
                             });
                         } else {
                             view.utility_report.apply_rights_inspection(category,
-                                Err("Building rights request failed: session closed".into()));
+                                Err("Building rights request failed: session closed".into()),
+                            );
                         }
                     } else {
                         view.utility_report.apply_rights_inspection(category,
-                            Err("Building rights require a running game session".into()));
+                            Err("Building rights require a running game session".into()),
+                        );
                     }
                 }
                 if let Some(category) = view.utility_report.take_rights_open()
@@ -5924,11 +6315,13 @@ impl Intro {
                 let colors = view.block_information.as_ref().map(|report| &report.title_colors);
                 let map = self.strategic_scene.prepare(
                     &self.assets.strategic_scene, &self.renderer,
-                    view.scene.camera, colors)?;
+                    view.scene.camera, colors,
+                )?;
                 self.renderer.draw_prepared(&self.color_view, &self.depth_view, map);
             } else {
                 update_city_pulse(&self.assets.city_pulse, &self.renderer, view.pulse_draw,
-                    view.pulse_state.as_ref(), view.camera, &mut view.scene, &mut view.prepared)?;
+                    view.pulse_state.as_ref(), view.camera, &mut view.scene, &mut view.prepared,
+                )?;
                 self.renderer
                     .draw_prepared(&self.color_view, &self.depth_view, &view.prepared);
                 if view.dust.active && view.dust.prepared.is_some() {
@@ -5936,16 +6329,20 @@ impl Intro {
                     //between authoritative point updates from the worker.
                     if let Some(status)=&view.live_status {
                         view.dust.update(&self.assets.dust,&self.renderer,&status.demolition_points,
-                            view.camera,view.scene.camera)?;
+                            view.camera,view.scene.camera,
+                        )?;
                     }
                     self.renderer.draw_world_overlay(&self.color_view,&self.depth_view,
-                        view.dust.prepared.as_ref().ok_or("dust draw lost prepared resources")?);
+                        view.dust.prepared.as_ref().ok_or("dust draw lost prepared resources")?,
+                    );
                 }
                 self.assets.sidewalk_labels.update(&self.renderer, &mut self.sidewalk_labels,
                     &mut self.sidewalk_shading, &view.scene, view.camera,
-                    view.settings_menu.graphics.distance)?;
+                    view.settings_menu.graphics.distance,
+                )?;
                 self.renderer
-                    .draw_world_overlay(&self.color_view, &self.depth_view, &self.sidewalk_labels);
+                    .draw_world_overlay(&self.color_view, &self.depth_view, &self.sidewalk_labels,
+                );
             for index in 0..self.mr_monopoly_draws {
                 self.renderer.update_camera(
                     &self.mr_monopoly,
@@ -5955,7 +6352,8 @@ impl Intro {
                 )?;
             }
             self.renderer
-                .draw_world_overlay(&self.color_view, &self.depth_view, &self.mr_monopoly);
+                .draw_world_overlay(&self.color_view, &self.depth_view, &self.mr_monopoly,
+                );
             // The quoted model is world geometry. Composite it while the city
             // depth attachment is still retained, before any UI pass clears it.
             if let (Some(planning), Some(_menu)) = (&mut view.planning, &self.menu) {
@@ -5992,7 +6390,8 @@ impl Intro {
             }
             if let (Some(menu),Some(status))=(&self.menu,&view.live_status) {
                 view.event_list.update(menu.event_list_assets(),&self.renderer,
-                    status.event_list_visible,status.event_list_settled)?;
+                    status.event_list_visible,status.event_list_settled,
+                )?;
                 if let Some(panel)=&view.event_list.prepared {
                     //43ce12 inserts model14, then13..0 move to head;43cb40 draws tail first.
                     self.renderer.draw_overlay(&self.color_view,&self.depth_view,panel);
@@ -6057,7 +6456,8 @@ impl Intro {
                 0
             };
             self.renderer
-                .draw_overlay(&self.color_view, &self.depth_view, &view.navigation[icon]);
+                .draw_overlay(&self.color_view, &self.depth_view, &view.navigation[icon],
+                );
             // The bottom-right round controls share the navigation backing;
             // draw their original-texture faces after it, along with the clock.
             if let Some(status)=&view.live_status {
@@ -6169,10 +6569,12 @@ impl Intro {
             }
             Self::draw_tutorial_visual(
                 &self.assets, &self.menu, &self.renderer,
-                &self.color_view, &self.depth_view, view)?;
+                &self.color_view, &self.depth_view, view,
+                )?;
             if let Some(menu)=&self.menu {
                 view.stats_panel.update(menu.stats_assets(),&self.renderer,
-                    view.live_status.as_ref().and_then(|status|status.stats.as_ref()))?;
+                    view.live_status.as_ref().and_then(|status|status.stats.as_ref()),
+                    )?;
                 if let Some(panel)=&view.stats_panel.prepared {
                     self.renderer.draw_overlay(&self.color_view,&self.depth_view,panel);
                 }
@@ -6188,8 +6590,10 @@ impl Intro {
                 let panel = menu
                     .prompt_assets()
                     .prepare_positioned(&self.renderer, &view.prompts,
-                        view.live_status.as_ref().map_or([0.; 2], |status|
-                            status.tutorial_interaction.prompt_offset()))?;
+                        view.live_status.as_ref().map_or([0.; 2], |status| {
+                            status.tutorial_interaction.prompt_offset()
+                        }),
+                    )?;
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
@@ -6199,18 +6603,22 @@ impl Intro {
             {
                 let panel = menu.prompt_assets()
                     .prepare_message_positioned(&self.renderer, &view.tutorial_message,
-                        view.live_status.as_ref().map_or([0.; 2], |status|
-                            status.tutorial_interaction.prompt_offset()))?;
+                        view.live_status.as_ref().map_or([0.; 2], |status| {
+                            status.tutorial_interaction.prompt_offset()
+                        }),
+                    )?;
                 self.renderer.draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
             }
             if view.game_options.open {
                 if view.save_dialog.visible {
                     let panel=self.assets.save_dialog.prepare(&self.renderer,
-                        &view.save_dialog,view.pointer.map(|p|p.map(|v|v as f32*0.5)))?;
+                        &view.save_dialog,view.pointer.map(|p|p.map(|v|v as f32*0.5)),
+                    )?;
                     self.renderer.draw_overlay(&self.color_view,&self.depth_view,&panel);
                     if let Some(modal)=self.assets.save_dialog.prepare_name_modal(&self.renderer,
-                        &view.save_dialog,view.pointer.map(|p|p.map(|v|v as f32*0.5)))? {
+                        &view.save_dialog,view.pointer.map(|p|p.map(|v|v as f32*0.5)),
+                    )? {
                         self.renderer.draw_overlay(&self.color_view,&self.depth_view,&modal);
                     }
                     if let Some((dialog,pressed_button))=view.save_dialog.generic_prompt()
@@ -6218,18 +6626,21 @@ impl Intro {
                     {
                         let panel=menu.prompt_assets().prepare_dialog(&self.renderer,dialog,
                             view.pointer.map(|p|p.map(|v|v as f32*0.5)).unwrap_or([-1.;2]),
-                            pressed_button)?;
+                            pressed_button,
+                        )?;
                         self.renderer.draw_overlay(&self.color_view,&self.depth_view,&panel);
                     }
                 } else if view.settings_menu.page.is_some() {
                     view.settings_menu.update_levels(&self.assets.settings_menu, &self.renderer,
-                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)), self.audio_levels)?;
+                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)), self.audio_levels,
+                    )?;
                     if let Some(panel) = &view.settings_menu.prepared {
                         self.renderer.draw_overlay(&self.color_view, &self.depth_view, panel);
                     }
                 } else {
                     view.game_options.update(&self.assets.game_options, &self.renderer,
-                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)))?;
+                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                    )?;
                     if let Some(panel) = &view.game_options.prepared {
                         self.renderer.draw_overlay(&self.color_view, &self.depth_view, panel);
                     }
@@ -6284,7 +6695,8 @@ impl Intro {
             )?;
         }
         self.assets.sidewalk_labels.update(&self.renderer, &mut self.sidewalk_labels,
-            &mut self.sidewalk_shading, &self.assets.scene, self.sidewalk_camera, 35)?;
+            &mut self.sidewalk_shading, &self.assets.scene, self.sidewalk_camera, 35,
+        )?;
         if tick >= self.assets.samples.len() && !self.ended && self.menu.is_none() {
             self.ended = true;
             self.open_menu();
@@ -6327,10 +6739,13 @@ mod tests {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let prepare = |fraction| assets.prepare(&renderer, crate::time_panel::Display {
+        let prepare = |fraction| {
+            assets.prepare(&renderer, crate::time_panel::Display {
             year: 1930, hour: 9, speed: 1, name: "JUSTIN", cash: Some(15000.),
             fraction, character: Some(4), cash_icon_phase: 0,
-        }).unwrap();
+        },
+                ).unwrap()
+        };
         renderer.bypass_texture_cache_for_capture(true);
         let started = Instant::now();
         for fraction in 0..100 { std::hint::black_box(prepare(fraction)); }
@@ -6346,7 +6761,8 @@ mod tests {
             assets.refresh_for_test(&renderer, &mut retained, crate::time_panel::Display {
                 year: 1930, hour: 9, speed: 1, name: "JUSTIN", cash: Some(15000.),
                 fraction, character: Some(4), cash_icon_phase: 0,
-            }).unwrap();
+            },
+                ).unwrap();
         }
         eprintln!("Original Time panel prepare (100 changing clock fractions): uncached {uncached:?}, resident {cached:?}, retained {:?}", started.elapsed());
     }
@@ -6355,7 +6771,8 @@ mod tests {
         let parameters = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         crate::block_sidewalk_labels::load_style(
             &openmt2001::pe::PeImage::parse(executable).unwrap(),
-            parameters.parent().unwrap().parent().unwrap()).unwrap()
+            parameters.parent().unwrap().parent().unwrap(),
+        ).unwrap()
     }
 
     #[cfg(feature = "capture")]
@@ -6505,7 +6922,8 @@ mod tests {
         assert_eq!(bounds[0], [79., 161.77893, 568., 195.77893]);
         let executable_bytes = fs::read(&executable).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable_bytes).unwrap();
-        for (i, expected) in [b"MAIN_BUTT02", b"MAIN_BUTT03", b"MAIN_BUTT04", b"MAIN_BUTT05"]
+        for (i, expected) in [b"MAIN_BUTT02", b"MAIN_BUTT03", b"MAIN_BUTT04", b"MAIN_BUTT05",
+        ]
             .into_iter().enumerate() {
             let native = image.at(0x543a68 + i as u32 * 20, 20).unwrap();
             let name = u32::from_le_bytes(native[..4].try_into().unwrap());
@@ -6514,14 +6932,16 @@ mod tests {
         let actions = [crate::game_options::Button::Continue,
             crate::game_options::Button::Save,
             crate::game_options::Button::Settings,
-            crate::game_options::Button::Quit];
+            crate::game_options::Button::Quit,
+        ];
         let mut state = crate::game_options::View::default();
         state.open(true);
         assert!(state.open && state.resume_running);
         for (i, [l,t,r,b]) in bounds.into_iter().enumerate() {
             let point = [(l+r)/2., (t+b)/2.];
             for (size, screen) in [([960,720], [point[0]*1.5, point[1]*1.5]),
-                ([1280,720], [160.+point[0]*1.5, point[1]*1.5])] {
+                ([1280,720], [160.+point[0]*1.5, point[1]*1.5]),
+            ] {
                 let internal = internal_pointer(screen.map(f64::from), size).unwrap();
                 assert_eq!(assets.button(internal.map(|v| v as f32 * 0.5)), Some(actions[i]));
             }
@@ -6560,7 +6980,8 @@ mod tests {
             &language).unwrap();
         for (id, expected) in [(1679,b"SETTINGS".as_slice()),(1607,b"Sound"),
             (1608,b"Graphics"),(1609,b"Gameplay"),(1610,b"Board"),
-            (1770,b"Credits"),(1139,b"Reset to default"),(1127,b"OK")] {
+            (1770,b"Credits"),(1139,b"Reset to default"),(1127,b"OK"),
+        ] {
             let decoded = assets.label_for_test(id).iter().map(|&b| b+32).collect::<Vec<_>>();
             assert_eq!(decoded, expected, "original Settings text ID {id}");
         }
@@ -6570,7 +6991,8 @@ mod tests {
         let rows = [crate::settings_menu::Button::Sound,
             crate::settings_menu::Button::Graphics,
             crate::settings_menu::Button::Gameplay,
-            crate::settings_menu::Button::Back];
+            crate::settings_menu::Button::Back,
+        ];
         let mut state = crate::settings_menu::View::default();
         let mut levels = crate::settings_menu::Levels::default();
         state.open();
@@ -6578,7 +7000,8 @@ mod tests {
             let [l,t,r,b] = assets.bounds(page,button).unwrap();
             let point = [(l+r)/2.,(t+b)/2.];
             for (size, screen) in [([960,720],[point[0]*1.5,point[1]*1.5]),
-                ([1280,720],[160.+point[0]*1.5,point[1]*1.5])] {
+                ([1280,720],[160.+point[0]*1.5,point[1]*1.5]),
+            ] {
                 let internal = internal_pointer(screen.map(f64::from),size).unwrap();
                 assert_eq!(assets.button(page,internal.map(|v| v as f32*0.5)),Some(button));
             }
@@ -6641,11 +7064,13 @@ mod tests {
         state.mouse(&assets,Some([320.,128.]),false,&mut levels);
         assert_eq!(state.page,Some(Page::Sound));
         for button in [Button::MusicTrack,Button::EffectsTrack,Button::MusicLeft,
-            Button::MusicRight,Button::EffectsLeft,Button::EffectsRight] {
+            Button::MusicRight,Button::EffectsLeft,Button::EffectsRight,
+        ] {
             let [l,t,r,b]=assets.bounds(Page::Sound,button).unwrap();
             let center=[(l+r)/2.,(t+b)/2.];
             for (size,screen) in [([960,720],[center[0]*1.5,center[1]*1.5]),
-                ([1280,720],[160.+center[0]*1.5,center[1]*1.5])] {
+                ([1280,720],[160.+center[0]*1.5,center[1]*1.5]),
+            ] {
                 let internal=internal_pointer(screen.map(f64::from),size).unwrap();
                 assert_eq!(assets.button(Page::Sound,internal.map(|v| v as f32*0.5)),Some(button));
             }
@@ -6716,16 +7141,20 @@ mod tests {
                 let scene = render_scene::assemble(Request {
                     build_file: &build, source: if saved { Source::Save(&save) } else { Source::Map(std::str::from_utf8(&map).unwrap()) },
                     original: Some(OriginalAssets { executable: &executable,
-                        directory: &directory, archive: &archive }),
+                        directory: &directory, archive: &archive,
+                    }),
                     suncols: Some(&suncols), phase: Some(hour), camera: None,
                     width: 1280, height: 960, animated: true,
                 }).unwrap();
-                let materials = scene.draws.iter().map(|d| (d.mode, d.secondary.as_ref().map(|t| {
+                let materials = scene.draws.iter().map(|d| {
+                        (d.mode, d.secondary.as_ref().map(|t| {
                     use std::hash::Hasher;
                     let mut hash = std::collections::hash_map::DefaultHasher::new();
                     hash.write(t.rgba.as_ref());
                     (t.width, t.height, t.mipmaps, hash.finish())
-                }))).collect::<Vec<_>>();
+                }),
+                        )
+                    }).collect::<Vec<_>>();
                 if let Some(old) = &previous_materials { material_transition |= old != &materials; }
                 previous_materials = Some(materials);
                 let draws = scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>();
@@ -6733,17 +7162,20 @@ mod tests {
                 if let Some(old) = &mut retained {
                     renderer.refresh_prepared(old, &draws, scene.camera, scene.fog).unwrap();
                 } else { retained = Some(renderer.prepare(&draws, scene.camera, scene.fog).unwrap()); }
-                compare(&fresh, retained.as_ref().unwrap(), &format!("complete city hour {hour}"));
+                compare(&fresh, retained.as_ref().unwrap(), &format!("complete city hour {hour}"),
+                );
             }
             assert!(material_transition, "fixture must exercise day/night material or secondary transition");
         }
         // Visible diagnostic contract probes supplement potentially occluded city data.
         // No invented city assembly/lighting rules: these are explicitly synthetic.
-        use openmt2001::render::{SurfaceMode, TexturedDraw, SecondaryTexture};
-        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        use openmt2001::render::{SecondaryTexture, SurfaceMode, TexturedDraw};
+        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.,
+        ];
         let triangle = [[-0.8,-0.8,0.2,1.,1.,1.,0.,0.],
                         [0.8,-0.8,0.2,1.,1.,1.,1.,0.],
-                        [0.,0.8,0.2,1.,1.,1.,0.5,1.]];
+                        [0.,0.8,0.2,1.,1.,1.,0.5,1.],
+        ];
         let mut retained = None;
         let mut previous_pixels = None;
         for case in 0..10 {
@@ -6762,12 +7194,14 @@ mod tests {
                 mode: if blend { SurfaceMode::FacadeBlend } else { SurfaceMode::StaticLit },
                 width: 1, height: 1, rgba: &primary, mipmaps: case >= 7,
                 secondary: blend.then_some(SecondaryTexture { uv: &uv, diffuse_alpha: 120,
-                    width: 1, height: 1, rgba: &secondary, mipmaps: case >= 7 }),
+                    width: 1, height: 1, rgba: &secondary, mipmaps: case >= 7,
+                }),
             };
             let mut camera = identity;
             if case >= 5 { camera[12] = 0.2; } // override must win
             let draws = if case == 8 { Vec::new() } else { vec![draw] };
-            let fog = (case >= 5).then_some(openmt2001::render::EyeFog { color: 0x406080, start: 0.0, end: 2.0 });
+            let fog = (case >= 5).then_some(openmt2001::render::EyeFog { color: 0x406080, start: 0.0, end: 2.0,
+            });
             let fresh = renderer.prepare(&draws, camera, fog).unwrap();
             if let Some(old) = &mut retained {
                 renderer.refresh_prepared(old, &draws, camera, fog).unwrap();
@@ -6801,16 +7235,19 @@ mod tests {
                 TexturedDraw { view_projection: None,
                     vertices: if case == 4 { &[] } else { &left },
                     specular: None, diffuse_alpha: None, mode: SurfaceMode::StaticLit,
-                    width:1, height:1, rgba:&left_pixels, mipmaps:false, secondary:None },
+                    width:1, height:1, rgba:&left_pixels, mipmaps:false, secondary:None,
+                },
                 TexturedDraw { view_projection: Some(identity), vertices:&right,
                     specular: None, diffuse_alpha: None, mode: SurfaceMode::StaticLit,
-                    width:1, height:1, rgba:&right_pixels, mipmaps:false, secondary:None },
+                    width:1, height:1, rgba:&right_pixels, mipmaps:false, secondary:None,
+                },
             ];
             let fresh = renderer.prepare(&draws, camera, fog).unwrap();
             if let Some(old) = &mut mixed {
                 renderer.refresh_prepared(old, &draws, camera, fog).unwrap();
             } else { mixed = Some(renderer.prepare(&draws, camera, fog).unwrap()); }
-            compare(&fresh, mixed.as_ref().unwrap(), &format!("mixed buffers {case}"));
+            compare(&fresh, mixed.as_ref().unwrap(), &format!("mixed buffers {case}"),
+            );
             let pixels = fs::read(owned.join("fresh.png")).unwrap();
             if let Some(previous) = &previous {
                 assert_ne!(previous, &pixels, "mixed controls must visibly change");
@@ -6837,11 +7274,13 @@ mod tests {
         let suncols = read("OPENMT2001_SUNCOLS");
         let map = read("OPENMT2001_INTRO_MAP");
         let camera = CameraSample { eye: [-53., 30., 74.], target: [-53., 5., 44.],
-            up: [0., 1., 0.], vertical_fov: 45. };
+            up: [0., 1., 0.], vertical_fov: 45.,
+        };
         let mut scene = render_scene::assemble(Request {
             build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
+                directory: &directory, archive: &archive,
+            }),
             suncols: Some(&suncols), phase: Some(phase), camera: Some(camera),
             width: 1280, height: 960, animated: true,
         }).unwrap();
@@ -6864,10 +7303,12 @@ mod tests {
             for (index, draw) in scene.draws.iter().enumerate() {
                 if changed.contains(&index) {
                     renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
-                        scene.camera, scene.fog).unwrap();
+                        scene.camera, scene.fog,
+                        ).unwrap();
                 } else {
                     renderer.update_camera(&individual, index,
-                        draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                        draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                        ).unwrap();
                 }
             }
             old_time += started.elapsed();
@@ -6886,7 +7327,8 @@ mod tests {
                 crate::capture_test::capture_standalone(&renderer, &batch, &actual);
                 assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap());
                 let fresh = format!("work/frontend/vertex-fresh-{tick}.png");
-                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
+                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh,
+                );
                 assert_eq!(fs::read(fresh).unwrap(),
                     fs::read(format!("work/frontend/vertex-batch-{tick}.png")).unwrap());
             } else {
@@ -6901,9 +7343,11 @@ mod tests {
         renderer.update_camera(&individual, 0, scene.camera, alternate).unwrap();
         renderer.update_camera(&batch, 0, scene.camera, alternate).unwrap();
         crate::capture_test::capture_standalone(&renderer, &individual,
-            "work/frontend/vertex-individual-fog.png");
+            "work/frontend/vertex-individual-fog.png",
+        );
         crate::capture_test::capture_standalone(&renderer, &batch,
-            "work/frontend/vertex-batch-fog.png");
+            "work/frontend/vertex-batch-fog.png",
+        );
         assert_eq!(fs::read("work/frontend/vertex-individual-fog.png").unwrap(),
             fs::read("work/frontend/vertex-batch-fog.png").unwrap());
         // A material replacement introduces a standalone uniform buffer. The
@@ -6917,7 +7361,8 @@ mod tests {
         if let Some(values) = &mut scene.draws[0].diffuse_alpha { values.extend(values.clone()); }
         if let Some(secondary) = &mut scene.draws[0].secondary { secondary.uv.extend(secondary.uv.clone()); }
         renderer.update_dynamic_surface(&mut individual, 0, &scene.draws[0].borrowed(),
-            scene.camera, scene.fog).unwrap();
+            scene.camera, scene.fog,
+            ).unwrap();
         renderer.update_dynamic_vertices_batch(&mut batch, &[(0, scene.draws[0].borrowed())]).unwrap();
         let borrowed = scene.draws.iter().map(|draw| draw.borrowed()).collect::<Vec<_>>();
         renderer.refresh_prepared(&mut individual, &borrowed, scene.camera, scene.fog).unwrap();
@@ -6926,11 +7371,13 @@ mod tests {
         for (index, draw) in scene.draws.iter().enumerate() {
             if changed.contains(&index) {
                 renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
-                    scene.camera, scene.fog).unwrap();
+                    scene.camera, scene.fog,
+                    ).unwrap();
 
             } else {
                 renderer.update_camera(&individual, index,
-                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                    draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                    ).unwrap();
             }
         }
         let updates = changed.iter().map(|&index|
@@ -6940,9 +7387,11 @@ mod tests {
             draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
         renderer.update_cameras(&batch, &cameras, scene.fog).unwrap();
         crate::capture_test::capture_standalone(&renderer, &individual,
-            "work/frontend/vertex-individual-replaced.png");
+            "work/frontend/vertex-individual-replaced.png",
+        );
         crate::capture_test::capture_standalone(&renderer, &batch,
-            "work/frontend/vertex-batch-replaced.png");
+            "work/frontend/vertex-batch-replaced.png",
+        );
         assert_eq!(fs::read("work/frontend/vertex-individual-replaced.png").unwrap(),
             fs::read("work/frontend/vertex-batch-replaced.png").unwrap());
         eprintln!("Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}", scene.draws.len());
@@ -6961,11 +7410,13 @@ mod tests {
         let suncols = read("OPENMT2001_SUNCOLS");
         let map = read("OPENMT2001_INTRO_MAP");
         let camera = CameraSample { eye: [-53., 30., 74.], target: [-53., 5., 44.],
-            up: [0., 1., 0.], vertical_fov: 45. };
+            up: [0., 1., 0.], vertical_fov: 45.,
+        };
         let mut scene = render_scene::assemble(Request {
             build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
+                directory: &directory, archive: &archive,
+            }),
             suncols: Some(&suncols), phase: Some(12), camera: Some(camera),
             width: 1280, height: 960, animated: true,
         }).unwrap();
@@ -6987,10 +7438,12 @@ mod tests {
             for (index, draw) in scene.draws.iter().enumerate() {
                 if changed.contains(&index) {
                     renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
-                        scene.camera, scene.fog).unwrap();
+                        scene.camera, scene.fog,
+                        ).unwrap();
                 } else {
                     renderer.update_camera(&individual, index,
-                        draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                        draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                        ).unwrap();
                 }
             }
             old_time += started.elapsed();
@@ -7010,7 +7463,8 @@ mod tests {
                 crate::capture_test::capture_standalone(&renderer, &batch, &actual);
                 assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap());
                 let fresh = format!("work/frontend/menu-fresh-{tick}.png");
-                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
+                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh,
+                );
                 assert_eq!(fs::read(fresh).unwrap(),
                     fs::read(format!("work/frontend/menu-batch-{tick}.png")).unwrap());
             } else {
@@ -7025,9 +7479,11 @@ mod tests {
         renderer.update_camera(&individual, 0, scene.camera, alternate).unwrap();
         renderer.update_camera(&batch, 0, scene.camera, alternate).unwrap();
         crate::capture_test::capture_standalone(&renderer, &individual,
-            "work/frontend/menu-individual-fog.png");
+            "work/frontend/menu-individual-fog.png",
+        );
         crate::capture_test::capture_standalone(&renderer, &batch,
-            "work/frontend/menu-batch-fog.png");
+            "work/frontend/menu-batch-fog.png",
+        );
         assert_eq!(fs::read("work/frontend/menu-individual-fog.png").unwrap(),
             fs::read("work/frontend/menu-batch-fog.png").unwrap());
         // A material replacement introduces a standalone uniform buffer. The
@@ -7041,7 +7497,8 @@ mod tests {
         if let Some(values) = &mut scene.draws[0].diffuse_alpha { values.extend(values.clone()); }
         if let Some(secondary) = &mut scene.draws[0].secondary { secondary.uv.extend(secondary.uv.clone()); }
         renderer.update_dynamic_surface(&mut individual, 0, &scene.draws[0].borrowed(),
-            scene.camera, scene.fog).unwrap();
+            scene.camera, scene.fog,
+            ).unwrap();
         renderer.update_dynamic_vertices(&mut batch, 0, &scene.draws[0].borrowed()).unwrap();
         let borrowed = scene.draws.iter().map(|draw| draw.borrowed()).collect::<Vec<_>>();
         renderer.refresh_prepared(&mut individual, &borrowed, scene.camera, scene.fog).unwrap();
@@ -7050,20 +7507,24 @@ mod tests {
         for (index, draw) in scene.draws.iter().enumerate() {
             if changed.contains(&index) {
                 renderer.update_dynamic_surface(&mut individual, index, &draw.borrowed(),
-                    scene.camera, scene.fog).unwrap();
+                    scene.camera, scene.fog,
+                    ).unwrap();
                 renderer.update_dynamic_vertices(&mut batch, index, &draw.borrowed()).unwrap();
             } else {
                 renderer.update_camera(&individual, index,
-                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                    draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                    ).unwrap();
             }
         }
         let cameras = scene.draws.iter().map(|draw|
             draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
         renderer.update_cameras(&batch, &cameras, scene.fog).unwrap();
         crate::capture_test::capture_standalone(&renderer, &individual,
-            "work/frontend/menu-individual-replaced.png");
+            "work/frontend/menu-individual-replaced.png",
+        );
         crate::capture_test::capture_standalone(&renderer, &batch,
-            "work/frontend/menu-batch-replaced.png");
+            "work/frontend/menu-batch-replaced.png",
+        );
         assert_eq!(fs::read("work/frontend/menu-individual-replaced.png").unwrap(),
             fs::read("work/frontend/menu-batch-replaced.png").unwrap());
         eprintln!("Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}", scene.draws.len());
@@ -7094,7 +7555,8 @@ mod tests {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
+                directory: &directory, archive: &archive,
+            }),
             suncols: Some(&suncols), phase: Some(12), camera: Some(camera),
             width: 1280, height: 960, animated: true,
         }).unwrap();
@@ -7102,13 +7564,16 @@ mod tests {
         if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let mut city = renderer.prepare(&scene.draws.iter().map(|draw| draw.borrowed())
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+            .collect::<Vec<_>>(), scene.camera, scene.fog,
+            ).unwrap();
         let actor = renderer.prepare(&actor_draws.iter().map(|draw| draw.borrowed())
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+            .collect::<Vec<_>>(), scene.camera, scene.fog,
+            ).unwrap();
         let path = std::env::var("OPENMT2001_MR_MONOPOLY_CAPTURE")
             .unwrap_or_else(|_| "work/frontend/mr-monopoly-menu-capture.png".into());
         crate::capture_test::capture_prepared_world_overlays(
-            &renderer, &city, &[&actor], &[], &path);
+            &renderer, &city, &[&actor], &[], &path,
+        );
         let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         let installer = parameter.parent().unwrap().parent().unwrap();
         let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
@@ -7119,11 +7584,13 @@ mod tests {
             year: 1930, hour: 12, speed: 1,
             name: "Player", cash: Some(8000.), fraction: 312,
             character: Some(4), cash_icon_phase: 0,
-        }).unwrap();
+        },
+            ).unwrap();
         let navigation = crate::navigation::Navigation::load(&index, &archive, &executable)
             .unwrap().prepare(&renderer).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
-            &[&navigation[0], &time], "work/frontend/time-panel-city-corrected.png");
+            &[&navigation[0], &time], "work/frontend/time-panel-city-corrected.png",
+        );
         let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
             .parent().unwrap().parent().unwrap().join("US/language/usa");
         let options_assets = crate::game_options::Assets::load(&index, &archive, installer,
@@ -7131,36 +7598,47 @@ mod tests {
         let options = options_assets.prepare(&renderer,
             Some(crate::game_options::Button::Continue), None).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
-            &[&options], "work/frontend/game-options-city.png");
+            &[&options], "work/frontend/game-options-city.png",
+        );
         let mut save_feedback = crate::game_options::View::default();
         save_feedback.open(false);
         save_feedback.set_message("Saved: V2-1790352000000-000.sav".into());
         save_feedback.update(&options_assets, &renderer, None).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
-            &[save_feedback.prepared.as_ref().unwrap()], "work/frontend/game-options-save-feedback.png");
+            &[save_feedback.prepared.as_ref().unwrap()], "work/frontend/game-options-save-feedback.png",
+        );
         let mut tutorial_options=crate::game_options::View::default();
         tutorial_options.open(false);
         tutorial_options.set_save_disabled(true);
         tutorial_options.update(&options_assets, &renderer, None).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
             &[tutorial_options.prepared.as_ref().unwrap()],
-            "work/frontend/game-options-tutorial-save-disabled.png");
+            "work/frontend/game-options-tutorial-save-disabled.png",
+        );
         let settings_assets=crate::settings_menu::Assets::load(&index,&archive,installer,
             &language).unwrap();
         let settings=settings_assets.prepare(&renderer,crate::settings_menu::Page::Main,
-            None,None,crate::settings_menu::Levels::default()).unwrap();
+            None,None,crate::settings_menu::Levels::default(),
+            ).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
-            &[&settings], "work/frontend/settings-menu-city.png");
+            &[&settings], "work/frontend/settings-menu-city.png",
+        );
         let sound=settings_assets.prepare(&renderer,crate::settings_menu::Page::Sound,
-            None,None,crate::settings_menu::Levels {music:60,effects:25}).unwrap();
+            None,None,crate::settings_menu::Levels {music:60,effects:25,
+                },
+            ).unwrap();
         crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor],
-            &[&sound], "work/frontend/sound-settings-city.png");
+            &[&sound], "work/frontend/sound-settings-city.png",
+        );
         for (name,page) in [("graphics",crate::settings_menu::Page::Graphics),
-            ("gameplay",crate::settings_menu::Page::Gameplay)] {
+            ("gameplay",crate::settings_menu::Page::Gameplay),
+        ] {
             let panel=settings_assets.prepare(&renderer,page,None,None,
-                crate::settings_menu::Levels::default()).unwrap();
+                crate::settings_menu::Levels::default(),
+                ).unwrap();
             crate::capture_test::capture_prepared_world_overlays(&renderer,&city,&[&actor],
-                &[&panel],&format!("work/frontend/{name}-settings-city.png"));
+                &[&panel],&format!("work/frontend/{name}-settings-city.png"),
+            );
         }
         // Controlled flyby-to-menu frames. The original recording has splash
         // skips, so these are native-rule checkpoints rather than synchronized
@@ -7173,10 +7651,12 @@ mod tests {
                 renderer.update_camera(&actor, index, scene.camera, scene.fog).unwrap();
             }
             crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[&actor], &[],
-                &format!("work/frontend/mr-monopoly-intro-frame-{frame:04}.png"));
+                &format!("work/frontend/mr-monopoly-intro-frame-{frame:04}.png"),
+            );
         }
         city = renderer.prepare(&scene.draws.iter().map(|draw| draw.borrowed())
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+            .collect::<Vec<_>>(), scene.camera, scene.fog,
+            ).unwrap();
         let final_flyby = track.sample(track.frame_count() - 1).unwrap();
         let mut menu_camera = MenuCamera::new(final_flyby);
         for tick in [0, 10, 50] {
@@ -7185,17 +7665,20 @@ mod tests {
             for (index, draw) in scene.draws.iter().enumerate() {
                 if changed.contains(&index) {
                     renderer.update_dynamic_surface(&mut city, index, &draw.borrowed(),
-                        scene.camera, scene.fog).unwrap();
+                        scene.camera, scene.fog,
+                        ).unwrap();
                 } else {
                     renderer.update_camera(&city, index,
-                        draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                        draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                        ).unwrap();
                 }
             }
             for index in 0..actor_draws.len() {
                 renderer.update_camera(&actor, index, scene.camera, scene.fog).unwrap();
             }
             crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor], &[],
-                &format!("work/frontend/menu-camera-transition-{tick:02}.png"));
+                &format!("work/frontend/menu-camera-transition-{tick:02}.png"),
+            );
         }
     }
 
@@ -7214,12 +7697,14 @@ mod tests {
             height: 180., radius: 220.,
         };
         let (eye, target) = mode12_input_tick(&mut controls, false, [false; 4], [0; 2],50,false).unwrap();
-        let mut camera = CameraSample { eye, target, up: [0., 1., 0.], vertical_fov: 45. };
+        let mut camera = CameraSample { eye, target, up: [0., 1., 0.], vertical_fov: 45.,
+        };
         let mut scene = render_scene::assemble(Request {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
+                directory: &directory, archive: &archive,
+            }),
             suncols: Some(&suncols), phase: Some(12), camera: Some(camera),
             width: 1280, height: 960, animated: true,
         }).unwrap();
@@ -7228,9 +7713,11 @@ mod tests {
         if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let mut prepared = renderer.prepare(&scene.draws.iter().map(|d| d.borrowed())
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+            .collect::<Vec<_>>(), scene.camera, scene.fog,
+            ).unwrap();
         let mut batch = renderer.prepare(&scene.draws.iter().map(|d| d.borrowed())
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+            .collect::<Vec<_>>(), scene.camera, scene.fog,
+            ).unwrap();
         let original_matrix = scene.camera;
         let first = mode12_input_tick(&mut controls, false, [false; 4], [8, -12],50,false).unwrap();
         assert_eq!(first.0[0], eye[0], "horizontal orbit applies next callback");
@@ -7244,10 +7731,12 @@ mod tests {
         for (index, draw) in scene.draws.iter().enumerate() {
             if changed.contains(&index) {
                 renderer.update_dynamic_surface(&mut prepared, index, &draw.borrowed(),
-                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                    draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                    ).unwrap();
             } else {
                 renderer.update_camera(&prepared, index,
-                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                    draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                    ).unwrap();
             }
         }
         assert_eq!(scene.draws.iter().map(|draw| draw.vertices.len()).collect::<Vec<_>>(), layout);
@@ -7259,11 +7748,13 @@ mod tests {
                 changed.dedup();
                 for &index in &changed {
                     renderer.update_dynamic_surface(&mut prepared, index,
-                        &scene.draws[index].borrowed(), scene.camera, scene.fog).unwrap();
+                        &scene.draws[index].borrowed(), scene.camera, scene.fog,
+                        ).unwrap();
                 }
                 for (index, draw) in scene.draws.iter().enumerate() {
                     renderer.update_camera(&prepared, index,
-                        draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                        draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                        ).unwrap();
                 }
                 changed
             };
@@ -7281,7 +7772,8 @@ mod tests {
                 let fresh = format!("work/frontend/city-fresh-phase-{phase}.png");
                 crate::capture_test::capture_standalone(&renderer, &prepared, &reference);
                 crate::capture_test::capture_standalone(&renderer, &batch, &actual);
-                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
+                crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh,
+                );
                 assert_eq!(fs::read(reference).unwrap(), fs::read(&actual).unwrap());
                 assert_eq!(fs::read(fresh).unwrap(), fs::read(actual).unwrap());
             }
@@ -7317,14 +7809,20 @@ mod tests {
                 inputs.maps.parent().unwrap(),
             ).unwrap();
             let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
-                up: [0., 1., 0.], vertical_fov: 45. };
+                up: [0., 1., 0.], vertical_fov: 45.,
+                };
             use crate::singleplayer::{Difficulty, Preview};
             for (preview, id, difficulty, expected_cash, expected_people) in [
-                (Preview::Sandbox, 400002, Difficulty::Easy, Some(20000.), 500),
-                (Preview::Scenario(400001), 400001, Difficulty::Easy, Some(40000000.), 500),
-                (Preview::Scenario(400001), 400001, Difficulty::Medium, Some(30000000.), 500),
-                (Preview::Scenario(400001), 400001, Difficulty::Hard, Some(20000000.), 500),
-                (Preview::Scenario(200016), 200016, Difficulty::Easy, Some(8000.), 410),
+                (Preview::Sandbox, 400002, Difficulty::Easy, Some(20000.), 500,
+                    ),
+                (Preview::Scenario(400001), 400001, Difficulty::Easy, Some(40000000.), 500,
+                    ),
+                (Preview::Scenario(400001), 400001, Difficulty::Medium, Some(30000000.), 500,
+                    ),
+                (Preview::Scenario(400001), 400001, Difficulty::Hard, Some(20000000.), 500,
+                    ),
+                (Preview::Scenario(200016), 200016, Difficulty::Easy, Some(8000.), 410,
+                    ),
                 (Preview::Scenario(100001), 100001, Difficulty::Easy, None, 0),
             ] {
                 let setup = crate::singleplayer::Setup {
@@ -7362,8 +7860,10 @@ mod tests {
                 if id == 100001 {
                     let plain = session.scene(&inputs.build_file,
                         OriginalAssets { executable: &inputs.executable,
-                            directory: &inputs.directory, archive: &inputs.archive },
-                        &inputs.suncols, Some(camera), true).unwrap();
+                            directory: &inputs.directory, archive: &inputs.archive,
+                                },
+                        &inputs.suncols, Some(camera), true,
+                            ).unwrap();
                     assert!(cache.city.as_ref().unwrap().draws.len() > plain.draws.len(),
                         "original Tutorial2 map signs and banners must reach the live city");
                 }
@@ -7530,19 +8030,23 @@ mod tests {
             suncols: read("OPENMT2001_SUNCOLS"),
         };
         let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
-            up: [0., 1., 0.], vertical_fov: 45. };
+            up: [0., 1., 0.], vertical_fov: 45.,
+                };
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
             let mut cache = SnapshotCache::default();
             let (loaded, mut session) = inputs.saved_preview(
                 std::path::Path::new(&std::env::var(key).unwrap()), camera,
-                &mut cache).unwrap();
+                &mut cache,
+                        ).unwrap();
             if key == "OPENMT2001_SAVE_ONE" {
                 assert!(loaded.scene.diagnostics.iter().any(|line|
                     line.contains("45 native-order detail replacements")));
                 let baseline = session.scene(&inputs.build_file,
                     OriginalAssets { executable: &inputs.executable,
-                        directory: &inputs.directory, archive: &inputs.archive },
-                    &inputs.suncols, Some(loaded.saved_viewpoint.unwrap().0), true).unwrap();
+                        directory: &inputs.directory, archive: &inputs.archive,
+                                },
+                    &inputs.suncols, Some(loaded.saved_viewpoint.unwrap().0), true,
+                            ).unwrap();
                 let mut current_models = baseline.clone();
                 inputs.append_current_appearance(
                     &session, &mut current_models, &mut DetailVisibility::default(),
@@ -7571,7 +8075,8 @@ mod tests {
                 let mut rebound = baseline.clone();
                 let mut rebound_cache = SnapshotCache::default();
                 inputs.append_saved_appearance(&session, &mut rebound,
-                    &mut DetailVisibility::default(), &mut rebound_cache).unwrap();
+                    &mut DetailVisibility::default(), &mut rebound_cache,
+                            ).unwrap();
                 inputs.append_current_appearance(
                     &session, &mut rebound, &mut DetailVisibility::default(),
                     &mut rebound_cache, true,
@@ -7582,7 +8087,9 @@ mod tests {
             }
             let saved = session.saved_cameras.as_ref().unwrap();
             let (visible, controls) = loaded.saved_viewpoint.unwrap();
-            let at = |offset: usize| f32::from_le_bytes(saved[0][offset..offset + 4].try_into().unwrap());
+            let at = |offset: usize| {
+                        f32::from_le_bytes(saved[0][offset..offset + 4].try_into().unwrap())
+                    };
             assert_eq!(visible.eye, [at(0x4c), at(0x50), at(0x54)]);
             assert_eq!(visible.target, [at(0x58), at(0x5c), at(0x60)]);
             assert_eq!(visible.up, [at(0x64), at(0x68), at(0x6c)]);
@@ -7650,7 +8157,8 @@ mod tests {
                 time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
             character_names: crate::fresh_city::character_names(
-                &openmt2001::pe::PeImage::parse(&executable).unwrap(), &language).unwrap(),
+                &openmt2001::pe::PeImage::parse(&executable).unwrap(), &language,
+                    ).unwrap(),
             installer, language,
             maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
                 .parent().unwrap().to_path_buf(),
@@ -7660,22 +8168,28 @@ mod tests {
             suncols: read("OPENMT2001_SUNCOLS"),
         };
         let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
-            up: [0., 1., 0.], vertical_fov: 45. };
+            up: [0., 1., 0.], vertical_fov: 45.,
+                };
         let mut cache = SnapshotCache::default();
         let (loaded, session) = inputs.saved_preview(
             std::path::Path::new(&std::env::var("OPENMT2001_SAVE_ONE").unwrap()),
-            camera, &mut cache).unwrap();
+            camera, &mut cache,
+                    ).unwrap();
         let plain = session.scene(&inputs.build_file,
             OriginalAssets { executable: &inputs.executable,
-                directory: &inputs.directory, archive: &inputs.archive },
-            &inputs.suncols, Some(loaded.saved_viewpoint.unwrap().0), true).unwrap();
+                directory: &inputs.directory, archive: &inputs.archive,
+                        },
+            &inputs.suncols, Some(loaded.saved_viewpoint.unwrap().0), true,
+                    ).unwrap();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         crate::capture_test::capture(&renderer, None, &plain,
-            "work/save/plain-saved-city.png");
+            "work/save/plain-saved-city.png",
+                );
         crate::capture_test::capture(&renderer, None, cache.city.as_ref().unwrap(),
-            "work/save/appearance-saved-city.png");
+            "work/save/appearance-saved-city.png",
+                );
         }).unwrap().join().unwrap();
     }
     #[cfg(feature = "capture")]
@@ -7802,7 +8316,8 @@ mod tests {
             character_index: 2,
             profile_name: b"Preview test".to_vec(),
             catalog,
-            profile_path: crate::campaign_store::profile_path(&inputs.profile_root, b"Preview test"),
+            profile_path: crate::campaign_store::profile_path(&inputs.profile_root, b"Preview test",
+            ),
         };
         let mut controls = openmt2001::camera::BlockCamera {
             center: [0.; 3],
@@ -7834,11 +8349,13 @@ mod tests {
         #[cfg(feature = "capture")]
         if let Ok(path) = std::env::var("OPENMT2001_SIDEWALK_CAPTURE") {
             crate::block_sidewalk_labels::capture_marvin(
-                &loaded.scene, loaded.block_information.as_ref().unwrap(), &path);
+                &loaded.scene, loaded.block_information.as_ref().unwrap(), &path,
+            );
         }
         let sender = loaded.fresh_session.as_ref().unwrap();
         let (reply, initial_status) = mpsc::channel();
-        sender.send(FreshRequest::Status { camera: camera.eye, reply }).unwrap();
+        sender.send(FreshRequest::Status { camera: camera.eye, reply,
+            }).unwrap();
         let initial_status = initial_status.recv().unwrap();
         assert!(initial_status.running, "native worker startup enables gameplay");
         assert!(initial_status.failure.is_none(), "{:?}", initial_status.failure);
@@ -7848,7 +8365,8 @@ mod tests {
         sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Open)).unwrap();
         sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Open)).unwrap();
         let (reply,opened)=mpsc::channel();
-        sender.send(FreshRequest::Status{camera:camera.eye,reply}).unwrap();
+        sender.send(FreshRequest::Status{camera:camera.eye,reply,
+            }).unwrap();
         let opened=opened.recv().unwrap();
         assert!(opened.running&&opened.script_paused);
         let snapshot=opened.stats.as_ref().unwrap();
@@ -7856,33 +8374,38 @@ mod tests {
         assert_eq!(snapshot.players[0].character,2);
         std::thread::sleep(std::time::Duration::from_millis(120));
         let (reply,held)=mpsc::channel();
-        sender.send(FreshRequest::Status{camera:camera.eye,reply}).unwrap();
+        sender.send(FreshRequest::Status{camera:camera.eye,reply,
+            }).unwrap();
         let held=held.recv().unwrap();
         assert_eq!(held.ticks,opened.ticks,"Stats modal suspends the actual logic timer group");
         assert!(held.interface_ticks>opened.interface_ticks);
         assert_eq!(held.time_display,opened.time_display,"GUI4 suppresses native Time callbacks");
         sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Close)).unwrap();
         let (reply,closed)=mpsc::channel();
-        sender.send(FreshRequest::Status{camera:camera.eye,reply}).unwrap();
+        sender.send(FreshRequest::Status{camera:camera.eye,reply,
+            }).unwrap();
         let closed=closed.recv().unwrap();
         assert!(closed.running&&!closed.script_paused&&closed.stats.is_none(),
             "closing a duplicate-opened graph releases exactly one reason");
         sender.send(FreshRequest::Run(false)).unwrap();
         sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Open)).unwrap();
         let (reply,paused_graph)=mpsc::channel();
-        sender.send(FreshRequest::Status{camera:camera.eye,reply}).unwrap();
+        sender.send(FreshRequest::Status{camera:camera.eye,reply,
+            }).unwrap();
         let paused_graph=paused_graph.recv().unwrap();
         assert!(!paused_graph.running&&paused_graph.script_paused&&paused_graph.stats.is_some(),
             "original session-active flag remains set during a player's pause");
         sender.send(FreshRequest::Stats(crate::live_host::StatsAction::Close)).unwrap();
         let (reply, paused_status) = mpsc::channel();
-        sender.send(FreshRequest::Status { camera: camera.eye, reply }).unwrap();
+        sender.send(FreshRequest::Status { camera: camera.eye, reply,
+            }).unwrap();
         let paused_tick = paused_status.recv().unwrap().ticks;
         let (reply, saved_result) = mpsc::channel();
         let save_name = format!("worker-{:012x}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64 & 0xffff_ffff_ffff);
         sender.send(FreshRequest::SaveSelected { target: crate::save_menu::Target::NewName(save_name.clone()),
-            camera, game_mode: 1, interface_mode: 0, reply }).unwrap();
+            camera, game_mode: 1, interface_mode: 0, reply,
+            }).unwrap();
         let saved_path = saved_result.recv().unwrap().unwrap();
         assert_eq!(saved_path.file_stem().unwrap().to_string_lossy(), save_name);
         let scoped_root = crate::save_menu::selected_profile_root(&inputs.profile_root, b"Preview test");
@@ -7912,13 +8435,15 @@ mod tests {
         assert_eq!(restored.saved_viewpoint.unwrap().0.eye, camera.eye);
         let (delete_reply, delete_result) = mpsc::channel();
         sender.send(FreshRequest::DeleteSave { id: saved_path.file_name().unwrap()
-            .to_string_lossy().to_string(), reply: delete_reply }).unwrap();
+            .to_string_lossy().to_string(), reply: delete_reply,
+            }).unwrap();
         delete_result.recv().unwrap().unwrap();
         assert!(!saved_path.exists(), "confirmed Delete must remove only the selected V2 slot");
         for expected in [4, 1] {
             sender.send(FreshRequest::ToggleSpeed).unwrap();
             let (reply, result) = mpsc::channel();
-            sender.send(FreshRequest::Status { camera: camera.eye, reply }).unwrap();
+            sender.send(FreshRequest::Status { camera: camera.eye, reply,
+                }).unwrap();
             let status = result.recv().unwrap();
             assert_eq!(status.speed, expected);
             assert!(!status.running, "speed control does not unpause the city");
@@ -7974,7 +8499,8 @@ mod tests {
             let (reply, answer) = mpsc::channel();
             preview_worker.send(FreshRequest::BuildDrag { reply }).unwrap();
             answer.recv().unwrap().unwrap()
-        });
+        },
+        );
         drop(preview_worker);
         let mut form = crate::build_panel::Request {
             category: 33,
@@ -8059,7 +8585,9 @@ mod tests {
         assert!(!loaded.detail_visibility.spans.is_empty(),
             "original fresh city should contain registry details");
         let first_detail = loaded.detail_visibility.spans.iter()
-            .find(|span| span.positions.iter().any(|position| position[1] != span.pivot_y))
+            .find(|span| {
+                span.positions.iter().any(|position| position[1] != span.pivot_y)
+            })
             .expect("original registry details have no vertical geometry").clone();
         let detail_camera = CameraSample {
             eye: [first_detail.center[0], 80., first_detail.center[1] + 300.],
@@ -8068,8 +8596,10 @@ mod tests {
         };
         let depth = openmt2001::camera::translated_scene_view(
             openmt2001::camera::scene_view_with_up(detail_camera.eye,
-                detail_camera.target, detail_camera.up),
-            [first_detail.center[0],0.,first_detail.center[1]])[11];
+                detail_camera.target, detail_camera.up,
+            ),
+            [first_detail.center[0],0.,first_detail.center[1]],
+        )[11];
         assert!(depth > 200. && depth <= 500.,
             "fixture camera should cross the native detail0/100 far bounds: {depth}");
         let base_vertices = loaded.scene.draws[0].vertices.clone();
@@ -8087,8 +8617,10 @@ mod tests {
         };
         let band_depth = openmt2001::camera::translated_scene_view(
             openmt2001::camera::scene_view_with_up(band_camera.eye,
-                band_camera.target, band_camera.up),
-            [first_detail.center[0],0.,first_detail.center[1]])[11];
+                band_camera.target, band_camera.up,
+            ),
+            [first_detail.center[0],0.,first_detail.center[1]],
+        )[11];
         assert!(band_depth > 220. && band_depth < 270.,
             "fixture camera should enter original detail fade band: {band_depth}");
         loaded.detail_visibility.reframe(&mut loaded.scene, band_camera, 35).unwrap();
@@ -8185,7 +8717,9 @@ mod tests {
                                 loaded.scene.camera,
                                 loaded.scene.fog,
                             )
-                            .unwrap_or_else(|error| panic!("reframe {name} dynamic surface {i} {:?} vertices {}: {error}", draw.mode, draw.vertices.len()));
+                            .unwrap_or_else(|error| {
+                                panic!("reframe {name} dynamic surface {i} {:?} vertices {}: {error}", draw.mode, draw.vertices.len())
+                            });
                     } else if changed.contains(&i) {
                         renderer
                             .update_dynamic_surface(
@@ -8195,7 +8729,9 @@ mod tests {
                                 loaded.scene.camera,
                                 loaded.scene.fog,
                             )
-                            .unwrap_or_else(|error| panic!("reframe {name} retained surface {i} {:?} vertices {}: {error}", draw.mode, draw.vertices.len()));
+                            .unwrap_or_else(|error| {
+                                panic!("reframe {name} retained surface {i} {:?} vertices {}: {error}", draw.mode, draw.vertices.len())
+                            });
                     } else {
                         renderer
                             .update_camera(
@@ -8229,13 +8765,15 @@ mod tests {
                 let residents = loaded.people.as_ref().unwrap()
                     .reframe(&mut loaded.scene, distance_camera, detail).unwrap();
                 distance_counts.push(loaded.scene.draws[residents].iter()
-                    .map(|draw| draw.vertices.len()).sum::<usize>());
+                    .map(|draw| draw.vertices.len()).sum::<usize>(),
+                );
                 let draws = loaded.scene.draws.iter().map(|draw| draw.borrowed())
                     .collect::<Vec<_>>();
                 let distance_prepared = renderer.prepare(&draws, loaded.scene.camera,
                     loaded.scene.fog).unwrap();
                 crate::capture_test::capture_prepared(&renderer, &loaded.scene,
-                    &distance_prepared, &format!("{path}-distance-{detail}.png"));
+                    &distance_prepared, &format!("{path}-distance-{detail}.png"),
+                );
             }
             assert!(distance_counts[0] < distance_counts[2],
                 "original draw-distance range should reveal residents at a fixed camera");
@@ -8252,7 +8790,8 @@ mod tests {
                 let captured = renderer.prepare(&draws, loaded.scene.camera,
                     loaded.scene.fog).unwrap();
                 crate::capture_test::capture_prepared(&renderer, &loaded.scene,
-                    &captured, &format!("{path}-category-detail-{detail}.png"));
+                    &captured, &format!("{path}-category-detail-{detail}.png"),
+                );
             }
         }
         let residents = loaded
@@ -8721,7 +9260,8 @@ mod tests {
             for (i, draw) in scene.draws.iter().enumerate() {
                 if changed.contains(&i) {
                     renderer
-                        .update_dynamic_surface(&mut prepared, i, &draw.borrowed(), scene.camera, scene.fog)
+                        .update_dynamic_surface(&mut prepared, i, &draw.borrowed(), scene.camera, scene.fog,
+                        )
                         .unwrap();
                 } else {
                     renderer
@@ -8903,7 +9443,8 @@ mod tests {
         let sender = loaded.fresh_session.as_ref().unwrap().clone();
         let status = || {
             let (reply, answer) = mpsc::channel();
-            sender.send(FreshRequest::Status { camera: camera.eye, reply }).unwrap();
+            sender.send(FreshRequest::Status { camera: camera.eye, reply,
+                }).unwrap();
             answer.recv_timeout(std::time::Duration::from_secs(15)).unwrap()
         };
         sender.send(FreshRequest::Run(false)).unwrap();
@@ -8913,17 +9454,20 @@ mod tests {
         for id in [11, 12, 13, 15, 16, 17, 18, 19, 20, 88] {
             sender.send(FreshRequest::TutorialControl(id)).unwrap();
         }
-        sender.send(FreshRequest::TutorialProducer { control: 40, event: 7 }).unwrap();
+        sender.send(FreshRequest::TutorialProducer { control: 40, event: 7,
+            }).unwrap();
         sender.send(FreshRequest::AuctionButton(0)).unwrap();
         let (reply, answer) = mpsc::channel();
-        sender.send(FreshRequest::Planning { category: 33, reply }).unwrap();
+        sender.send(FreshRequest::Planning { category: 33, reply,
+            }).unwrap();
         let planning = answer.recv().unwrap().unwrap();
         assert_eq!(planning.entry(), crate::build_panel::Entry::Open);
         let (reply, answer) = mpsc::channel();
         sender.send(FreshRequest::BuildDrag { reply }).unwrap();
         answer.recv().unwrap().unwrap();
         let floor = u32::from_le_bytes(planning.catalog.row(0).unwrap()[0x48..0x4c]
-            .try_into().unwrap()) as i32;
+            .try_into().unwrap(),
+        ) as i32;
         let mut form = crate::build_panel::Request {
             category: 33, origin: [0, 0], size: [2, 2], height: floor,
             packed_model: 0, kind: 0, quality: 0, displayed_quote: f32::NAN,
@@ -8933,12 +9477,14 @@ mod tests {
         for origin in [[0, 0], [0, 5], [5, 0], [5, 5]] {
             form.origin = origin;
             let (reply, answer) = mpsc::channel();
-            sender.send(FreshRequest::Build { form: form.clone(), submit: false, reply }).unwrap();
+            sender.send(FreshRequest::Build { form: form.clone(), submit: false, reply,
+                }).unwrap();
             if answer.recv().unwrap().unwrap().allowed() { allowed = true; break; }
         }
         assert!(allowed);
         let (reply, answer) = mpsc::channel();
-        sender.send(FreshRequest::Build { form, submit: true, reply }).unwrap();
+        sender.send(FreshRequest::Build { form, submit: true, reply,
+            }).unwrap();
         assert!(answer.recv().unwrap().unwrap().submitted);
         assert!(status().failure.is_none(), "building before first tip must remain legal");
         for running in [false, true] {
@@ -8958,7 +9504,8 @@ mod tests {
             // drains prompt events into that reply exactly once; the UI must
             // retain its receiver through the transition to display the tip.
             let (reply, answer) = mpsc::channel();
-            sender.send(FreshRequest::Status { camera: camera.eye, reply }).unwrap();
+            sender.send(FreshRequest::Status { camera: camera.eye, reply,
+                }).unwrap();
             sender.send(FreshRequest::Options(true)).unwrap();
             let barrier = status();
             assert!(!barrier.running && barrier.failure.is_none(), "{barrier:?}");
@@ -8990,15 +9537,19 @@ mod tests {
         // The user crash occurred after construction and subsequent original
         // tips, when the hourly ship reached the actual rendering adapter.
         let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
-        let ships = std::array::from_fn::<_, 4, _>(|i| u32::from_le_bytes(
-            image.at(0x539d50 + i as u32 * 4, 4).unwrap().try_into().unwrap()));
+        let ships = std::array::from_fn::<_, 4, _>(|i| {
+            u32::from_le_bytes(
+            image.at(0x539d50 + i as u32 * 4, 4).unwrap().try_into().unwrap(),
+            )
+        });
         let deadline = Instant::now() + std::time::Duration::from_secs(45);
         loop {
             let next = status();
             assert!(next.failure.is_none(), "{next:?}");
             for prompt in next.prompts {
                 let (reply, answer) = mpsc::channel();
-                sender.send(FreshRequest::DismissPrompt(prompt.dismissal_id, Some(reply))).unwrap();
+                sender.send(FreshRequest::DismissPrompt(prompt.dismissal_id, Some(reply),
+                    )).unwrap();
                 answer.recv().unwrap();
             }
             if next.ticks >= 2000 { break; }

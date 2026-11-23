@@ -9,7 +9,8 @@ use openmt2001::{
     render::{PreparedScene, Renderer},
     texture::TextureSet,
 };
-use std::{fs, path::{Path, PathBuf}};
+use std::{fs, path::{Path, PathBuf},
+};
 
 const TUTORIAL_TITLE_COLORS: [u32; 4] =
     [0xffffb400, 0xffffb400, 0x80ffb400, 0x80ffb400];
@@ -53,16 +54,17 @@ mod click_cue_tests {
 
 #[cfg(test)]
 mod tutorial_title_tests {
-    use super::{TUTORIAL_TITLE_COLORS, ui};
     #[cfg(feature = "capture")]
     use super::SinglePlayer;
+    use super::{TUTORIAL_TITLE_COLORS, ui};
     use openmt2001::archive::ArchiveIndex;
 
     #[test]
     #[ignore = "requires original v1.4 Tutorial title fixture and archive"]
     fn tutorial_title_matches_original_painter_and_mesh() {
         let fixture = std::fs::read(std::env::var("OPENMT2001_NATIVE_TUTORIAL_TITLE")
-            .expect("set OPENMT2001_NATIVE_TUTORIAL_TITLE")).unwrap();
+            .expect("set OPENMT2001_NATIVE_TUTORIAL_TITLE"),
+        ).unwrap();
         assert_eq!(&fixture[..8], b"MTTUTL01");
         let mut at = 40;
         let mut word = || {
@@ -81,7 +83,8 @@ mod tutorial_title_tests {
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (_, regions) = ui::panel_base(&index, &archive,
-            "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm", &[part]).unwrap();
+            "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm", &[part],
+        ).unwrap();
         assert_eq!(regions[part], bounds);
     }
 
@@ -146,25 +149,28 @@ mod tutorial_title_tests {
         }).unwrap();
         let overlay = panel.draw_tutorial(&renderer, None, false).unwrap();
         crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&overlay],
-            "work/frontend/tutorial-caption-city.png");
+            "work/frontend/tutorial-caption-city.png",
+        );
         panel.open(false, "Capture", catalog, fresh);
         let scenario = panel.draw(&renderer, None, false).unwrap();
         crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&scenario],
-            "work/frontend/scenario-scrollbars-city.png");
+            "work/frontend/scenario-scrollbars-city.png",
+        );
         panel.activate(0); // the unlocked Starting Out row opens Character Selection
         assert!(panel.character_screen);
-        panel.activate(2);
-        panel.activate(2); // native left arrow reaches Dog from the default Top Hat
+        panel.activate(3);
+        panel.activate(3); // right arrow reaches Dog from the new-profile Racecar
         assert_eq!(panel.characters[panel.character].name, 1746);
         let dog = panel.draw(&renderer, None, false).unwrap();
         crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&dog],
-            "work/frontend/character-dog-biography-city.png");
+            "work/frontend/character-dog-biography-city.png",
+        );
     }
 }
 #[cfg(test)]
 mod scenario_scroll_tests {
-    use super::{SCENARIO_INFO_SCROLL, SCENARIO_LIST_SCROLL, scenario_scroll_hit,
-        scenario_rows_for, ui};
+    use super::{SCENARIO_INFO_SCROLL, SCENARIO_LIST_SCROLL, scenario_rows_for, scenario_scroll_hit, ui,
+    };
 
     #[test]
     #[ignore = "requires original v1.4 Scenario completion-cup fixture"]
@@ -296,7 +302,8 @@ mod character_biography_tests {
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (_, regions) = ui::panel_base(&index, &archive,
-            "gamedata2\\brand_new_panels\\sp_token_V2.tm", &[68]).unwrap();
+            "gamedata2\\brand_new_panels\\sp_token_V2.tm", &[68],
+        ).unwrap();
         assert_eq!(regions[68], bounds);
     }
 }
@@ -364,9 +371,7 @@ fn native_generic_click(visible: bool, busy: bool, character_screen: bool, i: us
 }
 fn scenario_scroll_hit(maximum: usize, rows: usize, point: [f32; 2]) -> Option<usize> {
     if maximum == 0 { return None; }
-    let inside = |[l, t, r, b]: [f32; 4]| {
-        point[0] >= l && point[0] <= r && point[1] >= t && point[1] <= b
-    };
+    let inside = |[l, t, r, b]: [f32; 4]| point[0] >= l && point[0] <= r && point[1] >= t && point[1] <= b;
     let base = 5 + rows;
     if let Some(side) = ui::slider_arrows(SCENARIO_INFO_SCROLL, true)
         .into_iter().position(inside) {
@@ -377,8 +382,10 @@ fn scenario_scroll_hit(maximum: usize, rows: usize, point: [f32; 2]) -> Option<u
 fn scenario_rows_for(catalog: &openmt2001::level_catalog::Catalog) -> Vec<usize> {
     catalog.levels.iter().filter(|level| !level.tutorial()
         && level.unlocked() && level.bytes[2] == 0)
-        .filter_map(|level| crate::scenarios::CAMPAIGN.iter()
-            .position(|scenario| scenario.id == level.id()))
+        .filter_map(|level| {
+            crate::scenarios::CAMPAIGN.iter()
+            .position(|scenario| scenario.id == level.id())
+        })
         .collect()
 }
 fn scenario_cup_rect(row: usize, cup: usize) -> [f32; 4] {
@@ -386,7 +393,8 @@ fn scenario_cup_rect(row: usize, cup: usize) -> [f32; 4] {
     let top = 98. + SCENARIO_ROW_HEIGHT * row as f32;
     [left, top, left + 17., top + 14.]
 }
-fn character_biography_lines(tab: &[u8], encoded: &[u8], width: f32)
+fn character_biography_lines(tab: &[u8], encoded: &[u8], width: f32,
+)
     -> Result<Vec<Vec<u8>>, String> {
     let (offsets, wrapped) = crate::prompt::wrap_with_gap(tab, encoded,
         width.trunc() as i32, -1)?;
@@ -475,7 +483,7 @@ impl SinglePlayer {
             scenario_index: 0,
             scenario_rows: vec![],
             tutorial_index: 0,
-            character: 4,
+            character: 0,
             name: vec![],
             catalog: None,
             profile_path: None,
@@ -487,13 +495,36 @@ impl SinglePlayer {
         })
     }
     pub fn open(&mut self, sandbox: bool, name: &str,
-        catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf) {
+        catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf,
+    ) {
         self.visible = true;
         self.tutorial_screen = false;
         self.sandbox = sandbox;
         self.character_screen = sandbox;
         self.difficulty = 0;
-        self.character = 4;
+        // Fail closed before loading another profile's selection/catalog.
+        self.request = None;
+        self.busy = true;
+        self.catalog = None;
+        self.name = name.as_bytes().to_vec();
+        self.profile_path = Some(profile_path.clone());
+        let root = profile_path.parent().and_then(|p| p.parent());
+        let token = root
+            .ok_or("Profile root missing".to_string())
+            .and_then(|root| {
+                crate::menu::preferred_token::Token::load(&crate::menu::preferred_token::path(
+                    root,
+                    name.as_bytes(),
+                ))
+            });
+        self.character = match token {
+            Ok(t) => t.index(),
+            Err(e) => {
+                self.message = Some(e);
+                self.visible = true;
+                return;
+            }
+        };
         self.name = name.as_bytes().to_vec();
         // Original 49b1b0 walks registration order and appends only
         // non-tutorial, unlocked, non-custom scenario records.
@@ -508,7 +539,8 @@ impl SinglePlayer {
         self.pointer_position = None;
     }
     pub fn open_tutorial(&mut self, name: &str,
-        catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf) {
+        catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf,
+    ) {
         self.visible = true;
         self.tutorial_screen = true;
         self.character_screen = false;
@@ -563,7 +595,8 @@ impl SinglePlayer {
     pub fn drag_track(&mut self, origin: Option<usize>, p: [f32; 2]) -> bool {
         if !self.is_scroll_track(origin) { return false; }
         let next = ui::slider_selection(ui::slider_track(SCENARIO_INFO_SCROLL, true),
-            p[1], self.scenario_description_limit() as i32, true) as usize;
+            p[1], self.scenario_description_limit() as i32, true,
+        ) as usize;
         let changed = next != self.description_first;
         self.description_first = next;
         changed
@@ -586,15 +619,13 @@ impl SinglePlayer {
         let Some(level) = self.catalog.as_ref().and_then(|c| c.find(id).map(|i| &c.levels[i]))
             else { return fallback; };
         match level.labels() {
-            openmt2001::level_catalog::Labels::Localized { title: name, description } => {
-                self.strings.get((if title { name } else { description }) as usize)
-                    .cloned().unwrap_or(fallback)
-            }
-            openmt2001::level_catalog::Labels::Literal { title: name, description } => {
-                (if title { name } else { description }).into_iter().map(|byte| {
+            openmt2001::level_catalog::Labels::Localized { title: name, description,
+            } => self.strings.get((if title { name } else { description }) as usize)
+                    .cloned().unwrap_or(fallback),
+            openmt2001::level_catalog::Labels::Literal { title: name, description,
+            } => (if title { name } else { description }).into_iter().map(|byte| {
                     if (32..=126).contains(&byte) { byte - 32 } else { b'?' - 32 }
-                }).collect()
-            }
+                }).collect(),
         }
     }
     pub fn back(&mut self) {
@@ -610,6 +641,18 @@ impl SinglePlayer {
             self.visible = false;
         }
         self.description_first = 0;
+    }
+    fn choose_character(&mut self, value: usize) -> Result<(), String> {
+        let root = self
+            .profile_path
+            .as_ref()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or("Profile root missing")?;
+        crate::menu::preferred_token::Token::new(value)?
+            .save(&crate::menu::preferred_token::path(root, &self.name))?;
+        self.character = value;
+        Ok(())
     }
     pub fn activate(&mut self, i: usize) {
         if self.busy && i != 1 {
@@ -679,11 +722,17 @@ impl SinglePlayer {
                 }
                 1 => self.back(),
                 2 => {
-                    self.character = (self.character + 9) % 10;
+                    if let Err(e) = self.choose_character((self.character + 9) % 10) {
+                        self.message = Some(e);
+                        return;
+                    }
                     self.description_first = 0;
                 }
                 3 => {
-                    self.character = (self.character + 1) % 10;
+                    if let Err(e) = self.choose_character((self.character + 1) % 10) {
+                        self.message = Some(e);
+                        return;
+                    }
                     self.description_first = 0;
                 }
                 _ => (),
@@ -728,7 +777,8 @@ impl SinglePlayer {
         } else { vec![] };
         let (text, b) = if self.tutorial_screen {
             (&self.strings[level_labels(crate::scenarios::TUTORIALS[self.tutorial_index].id)
-                .unwrap().1], self.tutorial_panel.bounds[11])
+                .unwrap().1], self.tutorial_panel.bounds[11],
+            )
         } else if self.character_screen {
             (
                 &self.strings[self.characters[self.character].description],
@@ -779,7 +829,8 @@ impl SinglePlayer {
             }
         } else {
             if let Some(slider) = scenario_scroll_hit(
-                self.scenario_description_limit(), self.scenario_rows.len(), p) {
+                self.scenario_description_limit(), self.scenario_rows.len(), p,
+            ) {
                 return Some(slider);
             }
             for (i, part) in [26, 25, 19, 18, 17].iter().enumerate() {
@@ -810,7 +861,8 @@ impl SinglePlayer {
         Ok(())
     }
     fn draw_tutorial(&self, renderer: &Renderer, selected: Option<usize>,
-        pressed: bool) -> Result<PreparedScene, String> {
+        pressed: bool,
+    ) -> Result<PreparedScene, String> {
         let b = &self.tutorial_panel.bounds;
         let mut surfaces = self.tutorial_panel.base.clone();
         let mut shapes = Surface::solid();
@@ -824,43 +876,52 @@ impl SinglePlayer {
         }
         // 49c3b6/49c4a1 construct font4 and font1 style9 caption widgets.
         ui::text_widget_style9(&mut title_fonts, &self.title_tab,
-            &self.strings[1667], b[6], 0xffffffff)?;
+            &self.strings[1667], b[6], 0xffffffff,
+        )?;
         ui::text_widget_style9(&mut fonts, &self.tab,
             &self.strings[1668], b[9], 0xffffffff)?;
         let chosen = crate::scenarios::TUTORIALS[self.tutorial_index];
         let (title, description) = level_labels(chosen.id).unwrap();
         ui::text(&mut fonts, &self.tab, &self.strings[title],
-            b[10], true, 0xffffffff)?;
+            b[10], true, 0xffffffff,
+        )?;
         let [l, t, r, _] = b[8];
         for (row, tutorial) in crate::scenarios::TUTORIALS.iter().enumerate() {
             let top = t + row as f32 * 13.;
             if row == self.tutorial_index || selected == Some(2 + row) {
                 shapes.rect([l, top, r, top + 13.],
-                    [if row == self.tutorial_index { 0xff008ed0 } else { 0x99505050 }; 4]);
+                    [if row == self.tutorial_index { 0xff008ed0 } else { 0x99505050 }; 4],
+                );
             }
             ui::text(&mut fonts, &self.tab,
                 &self.strings[level_labels(tutorial.id).unwrap().0],
-                [l + 3., top, r, top + 13.], false, 0xffffffff)?;
+                [l + 3., top, r, top + 13.], false, 0xffffffff,
+            )?;
         }
         wrapped(&mut fonts, &self.tab, &self.strings[description],
-            b[11], self.description_first)?;
+            b[11], self.description_first,
+        )?;
         for (i, part, label, color) in
             [(0, 13, 1435, [80, 148, 34]), (1, 12, 1439, [175, 6, 6])] {
             ui::button(&mut shapes, b[part], color, selected == Some(i),
-                pressed && selected == Some(i), self.busy && i == 0)?;
+                pressed && selected == Some(i), self.busy && i == 0,
+            )?;
             ui::text(&mut fonts, &self.tab, &self.strings[label],
-                b[part], true, 0xffffffff)?;
+                b[part], true, 0xffffffff,
+            )?;
         }
         wrapped(&mut fonts, &self.tab,
             &ascii(self.message.as_deref().unwrap_or("")),
-            [32., 449., 609., 466.], 0)?;
+            [32., 449., 609., 466.], 0,
+        )?;
         surfaces.push(shapes);
         surfaces.extend(fonts);
         surfaces.extend(title_fonts);
         renderer.prepare(
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
             [2. / 640., 0., 0., 0., 0., -2. / 480., 0., 0.,
-                0., 0., 1., 0., -1., 1., 0., 1.],
+                0., 0., 1., 0., -1., 1., 0., 1.,
+            ],
             None,
         )
     }
@@ -998,13 +1059,15 @@ impl SinglePlayer {
             // 4a7e4b selects font2. Its W glyph advances each wrapped row.
             let biography = b[68];
             for (line, text) in character_biography_lines(&self.scenario_list_tab,
-                &self.strings[c.description], biography[2] - biography[0])?
+                &self.strings[c.description], biography[2] - biography[0],
+            )?
                 .iter().skip(self.description_first).enumerate() {
                 let top = biography[1].trunc() + line as f32 * 10.;
                 if top + 10. > biography[3] { break; }
                 ui::text_widget_style0(&mut scenario_list_fonts,
                     &self.scenario_list_tab, text,
-                    [biography[0], top, biography[2], biography[3]], 0xffffffff)?;
+                    [biography[0], top, biography[2], biography[3]], 0xffffffff,
+                )?;
             }
             for (part, id) in [(63, 0x64f), (64, 0x757)] {
                 shapes.rect(b[part], [0xff01762f; 4]);
@@ -1040,7 +1103,8 @@ impl SinglePlayer {
                 shapes.rect(b[part], [0xbb000a28; 4]);
             }
             for (part, label) in [(9, self.strings[0x66d].as_slice()),
-                (10, selected_title.as_slice())] {
+                (10, selected_title.as_slice()),
+            ] {
                 shapes.rect(b[part], [0xff909090, 0xff909090, 0x80909090, 0x80909090]);
                 let mut r = b[part];
                 r[1] += 4.;
@@ -1050,8 +1114,7 @@ impl SinglePlayer {
                     label,
                     r,
                     true,
-                    0xffffffff,
-                )?;
+                    0xffffffff)?;
             }
             let [l, t, r, _] = b[8];
             for (row, &scenario_index) in self.scenario_rows.iter().enumerate() {
@@ -1075,12 +1138,15 @@ impl SinglePlayer {
                     0xffffffff,
                 )?;
                 let id = crate::scenarios::CAMPAIGN[scenario_index].id;
-                let completed = self.catalog.as_ref().and_then(|catalog| catalog.find(id)
-                    .map(|index| catalog.levels[index].completed())).unwrap_or([false; 3]);
+                let completed = self.catalog.as_ref().and_then(|catalog| {
+                        catalog.find(id)
+                    .map(|index| catalog.levels[index].completed())
+                    }).unwrap_or([false; 3]);
                 for (cup, earned) in completed.into_iter().enumerate() {
                     self.image(&mut completion_cups,
                         if earned { 293 + cup } else { SCENARIO_CUP_EMPTY },
-                        scenario_cup_rect(row, cup))?;
+                        scenario_cup_rect(row, cup),
+                    )?;
                 }
             }
             for (part, id) in [(12, 0x757), (23, 0x75b)] {
@@ -1111,12 +1177,14 @@ impl SinglePlayer {
                 )?;
             }
             for (line, text) in wrap_lines(&self.scenario_list_tab,
-                &selected_description, b[24][2] - b[24][0])?
+                &selected_description, b[24][2] - b[24][0],
+            )?
                 .iter().skip(self.description_first).enumerate() {
                 let top = b[24][1] + line as f32 * SCENARIO_ROW_HEIGHT;
                 if top + SCENARIO_ROW_HEIGHT > b[24][3] { break; }
                 ui::text(&mut scenario_list_fonts, &self.scenario_list_tab, text,
-                    [b[24][0], top, b[24][2], b[24][3]], false, 0xffffffff)?;
+                    [b[24][0], top, b[24][2], b[24][3]], false, 0xffffffff,
+                )?;
             }
             // 499817/49994e attach original 43f510 children beside the
             // description and list. The 17 scenario rows fit the native
@@ -1124,7 +1192,8 @@ impl SinglePlayer {
             for (bounds, value, maximum, target) in [
                 (SCENARIO_INFO_SCROLL, self.description_first,
                     self.scenario_description_limit(),
-                    5 + self.scenario_rows.len()),
+                    5 + self.scenario_rows.len(),
+                ),
                 (SCENARIO_LIST_SCROLL, 0, 0, usize::MAX),
             ] {
                 ui::Slider {
@@ -1213,5 +1282,88 @@ impl SinglePlayer {
             ],
             None,
         )
+    }
+}
+
+#[cfg(test)]
+mod preferred_flow_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires supplied original assets; source-only candidate"]
+    fn ordinary_arrows_persist_active_name_and_reopen_isolated() {
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let exe = read("OPENMT2001_EXE");
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_owned();
+        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+        let offsets = std::fs::read(language.join("tycoon.off")).unwrap();
+        let glyphs = std::fs::read(language.join("tycoon.bin")).unwrap();
+        let mut at = 0;
+        let rows = offsets
+            .chunks_exact(2)
+            .map(|b| {
+                let end = at + u16::from_le_bytes(b.try_into().unwrap()) as usize;
+                let row = &glyphs[at..end];
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
+        let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
+        let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+        let scripts = map.parent().unwrap().parent().unwrap();
+        let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
+        let mut panel = SinglePlayer::new(&index, &archive, &installer, &refs, &exe).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "ordinary-token-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let a = crate::campaign_store::profile_path(&root, b"Alice");
+        let b = crate::campaign_store::profile_path(&root, b"Bob");
+        panel.open(true, "Alice", catalog.clone(), a.clone());
+        assert_eq!(panel.character, 0);
+        panel.activate(3);
+        assert_eq!(panel.character, 1);
+        let token_path = crate::menu::preferred_token::path(&root, b"Alice");
+        assert_eq!(
+            crate::menu::preferred_token::Token::load(&token_path)
+                .unwrap()
+                .index(),
+            1
+        );
+        // Same typed value consumed by Route::open; model a persisted ordinary-profile choice.
+        crate::menu::preferred_token::Token::new(7)
+            .unwrap()
+            .save(&token_path)
+            .unwrap();
+        panel.open(false, "Alice", catalog.clone(), a);
+        assert_eq!(panel.character, 7);
+        panel.open(true, "Bob", catalog, b);
+        assert_eq!(panel.character, 0);
+        assert_eq!(
+            crate::menu::preferred_token::Token::load(&token_path)
+                .unwrap()
+                .index(),
+            7
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -77,7 +77,16 @@ const fn scenario(n: u32, map: Option<&'static str>) -> Scenario {
     }
 }
 pub fn find(id: u32) -> Result<Scenario, String> {
-    CAMPAIGN.iter().chain(TUTORIALS.iter())
+    const NET: [Scenario; 7] = [
+        Scenario { id: 300000, token: "NET0", map: Some("empty.lua") },
+        Scenario { id: 300001, token: "NET1", map: Some("empty.lua") },
+        Scenario { id: 300002, token: "NET2", map: Some("empty.lua") },
+        Scenario { id: 300003, token: "NET3", map: Some("empty.lua") },
+        Scenario { id: 300004, token: "NET4", map: Some("empty.lua") },
+        Scenario { id: 300005, token: "NET5", map: Some("empty.lua") },
+        Scenario { id: 300006, token: "NET6", map: Some("empty.lua") },
+    ];
+    CAMPAIGN.iter().chain(TUTORIALS.iter()).chain(NET.iter())
         .copied()
         .find(|s| s.id == id)
         .ok_or_else(|| format!("unknown preview scenario {id}"))

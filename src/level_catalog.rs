@@ -8,6 +8,14 @@ pub struct Level {
     pub bytes: [u8; RECORD_SIZE],
 }
 impl Level {
+    ///4dacb0 reads this selected-record binary32, independent of86ce64.
+    pub fn objective_target(&self) -> f32 {
+        f32::from_bits(word(&self.bytes, 0x870))
+    }
+    ///4a4815..4a4831 writes the setup modifier before roster handoff.
+    pub fn set_objective_target(&mut self, target: f32) {
+        put(&mut self.bytes, 0x870, target.to_bits());
+    }
     pub fn id(&self) -> u32 {
         word(&self.bytes, 0x44c)
     }

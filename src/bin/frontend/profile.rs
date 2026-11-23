@@ -30,6 +30,7 @@ impl Profiles {
     }
     fn clear_orphan_options(&self, name: &str) -> Result<(), String> {
         let root = self.path.parent().ok_or("profile directory")?;
+        crate::menu::preferred_token::clear(root, name.as_bytes())?;
         let path = crate::profile_settings::profile_path(root, name.as_bytes());
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
@@ -208,7 +209,8 @@ impl Profile {
         for first in [105, 93] {
             for state in 0..4 {
                 slider_textures[first + state] = Surface::new(generic.textures
-                    .get(first + state).ok_or("original Profile scrollbar arrow missing")?);
+                    .get(first + state).ok_or("original Profile scrollbar arrow missing")?,
+                );
             }
         }
         for (part, texture) in [(7, 287), (8, 273), (9, 274)] {
@@ -287,7 +289,8 @@ impl Profile {
     /// The four LOGIN_SELECT action children are generic 43ed20 buttons.
     /// Selected-player actions carry the same disabled admission as their art.
     pub fn generic_button_enabled(&self, i: usize) -> bool {
-        action_button_enabled(self.chosen.is_some(), self.name.is_some() || self.deleting, i)
+        action_button_enabled(self.chosen.is_some(), self.name.is_some() || self.deleting, i,
+        )
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         let hit = |[l, t, r, b]: [f32; 4]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b;
@@ -382,8 +385,7 @@ impl Profile {
         }
         let maximum = self.store.names.len().saturating_sub(6) as i32;
         let next = ui::slider_selection(
-            ui::slider_track(PROFILE_SCROLL, true), p[1], maximum, true,
-        ) as usize;
+            ui::slider_track(PROFILE_SCROLL, true), p[1], maximum, true) as usize;
         let changed = next != self.first;
         self.first = next;
         changed
@@ -520,7 +522,8 @@ impl Profile {
             pointer: self.pointer_position,
             pressed: (pressed && selected.is_some_and(|i| (scroll_base..scroll_base + 3).contains(&i)))
                 .then_some(self.pointer_position).flatten(),
-        }.paint(&mut slider_shapes, &mut slider_controls, &self.assets.slider_textures);
+        }.paint(&mut slider_shapes, &mut slider_controls, &self.assets.slider_textures,
+        );
         for (i, part) in [11, 10, 13, 12].iter().enumerate() {
             let bounds = self.assets.bounds[*part];
             let disabled = ((1..=3).contains(&i) && self.chosen.is_none())
@@ -672,7 +675,7 @@ impl Profile {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_button_enabled, Assets, Profile, Profiles, PROFILE_SCROLL};
+    use super::{Assets, PROFILE_SCROLL, Profile, Profiles, action_button_enabled};
     use crate::ui;
     use std::{fs, path::PathBuf};
 
@@ -835,6 +838,7 @@ mod tests {
         }).unwrap();
         let panel = profile.draw(&renderer, None, false).unwrap();
         crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&panel],
-            "work/frontend/profile-scrollbar-city.png");
+            "work/frontend/profile-scrollbar-city.png",
+        );
     }
 }

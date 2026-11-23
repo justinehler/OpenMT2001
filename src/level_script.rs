@@ -1,6 +1,8 @@
 //! Recovered level-script bindings over one live city and resident pool.
 //! The host owns script buffers, geometry registration, notifications and game
 //! objectives. This is the map/population stage, not the complete boot sequence.
+pub mod objective_selection;
+
 use crate::{
     business_binding,
     lua4::{Runtime, Value},
@@ -126,6 +128,7 @@ impl Context<'_, '_> {
 }
 
 pub struct Bindings {
+    selected_objective: objective_selection::Selection,
     startup_settings: crate::startup_settings::Bindings,
     resident_settings: crate::resident_settings::Bindings,
     map: crate::map_script::Bindings,
@@ -135,6 +138,13 @@ pub struct Bindings {
 }
 
 impl Bindings {
+    /// Bind the selected record before any script dispatch that may call the getter.
+    /// Refresh after every selection/reselection, target edit or reconstruction;
+    /// pass None on deselection/teardown. No world-objective or save fallback.
+    pub fn bind_selected_level(&mut self, level: Option<&crate::level_catalog::Level>) {
+        self.selected_objective.bind(level);
+    }
+
     /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609. Host buffers
     /// registered with Runtime::script_buffer satisfy nested C_RunScript calls.
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
@@ -186,21 +196,10 @@ impl Bindings {
             vm.set_number(name, value)?;
         }
         crate::level_catalog::script::register_language(vm,image)?;
-        // Original Game registration block4db128..4db1ac. NONE uses a
-        // sign-extended PUSH imm8 zero; the others carry binary32 immediates.
-        vm.set_number("OBJECTIVE_NONE", 0.)?;
-        for (name, immediate) in [
-            ("OBJECTIVE_FIRST_TO_BE_MAYOR", 0x4db13f),
-            ("OBJECTIVE_WEAKEST_LINK", 0x4db153),
-            ("OBJECTIVE_PROFIT", 0x4db167),
-            ("OBJECTIVE_PAPERWEALTH_BY_DATE", 0x4db17b),
-            ("OBJECTIVE_PAPERWEALTH_BY_AMOUNT", 0x4db18f),
-            ("OBJECTIVE_SALES", 0x4db1a3),
-        ] {
-            vm.set_number(name, f64::from(image.f32_at(immediate)?))?;
-        }
+        objective_selection::register_constants(vm, image)?;
         for (name, id) in [
             ("GetDifficulty", 3),
+            ("GetObjectiveTarget", objective_selection::GET_TARGET_CALLBACK),
             ("CreatePrompt", 5),
             ("Pause", 9),
             ("Unpause", 10),
@@ -330,11 +329,12 @@ impl Bindings {
         vm.register_coerced("SetObjective", 4, "nnN")?;
         vm.execute(
             "Game bindings",
-            b"Game={GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}; Calendar={SetFrequency=C_SetCalendarFrequency}",
+            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}; Calendar={SetFrequency=C_SetCalendarFrequency}",
             &mut |_, _| Err("unexpected binding callback".into()),
         )?;
         vm.register_script_loader("C_RunScript")?;
         Ok(Self {
+            selected_objective: objective_selection::Selection::default(),
             startup_settings,
             resident_settings,
             map,
@@ -482,18 +482,11 @@ impl Bindings {
                 }
                 Ok(None)
             }
+            objective_selection::GET_TARGET_CALLBACK => self.selected_objective.target(),
             3 => Ok(Some(f64::from(context.difficulty))),
             4 | 5 => {
                 if id == 4 {
-                    let [Value::Number(kind), Value::Number(target), flag] = arguments else {
-                        return Err("invalid converted objective arguments".into());
-                    };
-                    let flag = match flag {
-                        Value::Number(value) => Some(*value),
-                        Value::Nil => None,
-                        _ => return Err("invalid optional objective number".into()),
-                    };
-                    state.objective.set(*kind, *target, flag);
+                    objective_selection::set_objective(state.objective, arguments)?;
                 }
                 hooks.command(
                     match id {

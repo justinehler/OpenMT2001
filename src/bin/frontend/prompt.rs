@@ -4,7 +4,8 @@ pub fn wrap(tab: &[u8], text: &[u8], width: i32) -> Result<(Vec<usize>, Vec<u8>)
 }
 /// Original4e7b35..4e7b3f applies font-manager5ec before scaling the advance.
 /// Existing gap-zero native observations retain their explicit contract.
-pub fn wrap_with_gap(tab: &[u8], text: &[u8], width: i32, gap: i32) -> Result<(Vec<usize>, Vec<u8>), String> {
+pub fn wrap_with_gap(tab: &[u8], text: &[u8], width: i32, gap: i32,
+) -> Result<(Vec<usize>, Vec<u8>), String> {
     openmt2001::font::Font::parse(tab)?;
     if width <= 0 {
         return Err("prompt width must be positive".into());
@@ -129,6 +130,7 @@ struct Slot {
 }
 #[derive(Default)]
 pub struct State {
+    literal_body: Option<Vec<u8>>,
     dialog_replies: Vec<crate::human_dialog::Reply>,
     pressed_dialog: Option<usize>,
     slots: [Slot; 4],
@@ -432,11 +434,13 @@ fn text_quads(tab: &[u8], paragraphs: &[Vec<u8>], bounds: [f32; 4],
     let font = openmt2001::font::Font::parse(tab)?;
     let height_at = 4 + usize::from(b'W' - 32) * 44 + 36;
     let height = i32::from_le_bytes(tab.get(height_at..height_at + 4)
-        .ok_or("prompt W metric missing")?.try_into().unwrap());
+        .ok_or("prompt W metric missing")?.try_into().unwrap(),
+    );
     let mut rows = Vec::new();
     for text in paragraphs {
         let (offsets, copy) = wrap_with_gap(tab, text,
-            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32, -1)?;
+            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32, -1,
+        )?;
         for pair in offsets.windows(2) {
             let end = pair[1].saturating_sub(1).min(copy.len());
             rows.push(copy[pair[0].min(end)..end].to_vec());
@@ -454,9 +458,11 @@ fn text_quads(tab: &[u8], paragraphs: &[Vec<u8>], bounds: [f32; 4],
         } else { (x_margin + 2) as f32 };
         quads.extend(font.layout(row, openmt2001::font::Layout {
             origin: [left + parent_offset[0].trunc(),
-                top + index as f32 * height as f32 + parent_offset[1].trunc()], depth: 0.5,
+                top + index as f32 * height as f32 + parent_offset[1].trunc(),
+                ], depth: 0.5,
             scale: 1., gap: -1, baseline: 0,
-        })?);
+        },
+        )?);
     }
     Ok(quads)
 }
@@ -558,13 +564,15 @@ impl Assets {
     /// 429f03..429f64 starts the tutorial arrow at the prompt widget centre.
     pub fn arrow_origin(&self) -> [f32; 2] {
         [(self.main[0] + self.main[2]) * 0.5,
-            (self.main[1] + self.main[3]) * 0.5]
+            (self.main[1] + self.main[3]) * 0.5,
+        ]
     }
     /// Native 4db740 stores the two PositionPrompt coordinates on the prompt
     /// widget. They translate its button and all rendered prompt surfaces.
     pub fn button_at(&self, offset: [f32; 2]) -> [f32; 4] {
         [self.button[0] + offset[0], self.button[1] + offset[1],
-            self.button[2] + offset[0], self.button[3] + offset[1]]
+            self.button[2] + offset[0], self.button[3] + offset[1],
+        ]
     }
     /// Original5254c0+24→43bca0→43bc70 tests the actual visible prompt
     /// parent's mesh rectangle before looking for an enabled button child.
@@ -577,6 +585,22 @@ impl Assets {
     /// Present a local original generic dialog without enrolling it in the
     /// Host prompt queue. Save Game owns its confirmation callback and uses
     /// this same 429e30 panel, typography and 429630 button geometry.
+    pub fn prepare_error(
+        &self,
+        renderer: &Renderer,
+        message: &str,
+    ) -> Result<PreparedScene, String> {
+        let mut state = State::default();
+        state.submit(Request {
+            dialog: None,
+            title: 1488,
+            body: 0,
+            dismissal_id: 0,
+            card: None,
+        });
+        state.literal_body = Some(error_glyphs(&self.strings, message)?);
+        self.prepare(renderer, &state)
+    }
     pub fn prepare_dialog(
         &self,
         renderer: &Renderer,
@@ -597,20 +621,24 @@ impl Assets {
         self.prepare(renderer, &state)
     }
     pub fn prepare_positioned(&self, renderer: &Renderer, state: &State,
-        offset: [f32; 2]) -> Result<PreparedScene, String> {
+        offset: [f32; 2],
+    ) -> Result<PreparedScene, String> {
         self.prepare_with_button(renderer, state, true, offset)
     }
     /// Interface.CreateMessage shares the prompt body but does not create the
     /// OK control that CreatePrompt appends.
-    pub fn prepare_message(&self, renderer: &Renderer, state: &State) -> Result<PreparedScene, String> {
+    pub fn prepare_message(&self, renderer: &Renderer, state: &State,
+    ) -> Result<PreparedScene, String> {
         self.prepare_message_positioned(renderer, state, [0.; 2])
     }
     pub fn prepare_message_positioned(&self, renderer: &Renderer, state: &State,
-        offset: [f32; 2]) -> Result<PreparedScene, String> {
+        offset: [f32; 2],
+    ) -> Result<PreparedScene, String> {
         self.prepare_with_button(renderer, state, false, offset)
     }
     fn prepare_with_button(&self, renderer: &Renderer, state: &State,
-        show_button: bool, offset: [f32; 2]) -> Result<PreparedScene, String> {
+        show_button: bool, offset: [f32; 2],
+    ) -> Result<PreparedScene, String> {
         let request = state.request().ok_or("no active prompt")?;
         let mut surfaces = self.base.clone();
         // Original429e30 submits this title gradient before prompt strings.
@@ -699,7 +727,9 @@ impl Assets {
                 .strings
                 .get(id as usize)
                 .ok_or("prompt language ID out of range")?;
-            let formatted = if field_index == 0
+            let formatted = if font == 0 && state.literal_body.is_some() {
+                Some(vec![state.literal_body.clone().unwrap()])
+            } else if field_index == 0
                 && let Some(dialog) = request.dialog
             {
                 Some(vec![dialog.title_text(&self.strings)?])
@@ -715,9 +745,11 @@ impl Assets {
             let ordinary = vec![original.clone()];
             let paragraphs = formatted.as_ref().unwrap_or(&ordinary);
             let mut pages = self.fonts[font].clone();
-            for quad in text_quads(&self.tabs[font], paragraphs, bounds, center, margin, margin, offset)? {
+            for quad in text_quads(&self.tabs[font], paragraphs, bounds, center, margin, margin, offset,
+            )? {
                 pages.get_mut(quad.page).ok_or("prompt glyph page missing")?
-                    .quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [0xffffffff; 4]);
+                    .quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [0xffffffff; 4],
+                    );
             }
             surfaces.extend(pages);
         }
@@ -841,7 +873,8 @@ mod tests {
     #[ignore = "original prompt complete glyph streams at037f"]
     fn matches_native_prompt_text_geometry() {
         let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("work/frontend/native-prompt-text.bin")).unwrap();
+            .join("work/frontend/native-prompt-text.bin"),
+        ).unwrap();
         assert_eq!(&bytes[..8], b"MTPGTX01");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -868,7 +901,8 @@ mod tests {
                 paragraphs.push(bytes[at..at + length].to_vec()); at += length;
             }
             let quads = super::text_quads(fonts[&font], &paragraphs, bounds,
-                style == 4, x_margin, y_margin, parent_offset).unwrap();
+                style == 4, x_margin, y_margin, parent_offset,
+            ).unwrap();
             for page in 0..2 {
                 let count = word(&mut at) as usize;
                 let actual = quads.iter().filter(|q| q.page == page).collect::<Vec<_>>();
@@ -1127,7 +1161,8 @@ mod tests {
         let archive=read("OPENMT2001_ARCHIVE_BIN");
         let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
         let entry=index.find("gamedata2/brand_new_panels/prompt_panel.tm").unwrap();
-        let bounds=super::parent_input_bounds(&archive[entry.offset as usize..(entry.offset+entry.length) as usize]).unwrap();
+        let bounds=super::parent_input_bounds(&archive[entry.offset as usize..(entry.offset+entry.length) as usize],
+        ).unwrap();
         for (i,bound) in bounds.iter().enumerate(){
             assert_eq!(bound.to_bits(),u32::from_le_bytes(bytes[12+i*4..16+i*4].try_into().unwrap()));
         }
@@ -1279,26 +1314,63 @@ fn original_human_dialog_resources() {
         crate::capture_test::capture_standalone(&renderer, &panel, &path);
         let mut tip = State::default();
         tip.submit(Request { title: 1934, body: 1935, dismissal_id: 1,
-            dialog: None, card: None });
+            dialog: None, card: None,
+        });
         tip.cursor([-1.; 2]);
         let panel = assets.prepare(&renderer, &tip).unwrap();
         crate::capture_test::capture_standalone(&renderer, &panel,
-            "work/frontend/popup-starting-out-native-text.png");
+            "work/frontend/popup-starting-out-native-text.png",
+        );
         let panel = assets.prepare_message_positioned(&renderer, &tip, [0., -140.]).unwrap();
         crate::capture_test::capture_standalone(&renderer, &panel,
-            "work/frontend/popup-positioned-message-native-text.png");
+            "work/frontend/popup-positioned-message-native-text.png",
+        );
         let mut actor = vec![0; 0x220];
         actor[0x150..0x154].copy_from_slice(&2u32.to_le_bytes());
         actor[0x158..0x15e].copy_from_slice(b"Justin");
         let mut card = State::default();
         card.submit(card_request(&image, &actor, openmt2001::event_cards::effects::Notice {
             player: 0, card: 16, enabled: true, affected: true, amount: -1234.125,
-        }).unwrap());
+        },
+            ).unwrap(),
+        );
         card.cursor([-1.; 2]);
         let panel = assets.prepare(&renderer, &card).unwrap();
         crate::capture_test::capture_standalone(&renderer, &panel,
-            "work/frontend/popup-card-native-text.png");
+            "work/frontend/popup-card-native-text.png",
+        );
     }
     state.finish_dismiss(Vec::new());
     assert!(state.request().is_none());
+}
+
+fn error_glyphs(strings: &[Vec<u8>], message: &str) -> Result<Vec<u8>, String> {
+    let map = strings.first().ok_or("Language map missing")?;
+    message
+        .chars()
+        .take(400)
+        .map(|c| {
+            let b = if c.is_ascii() && !c.is_control() {
+                c as u8
+            } else {
+                b'?'
+            };
+            map.get((b - 32) as usize)
+                .copied()
+                .ok_or("Error glyph missing".to_string())
+        })
+        .collect()
+}
+#[cfg(test)]
+mod route_error_text_tests {
+    use super::*;
+    #[test]
+    fn error_body_is_visible_glyph_data_for_existing_prompt() {
+        let rows = vec![(0..224).map(|i| i as u8).collect()];
+        assert_eq!(
+            error_glyphs(&rows, "Worker failed").unwrap(),
+            b"Worker failed".iter().map(|b| b - 32).collect::<Vec<_>>()
+        );
+        assert_eq!(error_glyphs(&rows, "é").unwrap(), vec![b'?' - 32]);
+    }
 }

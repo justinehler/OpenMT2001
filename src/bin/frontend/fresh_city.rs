@@ -106,6 +106,42 @@ pub fn load_era_styles(directory:&Path)->Result<[openmt2001::building_styles::St
         openmt2001::building_styles::Styles::from_parameters(&text)
     }).collect::<Result<Vec<_>,String>>()?.try_into().map_err(|_|"original era style bank size mismatch".into())
 }
+/// Confirmed setup and full compact participants, separate from ordinary Inputs.
+/// Offline local peer0 is an adapter identity, not a recovered native peer ID.
+pub struct SkirmishLaunch {
+    pub level_id: u32,
+    pub directory: String,
+    pub map: String,
+    pub objective_kind: i32,
+    pub target: f32,
+    pub difficulty: i32,
+    pub participants: Vec<openmt2001::skirmish::roster::Participant>,
+}
+impl SkirmishLaunch {
+    fn validate(&self) -> Result<(), String> {
+        use openmt2001::skirmish::roster::Kind;
+        // Bounded original supplied map support; never join a caller path.
+        if self.map != "empty.lua" || !(0..=2).contains(&self.difficulty)
+            || !self.target.is_finite() || !(2..=6).contains(&self.participants.len())
+            || self.participants[0].kind != Kind::Human {
+            return Err("invalid offline Skirmish launch".into());
+        }
+        if self.directory.is_empty() || !self.directory.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err("invalid selected level directory".into());
+        }
+        let mut used = [false; 10];
+        for (slot,p) in self.participants.iter().enumerate() {
+            let token = p.token.filter(|&t|t < 10).ok_or("invalid participant token")?;
+            if used[token] || !p.ready || p.name.is_empty() || p.name.len() >= 32
+                || p.name.contains(&0) || (slot > 0 && p.kind != Kind::Ai) {
+                return Err("invalid compact offline participant".into());
+            }
+            used[token] = true;
+        }
+        Ok(())
+    }
+}
+
 pub struct Session<'data> {
     pub building_styles: openmt2001::building_styles::Styles,
     pub era_styles: [openmt2001::building_styles::Styles;8],
@@ -721,7 +757,7 @@ impl<'data> Session<'data> {
     }
 
     pub fn initialize(input: Inputs<'_, 'data>, policy: Policy) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14)
+        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14, None)
     }
 
     /// Start from the host's loaded campaign profile, preserving its unlocks
@@ -732,7 +768,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog,
         profile_path: std::path::PathBuf,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14, None)
     }
 
     pub fn initialize_campaign_with_style(
@@ -740,7 +776,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14, None)
     }
 
     /// Start with the host-selected compatibility policy. Legacy entry points
@@ -750,7 +786,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility, None)
     }
 
     pub fn initialize_campaign_with_style_and_compatibility(
@@ -759,7 +795,42 @@ impl<'data> Session<'data> {
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility, None)
+    }
+
+    /// Fresh offline kernel only. Policy.seed is injected by the host; offline
+    /// wall-clock sampling belongs at the future launch boundary.
+    pub fn initialize_skirmish(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+    ) -> Result<Self, String> {
+        Self::initialize_skirmish_inner(input,policy,catalog,launch,None)
+    }
+
+    pub fn initialize_skirmish_with_style(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+        style: &openmt2001::board_style::Style,
+    ) -> Result<Self, String> {
+        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style))
+    }
+
+    fn initialize_skirmish_inner(
+        mut input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+        style: Option<&openmt2001::board_style::Style>,
+    ) -> Result<Self, String> {
+        launch.validate()?;
+        let options = openmt2001::skirmish::Options::from_pe(input.image)?;
+        let rule = options.rules().iter().find(|r|r.kind == launch.objective_kind)
+            .ok_or("unknown Skirmish objective")?;
+        if launch.target < rule.minimum as f32 || launch.target > rule.maximum as f32
+            || launch.target.fract() != 0. {
+            return Err("Skirmish target outside original bounds".into());
+        }
+        input.difficulty = launch.difficulty;
+        Self::initialize_with_catalog(input, policy, Some(catalog), None, false,
+            style, crate::compatibility::Mode::StrictV14, Some(launch))
     }
 
     fn initialize_with_catalog(mut input: Inputs<'_, 'data>, policy: Policy,
@@ -768,6 +839,7 @@ impl<'data> Session<'data> {
         load_mode: bool,
         style: Option<&openmt2001::board_style::Style>,
         compatibility: crate::compatibility::Mode,
+        skirmish: Option<SkirmishLaunch>,
     ) -> Result<Self, String> {
         if !(0..=2).contains(&input.difficulty){return Err("campaign difficulty outside three levels".into());}
         let mut catalog=if let Some(catalog)=supplied_catalog {catalog} else {
@@ -778,10 +850,21 @@ impl<'data> Session<'data> {
         };
         let selected=catalog.find_directory(input.scenario.as_bytes()).ok_or("scenario missing from original level catalog")?;
         let id=catalog.levels[selected].id();
-        if !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
+        let saved_net = load_mode && (300000..=300006).contains(&id)
+            && !catalog.levels[selected].single_player()
+            && catalog.levels[selected].directory().eq_ignore_ascii_case(
+                format!("net{}", id - 300000).as_bytes());
+        if skirmish.is_none() && !saved_net && !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
             return Err("fresh-city initialization requires a supported scenario, Tutorials 1 through 12, Bonus or Sandbox".into());
         }
-        if !catalog.select(id,false){return Err("scenario is not a single-player catalog entry".into());}
+        if let Some(launch) = &skirmish {
+            if id != launch.level_id || catalog.levels[selected].directory() != launch.directory.as_bytes()
+                || catalog.levels[selected].single_player() {
+                return Err("Skirmish identity does not match selected multiplayer catalog record".into());
+            }
+            catalog.levels[selected].set_objective_target(launch.target);
+        }
+        if !catalog.select(id,skirmish.is_some() || saved_net){return Err("scenario is not a single-player catalog entry".into());}
         catalog.difficulty=input.difficulty as u32;
         let configuration = openmt2001::resident::Configuration::before_defaults(
             input.parameters,
@@ -814,7 +897,13 @@ impl<'data> Session<'data> {
                 &read(&format!("DEFAULT/{name}.lua"))?,
             )?;
         }
-        scenarios::register_sources(&mut scripts.runtime,input.scripts)?;
+        if skirmish.is_some() || saved_net {
+            let relative = format!("{}/initialpref.lua", input.scenario);
+            scripts.runtime.script_buffer(&format!("scripts/{relative}"), &read(&relative)?)?;
+        } else {
+            scenarios::register_sources(&mut scripts.runtime,input.scripts)?;
+        }
+        scripts.bindings.bind_selected_level(catalog.selected_level());
         // These opaque identities resolve to retained original people meshes;
         // no resident drawing or native graphics-manager pointer is claimed.
         let handles = std::array::from_fn(|i| [(i * 2 + 1) as u32, (i * 2 + 2) as u32]);
@@ -851,6 +940,18 @@ impl<'data> Session<'data> {
             scripts.initialize(sources, &mut world.script_state(&[None; 6]),
                 &context, &mut geometry, &mut hooks)?;
         }
+        if let Some(launch) = &skirmish {
+            //4ba07d: Level has executed; the extra multiplayer map precedes48cca0.
+            let bytes = read("MAPS/empty.lua")?;
+            let mut state = world.script_state(&[None; 6]);
+            let bindings = &mut scripts.bindings;
+            let events = &mut scripts.events;
+            scripts.runtime.execute("scripts/maps/empty.lua", &bytes,
+                &mut |id,args| bindings.handle(id,args,&mut state,events,&context,&mut geometry,&mut hooks))?;
+            if world.objective.kind != launch.objective_kind || world.objective.target != launch.target {
+                return Err("authored Skirmish objective differs from confirmed setup".into());
+            }
+        }
         if matches!(id,100009|100012){
             let hub=read(&format!("{}/hub.lua",input.scenario))?;
             let compact:String=std::str::from_utf8(&hub).map_err(|e|e.to_string())?
@@ -885,7 +986,17 @@ impl<'data> Session<'data> {
         let mut saved_player_metadata = [[0u8; 48]; 6];
         if !load_mode {
         let mut pending = openmt2001::player_script::PendingRoster::default();
-        if matches!(id, 100000..=100012) {
+        if let Some(launch) = &skirmish {
+            for (slot, participant) in launch.participants.iter().enumerate() {
+                pending.records[slot] = openmt2001::player_script::Registration {
+                    index: slot as i32,
+                    kind: if participant.kind == openmt2001::skirmish::roster::Kind::Human {0} else {1},
+                    character: participant.token.unwrap() as i32,
+                    difficulty: participant.difficulty,
+                };
+                pending.script_characters[slot] = participant.token.unwrap() as i32;
+            }
+        } else if matches!(id, 100000..=100012) {
             // Original 4a84cd..4a851b: tutorial players.lua is optional. When
             // absent, 4a6a20 registers slot 0 as kind 0, character 0.
             match fs::read(input.scripts.join(format!("{}/players.lua", input.scenario))) {
@@ -915,6 +1026,9 @@ impl<'data> Session<'data> {
             )?;
         }
         let names: [&[u8]; 6] = std::array::from_fn(|slot| {
+            if let Some(launch) = &skirmish {
+                return launch.participants.get(slot).map_or(&[][..], |p| p.name.as_slice());
+            }
             let record = pending.records[slot];
             if record.kind == 0 {
                 input.profile_name
@@ -934,6 +1048,11 @@ impl<'data> Session<'data> {
             let name = &name[..name.iter().position(|&byte| byte == 0).unwrap_or(name.len())];
             if name.len() >= 32 { return Err("frontend player metadata name exceeds field".into()); }
             metadata[8..8 + name.len()].copy_from_slice(name);
+            if let Some(launch) = &skirmish {
+                let peer = if launch.participants.get(registration.index as usize)
+                    .is_some_and(|p| p.kind == openmt2001::skirmish::roster::Kind::Ai) {-1i32} else {0};
+                metadata[40..44].copy_from_slice(&peer.to_le_bytes());
+            }
             metadata[44..48].copy_from_slice(&registration.difficulty.to_le_bytes());
         }
         // Explicit fresh host arena: zero-filled allocations and opaque,
@@ -4591,4 +4710,269 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod skirmish_session_acceptance {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires supplied original assets; fresh offline Skirmish kernel"]
+    fn original_net1_skirmish_session() {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build = read("OPENMT2001_BUILD_FILE");
+        let sun = read("OPENMT2001_SUNCOLS");
+        let parameters = read("OPENMT2001_PARAMETERS");
+        let timetable = read("OPENMT2001_TIMETABLE");
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let default_path =
+            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let scripts = default_path.parent().unwrap().parent().unwrap();
+        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+
+        let names = character_names(&image, &language).unwrap();
+        use openmt2001::skirmish::roster::{Kind, Participant};
+        let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
+        let launch = SkirmishLaunch {
+            level_id:300001, directory:"net1".into(), map:"empty.lua".into(),
+            objective_kind:6, target:3500., difficulty:1,
+            participants:vec![
+                Participant{kind:Kind::Human,token:Some(4),name:b"Fixture Player".to_vec(),ready:true,difficulty:2},
+                Participant{kind:Kind::Ai,token:Some(1),name:b"Explicit Opponent".to_vec(),ready:true,difficulty:0},
+            ],
+        };
+        let session = Session::initialize_skirmish(
+                    Inputs {
+                        tree_locators: None,
+                        image: &image,
+                        board: &board,
+                        file: &file,
+                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                            .unwrap(),
+                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        transport_models: openmt2001::traffic::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        road_routes: std::fs::read(
+                            std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
+                        )
+                        .unwrap(),
+                        scripts,
+                        parameters: std::str::from_utf8(&parameters).unwrap(),
+                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                        timetable: std::str::from_utf8(&timetable).unwrap(),
+                        scenario: "NET1",
+                        difficulty: 1,
+                        selected_character: 4,
+                        profile_name: b"Fixture Player",
+                        character_names: &names,
+                    },
+                    Policy {
+                        seed: 0x12345678,
+                        auxiliary_prior_bytes: [0; 0x11c],
+                    },
+                    catalog, launch,
+                ).unwrap();
+        let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        assert_eq!(session.catalog.selected_level().unwrap().id(),300001);
+        assert!(!session.catalog.selected_level().unwrap().single_player());
+        assert_eq!(session.catalog.selected_level().unwrap().objective_target(),3500.);
+        assert_eq!(session.world.objective.kind,6);
+        assert_eq!(session.world.objective.target,3500.);
+        assert_eq!(session.difficulty,1);
+        assert_eq!(session.roster.manager.players.len(),2);
+        assert_eq!(session.roster.status.ai_count,1);
+        assert_eq!(session.world.player_money,6500.);
+        assert_eq!(session.world.ledgers.residents.active_count,251);
+        for (slot,(token,kind,difficulty,peer,name)) in [
+            (4,0,2,0,b"Fixture Player".as_slice()),
+            (1,1,0,u32::MAX,b"Explicit Opponent".as_slice()),
+        ].into_iter().enumerate() {
+            let row=&session.saved_player_metadata[slot];
+            assert_eq!(word(row,0),token); assert_eq!(word(row,4),kind);
+            assert_eq!(word(row,40),peer); assert_eq!(word(row,44),difficulty);
+            assert_eq!(&row[8..8+name.len()],name);
+            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x150),token);
+            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x154),kind);
+            if kind == 1 { assert_eq!(word(&session.roster.manager.players[slot].bytes,0x13f4),difficulty); }
+            assert_eq!(session.world.ledgers.players[slot].cash,6500.);
+        }
+        assert!(session.campaign_profile.is_none());
+        assert!(session.network_command_timer.is_none());
+    }
+    #[test]
+    #[ignore = "requires supplied originals; bounded net1 cold reload Host continuation"]
+    fn original_net1_skirmish_cold_reload_continuation() {
+        std::thread::Builder::new().stack_size(64*1024*1024).spawn(|| {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build = read("OPENMT2001_BUILD_FILE");
+        let sun = read("OPENMT2001_SUNCOLS");
+        let parameters = read("OPENMT2001_PARAMETERS");
+        let timetable = read("OPENMT2001_TIMETABLE");
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let default_path =
+            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let scripts = default_path.parent().unwrap().parent().unwrap();
+        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+
+        let names = character_names(&image, &language).unwrap();
+        use openmt2001::skirmish::roster::{Kind, Participant};
+        let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
+        let launch = SkirmishLaunch {
+            level_id:300001, directory:"net1".into(), map:"empty.lua".into(),
+            objective_kind:6, target:3500., difficulty:1,
+            participants:vec![
+                Participant{kind:Kind::Human,token:Some(4),name:b"Fixture Player".to_vec(),ready:true,difficulty:2},
+                Participant{kind:Kind::Ai,token:Some(1),name:b"Explicit Opponent".to_vec(),ready:true,difficulty:0},
+            ],
+        };
+        let inputs = || Inputs {
+                        tree_locators: None,
+                        image: &image,
+                        board: &board,
+                        file: &file,
+                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                            .unwrap(),
+                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        transport_models: openmt2001::traffic::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        road_routes: std::fs::read(
+                            std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
+                        )
+                        .unwrap(),
+                        scripts,
+                        parameters: std::str::from_utf8(&parameters).unwrap(),
+                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                        timetable: std::str::from_utf8(&timetable).unwrap(),
+                        scenario: "NET1",
+                        difficulty: 1,
+                        selected_character: 4,
+                        profile_name: b"Fixture Player",
+                        character_names: &names,
+                    };
+        let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
+        let mut session = Session::initialize_skirmish(inputs(), policy(), catalog, launch).unwrap();
+        let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        assert_eq!(session.catalog.selected_level().unwrap().id(),300001);
+        assert!(!session.catalog.selected_level().unwrap().single_player());
+        assert_eq!(session.catalog.selected_level().unwrap().objective_target(),3500.);
+        assert_eq!(session.world.objective.kind,6);
+        assert_eq!(session.world.objective.target,3500.);
+        assert_eq!(session.difficulty,1);
+        assert_eq!(session.roster.manager.players.len(),2);
+        assert_eq!(session.roster.status.ai_count,1);
+        assert_eq!(session.world.player_money,6500.);
+        assert_eq!(session.world.ledgers.residents.active_count,251);
+        for (slot,(token,kind,difficulty,peer,name)) in [
+            (4,0,2,0,b"Fixture Player".as_slice()),
+            (1,1,0,u32::MAX,b"Explicit Opponent".as_slice()),
+        ].into_iter().enumerate() {
+            let row=&session.saved_player_metadata[slot];
+            assert_eq!(word(row,0),token); assert_eq!(word(row,4),kind);
+            assert_eq!(word(row,40),peer); assert_eq!(word(row,44),difficulty);
+            assert_eq!(&row[8..8+name.len()],name);
+            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x150),token);
+            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x154),kind);
+            if kind == 1 { assert_eq!(word(&session.roster.manager.players[slot].bytes,0x13f4),difficulty); }
+            assert_eq!(session.world.ledgers.players[slot].cash,6500.);
+        }
+        assert!(session.campaign_profile.is_none());
+        assert!(session.network_command_timer.is_none());
+        // A deliberately distinct active objective must not replace selected+870.
+        session.world.objective.target = 3499.;
+        let assets = CommandAssets { image: &image, board: &board, file: &file };
+        let camera = openmt2001::flyby::CameraSample {
+            eye: [100.,120.,100.], target: [0.,0.,0.], up: [0.,1.,0.], vertical_fov: 0.7,
+        };
+        let cameras = crate::save_menu::cameras(None, camera).unwrap();
+        let mut host = crate::live_host::Host::new(camera.eye);
+        host.running = true;
+        let initial = session.world.clock.timing[0];
+        for _ in 0..30 {
+            host.tick(&mut session, &assets);
+            assert!(host.failure.is_none(), "{:?}", host.failure);
+        }
+        assert!(session.world.clock.timing[0] > initial);
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let path = std::path::PathBuf::from("work/save").join(format!("net1-cold-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::create_dir(&path).unwrap();
+        let scratch = Scratch(path);
+        let bytes = session.save_v2(&image, cameras, 1).unwrap();
+        let saved_path = crate::save_menu::write_new(&scratch.0, &bytes).unwrap();
+        let bytes = fs::read(saved_path).unwrap();
+        let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+        assert_eq!(save.level_metadata().unwrap()[0], 300001);
+        assert_eq!(save.game_mode().unwrap(), 1);
+        let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
+        resumed.restore_v2_extension_with_image(&save, &image).unwrap();
+        assert_eq!(resumed.catalog.selected_level().unwrap().objective_target(), 3500.);
+        assert_eq!(resumed.world.objective.target, 3499.);
+        assert_eq!(resumed.world.objective.kind, 6);
+        assert_eq!(resumed.difficulty, 1);
+        assert_eq!(&resumed.saved_player_metadata[..2], &session.saved_player_metadata[..2]);
+        assert!(resumed.campaign_profile.is_none());
+        assert!(resumed.network_command_timer.is_none());
+        let mut other_host = crate::live_host::Host::new(camera.eye);
+        other_host.running = true;
+        // Both hosts restart at the same wall-frame boundary, as visible load does.
+        host = crate::live_host::Host::new(camera.eye); host.running = true;
+        let before = resumed.world.clock.timing[0];
+        for _ in 0..60 {
+            host.tick(&mut session, &assets); other_host.tick(&mut resumed, &assets);
+            assert!(host.failure.is_none(), "{:?}", host.failure);
+            assert!(other_host.failure.is_none(), "{:?}", other_host.failure);
+            assert_eq!(session.world.clock, resumed.world.clock);
+            assert_eq!(session.world.ledgers.businesses, resumed.world.ledgers.businesses);
+            assert_eq!(session.world.pending_world.to_bytes(), resumed.world.pending_world.to_bytes());
+            assert_eq!(session.roster.profiles, resumed.roster.profiles);
+            assert_eq!(session.script_random_state, resumed.script_random_state);
+            for (left, right) in session.roster.manager.players.iter().zip(&resumed.roster.manager.players) {
+                assert_eq!(left.bytes, right.bytes);
+            }
+        }
+        assert!(resumed.world.clock.timing[0] > before);
+        // Complete native+modern serialization compares the entire portable world,
+        // retained scripts, participant metadata and scheduler after continuation.
+        assert_eq!(session.save_v2(&image, cameras, 1).unwrap(), resumed.save_v2(&image, cameras, 1).unwrap());
+
+
+        }).unwrap().join().unwrap();
+    }
+
 }

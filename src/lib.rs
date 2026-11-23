@@ -173,3 +173,4 @@ pub mod human_messages;
 pub mod business_controls;
 pub mod business_permissions;
 pub mod level_catalog;
+pub mod skirmish;
