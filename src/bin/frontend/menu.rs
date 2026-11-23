@@ -295,6 +295,15 @@ fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>,
     }
 }
 impl Menu {
+    // Retained single-mode background is valid while SinglePlayer owns hit/draw.
+    #[cfg(test)]
+    pub(crate) fn participant_test_single_mode_background(&self) -> bool { self.single_mode }
+    #[cfg(test)]
+    pub(crate) fn participant_test_named_profile(&mut self, name: &str) {
+        self.profile.store.names = vec![name.into()];
+        self.profile.store.current = Some(0);
+        self.profile.visible = false;
+    }
     pub fn desktop_quit_active(&self) -> bool { self.desktop_quit.active() }
     pub fn desktop_input_blocked(&self) -> bool {
         self.desktop_quit.active() || self.desktop_exit_requested
@@ -578,6 +587,11 @@ impl Menu {
         .position(|&[l, t, r, b]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b)
     }
     pub fn mouse_button(&mut self, pressed: bool) {
+        self.mouse_button_with_participant_press(pressed, false);
+    }
+    /// `participant_down` belongs to THIS App MouseInput event. Legacy callers
+    /// keep generic release activation and cannot manufacture portrait input.
+    pub(crate) fn mouse_button_with_participant_press(&mut self, pressed: bool, participant_down: bool) {
         if self.desktop_exit_requested { return; }
         if self.desktop_quit.active() {
             let hit = self.assets.prompts.desktop_quit_hit(&self.desktop_quit);
@@ -595,6 +609,14 @@ impl Menu {
                 &mut self.settings_audio,
             );
             return;
+        }
+        if pressed && participant_down && self.single.visible && !self.profile.visible
+            && !self.load.visible && self.pending.is_none()
+            && self.skirmish.error.is_none() && !self.skirmish.visible()
+            && let Some(point) = self.pointer_position
+            && self.single.inspect_participant_press(point,
+                self.desktop_quit.blocked_by_right()) {
+            self.dirty = true;
         }
         // A panel transition can change the hit target without a CursorMoved event.
         if pressed && let Some(point) = self.pointer_position {

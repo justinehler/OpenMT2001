@@ -15,6 +15,33 @@ use winit::{
 };
 type Error = Box<dyn std::error::Error>;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
+
+/// Physical history belongs to App, ahead of every inspection/modal/pending
+/// return. The result is event-local, never queued across redraw/key events.
+#[derive(Default)]
+pub(crate) struct ParticipantLeft { held: bool }
+impl ParticipantLeft {
+    pub(crate) fn sample(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::MouseInput { button: MouseButton::Left, state, .. } => {
+                let down = *state == ElementState::Pressed;
+                let fresh = down && !self.held;
+                self.held = down;
+                fresh
+            }
+            WindowEvent::Focused(false) => { self.held = false; false }
+            _ => false,
+        }
+    }
+}
+/// Same upstream pending gate used by actual App dispatch and regression.
+/// Sampling is deliberately separate and must occur even if this returns early.
+pub(crate) fn route_menu_left(menu: &mut crate::menu::Menu, pressed: bool, fresh: bool) -> bool {
+    if menu.pending.is_none() || menu.desktop_quit_active() {
+        menu.mouse_button_with_participant_press(pressed, fresh);
+        menu.light_click_on_held_entry()
+    } else { false }
+}
 struct Pixels {
     width: u32,
     height: u32,
@@ -152,6 +179,7 @@ struct App {
     frame_profile: Option<FrameProfile>,
     next_redraw: Instant,
     desktop_keys: crate::menu::desktop_quit::Keys,
+    participant_left: ParticipantLeft,
 }
 struct FrameProfile {
     started: Instant,
@@ -316,6 +344,7 @@ impl ApplicationHandler for App {
         if matches!(&event, WindowEvent::RedrawRequested) {
             self.next_redraw = Instant::now() + FRAME_INTERVAL;
         }
+        let participant_down = self.participant_left.sample(&event);
         // Track physical samples BEFORE logical routing, including releases,
         // repeats and events consumed by inspection. No city behavior changes.
         if self.stage == 3 {
@@ -477,10 +506,8 @@ impl ApplicationHandler for App {
                 let mut light_click = false;
                 if let Some(intro) = &mut self.intro {
                     if let Some(menu) = &mut intro.menu {
-                        if menu.pending.is_none() || menu.desktop_quit_active() {
-                            menu.mouse_button(state == ElementState::Pressed);
-                            light_click = menu.light_click_on_held_entry();
-                        }
+                        light_click = route_menu_left(menu,
+                            state == ElementState::Pressed, participant_down);
                     } else if state == ElementState::Pressed {
                         intro.open_menu();
                     }
@@ -807,6 +834,7 @@ pub fn run() -> Result<(), Error> {
         launched: now,
         next_redraw: now,
         desktop_keys: Default::default(),
+        participant_left: Default::default(),
         frame_profile: std::env::var_os("OPENMT2001_PROFILE_PACE").map(|_| FrameProfile {
             started: now,
             frames: 0,
@@ -819,4 +847,29 @@ pub fn run() -> Result<(), Error> {
         return Err(error.into());
     }
     Ok(())
+}
+
+
+#[cfg(test)]
+mod participant_physical_input_tests {
+    use super::*;
+    fn left(down: bool) -> WindowEvent {
+        WindowEvent::MouseInput { device_id: winit::event::DeviceId::dummy(),
+            button: MouseButton::Left,
+            state: if down { ElementState::Pressed } else { ElementState::Released } }
+    }
+    #[test]
+    fn event_local_left_edges_survive_filtered_delivery_and_focus_loss() {
+        let mut sample = ParticipantLeft::default();
+        assert!(sample.sample(&left(true))); // event could be swallowed by inspection/pending
+        assert!(!sample.sample(&WindowEvent::RedrawRequested));
+        assert!(!sample.sample(&WindowEvent::Focused(true)));
+        assert!(!sample.sample(&left(true)), "no repeat edge after nonmouse events");
+        assert!(!sample.sample(&left(false))); // release need not reach Menu
+        assert!(sample.sample(&left(true)), "physical release restores next edge");
+        assert!(!sample.sample(&WindowEvent::Focused(false)));
+        assert!(sample.sample(&left(true)), "missing OS release after focus loss is harmless");
+        assert!(!sample.sample(&left(false)));
+        assert!(!sample.sample(&left(false)));
+    }
 }

@@ -360,6 +360,9 @@ pub struct SinglePlayer {
     scenario_rows: Vec<usize>,
     tutorial_index: usize,
     character: usize,
+    inspected_slot: usize,
+    // Concrete text-control first-line survives clear/repopulate and Back.
+    biography_first: std::cell::Cell<usize>,
     // Runtime/profile bytes; convert to glyph indices only at the draw boundary.
     name: Vec<u8>,
     catalog: Option<openmt2001::level_catalog::Catalog>,
@@ -489,6 +492,8 @@ impl SinglePlayer {
             scenario_rows: vec![],
             tutorial_index: 0,
             character: 0,
+            inspected_slot: 0,
+            biography_first: std::cell::Cell::new(0),
             name: vec![],
             catalog: None,
             profile_path: None,
@@ -507,6 +512,7 @@ impl SinglePlayer {
         self.tutorial_screen = false;
         self.sandbox = sandbox;
         self.character_screen = sandbox;
+        self.inspected_slot = 0;
         self.difficulty = 0;
         // Fail closed before loading another profile's selection/catalog.
         self.request = None;
@@ -596,6 +602,42 @@ impl SinglePlayer {
         if !self.keyboard_enabled(i) { return false; }
         native_generic_click(self.visible, self.busy, self.character_screen, i)
     }
+    /// Identity of the actual active displayed roster slot, never an editable
+    /// human selection. Ordinary non-Custom display has only its human slot.
+    fn participant_character(&self, slot: usize) -> Option<usize> {
+        if slot >= 6 { return None; }
+        if let Some(roster) = self.custom.as_ref().and_then(|c| c.roster.as_ref()) {
+            let record = roster.records[slot];
+            return (record.kind != -1 && (0..10).contains(&record.character))
+                .then_some(record.character as usize);
+        }
+        (slot == 0).then_some(self.character)
+    }
+    fn biography_character(&self) -> usize {
+        self.participant_character(self.inspected_slot).unwrap_or(self.character)
+    }
+    /// Root fallback only: real generic children own their rectangles first.
+    /// Called once on physical Left's fresh DOWN by Menu, never by pointer motion.
+    pub fn inspect_participant_press(&mut self, point: [f32; 2], right: bool) -> bool {
+        if !self.visible || !self.character_screen || self.busy || self.message.is_some()
+            || right || self.hit(point).is_some() { return false; }
+        let mut admitted = false;
+        for slot in 0..6 {
+            let [l,t,r,b] = self.character_panel.bounds[35 + slot];
+            if point[0] > l && point[0] < r && point[1] >= t && point[1] <= b
+                && self.participant_character(slot).is_some() {
+                self.inspected_slot = slot;
+                // Same-slot press still invalidates/rebuilds the menu scene.
+                // Original clear+identify does not reset first-line.
+                admitted = true;
+            }
+        }
+        admitted
+    }
+    fn biography_first_for_rows(&self, rows: usize) -> usize {
+        let first = self.biography_first.get();
+        if first > rows { self.biography_first.set(0); 0 } else { first }
+    }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
     }
@@ -667,6 +709,7 @@ impl SinglePlayer {
         crate::menu::preferred_token::Token::new(value)?
             .save(&crate::menu::preferred_token::path(root, &self.name))?;
         self.character = value;
+        self.inspected_slot = 0;
         if self.custom.is_some() { self.custom_roster()?; }
         Ok(())
     }
@@ -674,7 +717,11 @@ impl SinglePlayer {
         if self.busy && i != 1 {
             return;
         }
-        if self.custom.is_some() && !self.character_screen { self.custom_activate(i); return; }
+        if self.custom.is_some() && !self.character_screen {
+            self.custom_activate(i);
+            if self.character_screen { self.inspected_slot = 0; }
+            return;
+        }
         if self.tutorial_screen {
             match i {
                 0 => {
@@ -771,6 +818,7 @@ impl SinglePlayer {
                         return;
                     }
                     self.character_screen = true;
+                    self.inspected_slot = 0;
                     self.description_first = 0;
                 }
                 1 => self.back(),
@@ -804,7 +852,7 @@ impl SinglePlayer {
             )
         } else if self.character_screen {
             (
-                &self.strings[self.characters[self.character].description],
+                &self.strings[self.characters[self.biography_character()].description],
                 self.character_panel.bounds[68],
             )
         } else {
@@ -829,9 +877,16 @@ impl SinglePlayer {
         };
         if let Ok(lines) = lines {
             let visible = ((b[3] - b[1]) / row_height) as usize;
-            self.description_first = (self.description_first as i32 + delta)
-                .clamp(0, lines.len().saturating_sub(visible) as i32)
-                as usize;
+            // Existing modern wheel convenience retained, scoped explicitly:
+            // no original Character wheel producer is claimed. It now scrolls
+            // the inspected biography; original paint retention remains separate.
+            if self.character_screen {
+                self.biography_first.set((self.biography_first.get() as i32 + delta)
+                    .clamp(0, lines.len().saturating_sub(visible) as i32) as usize);
+            } else {
+                self.description_first = (self.description_first as i32 + delta)
+                    .clamp(0, lines.len().saturating_sub(visible) as i32) as usize;
+            }
         }
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
@@ -1065,7 +1120,7 @@ impl SinglePlayer {
                     };
                 self.image(&mut images, texture, b[part])?;
             }
-            let c = &self.characters[self.character];
+            let c = &self.characters[self.biography_character()];
             shapes.rect(
                 b[67],
                 [
@@ -1088,10 +1143,10 @@ impl SinglePlayer {
             // Native 4a7e26 creates the biography widget as style0 and
             // 4a7e4b selects font2. Its W glyph advances each wrapped row.
             let biography = b[68];
-            for (line, text) in character_biography_lines(&self.scenario_list_tab,
-                &self.strings[c.description], biography[2] - biography[0],
-            )?
-                .iter().skip(self.description_first).enumerate() {
+            let biography_lines = character_biography_lines(&self.scenario_list_tab,
+                &self.strings[c.description], biography[2] - biography[0])?;
+            let first = self.biography_first_for_rows(biography_lines.len());
+            for (line, text) in biography_lines.iter().skip(first).enumerate() {
                 let top = biography[1].trunc() + line as f32 * 10.;
                 if top + 10. > biography[3] { break; }
                 ui::text_widget_style0(&mut scenario_list_fonts,
@@ -1399,5 +1454,185 @@ mod preferred_flow_tests {
             7
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+
+#[cfg(test)]
+mod participant_biography_contract_tests {
+    use super::*;
+    use winit::event::{WindowEvent, MouseButton, ElementState, DeviceId};
+    fn left(menu: &mut crate::menu::Menu, physical: &mut crate::app::ParticipantLeft, down: bool) {
+        let event = WindowEvent::MouseInput { device_id: DeviceId::dummy(),
+            state: if down { ElementState::Pressed } else { ElementState::Released },
+            button: MouseButton::Left };
+        let fresh = physical.sample(&event);
+        crate::app::route_menu_left(menu, down, fresh);
+    }
+    /// Real supplied menu/control dispatch and roster data; synthetic nonzero
+    /// first-line is explicitly a FIELD contract, not an original wheel flow.
+    #[test]
+    #[ignore = "requires original assets/scripts, populated Custom level and owned OPENMT2001_BIOGRAPHY_TEST_ROOT; no game window"]
+    fn supplied_participant_press_child_priority_identity_launch_and_first_line() {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let executable = read("OPENMT2001_EXE");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let scripts = PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
+        let parent = PathBuf::from(std::env::var("OPENMT2001_BIOGRAPHY_TEST_ROOT").unwrap());
+        assert!(parent.is_dir());
+        let root = parent.join(format!("participant-biography-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let assets = crate::menu::Assets::load(&index, &archive,
+            parameter.parent().unwrap().parent().unwrap(),
+            &exe.parent().unwrap().parent().unwrap().join("US/language/usa"),
+            &scripts, root.clone(), root.join("saves"), &executable).unwrap();
+        let mut menu = crate::menu::Menu::new(assets);
+        let mut physical = crate::app::ParticipantLeft::default();
+        // Enter the real named-profile Main -> SinglePlayer -> Custom route.
+        // single_mode intentionally survives as background navigation state.
+        menu.participant_test_named_profile("Participant");
+        let profile = crate::campaign_store::profile_path(&root, b"Participant");
+        crate::menu::preferred_token::Token::new(0).unwrap().save(
+            &crate::menu::preferred_token::path(&root, b"Participant")).unwrap();
+        menu.select(Some(2), false); menu.activate(); // Main SinglePlayer
+        assert!(menu.participant_test_single_mode_background());
+        menu.select(Some(3), false); menu.activate(); // Custom Scenarios
+        assert!(menu.single.visible && !menu.single.character_screen);
+        let id: u32 = std::env::var("OPENMT2001_BIOGRAPHY_LEVEL").unwrap().parse().unwrap();
+        assert_eq!(id / 100000, 5);
+        let chosen = menu.single.catalog.as_ref().unwrap().find(id).expect("supplied Custom level ID");
+        let row = menu.single.custom.as_ref().unwrap().rows.iter()
+            .position(|row| matches!(row, custom::Row::Level(i) if *i == chosen))
+            .expect("supplied level must be an actual Custom menu row");
+        menu.select(Some(11 + row), false); menu.activate(); // actual authored level row
+        menu.select(Some(2), false); menu.activate(); // Easy
+        menu.select(Some(0), false); menu.activate(); // Start -> Character + players.lua
+        assert!(menu.single.character_screen && menu.single.visible && !menu.single.busy);
+        assert!(menu.participant_test_single_mode_background(),
+            "real Character route retains SinglePlayer background mode; do not clear it to pass");
+        let human = menu.single.character;
+        let slot = (1..6).find(|&slot| menu.single.participant_character(slot)
+            .is_some_and(|c| c != human)).expect("fixture needs distinct active opponent");
+        let other = menu.single.participant_character(slot).unwrap();
+        let roster_before = menu.single.custom.as_ref().unwrap().roster.as_ref().unwrap()
+            .records.iter().map(|r| (r.kind,r.character)).collect::<Vec<_>>();
+        let bounds = menu.single.character_panel.bounds[35 + slot];
+        let center = |b: [f32;4]| [(b[0]+b[2])*0.5,(b[1]+b[3])*0.5];
+        let point = center(bounds);
+        assert!(menu.single.hit(point).is_none(), "fixture must reach real root fallback");
+        menu.pointer(point); // motion never selects biography
+        assert_eq!(menu.single.inspected_slot, 0);
+        left(&mut menu, &mut physical, true); // actual Menu -> root-equivalent fresh Left DOWN
+        assert_eq!(menu.single.inspected_slot, slot);
+        assert_eq!(menu.single.biography_character(), other);
+        assert_eq!(menu.single.character, human);
+        left(&mut menu, &mut physical, false);
+        // Controlled first-line field, same-slot press must not reset to0.
+        let rows = character_biography_lines(&menu.single.scenario_list_tab,
+            &menu.single.strings[menu.single.characters[other].description],
+            menu.single.character_panel.bounds[68][2]-menu.single.character_panel.bounds[68][0])
+            .unwrap().len();
+        assert!(rows > 1);
+        menu.single.biography_first.set(1);
+        left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+        assert_eq!(menu.single.biography_first.get(),1);
+        assert_eq!(menu.single.biography_first_for_rows(rows),1);
+        menu.single.biography_first.set(rows);
+        assert_eq!(menu.single.biography_first_for_rows(rows),rows,"equality is retained");
+        menu.single.biography_first.set(rows+1);
+        assert_eq!(menu.single.biography_first_for_rows(rows),0,"only > resets");
+        // Right down and modal consumption cannot manufacture a new left edge.
+        menu.single.inspected_slot=0;
+        menu.desktop_right_button(true); left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,0);
+        menu.desktop_right_button(false); left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,0,"repeated down is not original4");
+        left(&mut menu, &mut physical, false); left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+        assert_eq!(menu.single.inspected_slot,slot);
+        // Exact blocker: press reaches panel, release is physically sampled
+        // while App's pending gate filters it, keyboard dismissal, next fresh
+        // portrait press succeeds. No direct Menu release is delivered.
+        menu.single.inspected_slot=0;
+        menu.pending=Some(0);
+        left(&mut menu, &mut physical, true); // swallowed pending press
+        left(&mut menu, &mut physical, false); // swallowed pending release
+        assert_eq!(menu.single.inspected_slot,0);
+        menu.pending=None; // controlled keyboard dismissal; no MouseInput
+        assert!(!physical.sample(&WindowEvent::RedrawRequested));
+        left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,slot);
+        menu.pending=Some(0);
+        left(&mut menu, &mut physical, false); // release after an admitted press, swallowed
+        menu.pending=None; menu.single.inspected_slot=0;
+        left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,slot,"filtered release must release physical history");
+        left(&mut menu, &mut physical, false);
+        menu.single.inspected_slot=0; menu.pending=Some(0);
+        left(&mut menu, &mut physical, true); menu.pending=None;
+        assert!(!physical.sample(&WindowEvent::RedrawRequested));
+        left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,0,"pending-held press cannot become a new edge");
+        physical.sample(&WindowEvent::Focused(false)); menu.cancel_input();
+        left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,slot,"focus loss resets physical sample");
+        left(&mut menu, &mut physical, false);
+        menu.single.inspected_slot=0;
+        // A generic child wins even with deliberately overlapping portrait art.
+        let child = menu.single.character_panel.bounds[70]; // Start
+        let original = menu.single.character_panel.bounds[35+slot];
+        menu.single.character_panel.bounds[35+slot]=child;
+        let child_point=center(child);
+        assert!(menu.single.hit(child_point).is_some());
+        menu.pointer(child_point); left(&mut menu, &mut physical, true);
+        assert_eq!(menu.single.inspected_slot,0);
+        physical.sample(&WindowEvent::Focused(false));
+        menu.cancel_input(); // cancel release so this child probe cannot launch
+        menu.single.character_panel.bounds[35+slot]=original;
+        // Exact portrait edge rule using actual handler; generic-child-free edges.
+        for (p, admitted) in [([bounds[0],point[1]],false),([bounds[2],point[1]],false),
+            ([point[0],bounds[1]],true),([point[0],bounds[3]],true)] {
+            if menu.single.hit(p).is_some() { continue; } // child priority is separately proved
+            menu.single.inspected_slot=0; menu.pointer(p);
+            left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+            assert_eq!(menu.single.inspected_slot==slot,admitted);
+        }
+        // Controlled inactive-slot admission: same supplied geometry/character,
+        // kind=-1 is the original inactive sentinel (not a natural script claim).
+        let kind = menu.single.custom.as_ref().unwrap().roster.as_ref().unwrap().records[slot].kind;
+        menu.single.custom.as_mut().unwrap().roster.as_mut().unwrap().records[slot].kind=-1;
+        menu.single.inspected_slot=0; menu.pointer(point);
+        left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+        assert_eq!(menu.single.inspected_slot,0);
+        menu.single.custom.as_mut().unwrap().roster.as_mut().unwrap().records[slot].kind=kind;
+        menu.single.busy=true; left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+        assert_eq!(menu.single.inspected_slot,0); menu.single.busy=false;
+        menu.pointer(point); left(&mut menu, &mut physical, true); left(&mut menu, &mut physical, false);
+        // Modern wheel convenience consumes inspected text; no original producer claim.
+        menu.single.scroll(1);
+        assert_eq!(menu.single.biography_character(),other);
+        assert_eq!(menu.single.custom.as_ref().unwrap().roster.as_ref().unwrap().records
+            .iter().map(|r|(r.kind,r.character)).collect::<Vec<_>>(),roster_before);
+        menu.select(Some(0), false); menu.activate(); // real Menu launch still uses human identity
+        assert_eq!(menu.single.request.as_ref().unwrap().character_index,human);
+        assert_eq!(menu.single.request.as_ref().unwrap().profile_name,b"Participant");
+        assert_eq!(menu.single.request.as_ref().unwrap().profile_path,profile);
+        menu.select(Some(1), false); menu.activate(); // actual Menu Back to Custom
+        menu.select(Some(0), false); menu.activate(); // reopen ordinary Character
+        assert_eq!(menu.single.inspected_slot,0);
+        assert_eq!(menu.single.character,human);
+        menu.single.inspected_slot=slot;
+        menu.single.biography_first.set(1);
+        menu.single.activate(3); // real preference write only in owned test root
+        assert_eq!(menu.single.inspected_slot,0,"arrows return inspection to human");
+        assert_eq!(menu.single.character,(human+1)%10);
+        assert_eq!(menu.single.biography_first.get(),1,"arrow clear also retains first");
     }
 }
