@@ -36,6 +36,7 @@ pub struct Assets {
     locator: crate::locator::Assets,
     adjustment: crate::business_adjustment::Assets,
     profile: Option<crate::profile::Profile>,
+    scripts_root: std::path::PathBuf,
     catalog: openmt2001::level_catalog::Catalog,
     profile_root: std::path::PathBuf,
     load: Option<crate::load::Load>,
@@ -138,9 +139,10 @@ impl Assets {
         let catalog = crate::campaign_store::load_catalog(
             &openmt2001::pe::PeImage::parse(executable)?, scripts,
         )?;
-        let load = crate::load::Load::new(
+        let mut load = crate::load::Load::new(
             index, archive, installer, &strings, save_root, profile_root.clone(),
         )?;
+        load.set_level_catalog(&catalog);
         let load = Some(load);
         let labels = [0x63d, 0x63e, 0x63f, 0x640, 0x641, 0x68f, 0x643]
             .iter()
@@ -201,6 +203,7 @@ impl Assets {
             adjustment,
             profile,
             catalog,
+            scripts_root: scripts.to_path_buf(),
             profile_root,
             load,
             base,
@@ -591,7 +594,7 @@ impl Menu {
                     }
                     self.selected = None;
                 }
-                Some(i @ (0 | 2)) => {
+                Some(i @ (0 | 2 | 3)) => {
                     if let Some(current) = self.profile.store.current {
                         let name = &self.profile.store.names[current];
                         let path = crate::campaign_store::profile_path(
@@ -599,7 +602,7 @@ impl Menu {
                         );
                         let mut catalog = self.assets.catalog.clone();
                         match crate::campaign_store::load_progress(&mut catalog, &path) {
-                            Ok(()) => self.single.open(i == 2, name, catalog, path),
+                            Ok(()) => if i == 3 { self.single.open_custom(name, catalog, path, self.assets.scripts_root.clone()); } else { self.single.open(i == 2, name, catalog, path); },
                             Err(error) => self.single.message = Some(error),
                         }
                         self.selected = None;
@@ -714,11 +717,17 @@ impl Menu {
         } else {
             7
         };
-        let next = (self
+        let mut next = (self
             .selected
             .map_or(if delta > 0 { -1 } else { 0 }, |i| i as i32)
             + delta)
             .rem_euclid(count as i32) as usize;
+        if self.single.visible {
+            for _ in 0..count {
+                if self.single.keyboard_enabled(next) { break; }
+                next = (next as i32 + delta.signum()).rem_euclid(count as i32) as usize;
+            }
+        }
         self.select(Some(next), false);
     }
     pub fn input(&mut self, text: &str) {

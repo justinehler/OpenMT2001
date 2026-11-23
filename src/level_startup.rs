@@ -739,10 +739,8 @@ impl Roster {
         result
     }
 
-    /// Fresh, script-created city roster. AI ownership maintenance observes the
-    /// same city records, and accounting starts from the constructed players.
-    /// Player-owned initial businesses require their full valuation boundary;
-    /// ordinary original fresh maps have city-owned initial businesses.
+    /// Fresh, script-created city roster with no ownership allocation boundary.
+    /// Existing zero-owned callers retain their bounded startup behavior.
     pub fn initialize_world(
         &mut self,
         pending: &crate::player_script::PendingRoster,
@@ -751,22 +749,34 @@ impl Roster {
         world: &mut World,
         difficulty: i32,
     ) -> Result<(), String> {
-        let mapping = crate::ai_ownership::group_mapping(construction.image)?;
-        let business_categories = std::array::from_fn(|slot| {
-            let business = &world.ledgers.businesses[slot];
-            if business[0x21c] == 0 {
-                return -1;
-            }
-            let building = u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize;
-            let Some(building) = world.buildings.get(building) else {
-                return -1;
-            };
-            let reference = u32::from_le_bytes(building[0x40..0x44].try_into().unwrap());
-            reference
-                .checked_sub(0x617628)
-                .map_or(-1, |offset| (offset / 0x17c) as i16)
-        });
-        self.initialize(
+        self.initialize_world_with_ownership_allocator(
+            pending,
+            inputs,
+            construction,
+            world,
+            difficulty,
+            |_| Err("fresh roster ownership requires a host allocation boundary".into()),
+        )
+    }
+
+    /// Fresh roster with authored ownership. Run original467a30/4708a0 against
+    /// the live city and script-mutated catalog immediately after each actual
+    /// AI reset, in initialize_created's original order. Allocation identities
+    /// must share the host's roster/runtime arena.
+    pub fn initialize_world_with_ownership_allocator(
+        &mut self,
+        pending: &crate::player_script::PendingRoster,
+        inputs: crate::player_script::RosterInputs<'_>,
+        construction: &mut crate::player_constructor::RosterConstruction<'_>,
+        world: &mut World,
+        difficulty: i32,
+        mut allocate_ownership: impl FnMut(usize) -> Result<u32, String>,
+    ) -> Result<(), String> {
+        let image = construction.image;
+        // Temporarily detach storage so initialize can borrow the roster. Always
+        // restore it before propagating errors, preserving partial native writes.
+        let mut ownership = std::mem::take(&mut self.ai_ownership);
+        let result = self.initialize(
             pending,
             inputs,
             construction,
@@ -784,33 +794,20 @@ impl Roster {
                     .iter_mut()
                     .find(|p| p.reference == reference)
                     .ok_or("fresh ownership player is unresolved")?;
-                let mut ownership = crate::ai_ownership::State {
-                    completed_groups: player.bytes[0xaa8],
-                    groups: std::array::from_fn(|i| {
-                        player.bytes[0xaac + i * 12..0xaac + (i + 1) * 12]
-                            .try_into()
-                            .unwrap()
-                    }),
-                    lists: std::array::from_fn(|_| crate::ai_ownership::BusinessList {
-                        entries: vec![],
-                        active_count: 0,
-                    }),
-                };
-                ownership.maintain(
-                    player.bytes[0x1bc],
-                    player.bytes[0x178..0x1ac].try_into().unwrap(),
-                    &mapping,
+                crate::ai_ownership::maintain_player(
+                    &mut ownership,
+                    player,
+                    &world.categories,
+                    &world.buildings,
                     &world.ledgers.businesses,
-                    &business_categories,
-                    |_| Err("fresh roster unexpectedly owns an initial business".into()),
-                )?;
-                player.bytes[0xaa8] = ownership.completed_groups;
-                for (i, group) in ownership.groups.iter().enumerate() {
-                    player.bytes[0xaac + i * 12..0xaac + (i + 1) * 12].copy_from_slice(group);
-                }
-                Ok(())
+                    image,
+                    &world.catalog.info,
+                    &mut allocate_ownership,
+                )
             },
-        )?;
+        );
+        self.ai_ownership = ownership;
+        result?;
         world.ledgers.players = self
             .manager
             .players

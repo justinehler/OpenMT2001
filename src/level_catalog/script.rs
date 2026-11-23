@@ -41,58 +41,85 @@ pub fn load(
     image: &PeImage<'_>,
     source: &[u8],
     development: bool,
-    mut directory: impl FnMut(&[u8]) -> Result<Option<i32>, String>,
+    directory: impl FnMut(&[u8]) -> Result<Option<i32>, String>,
+) -> Result<Catalog, String> {
+    load_sources(image, &[("GAMESTART/hub.lua", source)], development, directory)
+}
+
+/// Execute buffers in caller order in one runtime and catalog. The host owns
+/// discovery/containment; Lua receives only the existing registration callbacks.
+pub fn load_sources(
+    image: &PeImage<'_>,
+    sources: &[(&str, &[u8])],
+    development: bool,
+    directory: impl FnMut(&[u8]) -> Result<Option<i32>, String>,
 ) -> Result<Catalog, String> {
     let mut runtime = Runtime::new()?;
     register_language(&mut runtime, image)?;
+    register_sources(&mut runtime, sources, development, directory)
+}
+
+fn register_sources(
+    runtime: &mut Runtime,
+    sources: &[(&str, &[u8])],
+    development: bool,
+    mut directory: impl FnMut(&[u8]) -> Result<Option<i32>, String>,
+) -> Result<Catalog, String> {
     runtime.register_coerced("openmt_level_literal", 0, "nsss")?;
     runtime.register_coerced("openmt_level_localized", 1, "nsnn")?;
     runtime.execute("level registration table",b"Frontend={RegisterLevel=openmt_level_literal, RegisterLevel_Id=openmt_level_localized}; openmt_level_literal=nil; openmt_level_localized=nil",&mut|_,_|Err("unexpected level binding callback".into()))?;
     let mut catalog = Catalog::default();
-    runtime.execute("GAMESTART/hub.lua", source, &mut |id, args| {
-        let number = |i: usize| -> Result<u32, String> {
-            match args.get(i) {
-                Some(Value::Number(n)) => Ok(ftol_low_word(*n) as u32),
-                _ => Err("level registration numeric coercion missing".into()),
+    let mut registrations = 0usize;
+    for &(name, source) in sources {
+        runtime.execute(name, source, &mut |id, args| {
+            registrations += 1;
+            if registrations > 16_384 {
+                return Err("level registration callback limit exceeded".into());
             }
-        };
-        let text = |i: usize| -> Result<Vec<u8>, String> {
-            match args.get(i) {
-                Some(Value::Bytes(s)) => Ok(s.clone()),
-                _ => Err("level registration string conversion failed".into()),
+            let number = |i: usize| -> Result<u32, String> {
+                match args.get(i) {
+                    Some(Value::Number(n)) => Ok(ftol_low_word(*n) as u32),
+                    _ => Err("level registration numeric coercion missing".into()),
+                }
+            };
+            let text = |i: usize| -> Result<Vec<u8>, String> {
+                match args.get(i) {
+                    Some(Value::Bytes(s)) => Ok(s.clone()),
+                    _ => Err("level registration string conversion failed".into()),
+                }
+            };
+            let level_id = number(0)? as i32;
+            if !development && level_id / 100000 >= 7 {
+                return Ok(None);
             }
-        };
-        let level_id = number(0)? as i32;
-        if !development && level_id / 100000 >= 7 {
-            return Ok(None);
-        }
-        let token = text(1)?;
-        let Some(checksum) = directory(&token)? else {
-            return Ok(None);
-        };
-        let labels = match id {
-            0 => Labels::Literal {
-                title: text(2)?,
-                description: text(3)?,
-            },
-            1 => Labels::Localized {
-                title: number(2)?,
-                description: number(3)?,
-            },
-            _ => return Err("unknown level registration callback".into()),
-        };
-        catalog.register(
-            Registration {
-                id: level_id,
-                directory: token,
-                labels,
-                checksum,
-            },
-            development,
-            true,
-        )?;
-        Ok(None)
-    })?;
+            let token = text(1)?;
+            let Some(checksum) = directory(&token)? else {
+                return Ok(None);
+            };
+            let labels = match id {
+                0 => Labels::Literal {
+                    title: text(2)?,
+                    description: text(3)?,
+                },
+                1 => Labels::Localized {
+                    title: number(2)?,
+                    description: number(3)?,
+                },
+                _ => return Err("unknown level registration callback".into()),
+            };
+            catalog.register(
+                Registration {
+                    id: level_id,
+                    directory: token,
+                    labels,
+                    checksum,
+                },
+                development,
+                true,
+            )?;
+            Ok(None)
+        }).map_err(|error| format!("{name}: {error}"))?;
+    }
     Ok(catalog)
 }
 
@@ -145,6 +172,29 @@ pub fn profile_text(catalog: &Catalog) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_buffers_share_globals_callbacks_and_catalog_order() {
+        let mut runtime = Runtime::new().unwrap();
+        let sources: &[(&str, &[u8])] = &[
+            ("GAMESTART", b"custom_id=500000; Frontend.RegisterLevel(200001,'base','Base','Description')"),
+            ("CUSTOM/first", b"Frontend.RegisterLevel(custom_id,'custom/first','Literal','Details'); Frontend.RegisterLevel_Id(500001,'custom/second',12,34)"),
+            ("CUSTOM/last", b"Frontend.RegisterLevel(custom_id,'duplicate','Duplicate','D'); Frontend.RegisterLevel(700000,'dev','Dev','D'); Frontend.RegisterLevel(500002,'missing','Missing','D')"),
+        ];
+        let mut queried = Vec::new();
+        let catalog = register_sources(&mut runtime, sources, false, |name| {
+            queried.push(name.to_vec());
+            Ok(if name == b"missing" { None } else { Some(123) })
+        }).unwrap();
+        assert_eq!(catalog.levels.iter().map(|l| l.id()).collect::<Vec<_>>(), [200001,500000,500001,500000]);
+        assert_eq!(catalog.find(500000), Some(1));
+        assert!(!queried.iter().any(|name| name == b"dev"));
+        assert_eq!(catalog.levels[2].directory(), b"custom/second");
+        assert!(matches!(catalog.levels[1].labels(), Labels::Literal { title, description }
+            if title == b"Literal" && description == b"Details"));
+        assert!(matches!(catalog.levels[2].labels(), Labels::Localized { title: 12, description: 34 }));
+        let empty = register_sources(&mut Runtime::new().unwrap(), &[], false, |_| panic!("no callback expected")).unwrap();
+        assert!(empty.levels.is_empty());
+    }
     #[test]
     #[ignore = "requires original executable and GAMESTART registration source"]
     fn original_registration_and_profile_data() {

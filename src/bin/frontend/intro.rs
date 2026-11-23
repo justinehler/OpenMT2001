@@ -141,8 +141,13 @@ impl Assets {
         let dust = crate::dust_scene::Assets::load(&index, &archive)?;
         let game_options = crate::game_options::Assets::load(
             &index, &archive, &paths.installer, &paths.language)?;
-        let save_dialog = crate::save_dialog::Assets::load(
+        let mut save_dialog = crate::save_dialog::Assets::load(
             &index, &archive, &paths.installer, &paths.language)?;
+        let save_catalog = crate::campaign_store::load_catalog(
+            &openmt2001::pe::PeImage::parse(&executable)?,
+            scripts,
+        )?;
+        save_dialog.set_level_catalog(&save_catalog);
         let settings_menu = crate::settings_menu::Assets::load(
             &index, &archive, &paths.installer, &paths.language,
         )?;
@@ -703,9 +708,10 @@ impl SceneInputs {
         let selected_save_root = match &start {
             WorkerStart::Saved(_, root) => root.clone(),
             WorkerStart::Skirmish(request) => Some(request.save_root.clone()),
-            WorkerStart::Fresh(_) => None,
+            WorkerStart::Fresh(setup) => {
+                crate::save_menu::profile_root_for_campaign(&self.profile_root, &setup.profile_path)
+            }
         };
-        let is_saved_start = matches!(&start, WorkerStart::Saved(..) | WorkerStart::Skirmish(..));
         let result = match start {
             WorkerStart::Skirmish(request) => self.fresh_skirmish(request, camera, &mut cache),
             WorkerStart::Fresh(setup) => {
@@ -713,6 +719,9 @@ impl SceneInputs {
                     crate::singleplayer::Preview::Scenario(id) => {
                         crate::scenarios::live_tutorial(id)
                             || matches!(id, 200001..=200016 | 400001)
+                            || setup.catalog.find(id).is_some_and(|index| {
+                                crate::fresh_city::custom::valid_level(&setup.catalog.levels[index])
+                            })
                     }
                     crate::singleplayer::Preview::Sandbox => true,
                 };
@@ -729,15 +738,9 @@ impl SceneInputs {
         };
         match result {
             Ok((mut loaded, mut session)) => {
-                let save_profile_root = if is_saved_start {
-                    selected_save_root
-                } else {
-                    session.campaign_profile.as_ref()
-                        .and_then(|campaign| {
-                        crate::save_menu::profile_root_for_campaign(
-                            &self.profile_root, campaign)
-                    })
-                };
+                // Ordinary saves belong to the selected profile independently
+                // of whether this session may persist campaign progression.
+                let save_profile_root = selected_save_root;
                 loaded.save_profile_root = save_profile_root.clone();
                 let saved_auction = loaded.saved_auction.take();
                 let restored_presentation = std::mem::take(&mut loaded.restored_presentation);
@@ -1206,12 +1209,23 @@ impl SceneInputs {
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         let (scenario_id, scenario_token) = match setup.preview {
             crate::singleplayer::Preview::Scenario(id) => {
-                let scenario = crate::scenarios::find(id)?;
-                (id, scenario.token)
+                if let Some(level) = setup.catalog.find(id).map(|i| &setup.catalog.levels[i])
+                    && crate::fresh_city::custom::valid_level(level)
+                {
+                    (
+                        id,
+                        std::str::from_utf8(level.directory())
+                            .map_err(|_| "custom scenario directory is not UTF-8")?
+                            .to_owned(),
+                    )
+                } else {
+                    let scenario = crate::scenarios::find(id)?;
+                (id, scenario.token.to_owned())
+                }
             }
             // Supplied v1.4 GAMESTART registers ID 400002 as "sandbox";
             // its hub creates the resident city and must run through Session.
-            crate::singleplayer::Preview::Sandbox => (400002, "sandbox"),
+            crate::singleplayer::Preview::Sandbox => (400002, "sandbox".to_owned()),
         };
         if setup.catalog.find(scenario_id).is_none() {
             return Err(format!(
@@ -1235,57 +1249,81 @@ impl SceneInputs {
             crate::singleplayer::Difficulty::Medium => 1,
             crate::singleplayer::Difficulty::Hard => 2,
         };
+        let is_custom = setup.catalog.find(scenario_id).is_some_and(|index| {
+            crate::fresh_city::custom::valid_level(&setup.catalog.levels[index])
+        });
         // Reproducible preview policy. These unspecified prior bytes are not
         // original captured stack data, nor is seed0 the original host seed.
-        let mut session =
-            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
-                crate::fresh_city::Inputs {
-                    tree_locators: Some(
-                        openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
-                    ),
-                    image: &image,
-                    board: &board,
-                    file: &file,
-                    people,
-                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(
-                        &image,
-                        &index,
-                        &self.archive,
-                    )?,
-                    road_routes: fs::read(self.installer.join("Standard/route_smalltable.bin"))
-                        .map_err(|e| format!("road route table: {e}"))?,
-                    transport_models: openmt2001::traffic::models::Models::from_original(
-                        &image,
-                        &index,
-                        &self.archive,
-                    )?,
-                    scripts,
-                    parameters: &parameters,
-                    era_styles: crate::fresh_city::load_era_styles(
-                        &self.installer.join("parameters"),
-                    )?,
-                    timetable: &timetable,
-                    scenario: scenario_token,
-                    difficulty,
-                    selected_character: setup.character_index,
-                    profile_name: &setup.profile_name,
-                    character_names: &self.character_names,
-                },
-                crate::fresh_city::Policy {
-                    seed: 0,
-                    auxiliary_prior_bytes: [0; 0x11c],
-                },
+        let input = crate::fresh_city::Inputs {
+            tree_locators: Some(
+                openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
+            ),
+            image: &image,
+            board: &board,
+            file: &file,
+            people,
+            vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                &image,
+                &index,
+                &self.archive,
+            )?,
+            road_routes: fs::read(self.installer.join("Standard/route_smalltable.bin"))
+                .map_err(|e| format!("road route table: {e}"))?,
+            transport_models: openmt2001::traffic::models::Models::from_original(
+                &image,
+                &index,
+                &self.archive,
+            )?,
+            scripts,
+            parameters: &parameters,
+            era_styles: crate::fresh_city::load_era_styles(&self.installer.join("parameters"))?,
+            timetable: &timetable,
+            scenario: &scenario_token,
+            difficulty,
+            selected_character: setup.character_index,
+            profile_name: &setup.profile_name,
+            character_names: &self.character_names,
+        };
+        let seed = if is_custom {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "offline launch clock predates Unix epoch")?
+                .as_secs() as u32
+        } else {
+            0
+        };
+        let policy = crate::fresh_city::Policy {
+            seed,
+            auxiliary_prior_bytes: [0; 0x11c],
+        };
+        let mut session = if is_custom {
+            crate::fresh_city::Session::initialize_custom_with_style(
+                input,
+                policy,
                 setup.catalog.clone(),
-                setup.profile_path.clone(),
                 &self.style,
                 self.compatibility,
-            )?;
+            )?
+        } else {
+            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
+                input,
+                policy,
+                setup.catalog.clone(),
+                setup.profile_path.clone(), &self.style,
+                self.compatibility,
+            )?
+        };
         eprintln!(
-            "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; deterministic host seed0 / auxiliary prior bytes zero; player roster initialized; live worker enabled",
+            "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; host seed{seed} / auxiliary prior bytes zero; player roster initialized; live worker enabled",
             scenario_token,
             session.world.ledgers.residents.active_count,
             session.models.bindings.len()
         );
+        if is_custom {
+            eprintln!(
+                "Authored custom offline launch used host seed{seed}; campaign progress isolated"
+            );
+        }
         session.setup = Some(setup);
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         Ok((loaded, session))
@@ -1368,6 +1406,13 @@ impl SceneInputs {
         if let Some(metadata) = metadata
             && let Some(filename) = metadata.profile_filename
         {
+            if session
+                .catalog
+                .selected_level()
+                .is_some_and(crate::fresh_city::custom::valid_level)
+            {
+                return Err("Custom save cannot claim campaign progress ownership".into());
+            }
             let profile = self.profile_root.join("campaign").join(&filename);
             let owner = crate::save_menu::profile_root_for_campaign(&self.profile_root, &profile);
             let selected_matches = selected_root.is_none_or(|selected| selected == owner.as_deref());

@@ -12,6 +12,8 @@ pub mod cards;
 pub mod property;
 #[path="session_scenarios.rs"]
 pub mod scenarios;
+#[path="custom_session.rs"]
+pub mod custom;
 #[path="session_restore.rs"]
 pub mod restore;
 #[path="tutorial_announcement.rs"]
@@ -833,6 +835,21 @@ impl<'data> Session<'data> {
             style, crate::compatibility::Mode::StrictV14, Some(launch))
     }
 
+    /// Ordinary authored single-player startup, with no campaign progress owner.
+    pub fn initialize_custom_with_style(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        style: &openmt2001::board_style::Style,
+        compatibility: crate::compatibility::Mode,
+    ) -> Result<Self, String> {
+        let level = catalog.levels.iter().find(|level|
+            custom::same_directory(level.directory(), input.scenario.as_bytes()))
+            .ok_or("custom scenario missing from registered catalog")?;
+        if !custom::valid_level(level) { return Err("invalid custom scenario identity".into()); }
+        Self::initialize_with_catalog(input, policy, Some(catalog), None, false,
+            Some(style), compatibility, None)
+    }
+
     fn initialize_with_catalog(mut input: Inputs<'_, 'data>, policy: Policy,
         supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
@@ -848,13 +865,18 @@ impl<'data> Session<'data> {
             catalog.unlock_first();
             catalog
         };
-        let selected=catalog.find_directory(input.scenario.as_bytes()).ok_or("scenario missing from original level catalog")?;
+        let selected=catalog.find_directory(input.scenario.as_bytes()).or_else(|| {
+            catalog.levels.iter().position(|level| custom::valid_level(level)
+                && custom::same_directory(level.directory(), input.scenario.as_bytes()))
+        }).ok_or("scenario missing from original level catalog")?;
         let id=catalog.levels[selected].id();
+        let is_custom = custom::valid_level(&catalog.levels[selected]);
+        let profile_path = if is_custom { None } else { profile_path };
         let saved_net = load_mode && (300000..=300006).contains(&id)
             && !catalog.levels[selected].single_player()
             && catalog.levels[selected].directory().eq_ignore_ascii_case(
                 format!("net{}", id - 300000).as_bytes());
-        if skirmish.is_none() && !saved_net && !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
+        if skirmish.is_none() && !saved_net && !is_custom && !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
             return Err("fresh-city initialization requires a supported scenario, Tutorials 1 through 12, Bonus or Sandbox".into());
         }
         if let Some(launch) = &skirmish {
@@ -878,7 +900,9 @@ impl<'data> Session<'data> {
         if let Some(style) = style { style.apply_categories(&mut world.categories); }
         let mut scripts = level_startup::Scripts::new(input.image)?;
         let read = |relative: &str| {
-            fs::read(input.scripts.join(relative)).map_err(|e| format!("{relative}: {e}"))
+            if is_custom { custom::read(input.scripts, relative) } else {
+                fs::read(input.scripts.join(relative)).map_err(|e| format!("{relative}: {e}"))
+            }
         };
         // Explicit original nested sources. Runtime normalizes their original
         // script names; arbitrary scripts outside this verified stage are rejected.
@@ -900,6 +924,8 @@ impl<'data> Session<'data> {
         if skirmish.is_some() || saved_net {
             let relative = format!("{}/initialpref.lua", input.scenario);
             scripts.runtime.script_buffer(&format!("scripts/{relative}"), &read(&relative)?)?;
+        } else if is_custom {
+            custom::register_sources(&mut scripts.runtime, input.scripts, input.scenario)?;
         } else {
             scenarios::register_sources(&mut scripts.runtime,input.scripts)?;
         }
@@ -1058,13 +1084,23 @@ impl<'data> Session<'data> {
         // Explicit fresh host arena: zero-filled allocations and opaque,
         // nonoverlapping logical identities, never native host addresses.
         let mut demand_ready = world.city.ai_demand.ready;
-        let scenario_ai = match fs::read(input.scripts.join(format!("{}/ai.lua", input.scenario))) {
+        let scenario_ai = if is_custom {
+            custom::read_optional(input.scripts, &format!("{}/ai.lua", input.scenario))?
+        } else { match fs::read(input.scripts.join(format!("{}/ai.lua", input.scenario))) {
             Ok(bytes) => Some(bytes),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.to_string()),
-        };
+        }};
         let cash = world.player_money;
-        roster.initialize_world(
+        let roster_allocation_next = std::cell::Cell::new(allocation_next);
+        let allocate_roster = |size: usize| -> Result<u32, String> {
+            let reference = roster_allocation_next.get();
+            let span = u32::try_from(size).map_err(|_| "player allocation size overflow")?
+                .checked_add(0xfff).ok_or("player allocation alignment overflow")? & !0xfff;
+            roster_allocation_next.set(reference.checked_add(span).ok_or("player arena exhausted")?);
+            Ok(reference)
+        };
+        roster.initialize_world_with_ownership_allocator(
             &pending,
             openmt2001::player_script::RosterInputs {
                 names,
@@ -1079,15 +1115,7 @@ impl<'data> Session<'data> {
                 registry: &mut random_registry,
                 global_reset: &mut demand_ready,
                 allocate: &mut |size| {
-                    let reference = allocation_next;
-                    let span = u32::try_from(size)
-                        .map_err(|_| "player allocation size overflow")?
-                        .checked_add(0xfff)
-                        .ok_or("player allocation alignment overflow")?
-                        & !0xfff;
-                    allocation_next = allocation_next
-                        .checked_add(span)
-                        .ok_or("player arena exhausted")?;
+                    let reference = allocate_roster(size)?;
                     Ok(Some(openmt2001::player_constructor::Allocation {
                         reference,
                         bytes: vec![0; size],
@@ -1103,7 +1131,9 @@ impl<'data> Session<'data> {
             },
             &mut world,
             input.difficulty,
+            |size| allocate_roster(size),
         )?;
+        allocation_next = roster_allocation_next.get();
         world.city.ai_demand.ready = demand_ready;
         let mut ownership_lists = std::mem::take(&mut roster.ai_ownership);
         let ownership_catalog = world.catalog.info.clone();

@@ -77,6 +77,7 @@ pub struct Assets {
     tab2: Vec<u8>,
     tab4: Vec<u8>,
     strings: Vec<Vec<u8>>,
+    level_text: crate::load::LevelTextCatalog,
     slider_textures: Vec<Surface>,
 }
 impl Assets {
@@ -159,8 +160,13 @@ impl Assets {
             tab2,
             tab4,
             strings,
+            level_text: crate::load::LevelTextCatalog::default(),
             slider_textures,
         })
+    }
+    /// Retain registered metadata using this panel's active language glyphs.
+    pub fn set_level_catalog(&mut self, catalog: &openmt2001::level_catalog::Catalog) {
+        self.level_text = crate::load::LevelTextCatalog::new(catalog, &self.strings);
     }
     pub fn bounds(&self, button: Button) -> [f32; 4] {
         self.bounds[match button {
@@ -190,13 +196,13 @@ impl Assets {
             return 0;
         };
         let Ok(words) = slot.metadata else { return 0 };
-        let Some((_, description)) = crate::load::level_labels(words[0]) else {
+        let Some(description) = self.level_text.description(words[0], &self.strings) else {
             return 0;
         };
         let info = self.bounds[21];
         crate::prompt::wrap_with_gap(
             &self.tab2,
-            &self.strings[description],
+            description,
             (info[2] - info[0] - 18.).trunc() as i32,
             -1,
         )
@@ -297,9 +303,7 @@ impl Assets {
                 0xffffffff,
             )?;
             if let Ok(words) = slot.metadata {
-                let level = crate::load::level_labels(words[0])
-                    .and_then(|(id, _)| self.strings.get(id).cloned())
-                    .unwrap_or_else(|| crate::load::ascii(&format!("Level {}", words[0])));
+                let level = self.level_text.title(words[0], &self.strings);
                 ui::text_widget_style4(&mut font1, &self.tab1, &level, b[15], 0xffffffff)?;
                 ui::text_widget_style4(
                     &mut font1,
@@ -319,11 +323,11 @@ impl Assets {
                     b[19],
                     0xffffffff,
                 )?;
-                if let Some((_, description)) = crate::load::level_labels(words[0]) {
+                if let Some(description) = self.level_text.description(words[0], &self.strings) {
                     let info = b[21];
                     let (offsets, wrapped) = crate::prompt::wrap_with_gap(
                         &self.tab2,
-                        &self.strings[description],
+                        description,
                         (info[2] - info[0] - 18.).trunc() as i32,
                         -1,
                     )?;
@@ -946,6 +950,7 @@ mod tests {
             tab2: Vec::new(),
             tab4: Vec::new(),
             strings: Vec::new(),
+            level_text: crate::load::LevelTextCatalog::default(),
             slider_textures: Vec::new(),
         };
         assert_eq!(

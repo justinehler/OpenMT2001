@@ -31,6 +31,7 @@ pub struct Load {
     title_fonts: Vec<Surface>,
     title_tab: Vec<u8>,
     strings: Vec<Vec<u8>>,
+    level_text: LevelTextCatalog,
     directories: Vec<PathBuf>,
     app_root: PathBuf,
     import_directory: PathBuf,
@@ -96,6 +97,7 @@ impl Load {
             title_tab: fs::read(installer.join("Standard/fonts/coppgoth23p.tab"))
                 .map_err(|e| e.to_string())?,
             strings: strings.iter().map(|s| s.to_vec()).collect(),
+            level_text: LevelTextCatalog::default(),
             directories: vec![directory.clone()],
             app_root: profile_root.clone(),
             import_directory: directory,
@@ -113,6 +115,11 @@ impl Load {
             message: None,
             delete_confirmation: None,
         })
+    }
+    /// Retain registered metadata using this panel's active language glyphs.
+    pub fn set_level_catalog(&mut self, catalog: &openmt2001::level_catalog::Catalog) {
+        self.level_text = LevelTextCatalog::new(catalog, &self.strings);
+        self.description_first = 0;
     }
     /// Called when opening Load, since the selected profile can change after
     /// the menu assets were constructed.
@@ -265,8 +272,7 @@ impl Load {
     fn info_rows(&self) -> usize {
         self.chosen.and_then(|index| self.entries.get(index))
             .and_then(|entry| entry.metadata.as_ref().ok())
-            .and_then(|words| level_labels(words[0]))
-            .and_then(|(_, id)| self.strings.get(id))
+            .and_then(|words| self.level_text.description(words[0], &self.strings))
             .and_then(|text| crate::prompt::wrap_with_gap(
                 &self.description_tab, text,
                 (self.bounds[21][2] - self.bounds[21][0] - 18.).trunc() as i32, -1,
@@ -487,11 +493,7 @@ impl Load {
                 0xffffffff,
             )?;
             if let Ok(words) = entry.metadata {
-                let ids = level_labels(words[0]);
-                let title = ids
-                    .and_then(|(i, _)| self.strings.get(i))
-                    .cloned()
-                    .unwrap_or_else(|| ascii(&format!("Level {}", words[0])));
+                let title = self.level_text.title(words[0], &self.strings);
                 ui::text(
                     &mut fonts,
                     &self.tab,
@@ -520,10 +522,10 @@ impl Load {
                     true,
                     0xffffffff,
                 )?;
-                if let Some((_, id)) = ids {
+                if let Some(description) = self.level_text.description(words[0], &self.strings) {
                     let info = self.bounds[21];
                     let (offsets, wrapped) = crate::prompt::wrap_with_gap(
-                        &self.description_tab, &self.strings[id],
+                        &self.description_tab, description,
                         (info[2] - info[0] - 18.).trunc() as i32, -1,
                     )?;
                     for (line, range) in offsets.windows(2)
@@ -646,6 +648,44 @@ fn row_columns([left, top, right, bottom]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
     ([left + 3., top, left + 151., bottom],
      [left + 155., top, right - 16., bottom])
 }
+/// Owned glyph text only: no script runtime, filesystem, or borrowed catalog.
+/// First duplicate ID wins, matching Catalog::find.
+#[derive(Default)]
+pub(crate) struct LevelTextCatalog {
+    entries: std::collections::BTreeMap<u32, (Option<Vec<u8>>, Option<Vec<u8>>)>,
+}
+impl LevelTextCatalog {
+    pub(crate) fn new(catalog: &openmt2001::level_catalog::Catalog, strings: &[Vec<u8>]) -> Self {
+        use openmt2001::level_catalog::Labels;
+        let mut result = Self::default();
+        for level in &catalog.levels {
+            result.entries.entry(level.id()).or_insert_with(|| match level.labels() {
+                Labels::Localized { title, description } => (
+                    strings.get(title as usize).cloned(),
+                    strings.get(description as usize).cloned(),
+                ),
+                Labels::Literal { title, description } => {
+                    // Match the custom picker's byte-to-original-font conversion.
+                    let glyphs = |text: Vec<u8>| text.into_iter()
+                        .map(|b| if (32..=126).contains(&b) { b - 32 } else { 31 })
+                        .collect();
+                    (Some(glyphs(title)), Some(glyphs(description)))
+                }
+            });
+        }
+        result
+    }
+    pub(crate) fn title(&self, id: u32, strings: &[Vec<u8>]) -> Vec<u8> {
+        self.entries.get(&id).and_then(|text| text.0.as_ref())
+            .or_else(|| level_labels(id).and_then(|(title, _)| strings.get(title)))
+            .cloned().unwrap_or_else(|| ascii(&format!("Level {id}")))
+    }
+    pub(crate) fn description<'a>(&'a self, id: u32, strings: &'a [Vec<u8>]) -> Option<&'a [u8]> {
+        self.entries.get(&id).and_then(|text| text.1.as_ref())
+            .or_else(|| level_labels(id).and_then(|(_, description)| strings.get(description)))
+            .filter(|text| !text.is_empty()).map(Vec::as_slice)
+    }
+}
 // GAMESTART/hub.lua level IDs + original4dc80d numeric language registrations.
 pub(crate) fn level_labels(id: u32) -> Option<(usize, usize)> {
     match id {
@@ -728,6 +768,69 @@ pub(crate) fn wrapped(
 mod tests {
     use super::*;
 
+    fn register_text(catalog: &mut openmt2001::level_catalog::Catalog, id: i32,
+        labels: openmt2001::level_catalog::Labels) {
+        catalog.register(openmt2001::level_catalog::Registration {
+            id, directory: b"CUSTOM/Example".to_vec(), labels, checksum: 0,
+        }, false, true).unwrap();
+    }
+
+    #[test]
+    fn registered_literal_text_retains_first_id_and_empty_description() {
+        use openmt2001::level_catalog::{Catalog, Labels};
+        let mut catalog = Catalog::default();
+        register_text(&mut catalog, 500000, Labels::Literal {
+            title: b"Custom title".to_vec(), description: b"Custom description".to_vec(),
+        });
+        register_text(&mut catalog, 500000, Labels::Literal {
+            title: b"Duplicate".to_vec(), description: vec![],
+        });
+        register_text(&mut catalog, 500001, Labels::Literal {
+            title: vec![0x80], description: vec![],
+        });
+        let text = LevelTextCatalog::new(&catalog, &[]);
+        drop(catalog); // Panels own the text, independent of catalog lifetime.
+        assert_eq!(text.title(500000, &[]), ascii("Custom title"));
+        assert_eq!(text.description(500000, &[]), Some(ascii("Custom description").as_slice()));
+        assert_eq!(text.title(500001, &[]), vec![31]);
+        assert_eq!(text.description(500001, &[]), None);
+    }
+
+    #[test]
+    fn localized_text_preserves_language_glyphs_and_registered_empty_values() {
+        use openmt2001::level_catalog::{Catalog, Labels};
+        let mut catalog = Catalog::default();
+        register_text(&mut catalog, 500000, Labels::Localized { title: 0, description: 1 });
+        register_text(&mut catalog, 200001, Labels::Localized { title: 2, description: 2 });
+        let strings = vec![vec![128, 201, 0], vec![199, 42], vec![]];
+        let text = LevelTextCatalog::new(&catalog, &strings);
+        assert_eq!(text.title(500000, &strings), strings[0]);
+        assert_eq!(text.description(500000, &strings), Some(strings[1].as_slice()));
+        assert!(text.title(200001, &strings).is_empty());
+        assert_eq!(text.description(200001, &strings), None);
+    }
+
+    #[test]
+    fn missing_registration_or_language_rows_use_safe_builtin_fallbacks() {
+        use openmt2001::level_catalog::{Catalog, Labels};
+        let mut strings = vec![vec![]; 1958];
+        strings[1956] = vec![81];
+        strings[1957] = vec![82];
+        let mut catalog = Catalog::default();
+        register_text(&mut catalog, 200001, Labels::Localized {
+            title: u32::MAX, description: u32::MAX,
+        });
+        for text in [LevelTextCatalog::default(), LevelTextCatalog::new(&catalog, &strings)] {
+            assert_eq!(text.title(200001, &strings), vec![81]);
+            assert_eq!(text.description(200001, &strings), Some([82].as_slice()));
+            for id in [0, 500099, u32::MAX] {
+                assert_eq!(text.title(id, &[]), ascii(&format!("Level {id}")));
+                assert_eq!(text.description(id, &[]), None);
+            }
+            assert_eq!(text.description(200001, &[]), None);
+        }
+    }
+
     #[test]
     #[ignore = "requires original v1.4 executable and supplied original save"]
     fn original_load_delete_confirmation_and_profile_scope() {
@@ -782,6 +885,7 @@ mod tests {
             tab: Vec::new(), description_fonts: Vec::new(),
             description_tab: Vec::new(), slider_textures: Vec::new(),
             title_fonts: Vec::new(), title_tab: Vec::new(),
+            level_text: LevelTextCatalog::default(),
             strings: Vec::new(), directories: vec![root.join("saves"),
                 original.parent().unwrap().to_path_buf()], app_root: root.clone(),
             import_directory: original.parent().unwrap().to_path_buf(),

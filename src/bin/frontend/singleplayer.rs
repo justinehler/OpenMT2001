@@ -12,6 +12,9 @@ use openmt2001::{
 use std::{fs, path::{Path, PathBuf},
 };
 
+#[path = "singleplayer/custom.rs"]
+mod custom;
+
 const TUTORIAL_TITLE_COLORS: [u32; 4] =
     [0xffffb400, 0xffffb400, 0x80ffb400, 0x80ffb400];
 // 499817/49994e call original 43f510 with the Info8/Backing3 mesh bounds.
@@ -335,6 +338,7 @@ struct Character {
     portrait: usize,
 }
 pub struct SinglePlayer {
+    custom: Option<custom::Custom>,
     scenario: Panel,
     tutorial_panel: Panel,
     character_panel: Panel,
@@ -446,6 +450,7 @@ impl SinglePlayer {
             });
         }
         Ok(Self {
+            custom: None,
             scenario: panel(
                 "gamedata2\\brand_new_panels\\SP_Scenario_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 7],
@@ -497,6 +502,7 @@ impl SinglePlayer {
     pub fn open(&mut self, sandbox: bool, name: &str,
         catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf,
     ) {
+        self.custom = None;
         self.visible = true;
         self.tutorial_screen = false;
         self.sandbox = sandbox;
@@ -521,7 +527,8 @@ impl SinglePlayer {
             Ok(t) => t.index(),
             Err(e) => {
                 self.message = Some(e);
-                self.visible = true;
+                self.custom = None;
+        self.visible = true;
                 return;
             }
         };
@@ -541,6 +548,7 @@ impl SinglePlayer {
     pub fn open_tutorial(&mut self, name: &str,
         catalog: openmt2001::level_catalog::Catalog, profile_path: PathBuf,
     ) {
+        self.custom = None;
         self.visible = true;
         self.tutorial_screen = true;
         self.character_screen = false;
@@ -558,6 +566,7 @@ impl SinglePlayer {
         self.pointer_position = None;
     }
     pub fn reload_progress(&mut self) -> Result<(), String> {
+        if self.custom.is_some() { return Ok(()); }
         let Some(path) = &self.profile_path else { return Ok(()); };
         let catalog = self.catalog.as_mut().ok_or("Campaign catalog missing")?;
         crate::campaign_store::load_progress(catalog, path)?;
@@ -569,6 +578,7 @@ impl SinglePlayer {
         Ok(())
     }
     pub fn count(&self) -> usize {
+        if self.custom.is_some() && !self.character_screen { return self.custom_count(); }
         if self.tutorial_screen {
             2 + crate::scenarios::TUTORIALS.len()
         } else if self.character_screen {
@@ -582,17 +592,20 @@ impl SinglePlayer {
     /// children/arrows are original 43ed20 widgets with 443360 press audio.
     /// Scenario difficulty radios and both list families use other widgets.
     pub fn generic_click_enabled(&self, i: usize) -> bool {
+        if !self.keyboard_enabled(i) { return false; }
         native_generic_click(self.visible, self.busy, self.character_screen, i)
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
     }
     pub fn is_scroll_track(&self, origin: Option<usize>) -> bool {
+        if self.custom.is_some() { return !self.character_screen && matches!(origin, Some(7 | 10)); }
         self.visible && !self.tutorial_screen && !self.character_screen
             && self.scenario_description_limit() > 0
             && origin == Some(7 + self.scenario_rows.len())
     }
     pub fn drag_track(&mut self, origin: Option<usize>, p: [f32; 2]) -> bool {
+        if self.custom.is_some() && self.is_scroll_track(origin) { self.pointer_position = Some(p); self.custom_scroll_control(7, origin == Some(10)); return true; }
         if !self.is_scroll_track(origin) { return false; }
         let next = ui::slider_selection(ui::slider_track(SCENARIO_INFO_SCROLL, true),
             p[1], self.scenario_description_limit() as i32, true,
@@ -610,6 +623,7 @@ impl SinglePlayer {
             .unwrap_or(0)
     }
     fn scenario_record_text(&self, title: bool) -> Vec<u8> {
+        if self.custom.is_some() { return self.custom_text(title); }
         self.scenario_record_text_at(self.scenario_index, title)
     }
     fn scenario_record_text_at(&self, scenario_index: usize, title: bool) -> Vec<u8> {
@@ -652,12 +666,14 @@ impl SinglePlayer {
         crate::menu::preferred_token::Token::new(value)?
             .save(&crate::menu::preferred_token::path(root, &self.name))?;
         self.character = value;
+        if self.custom.is_some() { self.custom_roster()?; }
         Ok(())
     }
     pub fn activate(&mut self, i: usize) {
         if self.busy && i != 1 {
             return;
         }
+        if self.custom.is_some() && !self.character_screen { self.custom_activate(i); return; }
         if self.tutorial_screen {
             match i {
                 0 => {
@@ -696,6 +712,7 @@ impl SinglePlayer {
         } else if self.character_screen {
             match i {
                 0 => {
+                    if self.custom.is_some() { if let Err(e) = self.custom_roster() { self.message = Some(e); return; } }
                     let Some(catalog) = self.catalog.clone() else {
                         self.message = Some("Selected profile catalog is unavailable".into());
                         return;
@@ -705,7 +722,9 @@ impl SinglePlayer {
                         return;
                     };
                     self.request = Some(Setup {
-                        preview: if self.sandbox {
+                        preview: if let Some(c) = &self.custom {
+                            Preview::Scenario(c.selected.and_then(|i| self.catalog.as_ref()?.levels.get(i)).map(|l| l.id()).unwrap())
+                        } else if self.sandbox {
                             Preview::Sandbox
                         } else {
                             Preview::Scenario(crate::scenarios::CAMPAIGN[self.scenario_index].id)
@@ -772,6 +791,9 @@ impl SinglePlayer {
         }
     }
     pub fn scroll(&mut self, delta: i32) {
+        if self.custom.is_some() && !self.character_screen && self.pointer_position.is_some_and(|p| p[0] < 320.) {
+            let max = self.custom_list_limit(); let c = self.custom.as_mut().unwrap(); c.first = (c.first as i32 + delta).clamp(0,max as i32) as usize; return;
+        }
         let scenario_text = if !self.tutorial_screen && !self.character_screen {
             self.scenario_record_text(false)
         } else { vec![] };
@@ -812,6 +834,7 @@ impl SinglePlayer {
         }
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
+        if self.custom.is_some() && !self.character_screen { return self.custom_hit(p); }
         let inside = |[l, t, r, b]: [f32; 4]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b;
         if self.tutorial_screen {
             for (i, part) in [13, 12].iter().enumerate() {
@@ -958,7 +981,7 @@ impl SinglePlayer {
         ui::text(
             &mut title_fonts,
             &self.title_tab,
-            &self.strings[if self.character_screen { 0x756 } else { 0x755 }],
+            &self.strings[if self.character_screen { 0x756 } else if self.custom.is_some() {2240} else { 0x755 }],
             title,
             true,
             0xffffffff,
@@ -998,15 +1021,17 @@ impl SinglePlayer {
                     if slot == 0 {
                         &profile_glyphs
                     } else {
-                        &self.strings[0x6db]
+                        self.custom.as_ref().and_then(|c| c.roster.as_ref()).and_then(|r| { let record = r.records[slot]; (record.kind != -1).then(|| self.strings[self.characters[record.character as usize].name].as_slice()) }).unwrap_or(&self.strings[0x6db])
                     },
                     r,
                     false,
                     0xffffffff,
                 )?;
                 let mut tint = b[41 + slot];
-                if slot == 0 {
-                    let c = self.characters[self.character].color;
+                let authored = self.custom.as_ref().and_then(|c| c.roster.as_ref()).and_then(|r| { let v=r.records[slot]; (v.kind != -1).then_some(v.character as usize) });
+                if slot == 0 || authored.is_some() {
+                    let token = authored.unwrap_or(self.character);
+                    let c = self.characters[token].color;
                     shapes.rect(
                         tint,
                         [
@@ -1016,14 +1041,18 @@ impl SinglePlayer {
                             (c & 0xffffff) | 0x7f000000,
                         ],
                     );
-                    self.image(&mut images, self.characters[self.character].portrait, b[35])?;
-                    self.image(&mut images, self.characters[self.character].token, b[47])?;
+                    self.image(&mut images, self.characters[token].portrait, b[35 + slot])?;
+                    self.image(&mut images, self.characters[token].token, b[47 + slot])?;
                 } else {
                     shapes.rect(tint, [0xff909090, 0xff909090, 0x7f909090, 0x7f909090]);
                     tint = b[35 + slot];
                     shapes.rect(tint, [0x7f000000; 4]);
                 }
-                self.image(&mut images, if slot == 0 { 259 } else { 257 }, b[55 + slot])?;
+                let difficulty_icon = self.custom.as_ref().and_then(|c| c.roster.as_ref()).map(|r| {
+                    let record = r.records[slot];
+                    if record.kind == 0 {259} else if record.kind == 1 {258} else {257}
+                }).unwrap_or(if slot == 0 {259} else {257});
+                self.image(&mut images, difficulty_icon, b[55 + slot])?;
             }
             // 4a80fe/4a8117: normal, hover and pressed textures for the two arrows.
             for (i, part, texture) in [(2, 53, 97), (3, 54, 101)] {
@@ -1083,7 +1112,7 @@ impl SinglePlayer {
             ui::text(
                 &mut fonts,
                 &self.tab,
-                &self.strings[level_title],
+                &if self.custom.is_some() { self.custom_text(true) } else {self.strings[level_title].clone()},
                 b[65],
                 true,
                 0xffffffff,
@@ -1117,7 +1146,8 @@ impl SinglePlayer {
                     0xffffffff)?;
             }
             let [l, t, r, _] = b[8];
-            for (row, &scenario_index) in self.scenario_rows.iter().enumerate() {
+            if self.custom.is_some() { self.custom_list_draw(&mut shapes, &mut scenario_list_fonts)?; }
+            for (row, &scenario_index) in self.scenario_rows.iter().enumerate().filter(|_| self.custom.is_none()) {
                 let top = t + row as f32 * SCENARIO_ROW_HEIGHT;
                 if self.scenario_index == scenario_index || selected == Some(5 + row) {
                     shapes.rect(
@@ -1192,9 +1222,9 @@ impl SinglePlayer {
             for (bounds, value, maximum, target) in [
                 (SCENARIO_INFO_SCROLL, self.description_first,
                     self.scenario_description_limit(),
-                    5 + self.scenario_rows.len(),
+                    if self.custom.is_some() {5} else {5 + self.scenario_rows.len()},
                 ),
-                (SCENARIO_LIST_SCROLL, 0, 0, usize::MAX),
+                (SCENARIO_LIST_SCROLL, self.custom.as_ref().map_or(0, |c| c.first), self.custom.as_ref().map_or(0, |_| self.custom_list_limit()), if self.custom.is_some() {8} else {usize::MAX}),
             ] {
                 ui::Slider {
                     bounds,
@@ -1224,7 +1254,7 @@ impl SinglePlayer {
                 if i == 0 { [80, 148, 34] } else { [175, 6, 6] },
                 selected == Some(i),
                 pressed && selected == Some(i),
-                self.busy && i == 0,
+                i == 0 && (self.busy || self.custom.as_ref().is_some_and(|c| c.selected.is_none())),
             )?;
             let mut text = r;
             text[1] += (r[3] - r[1] - 14.) / 2.;

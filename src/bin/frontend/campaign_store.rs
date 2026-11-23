@@ -6,86 +6,163 @@ use openmt2001::{
 };
 use std::{
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
 };
 
 /// Resolve original Windows filenames on case-sensitive hosts without allowing
 /// registration strings to escape the supplied scripts directory.
+const MAX_CUSTOM_DEPTH: usize = 32;
+const MAX_SCAN_ENTRIES: usize = 16_384;
+const MAX_REGISTRATION_FILES: usize = 1_024;
+const MAX_REGISTRATION_BYTES: usize = 8 * 1024 * 1024;
+
+fn contained(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let path = fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !path.starts_with(root) {
+        return Err(format!("script path escapes supplied root: {}", path.display()));
+    }
+    Ok(path)
+}
+
+// Modern ordering policy, not a claim about Windows enumeration order.
+// Reject case collisions even when the requested spelling exists exactly.
+fn ordered_entries(path: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().into_string()
+            .map_err(|_| format!("non-UTF8 script filename in {}", path.display()))?;
+        entries.push((name, entry.path()));
+        if entries.len() > MAX_SCAN_ENTRIES {
+            return Err(format!("script directory entry limit exceeded: {}", path.display()));
+        }
+    }
+    entries.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    for pair in entries.windows(2) {
+        if pair[0].0.eq_ignore_ascii_case(&pair[1].0) {
+            return Err(format!("ambiguous original script filename case in {}: {} / {}",
+                path.display(), pair[0].0, pair[1].0));
+        }
+    }
+    Ok(entries)
+}
+
 pub(super) fn original_path(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    let root = fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let name = name.replace('\\', "/");
-    let mut path = root.to_path_buf();
+    if name.is_empty() || name.split('/').any(|part| part.is_empty() || part == "." || part == ".." || part.contains(':')) {
+        return Err("level script path is not relative".into());
+    }
+    let mut path = root.clone();
     for component in Path::new(&name).components() {
         let Component::Normal(part) = component else {
             return Err("level script path is not relative".into());
         };
-        let direct = path.join(part);
-        if direct.exists() {
-            path = direct;
-            continue;
-        }
-        let entries = match fs::read_dir(&path) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.to_string()),
-        };
-        let mut found = None;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .eq_ignore_ascii_case(&part.to_string_lossy())
-            {
-                if found.is_some() {
-                    return Err("ambiguous original script filename case".into());
-                }
-                found = Some(entry.path());
-            }
-        }
-        let Some(next) = found else {
-            return Ok(None);
-        };
-        path = next;
+        let entries = ordered_entries(&path)?;
+        let Some((_, next)) = entries.into_iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&part.to_string_lossy())) else {
+                return Ok(None);
+            };
+        path = contained(&root, &next)?;
     }
     Ok(Some(path))
 }
-pub fn load_catalog(image: &PeImage<'_>, scripts: &Path) -> Result<Catalog, String> {
-    let hub =
-        original_path(scripts, "GAMESTART/hub.lua")?.ok_or("original GAMESTART/hub.lua missing")?;
-    let source = fs::read(&hub).map_err(|e| format!("{}: {e}", hub.display()))?;
-    script::load(image, &source, false, |name| {
-        let name = std::str::from_utf8(name).map_err(|_| "non-UTF8 level directory")?;
-        let Some(directory) = original_path(scripts, name)? else {
-            return Ok(None);
-        };
-        let Some(hub) = original_path(&directory, "hub.lua")? else {
-            return Ok(None);
-        };
-        if fs::File::open(hub).is_err() {
-            return Ok(None);
+
+fn read_registration(path: &Path, remaining: &mut usize) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    fs::File::open(path).and_then(|file| file.take((*remaining + 1) as u64).read_to_end(&mut bytes))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if bytes.len() > *remaining {
+        return Err(format!("registration byte limit exceeded at {}", path.display()));
+    }
+    *remaining -= bytes.len();
+    Ok(bytes)
+}
+
+/// GAMESTART first, then CUSTOM descendants before each directory's register.
+/// Missing CUSTOM is valid. No installer or filesystem callback is exposed to Lua.
+fn registration_sources(scripts: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let scripts = fs::canonicalize(scripts).map_err(|e| e.to_string())?;
+    let hub = original_path(&scripts, "GAMESTART/hub.lua")?
+        .ok_or("original GAMESTART/hub.lua missing")?;
+    let mut remaining = MAX_REGISTRATION_BYTES;
+    let mut sources = vec![("GAMESTART/hub.lua".into(), read_registration(&hub, &mut remaining)?)];
+    if let Some(custom) = original_path(&scripts, "CUSTOM")? {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut entries = 0;
+        discover_registrations(&scripts, &custom, 0, &mut seen, &mut entries, &mut remaining, &mut sources)?;
+    }
+    Ok(sources)
+}
+
+fn discover_registrations(
+    root: &Path, directory: &Path, depth: usize,
+    seen: &mut std::collections::BTreeSet<PathBuf>, entries_seen: &mut usize,
+    remaining: &mut usize, sources: &mut Vec<(String, Vec<u8>)>,
+) -> Result<(), String> {
+    if depth > MAX_CUSTOM_DEPTH {
+        return Err(format!("custom registration depth limit exceeded: {}", directory.display()));
+    }
+    let directory = contained(root, directory)?;
+    if !seen.insert(directory.clone()) {
+        return Err(format!("custom registration directory cycle or alias: {}", directory.display()));
+    }
+    let entries = ordered_entries(&directory)?;
+    *entries_seen += entries.len();
+    if *entries_seen > MAX_SCAN_ENTRIES {
+        return Err("custom registration scan entry limit exceeded".into());
+    }
+    for (name, path) in &entries {
+        if name.starts_with('.') || name.starts_with('_') { continue; }
+        let resolved = contained(root, path)?;
+        if resolved.is_dir() {
+            discover_registrations(root, &resolved, depth + 1, seen, entries_seen, remaining, sources)?;
         }
-        let mut checksum = 0i32;
-        for entry in fs::read_dir(&directory).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            if !entry
-                .path()
-                .extension()
-                .is_some_and(|s| s.eq_ignore_ascii_case("lua"))
-            {
-                continue;
+    }
+    if let Some((_, path)) = entries.iter().find(|(name, _)| name.eq_ignore_ascii_case("register.lua")) {
+        if sources.len() >= MAX_REGISTRATION_FILES {
+            return Err("registration file count limit exceeded".into());
+        }
+        let path = contained(root, path)?;
+        if !path.is_file() { return Err(format!("registration is not a file: {}", path.display())); }
+        sources.push((path.strip_prefix(root).unwrap().to_string_lossy().into_owned(), read_registration(&path, remaining)?));
+    }
+    Ok(())
+}
+
+fn directory_checksum(scripts: &Path, name: &[u8]) -> Result<Option<i32>, String> {
+    let name = std::str::from_utf8(name).map_err(|_| "non-UTF8 level directory")?;
+    let Some(directory) = original_path(scripts, name)? else { return Ok(None); };
+    if !directory.is_dir() { return Ok(None); }
+    let Some(hub) = original_path(&directory, "hub.lua")? else { return Ok(None); };
+    if !hub.is_file() || fs::File::open(hub).is_err() { return Ok(None); }
+    let mut checksum = 0i32;
+    for (_, path) in ordered_entries(&directory)? {
+        if !path.extension().is_some_and(|s| s.eq_ignore_ascii_case("lua")) { continue; }
+        let path = contained(&directory, &path)?;
+        //48d570 contributes -1 for a Lua file that cannot be opened/read.
+        // Stream checksum inputs so large authored files cannot grow host memory.
+        let value = (|| -> std::io::Result<i32> {
+            let mut file = fs::File::open(path)?;
+            let mut buffer = [0u8; 8192];
+            let mut sum = 0i32;
+            loop {
+                let n = file.read(&mut buffer)?;
+                if n == 0 { return Ok(sum); }
+                for &b in &buffer[..n] { sum = sum.wrapping_add(i32::from(b)); }
             }
-            //48d570 contributes -1 for a Lua file that cannot be opened.
-            let value = fs::read(entry.path())
-                .map(|bytes| {
-                    bytes
-                        .into_iter()
-                        .fold(0i32, |sum, b| sum.wrapping_add(i32::from(b)))
-                })
-                .unwrap_or(-1);
-            checksum = checksum.wrapping_add(value);
-        }
-        Ok(Some(checksum))
-    })
+        })().unwrap_or(-1);
+        checksum = checksum.wrapping_add(value);
+    }
+    Ok(Some(checksum))
+}
+
+pub fn load_catalog(image: &PeImage<'_>, scripts: &Path) -> Result<Catalog, String> {
+    let scripts = fs::canonicalize(scripts).map_err(|e| e.to_string())?;
+    let sources = registration_sources(&scripts)?;
+    let buffers: Vec<_> = sources.iter().map(|(name, bytes)| (name.as_str(), bytes.as_slice())).collect();
+    script::load_sources(image, &buffers, false, |name| directory_checksum(&scripts, name))
 }
 /// A reversible encoding prevents profile names becoming filesystem paths.
 pub fn profile_path(root: &Path, name: &[u8]) -> PathBuf {
@@ -134,6 +211,94 @@ pub fn commit_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let root = PathBuf::from(format!("work/custom-import-{}-{nonce}", std::process::id()));
+            fs::create_dir_all(root.join("GAMESTART")).unwrap();
+            fs::write(root.join("GAMESTART/hub.lua"), b"-- base").unwrap();
+            Self(root)
+        }
+        fn write(&self, name: &str, bytes: &[u8]) {
+            let path = self.0.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) { fs::remove_dir_all(&self.0).unwrap(); }
+    }
+    #[test]
+    fn custom_discovery_empty_order_and_exclusions() {
+        let fixture = Fixture::new();
+        assert_eq!(registration_sources(&fixture.0).unwrap().len(), 1);
+        fixture.write("CuStOm/register.lua", b"parent");
+        fixture.write("CuStOm/z/register.lua", b"z");
+        fixture.write("CuStOm/A/register.lua", b"a");
+        fixture.write("CuStOm/A/child/REGISTER.LUA", b"child");
+        fixture.write("CuStOm/_hidden/register.lua", b"ignored");
+        fixture.write("CuStOm/.hidden/register.lua", b"ignored");
+        let sources = registration_sources(&fixture.0).unwrap();
+        assert_eq!(sources.iter().map(|(_, b)| b.as_slice()).collect::<Vec<_>>(),
+            vec![b"-- base".as_slice(), b"child", b"a", b"z", b"parent"]);
+        fixture.write("CuStOm/a/register.lua", b"collision");
+        assert!(registration_sources(&fixture.0).unwrap_err().contains("ambiguous"));
+    }
+    #[test]
+    fn registration_limits_and_missing_hubs() {
+        let fixture = Fixture::new();
+        assert_eq!(directory_checksum(&fixture.0, b"missing").unwrap(), None);
+        fixture.write("CUSTOM/author/register.lua", b"abc");
+        assert_eq!(directory_checksum(&fixture.0, b"custom/author").unwrap(), None);
+        fixture.write("CUSTOM/author/hub.lua", b"d");
+        assert_eq!(directory_checksum(&fixture.0, b"CUSTOM/author").unwrap(), Some(394));
+        let mut remaining = 2;
+        assert!(read_registration(&fixture.0.join("CUSTOM/author/register.lua"), &mut remaining).is_err());
+        assert!(original_path(&fixture.0, "../escape").is_err());
+        let mut path = String::from("CUSTOM");
+        for _ in 0..=MAX_CUSTOM_DEPTH { path.push_str("/child"); }
+        fixture.write(&format!("{path}/register.lua"), b"");
+        assert!(registration_sources(&fixture.0).unwrap_err().contains("depth limit"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlink_containment_covers_discovery_hubs_and_checksum_inputs() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        let outside = Fixture::new();
+        let outside_root = fs::canonicalize(&outside.0).unwrap();
+        fs::create_dir_all(fixture.0.join("CUSTOM/author")).unwrap();
+        symlink(&outside_root, fixture.0.join("CUSTOM/escape")).unwrap();
+        assert!(registration_sources(&fixture.0).unwrap_err().contains("escapes"));
+        fs::remove_file(fixture.0.join("CUSTOM/escape")).unwrap();
+        symlink(outside_root.join("GAMESTART/hub.lua"), fixture.0.join("CUSTOM/author/hub.lua")).unwrap();
+        assert!(directory_checksum(&fixture.0, b"custom/author").is_err());
+        fs::remove_file(fixture.0.join("CUSTOM/author/hub.lua")).unwrap();
+        fixture.write("CUSTOM/author/hub.lua", b"hub");
+        symlink(outside_root.join("GAMESTART/hub.lua"), fixture.0.join("CUSTOM/author/other.lua")).unwrap();
+        assert!(directory_checksum(&fixture.0, b"custom/author").is_err());
+        fs::remove_file(fixture.0.join("CUSTOM/author/other.lua")).unwrap();
+        symlink(fs::canonicalize(fixture.0.join("CUSTOM")).unwrap(), fixture.0.join("CUSTOM/author/cycle")).unwrap();
+        assert!(registration_sources(&fixture.0).unwrap_err().contains("cycle or alias"));
+    }
+    #[test]
+    #[ignore = "requires original executable and supplied patch Essential scripts"]
+    fn supplied_eight_custom_registrations_append_to_gamestart() {
+        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = PeImage::parse(&executable).unwrap();
+        let scripts = PathBuf::from(std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").unwrap());
+        let sources = registration_sources(&scripts).unwrap();
+        assert_eq!(sources.len(), 9);
+        let base = script::load(&image, &sources[0].1, false, |name| directory_checksum(&scripts, name)).unwrap();
+        let catalog = load_catalog(&image, &scripts).unwrap();
+        assert_eq!(catalog.levels.len(), base.levels.len() + 8);
+        assert_eq!(catalog.levels[..base.levels.len()].iter().map(|l| l.id()).collect::<Vec<_>>(),
+            base.levels.iter().map(|l| l.id()).collect::<Vec<_>>());
+        assert_eq!(catalog.levels[base.levels.len()..].iter().map(|l| l.id()).collect::<Vec<_>>(),
+            (500000..=500007).collect::<Vec<_>>());
+        assert_eq!(catalog.levels[catalog.find(500000).unwrap()].directory(), b"custom\\deepred\\Jon001");
+    }
     #[test]
     fn retrying_failed_profile_write_does_not_finish_twice() {
         use openmt2001::level_catalog::{Labels, Registration};
@@ -231,7 +396,12 @@ mod tests {
         let image = PeImage::parse(&executable).unwrap();
         let scripts = PathBuf::from(std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").unwrap());
         let mut catalog = load_catalog(&image, &scripts).unwrap();
-        assert_eq!(catalog.levels.len(), 36);
+        let hub = original_path(&scripts, "GAMESTART/hub.lua").unwrap().unwrap();
+        let base = script::load(&image, &fs::read(hub).unwrap(), false,
+            |name| directory_checksum(&scripts, name)).unwrap();
+        assert!(catalog.levels.len() >= base.levels.len());
+        assert_eq!(catalog.levels[..base.levels.len()].iter().map(|level| level.id()).collect::<Vec<_>>(),
+            base.levels.iter().map(|level| level.id()).collect::<Vec<_>>());
         let root = PathBuf::from("work/economy/catalog-profile-roundtrip");
         let path = profile_path(&root, b"Campaign / Test");
         assert_eq!(path.parent(), Some(root.join("campaign").as_path()));
