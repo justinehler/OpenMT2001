@@ -495,9 +495,9 @@ impl<'data> Session<'data> {
                     &definition,
                 )?)?;
             }
-            let context = live_commands::Context {
+            let mut context = live_commands::CommandContext {
                 image: assets.image,
-                clock: &self.world.clock,
+                clock: &mut self.world.clock,
                 accounting_enabled: true,
                 notifications: self.world.city.ai_demand.ready != 0,
                 tutorial_state: self.tutorial_state,
@@ -505,6 +505,7 @@ impl<'data> Session<'data> {
                 network_override: false,
                 utility_factor: self
                     .world
+                    .city
                     .settings
                     .rail_income(self.difficulty)
                     .ok_or("command income difficulty leaves settings")?,
@@ -521,18 +522,20 @@ impl<'data> Session<'data> {
             let hooks=std::cell::RefCell::new(&mut self.hooks);
             let mut announcement=script_context.as_mut().map(|context|tutorial_announcement::Bridge{
                 scripts:&mut self.scripts,hooks:&hooks,context});
+            let submission_tick = context.clock.timing[0];
+            let mut drain_clocks = context.clock.timing[..2].try_into().unwrap();
             let apply = |command: &live_commands::Command| {
-                runtime.apply_with_announcement(command, &context, &mut geometry,
-                    announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement), &mut event)
+                runtime.apply_with_announcement(command, &mut context, &mut geometry,
+                    announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement), |call,_clock|event(call))
             };
             if let Some(command) = command {
                 self.live_commands
-                    .submit(command, context.clock.timing[0], true, apply)
+                    .submit(command, submission_tick, true, apply)
             } else {
-                let mut clocks = context.clock.timing[..2].try_into().unwrap();
-                self.live_commands.drain_scheduling(&mut clocks, |command,enqueue|{
-                    runtime.apply_with_announcement(command,&context,&mut geometry,
-                        announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement),|call|{
+                drop(apply);
+                self.live_commands.drain_scheduling(&mut drain_clocks, |command,enqueue|{
+                    runtime.apply_with_announcement(command,&mut context,&mut geometry,
+                        announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement),|call,_clock|{
                         if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=call{
                             enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
                         }else if let live_commands::Event::CategoryReadyAt{category,normal_tick}=call{
@@ -835,10 +838,23 @@ impl<'data> Session<'data> {
             style, crate::compatibility::Mode::StrictV14, Some(launch))
     }
 
-    /// Ordinary authored single-player startup, with no campaign progress owner.
+    /// Authored startup without a named profile, for read-only/import callers.
     pub fn initialize_custom_with_style(
         input: Inputs<'_, 'data>, policy: Policy,
         catalog: openmt2001::level_catalog::Catalog,
+        style: &openmt2001::board_style::Style,
+        compatibility: crate::compatibility::Mode,
+    ) -> Result<Self, String> {
+        Self::initialize_custom_with_style_and_profile(input, policy, catalog, None,
+            style, compatibility)
+    }
+
+    /// Original Custom completion uses the active named profile and shared
+    /// catalog. The caller supplies its progress destination independently of saves.
+    pub fn initialize_custom_with_style_and_profile(
+        input: Inputs<'_, 'data>, policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: Option<std::path::PathBuf>,
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
@@ -846,7 +862,7 @@ impl<'data> Session<'data> {
             custom::same_directory(level.directory(), input.scenario.as_bytes()))
             .ok_or("custom scenario missing from registered catalog")?;
         if !custom::valid_level(level) { return Err("invalid custom scenario identity".into()); }
-        Self::initialize_with_catalog(input, policy, Some(catalog), None, false,
+        Self::initialize_with_catalog(input, policy, Some(catalog), profile_path, false,
             Some(style), compatibility, None)
     }
 
@@ -871,7 +887,6 @@ impl<'data> Session<'data> {
         }).ok_or("scenario missing from original level catalog")?;
         let id=catalog.levels[selected].id();
         let is_custom = custom::valid_level(&catalog.levels[selected]);
-        let profile_path = if is_custom { None } else { profile_path };
         let saved_net = load_mode && (300000..=300006).contains(&id)
             && !catalog.levels[selected].single_player()
             && catalog.levels[selected].directory().eq_ignore_ascii_case(
@@ -1325,7 +1340,7 @@ impl<'data> Session<'data> {
                 })
             }).collect();
             self.scripts.enter_level(
-                &mut self.world.city.script_state(&players),
+                &mut self.world.script_state(&players),
                 &context,
                 &mut geometry,
                 &mut self.hooks,

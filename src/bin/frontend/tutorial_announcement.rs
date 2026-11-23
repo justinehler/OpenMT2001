@@ -55,23 +55,21 @@ impl Bridge<'_, '_, '_, '_> {
         &mut self,
         control: u32,
         state: &mut level_script::State<'_>,
-        clock: &openmt2001::clock::Clock,
         geometry: &mut dyn GeometryBinding,
         utilities: &mut openmt2001::economy::Utilities,
     ) -> Result<(), String> {
         PartsBridge{runtime:&mut self.scripts.runtime,bindings:&mut self.scripts.bindings,
             events:&mut self.scripts.events,hooks:self.hooks,context:self.context}
-            .dispatch_control(control,state,clock,geometry,utilities)
+            .dispatch_control(control,state,geometry,utilities)
     }
 }
 impl PartsBridge<'_,'_,'_,'_>{
-    fn dispatch_control(&mut self,control:u32,state:&mut level_script::State<'_>,
-        clock:&openmt2001::clock::Clock,geometry:&mut dyn GeometryBinding,
+    fn dispatch_control(&mut self,control:u32,state:&mut level_script::State<'_>,geometry:&mut dyn GeometryBinding,
         utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
         let mut hooks = self.hooks.borrow_mut();
         let active = active_dismissal(&hooks)?;
         let first = hooks.commands.len();
-        self.context.update_clock(clock);
+        self.context.update_clock(state.clock);
         let mut geometry = Geometry(geometry);
         std::mem::swap(utilities, &mut hooks.utilities);
         let result = (|| {
@@ -102,20 +100,21 @@ impl PartsBridge<'_,'_,'_,'_>{
             }
             Ok(())
         })();
+        self.context.update_clock(state.clock);
         std::mem::swap(utilities, &mut hooks.utilities);
         result
     }
 }
 
 impl live_commands::TutorialAnnouncement for PartsBridge<'_,'_,'_,'_>{
-    fn start(&mut self,state:&mut level_script::State<'_>,clock:&openmt2001::clock::Clock,
+    fn start(&mut self,state:&mut level_script::State<'_>,
         _presentation:&openmt2001::ai_messages::offers::auction::admission::Presentation,
         geometry:&mut dyn GeometryBinding,utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
-        self.dispatch_control(61,state,clock,geometry,utilities)
+        self.dispatch_control(61,state,geometry,utilities)
     }
-    fn control(&mut self,control:u32,state:&mut level_script::State<'_>,clock:&openmt2001::clock::Clock,
+    fn control(&mut self,control:u32,state:&mut level_script::State<'_>,
         geometry:&mut dyn GeometryBinding,utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
-        self.dispatch_control(control,state,clock,geometry,utilities)
+        self.dispatch_control(control,state,geometry,utilities)
     }
 }
 
@@ -123,21 +122,19 @@ impl live_commands::TutorialAnnouncement for Bridge<'_, '_, '_, '_> {
     fn start(
         &mut self,
         state: &mut level_script::State<'_>,
-        clock: &openmt2001::clock::Clock,
         _presentation: &openmt2001::ai_messages::offers::auction::admission::Presentation,
         geometry: &mut dyn GeometryBinding,
         utilities: &mut openmt2001::economy::Utilities,
     ) -> Result<(), String> {
-        self.dispatch_control(61, state, clock, geometry, utilities)
+        self.dispatch_control(61, state, geometry, utilities)
     }
     fn control(
         &mut self,
         control: u32,
         state: &mut level_script::State<'_>,
-        clock: &openmt2001::clock::Clock,
         geometry: &mut dyn GeometryBinding,
         utilities: &mut openmt2001::economy::Utilities,
     ) -> Result<(), String> {
-        self.dispatch_control(control, state, clock, geometry, utilities)
+        self.dispatch_control(control, state, geometry, utilities)
     }
 }

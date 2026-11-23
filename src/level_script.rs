@@ -75,6 +75,7 @@ fn forced_auction(id:u32,arguments:&[Value])->Option<(u32,u32,u32)>{
 
 /// Borrow authoritative records; no copied city topology or resident counters.
 pub struct State<'a> {
+    pub clock: &'a mut crate::clock::Clock,
     pub ai_demand: &'a mut crate::ai_demand::State,
     pub objective: &'a mut crate::scenario_objective::State,
     pub settings: &'a mut crate::startup_settings::State,
@@ -99,6 +100,7 @@ pub struct State<'a> {
 
 /// Live globals/configuration at the script call boundary. Explicit RNG and
 /// allocator state is in State; a fresh seed is never invented by this runner.
+#[derive(Clone, Copy)]
 pub struct Context<'a, 'image> {
     pub total_clock: u32,
     pub image: &'a crate::pe::PeImage<'image>,
@@ -127,6 +129,37 @@ impl Context<'_, '_> {
     }
 }
 
+// 741 belongs to TutorialSetBuildUse. Calendar owns 744/745 (get/set).
+fn register_calendar(vm: &mut Runtime) -> Result<(), String> {
+    vm.register_number_properties("Calendar", 744)?;
+    for (name, value) in [("GAME_MINUTE", 10), ("GAME_HOUR", 625),
+        ("GAME_YEAR", 15000), ("GAME_DECADE", 150000)] {
+        vm.set_number(name, value as f64)?;
+    }
+    for hour in 0..24 { vm.set_number(&format!("HOUR_{hour}"), hour as f64)?; }
+    for year in 0..10 { vm.set_number(&format!("YEAR_{year:02}"), year as f64)?; }
+    for era in 0..8 { vm.set_number(&format!("ERA_{}", 1930 + era * 10), era as f64)?; }
+    Ok(())
+}
+
+fn calendar_property(id: u32, arguments: &[Value], clock: &mut crate::clock::Clock)
+    -> Result<Option<f64>, String> {
+    let slot = match arguments.first() {
+        Some(Value::Bytes(key)) => match key.as_slice() {
+            b"hour" => 0, b"year" => 1, b"era" => 2,
+            _ => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    if id == 744 { return Ok(Some(clock.calendar[slot] as i32 as f64)); }
+    // host_property performs lua_tonumber in C, including numeric strings and nil.
+    let Some(Value::Number(value)) = arguments.get(1) else {
+        return Err("Calendar setter missing C-coerced number".into());
+    };
+    clock.calendar[slot] = crate::economy::ftol_low_word(*value) as u32;
+    Ok(None)
+}
+
 pub struct Bindings {
     selected_objective: objective_selection::Selection,
     startup_settings: crate::startup_settings::Bindings,
@@ -145,9 +178,10 @@ impl Bindings {
         self.selected_objective.bind(level);
     }
 
-    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609. Host buffers
+    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..745. Host buffers
     /// registered with Runtime::script_buffer satisfy nested C_RunScript calls.
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
+        register_calendar(vm)?;
         let map = crate::map_script::Bindings::register(vm, 1, 2)?;
         vm.execute("Business table", b"Business={}", &mut |_, _| Err("unexpected initialization callback".into()))?;
         for index in 0..600 {
@@ -168,6 +202,7 @@ impl Bindings {
         vm.register_event_triggers(7)?;
         vm.register_coerced("C_PlaySound", 13, "S")?;
         vm.register_calendar_frequency("C_SetCalendarFrequency", 11)?;
+        vm.register_calendar_frequency_method("Calendar", "SetFrequency", 11)?;
         // Native 4dbe8d..4dbed8 registers these Tutorial 1 control constants.
         for (name, value) in [
             ("DIFFICULTY_EASY", 0.),
@@ -329,7 +364,7 @@ impl Bindings {
         vm.register_coerced("SetObjective", 4, "nnN")?;
         vm.execute(
             "Game bindings",
-            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}; Calendar={SetFrequency=C_SetCalendarFrequency}",
+            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
             &mut |_, _| Err("unexpected binding callback".into()),
         )?;
         vm.register_script_loader("C_RunScript")?;
@@ -356,6 +391,13 @@ impl Bindings {
         geometry: &mut impl crate::building_pool::GeometryBinding,
         hooks: &mut impl Hooks,
     ) -> Result<Option<f64>, String> {
+        // A nested Lua script can change the clock between any two host calls.
+        let mut live_context = *context;
+        live_context.update_clock(state.clock);
+        let context = &live_context;
+        if matches!(id, 744 | 745) {
+            return calendar_property(id, arguments, state.clock);
+        }
         if self.startup_settings.contains(id) {
             return self.startup_settings.handle(id, arguments, state.settings);
         }
@@ -782,4 +824,90 @@ mod tutorial_owner_tests {
         }
         assert_eq!(at, bytes.len());
     }
+}
+
+#[cfg(test)]
+mod calendar_binding_tests {
+    use super::*;
+    #[test]
+    fn tagged_calendar_is_immediate_signed_coerced_nested_and_partial() {
+        let mut vm = Runtime::new().unwrap();
+        register_calendar(&mut vm).unwrap();
+        vm.register_script_loader("C_RunScript").unwrap();
+        vm.script_buffer("inner.lua", b"Calendar.era=ERA_1980; inner=Calendar.era").unwrap();
+        let mut clock = crate::clock::Clock {calendar:[13,7,3,0xabcdef,77],timing:[11,22,33,44,55,66]};
+        vm.execute("get", b"h=Calendar.hour; y=Calendar.year; e=Calendar.era", &mut |id,args| calendar_property(id,args,&mut clock)).unwrap();
+        assert_eq!(vm.number("h").unwrap(),Some(13.));
+        assert_eq!(vm.number("y").unwrap(),Some(7.));
+        assert_eq!(vm.number("e").unwrap(),Some(3.));
+        for (input,expected) in [("9.9",9),("-9.9",-9),("'12.7'",12),("'bad'",0),("nil",0),("{}",0),("function() end",0),("4294967301",5)] {
+            vm.execute("coerce",format!("Calendar.hour={input}; observed=Calendar.hour").as_bytes(),&mut |id,args|calendar_property(id,args,&mut clock)).unwrap();
+            assert_eq!(vm.number("observed").unwrap(),Some(expected as f64));
+            assert_eq!(&clock.calendar[1..], &[7,3,0xabcdef,77]);
+            assert_eq!(clock.timing,[11,22,33,44,55,66]);
+        }
+        clock.calendar[1]=u32::MAX;
+        vm.execute("host change", b"signed=Calendar.year; Calendar.era=3; first=Calendar.era; C_RunScript('inner.lua'); second=Calendar.era; Calendar.era=7; third=Calendar.era", &mut |id,args|calendar_property(id,args,&mut clock)).unwrap();
+        for (key,value) in [("signed",-1.),("first",3.),("inner",5.),("second",5.),("third",7.)] {assert_eq!(vm.number(key).unwrap(),Some(value));}
+        assert!(vm.execute("partial error",b"Calendar.hour=21; missing_calendar_test_function()",&mut |id,args|calendar_property(id,args,&mut clock)).is_err());
+        assert_eq!(clock.calendar[0],21);
+        assert_eq!(&clock.calendar[3..],&[0xabcdef,77]);
+    }
+    #[test]
+    #[ignore = "requires OPENMT2001_EXE original binding constants; registration only"]
+    fn full_registration_attaches_calendar_frequency_without_property_dispatch() {
+        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = crate::pe::PeImage::parse(&bytes).unwrap();
+        let mut vm = Runtime::new().unwrap();
+        // register executes all initialization chunks with an error-only host.
+        // Ordinary Calendar.SetFrequency assignment would invoke that host.
+        let _bindings = Bindings::register(&mut vm, &image).unwrap();
+        let mut calls = Vec::new();
+        vm.execute("frequency closure", b"Calendar.SetFrequency(99,'0.04')", &mut |id,args| {
+            calls.push((id,args.to_vec()));
+            match id {11=>Ok(Some(1.)),12=>Ok(None),_=>Err("frequency routed to property setter".into())}
+        }).unwrap();
+        assert_eq!(calls[0].0,11);
+        assert_eq!(calls[1],(12,vec![Value::Number(0.04)]));
+        for (name,value) in [("ERA_1960",3.),("ERA_1980",5.),("GAME_HOUR",625.),("YEAR_09",9.),("HOUR_23",23.)] {
+            assert_eq!(vm.number(name).unwrap(),Some(value));
+        }
+    }
+
+    #[test]
+    fn era_callback_partial_error_and_clock_export_cold_readback() {
+        let mut vm=Runtime::new().unwrap();
+        register_calendar(&mut vm).unwrap();
+        let mut clock=crate::clock::Clock{calendar:[1,0,3,0x12345678,99],timing:[100,200,300,400,500,600]};
+        let mut saw_script=false;
+        crate::era::advance(3,&mut clock,|call,clock| {
+            if matches!(call,crate::era::Call::Script{..}) {
+                saw_script=true;
+                vm.execute("era callback",b"Calendar.year=2; y1=Calendar.year; Calendar.year=7; y2=Calendar.year; Calendar.hour=4; h1=Calendar.hour; Calendar.hour=13; h2=Calendar.hour",&mut |id,args|calendar_property(id,args,clock))?;
+            }
+            Ok(())
+        }).unwrap();
+        assert!(saw_script);
+        for (name,value) in [("y1",2.),("y2",7.),("h1",4.),("h2",13.)] {assert_eq!(vm.number(name).unwrap(),Some(value));}
+        assert_eq!(clock.calendar,[13,7,3,0x12345678,99]);
+        // This is the real save writer/reader clock path, not a synthetic table.
+        let mut categories=[[0;380];52];
+        let mut saved=crate::save::writer::State {
+            compatibility:&[0;40],level:500002,difficulty:0,current_cash:0.,players:&[],
+            businesses:&[],buildings:&[],building_base:0,building_sentinel_next:0,
+            categories:&mut categories,residents:&[],cameras:&[[0;196];2],
+            calendar:clock.calendar,timing:clock.timing,pending:&[0;3588],resident_accounts:&[],
+            scheduled:&[],auction:None,objective:&[0;60],business_info:&[[0;116];45],
+            commodities:&[[0;28];32],history:&[0;0x10f44],game_mode:0,
+        };
+        let bytes=crate::save::writer::encode(&mut saved,0x600,[0;4]).unwrap();
+        let mut cold=crate::save::SaveFile::parse(&bytes).unwrap().clock().unwrap();
+        assert_eq!(cold,clock);
+        vm.execute("cold clock getter",b"cold_hour=Calendar.hour; Calendar.year=-2.9; cold_year=Calendar.year",&mut |id,args|calendar_property(id,args,&mut cold)).unwrap();
+        assert_eq!(vm.number("cold_hour").unwrap(),Some(13.));
+        assert_eq!(vm.number("cold_year").unwrap(),Some(-2.));
+        assert_eq!(cold.calendar[1],(-2i32) as u32);
+        assert_eq!(cold.timing,clock.timing);
+    }
+
 }

@@ -566,13 +566,14 @@ impl SinglePlayer {
         self.pointer_position = None;
     }
     pub fn reload_progress(&mut self) -> Result<(), String> {
-        if self.custom.is_some() { return Ok(()); }
         let Some(path) = &self.profile_path else { return Ok(()); };
         let catalog = self.catalog.as_mut().ok_or("Campaign catalog missing")?;
         crate::campaign_store::load_progress(catalog, path)?;
-        self.scenario_rows = scenario_rows_for(catalog);
-        if !self.scenario_rows.contains(&self.scenario_index) {
-            self.scenario_index = self.scenario_rows.first().copied().unwrap_or(0);
+        if self.custom.is_none() {
+            self.scenario_rows = scenario_rows_for(catalog);
+            if !self.scenario_rows.contains(&self.scenario_index) {
+                self.scenario_index = self.scenario_rows.first().copied().unwrap_or(0);
+            }
         }
         self.message = None;
         Ok(())
@@ -1146,7 +1147,10 @@ impl SinglePlayer {
                     0xffffffff)?;
             }
             let [l, t, r, _] = b[8];
-            if self.custom.is_some() { self.custom_list_draw(&mut shapes, &mut scenario_list_fonts)?; }
+            if self.custom.is_some() {
+                self.custom_list_draw(&mut shapes, &mut scenario_list_fonts)?;
+                self.custom_cups_draw(&mut completion_cups)?;
+            }
             for (row, &scenario_index) in self.scenario_rows.iter().enumerate().filter(|_| self.custom.is_none()) {
                 let top = t + row as f32 * SCENARIO_ROW_HEIGHT;
                 if self.scenario_index == scenario_index || selected == Some(5 + row) {

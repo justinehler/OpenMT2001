@@ -787,10 +787,11 @@ mod tests {
                     &mut hooks,
                 )
                 .unwrap();
+            let before_synthetic_total = world.clock.timing[0];
             if scenario == "SCENARIO5" {
                 let mut seen = Vec::new();
                 for tick in 1..=8125 {
-                    context.total_clock = tick;
+                    world.clock.timing[0] = tick;
                     let before = hooks.prompts.len();
                     session
                         .runtime
@@ -844,11 +845,12 @@ mod tests {
                     }
                 );
             }
+            world.clock.timing[0] = before_synthetic_total;
             // Existing detailed subsystem checks borrow the initialized owned
             // world below; production callers can keep World/Scripts together.
             let mut routes = world.category_routes(&board);
             let crate::level_startup::World {
-                clock,
+                mut clock,
                 city:
                     crate::level_startup::City {
                         mut objective,
@@ -1429,8 +1431,10 @@ mod tests {
                 .map(|r| (r.as_bytes()[byte_at] >> shift) & 3)
                 .collect();
             assert!(before.iter().any(|&value| value < 3));
+            let before_synthetic_total = clock.timing[0];
             {
                 let mut state = crate::level_script::State {
+                            clock: &mut clock,
                     ai_demand: &mut crate::ai_demand::State::default(),
                     objective: &mut objective,
                     settings: &mut settings,
@@ -1462,14 +1466,27 @@ mod tests {
                 assert_eq!(vm.number("GAME_DAY").unwrap(), None);
                 assert_eq!(hooks.frequency.frequency.to_bits(), 0.04_f32.to_bits());
                 assert_eq!(f32::from_bits(word(&hooks.timers[1], 8)), 40.);
-                vm.execute("post-population addition", b"extra=AddBuilding('INDIANA_AVENUE',4,4,3,3,8,'RESIDENTIAL',176,'high'); AddBusiness(extra,'apartments')", &mut |id,args|level.handle(id,args,&mut state,&mut events,&context,&mut geometry,&mut hooks)).unwrap();
+                let ownership_tick=state.clock.timing[1];
+                state.clock.timing[1]=0x11223344;
+                // One actual scheduled callback invokes a nested buffer. Native map
+                // construction must consume that buffer's immediately written date.
+                vm.script_buffer("calendar-date-inner.lua",b"Calendar.era=5; Calendar.year=7; Calendar.hour=13; extra=AddBuilding('INDIANA_AVENUE',4,4,3,3,8,'RESIDENTIAL',176,'high'); AddBusiness(extra,'apartments')").unwrap();
+                vm.execute("scheduled calendar consumer", b"function CalendarDateConsumer() old_era=Calendar.era; old_year=Calendar.year; old_hour=Calendar.hour; C_RunScript('calendar-date-inner.lua'); Calendar.era=old_era; Calendar.year=old_year; Calendar.hour=old_hour; return 0 end", &mut |id,args|level.handle(id,args,&mut state,&mut events,&context,&mut geometry,&mut hooks)).unwrap();
+                let mut calendar_events=crate::script_events::Events::default();
+                calendar_events.append(crate::script_events::Event{reference:vm.reference_function("CalendarDateConsumer").unwrap().unwrap(),remaining:1,argument:0});
+                vm.tick_events(&mut calendar_events,&mut |id,args,events|level.handle(id,args,&mut state,events,&context,&mut geometry,&mut hooks)).unwrap();
+                assert!(calendar_events.pending().is_empty());
+                state.clock.timing[1]=ownership_tick;
+                let extra = vm.number("extra").unwrap().expect("actual map construction") as usize;
+                assert_eq!(state.buildings[extra][0x34], 57, "same-chunk native construction date");
+                assert_eq!(word(&state.buildings[extra],0x30),0x11223344,"actual ownership-domain timestamp");
                 // Exercise the original tutorial event bodies and dismissal
                 // handler through the production bindings. This advances only
                 // script ticks, not a claim of full-city simulation/gameplay.
                 let due = [300, 1250, 2600, 4425, 5775, 8750, 9375, 10625, 13125];
                 let mut seen = vec![];
                 for tick in 1..=13125 {
-                    context.total_clock = tick;
+                    state.clock.timing[0] = tick;
                     let previous = hooks.prompts.len();
                     vm.tick_events(&mut events, &mut |id, args, events| {
                         level.handle(
@@ -1554,6 +1571,7 @@ mod tests {
                 assert!(!state.pause.has_reason());
                 assert!(!hooks.paused);
             }
+            clock.timing[0] = before_synthetic_total;
             assert_eq!(vm.number("extra").unwrap(), Some(9.));
             assert_eq!(residents.active_count, count);
             assert_eq!(available.len(), 10);
@@ -1971,6 +1989,7 @@ mod tests {
                                                     // original scenario VM; no synthetic script body.
                                                     {
                                                         let mut state = crate::level_script::State {
+                            clock: clock,
                     ai_demand: &mut crate::ai_demand::State::default(),
                                                             objective: &mut objective, settings: &mut settings,
                                                             configuration: &mut config, welfare: &mut welfare,
@@ -1983,7 +2002,9 @@ mod tests {
                     player_accounts: &mut [],
                                                             player_money: &mut cash, construction_components: &mut construction_components,
                                                         };
-                                                        if hourly_session.dispatch_catch_event((name, argument as i32), &mut state, &context, &mut geometry, &mut hooks)?.is_some() {
+                                                        let result=hourly_session.dispatch_catch_event((name, argument as i32), &mut state, &context, &mut geometry, &mut hooks);
+                                                        context.update_clock(state.clock);
+                                                        if result?.is_some() {
                                                             hourly_scripts.push(name.to_owned());
                                                         }
                                                     }
@@ -2018,6 +2039,7 @@ mod tests {
                                 context.update_clock(clock);
                                 let previous = hooks.prompts.len();
                                                         let mut state = crate::level_script::State {
+                            clock: clock,
                     ai_demand: &mut crate::ai_demand::State::default(),
                                                             objective: &mut objective, settings: &mut settings,
                                                             configuration: &mut config, welfare: &mut welfare,
@@ -2069,6 +2091,7 @@ mod tests {
                         std::mem::swap(&mut timed_tasks, &mut hooks.timers);
                         context.update_clock(&simulation_clock);
                         let mut state = crate::level_script::State {
+                            clock: &mut simulation_clock,
                             ai_demand: &mut crate::ai_demand::State::default(),
                             objective: &mut objective,
                             settings: &mut settings,
@@ -2224,6 +2247,29 @@ mod tests {
                     .zip(positions_before)
                     .any(|(row, before)| row[4..16] != before)
             );
+            // Independent terminal consumer control. All timetables distinguish
+            // stale hour11 (sleep) from the same-chunk write to hour13 (snack).
+            let timetable=(0..100).flat_map(|row|(1..=24).map(move |hour|
+                format!("TIMETABLE {row} HOUR{hour} {}\n",if hour==13 {"SNACK_TIME"}else{"SLEEP"}))).collect::<String>();
+            config.timetables=crate::resident::Timetables::from_timetable(&timetable).unwrap();
+            simulation_clock.calendar[0]=11;
+            let before_count=ledgers.residents.active_count;
+            let created_slot=ledgers.residents.nodes.iter().position(|node|!node.is_active()).expect("free original resident slot");
+            {
+                let mut state=crate::level_script::State {
+                    clock:&mut simulation_clock,ai_demand:&mut crate::ai_demand::State::default(),
+                    objective:&mut objective,settings:&mut settings,configuration:&mut config,welfare:&mut welfare,
+                    pause:&mut pause,buildings:&mut buildings,businesses:&mut ledgers.businesses,categories:&mut categories,
+                    definitions:&mut definitions,commodities:&mut commodities,catalog:&mut catalog,residents:&mut ledgers.residents,
+                    creation:&mut creation,available:&mut available,availability_cursor:&mut cursor,players:&[None;6],
+                    player_accounts:&mut ledgers.players,player_money:&mut cash,construction_components:&mut construction_components,
+                };
+                hourly_session.runtime.execute("live resident hour",b"Calendar.hour=13; People.Create(1)",&mut |id,args|hourly_session.bindings.handle(id,args,&mut state,&mut hourly_session.events,&context,&mut geometry,&mut hooks)).unwrap();
+                assert_eq!(state.residents.active_count,before_count+1);
+                let resident=&state.residents.nodes[created_slot];
+                assert_eq!(word(resident.as_bytes(),0xcc),8,"actual initialized snack state at hour13");
+            }
+
         }
     }
 }

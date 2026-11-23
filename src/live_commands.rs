@@ -113,6 +113,25 @@ pub struct Context<'a, 'image> {
     pub network_override: bool,
     pub utility_factor: f32,
 }
+pub struct CommandContext<'a, 'image> {
+    pub image: &'a PeImage<'image>,
+    pub clock: &'a mut crate::clock::Clock,
+    pub accounting_enabled: bool,
+    /// Original801dec: demand cache initialized by4717c0. This is separate
+    /// from the host preference to display interface notifications.
+    pub notifications: bool,
+    /// Original optional86d338 object+85c tutorial-event gate.
+    pub tutorial_state: u8,
+    pub network_enabled: bool,
+    pub network_override: bool,
+    pub utility_factor: f32,
+}
+impl CommandContext<'_, '_> {
+    /// Reborrow the actual clock for one native consumer; never snapshot its words.
+    pub fn read(&self) -> Context<'_, '_> {
+        Context {image: self.image,clock: &*self.clock,accounting_enabled: self.accounting_enabled,notifications: self.notifications,tutorial_state: self.tutorial_state,network_enabled: self.network_enabled,network_override: self.network_override,utility_factor: self.utility_factor}
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     PropertyOffer(crate::property_offer::Call),
@@ -185,7 +204,6 @@ pub trait TutorialAnnouncement {
         &mut self,
         control: u32,
         _state: &mut crate::level_script::State<'_>,
-        _clock: &crate::clock::Clock,
         _geometry: &mut dyn crate::building_pool::GeometryBinding,
         _utilities: &mut economy::Utilities,
     ) -> Result<(), String> {
@@ -194,7 +212,6 @@ pub trait TutorialAnnouncement {
     fn start(
         &mut self,
         state: &mut crate::level_script::State<'_>,
-        clock: &crate::clock::Clock,
         presentation: &crate::ai_messages::offers::auction::admission::Presentation,
         geometry: &mut dyn crate::building_pool::GeometryBinding,
         utilities: &mut economy::Utilities,
@@ -249,12 +266,12 @@ impl Runtime<'_> {
                     |call,_|{
                         if let auction::Call::Tutorial(control)=call
                             && let Some((1,geometry,callback))=tutorial.as_mut(){
-                            callback.control(control,&mut crate::level_script::State{
+                            callback.control(control,&mut crate::level_script::State{clock: &mut *clock,
                                 ai_demand,objective,settings,configuration,welfare,pause,buildings,
                                 businesses:&mut ledgers.businesses,categories,definitions,commodities,catalog,
                                 residents:&mut ledgers.residents,creation,available,availability_cursor,
                                 players:&players,player_accounts:&mut ledgers.players,player_money,construction_components,
-                            },clock,*geometry,self.utilities)?;
+                            },*geometry,self.utilities)?;
                             return Ok(());
                         }
                         event(auction_action_event(call, cash),clock).map(|_|())
@@ -272,14 +289,14 @@ impl Runtime<'_> {
                 auction::closure::finish(&mut world,|call,world|match call{
                     auction::closure::Call::Tutorial(control) if tutorial.as_ref().is_some_and(|(state,_,_)|*state==1)=>{
                         let (_,geometry,callback)=tutorial.as_mut().unwrap();
-                        callback.control(control,&mut crate::level_script::State{
+                        callback.control(control,&mut crate::level_script::State{clock: &mut *clock,
                             ai_demand,objective,settings,configuration,welfare,pause,buildings,
                             businesses:&mut ledgers.businesses,
                             categories:(&mut *world.categories).try_into().map_err(|_|"tutorial auction closure category pool size")?,
                             definitions,commodities,catalog,residents:&mut ledgers.residents,
                             creation,available,availability_cursor,players:&players,
                             player_accounts:&mut ledgers.players,player_money,construction_components,
-                        },clock,*geometry,self.utilities)
+                        },*geometry,self.utilities)
                     },
                     auction::closure::Call::Message(args)=>player_message(args,&mut self.roster.manager,self.message_context,
                         |e|event(e,clock).map(|_|())),
@@ -294,13 +311,13 @@ impl Runtime<'_> {
             kind=>Err(format!("command{kind:x} is not an auction phase")),
         }
     }
-    pub fn advance_auction(&mut self,clock:&crate::clock::Clock,network:[bool;2],
-        event:impl FnMut(Event)->Result<u32,String>)->Result<(),String>{
+    pub fn advance_auction(&mut self,clock:&mut crate::clock::Clock,network:[bool;2],
+        event:impl FnMut(Event,&crate::clock::Clock)->Result<u32,String>)->Result<(),String>{
         self.advance_auction_with_tutorial(clock,network,None,event)
     }
-    pub fn advance_auction_with_tutorial(&mut self,clock:&crate::clock::Clock,network:[bool;2],
+    pub fn advance_auction_with_tutorial(&mut self,clock:&mut crate::clock::Clock,network:[bool;2],
         mut tutorial:Option<(u8,&mut dyn crate::building_pool::GeometryBinding,&mut dyn TutorialAnnouncement)>,
-        mut event:impl FnMut(Event)->Result<u32,String>)->Result<(),String>{
+        mut event:impl FnMut(Event,&crate::clock::Clock)->Result<u32,String>)->Result<(),String>{
         use crate::{player_manager::word,ai_messages::offers::auction};
         if self.city.auction.controller.reference==0{return Err("auction scheduler has no retained controller".into());}
         let cash = self.current_player_cash()?;
@@ -313,45 +330,45 @@ impl Runtime<'_> {
         let mut world=auction::progress::World{record:(&mut state.controller.record[..128]).try_into().unwrap(),
             selected:&mut state.presentation.selected,active:&active,network,command_prior:[[0;32];2],opening:&mut state.opening};
         auction::progress::update(&mut world,|call,world|match call{
-            auction::progress::Call::Message(args)=>player_message(args,&mut self.roster.manager,self.message_context,|e|event(e).map(|_|())),
+            auction::progress::Call::Message(args)=>player_message(args,&mut self.roster.manager,self.message_context,|e|event(e, clock).map(|_|())),
             auction::progress::Call::Queue{descriptor:d,size}=>{
                 if word(&d,4)==0x1f && d[16]==0 && word(&d,12)==0 {
                     auction::apply(auction::Command{action:word(&d,20),participant:word(&d,24),amount:word(&d,28)},world.record,active.len() as i32,true,
                         |call,_|{
                             if let auction::Call::Tutorial(control)=call
                                 && let Some((1,geometry,callback))=tutorial.as_mut(){
-                                return callback.control(control,&mut crate::level_script::State{
+                                return callback.control(control,&mut crate::level_script::State{clock: &mut *clock,
                                     ai_demand,objective,settings,configuration,welfare,pause,buildings,
                                     businesses:&mut ledgers.businesses,categories,definitions,commodities,catalog,
                                     residents:&mut ledgers.residents,creation,available,availability_cursor,
                                     players:&players,player_accounts:&mut ledgers.players,player_money,construction_components,
-                                },clock,*geometry,self.utilities);
+                                },*geometry,self.utilities);
                             }
-                            event(auction_action_event(call, cash)).map(|_|())
+                            event(auction_action_event(call, cash), clock).map(|_|())
                         })
                 }else{
                     let mut descriptor=[0;52];descriptor[..size].copy_from_slice(&d[..size]);
-                    event(Event::AuctionQueue{descriptor,additional_delay:0}).map(|_|())
+                    event(Event::AuctionQueue{descriptor,additional_delay:0}, clock).map(|_|())
                 }
             }
         })?;
         let _=clock;
         Ok(())
     }
-    fn apply_auction(&mut self,d:&[u8;52],context:&Context<'_,'_>,
+    fn apply_auction(&mut self,d:&[u8;52],context:&mut CommandContext<'_,'_>,
         geometry:&mut impl crate::building_pool::GeometryBinding,
         mut announcement:Option<&mut dyn TutorialAnnouncement>,
-        event:&mut impl FnMut(Event)->Result<(),String>)->Result<(),String>{
+        event:&mut impl FnMut(Event,&crate::clock::Clock)->Result<(),String>)->Result<(),String>{
         use crate::{player_manager::word,ai_messages::offers::auction::admission};
         match word(d,4) {
             0x19=>{
                 let category=word(d,20);
                 let row=self.city.categories.get_mut(category as usize).ok_or("category wait command leaves pool")?;
                 let normal_tick=crate::category_ownership::begin_wait(row,context.clock.timing[1]);
-                event(Event::CategoryReadyAt{category,normal_tick})
+                event(Event::CategoryReadyAt{category,normal_tick}, &*context.clock)
             },
             0x16=>{let result=property_transfer(i16::from_le_bytes(d[24..26].try_into().unwrap()),d[26],word(d,20) as i32,
-                self.city,self.roster,self.message_context,context,event);self.utilities.owners=[2,35,39,42].map(|i|self.city.categories[i][5]);result},
+                self.city,self.roster,self.message_context,&context.read(),|call|event(call, &*context.clock));self.utilities.owners=[2,35,39,42].map(|i|self.city.categories[i][5]);result},
             0x1d=>{
                 let active:Vec<u8>=self.roster.manager.players.iter().map(|p|p.bytes[0x10]).collect();
                 let current=self.roster.manager.players.iter().find(|p|p.reference==self.roster.status.current_player).ok_or("auction current player unresolved")?.bytes[0x1bc];
@@ -368,22 +385,22 @@ impl Runtime<'_> {
                 let admitted=admission::admit(word(d,20),word(d,24),word(d,28),&mut world,|call,world|{
                     if let admission::Call::QueueStart{additional_delay,descriptor}=call {
                         let mut bytes=[0;52];bytes[..20].copy_from_slice(&descriptor);
-                        event(Event::AuctionQueue{descriptor:bytes,additional_delay})
+                        event(Event::AuctionQueue{descriptor:bytes,additional_delay}, &*context.clock)
                     }else{
                         if call==admission::Call::ShowAnnouncement{
                             if context.tutorial_state==1 && let Some(callback)=announcement.as_deref_mut(){
-                                callback.start(&mut crate::level_script::State{
+                                callback.start(&mut crate::level_script::State{clock: &mut *context.clock,
                                     ai_demand,objective,settings,configuration,welfare,pause,buildings,
                                     businesses:&mut ledgers.businesses,
                                     categories:(&mut *world.categories).try_into().map_err(|_|"tutorial announcement category pool size")?,
                                     definitions,commodities,catalog,residents:&mut ledgers.residents,
                                     creation,available,availability_cursor,players:&players,
                                     player_accounts:&mut ledgers.players,player_money,construction_components,
-                                },context.clock,world.presentation,geometry,self.utilities)?;
+                                },world.presentation,geometry,self.utilities)?;
                             }
                             world.presentation.visible=true;
                         }
-                        event(Event::AuctionAdmission(call))
+                        event(Event::AuctionAdmission(call), &*context.clock)
                     }
                 })?;
                 if !admitted && (!context.network_enabled || context.network_override){
@@ -392,7 +409,7 @@ impl Runtime<'_> {
                             if let crate::player_messages::Route::PropertyRefresh{category}=route {
                                 crate::category_ownership::property_view(self.city.categories.get_mut(category as usize).ok_or("busy auction reply category leaves pool")?,0,1);
                             }
-                            event(Event::PlayerMessageRoute{route,packet:*packet})
+                            event(Event::PlayerMessageRoute{route,packet:*packet}, &*context.clock)
                         })?;
                 }
                 Ok(())
@@ -403,19 +420,19 @@ impl Runtime<'_> {
     pub fn apply(
         &mut self,
         command: &Command,
-        context: &Context<'_, '_>,
+        context: &mut CommandContext<'_, '_>,
         geometry: &mut impl crate::building_pool::GeometryBinding,
-        event: impl FnMut(Event) -> Result<(), String>,
+        mut event: impl FnMut(Event) -> Result<(), String>,
     ) -> Result<(), String> {
-        self.apply_with_announcement(command,context,geometry,None,event)
+        self.apply_with_announcement(command,context,geometry,None,|call,_clock|event(call))
     }
     pub fn apply_with_announcement(
         &mut self,
         command: &Command,
-        context: &Context<'_, '_>,
+        context: &mut CommandContext<'_, '_>,
         geometry: &mut impl crate::building_pool::GeometryBinding,
         announcement: Option<&mut dyn TutorialAnnouncement>,
-        mut event: impl FnMut(Event) -> Result<(), String>,
+        mut event: impl FnMut(Event,&crate::clock::Clock) -> Result<(), String>,
     ) -> Result<(), String> {
         let result = match command {
             Command::CategoryReady{category}=>{
@@ -424,7 +441,7 @@ impl Runtime<'_> {
             Command::Auction{descriptor}=>self.apply_auction(descriptor,context,geometry,announcement,&mut event),
             Command::PropertyTransfer { category,owner,amount } => {
                 let result=property_transfer(*category,*owner,*amount,self.city,self.roster,
-                    self.message_context,context,&mut event);
+                    self.message_context,&context.read(),|call|event(call, &*context.clock));
                 self.utilities.owners=[2,35,39,42].map(|i|self.city.categories[i][5]);
                 result
             }
@@ -482,31 +499,31 @@ impl Runtime<'_> {
                             },notice,|call,_| {
                                 if let crate::event_cards::targeted::Call::Message{from,to,building}=call {
                                     self.message_context.produce([from as i32,to as i32,0x2e,building,0,0,0,-999],&mut self.roster.manager,
-                                        |route,packet|event(Event::PlayerMessageRoute{route,packet:*packet}))?;
+                                        |route,packet|event(Event::PlayerMessageRoute{route,packet:*packet}, &*context.clock))?;
                                     Ok(())
-                                } else {event(Event::EventCardTargeted(call))}
+                                } else {event(Event::EventCardTargeted(call), &*context.clock)}
                             })
                     },
                 )?;
                 if notice.enabled {
-                    event(Event::EventCardNotice(notice))?;
+                    event(Event::EventCardNotice(notice), &*context.clock)?;
                 }
                 Ok(())
             }
             Command::OutcomeNotice { player, reason } => {
                 // Retain the existing command observation, then execute its
                 // original dialog and pause effects synchronously.
-                event(Event::OutcomeNotice { player:*player, reason:*reason })?;
+                event(Event::OutcomeNotice { player:*player, reason:*reason }, &*context.clock)?;
                 crate::outcome_notice::present(*player as u32,*reason,&crate::outcome_notice::World {
                     image:context.image,players:&self.roster.manager.players,
                     current_reference:self.roster.status.current_player,objective:&self.city.objective,
                 },|call| {
                     if call==crate::outcome_notice::Call::Pause {
-                        self.city.pause.pause(0,|timers,_|event(Event::Outcome(crate::outcome_notice::Call::Timers(timers))))
-                    }else{event(Event::Outcome(call))}
+                        self.city.pause.pause(0,|timers,_|event(Event::Outcome(crate::outcome_notice::Call::Timers(timers)), &*context.clock))
+                    }else{event(Event::Outcome(call), &*context.clock)}
                 })
             },
-            Command::Eliminate { slot } => eliminate(*slot, self.city, self.roster, &mut self.population.business_counts.age, self.message_context, context, event),
+            Command::Eliminate { slot } => eliminate(*slot, self.city, self.roster, &mut self.population.business_counts.age, self.message_context, &context.read(), |call|event(call, &*context.clock)),
             Command::SellBusiness(command) => crate::business_sale::apply(command,
                 &mut crate::business_sale::World {
                     businesses: &mut self.city.ledgers.businesses, buildings: &mut self.city.buildings,
@@ -523,7 +540,7 @@ impl Runtime<'_> {
                     crate::business_sale::Call::NativeUiCall { address, args, argument_count } =>
                         Event::PropertyOwnership(crate::category_ownership::Seam::NativeUiCall { address, args, argument_count }),
                     other => Event::BusinessSale(other),
-                })),
+                }, &*context.clock)),
             Command::Takeover(command) => {
                 let references:Vec<_>=self.roster.manager.players.iter().map(|p|p.reference).collect();
                 let slots:Vec<_>=self.roster.manager.players.iter().map(|p|p.bytes[0x1bc]).collect();
@@ -539,12 +556,12 @@ impl Runtime<'_> {
                         for (account,player) in world.players.iter().zip(&mut self.roster.manager.players) {
                             account.write_runtime(&mut player.bytes)?;
                         }
-                        player_message(args,&mut self.roster.manager,self.message_context,&mut event)
+                        player_message(args,&mut self.roster.manager,self.message_context,|call|event(call, &*context.clock))
                     },
-                    crate::business_takeover::Call::RefreshInterface=>event(Event::RefreshInterface),
+                    crate::business_takeover::Call::RefreshInterface=>event(Event::RefreshInterface, &*context.clock),
                     crate::business_takeover::Call::NativeUiCall { address, args, argument_count }=>
-                        event(Event::PropertyOwnership(crate::category_ownership::Seam::NativeUiCall { address, args, argument_count })),
-                    other=>event(Event::BusinessTakeover(other)),
+                        event(Event::PropertyOwnership(crate::category_ownership::Seam::NativeUiCall { address, args, argument_count }), &*context.clock),
+                    other=>event(Event::BusinessTakeover(other), &*context.clock),
                 })
             },
             Command::Convert(command)=>{
@@ -552,9 +569,9 @@ impl Runtime<'_> {
                 crate::business_conversion::debit(command,quote,&mut self.city.ledgers.players)?;
                 open_with_tutorial(&command.opening(),self.city,self.roster,&mut self.population.business_counts,self.utilities,self.message_context,context,Some(geometry),announcement,event).map(|_|())
             },
-            Command::Demolish(command) => demolish(command, self.city, self.roster, context, event),
+            Command::Demolish(command) => demolish(command, self.city, self.roster, &context.read(), |call|event(call, &*context.clock)),
             Command::Build(command) => {
-                build(command, self.city, context, geometry, event).map(|_| ())
+                build(command, self.city, &context.read(), geometry, |call|event(call, &*context.clock)).map(|_| ())
             }
             Command::Open(command) => open_with_tutorial(
                 command,
@@ -711,8 +728,7 @@ pub fn open(
     context: &Context<'_, '_>,
     event: impl FnMut(Event) -> Result<(), String>,
 ) -> Result<usize, String> {
-    open_with_tutorial(command, city, roster, counts, utilities, messages,
-        context, None, None, event)
+    open_readonly(command, city, roster, counts, utilities, messages, context, event)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -723,9 +739,90 @@ fn open_with_tutorial(
     counts: &mut crate::player_metrics::BusinessCounts,
     utilities: &mut economy::Utilities,
     messages: &mut crate::player_messages::Context,
-    context: &Context<'_, '_>,
+    context: &mut CommandContext<'_, '_>,
     mut geometry: Option<&mut dyn crate::building_pool::GeometryBinding>,
     mut tutorial: Option<&mut dyn TutorialAnnouncement>,
+    mut event: impl FnMut(Event,&crate::clock::Clock) -> Result<(), String>,
+) -> Result<usize, String> {
+    let mut command = command.clone();
+    let mut age = counts.age;
+    let result = crate::business_open::apply(
+        &mut command,
+        &mut age,
+        &mut crate::business_open::Controls {
+            network_enabled: context.network_enabled,
+            network_override: context.network_override,
+        },
+        |call, command, _, _| match call.address {
+            0x4634c0 => allocate(command, city, &context.read(), |call|event(call, &*context.clock))
+                .map(|slot| slot.map_or(u32::MAX, |v| v as u32)),
+            0x463560 => {
+                bind_open(
+                    command,
+                    call.arguments[0] as usize,
+                    city,
+                    roster,
+                    utilities,
+                    &context.read(),
+                    |call|event(call, &*context.clock),
+                )?;
+                Ok(0)
+            }
+            0x4e6960 => Err("original business allocation failed before binding".into()),
+            0x48cab0 => {
+                player_message(call.arguments.map(|v|v as i32),&mut roster.manager,messages,|call|event(call, &*context.clock))?;
+                Ok(0)
+            }
+            //420500 does not enqueue the current player's own construction.
+            0x4504e0 => {
+                use crate::player_manager::word;
+                let current=roster.manager.players.iter().find(|p|p.reference==roster.status.current_player).ok_or("open notification current player unresolved")?;
+                if u32::from(current.bytes[0x1bc])!=command.owner.wrapping_sub(1){
+                    let building=city.buildings.get(command.building as usize).ok_or("construction notice building outside pool")?;
+                    let business=word(building,0x1c);
+                    let business_kind=word(city.ledgers.businesses.get(business as usize).ok_or("construction notice business outside pool")?,4);
+                    let category_ptr=word(building,0x40);
+                    let category=category_ptr.checked_sub(0x617628).filter(|offset|offset%380==0).ok_or("construction notice category pointer")?/380;
+                    let category=word(city.categories.get(category as usize).ok_or("construction notice category outside pool")?,0);
+                    event(Event::ConstructionNotice{building:command.building,owner:command.owner,structure_kind:word(building,0x24),business,business_kind,category}, &*context.clock)?;
+                }
+                Ok(0)
+            }
+            0x41f410=>{event(Event::RefreshInterface, &*context.clock)?;Ok(0)}
+            0x407520=>{
+                city.buildings.get_mut(command.building as usize).ok_or("open appearance building leaves pool")?[0x3d]=0;
+                event(Event::RefreshInterface, &*context.clock)?;
+                Ok(0)
+            }
+            0x48dc40 if context.tutorial_state!=1=>Ok(0),
+            0x48dc40 if call.count == 1 && call.arguments[0] == 99
+                && tutorial.is_some() => {
+                let players: Vec<_> = roster.manager.players.iter().map(|player|
+                    Some(business_binding::Player { identity: player.reference,
+                        kind: crate::player_manager::word(&player.bytes, 0x154) })).collect();
+                tutorial.as_deref_mut().unwrap().control(99,
+                    &mut city.script_state(context.clock, &players),
+                    geometry.as_deref_mut().ok_or("tutorial completion geometry owner missing")?,
+                    utilities)?;
+                Ok(0)
+            }
+            _ => {
+                event(Event::OpenCall(call), &*context.clock)?;
+                Ok(0)
+            }
+        },
+    );
+    counts.age = age;
+    result.map(|slot| slot as usize)
+}
+fn open_readonly(
+    command: &OpenBusiness,
+    city: &mut City,
+    roster: &mut Roster,
+    counts: &mut crate::player_metrics::BusinessCounts,
+    utilities: &mut economy::Utilities,
+    messages: &mut crate::player_messages::Context,
+    context: &Context<'_, '_>,
     mut event: impl FnMut(Event) -> Result<(), String>,
 ) -> Result<usize, String> {
     let mut command = command.clone();
@@ -779,17 +876,6 @@ fn open_with_tutorial(
                 Ok(0)
             }
             0x48dc40 if context.tutorial_state!=1=>Ok(0),
-            0x48dc40 if call.count == 1 && call.arguments[0] == 99
-                && tutorial.is_some() => {
-                let players: Vec<_> = roster.manager.players.iter().map(|player|
-                    Some(business_binding::Player { identity: player.reference,
-                        kind: crate::player_manager::word(&player.bytes, 0x154) })).collect();
-                tutorial.as_deref_mut().unwrap().control(99,
-                    &mut city.script_state(&players), context.clock,
-                    geometry.as_deref_mut().ok_or("tutorial completion geometry owner missing")?,
-                    utilities)?;
-                Ok(0)
-            }
             _ => {
                 event(Event::OpenCall(call))?;
                 Ok(0)

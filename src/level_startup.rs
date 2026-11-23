@@ -164,13 +164,21 @@ impl World {
         })
     }
 }
+impl World {
+    pub fn script_state<'a>(&'a mut self,
+        players: &'a [Option<crate::business_binding::Player>]) -> level_script::State<'a> {
+        self.city.script_state(&mut self.clock, players)
+    }
+}
 impl City {
     /// Borrow current storage for each callback batch; no retained shadow city.
     pub fn script_state<'a>(
         &'a mut self,
+        clock: &'a mut crate::clock::Clock,
         players: &'a [Option<crate::business_binding::Player>],
     ) -> level_script::State<'a> {
         level_script::State {
+            clock,
             ai_demand: &mut self.ai_demand,
             objective: &mut self.objective,
             settings: &mut self.settings,

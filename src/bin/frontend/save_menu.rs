@@ -21,6 +21,18 @@ pub fn profile_root_for_campaign(app_root: &Path, campaign: &Path) -> Option<Pat
     Some(app_root.join("profiles").join(key))
 }
 
+/// Recover only the menu's exact selected profile identity, never an arbitrary
+/// save parent or a filename supplied by the saved game.
+pub fn progress_for_profile_root(app_root: &Path, selected: &Path) -> Option<PathBuf> {
+    let relative = selected.strip_prefix(app_root.join("profiles")).ok()?;
+    let key = relative.to_str()?;
+    let filename = format!("{key}.lua");
+    profile_key(&filename)?;
+    let progress = app_root.join("campaign").join(filename);
+    (profile_root_for_campaign(app_root, &progress)?.as_path() == selected)
+        .then_some(progress)
+}
+
 fn profile_key(filename: &str) -> Option<&str> {
     let key = filename.strip_suffix(".lua")?;
     (key.len().is_multiple_of(2) && !key.is_empty()
@@ -444,6 +456,20 @@ pub fn cameras(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selected_profile_progress_identity_roundtrips_without_save_path_authority() {
+        let root = Path::new("work/identity-fixture");
+        for name in [b"Alice".as_slice(), b"B ob", b"\xff"] {
+            let selected = selected_profile_root(root, name);
+            assert_eq!(progress_for_profile_root(root, &selected),
+                Some(crate::campaign_store::profile_path(root, name)));
+        }
+        for invalid in ["profiles", "profiles/", "profiles/zz", "profiles/a",
+            "profiles/41/saves", "profiles/41/../42", "elsewhere/41"] {
+            assert!(progress_for_profile_root(root, &root.join(invalid)).is_none(), "{invalid}");
+        }
+        assert!(progress_for_profile_root(root, Path::new("work/other/profiles/41")).is_none());
+    }
     const TERMINATOR: [u8; 8] = [255, 255, 255, 255, 0, 0, 0, 0];
     #[test]
     fn selected_profiles_isolate_save_overwrite_delete_and_legacy_rows() {

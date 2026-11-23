@@ -1297,10 +1297,11 @@ impl SceneInputs {
             auxiliary_prior_bytes: [0; 0x11c],
         };
         let mut session = if is_custom {
-            crate::fresh_city::Session::initialize_custom_with_style(
+            crate::fresh_city::Session::initialize_custom_with_style_and_profile(
                 input,
                 policy,
                 setup.catalog.clone(),
+                Some(setup.profile_path.clone()),
                 &self.style,
                 self.compatibility,
             )?
@@ -1321,7 +1322,7 @@ impl SceneInputs {
         );
         if is_custom {
             eprintln!(
-                "Authored custom offline launch used host seed{seed}; campaign progress isolated"
+                "Authored custom offline launch used host seed{seed}; named profile progress retained"
             );
         }
         session.setup = Some(setup);
@@ -1403,26 +1404,39 @@ impl SceneInputs {
         session.repair_imported_resident_models(self.compatibility, metadata.is_some())?;
         let saved_auction = metadata.as_ref().and_then(|metadata| metadata.auction.clone());
         let saved_interface_mode = metadata.as_ref().and_then(|metadata| metadata.interface_mode);
-        if let Some(metadata) = metadata
-            && let Some(filename) = metadata.profile_filename
-        {
-            if session
-                .catalog
-                .selected_level()
-                .is_some_and(crate::fresh_city::custom::valid_level)
-            {
-                return Err("Custom save cannot claim campaign progress ownership".into());
+        let is_custom = session
+            .catalog
+            .selected_level()
+            .is_some_and(crate::fresh_city::custom::valid_level);
+        let filename = metadata.and_then(|metadata| metadata.profile_filename);
+        let progress = if is_custom {
+            // Custom progress belongs to the actively selected named profile.
+            // An imported save's filename cannot choose another profile's writer.
+            match selected_root {
+                Some(Some(root)) => {
+                    crate::save_menu::progress_for_profile_root(&self.profile_root, root)
+                }
+                Some(None) => None,
+                None => filename
+                    .as_ref()
+                    .map(|name| self.profile_root.join("campaign").join(name)),
             }
-            let profile = self.profile_root.join("campaign").join(&filename);
-            let owner = crate::save_menu::profile_root_for_campaign(&self.profile_root, &profile);
-            let selected_matches = selected_root.is_none_or(|selected| selected == owner.as_deref());
-            if selected_matches {
+        } else {
+            filename.and_then(|filename| {
+                let profile = self.profile_root.join("campaign").join(filename);
+                let owner =
+                    crate::save_menu::profile_root_for_campaign(&self.profile_root, &profile);
+                selected_root
+                    .is_none_or(|selected| selected == owner.as_deref())
+                    .then_some(profile)
+            })
+        };
+        if let Some(profile) = progress {
                 crate::campaign_store::load_progress(&mut session.catalog, &profile)?;
                 if !session.catalog.select(id, false) {
-                    return Err("V2 saved level is absent after campaign reload".into());
+                    return Err("Saved level is absent after profile reload".into());
                 }
                 session.campaign_profile = Some(profile);
-            }
         }
         let saved_viewpoint = session.saved_cameras.as_ref()
             .map(|records| saved_viewpoint(&records[0], camera.vertical_fov))
@@ -8315,6 +8329,144 @@ mod tests {
             assert!(changed > 16, "static meshes changed only {changed} GPU pixels");
             eprintln!("Static capture: {removed_vertices} submitted vertices, {changed} changed pixels; focus {focus:?}");
         }).unwrap().join().unwrap();
+    }
+    #[test]
+    #[ignore = "requires supplied Custom originals; fresh/save/selected-profile cold ownership"]
+    fn custom_fresh_save_and_cold_selected_profile_ownership() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                struct Scratch(PathBuf);
+                impl Drop for Scratch {
+                    fn drop(&mut self) {
+                        fs::remove_dir_all(&self.0).unwrap();
+                    }
+                }
+                let root = Scratch(std::env::temp_dir().join(format!("custom-profile-{}-{}",
+                std::process::id(), std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
+                fs::create_dir_all(&root.0).unwrap();
+                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+                let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let executable = read("OPENMT2001_EXE");
+                let language = exe_path
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("US/language/usa");
+                let inputs = SceneInputs {
+                    compatibility: crate::compatibility::Mode::Modern,
+                    style: test_board_style(&executable),
+                    time_runtime: Default::default(),
+                    profile_root: root.0.clone(),
+                    character_names: crate::fresh_city::character_names(
+                        &openmt2001::pe::PeImage::parse(&executable).unwrap(),
+                        &language,
+                    )
+                    .unwrap(),
+                    installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
+                    language,
+                    maps: map.parent().unwrap().to_path_buf(),
+                    build_file: read("OPENMT2001_BUILD_FILE"),
+                    executable,
+                    directory: read("OPENMT2001_ARCHIVE_DIR"),
+                    archive: read("OPENMT2001_ARCHIVE_BIN"),
+                    suncols: read("OPENMT2001_SUNCOLS"),
+                };
+                let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+                let catalog =
+                    crate::campaign_store::load_catalog(&image, inputs.maps.parent().unwrap())
+                        .unwrap();
+                let alice = crate::campaign_store::profile_path(&root.0, b"Alice");
+                let bob = crate::campaign_store::profile_path(&root.0, b"Bob");
+                // Distinct persistence fixtures; these are not gameplay victories.
+                for (path, attempts) in [(&alice, 2), (&bob, 7)] {
+                    let mut profile = catalog.clone();
+                    profile.reset_progress();
+                    profile.set_level_info(500000, attempts, [0; 3]);
+                    crate::campaign_store::save_progress(&profile, path).unwrap();
+                }
+                let before = [fs::read(&alice).unwrap(), fs::read(&bob).unwrap()];
+                let mut selected = catalog.clone();
+                crate::campaign_store::load_progress(&mut selected, &alice).unwrap();
+                let setup = crate::singleplayer::Setup {
+                    preview: crate::singleplayer::Preview::Scenario(500000),
+                    difficulty: crate::singleplayer::Difficulty::Medium,
+                    character_index: 4,
+                    profile_name: b"Alice".to_vec(),
+                    catalog: selected,
+                    profile_path: alice.clone(),
+                };
+                let camera = CameraSample {
+                    eye: [0., 180., 220.],
+                    target: [0.; 3],
+                    up: [0., 1., 0.],
+                    vertical_fov: 0.7,
+                };
+                let (inspection, mut session) = inputs
+                    .fresh_preview(setup, camera, &mut SnapshotCache::default())
+                    .unwrap();
+                assert_eq!(session.campaign_profile, Some(alice.clone()));
+                assert_eq!(session.catalog.selected_level().unwrap().attempts(), 2);
+                let bytes = session
+                    .save_v2(&image, crate::save_menu::cameras(None, camera).unwrap(), 1)
+                    .unwrap();
+                let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+                let extension = openmt2001::save::extension::Extension::parse(&save)
+                    .unwrap()
+                    .unwrap();
+                assert!(extension.version >= 4);
+                let path = root.0.join("custom.sav");
+                fs::write(&path, &bytes).unwrap();
+                drop(session);
+                drop(inspection);
+                let (inspection, restored) = inputs
+                    .saved_preview(&path, camera, &mut SnapshotCache::default())
+                    .unwrap();
+                assert_eq!(
+                    restored.campaign_profile,
+                    Some(alice.clone()),
+                    "the explicit runtime extension must retain the fresh profile identity"
+                );
+                drop(restored);
+                drop(inspection);
+                for (name, expected, attempts) in [
+                    (Some(b"Alice".as_slice()), Some(alice.clone()), 2),
+                    (Some(b"Bob".as_slice()), Some(bob.clone()), 7),
+                    (None, None, 0),
+                ] {
+                    let selected_root =
+                        name.map(|name| crate::save_menu::selected_profile_root(&root.0, name));
+                    let (inspection, restored) = inputs
+                        .saved_preview_with_selection(
+                            &path,
+                            camera,
+                            &mut SnapshotCache::default(),
+                            Some(selected_root.as_deref()),
+                        )
+                        .unwrap();
+                    assert_eq!(restored.campaign_profile, expected);
+                    assert_eq!(restored.catalog.selected_level().unwrap().id(), 500000);
+                    assert_eq!(
+                        restored.catalog.selected_level().unwrap().attempts(),
+                        attempts
+                    );
+                    assert_eq!(restored.difficulty, 1);
+                    drop(restored);
+                    drop(inspection);
+                }
+                assert_eq!(
+                    [fs::read(&alice).unwrap(), fs::read(&bob).unwrap()],
+                    before,
+                    "startup/save/reload must not count a completed result"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
     #[test]
     #[ignore = "requires original fresh scenario and graphics assets"]

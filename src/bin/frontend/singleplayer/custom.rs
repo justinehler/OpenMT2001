@@ -20,6 +20,30 @@ fn rows(catalog: &openmt2001::level_catalog::Catalog) -> Vec<Row> {
     }
     rows
 }
+// Share the text viewport: headers/spacers consume height even though they draw no cups.
+fn visible_rows(rows: &[Row], first: usize, bounds: [f32; 4])
+    -> impl Iterator<Item = (usize, &Row)> {
+    rows.iter().skip(first).enumerate().take_while(move |(row, _)| {
+        bounds[1] + (*row as f32 + 1.) * SCENARIO_ROW_HEIGHT <= bounds[3]
+    })
+}
+// Native 49a297..49a3d2: viewport row, three independent completion bytes,
+// bank 296 empty / 297..299 earned. Callback is the production submission seam.
+fn submit_row_cups(
+    rows: &[Row], first: usize, bounds: [f32; 4],
+    catalog: &openmt2001::level_catalog::Catalog,
+    mut submit: impl FnMut(usize, [f32; 4]) -> Result<(), String>,
+) -> Result<(), String> {
+    for (visible_row, item) in visible_rows(rows, first, bounds) {
+        let Row::Level(index) = item else { continue; };
+        let Some(level) = catalog.levels.get(*index) else { continue; };
+        for (cup, earned) in level.completed().into_iter().enumerate() {
+            submit(if earned { 297 + cup } else { SCENARIO_CUP_EMPTY },
+                scenario_cup_rect(visible_row, cup))?;
+        }
+    }
+    Ok(())
+}
 // Resolve Windows spelling without allowing traversal, ambiguous names or symlink escapes.
 fn players_path(root: &Path, directory: &[u8]) -> Result<PathBuf, String> {
     let root = root.canonicalize().map_err(|e| format!("Custom scripts root: {e}"))?;
@@ -126,10 +150,16 @@ impl SinglePlayer {
             openmt2001::level_catalog::Labels::Literal {title:t,description:d} => (if title {t} else {d}).into_iter().map(|b| if (32..=126).contains(&b) {b-32} else {31}).collect(),
         }
     }
+    pub(super) fn custom_cups_draw(&self, out: &mut Vec<Surface>) -> Result<(), String> {
+        let custom = self.custom.as_ref().ok_or("Custom picker missing")?;
+        let catalog = self.catalog.as_ref().ok_or("Custom catalog missing")?;
+        submit_row_cups(&custom.rows, custom.first, self.scenario.bounds[8], catalog,
+            |texture, rect| self.image(out, texture, rect))
+    }
     pub(super) fn custom_list_draw(&self, shapes: &mut Surface, fonts: &mut [Surface]) -> Result<(),String> {
-        let c = self.custom.as_ref().unwrap(); let [l,t,r,b] = self.scenario.bounds[8];
-        for (row,item) in c.rows.iter().enumerate().skip(c.first) {
-            let y=t+(row-c.first) as f32*12.; if y+12.>b {break;}
+        let c = self.custom.as_ref().unwrap(); let [l,t,r,_] = self.scenario.bounds[8];
+        for (row,item) in visible_rows(&c.rows, c.first, self.scenario.bounds[8]) {
+            let y=t+row as f32*SCENARIO_ROW_HEIGHT;
             let text = match item { Row::Header(s)=>ascii(&String::from_utf8_lossy(s)), Row::Space=>vec![], Row::Level(i)=> {
                 if c.selected==Some(*i) {shapes.rect([l,y,r,y+12.],[0xff008ed0;4]);}
                 self.custom_label(&self.catalog.as_ref().unwrap().levels[*i],true)
@@ -169,4 +199,53 @@ impl SinglePlayer {
         assert!(matches!(rows(&c).last(), Some(Row::Level(0))));
     }
     #[test] fn traversal_is_refused() { assert!(players_path(Path::new("/"),b"../players").is_err()); }
+    #[test]
+    fn custom_cup_submissions_follow_viewport_and_independent_bytes() {
+        use openmt2001::level_catalog::{Catalog, Registration, Labels};
+        let mut catalog = Catalog::default();
+        for id in [500000, 500001] {
+            catalog.register(Registration { id, directory:b"custom/author/level".to_vec(),
+                labels:Labels::Literal {title:vec![], description:vec![]}, checksum:0 },
+                false, true).unwrap();
+        }
+        catalog.levels[0].bytes[0x874..0x877].copy_from_slice(&[1, 0, 1]);
+        catalog.levels[1].bytes[0x874..0x877].copy_from_slice(&[0, 1, 0]);
+        let rows = [Row::Header(vec![]), Row::Level(0), Row::Space,
+            Row::Header(vec![]), Row::Level(1), Row::Level(usize::MAX)];
+        // Exactly five visible text rows. The sixth row must not submit anything.
+        let bounds = [32., 97., 300., 157.];
+        let mut draws = vec![];
+        submit_row_cups(&rows, 0, bounds, &catalog,
+            |id, rect| { draws.push((id, rect)); Ok(()) }).unwrap();
+        assert_eq!(draws, vec![
+            (297, [242.,110.,259.,124.]), (296, [262.,110.,279.,124.]),
+            (299, [282.,110.,299.,124.]), (296, [242.,146.,259.,160.]),
+            (298, [262.,146.,279.,160.]), (296, [282.,146.,299.,160.]),
+        ]);
+        draws.clear();
+        // Scrolling uses viewport-relative y, never catalog index or absolute row.
+        submit_row_cups(&rows, 4, [32.,97.,300.,121.], &catalog,
+            |id, rect| { draws.push((id, rect)); Ok(()) }).unwrap();
+        assert_eq!(draws, vec![
+            (296, [242.,98.,259.,112.]), (298, [262.,98.,279.,112.]),
+            (296, [282.,98.,299.,112.]),
+        ]);
+        draws.clear();
+        submit_row_cups(&[Row::Level(0), Row::Level(1)], 0, [32.,97.,300.,109.],
+            &catalog, |id, rect| { draws.push((id, rect)); Ok(()) }).unwrap();
+        assert_eq!(draws.len(), 3); // A valid offscreen level must not submit.
+        assert_eq!(draws[0], (297, [242.,98.,259.,112.]));
+        submit_row_cups(&[Row::Level(0)], 0, [32.,97.,300.,108.],
+            &catalog, |_, _| panic!("partial text row must not submit")).unwrap();
+        for first in [rows.len(), rows.len() + 1] {
+            submit_row_cups(&rows, first, bounds, &catalog,
+                |_, _| panic!("off-end rows must not submit")).unwrap();
+        }
+        let mut calls = 0;
+        assert_eq!(submit_row_cups(&rows, 0, bounds, &catalog, |_, _| {
+            calls += 1; Err("submission failure".into())
+        }), Err("submission failure".into()));
+        assert_eq!(calls, 1);
+    }
+
 }

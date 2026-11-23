@@ -230,6 +230,45 @@ mod tests {
         fn drop(&mut self) { fs::remove_dir_all(&self.0).unwrap(); }
     }
     #[test]
+    fn custom_result_records_share_profile_and_preserve_campaign_by_id() {
+        use openmt2001::level_catalog::{Registration, Labels};
+        use openmt2001::outcome_notice::Sequence;
+        let fixture = Fixture::new();
+        let path = profile_path(&fixture.0, b"Combined profile");
+        let mut catalog = Catalog::default();
+        for (id, directory) in [(200001, "SCENARIO1"), (200002, "SCENARIO2"),
+            (500000, "custom/author/first"), (500001, "custom/author/second")] {
+            catalog.register(Registration { id, directory: directory.as_bytes().to_vec(),
+                labels: Labels::Literal { title: vec![], description: vec![] }, checksum: 0 },
+                false, true).unwrap();
+        }
+        catalog.reset_progress();
+        catalog.set_level_info(200001, 3, [1, 0, 1]);
+        catalog.set_level_info(200002, 2, [0, 1, 0]);
+        let campaign_before: Vec<_> = catalog.levels[..2].to_vec();
+        assert!(catalog.select(500000, false));
+        catalog.difficulty = 1;
+        let mut applied = false;
+        // Exercise the persistence boundary, not a simulated gameplay victory.
+        commit_result(&mut catalog, Some(&path), &mut applied, Sequence::Win).unwrap();
+        commit_result(&mut catalog, Some(&path), &mut applied, Sequence::Win).unwrap();
+        assert_eq!(catalog.levels[..2], campaign_before);
+        let mut reopened = catalog.clone();
+        load_progress(&mut reopened, &path).unwrap();
+        let level = &reopened.levels[reopened.find(500000).unwrap()];
+        assert_eq!((level.attempts(), level.completed()), (1, [false, true, false]));
+        assert_eq!(reopened.levels[..2], campaign_before);
+        // Original unlock_next applies to the actual catalog successor too.
+        assert!(reopened.levels[reopened.find(500001).unwrap()].unlocked());
+        assert!(reopened.select(500000, false));
+        reopened.difficulty = 2;
+        commit_result(&mut reopened, Some(&path), &mut false, Sequence::Lose).unwrap();
+        load_progress(&mut catalog, &path).unwrap();
+        let level = &catalog.levels[catalog.find(500000).unwrap()];
+        assert_eq!((level.attempts(), level.completed()), (2, [false, true, false]));
+        assert_eq!(catalog.levels[..2], campaign_before);
+    }
+    #[test]
     fn custom_discovery_empty_order_and_exclusions() {
         let fixture = Fixture::new();
         assert_eq!(registration_sources(&fixture.0).unwrap().len(), 1);

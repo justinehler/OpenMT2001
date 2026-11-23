@@ -60,6 +60,8 @@ unsafe extern "C" {
     fn mt4_set_number(runtime: *mut c_void, name: *const c_char, value: f64) -> c_int;
     fn mt4_register_properties(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
     fn mt4_calendar_binding(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
+    fn mt4_calendar_method(runtime: *mut c_void, table: *const c_char,
+        method: *const c_char, id: u32) -> c_int;
     fn mt4_number_method(
         runtime: *mut c_void,
         table: *const c_char,
@@ -229,6 +231,15 @@ impl Runtime {
         id.checked_add(1).ok_or("calendar callback ID overflow")?;
         let name = CString::new(name).map_err(|_| "NUL in calendar binding name")?;
         self.check(unsafe { mt4_calendar_binding(self.raw.as_ptr(), name.as_ptr(), id) })
+    }
+    /// Attach the same protected frequency closure directly to a tagged table.
+    /// Lua-level assignment would invoke its numeric property setter.
+    pub fn register_calendar_frequency_method(&mut self, table: &str, method: &str,
+        id: u32) -> Result<(), String> {
+        id.checked_add(1).ok_or("calendar callback ID overflow")?;
+        let table = CString::new(table).map_err(|_| "NUL in calendar table name")?;
+        let method = CString::new(method).map_err(|_| "NUL in calendar method name")?;
+        self.check(unsafe { mt4_calendar_method(self.raw.as_ptr(), table.as_ptr(), method.as_ptr(), id) })
     }
     /// Register original relative/absolute trigger semantics. `id` requests
     /// the live total clock (no arguments, numeric result); `id+1` admits an

@@ -126,7 +126,7 @@ impl Session<'_> {
                 .collect();
             self.scripts.dispatch_catch_event(
                 (name, argument),
-                &mut self.world.city.script_state(&players),
+                &mut self.world.script_state(&players),
                 &context,
                 &mut geometry,
                 &mut self.hooks,
@@ -284,8 +284,8 @@ impl Session<'_> {
                                                         let players:Vec<_>=self.roster.manager.players.iter().map(|p|Some(business_binding::Player{identity:p.reference,kind:u32::from_le_bytes(p.bytes[0x154..0x158].try_into().unwrap())})).collect();
                                                         std::mem::swap(context.utilities,&mut self.hooks.utilities);
                                                         let first=self.hooks.commands.len();
-                                                        let result=self.scripts.trigger_event((name,delay,argument),&mut city.script_state(&players),&script_context,&mut geometry,&mut self.hooks);
-                                                        std::mem::swap(context.utilities,&mut self.hooks.utilities);result?;
+                                                        let result=self.scripts.trigger_event((name,delay,argument),&mut city.script_state(clock, &players),&script_context,&mut geometry,&mut self.hooks);
+                                                        std::mem::swap(context.utilities,&mut self.hooks.utilities); script_context.update_clock(clock); result?;
                                                         population.refresh_bindings_if_changed(city,&self.resident_models,&self.people)?;
                                                         boundary(Event::Script{name:name.to_owned(),argument,commands:&self.hooks.commands[first..]},clock)?;
                                                     },
@@ -330,7 +330,7 @@ impl Session<'_> {
                                             let command_start = self.hooks.commands.len();
                                             let result = self.scripts.dispatch_catch_event(
                                                 (name, argument as i32),
-                                                &mut city.script_state(&players),
+                                                &mut city.script_state(clock, &players),
                                                 &script_context,
                                                 &mut geometry,
                                                 &mut self.hooks,
@@ -339,6 +339,7 @@ impl Session<'_> {
                                                 context.utilities,
                                                 &mut self.hooks.utilities,
                                             );
+                                            script_context.update_clock(clock);
                                             result?;
                                             population.refresh_bindings_if_changed(city,&self.resident_models,&self.people)?;
                                             boundary(
@@ -576,7 +577,7 @@ impl Session<'_> {
                             std::mem::swap(context.utilities, &mut self.hooks.utilities);
                             let command_start = self.hooks.commands.len();
                             let result = if self.hooks.forced_auction_handlers.is_empty(){
-                                self.scripts.tick_events(&mut city.script_state(&players),&script_context,
+                                self.scripts.tick_events(&mut city.script_state(clock, &players),&script_context,
                                     &mut geometry,&mut self.hooks)
                             }else{
                                 self.scripts.tick_events_with_invocation(|vm,bindings,invocation,events|{
@@ -586,7 +587,7 @@ impl Session<'_> {
                                     let first=self.hooks.commands.len();
                                     self.hooks.forced_auction_allowed=allowed;
                                     let result=vm.call_reference(invocation.reference,invocation.argument,&mut |id,args|
-                                        bindings.handle(id,args,&mut city.script_state(&players),events,
+                                        bindings.handle(id,args,&mut city.script_state(clock, &players),events,
                                             &script_context,&mut geometry,&mut self.hooks));
                                     self.hooks.forced_auction_allowed=false;
                                     let result=result?;
@@ -623,6 +624,7 @@ impl Session<'_> {
                                 })
                             };
                             std::mem::swap(context.utilities, &mut self.hooks.utilities);
+                            script_context.update_clock(clock);
                             result?;
                             dispatch.population.refresh_bindings_if_changed(city,&self.resident_models,&self.people)?;
                             if self.hooks.commands.len() != command_start {
@@ -637,7 +639,7 @@ impl Session<'_> {
                             let mut runtime=live_commands::Runtime{city,roster:&mut self.roster,population:dispatch.population,
                                 utilities:context.utilities,board,event_cards:&mut self.event_cards,message_context:&mut messages.borrow_mut()};
                             runtime.advance_auction_with_tutorial(clock,[scheduler.network_enabled,scheduler.network_override],
-                                Some((self.tutorial_state,&mut geometry,&mut announcement)),|event|{
+                                Some((self.tutorial_state,&mut geometry,&mut announcement)),|event,clock|{
                                 if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event{
                                     self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},clock.timing[0],descriptor[16]!=0,additional_delay,
                                         |_|Err("auction update command wrapped into immediate dispatch".into())).map(|_|0)
@@ -671,9 +673,9 @@ impl Session<'_> {
                                             }
                                         });
                                 }
-                            let command_context = live_commands::Context {
+                            let mut command_context = live_commands::CommandContext {
                                 image,
-                                clock,
+                                clock: &mut *clock,
                                 accounting_enabled: true,
                                 notifications: runtime.city.ai_demand.ready != 0,
                                 tutorial_state: self.tutorial_state,
@@ -684,7 +686,7 @@ impl Session<'_> {
                                 let hooks=std::cell::RefCell::new(&mut self.hooks);
                                 let mut announcement=super::tutorial_announcement::Bridge{
                                     scripts:&mut self.scripts,hooks:&hooks,context:&mut script_context};
-                                runtime.apply_with_announcement(command, &command_context, &mut geometry, Some(&mut announcement), |event| {
+                                let result = runtime.apply_with_announcement(command, &mut command_context, &mut geometry, Some(&mut announcement), |event,clock| {
                                     if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event {
                                         enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
                                     }else if let live_commands::Event::CategoryReadyAt{category,normal_tick}=event{
@@ -698,7 +700,9 @@ impl Session<'_> {
                                         if matches!(event,live_commands::Event::Outcome(openmt2001::outcome_notice::Call::Show)) && !scheduler.network_enabled {scheduler.iterations=1;}
                                         boundary(Event::Command(event), clock).map(|_| ())
                                     }
-                                })
+                                });
+                                announcement.context.update_clock(command_context.clock);
+                                result
                             })?;
                         }
                         scheduler::Event::Helper(0x4b0810) => {

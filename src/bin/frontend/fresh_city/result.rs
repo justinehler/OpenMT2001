@@ -185,7 +185,7 @@ impl Session<'_> {
                 self.scripts.runtime.execute(label, source, &mut |id, args| {
                     if id == 708 { return random_zero_to(&mut self.script_random_state, args).map(Some); }
                     self.scripts.bindings.handle(id, args,
-                        &mut self.world.city.script_state(&players), &mut self.scripts.events,
+                        &mut self.world.script_state(&players), &mut self.scripts.events,
                         &context, &mut geometry, &mut self.hooks)
                 })?;
             }
@@ -194,25 +194,18 @@ impl Session<'_> {
                     self.scripts.runtime.call(event, &[0.], &mut |id, args| {
                         if id == 708 { return random_zero_to(&mut self.script_random_state, args).map(Some); }
                         self.scripts.bindings.handle(id, args,
-                            &mut self.world.city.script_state(&players), &mut self.scripts.events,
+                            &mut self.world.script_state(&players), &mut self.scripts.events,
                             &context, &mut geometry, &mut self.hooks)
                     })?;
                     if *event == "EVENTINITIALISE_Level"
                         && self.result_presentation.as_ref().is_some_and(|result| result.sequence != Sequence::Lose) {
-                        // The original Calendar table is a host property. Read the
-                        // assignment made by the hub before its EVENT_Level runs.
-                        self.scripts.runtime.execute("result calendar property",
-                            b"__result_calendar_hour=Calendar.hour", &mut |_, _| {
-                                Err("unexpected callback reading result hour".into())
-                            })?;
-                        let hour = self.scripts.runtime.number("__result_calendar_hour")?
-                            .ok_or("result hub did not assign Calendar.hour")?;
-                        if hour != 21. { return Err("result hub requested unsupported hour".into()); }
-                        self.world.clock.calendar[0] = hour as u32;
+                        if self.world.clock.hour() != 21 {
+                            return Err("result hub Calendar setter did not select hour21".into());
+                        }
                     }
                 } else {
                     self.scripts.dispatch_catch_event((event, 0),
-                        &mut self.world.city.script_state(&players), &context,
+                        &mut self.world.script_state(&players), &context,
                         &mut geometry, &mut self.hooks)?;
                 }
             }

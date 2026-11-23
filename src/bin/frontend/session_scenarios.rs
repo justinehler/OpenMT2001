@@ -55,13 +55,17 @@ mod tests {
             fn model_height(&mut self,_:u32)->Result<f32,String>{Err("auction must not query geometry".into())}
         }
         #[derive(Default)]
-        struct Observation{event:Option<[u32;3]>}
+        struct Observation{event:Option<[u32;3]>,clock_write:std::rc::Rc<std::cell::Cell<bool>>}
         impl live_commands::TutorialAnnouncement for Observation{
-            fn start(&mut self,state:&mut openmt2001::level_script::State<'_>,_:&openmt2001::clock::Clock,
+            fn start(&mut self,state:&mut openmt2001::level_script::State<'_>,
                 presentation:&openmt2001::ai_messages::offers::auction::admission::Presentation,
                 _:&mut dyn openmt2001::building_pool::GeometryBinding,_:&mut openmt2001::economy::Utilities)->Result<(),String>{
                 assert!(self.event.is_none(),"internal61 must occur once per admitted auction");
                 self.event=Some([presentation.countdown,u32::from(presentation.visible),u32::from(state.categories[3][0x6c])]);
+                // Deliberate synchronous host mutation tests borrow ownership;
+                // Lua property conversion is exercised in the binding regressions.
+                state.clock.calendar[0]=13;
+                self.clock_write.set(true);
                 Ok(())
             }
         }
@@ -82,14 +86,22 @@ mod tests {
             session.world.city.auction.presentation.countdown=0x55667788;
             session.world.city.categories[3][0x6c]=0x7f;
             let mut descriptor=[0;52];put(&mut descriptor,4,0x1d);put(&mut descriptor,20,3);put(&mut descriptor,24,0);put(&mut descriptor,28,1000);
-            let context=live_commands::Context{image:assets.image,clock:&session.world.clock,accounting_enabled:true,
+            let mut context=live_commands::CommandContext{image:assets.image,clock:&mut session.world.clock,accounting_enabled:true,
                 notifications:session.world.city.ai_demand.ready!=0,tutorial_state,network_enabled:false,network_override:false,utility_factor:1.};
             let mut messages=openmt2001::player_messages::Context{arena:openmt2001::player_messages::Arena{next:session.allocation_next},
                 current_player:session.roster.status.current_player,network:[false;2],prior:[0;48]};
+            let previous_hour=context.clock.calendar[0];
             let mut observation=Observation::default();
+            let clock_write=observation.clock_write.clone();
+            let mut observed_live_clock=false;
             live_commands::Runtime{city:&mut session.world.city,roster:&mut session.roster,population:&mut session.population,
                 utilities:&mut session.hooks.utilities,board:assets.board,event_cards:&mut session.event_cards,message_context:&mut messages}
-                .apply_with_announcement(&live_commands::Command::Auction{descriptor},&context,&mut Geometry,Some(&mut observation),|_|Ok(())).unwrap();
+                .apply_with_announcement(&live_commands::Command::Auction{descriptor},&mut context,&mut Geometry,Some(&mut observation),|_,clock| {
+                    if clock_write.get() {assert_eq!(clock.hour(),13);observed_live_clock=true;}
+                    Ok(())
+                }).unwrap();
+            assert_eq!(observed_live_clock,has_event,"post-announcement command callback sees authoritative clock");
+            context.clock.calendar[0]=previous_hour;
             assert_eq!(observation.event,has_event.then_some(before),"native internal61 gate/order, state{tutorial_state}");
             let presentation=&session.world.city.auction.presentation;
             assert_eq!([presentation.countdown,u32::from(presentation.visible),u32::from(session.world.city.categories[3][0x6c])],after,
