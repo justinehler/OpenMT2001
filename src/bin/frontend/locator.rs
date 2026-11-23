@@ -1,5 +1,7 @@
 //! Original40f260 Locator business list and live report navigation.
 use crate::ui::{self, Surface};
+#[path = "toolbar_collapse.rs"]
+pub mod toolbar_collapse;
 use openmt2001::{
     archive::ArchiveIndex,
     business_pool::BusinessCatalog,
@@ -60,6 +62,8 @@ pub struct Assets {
     property_tabs: [Surface; 5],
     property_side_icons: [Surface; 3],
     property_side_bounds: [[f32; 4]; 3],
+    toolbar_closed_base: Vec<Surface>,
+    toolbar_disabled: Surface,
     offer_buttons: [Surface; 3],
     offer_arrows: [[Surface; 3]; 2],
     period_bounds: [[f32; 4]; 2],
@@ -254,6 +258,14 @@ impl Assets {
         let panel_mesh = openmt2001::mesh::CachedMesh::parse(payload(
             "gamedata2/brand_new_panels/main_panel_v2.tm",
         )?)?;
+        let (mut toolbar_closed_base, _) = ui::panel_frame_base(index, archive,
+            "gamedata2/brand_new_panels/main_panel_v2.tm", &(0..12).collect::<Vec<_>>(), 0)?;
+        let closed_regions = openmt2001::ui_mesh::regions(&panel_mesh, 0)?;
+        let strip = closed_regions.iter().find(|r|r.name=="P_MAIN_VERTCAL_BAR_BACKING")
+            .ok_or("closed toolbar strip missing")?.bounds;
+        let mut strip_backing = Surface::solid();
+        strip_backing.rect(strip, [0xff777777,0x66777777,0x66777777,0xff777777]);
+        toolbar_closed_base.push(strip_backing);
         let property_title_bounds = openmt2001::ui_mesh::regions(&panel_mesh, 9)?
             .into_iter()
             .find(|r| r.name == "P_MAIN_TITLE_AREA_BACKING")
@@ -527,6 +539,9 @@ impl Assets {
             property_lease_available,
             property_side_icons: [66, 19, 18].map(|i| Surface::new(&generic.textures[i])),
             property_side_bounds: [regions[14], regions[15], regions[16]],
+            toolbar_closed_base,
+            // Original mode images[2]=68ae6c => generic17 for blocked(+333).
+            toolbar_disabled: Surface::new(&generic.textures[17]),
             offer_buttons: [76, 78, 77].map(|i| Surface::new(&generic.textures[i])),
             offer_arrows: [118usize, 122].map(|first| {
                 [first, first + 2, first + 1].map(|i| Surface::new(&generic.textures[i]))
@@ -810,13 +825,24 @@ impl Assets {
             2
         }
     }
-    pub fn property_panel(
-        &self,
-        renderer: &Renderer,
-        report: &crate::block_information::Report,
-        category: usize,
-        state: &crate::utility_report::View,
-    ) -> Result<(PreparedScene, [f32; 4]), String> {
+    pub fn property_panel(&self, renderer: &Renderer, report: &crate::block_information::Report,
+        category: usize, state: &crate::utility_report::View,
+    ) -> Result<(PreparedScene,[f32;4]),String> {
+        self.property_panel_content(renderer,report,category,state,true)
+    }
+    /// Only ordinary selected-block mode opts into independent side presentation.
+    pub fn ordinary_property_body(&self, renderer:&Renderer, report:&crate::block_information::Report,
+        category:usize,state:&crate::utility_report::View,
+    )->Result<(PreparedScene,[f32;4]),String> {
+        if !report.categories.get(category).is_some_and(Option::is_some) {
+            return Err("ordinary toolbar body requires ordinary category".into());
+        }
+        self.property_panel_content(renderer,report,category,state,false)
+    }
+    fn property_panel_content(
+        &self, renderer:&Renderer, report:&crate::block_information::Report,
+        category:usize,state:&crate::utility_report::View,include_sides:bool,
+    )->Result<(PreparedScene,[f32;4]),String> {
         if let Some(utility) = report
             .utility_categories
             .iter()
@@ -841,7 +867,7 @@ impl Assets {
         let mut fonts = self.fonts.clone();
         let mut title_font = self.property_title_fonts.clone();
         let mut body = self.ownership_fonts.clone();
-        self.property_side_buttons(&mut surfaces, state, report, category);
+        if include_sides { self.property_side_buttons(&mut surfaces, state, report, category); }
         if !state.property_offer_open() && !state.property_rights_open() {
             self.property_buttons(
                 &mut surfaces,
@@ -1142,6 +1168,63 @@ impl Assets {
             [0xffffffff; 4],
         );
         surfaces.push(surface);
+    }
+    pub fn ordinary_toolbar_bounds(&self)->[[f32;4];3] { self.property_side_bounds }
+    pub fn ordinary_toolbar_policy(&self,report:&crate::block_information::Report,
+        category:usize,shown:bool,build_allowed:bool,tutorial_allowed:[bool;3],
+    )->toolbar_collapse::Policy {
+        toolbar_collapse::Policy { category,shown,
+            nonzero_kind:self.property_lease_available[category],
+            lease_available:report.lease_available[category],build_allowed,tutorial_allowed }
+    }
+    /// Remove only side-control admission. All existing BODY branches remain.
+    pub fn ordinary_body_pointer(&self,state:&mut crate::utility_report::View,
+        point:Option<[i32;2]>,report:&crate::block_information::Report,category:usize,
+    ) {
+        self.property_pointer(state,point,report,category);
+        if state.property_control_hover.is_some_and(|id|(9..=11).contains(&id)) {
+            state.property_control_pointer(None);
+        }
+    }
+    pub fn ordinary_body_tutorial_at(&self,state:&crate::utility_report::View,
+        point:Option<[i32;2]>,report:&crate::block_information::Report,category:usize,
+    )->Option<u32> {
+        self.property_tutorial_control_at(state,point,report,category)
+            .filter(|id|!(9..=11).contains(id))
+    }
+    fn toolbar_surfaces(&self,policy:toolbar_collapse::Policy,input:&toolbar_collapse::Input,
+        state:&crate::utility_report::View,body_open:bool,
+    )->Vec<Surface> {
+        use toolbar_collapse::Action;
+        if !policy.shown { return Vec::new(); }
+        let mut surfaces=if body_open {Vec::new()} else {self.toolbar_closed_base.clone()};
+        for action in Action::ALL {
+            if !policy.visible(action) {continue;}
+            let i=action.index();
+            let selected=body_open && match action {
+                Action::Info=>!state.property_offer_open()&&!state.property_rights_open(),
+                Action::Lease=>state.property_offer_open(),Action::Build=>false,
+            };
+            let enabled=policy.enabled(action);
+            let mut backing=if !enabled {self.toolbar_disabled.clone()} else {
+                self.icon_backgrounds[if selected||input.pressed(policy.category,action){1}
+                    else if input.hover==Some(action){2}else{0}].clone()
+            };
+            let [l,t,r,b]=self.property_side_bounds[i];
+            backing.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+            surfaces.push(backing);
+            let mut icon=self.property_side_icons[i].clone();
+            icon.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+            surfaces.push(icon);
+        }
+        surfaces
+    }
+    pub fn ordinary_toolbar_scene(&self,renderer:&Renderer,policy:toolbar_collapse::Policy,
+        input:&toolbar_collapse::Input,state:&crate::utility_report::View,body_open:bool,
+    )->Result<PreparedScene,String> {
+        let surfaces=self.toolbar_surfaces(policy,input,state,body_open);
+        renderer.prepare(&surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [2./640.,0.,0.,0.,0.,-2./480.,0.,0.,0.,0.,1.,0.,-1.,1.,0.,1.],None)
     }
     fn property_side_buttons(
         &self,
@@ -5499,5 +5582,58 @@ mod refresh_ui_tests {
         let mut gone = fresh(); gone.retain_ui_choices(&new, 19, 19).unwrap();
         assert!(!gone.city_info && !gone.prestige_mode);
         assert_eq!(gone.ownership_scroll, 0);
+    }
+}
+
+#[cfg(test)]
+mod ordinary_toolbar_assets_tests {
+    use super::*;
+    #[test]
+    #[ignore="requires supplied archive/installer/v1.4 language; optional capture feature and OPENMT2001_TOOLBAR_CAPTURE directory"]
+    fn closed_strip_keeps_disabled_lease_without_body_title_surfaces() {
+        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");
+        let exe=read("OPENMT2001_EXE");
+        let index=ArchiveIndex::parse(&directory,archive.len()as u64).unwrap();
+        let param=std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer=param.parent().unwrap().parent().unwrap();
+        let path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language=path.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let bytes=fs::read(language.join("tycoon.bin")).unwrap();
+        let offsets=fs::read(language.join("tycoon.off")).unwrap();let mut at=0;
+        let strings=offsets.chunks_exact(2).map(|n|{
+            let end=at+u16::from_le_bytes(n.try_into().unwrap())as usize;
+            let row=&bytes[at..end];at=end;row
+        }).collect::<Vec<_>>();
+        let assets=Assets::load(&index,&archive,installer,&strings,&exe).unwrap();
+        let mut q=toolbar_collapse::Policy{category:33,shown:true,nonzero_kind:true,
+            lease_available:false,build_allowed:true,tutorial_allowed:[true;3]};
+        let input=toolbar_collapse::Input::default();
+        let state=crate::utility_report::View::default();
+        let base=assets.toolbar_closed_base.len();
+        let closed=assets.toolbar_surfaces(q,&input,&state,false);
+        assert_eq!(closed.len(),base+6,"all three visible buttons retain backing+icon");
+        assert_eq!(closed[base+2].pixels,assets.toolbar_disabled.pixels,
+            "unavailable lease uses native blocked-image fallback, not omission");
+        assert_eq!(closed[base+3].pixels,assets.property_side_icons[1].pixels);
+        let opened=assets.toolbar_surfaces(q,&input,&state,true);
+        assert_eq!(opened.len(),6,"open side overlay contains no second body/title/base");
+        assert_eq!(opened[0].vertices[0][0],5.599999904632568_f32);
+        assert_eq!(assets.property_side_bounds[1][1],77.5999984741211_f32);
+        q.nonzero_kind=false;
+        assert_eq!(assets.toolbar_surfaces(q,&input,&state,false).len(),base+2);
+        q.shown=false;
+        assert!(assets.toolbar_surfaces(q,&input,&state,false).is_empty());
+        #[cfg(feature="capture")]
+        if let Ok(out)=std::env::var("OPENMT2001_TOOLBAR_CAPTURE") {
+            let out=std::path::PathBuf::from(out);assert!(out.is_dir());
+            let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows){descriptor.backends=wgpu::Backends::DX12;}
+            let renderer=pollster::block_on(Renderer::new(descriptor)).unwrap();
+            q.shown=true;q.nonzero_kind=true;
+            let panel=assets.ordinary_toolbar_scene(&renderer,q,&input,&state,false).unwrap();
+            crate::capture_test::capture_standalone(&renderer,&panel,
+                out.join("toolbar-closed-disabled-lease.png").to_str().unwrap());
+        }
     }
 }

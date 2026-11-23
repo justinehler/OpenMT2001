@@ -1,4 +1,4 @@
-//! Navigator and strategic-panel tooltips:43e0a0/43e3c0, font0.
+//! Navigator, strategic and ordinary-panel tooltips:43e0a0/43e3c0, font0.
 use crate::ui::Surface;
 use openmt2001::{
     archive::ArchiveIndex,
@@ -11,7 +11,7 @@ pub struct Tooltip {
     pages: Vec<Surface>,
     tab: Vec<u8>,
     names: Vec<Vec<u8>>,
-    icon_labels: [Vec<u8>; 4],
+    icon_labels: [Vec<u8>; 7],
 }
 impl Tooltip {
     pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path,
@@ -49,10 +49,10 @@ impl Tooltip {
         }
         if at != bin.len() { return Err("tooltip language trailing bytes".into()); }
         //40d8f2's four five-word descriptors store these text IDs in child+34.
-        let icon_labels = [1146, 1147, 1148, 12].map(|id| labels.get(id)
-            .map(|s| s.to_vec()).ok_or("strategic icon tooltip missing".to_owned()))
+        let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52].map(|id| labels.get(id)
+            .map(|s| s.to_vec()).ok_or("panel icon tooltip missing".to_owned()))
             .into_iter().collect::<Result<Vec<_>, _>>()?.try_into()
-            .map_err(|_| "strategic icon tooltip count")?;
+            .map_err(|_| "panel icon tooltip count")?;
         Ok(Self { pages, tab, names, icon_labels })
     }
     pub fn prepare(
@@ -66,6 +66,9 @@ impl Tooltip {
             1147 => &self.icon_labels[1],
             1148 => &self.icon_labels[2],
             12 => &self.icon_labels[3],
+            29 => &self.icon_labels[4],
+            50 => &self.icon_labels[5],
+            52 => &self.icon_labels[6],
             id => self.names.get(id.checked_sub(2242).ok_or("tooltip text ID")? as usize + 1)
                 .ok_or("tooltip category text range")?,
         };
@@ -220,6 +223,33 @@ mod tests {
         assert_eq!(timer.advance(None), None);
         for _ in 0..25 { assert_eq!(timer.advance(Some(1146)), None); }
         assert_eq!(timer.advance(Some(1146)), Some(1146));
+    }
+
+    #[test]
+    #[ignore = "supplied original panel descriptors/language/fonts and GPU"]
+    fn original_ordinary_toolbar_tooltip_ids_render_with_existing_families() {
+        let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");
+        let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
+        let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe=std::fs::read(&exe_path).unwrap();let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let titles=image.at(0x533238,12).unwrap();
+        let ids:[u32;3]=std::array::from_fn(|n|u32::from_le_bytes(titles[n*4..n*4+4].try_into().unwrap()));
+        assert_eq!(ids,[29,50,52]);
+        let installer=std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
+        let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows){descriptor.backends=wgpu::Backends::DX12;}
+        let renderer=pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
+        let assets=super::Tooltip::load(&index,&archive,&installer,&language).unwrap();
+        for id in ids.into_iter().chain([1146,1147,1148,12,2242]) {
+            let panel=assets.prepare(&renderer,id,[40,100]).unwrap();
+            #[cfg(feature="capture")]
+            if ids.contains(&id) && let Ok(out)=std::env::var("OPENMT2001_TOOLBAR_CAPTURE") {
+                let path=std::path::PathBuf::from(out).join(format!("toolbar-tooltip-{id}.png"));
+                crate::capture_test::capture_standalone(&renderer,&panel,path.to_str().unwrap());
+            }
+        }
     }
 
     #[test]

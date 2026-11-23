@@ -2202,6 +2202,12 @@ struct Inspection {
     information: Option<(PreparedScene, [f32; 4])>,
     details_visible: bool,
     details_pressed: bool,
+    toolbar_input: crate::locator::toolbar_collapse::Input,
+    // Physical Right events delivered to inspection, sampled before routing.
+    // Separate from camera/drag mouse_buttons, which modal handlers may swallow.
+    toolbar_right_held: bool,
+    toolbar_bounds: [[f32;4];3],
+    toolbar_regions: [Option<[f32;4]>;3],
     detail_icons: [PreparedScene; 2],
     detail_bounds: [f32; 4],
     camera: CameraSample,
@@ -2448,6 +2454,64 @@ impl Inspection {
         self.prompt_reply = Some(answer);
         Ok(())
     }
+    fn ordinary_toolbar_category(&self,blocks:&[openmt2001::board::Block])->Option<usize> {
+        if self.strategic || self.operations.building.is_some()
+            || !self.selected.is_some_and(|hit|hit.building.is_none()) { return None; }
+        self.utility_category(blocks).filter(|&category|self.block_information.as_ref()
+            .is_some_and(|report|report.available(category)&&report.categories[category].is_some()))
+    }
+    fn toolbar_policy(&self,menu:&crate::menu::Menu,blocks:&[openmt2001::board::Block],input:bool)
+        ->Option<crate::locator::toolbar_collapse::Policy>
+    {
+        use crate::locator::toolbar_collapse::Action;
+        let category=self.ordinary_toolbar_category(blocks)?;
+        let mut shown=self.main_panel_visible()&&!self.game_options.open
+            &&self.planning.is_none()&&self.adjustment.is_none();
+        let mut allowed=Action::ALL.map(|a|self.live_status.as_ref().is_none_or(|s|
+            !s.tutorial_session||s.tutorial_enabled_controls.contains(&a.tutorial())));
+        if input {
+            shown &= !self.toolbar_right_held&&self.settings_menu.page.is_none()
+                &&!self.save_dialog.visible&&!self.stats_requested
+                &&!self.live_status.as_ref().is_some_and(|s|s.stats.is_some())
+                &&self.planning_pending.is_none()&&self.auction.scene.is_none();
+            let pointer=self.pointer.map(|p|p.map(|v|v as f32*0.5));
+            let [l,t,r,b]=menu.card_assets().entry;
+            let entry_hit=pointer.is_some_and(|[x,y]|x>=l&&x<=r&&y>=t&&y<=b);
+            if entry_hit||self.card_input.captured()
+                ||self.live_status.as_ref().is_some_and(|s|s.card.is_some())
+                    &&menu.card_assets().contains(pointer) { shown=false; }
+            if self.prompts.request().is_some() {
+                let occupied=self.prompts.input_captured()||self.pointer.is_some_and(|p|
+                    menu.prompt_assets().input_occupied(p.map(|v|v as f32*0.5),
+                        self.live_status.as_ref().map_or([0.;2],|s|s.tutorial_interaction.prompt_offset())));
+                shown &= !occupied;
+                for a in Action::ALL { allowed[a.index()] &= self.live_status.as_ref()
+                    .is_some_and(|s|s.tutorial_enabled_controls.contains(&a.tutorial())); }
+            }
+            if self.live_status.as_ref().is_some_and(|s|s.event_list_visible&&self.auction.scene.is_none())
+                &&self.pointer.is_some_and(|p|menu.event_list_assets().contains(p.map(|v|v as f32*0.5))) {
+                shown=false;
+            }
+        }
+        let build=self._fresh_session.is_some()&&!self.live_status.as_ref()
+            .is_some_and(|s|s.auction_locked_categories.contains(&category));
+        Some(menu.locator_assets().ordinary_toolbar_policy(self.block_information.as_ref()?,
+            category,shown,build,allowed))
+    }
+    fn toolbar_target(&self,menu:&crate::menu::Menu,blocks:&[openmt2001::board::Block])
+        ->Option<crate::locator::toolbar_collapse::Action>
+    {
+        let policy=self.toolbar_policy(menu,blocks,true)?;
+        policy.target(self.toolbar_bounds,self.pointer?.map(|v|v as f32*0.5))
+    }
+    fn begin_toolbar_planning(&mut self,category:usize) {
+        if let Some(sender)=&self._fresh_session {
+            let (reply,result)=mpsc::channel();
+            if sender.send(FreshRequest::Planning{category,reply}).is_ok() {
+                self.planning_pending=Some(result);self.send_tutorial_control(11);
+            }
+        }
+    }
     fn main_panel_visible(&self) -> bool {
         self.live_status.as_ref().is_none_or(|s| s.player_panels[0])
     }
@@ -2514,6 +2578,9 @@ impl Inspection {
                 || self.locator_blocked
                 || self.over_navigation()
                 || self.over_details()
+                || (self.main_panel_visible()&&!self.strategic&&self.operations.building.is_none()
+                    &&self.toolbar_regions.iter().flatten().any(|b|
+                        crate::locator::toolbar_collapse::hit(*b,[*x as f32*0.5,*y as f32*0.5])))
                 || self.over_navigator()
             {
                 return false;
@@ -2818,6 +2885,8 @@ impl Intro {
             return Some(if hover { 3 } else { 0 });
         }
         self.inspection.as_ref().map(|view| {
+            if self.menu.as_ref().is_some_and(|menu|
+                view.toolbar_target(menu,&self.assets.selection.blocks).is_some()) { return 3; }
             // Original mode12/13 use cursor2 for right-only and cursor3 for both buttons.
             if view.strategic || !view.mouse_buttons[1] {
                 0
@@ -3266,6 +3335,18 @@ impl Intro {
     }
     pub fn inspection_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
         if let Some(view) = &mut self.inspection {
+            // Capture both edges BEFORE stats/save/settings/prompt/card/auction
+            // returns. Do not move the camera dispatcher's late Right assignment.
+            if button == winit::event::MouseButton::Right
+                && view.toolbar_right_held != pressed
+            {
+                view.toolbar_right_held = pressed;
+                view.toolbar_input.cancel();
+            }
+            let side_policy=self.menu.as_ref().and_then(|menu|
+                view.toolbar_policy(menu,&self.assets.selection.blocks,true));
+            view.toolbar_input.update(side_policy,view.toolbar_bounds,
+                view.pointer.map(|p|p.map(|v|v as f32*0.5)));
             let stats_modal=view.stats_requested
                 || view.live_status.as_ref().is_some_and(|status|status.stats.is_some());
             if stats_modal { view.auction_panel.cancel_press(); }
@@ -3445,13 +3526,19 @@ impl Intro {
                         || locator.tutorial_control_pressed()
                 },
                     );
-            let tutorial_property_hit = button == winit::event::MouseButton::Left
+            let tutorial_side_hit=button==winit::event::MouseButton::Left
+                && self.menu.as_ref().is_some_and(|menu|
+                    view.toolbar_target(menu,&self.assets.selection.blocks).is_some()
+                        || view.toolbar_input.captured());
+            let tutorial_property_hit = tutorial_side_hit || button == winit::event::MouseButton::Left
                 && !view.strategic && view.main_panel_visible() && view.details_visible
                 && self.menu.as_ref().zip(view.block_information.as_ref())
                     .zip(view.utility_category(&self.assets.selection.blocks)).is_some_and(|((menu, report), category)| {
-                        menu.locator_assets().property_tutorial_control_at(
-                            &view.utility_report, view.pointer, report, category,
-                            )
+                        (if view.ordinary_toolbar_category(&self.assets.selection.blocks).is_some() {
+                            menu.locator_assets().ordinary_body_tutorial_at(
+                                &view.utility_report,view.pointer,report,category)
+                        } else { menu.locator_assets().property_tutorial_control_at(
+                            &view.utility_report,view.pointer,report,category) })
                             .is_some_and(|id| {
                                 view.live_status.as_ref().is_some_and(|status| {
                                     status.tutorial_enabled_controls.contains(&id)
@@ -3738,10 +3825,43 @@ impl Intro {
                     return;
                 }
             }
+            if button==winit::event::MouseButton::Left
+                &&let Some(policy)=self.menu.as_ref().and_then(|menu|
+                    view.toolbar_policy(menu,&self.assets.selection.blocks,true))
+            {
+                let (consumed,action)=view.toolbar_input.mouse(policy,view.toolbar_bounds,
+                    view.pointer.map(|p|p.map(|v|v as f32*0.5)),pressed);
+                if let Some(action)=action {
+                    use crate::locator::toolbar_collapse::Action;
+                    // Original Info/lease reveal BEFORE dispatching their modes.
+                    action.reveal(&mut view.details_visible);
+                    view.utility_report.select(Some(policy.category));
+                    match action {
+                        Action::Info=>{
+                            view.utility_report.close_property_offer();
+                            view.utility_report.close_property_rights();
+                            view.send_tutorial_control(9);
+                        }
+                        Action::Lease=>{
+                            if !view.utility_report.property_offer_open() {
+                                view.utility_report.open_property_offer(policy.category);
+                            }
+                            view.send_tutorial_control(10);
+                        }
+                        Action::Build=>view.begin_toolbar_planning(policy.category),
+                    }
+                    view.title_state=None;
+                    view.utility_report.dirty=true;
+                }
+                if consumed {
+                    view.mouse_buttons[0]=false;view.double_click.clear();return;
+                }
+            }
             if !view.strategic
                 && view.main_panel_visible()
                 && view.details_visible
                 && view._fresh_session.is_some()
+                && view.ordinary_toolbar_category(&self.assets.selection.blocks).is_none()
                 && view.selected.is_some_and(|s| s.building.is_none())
                 && !view.selected.is_some_and(|s| {
                     view.live_status.as_ref().is_some_and(|status| {
@@ -4041,12 +4161,17 @@ impl Intro {
                         menu.locator_assets()
                             .utility_pointer(&mut view.utility_report, view.pointer);
                         let category = view.utility_category(&self.assets.selection.blocks).unwrap();
+                        if view.ordinary_toolbar_category(&self.assets.selection.blocks).is_some() {
+                            menu.locator_assets().ordinary_body_pointer(&mut view.utility_report,
+                                view.pointer,view.block_information.as_ref().unwrap(),category);
+                        } else {
                         menu.locator_assets().land_rent_pointer(
                             &mut view.utility_report,
                             view.pointer,
                             view.block_information.as_ref().unwrap(),
                             category,
                         );
+                        }
                         let rights_enabled = view.live_status.as_ref().is_none_or(|status| {
                             !status.tutorial_session || status.tutorial_enabled_controls.contains(&91)
                         });
@@ -4108,6 +4233,7 @@ impl Intro {
                         view.details_pressed = false;
                         if view.over_details() {
                             view.details_visible = !view.details_visible;
+                            view.toolbar_input.cancel();
                         }
                         return;
                     }
@@ -4282,6 +4408,8 @@ impl Intro {
     }
     pub fn inspection_unfocus(&mut self) {
         if let Some(view) = &mut self.inspection {
+            view.toolbar_input.cancel();
+            view.toolbar_right_held = false;
             view.settings_menu.cancel_input();
             if let Some(comparison) = &mut view.comparison {
                 comparison.cancel_press();
@@ -5087,6 +5215,11 @@ impl Intro {
                         information: None,
                         details_visible: true,
                         details_pressed: false,
+                        toolbar_input: Default::default(),
+                        toolbar_right_held: false,
+                        toolbar_bounds: self.menu.as_ref().ok_or("ordinary toolbar assets missing")?
+                            .locator_assets().ordinary_toolbar_bounds(),
+                        toolbar_regions: [None;3],
                         detail_icons: if refreshing && self.inspection.is_some() {
                             Default::default()
                         } else { self.assets.navigation.prepare_details(&self.renderer)? },
@@ -5213,6 +5346,10 @@ impl Intro {
                                 view.strategic = previous.strategic;
                                 view.return_camera = previous.return_camera;
                                 view.details_visible = previous.details_visible;
+                                view.toolbar_input = std::mem::take(&mut previous.toolbar_input);
+                                // Read the current event-thread sample; never
+                                // derive it from a snapshot's stale camera flags.
+                                view.toolbar_right_held = previous.toolbar_right_held;
                                 view.building_angle = previous.building_angle;
                                 view.building_camera = previous.building_camera;
                                 view.inertia = previous.inertia;
@@ -6125,7 +6262,9 @@ impl Intro {
                     })
                 })
             } else { None };
-            let visible_icon = view.icon_tooltip_dwell.advance(icon);
+            let side_icon=self.menu.as_ref().and_then(|menu|
+                view.toolbar_target(menu,&self.assets.selection.blocks)).map(|a|a.tooltip());
+            let visible_icon = view.icon_tooltip_dwell.advance(side_icon.or(icon));
             let tooltip_state = navigator_tooltip.or_else(||
                 visible_icon.zip(view.pointer));
             if tooltip_state != view.tooltip_state {
@@ -6194,6 +6333,13 @@ impl Intro {
             }
             if let Some(menu) = &self.menu {
                 view.utility_report.select(view.utility_category(&self.assets.selection.blocks));
+                let side_policy=view.toolbar_policy(menu,&self.assets.selection.blocks,true);
+                view.toolbar_input.update(side_policy,view.toolbar_bounds,
+                    view.pointer.map(|p|p.map(|v|v as f32*0.5)));
+                let visible_policy=view.toolbar_policy(menu,&self.assets.selection.blocks,false);
+                view.toolbar_regions=std::array::from_fn(|i|visible_policy
+                    .filter(|q|q.visible(crate::locator::toolbar_collapse::Action::ALL[i]))
+                    .map(|_|view.toolbar_bounds[i]));
                 let point = if !view.strategic
                     && view.main_panel_visible()
                     && view.details_visible
@@ -6310,12 +6456,11 @@ impl Intro {
                             if let Some(report) = &view.block_information
                                 && report.available(block.id)
                             {
-                                Some(menu.locator_assets().property_panel(
-                                    &self.renderer,
-                                    report,
-                                    block.id,
-                                    &view.utility_report,
-                                )?)
+                                Some(if view.ordinary_toolbar_category(&self.assets.selection.blocks).is_some() {
+                                    menu.locator_assets().ordinary_property_body(
+                                        &self.renderer,report,block.id,&view.utility_report)?
+                                } else { menu.locator_assets().property_panel(
+                                    &self.renderer,report,block.id,&view.utility_report)? })
                             } else {
                                 // There is no original Block Information
                                 // report until the current player snapshot is
@@ -6492,6 +6637,15 @@ impl Intro {
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
+            if base_panel_visible
+                && let Some(menu)=&self.menu
+                && let Some(policy)=view.toolbar_policy(menu,&self.assets.selection.blocks,false)
+                && policy.shown
+            {
+                let panel=menu.locator_assets().ordinary_toolbar_scene(&self.renderer,policy,
+                    &view.toolbar_input,&view.utility_report,view.details_visible)?;
+                self.renderer.draw_overlay(&self.color_view,&self.depth_view,&panel);
+            }
             if base_panel_visible {
                 self.renderer.draw_overlay(
                     &self.color_view,
@@ -6564,6 +6718,7 @@ impl Intro {
                 } else if !view.strategic
                     && view.main_panel_visible()
                     && view.details_visible
+                    && view.ordinary_toolbar_category(&self.assets.selection.blocks).is_none()
                     && view._fresh_session.is_some()
                     && view.selected.is_some_and(|s| s.building.is_none())
                     && !view.selected.is_some_and(|s| {
@@ -6853,6 +7008,11 @@ mod tests {
         include!("intro_strategic_capture_test.rs");
     }
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    mod toolbar_right_dispatch_test {
+        include!("toolbar_right_dispatch_test.rs");
+    }
 
     #[cfg(feature = "capture")]
     mod menu_identity_test {
