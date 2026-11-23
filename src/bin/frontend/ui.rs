@@ -431,17 +431,17 @@ pub fn button(
     pressed: bool,
     disabled: bool,
 ) -> Result<(), String> {
-    use openmt2001::ui_button::{self, Primitive, State};
-    for p in ui_button::background(
-        bounds,
-        rgb,
-        State {
-            flag_330: pressed,
-            flag_334: pressed,
-            flag_335: hover && !disabled,
-            flag_333: disabled,
-        },
-    )? {
+    button_state(surface, bounds, rgb, openmt2001::ui_button::State {
+        flag_330: pressed, flag_334: pressed,
+        flag_335: hover && !disabled, flag_333: disabled,
+    })
+}
+/// Original colored backgrounds also distinguish held entry from press origin.
+pub fn button_state(surface: &mut Surface, bounds: [f32; 4], rgb: [u8; 3],
+    state: openmt2001::ui_button::State,
+) -> Result<(), String> {
+    use openmt2001::ui_button::{self, Primitive};
+    for p in ui_button::background(bounds, rgb, state)? {
         match p {
             Primitive::Gradient { bounds, colors } => surface.rect(bounds, colors),
             Primitive::Outline {

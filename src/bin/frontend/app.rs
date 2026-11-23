@@ -151,6 +151,7 @@ struct App {
     launched: Instant,
     frame_profile: Option<FrameProfile>,
     next_redraw: Instant,
+    desktop_keys: crate::menu::desktop_quit::Keys,
 }
 struct FrameProfile {
     started: Instant,
@@ -315,6 +316,21 @@ impl ApplicationHandler for App {
         if matches!(&event, WindowEvent::RedrawRequested) {
             self.next_redraw = Instant::now() + FRAME_INTERVAL;
         }
+        // Track physical samples BEFORE logical routing, including releases,
+        // repeats and events consumed by inspection. No city behavior changes.
+        if self.stage == 3 {
+            match &event {
+                WindowEvent::KeyboardInput { event, .. } => self.desktop_keys.physical(
+                    event.physical_key, event.state == ElementState::Pressed, event.repeat),
+                WindowEvent::MouseInput { button: MouseButton::Right, state, .. } =>
+                    self.desktop_keys.mouse_right(*state == ElementState::Pressed),
+                WindowEvent::Focused(false) => self.desktop_keys.release_on_unfocus(),
+                _ => (),
+            }
+            if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
+                menu.desktop_right_button(self.desktop_keys.right());
+            }
+        }
         if let Some(intro) = &mut self.intro
             && intro.inspecting()
         {
@@ -372,6 +388,11 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && !event.repeat =>
             {
+                // An authentic quit ignores logical menu navigation/text.
+                // Its physical edges are consumed on the next UI event1 tick.
+                if self.stage == 3 && self.intro.as_ref()
+                    .and_then(|intro| intro.menu.as_ref())
+                    .is_some_and(|menu| menu.desktop_input_blocked()) { return; }
                 match event.logical_key {
                     Key::Named(key) if self.stage == 3 => {
                         if let Some(intro) = &mut self.intro {
@@ -384,8 +405,6 @@ impl ApplicationHandler for App {
                                     NamedKey::Enter | NamedKey::Space => {
                                         if key == NamedKey::Space && menu.is_editing() {
                                             menu.input(" ");
-                                        } else if menu.pending == Some(6) {
-                                            event_loop.exit();
                                         } else if menu.pending.is_none() {
                                             menu.activate();
                                         }
@@ -433,7 +452,7 @@ impl ApplicationHandler for App {
                 let mut light_click = false;
                 if let (Some(intro), Some(p)) = (&mut self.intro, &self.presenter)
                     && let Some(menu) = &mut intro.menu
-                    && menu.pending.is_none()
+                    && (menu.pending.is_none() || menu.desktop_quit_active())
                 {
                     let size = p.window.inner_size();
                     let scale = (size.width as f32 / 640.).min(size.height as f32 / 480.);
@@ -458,7 +477,7 @@ impl ApplicationHandler for App {
                 let mut light_click = false;
                 if let Some(intro) = &mut self.intro {
                     if let Some(menu) = &mut intro.menu {
-                        if menu.pending.is_none() {
+                        if menu.pending.is_none() || menu.desktop_quit_active() {
                             menu.mouse_button(state == ElementState::Pressed);
                             light_click = menu.light_click_on_held_entry();
                         }
@@ -537,6 +556,16 @@ impl ApplicationHandler for App {
                     }
                     if self.intro.is_some() {
                         self.update_intro_music();
+                    }
+                    // One sampled UI event1 per menu redraw; current/previous
+                    // survive opening and closing. Camera50Hz is a separate clock.
+                    let sample = self.desktop_keys.sample();
+                    if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
+                        menu.desktop_ui_event1(sample);
+                        if menu.take_desktop_exit() {
+                            event_loop.exit(); // normal App/EventLoop teardown
+                            return;
+                        }
                     }
                     if let Some(intro) = &mut self.intro {
                         let draw_started = self.frame_profile.as_ref().map(|_| Instant::now());
@@ -723,7 +752,7 @@ pub fn run() -> Result<(), Error> {
             }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit requires Enter confirmation. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }
@@ -777,6 +806,7 @@ pub fn run() -> Result<(), Error> {
         exit_after,
         launched: now,
         next_redraw: now,
+        desktop_keys: Default::default(),
         frame_profile: std::env::var_os("OPENMT2001_PROFILE_PACE").map(|_| FrameProfile {
             started: now,
             frames: 0,

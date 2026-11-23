@@ -704,9 +704,35 @@ impl Assets {
     ) -> Result<PreparedScene, String> {
         self.prepare_with_button(renderer, state, false, offset)
     }
+    pub fn desktop_quit_hit_at(&self, cursor: [f32; 2], right: bool) -> Option<usize> {
+        use crate::menu::desktop_quit;
+        if right || !desktop_quit::hit(self.input_bounds, cursor) { return None; }
+        self.dialog_buttons(2).iter().position(|bounds| desktop_quit::hit(*bounds, cursor))
+    }
+    pub fn desktop_quit_hit(&self, modal: &crate::menu::desktop_quit::Modal) -> Option<usize> {
+        modal.pointer().and_then(|p| self.desktop_quit_hit_at(p, modal.blocked_by_right()))
+    }
+    pub fn prepare_desktop_quit(&self, renderer: &Renderer,
+        modal: &crate::menu::desktop_quit::Modal,
+    ) -> Result<PreparedScene, String> {
+        let mut state = State::default();
+        state.submit(Request { script: None, dialog: Some(crate::menu::desktop_quit::dialog()),
+            title: 1765, body: 1766, dismissal_id: 0, card: None });
+        state.cursor(modal.pointer().unwrap_or([-1.; 2]));
+        state.pressed_dialog = modal.pressed_button();
+        let surfaces = self.message_surfaces(&state, true, crate::menu::desktop_quit::OFFSET,
+            Some(modal))?;
+        self.prepare_surfaces(renderer, &surfaces)
+    }
     fn prepare_with_button(&self, renderer: &Renderer, state: &State,
         show_button: bool, offset: [f32; 2],
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.message_surfaces(state, show_button, offset, None)?;
+        self.prepare_surfaces(renderer, &surfaces)
+    }
+    fn message_surfaces(&self, state: &State, show_button: bool, offset: [f32; 2],
+        desktop: Option<&crate::menu::desktop_quit::Modal>,
+    ) -> Result<Vec<Surface>, String> {
         let request = state.request().ok_or("no active prompt")?;
         let mut surfaces = self.base.clone();
         // Original429e30 submits this title gradient before prompt strings.
@@ -717,14 +743,14 @@ impl Assets {
             .dialog
             .map(|d| d.portrait)
             .or_else(|| request.card.map(|c| c.portrait));
-        surfaces.push(match portrait {
+        if desktop.is_none() { surfaces.push(match portrait {
             Some(302) | None => self.portrait.clone(),
             Some(portrait) => self
                 .card_portraits
                 .get(portrait.wrapping_sub(263) as usize)
                 .ok_or("Modal portrait leaves original texture registry")?
                 .clone(),
-        });
+        }); }
         let buttons = if show_button {
             request
                 .dialog
@@ -744,6 +770,14 @@ impl Assets {
             } else {
                 state.pressed
             };
+            if let Some(modal) = desktop {
+                let hover = self.desktop_quit_hit(modal) == Some(i);
+                let mut button = Surface::solid();
+                ui::button_state(&mut button, bounds, crate::menu::desktop_quit::COLORS[i],
+                    modal.button_state(i, hover))?;
+                surfaces.push(button);
+                continue;
+            }
             let mut button = self.buttons[if pressed && hit {
                 2
             } else if hit {
@@ -766,8 +800,11 @@ impl Assets {
             (
                 0,
                 request.dialog.map_or(request.body, |d| d.body),
-                self.body,
-                false,
+                if desktop.is_some() {
+                    [self.main[0], self.main[1], self.main[2],
+                        ((3. * f64::from(self.main[3]) + f64::from(self.main[1])) * 0.25 + 2.) as f32]
+                } else { self.body },
+                desktop.is_some(), // original no-portrait format(4,4); portrait path unchanged
                 4,
             ),
         ];
@@ -824,6 +861,9 @@ impl Assets {
                 vertex[1] += offset[1];
             }
         }
+        Ok(surfaces)
+    }
+    fn prepare_surfaces(&self, renderer: &Renderer, surfaces: &[Surface]) -> Result<PreparedScene, String> {
         let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
         renderer.prepare(
             &draws,
@@ -1525,5 +1565,96 @@ mod resource_integer_tests {
         assert_eq!(body[0].positions[0][0],1.5);
         assert!(title[0].positions[0][0]>body[0].positions[0][0]);
         assert_eq!(body[1].positions[0][0]-body[0].positions[0][0],7.);
+    }
+}
+
+#[cfg(test)]
+mod desktop_quit_assets_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires supplied v1.4 USA prompt assets; optional capture feature + OPENMT2001_DESKTOP_QUIT_CAPTURE directory"]
+    fn original_quit_full_body_colored_buttons_and_offset_surfaces() {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language = exe.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let offsets = fs::read(language.join("tycoon.off")).unwrap();
+        let bytes = fs::read(language.join("tycoon.bin")).unwrap();
+        let mut at = 0;
+        let strings = offsets.chunks_exact(2).map(|n| {
+            let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+            let row = &bytes[at..end]; at = end; row
+        }).collect::<Vec<_>>();
+        let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
+        let mut modal = crate::menu::desktop_quit::Modal::default(); modal.open(None);
+        let mut state = State::default();
+        state.submit(Request { script: None, dialog: Some(crate::menu::desktop_quit::dialog()),
+            title: 1765, body: 1766, dismissal_id: 0, card: None });
+        let surfaces = assets.message_surfaces(&state, true, [-40., 0.], Some(&modal)).unwrap();
+        assert_eq!(assets.main.map(f32::to_bits),
+            [224.8000030517578_f32, 180.29209899902344, 505.18377685546875, 303.6317138671875].map(f32::to_bits));
+        assert_eq!(assets.input_bounds[0].to_bits(), 224.00448608398438_f32.to_bits());
+        // Shared mesh parts retain their authored positions, shifted once.
+        for (base, actual) in assets.base.iter().zip(&surfaces) {
+            for (before, after) in base.vertices.iter().zip(&actual.vertices) {
+                assert_eq!(after[0], before[0]-40.); assert_eq!(after[1], before[1]);
+            }
+        }
+        let base = assets.base.len();
+        let green = &surfaces[base+1]; let red = &surfaces[base+2];
+        // No portrait surface between title and two SOLID colored backgrounds.
+        assert_eq!([green.width, green.height, red.width, red.height], [1; 4]);
+        assert!(green.vertices.iter().any(|v| v[3] == 80. / 255. && v[4] == 148. / 255. && v[5] == 34. / 255.));
+        assert!(red.vertices.iter().any(|v| v[3] == 175. / 255. && v[4] == 6. / 255. && v[5] == 6. / 255.));
+        assert!(assets.desktop_quit_hit_at([250., 274.79681396484375], false).is_some());
+        assert_eq!(assets.desktop_quit_hit_at([250., 274.79681396484375], true), None);
+        // Exact USA language identity prevents accidentally using the unpatched table.
+        let decode = |id: usize| assets.strings[id].iter().map(|b| b+32).collect::<Vec<_>>();
+        assert_eq!(decode(1765), b"QUIT TO DESKTOP");
+        assert_eq!(decode(1766), b"Do you want to quit Monopoly Tycoon?");
+        assert_eq!(decode(1636), b"Yes"); assert_eq!(decode(1637), b"No");
+        // Body spans the whole default main width, centered with original4/4
+        // layout, instead of reserving the portrait-right column.
+        let body_bounds = [assets.main[0], assets.main[1], assets.main[2], 274.79681396484375];
+        let body = text_quads(&assets.tabs[0], &[assets.strings[1766].clone()],
+            body_bounds, true, 4, 4, [-40., 0.]).unwrap();
+        assert!(!body.is_empty());
+        assert!(body.iter().flat_map(|q| q.positions).any(|p| p[0] < 261.96099853515625));
+        let body_pages = &surfaces[base+3..base+3+assets.fonts[0].len()];
+        assert!(body_pages.iter().flat_map(|s| &s.vertices).any(|v| v[0] < 261.96099853515625));
+        // Existing ordinary dialog defaults still include portrait302 and keep
+        // the historical portrait-column bounds. This variant is not global.
+        let ordinary = assets.message_surfaces(&state, true, [0.; 2], None).err().expect("ordinary sentinel must remain unsupported");
+        assert!(ordinary.contains("portrait")); // sentinel unsupported outside dedicated variant
+        let mut ordinary_state = State::default();
+        ordinary_state.submit(Request { script: None,
+            dialog: Some(crate::human_dialog::Dialog { title:1765, body:1766,
+                buttons:[1636,1637], button_count:2, timeout:false,
+                ..Default::default() }), title:1765, body:1766, dismissal_id:0, card:None });
+        let ordinary = assets.message_surfaces(&ordinary_state, true, [0.;2], None).unwrap();
+        assert_eq!(ordinary[base+1].vertices, assets.portrait.vertices);
+        #[cfg(feature = "capture")]
+        if let Ok(path) = std::env::var("OPENMT2001_DESKTOP_QUIT_CAPTURE") {
+            let path = std::path::PathBuf::from(path);
+            assert!(path.is_dir(), "supply an owned existing output directory");
+            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+            let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+            for (name, point, pressed) in [
+                ("idle", None, false), ("yes-hover", Some([250.,280.]), false),
+                ("yes-pressed", Some([250.,280.]), true), ("no-hover", Some([370.,280.]), false),
+            ] {
+                modal.cancel_pointer();
+                if let Some(point) = point { modal.cursor(point); }
+                if pressed { let hit = assets.desktop_quit_hit(&modal); modal.left(true, hit); }
+                let panel = assets.prepare_desktop_quit(&renderer, &modal).unwrap();
+                let file = path.join(format!("desktop-quit-{name}.png"));
+                crate::capture_test::capture_standalone(&renderer, &panel, file.to_str().unwrap());
+            }
+        }
     }
 }

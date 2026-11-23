@@ -3,8 +3,10 @@
 //! follows the supplied main-menu recording. Destination screens remain explicit.
 //! Textures currently use individual images rather than original packed pages;
 //! bitmap metrics are native-checked, but line rasterization is a GPU approximation.
-//! Pending/quit prompts are development UI, not reconstructed original dialogs.
+//! Unimplemented pending screens remain development UI; desktop Quit uses the shared modal.
 use crate::ui::Surface;
+#[path = "desktop_quit.rs"]
+pub(crate) mod desktop_quit;
 #[path = "preferred_token.rs"]
 pub mod preferred_token;
 #[path = "skirmish_route.rs"]
@@ -233,6 +235,8 @@ pub struct Menu {
     light_click_target: Option<(u8, usize)>,
     pointer_position: Option<[f32; 2]>,
     pub pending: Option<usize>,
+    desktop_quit: desktop_quit::Modal,
+    desktop_exit_requested: bool,
     dirty: bool,
     single_mode: bool,
 }
@@ -241,6 +245,7 @@ enum MenuCuePage {
     Main,
     Load,
     LoadPrompt,
+    DesktopQuit,
     Profile,
     Single,
     Other,
@@ -259,6 +264,7 @@ fn generic_cue_target(
         MenuCuePage::Main => selected.filter(|&i| i < 7).map(|i| (0, i)),
         MenuCuePage::Load => selected.filter(|&i| i < 3 && enabled).map(|i| (1, i)),
         MenuCuePage::LoadPrompt => selected.filter(|&i| i < 2).map(|i| (2, i)),
+        MenuCuePage::DesktopQuit => selected.filter(|&i| i < 2 && enabled).map(|i| (5, i)),
         MenuCuePage::Profile => selected.filter(|&i| i < 4 && enabled).map(|i| (3, i)),
         MenuCuePage::Single => selected.filter(|&i| i < 4 && enabled).map(|i| (4, i)),
         MenuCuePage::Other => None,
@@ -289,7 +295,34 @@ fn main_button_state(held: bool, origin: Option<usize>, selected: Option<usize>,
     }
 }
 impl Menu {
+    pub fn desktop_quit_active(&self) -> bool { self.desktop_quit.active() }
+    pub fn desktop_input_blocked(&self) -> bool {
+        self.desktop_quit.active() || self.desktop_exit_requested
+    }
+    pub fn desktop_right_button(&mut self, down: bool) { self.desktop_quit.right(down); }
+    /// Current/previous physical samples arrive once per App menu redraw.
+    /// This is the host's eligible modal event1 cadence, not proven50Hz parity.
+    pub fn desktop_ui_event1(&mut self, sample: desktop_quit::Sample) {
+        let edges = self.desktop_quit.event1(sample);
+        for (button, edge) in edges.into_iter().enumerate() {
+            if edge && self.desktop_quit.active() { self.desktop_reply(button); }
+        }
+    }
+    fn desktop_reply(&mut self, button: usize) {
+        let exit = &mut self.desktop_exit_requested;
+        self.desktop_quit.reply_with(button, |_, reply| {
+            //495670: release blocking first (Modal), then index0 requests
+            // orderly exit. Optional original8aaa24 object is not modeled.
+            if reply.button == 0 { *exit = true; }
+        });
+        self.dirty = true;
+    }
+    pub fn take_desktop_exit(&mut self) -> bool {
+        std::mem::take(&mut self.desktop_exit_requested)
+    }
     pub fn cancel_input(&mut self) {
+        if self.desktop_quit.active() { self.pointer_position = None; }
+        self.desktop_quit.cancel_pointer();
         self.settings.cancel_input();
         self.skirmish.cancel_input();
         self.pressed = false;
@@ -395,6 +428,8 @@ impl Menu {
             light_click_target: None,
             pointer_position: None,
             pending: None,
+            desktop_quit: Default::default(),
+            desktop_exit_requested: false,
             dirty: true,
             single_mode: false,
         }
@@ -417,7 +452,12 @@ impl Menu {
         }
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
+        if self.desktop_exit_requested { return; }
         self.pointer_position = Some(p);
+        if self.desktop_quit.active() {
+            self.desktop_quit.cursor(p);
+            return; // never mutate the menu selection behind the modal
+        }
         if self.skirmish.error.is_none() && self.skirmish.visible() { self.skirmish.pointer(p); }
         if self.settings.page.is_some() {
             self.settings.drag(&self.assets.settings, Some(p), &mut self.settings_audio);
@@ -439,6 +479,14 @@ impl Menu {
     /// 443360 emits its light click on the first held entry and on a held
     /// leave/re-entry. The audio latch is separate from release activation.
     pub fn light_click_on_held_entry(&mut self) -> bool {
+        if self.desktop_exit_requested { return false; }
+        if self.desktop_quit.active() {
+            // Original visual-child vtable5259a4 routes its event slot+0x18 to443360.
+            let target = generic_cue_target(MenuCuePage::DesktopQuit,
+                self.assets.prompts.desktop_quit_hit(&self.desktop_quit),
+                self.desktop_quit.left_held(), false, true);
+            return held_entry_click(&mut self.light_click_target, target);
+        }
         if self.settings.page.is_some() {
             return self.settings.pointer_click_cue(&self.assets.settings, self.pointer_position);
         }
@@ -467,7 +515,12 @@ impl Menu {
     }
     /// Bounded original button hover. Query the actual pointer, never keyboard selection.
     pub fn enabled_cursor_hover(&self) -> bool {
+        if self.desktop_exit_requested { return false; }
         let Some(p) = self.pointer_position else { return false; };
+        // Authentic quit owns hover BEFORE the background/pending gates.
+        if self.desktop_quit.active() {
+            return self.assets.prompts.desktop_quit_hit(&self.desktop_quit).is_some();
+        }
         // Placeholder overlays do not expose the background menu's hit regions.
         if self.pending.is_some() { return false; }
         if self.skirmish.error.is_some() { return self.hit(p).is_some(); }
@@ -486,6 +539,10 @@ impl Menu {
         self.hit(p).is_some()
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
+        if self.desktop_exit_requested { return None; }
+        if self.desktop_quit.active() {
+            return self.assets.prompts.desktop_quit_hit_at(p, self.desktop_quit.blocked_by_right());
+        }
         if self.skirmish.error.is_some() {
             let [l, t, r, b] = self.assets.prompts.button_at([0.; 2]);
             return (p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b).then_some(0);
@@ -517,6 +574,12 @@ impl Menu {
         .position(|&[l, t, r, b]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b)
     }
     pub fn mouse_button(&mut self, pressed: bool) {
+        if self.desktop_exit_requested { return; }
+        if self.desktop_quit.active() {
+            let hit = self.assets.prompts.desktop_quit_hit(&self.desktop_quit);
+            if let Some(button) = self.desktop_quit.left(pressed, hit) { self.desktop_reply(button); }
+            return;
+        }
         if self.skirmish.error.is_none() && self.skirmish.visible() {
             self.skirmish.mouse(self.pointer_position, pressed);
             self.pressed = pressed;
@@ -554,6 +617,7 @@ impl Menu {
         self.select(self.selected, pressed);
     }
     pub fn activate(&mut self) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() {
             self.skirmish.error = None;
             self.dirty = true;
@@ -707,6 +771,14 @@ impl Menu {
             self.dirty = true;
             return;
         }
+        if self.selected == Some(6) {
+            self.desktop_quit.open(self.pointer_position);
+            self.pressed = false;
+            self.pressed_origin = None;
+            self.light_click_target = None;
+            self.dirty = true;
+            return;
+        }
         if let Some(i) = self.selected {
             self.pending = Some(i);
             self.dirty = true;
@@ -716,6 +788,7 @@ impl Menu {
         self.skirmish.is_editing() || (self.profile.visible && self.profile.name.is_some())
     }
     pub fn navigate(&mut self, delta: i32) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() { return; }
         if self.skirmish.visible() {
             self.skirmish.navigate(delta);
@@ -751,6 +824,7 @@ impl Menu {
         self.select(Some(next), false);
     }
     pub fn input(&mut self, text: &str) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() {
             return;
         }
@@ -765,12 +839,14 @@ impl Menu {
         }
     }
     pub fn select_all(&mut self) {
+        if self.desktop_input_blocked() { return; }
         if self.profile.visible {
             self.profile.select_all();
             self.dirty = true;
         }
     }
     pub fn erase(&mut self) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() {
             return;
         }
@@ -785,6 +861,7 @@ impl Menu {
         }
     }
     pub fn scroll(&mut self, delta: i32) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() {
             return;
         }
@@ -812,6 +889,7 @@ impl Menu {
         self.dirty = true;
     }
     pub fn back(&mut self) {
+        if self.desktop_input_blocked() { return; }
         if self.skirmish.error.is_some() {
             self.skirmish.error = None;
             self.dirty = true;
@@ -856,6 +934,7 @@ impl Menu {
         color: &wgpu::TextureView,
         depth: &wgpu::TextureView,
     ) -> Result<(), String> {
+        if self.desktop_exit_requested { return Ok(()); }
         if let Some(error) = &self.skirmish.error {
             let panel = self.assets.prompts.prepare_error(renderer, error)?;
             renderer.draw_overlay(color, depth, &panel);
@@ -1025,23 +1104,11 @@ impl Menu {
             }
             if let Some(i) = self.pending {
                 modal.rect([60., 195., 580., 285.], [0xee101030; 4]);
-                let text = if i == 6 {
-                    "QUIT? ENTER CONFIRMS - ESC RETURNS"
-                } else {
-                    [
-                        "NAME SCREEN PENDING",
-                        "TUTORIALS PENDING",
-                        "SINGLE PLAYER PENDING",
-                        "MULTI-PLAYER PENDING",
-                        "LOAD GAME PENDING",
-                        "SETTINGS PENDING",
-                    ][i]
-                };
-                let text = if i == 6 {
-                    text.to_owned()
-                } else {
-                    format!("{text} - ESC RETURNS")
-                };
+                let text = format!("{} - ESC RETURNS", [
+                    "NAME SCREEN PENDING", "TUTORIALS PENDING",
+                    "SINGLE PLAYER PENDING", "MULTI-PLAYER PENDING",
+                    "LOAD GAME PENDING", "SETTINGS PENDING",
+                ][i]);
                 let encoded: Vec<_> = text.bytes().map(|b| b - 32).collect();
                 for q in font.layout(
                     &encoded,
@@ -1096,6 +1163,10 @@ impl Menu {
             self.dirty = false;
         }
         renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
+        if self.desktop_quit.active() {
+            let panel = self.assets.prompts.prepare_desktop_quit(renderer, &self.desktop_quit)?;
+            renderer.draw_overlay(color, depth, &panel);
+        }
         Ok(())
     }
 }
@@ -1235,5 +1306,78 @@ mod settings_route_tests {
         menu.back(); // Escape directly from Settings to menu
         assert_eq!(menu.settings.page, None);
         assert_eq!(menu.pending, None);
+    }
+}
+
+#[cfg(test)]
+mod desktop_quit_route_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires supplied menu assets/scripts and OPENMT2001_QUIT_TEST_ROOT disk scratch parent"]
+    fn original_quit_no_reopen_yes_preserves_menu_and_blocks_background() {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let executable = read("OPENMT2001_EXE");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language = exe.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
+        let parent = std::path::PathBuf::from(std::env::var("OPENMT2001_QUIT_TEST_ROOT").unwrap());
+        let root = parent.join(format!("desktop-quit-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let mut menu = Menu::new(Assets::load(&index, &archive, installer, &language,
+            &scripts, root.clone(), root.join("saves"), &executable).unwrap());
+        menu.profile.store.names = vec!["Quit Player".into(), "Other Player".into()];
+        menu.profile.store.current = Some(0);
+        menu.profile.visible = false;
+        fs::create_dir_all(root.join("saves")).unwrap();
+        fs::write(root.join("saves/keep.sav"), b"untouched save sentinel").unwrap();
+        fs::write(root.join("keep.profile"), b"untouched profile sentinel").unwrap();
+        let snapshot = menu.settings_snapshot();
+        let names = menu.profile.store.names.clone();
+        let settings_path = menu.current_settings_path();
+        menu.selected = Some(6);
+        menu.activate();
+        assert!(menu.desktop_quit_active()); assert_eq!(menu.pending, None);
+        let row0 = menu.assets.bounds[0];
+        let background = [(row0[0]+row0[2])*0.5, (row0[1]+row0[3])*0.5];
+        menu.pointer(background);
+        assert!(!menu.enabled_cursor_hover()); // modal wins over actual menu row
+        menu.mouse_button(true); menu.mouse_button(false);
+        menu.back(); menu.navigate(1); menu.erase(); menu.input("changed"); menu.activate();
+        assert!(menu.desktop_quit_active()); assert_eq!(menu.selected, Some(6));
+        assert!(!menu.profile.visible && !menu.single.visible && !menu.load.visible);
+        assert_eq!(menu.settings.page, None);
+        let buttons = menu.assets.prompts.dialog_buttons(2);
+        let point = |i: usize| { let b = buttons[i];
+            [(b[0]+b[2])*0.5-40., (b[1]+b[3])*0.5] };
+        menu.pointer(point(1));
+        assert!(menu.enabled_cursor_hover());
+        menu.mouse_button(true);
+        assert!(menu.light_click_on_held_entry());
+        assert!(!menu.light_click_on_held_entry()); // same held entry cues once
+        menu.mouse_button(false); // No
+        assert!(!menu.desktop_quit_active()); assert!(!menu.take_desktop_exit());
+        assert_eq!(menu.selected, Some(6));
+        assert_eq!(menu.profile.store.names, names);
+        assert_eq!(menu.profile.store.current, Some(0));
+        assert_eq!(menu.settings_snapshot(), snapshot);
+        assert_eq!(menu.current_settings_path(), settings_path);
+        menu.activate(); // same retained Menu, fresh modal
+        menu.pointer(point(0)); menu.mouse_button(false); // old release cannot confirm
+        assert!(menu.desktop_quit_active());
+        menu.mouse_button(true); menu.mouse_button(false);
+        assert!(!menu.desktop_quit_active());
+        assert!(menu.take_desktop_exit()); assert!(!menu.take_desktop_exit());
+        assert_eq!(menu.profile.store.names, names);
+        assert_eq!(fs::read(root.join("saves/keep.sav")).unwrap(), b"untouched save sentinel");
+        assert_eq!(fs::read(root.join("keep.profile")).unwrap(), b"untouched profile sentinel");
     }
 }
