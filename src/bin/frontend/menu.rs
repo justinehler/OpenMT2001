@@ -524,8 +524,12 @@ impl Menu {
         // Placeholder overlays do not expose the background menu's hit regions.
         if self.pending.is_some() { return false; }
         if self.skirmish.error.is_some() { return self.hit(p).is_some(); }
+        if let Some(page) = self.settings.page {
+            return !self.desktop_quit.blocked_by_right()
+                && self.assets.settings.action_cursor_hover(page,Some(p));
+        }
         // These routes have separate control policies; their hover is not yet closed.
-        if self.settings.page.is_some() || self.skirmish.visible()
+        if self.skirmish.visible()
             || self.single.visible || self.profile.visible || self.single_mode {
             return false;
         }
@@ -1272,6 +1276,20 @@ mod settings_route_tests {
         menu.activate(); // shared mouse-release / Enter activation path
         assert_eq!(menu.settings.page, Some(Page::Main));
         assert_eq!(menu.pending, None);
+        assert!(!menu.enabled_cursor_hover(),"keyboard route alone is not pointer hover");
+        let [l,t,r,b]=menu.assets.settings.bounds(Page::Main,Button::Sound).unwrap();
+        menu.pointer([(l+r)*0.5,(t+b)*0.5]);
+        assert!(menu.enabled_cursor_hover());
+        menu.desktop_right_button(true);
+        assert!(!menu.enabled_cursor_hover(),"physical Right suppresses action cursor");
+        menu.desktop_right_button(false);
+        assert!(menu.enabled_cursor_hover());
+        menu.pending=Some(2);
+        assert!(!menu.enabled_cursor_hover(),"foreground overlay wins over Settings");
+        menu.pending=None;
+        menu.pointer([1.,1.]);
+        menu.selected=Some(5);
+        assert!(!menu.enabled_cursor_hover(),"keyboard selection cannot replace pointer hit");
         let click = |menu: &mut Menu, button| {
             let bounds = menu.assets.settings.bounds(menu.settings.page.unwrap(), button).unwrap();
             menu.pointer([(bounds[0]+bounds[2])/2., (bounds[1]+bounds[3])/2.]);

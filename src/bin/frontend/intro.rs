@@ -2885,6 +2885,15 @@ impl Intro {
             return Some(if hover { 3 } else { 0 });
         }
         self.inspection.as_ref().map(|view| {
+            if let Some(page) = view.settings_menu.page {
+                let blocked = view.toolbar_right_held || view.save_dialog.visible
+                    || view.stats_requested
+                    || view.live_status.as_ref().is_some_and(|status|status.stats.is_some());
+                let pointer = view.pointer.map(|p|p.map(|v|v as f32*0.5));
+                return if !blocked && self.assets.settings_menu.action_cursor_hover(page,pointer) {
+                    3
+                } else { 0 };
+            }
             if self.menu.as_ref().is_some_and(|menu|
                 view.toolbar_target(menu,&self.assets.selection.blocks).is_some()) { return 3; }
             // Original mode12/13 use cursor2 for right-only and cursor3 for both buttons.

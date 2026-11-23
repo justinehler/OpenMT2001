@@ -265,6 +265,16 @@ impl Assets {
             .into_iter().find(|&button| self.bounds(page, button).is_some_and(|[l,t,r,b]|
                 pointer[0]>=l && pointer[0]<=r && pointer[1]>=t && pointer[1]<=b))
     }
+    /// Original action widgets request cursor1 only inside their enabled bounds.
+    /// Slider, radio and checkbox subclasses have separate cursor contracts.
+    pub fn action_cursor_hover(&self, page: Page, pointer: Option<[f32; 2]>) -> bool {
+        let Some([x,y]) = pointer else { return false; };
+        let buttons: &[Button] = if page == Page::Main {
+            &[Button::Sound,Button::Graphics,Button::Gameplay,Button::Back]
+        } else { &[Button::Back] };
+        buttons.iter().any(|&button| self.bounds(page,button).is_some_and(|[l,t,r,b]|
+            x>l && x<r && y>=t && y<=b))
+    }
     fn label(&self, id: usize) -> &[u8] { &self.strings[id] }
     #[cfg(test)]
     pub fn label_for_test(&self, id: usize) -> &[u8] { self.label(id) }
@@ -727,6 +737,39 @@ mod graphics_tests {
         let executable=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let language=executable.parent().unwrap().parent().unwrap().join("US/language/usa");
         let assets=Assets::load(&index,&archive,installer,&language).unwrap();
+        // Generic action hit4342c0 is strict X and inclusive Y. All other
+        // widget families retain their existing cursor policy in this slice.
+        for (page,buttons) in [
+            (Page::Main,&[Button::Sound,Button::Graphics,Button::Gameplay,Button::Back][..]),
+            (Page::Sound,&[Button::Back][..]),
+            (Page::Graphics,&[Button::Back][..]),
+            (Page::Gameplay,&[Button::Back][..]),
+        ] {
+            assert!(!assets.action_cursor_hover(page,None));
+            assert!(!assets.action_cursor_hover(page,Some([1.,1.])));
+            for &button in buttons {
+                let [l,t,r,b]=assets.bounds(page,button).unwrap();
+                let x=(l+r)*0.5; let y=(t+b)*0.5;
+                assert!(assets.action_cursor_hover(page,Some([x,y])),"{page:?} {button:?}");
+                assert!(!assets.action_cursor_hover(page,Some([l,y])));
+                assert!(!assets.action_cursor_hover(page,Some([r,y])));
+                assert!(assets.action_cursor_hover(page,Some([x,t])));
+                assert!(assets.action_cursor_hover(page,Some([x,b])));
+                assert!(!assets.action_cursor_hover(page,Some([x,t-0.01])));
+                assert!(!assets.action_cursor_hover(page,Some([x,b+0.01])));
+            }
+        }
+        for region in [9,11,12] { // disabled Main defaults, Board and Credits
+            let [l,t,r,b]=assets.panel(Page::Main).regions[region];
+            assert!(!assets.action_cursor_hover(Page::Main,Some([(l+r)*0.5,(t+b)*0.5])));
+        }
+        for (page,button) in [(Page::Sound,Button::MusicLeft),
+            (Page::Sound,Button::MusicTrack),(Page::Sound,Button::MusicRight),
+            (Page::Graphics,Button::DetailHigh),(Page::Graphics,Button::Trilinear),
+            (Page::Gameplay,Button::AutoRotate),(Page::Gameplay,Button::InvertVertical)] {
+            let [l,t,r,b]=assets.bounds(page,button).unwrap();
+            assert!(!assets.action_cursor_hover(page,Some([(l+r)*0.5,(t+b)*0.5])));
+        }
         let [l,t,r,b]=assets.panel(Page::Sound).regions[25];
         assert_eq!(assets.button(Page::Sound,[(l+r)*0.5,(t+b)*0.5]),None,
             "Sound mesh region 25 is not an interactive Reset control");
