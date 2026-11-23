@@ -190,6 +190,9 @@ pub struct Layer {
     range: Range<usize>,
     previous_visible: Vec<bool>,
     previous_time: Option<(u32, u32)>,
+    previous_camera: Option<CameraSample>,
+    previous_size: Option<[u32; 2]>,
+    previous_palette: Option<[u32; 9]>,
     pub submissions: Vec<i32>,
     pub foliage_counts: [usize; 3],
 }
@@ -202,11 +205,21 @@ impl Layer {
             range: 0..0,
             previous_visible: Vec::new(),
             previous_time: None,
+            previous_camera: None,
+            previous_size: None,
+            previous_palette: None,
             submissions: Vec::new(),
             foliage_counts: [0; 3],
         }
     }
     pub fn attach(&mut self, scene: &mut Scene) {
+        // A new attachment contains placeholders, even if this layer was used
+        // before. Its first frame must fill every draw.
+        self.previous_visible.clear();
+        self.previous_time = None;
+        self.previous_camera = None;
+        self.previous_size = None;
+        self.previous_palette = None;
         let r = &self.resources;
         let mut surfaces = r.surfaces.clone();
         let mut capacity = vec![0; surfaces.len()];
@@ -249,6 +262,9 @@ impl Layer {
             light.diffuse,
             light.ambient,
         )?;
+        let changed_foliage = self.previous_camera != Some(sample)
+            || self.previous_size != Some(size)
+            || self.previous_palette != Some(palette);
         let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
         let gpu_view = camera::view_with_up(sample.eye, sample.target, sample.up);
         let gpu_view = [
@@ -339,6 +355,15 @@ impl Layer {
         }
         self.previous_visible = visible;
         self.previous_time = Some(time);
+        self.previous_camera = Some(sample);
+        self.previous_size = Some(size);
+        self.previous_palette = Some(palette);
+        // Immutable world points, unchanged camera/viewport and identical
+        // quantized colours produce the same leaves. Fog/camera uniforms are
+        // updated independently by the host, including on this no-upload path.
+        if !changed_foliage {
+            return Ok(changed);
+        }
         self.foliage_counts = [0; 3];
         for phase in 0..3 {
             let draw = &mut draws[r.trunk_pages + phase];
@@ -503,6 +528,7 @@ mod tests {
             animated: true,
         })
         .unwrap();
+        let base_scene = scene.clone();
         let mut layer = Layer::new(resources.clone(), Mode::Modern);
         layer.attach(&mut scene);
         let retained: Vec<_> = scene.draws[layer.range.clone()]
@@ -545,10 +571,7 @@ mod tests {
             }
         }
         let unchanged = layer.reframe(&mut scene, camera).unwrap();
-        assert_eq!(
-            unchanged,
-            (layer.range.start + resources.trunk_pages..layer.range.end).collect::<Vec<_>>()
-        );
+        assert!(unchanged.is_empty());
         camera.eye[2] = target[2] - 400.;
         scene.reframe(camera).unwrap();
         layer.reframe(&mut scene, camera).unwrap();
@@ -565,6 +588,52 @@ mod tests {
             assert!(draw.vertices.iter().flatten().all(|x| x.is_finite()));
         }
         assert!(Arc::ptr_eq(&layer.resources, &resources));
+        let mut skipped = 0;
+        for frame in 0..48 {
+            // Includes repeated poses, same-hour counter changes and different
+            // daylight phases; fresh layers always expand all leaves.
+            let hour = 8 + frame / 8;
+            let counter = (frame % 8) * 4;
+            camera.eye[0] = target[0] + if frame % 12 < 6 { 0. } else { 20. };
+            scene.reframe(camera).unwrap();
+            scene.advance_daylight(hour, counter, camera).unwrap();
+            let updates = layer.reframe(&mut scene, camera).unwrap();
+            skipped += usize::from(
+                !updates
+                    .iter()
+                    .any(|i| *i >= layer.range.start + resources.trunk_pages),
+            );
+            let mut fresh_scene = base_scene.clone();
+            fresh_scene.reframe(camera).unwrap();
+            fresh_scene.advance_daylight(hour, counter, camera).unwrap();
+            let mut fresh = Layer::new(resources.clone(), Mode::Modern);
+            fresh.attach(&mut fresh_scene);
+            fresh.reframe(&mut fresh_scene, camera).unwrap();
+            for (a, b) in scene.draws[layer.range.clone()]
+                .iter()
+                .zip(&fresh_scene.draws[fresh.range.clone()])
+            {
+                assert_eq!(a.vertices, b.vertices, "frame {frame}");
+                assert_eq!(a.specular, b.specular, "frame {frame}");
+                assert_eq!(a.diffuse_alpha, b.diffuse_alpha, "frame {frame}");
+                assert_eq!(a.view_projection, b.view_projection, "frame {frame}");
+                assert!(Arc::ptr_eq(&a.rgba, &b.rgba));
+            }
+        }
+        assert!(
+            skipped > 0,
+            "original daylight sequence must exercise no-upload frames"
+        );
+        let mut reattached = base_scene.clone();
+        layer.attach(&mut reattached);
+        assert_eq!(
+            layer.reframe(&mut reattached, camera).unwrap().len(),
+            resources.trunk_pages + 3
+        );
+        eprintln!(
+            "48 retained/fresh original-data frames matched; {skipped} foliage uploads skipped"
+        );
+
         eprintln!(
             "137 ambient trees: raw foliage pixels, near/far selection, palette/daylight, quad layout and retained textures verified; no native visual acceptance"
         );
