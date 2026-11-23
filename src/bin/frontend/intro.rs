@@ -1570,7 +1570,9 @@ impl SceneInputs {
                 .ok_or("appearance business subtype outside catalog")?;
             u32::from_le_bytes(info[4..8].try_into().unwrap())
         };
-        Ok((class,assets.refresh_labels(name,name_id)?))
+        let mut payload = assets.refresh_labels(name,name_id)?;
+        payload.banner = Some(crate::save_appearance::BannerSelection::refreshed(class,kind)?);
+        Ok((class,payload))
     }
 
     fn append_saved_appearance(
@@ -8464,6 +8466,43 @@ mod tests {
                 }
                 eprintln!("SAVE_ONE appearance: {expected_draws} dynamic draws + {static_draws} static pages; \
                     static categories {static_categories:?}; identical45/53 detail submission");
+                // Controlled ownership-only mutation: the same-hour snapshot must
+                // rebuild appearance, then restore the original material submission.
+                let original_record = session.world.buildings[12];
+                assert_eq!(original_record[0x2d], 1);
+                let original_materials = cache.city.as_ref().unwrap().draws.iter()
+                    .map(|draw| (draw.width, draw.height, draw.rgba.clone())).collect::<Vec<_>>();
+                let mut absent_business = original_record;
+                absent_business[0x1c..0x20].copy_from_slice(&u32::MAX.to_le_bytes());
+                let payload = |record: &[u8; openmt2001::building_pool::RECORD_SIZE]| {
+                    let (class, labels) = SceneInputs::appearance_payload(&session, record,
+                        cache.appearance_assets.as_ref().unwrap()).unwrap();
+                    (class, crate::save_appearance::banner_material_indices(
+                        &openmt2001::pe::PeImage::parse(&inputs.executable).unwrap(),
+                        labels.banner.unwrap()).unwrap())
+                };
+                assert_eq!(payload(&original_record), (3, (48, 3, Some(5))));
+                assert_eq!(payload(&absent_business), (3, (48, 3, None)));
+                session.world.buildings[12][0x2d] = 0;
+                let city = inputs.inspect_fresh(&mut session, loaded.saved_viewpoint.unwrap().0,
+                    &mut cache).unwrap();
+                assert!(!city.reuse_city, "owner change must rebuild cached appearance");
+                let (class, labels) = SceneInputs::appearance_payload(&session,
+                    &session.world.buildings[12], cache.appearance_assets.as_ref().unwrap()).unwrap();
+                assert_eq!(class, 10);
+                assert_eq!(crate::save_appearance::banner_material_indices(
+                    &openmt2001::pe::PeImage::parse(&inputs.executable).unwrap(),
+                    labels.banner.unwrap()).unwrap(), (55, 286, Some(5)));
+                assert_ne!(cache.city.as_ref().unwrap().draws.iter()
+                    .map(|draw| (draw.width, draw.height, draw.rgba.clone())).collect::<Vec<_>>(),
+                    original_materials, "owner change must reach actual scene materials");
+                session.world.buildings[12] = original_record;
+                let restored = inputs.inspect_fresh(&mut session, loaded.saved_viewpoint.unwrap().0,
+                    &mut cache).unwrap();
+                assert!(!restored.reuse_city);
+                assert_eq!(cache.city.as_ref().unwrap().draws.iter()
+                    .map(|draw| (draw.width, draw.height, draw.rgba.clone())).collect::<Vec<_>>(),
+                    original_materials, "restored owner must restore original scene materials");
                 let mut unchanged = cache.city.as_ref().unwrap().clone();
                 inputs.append_current_appearance(
                     &session, &mut unchanged, &mut DetailVisibility::default(),

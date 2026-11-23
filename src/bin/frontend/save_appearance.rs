@@ -99,12 +99,37 @@ impl Assets {
         } else { self.business_value.clone() };
         let business = self.language_rows.get(business_id as usize)
             .ok_or("appearance business name ID outside language")?.clone();
-        Ok(RefreshLabels { owner, business })
+        Ok(RefreshLabels { owner, business, banner: None })
     }
 }
 
 ///485520 uses owner metadata for10000 and BusinessInfo+4 for20000.
-pub struct RefreshLabels { pub owner: Vec<u8>, pub business: Vec<u8> }
+pub struct RefreshLabels {
+    pub owner: Vec<u8>,
+    pub business: Vec<u8>,
+    /// Required only when refreshing01080202; text labels alone claim no selector.
+    pub banner: Option<BannerSelection>,
+}
+
+/// Original4846f0 banner selectors are distinct from the ordinary texture class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BannerSelection {
+    owner_style: u32,
+    business_page: Option<usize>,
+}
+impl BannerSelection {
+    //485368 passes selectors0/0 even while its ordinary texture class is10.
+    pub const INITIAL: Self = Self { owner_style: 0, business_page: Some(0) };
+
+    ///485520 supplies owner metadata (or10 for City), and business kind (or-1).
+    pub fn refreshed(owner_style: u32, business_kind: i32) -> Result<Self, String> {
+        if owner_style > 10 || !(-1..45).contains(&business_kind) {
+            return Err("appearance banner owner/business selector outside recovered domain".into());
+        }
+        Ok(Self { owner_style,
+            business_page: (business_kind >= 0).then_some(business_kind as usize) })
+    }
+}
 
 /// Original 457210 selects a generic front and BuildingTextures back using
 /// two PE DWORD tables, indexed by the 4846f0 appearance texture class.
@@ -136,13 +161,18 @@ pub fn awning_material_indices(image: &PeImage<'_>, class: u32) -> Result<(usize
     Ok((read(0x53a1d0 + offset)?, read(0x53a1fc + offset)?))
 }
 
-/// Original 457c60 uses SignTextures for the back and lower face, and
-/// GenericTextures640 for the portrait face. SAVE_ONE passes selector 0/0.
-pub fn banner_material_indices(image: &PeImage<'_>) -> Result<(usize, usize, usize), String> {
+///457c60 selects an owner backing/portrait and an optional business lower pair.
+/// Modern640-family UI textures retain the original handle-bank indices.
+pub fn banner_material_indices(image: &PeImage<'_>, selection: BannerSelection,
+) -> Result<(usize, usize, Option<usize>), String> {
     let read = |address| -> Result<usize, String> {
         Ok(u32::from_le_bytes(image.at(address, 4)?.try_into().unwrap()) as usize)
     };
-    Ok((read(0x53a254)?, read(0x541af8)?, 0))
+    let portrait = if selection.owner_style == 10 {
+        //68b2a0 is generic UI bank68ae28+286*4; no character record10 lookup.
+        286
+    } else { read(0x541af8 + selection.owner_style * 40)? };
+    Ok((read(0x53a254 + selection.owner_style * 4)?, portrait, selection.business_page))
 }
 
 #[derive(Clone)]
@@ -661,14 +691,23 @@ impl Adapter {
                       (assets.building.get(trim).ok_or("appearance awning trim texture leaves collection")?, 96..102)])
             }
             0x0108_0202 => {
-                // 457c60 selects these three pages independently of the
-                // owner texture class; supplied refreshes use both 0 and 10.
+                let selection = match labels {
+                    None => BannerSelection::INITIAL,
+                    Some(payload) => payload.banner.ok_or("appearance banner refresh selectors missing")?,
+                };
                 let geometry = banner_geometry(width, height)?;
-                let (outer, portrait, lower) = banner_material_indices(image)?;
-                (geometry.positions.to_vec(), geometry.uv.to_vec(), vec![0xffff_ffff; 20], geometry.indices.to_vec(),
-                 vec![(assets.signs.get(outer).ok_or("appearance banner backing texture leaves collection")?, 0..12),
-                      (assets.generic640.get(portrait).ok_or("appearance banner portrait texture leaves collection")?, 12..24),
-                      (assets.signs.get(lower).ok_or("appearance banner lower texture leaves collection")?, 24..36)])
+                let (outer, portrait, lower) = banner_material_indices(image, selection)?;
+                let mut parts = vec![
+                    (assets.signs.get(outer).ok_or("appearance banner backing texture leaves collection")?, 0..12),
+                    (assets.generic640.get(portrait).ok_or("appearance banner portrait texture leaves collection")?, 12..24),
+                ];
+                if let Some(lower) = lower {
+                    parts.push((assets.signs.get(lower).ok_or("appearance banner lower texture leaves collection")?, 24..36));
+                }
+                let vertices = if lower.is_some() { 20 } else { 12 };
+                let indices = if lower.is_some() { 36 } else { 24 };
+                (geometry.positions[..vertices].to_vec(), geometry.uv[..vertices].to_vec(),
+                 vec![0xffff_ffff; vertices], geometry.indices[..indices].to_vec(), parts)
             }
             0x0101_0201 | 0x0102_0201 | 0x0101_0204 | 0x0102_0204 => {
                 if assets.font4_tab.is_empty() {
@@ -1531,8 +1570,8 @@ mod tests {
         for _ in 0..2 {
             let width = f32::from_bits(word(at));
             let height = f32::from_bits(word(at+4));
-            assert_eq!(banner_material_indices(&image).unwrap(),
-                       (word(at+8) as usize, word(at+12) as usize, word(at+16) as usize));
+            assert_eq!(banner_material_indices(&image, BannerSelection::INITIAL).unwrap(),
+                       (word(at+8) as usize, word(at+12) as usize, Some(word(at+16) as usize)));
             assert_eq!((word(at+20), word(at+24), word(at+28)), (20, 36, 3));
             assert_eq!((word(at+32), word(at+36), word(at+40)), (12, 12, 12));
             at += 44;
@@ -1645,3 +1684,7 @@ mod tests {
         assert_eq!(checked, 59);
     }
 }
+
+#[cfg(test)]
+#[path = "rooftop_identity_tests.rs"]
+mod rooftop_identity_tests;
