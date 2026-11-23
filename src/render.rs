@@ -52,6 +52,9 @@ pub enum SurfaceMode {
     /// Original 4ec120/4ec270 result particle points, expanded to camera
     /// billboards with ARGB modulation and no depth writes.
     ResultParticles,
+    /// Original result mode12: textured ARGB billboards, SRCALPHA/ONE,
+    /// LESSEQUAL with no depth writes. Shared dust/pulse keep ResultParticles.
+    ResultFireworks,
     /// Original tree state10: two-sided GREATER64 cutout, ONE/ZERO, depth writes and LESSEQUAL.
     TreeFoliage,
     /// Original sun/moon textured quads, state1 with depth disabled.
@@ -130,6 +133,7 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     star_pipeline: wgpu::RenderPipeline,
     result_particle_pipeline: wgpu::RenderPipeline,
+    result_firework_pipeline: wgpu::RenderPipeline,
     tree_foliage_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
@@ -204,7 +208,7 @@ impl Renderer {
                     },
                     dst_factor: if mode == SurfaceMode::TreeFoliage {
                         wgpu::BlendFactor::Zero
-                    } else if mode == SurfaceMode::Clouds {
+                    } else if matches!(mode, SurfaceMode::Clouds | SurfaceMode::ResultFireworks) {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
                         wgpu::BlendFactor::OneMinusSrcAlpha
@@ -257,6 +261,7 @@ impl Renderer {
                             | SurfaceMode::Clouds
                             | SurfaceMode::Stars
                             | SurfaceMode::ResultParticles
+                            | SurfaceMode::ResultFireworks
                             | SurfaceMode::Celestial
                             | SurfaceMode::Overlay
                     )),
@@ -271,7 +276,7 @@ impl Renderer {
                             )
                         {
                             wgpu::CompareFunction::Always
-                        } else if static_lit || matches!(mode, SurfaceMode::UiDepth | SurfaceMode::TreeFoliage) {
+                        } else if static_lit || matches!(mode, SurfaceMode::UiDepth | SurfaceMode::TreeFoliage | SurfaceMode::ResultFireworks) {
                             wgpu::CompareFunction::LessEqual
                         } else {
                             wgpu::CompareFunction::Less
@@ -297,7 +302,8 @@ impl Renderer {
                         SurfaceMode::Stars
                         | SurfaceMode::Overlay
                         | SurfaceMode::UiDepth
-                        | SurfaceMode::ResultParticles => "star_fragment",
+                        | SurfaceMode::ResultParticles
+                        | SurfaceMode::ResultFireworks => "star_fragment",
                     }),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -319,6 +325,7 @@ impl Renderer {
         let sky_pipeline = make_pipeline(SurfaceMode::Sky);
         let star_pipeline = make_pipeline(SurfaceMode::Stars);
         let result_particle_pipeline = make_pipeline(SurfaceMode::ResultParticles);
+        let result_firework_pipeline = make_pipeline(SurfaceMode::ResultFireworks);
         let tree_foliage_pipeline = make_pipeline(SurfaceMode::TreeFoliage);
         let celestial_pipeline = make_pipeline(SurfaceMode::Celestial);
         let cloud_pipeline = make_pipeline(SurfaceMode::Clouds);
@@ -344,6 +351,7 @@ impl Renderer {
             sky_pipeline,
             star_pipeline,
             result_particle_pipeline,
+            result_firework_pipeline,
             tree_foliage_pipeline,
             celestial_pipeline,
             cloud_pipeline,
@@ -914,6 +922,7 @@ impl Renderer {
             SurfaceMode::Sky => &self.sky_pipeline,
             SurfaceMode::Stars => &self.star_pipeline,
             SurfaceMode::ResultParticles => &self.result_particle_pipeline,
+            SurfaceMode::ResultFireworks => &self.result_firework_pipeline,
             SurfaceMode::TreeFoliage => &self.tree_foliage_pipeline,
             SurfaceMode::Celestial => &self.celestial_pipeline,
             SurfaceMode::Clouds => &self.cloud_pipeline,

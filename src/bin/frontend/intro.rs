@@ -85,6 +85,7 @@ pub struct Assets {
     tooltip: crate::tooltip::Tooltip,
     result_actors: crate::auction_scene::Assets,
     result_text: crate::fresh_city::result::text::Assets,
+    result_firework_texture: crate::fresh_city::result::particles_gpu::FireworkTexture,
     result_medallions: crate::fresh_city::result::medallions::Assets,
     result_audio: crate::fresh_city::result::audio::Assets,
     auction_audio: crate::live_host::auction_audio::Assets,
@@ -174,6 +175,7 @@ impl Assets {
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
         )?;
         let city_pulse = crate::city_pulse_scene::Assets::load(&index, &archive)?;
+        let result_firework_texture = crate::fresh_city::result::particles_gpu::FireworkTexture::load(&index, &archive)?;
         let strategic_scene = crate::strategic_scene::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive, &selection.blocks,
         )?;
@@ -257,6 +259,7 @@ impl Assets {
             tooltip,
             result_actors,
             result_text,
+            result_firework_texture,
             result_medallions,
             result_audio,
             auction_audio,
@@ -4644,7 +4647,7 @@ impl Intro {
                         view.scene.draws.extend(medallions);
                         if fireworks.is_some() {
                             view.scene.draws.push(
-                                crate::fresh_city::result::particles_gpu::empty_draw());
+                                self.assets.result_firework_texture.empty_draw());
                         }
                         let draws = view.scene.draws.iter().map(|draw| draw.borrowed())
                             .collect::<Vec<_>>();

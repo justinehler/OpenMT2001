@@ -1515,7 +1515,7 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         SurfaceMode::StaticLit => 7,
         SurfaceMode::FacadeBlend => 8,
         SurfaceMode::TreeFoliage => 9,
-        SurfaceMode::ResultParticles => 9,
+        SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks => 9,
         SurfaceMode::Overlay | SurfaceMode::UiDepth => 9,
     });
     // Reproduce the original FOGTABLE + WFOG device path. Camera pose remains
