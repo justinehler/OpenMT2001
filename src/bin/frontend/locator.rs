@@ -5263,14 +5263,14 @@ mod tests {
                 assert_eq!(apartments, 9);
                 let mut prompt = crate::prompt::State::default();
                 for title in (1898..1916).step_by(2) {
-                    let request = crate::prompt::Request {
+                    let request = crate::prompt::Request { script: None,
                         dialog: None,
                         card: None,
                         title,
                         body: title + 1,
                         dismissal_id: title + 100,
                     };
-                    assert_eq!(prompt.submit(request), None);
+                    assert_eq!(prompt.submit(request.clone()), None);
                     let prepared = prompts.prepare(&renderer, &prompt).unwrap();
                     #[cfg(feature = "capture")]
                     if let Ok(prefix) = std::env::var("OPENMT2001_LOCATOR_CAPTURE")
@@ -5287,7 +5287,7 @@ mod tests {
                     prompt.cursor([0., 0.]);
                     assert_eq!(prompt.left_button(true, prompts.button), None);
                     assert_eq!(prompt.left_button(false, prompts.button), None);
-                    assert_eq!(prompt.request(), Some(request));
+                    assert_eq!(prompt.request(), Some(request.clone()));
                     prompt.cursor([
                         (prompts.button[0] + prompts.button[2]) * 0.5,
                         (prompts.button[1] + prompts.button[3]) * 0.5,

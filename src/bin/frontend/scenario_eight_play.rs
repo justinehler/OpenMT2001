@@ -109,7 +109,7 @@ fn legal_scenario_eight_occupied_property_profit_frontier() {
             host.frame(&mut session, &assets, 40);
             assert!(host.failure.is_none(), "Scenario8 Host boundary: {:?}", host.failure);
             let status = host.status(&session);
-            for prompt in status.prompts.iter().copied() {
+            for prompt in status.prompts.iter().cloned() {
                 if let Some(dialog) = prompt.dialog {
                     if dialog.callback == 0x48b490 { outcome = Some(dialog); break; }
                     host.human_dialog_reply(&mut session, &assets,
@@ -451,7 +451,7 @@ fn legal_scenario_eight_railroad_profit_frontier() {
                 host.frame(&mut session, &assets, 40);
                 assert!(host.failure.is_none(), "Scenario8 rail-first Host boundary: {:?}", host.failure);
                 let status = host.status(&session);
-                for prompt in status.prompts.iter().copied() {
+                for prompt in status.prompts.iter().cloned() {
                     if let Some(dialog) = prompt.dialog {
                         if dialog.callback == 0x48b490 { outcome = Some(dialog); break; }
                         host.human_dialog_reply(&mut session, &assets,
@@ -683,7 +683,7 @@ fn run_scenario_eight_utility_income_auctions(caps: [u32; 4], require_all: bool,
                 host.frame(&mut session, &assets, 40);
                 assert!(host.failure.is_none(), "Scenario8 utility Host boundary: {:?}", host.failure);
                 let status = host.status(&session);
-                for prompt in status.prompts.iter().copied() {
+                for prompt in status.prompts.iter().cloned() {
                     if let Some(dialog) = prompt.dialog {
                         if dialog.callback == 0x48b490 { result = Some(dialog); break; }
                         host.human_dialog_reply(&mut session, &assets,

@@ -707,7 +707,7 @@ mod tests {
         let prompt_assets=crate::prompt::Assets::load(&index,&archive,&installer,&strings).unwrap();
         let ack=|session:&mut Session<'_>,host:&mut crate::live_host::Host,id| {
             let status=host.status(session);
-            let request=status.prompts.last().copied().unwrap();
+            let request=status.prompts.last().cloned().unwrap();
             assert_eq!(request.dismissal_id,id);
             let mut modal=crate::prompt::State::default();
             let _=modal.submit(request);
@@ -1371,7 +1371,7 @@ mod tests {
         // explanations; do not invent callbacks93/95/92 beneath an active modal.
         let prompt_assets = crate::prompt::Assets::load(&index, &archive, &installer, &strings).unwrap();
         for dismissal in [15, 16, 17] {
-            let request = next_modal.prompts.last().copied().unwrap();
+            let request = next_modal.prompts.last().cloned().unwrap();
             assert_eq!(request.dismissal_id, dismissal);
             let mut modal = crate::prompt::State::default();
             let _ = modal.submit(request);
@@ -1411,7 +1411,7 @@ mod tests {
         assert!(fifth.world.buildings.iter().filter(|row| row[0x3f] != 0).count() > buildings_before,
             "legal submission must create an actual retained building");
         let status=fifth_host.status(&fifth);
-        let request = accepted_status.prompts.last().copied().unwrap();
+        let request = accepted_status.prompts.last().cloned().unwrap();
         assert_eq!(request.dismissal_id,19);
         let mut modal=crate::prompt::State::default();
         let _=modal.submit(request);
@@ -1666,7 +1666,7 @@ mod tests {
         assert!(host.business_operation(&mut session,&assets,owned_slot,action).unwrap());
         host.tutorial_event(&mut session,&assets,control).unwrap();
         let demolition_status=host.status(&session);
-        let final_prompt=*demolition_status.prompts.last().unwrap();
+        let final_prompt=demolition_status.prompts.last().unwrap().clone();
         assert_eq!(final_prompt.dismissal_id,24);
         // Native demolition has two floor-count*25 waits around the model
         // descent (0.3 per pending tick). Allow the actual model to finish.
@@ -2689,7 +2689,8 @@ mod tests {
                                     [
                                         openmt2001::lua4::Value::Number(_),
                                         openmt2001::lua4::Value::Number(_),
-                                        openmt2001::lua4::Value::Number(_)
+                                        openmt2001::lua4::Value::Number(_),
+                                        openmt2001::lua4::Value::Number(0.)
                                     ]
                                 )
                             ));

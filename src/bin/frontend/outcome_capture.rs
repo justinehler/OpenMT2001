@@ -88,7 +88,7 @@ pub fn capture(
         .unwrap();
         requests.push((
             name,
-            crate::prompt::Request {
+            crate::prompt::Request { script: None,
                 dialog: Some(dialog),
                 title: 0,
                 body: 0,

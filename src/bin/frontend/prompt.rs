@@ -69,13 +69,81 @@ use openmt2001::{
 use std::{fs, path::Path};
 
 /// A single original Interface.CreatePrompt request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
+    pub script: Option<ScriptText>,
     pub dialog: Option<crate::human_dialog::Dialog>,
     pub title: u32,
     pub body: u32,
     pub dismissal_id: u32,
     pub card: Option<CardText>,
+}
+/// Owned independently for every queued message; numeric fields retain their IDs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScriptText {
+    pub title: Option<std::sync::Arc<[u8]>>,
+    pub body: Option<std::sync::Arc<[u8]>>,
+    pub format_value: u32,
+}
+/// Bounded native no-argument printf policy, followed by original row0 mapping.
+pub fn literal_glyphs(raw: &[u8], row: &[u8]) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    let mut i = 0;
+    while i < raw.len() && raw[i] != 0 {
+        let b = raw[i];
+        if b < 32 && b != 10 { break; }
+        if b == b'%' {
+            if raw.get(i + 1) != Some(&b'%') {
+                return Err("Literal prompt argument-consuming or incomplete format is unsupported".into());
+            }
+            i += 1;
+        }
+        if b == 10 {
+            for index in [0x3c, 0x4e] {
+                bytes.push(*row.get(index).ok_or("prompt language map truncated")?);
+            }
+        } else {
+            bytes.push(*row.get(usize::from(b - 32)).ok_or("prompt language map truncated")?);
+        }
+        i += 1;
+    }
+    Ok(bytes)
+}
+/// Proven resource subset of4e7fe0/4e80d5: one signed32-bit decimal word.
+/// Parse atomically into private output; return no text on unsupported formats.
+fn resource_integer(text: &[u8], row: &[u8], word: u32) -> Result<Vec<u8>, String> {
+    let selector = |at| row.get(at).copied().ok_or("prompt map truncated");
+    let percent = selector(5)?;
+    let d = selector(0x44)?;
+    let integer = selector(0x49)?;
+    let mut result = Vec::with_capacity(text.len());
+    let mut used = false;
+    let mut at = 0;
+    while at < text.len() {
+        if text[at] != percent { result.push(text[at]); at += 1; continue; }
+        let next = *text.get(at + 1).ok_or("resource prompt trailing percent is unsupported")?;
+        if next != d && next != integer {
+            return Err("resource prompt pointer, escape or unproved directive is unsupported".into());
+        }
+        if used { return Err("resource prompt consumes more than one word".into()); }
+        used = true;
+        for byte in (word as i32).to_string().bytes() {
+            result.push(*row.get(usize::from(byte - 32)).ok_or("prompt decimal glyph missing")?);
+        }
+        at += 2;
+    }
+    Ok(result)
+}
+
+fn script_field(request: &Request, field: usize, strings: &[Vec<u8>]) -> Result<Option<Vec<Vec<u8>>>, String> {
+    let Some(script) = &request.script else { return Ok(None) };
+    let raw = if field == 0 { &script.title } else { &script.body };
+    if let Some(raw) = raw {
+        return Ok(Some(vec![literal_glyphs(raw, strings.first().ok_or("prompt map missing")?)?]));
+    }
+    let id = if field == 0 { request.title } else { request.body };
+    let text = strings.get(id as usize).ok_or("prompt language ID out of range")?;
+    Ok(Some(vec![resource_integer(text, strings.first().ok_or("prompt map missing")?, script.format_value)?]))
 }
 /// Original41c88f..41c966 presentation data. Names remain original ASCII until
 /// insertion into the encoded language text; the amount preserves its float bits.
@@ -103,7 +171,7 @@ pub fn card_request(
     }
     let row = openmt2001::event_cards::lifecycle::card_row(image, notice.card)?;
     let text = u32::from_le_bytes(row[4..8].try_into().unwrap());
-    Ok(Request {
+    Ok(Request { script: None,
         dialog: None,
         title: 1488,
         body: text.wrapping_add(1),
@@ -121,7 +189,7 @@ pub fn card_request(
         }),
     })
 }
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct Slot {
     request: Option<Request>,
     active: bool,
@@ -148,7 +216,7 @@ impl State {
         self.pressed || self.pressed_dialog.is_some()
     }
     pub fn request(&self) -> Option<Request> {
-        self.head.and_then(|i| self.slots[i].request)
+        self.head.and_then(|i| self.slots[i].request.clone())
     }
     /// Original429b50 reuses the first free slot. A full queue overwrites the
     /// last-created request; return that replaced payload for host diagnostics.
@@ -156,11 +224,11 @@ impl State {
         let free = self.slots.iter().position(|s| !s.active);
         let at = free.or(self.last).expect("full prompt queue has last slot");
         let replaced = if free.is_none() {
-            self.slots[at].request
+            self.slots[at].request.clone()
         } else {
             None
         };
-        if let (Some(previous), Some(dialog)) = (replaced, request.dialog.as_mut()) {
+        if let (Some(previous), Some(dialog)) = (replaced.as_ref(), request.dialog.as_mut()) {
             //429b50's full-queue reuse skips the callback/context/timeout reset.
             //Only fields explicitly written by this message replace those words.
             if !dialog.handler_written {
@@ -208,7 +276,7 @@ impl State {
             return None;
         }
         let at = self.head?;
-        if let Some(dialog) = self.slots[at].request?.dialog {
+        if let Some(dialog) = self.slots[at].request.as_ref()?.dialog {
             if dialog.timeout {
                 if self.slots[at].remaining <= 0 {
                     self.dialog_button(0);
@@ -591,7 +659,7 @@ impl Assets {
         message: &str,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request {
+        state.submit(Request { script: None,
             dialog: None,
             title: 1488,
             body: 0,
@@ -609,7 +677,7 @@ impl Assets {
         pressed_button: Option<usize>,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request {
+        state.submit(Request { script: None,
             dialog: Some(dialog),
             title: dialog.title,
             body: dialog.body,
@@ -723,11 +791,8 @@ impl Assets {
         let text_surface_start = surfaces.len();
         for (field_index, (font, id, bounds, center, margin)) in text_fields
         {
-            let original = self
-                .strings
-                .get(id as usize)
-                .ok_or("prompt language ID out of range")?;
-            let formatted = if font == 0 && state.literal_body.is_some() {
+            let scripted = if field_index < 2 { script_field(&request, field_index, &self.strings)? } else { None };
+            let formatted = if scripted.is_some() { scripted } else if font == 0 && state.literal_body.is_some() {
                 Some(vec![state.literal_body.clone().unwrap()])
             } else if field_index == 0
                 && let Some(dialog) = request.dialog
@@ -742,7 +807,7 @@ impl Assets {
             } else {
                 None
             };
-            let ordinary = vec![original.clone()];
+            let ordinary = if formatted.is_none() { vec![self.strings.get(id as usize).ok_or("prompt language ID out of range")?.clone()] } else { Vec::new() };
             let paragraphs = formatted.as_ref().unwrap_or(&ordinary);
             let mut pages = self.fonts[font].clone();
             for quad in text_quads(&self.tabs[font], paragraphs, bounds, center, margin, margin, offset,
@@ -930,7 +995,7 @@ mod tests {
     #[test]
     fn deferred_worker_callback_preserves_full_queue_replacement() {
         let mut state = super::State::default();
-        let request = |id| super::Request {
+        let request = |id| super::Request { script: None,
             title: id,
             body: id,
             dismissal_id: id,
@@ -1014,7 +1079,7 @@ mod tests {
             let expected_steps = read(&mut at);
             let remaining = read(&mut at) as i32;
             let mut state = super::State::default();
-            state.submit(super::Request {
+            state.submit(super::Request { script: None,
                 title: 1,
                 body: 2,
                 dismissal_id: 3,
@@ -1037,7 +1102,7 @@ mod tests {
     fn dismissal_callback_runs_before_slot_is_freed() {
         let mut state = super::State::default();
         for id in 1..=4 {
-            state.submit(super::Request {
+            state.submit(super::Request { script: None,
                 title: id,
                 body: id,
                 dismissal_id: id,
@@ -1050,7 +1115,7 @@ mod tests {
                 assert_eq!(id, 1);
                 assert_eq!(s.request().unwrap().dismissal_id, 1);
                 let replaced = s
-                    .submit(super::Request {
+                    .submit(super::Request { script: None,
                         title: 5,
                         body: 5,
                         dismissal_id: 5,
@@ -1086,7 +1151,7 @@ mod tests {
                 let command = word(&bytes, &mut at);
                 let event = word(&bytes, &mut at);
                 let actual = if command != 0 {
-                    state.submit(super::Request {
+                    state.submit(super::Request { script: None,
                         title: command,
                         body: command,
                         dismissal_id: command,
@@ -1099,10 +1164,10 @@ mod tests {
                 };
                 assert_eq!(actual, event);
                 let mut snapshot = vec![index(state.head), index(state.last)];
-                for slot in state.slots {
+                for slot in &state.slots {
                     snapshot.extend([
                         u32::from(slot.active),
-                        slot.request.map_or(0, |r| r.dismissal_id),
+                        slot.request.as_ref().map_or(0, |r| r.dismissal_id),
                         index(slot.next),
                     ]);
                 }
@@ -1118,7 +1183,7 @@ mod tests {
         let mut state = super::State::default();
         let bounds = [10., 10., 70., 34.];
         for id in [0, 1, u32::MAX] {
-            state.submit(super::Request {
+            state.submit(super::Request { script: None,
                 title: 1898,
                 body: 1899,
                 dismissal_id: id,
@@ -1273,7 +1338,7 @@ fn original_human_dialog_resources() {
         "Dog has made an offer of 1750 for ATLANTIC AVENUE. What would you like to do?"
     );
     let mut state = State::default();
-    state.submit(Request {
+    state.submit(Request { script: None,
         title: 0,
         body: 0,
         dismissal_id: 0,
@@ -1313,7 +1378,7 @@ fn original_human_dialog_resources() {
         let panel = assets.prepare(&renderer, &state).unwrap();
         crate::capture_test::capture_standalone(&renderer, &panel, &path);
         let mut tip = State::default();
-        tip.submit(Request { title: 1934, body: 1935, dismissal_id: 1,
+        tip.submit(Request { script: None, title: 1934, body: 1935, dismissal_id: 1,
             dialog: None, card: None,
         });
         tip.cursor([-1.; 2]);
@@ -1372,5 +1437,93 @@ mod route_error_text_tests {
             b"Worker failed".iter().map(|b| b - 32).collect::<Vec<_>>()
         );
         assert_eq!(error_glyphs(&rows, "é").unwrap(), vec![b'?' - 32]);
+    }
+}
+
+#[cfg(test)]
+mod owned_script_tests {
+    use super::*;
+    fn request(id: u32) -> Request {
+        Request { title: 0, body: 0, dismissal_id: id, dialog: None, card: None,
+            script: Some(ScriptText { title: Some(format!("Synthetic {id}").into_bytes().into()),
+                body: Some(b"A test zone is available.".as_slice().into()), format_value: 0 }) }
+    }
+    #[test]
+    fn byte_mapping_and_safe_format_policy() {
+        let row: Vec<u8> = (0..224).map(|i| (i as u8).wrapping_add(7)).collect();
+        assert_eq!(literal_glyphs(b"A%%\n\xff\0ignored", &row).unwrap(),
+            vec![row[33],row[5],row[0x3c],row[0x4e],row[223]]);
+        for end in [b'\r', b'\t', 1] {
+            assert_eq!(literal_glyphs(&[b'A', end, b'B'], &row).unwrap(), vec![row[33]]);
+        }
+        for raw in [b"%s".as_slice(), b"%d", b"%", b"%08x"] { assert!(literal_glyphs(raw, &row).is_err()); }
+    }
+    #[test]
+    fn four_owned_slots_replacement_and_deferred_callback() {
+        let mut state = State::default();
+        for id in 1..=4 { state.submit(request(id)); }
+        let retained = state.request().unwrap();
+        assert_eq!(state.begin_dismiss(), Some(1));
+        state.finish_dismiss(vec![request(5)]);
+        for id in [2,3,5] {
+            let r = state.request().unwrap();
+            assert_eq!(r.script.unwrap().title.unwrap().as_ref(), format!("Synthetic {id}").as_bytes());
+            assert_eq!(state.dismiss_with(|_,_|{}), Some(id));
+        }
+        assert_eq!(retained.script.unwrap().title.unwrap().as_ref(), b"Synthetic 1");
+        assert!(state.request().is_none());
+    }
+    #[test]
+    fn render_preparation_bypasses_missing_resource_and_formats_numeric_field() {
+        let mut rows = vec![(0..224).map(|i| i as u8).collect::<Vec<_>>()];
+        rows.push(b"%d".iter().map(|b| b-32).collect());
+        rows.push(vec![33,34]);
+        let mut r = request(1);
+        r.title = u32::MAX;
+        assert_eq!(script_field(&r,0,&rows).unwrap().unwrap()[0], literal_glyphs(b"Synthetic 1",&rows[0]).unwrap());
+        r.body=1; r.script.as_mut().unwrap().body=None; r.script.as_mut().unwrap().format_value=2;
+        assert_eq!(script_field(&r,1,&rows).unwrap(),Some(vec![vec![18]]));
+    }
+}
+
+#[cfg(test)]
+mod resource_integer_tests {
+    use super::*;
+    fn encoded(raw: &[u8], row: &[u8]) -> Vec<u8> { raw.iter().map(|b|row[usize::from(b-32)]).collect() }
+    #[test]
+    fn signed_decimal_is_not_a_language_reference() {
+        for shift in [0u8,17] {
+            let row: Vec<u8> = (0..224).map(|i|(i as u8).wrapping_add(shift)).collect();
+            let mut strings=vec![row.clone();8];
+            strings[1]=encoded(b"Count %d",&row); strings[7]=encoded(b"Other",&row);
+            let mut r=Request { title:1,body:1,dismissal_id:0,dialog:None,card:None,
+                script:Some(ScriptText{title:None,body:None,format_value:7}) };
+            assert_eq!(script_field(&r,0,&strings).unwrap(),Some(vec![encoded(b"Count 7",&row)]));
+            for (word,expected) in [(u32::MAX,b"Count -1".as_slice()),(0,b"Count 0")] {
+                r.script.as_mut().unwrap().format_value=word;
+                assert_eq!(script_field(&r,1,&strings).unwrap(),Some(vec![encoded(expected,&row)]));
+            }
+            assert_eq!(resource_integer(&encoded(b"%i",&row),&row,u32::MAX).unwrap(),encoded(b"-1",&row));
+            for raw in [b"Count %".as_slice(),b"%%",b"%%s",b"%d %i",b"%s",b"%07d"] {
+                assert!(resource_integer(&encoded(raw,&row),&row,7).is_err(),"{raw:?}");
+            }
+        }
+    }
+    #[test]
+    fn actual_synthetic_font_quads_from_prepared_script_fields() {
+        let row: Vec<u8>=(0..224).map(|i|i as u8).collect();
+        let r=Request{title:u32::MAX,body:u32::MAX,dismissal_id:0,dialog:None,card:None,
+            script:Some(ScriptText{title:Some(b"AB".as_slice().into()),body:Some(b"CD".as_slice().into()),format_value:0})};
+        let mut tab=vec![0;4+224*44]; tab[..4].copy_from_slice(&224u32.to_le_bytes());
+        for glyph in tab[4..].chunks_exact_mut(44) {
+            glyph[32..36].copy_from_slice(&8i32.to_le_bytes()); glyph[36..40].copy_from_slice(&12i32.to_le_bytes());
+        }
+        // Real field resolution -> wrap -> Font::layout, body first, then centered title.
+        let body=text_quads(&tab,&script_field(&r,1,&[row.clone()]).unwrap().unwrap(),[0.,0.,100.,24.],false,0,0,[0.,0.]).unwrap();
+        let title=text_quads(&tab,&script_field(&r,0,&[row]).unwrap().unwrap(),[0.,0.,100.,24.],true,0,0,[0.,0.]).unwrap();
+        assert_eq!(body.len(),2); assert_eq!(title.len(),2);
+        assert_eq!(body[0].positions[0][0],1.5);
+        assert!(title[0].positions[0][0]>body[0].positions[0][0]);
+        assert_eq!(body[1].positions[0][0]-body[0].positions[0][0],7.);
     }
 }

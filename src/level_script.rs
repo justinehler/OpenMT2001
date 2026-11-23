@@ -235,7 +235,7 @@ impl Bindings {
         for (name, id) in [
             ("GetDifficulty", 3),
             ("GetObjectiveTarget", objective_selection::GET_TARGET_CALLBACK),
-            ("CreatePrompt", 5),
+            
             ("Pause", 9),
             ("Unpause", 10),
             ("TutorialDisableAllControls", 720),
@@ -341,7 +341,8 @@ impl Bindings {
         // consumes its separate static RNG node (93aee8) in the same VM call.
         vm.register_coerced("C_RandomZeroTo", 708, "n")?;
         vm.register_coerced("TutorialAddArrow", 723, "nn")?;
-        vm.register_coerced("TutorialCreateMessage", 724, "nnn")?;
+        vm.register_coerced("CreatePrompt", 5, "ppnn")?;
+        vm.register_coerced("TutorialCreateMessage", 724, "ppnn")?;
         vm.register_coerced("TutorialEnableControl", 726, "n")?;
         vm.register_coerced("TutorialDisableControl", 727, "n")?;
         vm.register_coerced("TutorialEnableControlAndChildren", 735, "n")?;

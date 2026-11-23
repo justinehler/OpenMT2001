@@ -158,7 +158,8 @@ static int host_coerced(lua_State *L) {
         lua_insert(L, ++count);
     }
     for (i = 0; i < required; ++i) {
-        if (shape[i] == 'n') lua_pushnumber(L, lua_tonumber(L, i + 1));
+        if (shape[i] == 'p' && lua_isnumber(L, i + 1)) lua_pushnumber(L, lua_tonumber(L, i + 1));
+        else if (shape[i] == 'n') lua_pushnumber(L, lua_tonumber(L, i + 1));
         else if (shape[i] == 'N') {
             if (lua_isnumber(L, i + 1)) lua_pushnumber(L, lua_tonumber(L, i + 1));
             else lua_pushnil(L);

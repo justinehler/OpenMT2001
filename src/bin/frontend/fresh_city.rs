@@ -1364,7 +1364,7 @@ pub struct Hooks {
     pub timers: Vec<openmt2001::timers::Task>,
 }
 impl Hooks {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             forced_auction_allowed: false,
             forced_auction_handlers:Default::default(),
@@ -2266,7 +2266,7 @@ mod tests {
         }
         let request=modal.expect("real Host original result modal");let dialog=request.dialog.unwrap();
         #[cfg(feature="capture")]
-        super::outcome_capture::capture(request,session,assets);
+        super::outcome_capture::capture(request.clone(),session,assets);
         assert_eq!(session.world.clock.timing[0],due);assert_eq!(dialog.context,winner as u32);
         assert_eq!(session.roster.manager.players[local].bytes[0x10],0);
         assert_eq!(u32::from_le_bytes(session.roster.manager.players[local].bytes[0x154..0x158].try_into().unwrap()),2);

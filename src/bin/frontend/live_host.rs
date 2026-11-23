@@ -574,7 +574,7 @@ impl Host {
             city_people_rows,
             tutorial_controls: self.tutorial_controls,
             tutorial_arrows: self.tutorial_arrows.clone(),
-            tutorial_message: self.tutorial_message,
+            tutorial_message: self.tutorial_message.clone(),
             tutorial_enabled_controls: self.tutorial_enabled_controls.iter().copied().collect(),
             tutorial_interaction: self.tutorial_interaction,
             tutorial_camera_events: self.tutorial_camera_events.clone(),
@@ -657,7 +657,7 @@ impl Host {
             return Ok(());
         }
         self.collect_script_prompts(session);
-        let active = self.tutorial_message.or(self.tutorial_prompt);
+        let active = self.tutorial_message.clone().or_else(|| self.tutorial_prompt.clone());
         let before = session.hooks.commands.len();
         session.dispatch_session_event("TutorialEvent", callback as i32, assets, false)?;
         if session.hooks.commands[before..].iter().any(|(command, _)|
@@ -689,7 +689,7 @@ impl Host {
         // The original scripts also attach a 3D pick gate to a modal prompt
         // (Tutorials 10/11 Navigator steps). Dismiss whichever presenter owns
         // the active prompt before publishing its scripted successor.
-        let message = self.tutorial_message.or(self.tutorial_prompt)
+        let message = self.tutorial_message.clone().or_else(|| self.tutorial_prompt.clone())
             .ok_or("Tutorial pick has no active prompt")?;
         let before = session.hooks.commands.len();
         session.dispatch_session_event("Picked3D", callback, assets, false)?;
@@ -910,7 +910,7 @@ impl Host {
                     Ok(request) => {
                         self.tutorial_arrows.clear();
                         if session.tutorial_state == 1 {
-                            self.tutorial_prompt = Some(request);
+                            self.tutorial_prompt = Some(request.clone());
                         }
                         self.pending_prompts.push(request)
                     },
@@ -2316,20 +2316,25 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
 
 pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, String> {
     let number = |at: usize| match arguments.get(at) {
-        Some(Value::Number(value)) if value.is_finite() => openmt2001::x87::Sum::from_f64(*value)
-            .map(|v| v.ftol_low_word() as u32)
-            .map_err(str::to_owned),
-        _ => Err("Live prompt requires original numeric language identifiers".to_owned()),
+        Some(Value::Number(value)) => openmt2001::x87::Sum::from_f64(*value)
+            .map(|v| v.ftol_low_word() as u32).map_err(str::to_owned),
+        None | Some(Value::Nil) if at >= 2 => Ok(0),
+        _ => Err("Prompt requires C-coerced numeric context/value".to_owned()),
     };
-    Ok(prompt::Request {
-        dialog: None,
-        card: None,
-        title: number(0)?,
-        body: number(1)?,
-        dismissal_id: match arguments.get(2) {
-            None | Some(Value::Nil) => 0,
-            _ => number(2)?,
+    let field = |at| match arguments.get(at) {
+        Some(Value::Number(_)) => Ok((number(at)?, None)),
+        Some(Value::Bytes(bytes)) => {
+            // Validate safe formatting now; row0 mapping is deferred to rendering.
+            prompt::literal_glyphs(bytes, &(0..224).map(|i| i as u8).collect::<Vec<_>>())?;
+            Ok((0, Some(std::sync::Arc::<[u8]>::from(bytes.clone()))))
         },
+        _ => Err("Prompt title/body must be numeric or convertible to string".to_owned()),
+    };
+    let (title, literal_title) = field(0)?;
+    let (body, literal_body) = field(1)?;
+    Ok(prompt::Request {
+        script: Some(prompt::ScriptText { title: literal_title, body: literal_body, format_value: number(3)? }),
+        dialog: None, card: None, title, body, dismissal_id: number(2)?,
     })
 }
 
@@ -2341,7 +2346,7 @@ fn human_dialog_ui(
     name: Option<[u8; 96]>,
 ) -> Result<(), String> {
     if address == 0x43be20 && count == 0 {
-        prompts.push(prompt::Request {
+        prompts.push(prompt::Request { script: None,
             title: 0,
             body: 0,
             dismissal_id: 0,
@@ -2423,7 +2428,7 @@ mod tests {
                 Value::Number(1.)
             ])
             .unwrap(),
-            prompt::Request {
+            prompt::Request { script: Some(prompt::ScriptText { title: None, body: None, format_value: 0 }),
                 dialog: None,
                 card: None,
                 title: 1898,
@@ -2437,6 +2442,39 @@ mod tests {
                 .dismissal_id,
             0
         );
-        assert!(prompt_request(&[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)]).is_err());
+        assert!(prompt_request(&[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)]).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod literal_lua_bridge_tests {
+    use super::*;
+    #[test]
+    fn real_lua_to_owned_hooks_to_request() {
+        // Same protected adapter signatures as Bindings::register. No PE fixture.
+        let mut vm = openmt2001::lua4::Runtime::new().unwrap();
+        vm.register_coerced("CreatePrompt",5,"ppnn").unwrap();
+        vm.register_coerced("CreateMessage",724,"ppnn").unwrap();
+        let mut calls = Vec::new();
+        vm.execute("synthetic prompts", b"CreatePrompt('Synthetic Notice','A test zone is available.'); CreatePrompt('12','body','-3.9','7'); CreateMessage('title',13.9); CreatePrompt(16.9,'mixed'); CreatePrompt(14,15,nil,{}); CreatePrompt('drop','buffers')", &mut |id,args| {
+            calls.push((id,args.to_vec())); Ok(None)
+        }).unwrap();
+        // Hooks::command is the production owned argument-copy boundary.
+        let mut hooks = fresh_city::Hooks::new();
+        for (id,args) in calls {
+            openmt2001::level_script::Hooks::command(&mut hooks,
+                if id==5 { level_script::Command::Prompt } else { level_script::Command::TutorialMessage }, &args).unwrap();
+        }
+        drop(vm);
+        let requests = hooks.commands.iter().map(|(_,args)|prompt_request(args).unwrap()).collect::<Vec<_>>();
+        assert_eq!(requests[0].script.as_ref().unwrap().title.as_deref(),Some(b"Synthetic Notice".as_slice()));
+        assert_eq!(requests[1].title,12);
+        assert_eq!(requests[1].dismissal_id,(-3i32) as u32);
+        assert_eq!(requests[1].script.as_ref().unwrap().format_value,7);
+        assert_eq!(requests[2].body,13);
+        assert_eq!(requests[3].title,16);
+        assert_eq!(requests[3].script.as_ref().unwrap().body.as_deref(),Some(b"mixed".as_slice()));
+        assert_eq!(requests[4].dismissal_id,0);
+        assert_eq!(requests[4].script.as_ref().unwrap().format_value,0);
     }
 }

@@ -288,7 +288,7 @@ impl Runtime {
     /// Failed string conversion is passed as Nil so the owner can reject it safely.
     pub fn register_coerced(&mut self, name: &str, id: u32, shape: &str) -> Result<(), String> {
         if shape.len() > 256
-            || (shape != "S" && !shape.bytes().all(|b| matches!(b, b'n' | b'N' | b's')))
+            || (shape != "S" && !shape.bytes().all(|b| matches!(b, b'n' | b'N' | b's' | b'p')))
         {
             return Err("invalid Lua callback signature".into());
         }

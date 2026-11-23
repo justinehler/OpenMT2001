@@ -5859,7 +5859,7 @@ impl Intro {
                         }
                         if status.tutorial_message != view.tutorial_message.request() {
                             view.tutorial_message = crate::prompt::State::default();
-                            if let Some(message) = status.tutorial_message {
+                            if let Some(message) = status.tutorial_message.clone() {
                                 view.tutorial_message.submit(message);
                             }
                         }
@@ -9300,7 +9300,7 @@ mod tests {
                     "original scenario3 callback identity"
                 );
                 let mut ui = crate::prompt::State::default();
-                ui.submit(*prompt);
+                ui.submit(prompt.clone());
                 let id = ui.begin_dismiss().unwrap();
                 let (reply, answer) = mpsc::channel();
                 sender
