@@ -1666,6 +1666,31 @@ struct Animation {
 }
 
 impl Scene {
+    ///452780/4c4970: final per-draw policy for normal menu/city owners only.
+    /// Keep full retained geometry; generic reframe/daylight/result callers
+    /// remain policy-free and owners reapply this after their updates.
+    pub fn apply_normal_star_detail(&mut self, detail: u8,
+        camera: crate::flyby::CameraSample,
+    ) -> Result<Vec<usize>, String> {
+        if !self.draws.iter().any(|draw| draw.mode == SurfaceMode::Stars) {
+            return Ok(Vec::new());
+        }
+        let color = self.animation.as_ref().and_then(|state| state.sky.map(|(_, _, color)| color))
+            .ok_or("normal star policy requires retained sky light")?;
+        let strips = crate::sky::visible_strips(crate::sky::upper_view_angle(
+            camera.eye, camera.target, camera.vertical_fov)?)?;
+        let visible = detail == 2 && strips != 0 && color & 255 < 127;
+        let mut changed = Vec::new();
+        for (index, draw) in self.draws.iter_mut().enumerate() {
+            if draw.mode != SurfaceMode::Stars { continue; }
+            let count = if visible { draw.vertices.len() } else { 0 };
+            if draw.active_vertices != Some(count) {
+                draw.active_vertices = Some(count);
+                changed.push(index);
+            }
+        }
+        Ok(changed)
+    }
     /// Original ground glyphs are generated with +Y normals at4e8850 and
     /// use4f2580's ordinary palette branch after first-use registration.
     pub fn ground_shading(&self) -> Result<[u32; 2], String> {
@@ -2469,14 +2494,15 @@ mod tests {
         let track_bytes = read("OPENMT2001_INTRO_TRACK");
         let track = crate::flyby::Flyby::parse(&track_bytes).unwrap();
         let sample = track.sample(1).unwrap();
-        let make = |phase| assemble(Request {
+        let make_at = |phase, camera| assemble(Request {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets { executable: &executable,
                 directory: &directory, archive: &archive }),
-            suncols: Some(&suncols), phase: Some(phase), camera: Some(sample),
+            suncols: Some(&suncols), phase: Some(phase), camera: Some(camera),
             width: 1280, height: 960, animated: true,
         }).unwrap();
+        let make = |phase| make_at(phase, sample);
         let mut scene = make(20);
         let cloud = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::Clouds).unwrap();
         let water_draw = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::WaterFallback).unwrap();
@@ -2564,5 +2590,65 @@ mod tests {
         renderer.update_dynamic_surface(&mut day_prepared, stars,
             &daytime.draws[stars].borrowed(), daytime.draws[stars].view_projection.unwrap(),
             daytime.fog).unwrap();
+        let capacity = daytime.draws[stars].vertices.len();
+        assert!(capacity > 0);
+        let original_stars = daytime.draws[stars].vertices.clone();
+        let water_before = daytime.animation.as_ref().unwrap().water.phase.to_bits();
+        for detail in [0, 2, 1, 2, 255, 2] {
+            // Match the menu owner: generic camera update, then policy, then
+            // one retained upload. A masked count must not destroy capacity.
+            let mut changed = daytime.reframe(sample).unwrap();
+            changed.extend(daytime.apply_normal_star_detail(detail, sample).unwrap());
+            changed.sort_unstable();
+            changed.dedup();
+            assert_eq!(daytime.draws[stars].active_vertices, Some(if detail == 2 { capacity } else { 0 }));
+            assert_eq!(daytime.draws[stars].vertices, original_stars);
+            let updates = changed.into_iter().map(|index|
+                (index, daytime.draws[index].borrowed())).collect::<Vec<_>>();
+            renderer.update_dynamic_vertices_batch(&mut day_prepared, &updates).unwrap();
+            assert!(daytime.apply_normal_star_detail(detail, sample).unwrap().is_empty());
+        }
+        assert_eq!(daytime.animation.as_ref().unwrap().water.phase.to_bits(), water_before);
+        // Animated assembly reserves the complete catalog even when no sky
+        // strips are initially visible. Exercise prepare -> zero -> full on
+        // the same prepared scene, not a rebuilt replacement.
+        let downward = crate::flyby::CameraSample {
+            eye: [0., 200., 0.], target: [0., 0., 0.], up: [0., 0., 1.], ..sample
+        };
+        assert_eq!(crate::sky::visible_strips(crate::sky::upper_view_angle(
+            downward.eye, downward.target, downward.vertical_fov).unwrap()).unwrap(), 0);
+        let mut initially_down = make_at(20, downward);
+        let down_stars = initially_down.draws.iter().position(|d| d.mode == SurfaceMode::Stars).unwrap();
+        assert_eq!(initially_down.draws[down_stars].vertices.len(), capacity);
+        let mut down_prepared = renderer.prepare(&initially_down.draws.iter().map(OwnedDraw::borrowed)
+            .collect::<Vec<_>>(), initially_down.camera, initially_down.fog).unwrap();
+        for (camera, expected) in [(downward, 0), (sample, capacity), (downward, 0), (sample, capacity)] {
+            let mut changed = initially_down.reframe(camera).unwrap();
+            changed.extend(initially_down.apply_normal_star_detail(2, camera).unwrap());
+            changed.sort_unstable();
+            changed.dedup();
+            assert_eq!(initially_down.draws[down_stars].active_vertices, Some(expected));
+            let updates = changed.into_iter().map(|index|
+                (index, initially_down.draws[index].borrowed())).collect::<Vec<_>>();
+            renderer.update_dynamic_vertices_batch(&mut down_prepared, &updates).unwrap();
+        }
+        // Same-hour replacement retains environment but installs a fresh scene;
+        // the city owner reapplies its selected Detail before presentation.
+        let mut replacement = make(20);
+        replacement.retain_environment(&daytime).unwrap();
+        replacement.advance_daylight(20, 0, sample).unwrap();
+        replacement.apply_normal_star_detail(1, sample).unwrap();
+        let replacement_stars = replacement.draws.iter().position(|d| d.mode == SurfaceMode::Stars).unwrap();
+        assert_eq!(replacement.draws[replacement_stars].active_vertices, Some(0));
+        replacement.apply_normal_star_detail(2, sample).unwrap();
+        assert_eq!(replacement.draws[replacement_stars].active_vertices,
+            Some(replacement.draws[replacement_stars].vertices.len()));
+        assert_eq!(replacement.animation.as_ref().unwrap().water.phase.to_bits(), water_before);
+        daytime.advance_daylight(12, 0, sample).unwrap();
+        for detail in [0, 1, 2] {
+            daytime.apply_normal_star_detail(detail, sample).unwrap();
+            assert_eq!(daytime.draws[stars].active_vertices, Some(0));
+        }
+
     }
 }

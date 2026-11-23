@@ -38,6 +38,19 @@ fn update_locator_financial(locator: &mut Option<crate::locator::Locator>,
     Ok(())
 }
 
+// Normal city owners call this after generic updates and BEFORE borrowing any
+// draws for prepare/refresh/upload. Full CPU star capacity remains retained.
+fn normal_city_scene_updates(
+    scene: &mut Scene, camera: CameraSample, detail: Option<u8>, mut changed: Vec<usize>,
+) -> Result<Vec<usize>, String> {
+    if let Some(detail) = detail {
+        changed.extend(scene.apply_normal_star_detail(detail, camera)?);
+    }
+    changed.sort_unstable();
+    changed.dedup();
+    Ok(changed)
+}
+
 fn city_snapshot_interval(construction_active: bool) -> std::time::Duration {
     if construction_active {
         // Pending-world grows the model every 25 Hz logic tick. Four visible
@@ -2283,6 +2296,11 @@ struct ResultView {
     title: Option<(Option<u32>, Option<usize>, u8, PreparedScene)>,
 }
 impl Inspection {
+    fn normal_star_detail(&self) -> Option<u8> {
+        (self.result.is_none() && self.result_pending.is_none()
+            && !self.live_status.as_ref().is_some_and(|status| status.result_request.is_some()))
+            .then_some(self.settings_menu.graphics.detail)
+    }
     fn open_options(&mut self) -> Result<(), String> {
         self.game_options.open(self.live_status.as_ref().is_some_and(|s| s.running));
         // Before the first worker status, keep Save inert; authoritative
@@ -4547,8 +4565,8 @@ impl Intro {
             if let Some(transport) = &view.transport {
                 changed.extend(transport.reframe(&mut view.scene, view.camera, draw_distance)?);
             }
-            changed.sort_unstable();
-            changed.dedup();
+            let star_detail = view.normal_star_detail();
+            let changed = normal_city_scene_updates(&mut view.scene, view.camera, star_detail, changed)?;
             for index in changed {
                 self.renderer.update_dynamic_vertices(&mut view.prepared, index,
                     &view.scene.draws[index].borrowed(),
@@ -4972,6 +4990,10 @@ impl Intro {
                             None
                         }
                     });
+                    let graphics_levels = self.inspection.as_ref().map_or(self.graphics_levels,
+                        |view| view.settings_menu.graphics);
+                    let star_detail = self.inspection.as_ref().map_or(Some(graphics_levels.detail),
+                        Inspection::normal_star_detail);
                     let mut scene = loaded.scene;
                     let mut detail_visibility = loaded.detail_visibility;
                     if refreshing && let Some(previous) = &self.inspection {
@@ -4986,8 +5008,9 @@ impl Intro {
                         environment_changed.extend(scene.advance_daylight(hour, counter, inspection_camera)?);
                     }
                     environment_changed.extend(loaded.updated_city_draws);
-                    environment_changed.sort_unstable();
-                    environment_changed.dedup();
+                    let environment_changed = normal_city_scene_updates(
+                        &mut scene, inspection_camera, star_detail, environment_changed,
+                    )?;
                     let mut trees = loaded.trees;
                     let people = loaded.people;
                     let vehicles = loaded.vehicles;
@@ -5035,10 +5058,14 @@ impl Intro {
                             )?;
                         }
                     }
-                    // Upload complete retained buffers first, then update this snapshot's
-                    // camera. A cached scene may have been created from another view.
+                    // A cached scene may have been created from another view.
+                    // Reapply normal admission before this second upload seam.
                     if trees.is_some() || people.is_some() || vehicles.is_some() || transport.is_some() {
-                        for i in scene.reframe(inspection_camera)? {
+                        let changed = scene.reframe(inspection_camera)?;
+                        let changed = normal_city_scene_updates(
+                            &mut scene, inspection_camera, star_detail, changed,
+                        )?;
+                        for i in changed {
                             self.renderer.update_dynamic_surface(
                                 &mut prepared,
                                 i,
@@ -5051,8 +5078,6 @@ impl Intro {
                             draw.view_projection.unwrap_or(scene.camera)).collect::<Vec<_>>();
                         self.renderer.update_cameras(&prepared, &cameras, scene.fog)?;
                     }
-                    let graphics_levels = self.inspection.as_ref().map_or(self.graphics_levels,
-                        |view| view.settings_menu.graphics);
                     let gameplay_levels = self.inspection.as_ref().map_or(self.gameplay_levels,
                         |view| view.settings_menu.gameplay);
                     let draw_distance = u32::from(graphics_levels.distance);
@@ -6111,8 +6136,10 @@ impl Intro {
                             if let Some(trees) = &mut view.trees {
                                 changed.extend(trees.reframe(&mut view.scene, view.camera)?);
                             }
-                            changed.sort_unstable();
-                            changed.dedup();
+                            let star_detail = view.normal_star_detail();
+                            let changed = normal_city_scene_updates(
+                                &mut view.scene, view.camera, star_detail, changed,
+                            )?;
                             for index in changed {
                                 let draw = &view.scene.draws[index];
                                 self.renderer.update_dynamic_vertices(
@@ -6545,6 +6572,12 @@ impl Intro {
                     }
                 ));
             }
+            if let Some(detail) = view.normal_star_detail() {
+                let changed = view.scene.apply_normal_star_detail(detail, view.camera)?;
+                let updates = changed.into_iter().map(|index|
+                    (index, view.scene.draws[index].borrowed())).collect::<Vec<_>>();
+                self.renderer.update_dynamic_vertices_batch(&mut view.prepared, &updates)?;
+            }
             if view.strategic {
                 let colors = view.block_information.as_ref().map(|report| &report.title_colors);
                 let map = self.strategic_scene.prepare(
@@ -6919,7 +6952,12 @@ impl Intro {
                 self.assets.samples[sample]
             };
             self.sidewalk_camera = camera;
-            let changed = self.assets.scene.reframe(camera)?;
+            let mut changed = self.assets.scene.reframe(camera)?;
+            if let Some(menu) = &self.menu {
+                changed.extend(self.assets.scene.apply_normal_star_detail(menu.settings.graphics.detail, camera)?);
+                changed.sort_unstable();
+                changed.dedup();
+            }
             let updates = changed.into_iter().map(|index|
                 (index, self.assets.scene.draws[index].borrowed())).collect::<Vec<_>>();
             self.renderer.update_dynamic_vertices_batch(&mut self.prepared, &updates)?;
@@ -8003,6 +8041,90 @@ mod tests {
                 &format!("work/frontend/menu-camera-transition-{tick:02}.png"),
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires original intro assets and a GPU adapter"]
+    fn normal_city_star_uploads_apply_detail_before_borrowing() {
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build_file = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let map = read("OPENMT2001_INTRO_MAP");
+        let camera = CameraSample { eye: [0., 50., 0.], target: [0., 50., 1.],
+            up: [0., 1., 0.], vertical_fov: NORMAL_CITY_VERTICAL_FOV };
+        let mut scene = render_scene::assemble(Request {
+            build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
+            original: Some(OriginalAssets { executable: &executable, directory: &directory, archive: &archive }),
+            suncols: Some(&suncols), phase: Some(20), camera: Some(camera),
+            width: 1280, height: 960, animated: true,
+        }).unwrap();
+        let stars = scene.draws.iter().position(|d| d.mode == openmt2001::render::SurfaceMode::Stars).unwrap();
+        let capacity = scene.draws[stars].vertices.len();
+        assert!(capacity > 0);
+        let changed = scene.advance_daylight(20, 0, camera).unwrap();
+        assert_eq!(scene.draws[stars].borrowed().vertices.len(), capacity, "night premise");
+        // The actual snapshot owner uses this seam before prepare/refresh/take.
+        normal_city_scene_updates(&mut scene, camera, Some(0), changed).unwrap();
+        assert!(scene.draws[stars].borrowed().vertices.is_empty());
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let mut prepared = renderer.prepare(&scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>(),
+            scene.camera, scene.fog).unwrap();
+        // Observe the actual arguments supplied to the renderer, not just a
+        // policy boolean. Masked updates must never expand/write full stars.
+        let upload = |scene: &Scene, changed: &[usize], prepared: &mut PreparedScene| {
+            let mut star_vertices = 0;
+            for &index in changed {
+                let draw = scene.draws[index].borrowed();
+                if index == stars { star_vertices += draw.vertices.len(); }
+                renderer.update_dynamic_vertices(prepared, index, &draw).unwrap();
+            }
+            star_vertices
+        };
+        for detail in [0, 1, 2, 1, 0, 2] {
+            for event in 0..2 {
+                let changed = if event == 0 {
+                    scene.reframe(camera).unwrap()
+                } else {
+                    let mut changed = scene.advance_environment(37, camera.eye).unwrap();
+                    changed.extend(scene.advance_daylight(20, 45, camera).unwrap());
+                    changed
+                };
+                // Same ordering function used by camera and environment owners.
+                let changed = normal_city_scene_updates(&mut scene, camera, Some(detail), changed).unwrap();
+                assert_eq!(scene.draws[stars].vertices.len(), capacity);
+                let expected = if detail == 2 { capacity } else { 0 };
+                assert_eq!(scene.draws[stars].borrowed().vertices.len(), expected);
+                let sent = upload(&scene, &changed, &mut prepared);
+                assert_eq!(sent, if changed.contains(&stars) { expected } else { 0 },
+                    "Detail{detail} event{event}: exact star payload to renderer");
+                if detail != 2 { assert_eq!(sent, 0, "no masked full-star upload"); }
+            }
+        }
+        // Same-hour replacement, then the separate post-preparation camera seam.
+        let mut replacement = scene.clone();
+        replacement.retain_environment(&scene).unwrap();
+        let changed = replacement.advance_daylight(20, 45, camera).unwrap();
+        normal_city_scene_updates(&mut replacement, camera, Some(1), changed).unwrap();
+        assert!(replacement.draws[stars].borrowed().vertices.is_empty());
+        let mut replacement_prepared = renderer.prepare(&replacement.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>(),
+            replacement.camera, replacement.fog).unwrap();
+        let changed = replacement.reframe(camera).unwrap();
+        let changed = normal_city_scene_updates(&mut replacement, camera, Some(1), changed).unwrap();
+        assert_eq!(upload(&replacement, &changed, &mut replacement_prepared), 0);
+        let changed = replacement.reframe(camera).unwrap();
+        let changed = normal_city_scene_updates(&mut replacement, camera, Some(2), changed).unwrap();
+        assert_eq!(upload(&replacement, &changed, &mut replacement_prepared), capacity,
+            "High grows/restores the same previously masked prepared surface");
+        // Explicitly unowned/result callers retain generic night admission.
+        replacement.apply_normal_star_detail(0, camera).unwrap();
+        let changed = replacement.reframe(camera).unwrap();
+        let changed = normal_city_scene_updates(&mut replacement, camera, None, changed).unwrap();
+        assert_eq!(upload(&replacement, &changed, &mut replacement_prepared), capacity);
     }
 
     #[test]
