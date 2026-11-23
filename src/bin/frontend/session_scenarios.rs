@@ -155,6 +155,7 @@ mod tests {
         };
         for difficulty in 0..3 {
             let inputs = Inputs {
+                tree_locators: None,
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -210,6 +211,7 @@ mod tests {
         // Its retained initial resident lists have not yet entered housing;
         // verify that the UI adapter agrees with the shared native poll query.
         let populated = Session::initialize(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(
@@ -283,6 +285,7 @@ mod tests {
         assert_eq!(tutorial_setup.character_index, 0);
         let tutorial_scenario = crate::scenarios::find(100000).unwrap();
         let mut tutorial = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -379,6 +382,7 @@ mod tests {
         // same original tempmap. Follow its retained prompts and pick gates.
         let tutorial_two = crate::scenarios::find(100001).unwrap();
         let mut second = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -673,6 +677,7 @@ mod tests {
         fs::create_dir_all(&scratch.0).unwrap();
         let profile = scratch.0.join("progress.profile");
         let mut session = Session::initialize_campaign_compatible(Inputs {
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -889,6 +894,7 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         if profile.exists() { fs::remove_file(&profile).unwrap(); }
         let mut third = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -1050,6 +1056,7 @@ mod tests {
         assert!(progression.levels.iter().find(|l| l.id() == 100003).unwrap().unlocked());
         let fourth_token = crate::scenarios::find(100003).unwrap().token;
         let mut fourth = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -1199,6 +1206,7 @@ mod tests {
         }
         let fifth_token=crate::scenarios::find(100004).unwrap().token;
         let mut fifth=Session::initialize_campaign_compatible(Inputs{
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -1444,6 +1452,7 @@ mod tests {
         // Internal original-script admission is deliberately independent of
         // menu/profile eligibility while Tutorial5's startup is under review.
         let mut session=Session::initialize(Inputs{
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -1683,6 +1692,7 @@ mod tests {
         assert_eq!(progression.levels.iter().find(|level|level.id()==100004).unwrap().completed(),[false;3],
             "internal6 admission never fabricates unresolved Tutorial5 completion");
         let mut next=Session::initialize_campaign(Inputs{
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -1724,6 +1734,7 @@ mod tests {
         for id in [100005,100006]{assert_eq!(reopened.levels.iter().find(|level|level.id()==id).unwrap().completed(),[true,false,false]);}
         assert_eq!(reopened.levels.iter().find(|level|level.id()==100004).unwrap().completed(),[false;3]);
         let mut seventh=Session::initialize_campaign(Inputs{
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -1841,6 +1852,7 @@ mod tests {
         let locator_assets = crate::locator::Assets::load(&index, &archive, installer, &strings, &executable).unwrap();
         let auction_assets = crate::auction_panel::Assets::load(&index, &archive, installer, &strings, &executable).unwrap();
         let mut session = Session::initialize(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -2196,6 +2208,7 @@ mod tests {
         ] {
             let scenario = crate::scenarios::find(id).unwrap();
             let mut session = Session::initialize(Inputs {
+                tree_locators: None,
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -2301,6 +2314,7 @@ mod tests {
         // Internal original-script admission is deliberately independent of
         // menu/profile eligibility while Tutorial5's startup is under review.
         let mut session=Session::initialize(Inputs{
+            tree_locators: None,
             image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
             vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -2485,6 +2499,7 @@ mod tests {
                 let scenario = format!("SCENARIO{number}");
                 let result = Session::initialize(
                     Inputs {
+                        tree_locators: None,
                         image: &image,
                         board: &board,
                         file: &file,

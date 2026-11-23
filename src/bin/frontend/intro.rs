@@ -484,6 +484,7 @@ struct SnapshotCache {
     #[cfg(test)]
     static_detail_ranges: Vec<std::ops::Range<usize>>,
     trees: Option<std::sync::Arc<crate::tree_scene::Resources>>,
+    tree_instances: Option<(u64, std::sync::Arc<crate::tree_scene::Instances>)>,
     people: Option<crate::people_scene::Resources>,
     vehicles: Option<crate::vehicle_scene::Resources>,
     transport: Option<crate::transport_scene::Resources>,
@@ -1092,6 +1093,7 @@ impl SceneInputs {
         // original captured stack data, nor is seed0 the original host seed.
         let mut session = crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
             crate::fresh_city::Inputs {
+                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators),
                 image: &image,
                 board: &board,
                 file: &file,
@@ -1179,6 +1181,7 @@ impl SceneInputs {
         // An arbitrary original save has no authenticated V2 profile selection.
         let (mut session, restored_presentation) = crate::fresh_city::Session::load_original_with_presentation_style(
             crate::fresh_city::Inputs {
+                tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators),
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &self.archive)?,
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(
@@ -1618,7 +1621,18 @@ impl SceneInputs {
                 &image, &index, &self.archive, &self.suncols,
             )?));
         }
-        let mut trees = crate::tree_scene::Layer::new(cache.trees.as_ref().unwrap().clone(), self.compatibility);
+        let resources = cache.trees.as_ref().unwrap().clone();
+        let mut trees = if let Some(state) = &session.models.tree_state {
+            let pool = state.borrow();
+            if !cache.tree_instances.as_ref().is_some_and(|(revision, instances)|
+                *revision == pool.revision() && instances.matches(pool.pool())) {
+                cache.tree_instances = Some((pool.revision(), resources.instances(pool.pool().clone())?));
+            }
+            crate::tree_scene::Layer::with_instances(resources,
+                cache.tree_instances.as_ref().unwrap().1.clone(), self.compatibility)
+        } else {
+            crate::tree_scene::Layer::new(resources, self.compatibility)
+        };
         trees.attach(&mut scene);
         if cache.people.is_none() {
             cache.people = Some(crate::people_scene::Resources::new(
@@ -7352,6 +7366,140 @@ mod tests {
                         &inputs.suncols, Some(camera), true).unwrap();
                     assert!(cache.city.as_ref().unwrap().draws.len() > plain.draws.len(),
                         "original Tutorial2 map signs and banners must reach the live city");
+                }
+            }
+        }).unwrap().join().unwrap();
+    }
+    #[test]
+    #[ignore = "requires supplied original saves, scripts and assets"]
+    fn building_tree_saved_snapshot_retention() {
+        std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
+            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let executable = read("OPENMT2001_EXE");
+            let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let inputs = SceneInputs {
+                compatibility: crate::compatibility::Mode::Modern,
+                style: test_board_style(&executable), time_runtime: Default::default(),
+                profile_root: std::env::temp_dir().join("tree-snapshot-profiles"),
+                character_names: crate::fresh_city::character_names(
+                    &openmt2001::pe::PeImage::parse(&executable).unwrap(),
+                    &exe_path.parent().unwrap().parent().unwrap().join("US/language/usa"),
+                ).unwrap(),
+                installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
+                language: exe_path.parent().unwrap().parent().unwrap().join("US/language/usa"),
+                maps: map.parent().unwrap().to_path_buf(),
+                build_file: read("OPENMT2001_BUILD_FILE"), executable,
+                directory: read("OPENMT2001_ARCHIVE_DIR"), archive: read("OPENMT2001_ARCHIVE_BIN"),
+                suncols: read("OPENMT2001_SUNCOLS"),
+            };
+            let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
+                up: [0., 1., 0.], vertical_fov: 45. };
+            for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
+                let mut cache = SnapshotCache::default();
+                let (_, mut session) = inputs.saved_preview(
+                    &PathBuf::from(std::env::var(key).unwrap()), camera, &mut cache).unwrap();
+                let state = session.models.tree_state.as_ref().unwrap().clone();
+                let revision = state.borrow().revision();
+                let mut seen = std::collections::BTreeSet::new();
+                for (&slot, _) in &session.models.bindings {
+                    use openmt2001::trees::building::{OWNER_COUNT_OFFSET, OWNER_INDICES_OFFSET};
+                    let record = &session.world.buildings[slot];
+                    let word = |at| u32::from_le_bytes(record[at..at+4].try_into().unwrap()) as usize;
+                    let pool = state.borrow();
+                    let indices = pool.indices(slot).expect("bound model must own its tree list, including empty lists");
+                    assert_eq!(word(OWNER_COUNT_OFFSET), indices.len());
+                    for (n, &index) in indices.iter().enumerate() {
+                        assert_eq!(word(OWNER_INDICES_OFFSET + n*4), index);
+                        assert!(index >= 137 && seen.insert(index));
+                        assert!(pool.pool().slot(index).is_some());
+                    }
+                }
+                assert_eq!(state.borrow().pool().count(), 137 + seen.len());
+                let retained = cache.tree_instances.as_ref().unwrap().1.clone();
+                let _ = inputs.inspect_fresh(&mut session, camera, &mut cache).unwrap();
+                assert!(std::sync::Arc::ptr_eq(&retained, &cache.tree_instances.as_ref().unwrap().1));
+                assert_eq!(state.borrow().revision(), revision, "snapshot cannot allocate tree IDs");
+                assert!(std::rc::Rc::ptr_eq(&state, session.models.tree_state.as_ref().unwrap()));
+                eprintln!("{key}: {} building trees, stable pool/revision across repeated scene snapshots", seen.len());
+                if key == "OPENMT2001_SAVE_TWO" {
+                    let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+                    let board = inputs.styled_board(&image).unwrap();
+                    let file = openmt2001::build_file::BuildFile::parse(&inputs.build_file).unwrap();
+                    let assets = crate::fresh_city::CommandAssets { image: &image, board: &board, file: &file };
+                    let mut selected = None;
+                    'search: for category in 0..52 {
+                        if !matches!(crate::build_panel::Context::from_session(&session,category).unwrap().entry(),
+                            crate::build_panel::Entry::Open) { continue; }
+                        for x in 0..=6 { for y in 0..=5 { for variant in 0..32 {
+                            let request = crate::build_panel::Request { category: category as i32,
+                                origin: [x,y], size: [1,2], height: 1, packed_model: variant << 16,
+                                quality: 0, kind: 2, displayed_quote: 0., business: 44 };
+                            if let Ok(quote) = session.inspect_build(&request,&assets)
+                                && quote.allowed()
+                                && let Some(preview) = &quote.preview
+                                && !openmt2001::trees::building::locals(&file,preview.selected,1).unwrap().is_empty() {
+                                eprintln!("Tree-bearing legal preview model{} category{category} lot{x},{y} variant{variant}",preview.selected.index);
+                                selected = Some(request); break 'search;
+                            }
+                        }}}
+                    }
+                    let request = selected.expect("supplied skirmish admits a legally quoted 1x2 landscape");
+                    let slot = openmt2001::building_pool::first_free(&session.world.buildings).unwrap().unwrap();
+                    assert!(session.submit_build(&request,&assets,|_|Ok(())).unwrap().submitted);
+                    let mut host = crate::live_host::Host::new(camera.eye);
+                    host.running = true;
+                    for _ in 0..350 {
+                        host.tick(&mut session,&assets);
+                        assert!(host.failure.is_none(),"{:?}",host.failure);
+                        for prompt in host.take_prompts(&session) {
+                            session.dispatch_session_event("InterfacePromptDismiss",prompt.dismissal_id as i32,&assets,true).unwrap();
+                        }
+                        if state.borrow().indices(slot).is_some_and(|ids| !ids.is_empty()) { break; }
+                    }
+                    let ids = state.borrow().indices(slot).expect("real queued Build must bind tree ownership").to_vec();
+                    assert!(!ids.is_empty());
+                    let record = &session.world.buildings[slot];
+                    assert_eq!(&record[4..8],&[request.origin[0] as u8,request.origin[1] as u8,
+                        (request.origin[0]+request.size[0]-1) as u8,(request.origin[1]+request.size[1]-1) as u8]);
+                    assert_eq!(record[8],request.height as u8);
+                    assert_eq!(u32::from_le_bytes(record[0x24..0x28].try_into().unwrap()),request.kind);
+                    let poses: Vec<_> = ids.iter().map(|&i| *state.borrow().pool().slot(i).unwrap()).collect();
+                    let _ = inputs.inspect_fresh(&mut session,camera,&mut cache).unwrap();
+                    assert!(!std::sync::Arc::ptr_eq(&retained,&cache.tree_instances.as_ref().unwrap().1));
+                    let bytes = session.save_v2(&image,session.saved_cameras.unwrap(),1).unwrap();
+                    let path = std::env::temp_dir().join(format!("building-tree-roundtrip-{}-{}.sav",
+                        std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+                    struct SavedFixture(PathBuf);
+                    impl Drop for SavedFixture { fn drop(&mut self) { let _ = fs::remove_file(&self.0); } }
+                    let mut output = fs::OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
+                    let fixture = SavedFixture(path.clone());
+                    std::io::Write::write_all(&mut output,&bytes).unwrap();
+                    drop(output);
+                    let (_, mut resumed) = inputs.saved_preview(&path,camera,&mut SnapshotCache::default()).unwrap();
+                    let resumed_state = resumed.models.tree_state.as_ref().unwrap().clone();
+                    let resumed_ids = resumed_state.borrow().indices(slot).unwrap().to_vec();
+                    let restored: Vec<_> = resumed_ids.iter().map(|&i| *resumed_state.borrow().pool().slot(i).unwrap()).collect();
+                    assert_eq!(restored,poses,"cold native/model rebind must retain tree poses");
+                    assert_eq!(resumed_state.borrow().pool().count(),137+seen.len()+poses.len());
+                    let mut resumed_host = crate::live_host::Host::new(camera.eye);
+                    resumed_host.running = true;
+                    let before = session.world.clock.timing[0];
+                    assert_eq!(resumed.world.clock.timing[0],before);
+                    for _ in 0..30 {
+                        assert!(host.running && resumed_host.running);
+                        assert!(!session.world.pause.has_reason() && !resumed.world.pause.has_reason());
+                        host.tick(&mut session,&assets); resumed_host.tick(&mut resumed,&assets);
+                        assert!(host.failure.is_none() && resumed_host.failure.is_none());
+                        assert_eq!(session.world.clock,resumed.world.clock);
+                    }
+                    assert_eq!(session.world.clock.timing[0],before+30,"continuation must advance30 real logic ticks");
+                    assert_eq!(state.borrow().indices(slot).unwrap(),ids);
+                    assert_eq!(resumed_state.borrow().indices(slot).unwrap(),resumed_ids);
+                    eprintln!("Legal landscape on category{} slot{slot}: {} trees through queued construction, scene invalidation, export/cold reload and30 continuation ticks",request.category,poses.len());
+                    drop(fixture);
+                    assert!(!path.exists(),"owned roundtrip fixture removed");
                 }
             }
         }).unwrap().join().unwrap();

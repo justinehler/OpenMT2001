@@ -162,6 +162,7 @@ fn run(controlled_retail: bool) {
         with_opponent.extend_from_slice(&saved[insert_at..]);
         let mut session = Session::load_original(
             Inputs {
+                tree_locators: None,
                 image: &image,
                 board: &board,
                 file: &file,

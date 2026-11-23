@@ -202,6 +202,7 @@ fn legal_scenario_six_mayor_win_and_profile_reload() {
             assert_eq!(previous.attempts(), 1); assert!(previous.completed()[0]);
         }
         let mut session = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

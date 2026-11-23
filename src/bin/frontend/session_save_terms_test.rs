@@ -63,6 +63,7 @@ fn modern_overdue_terms_resume_real_tenants() {
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let styles = load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
         let inputs = || Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

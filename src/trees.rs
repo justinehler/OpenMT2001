@@ -4,6 +4,8 @@
 
 use crate::{archive::ArchiveIndex, mesh::CachedMesh, pe::PeImage, x87::Sum};
 
+pub mod building;
+
 pub const CAPACITY: usize = 500;
 pub const LOCATOR_PATH: &str = "gamedata2/trees/tree_locators.tm";
 pub const TRUNK_PATH: &str = "gamedata2/trees/tree_trunk.tm";
@@ -29,6 +31,7 @@ impl Slot {
     }
 }
 
+#[derive(Clone)]
 pub struct Pool {
     slots: [Option<Slot>; CAPACITY],
     count: usize,

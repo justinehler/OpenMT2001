@@ -867,6 +867,26 @@ impl<'data> Session<'data> {
         // 4bcd34..4bcd57 reset before the full 4bc290 stream. The category
         // list disposal has no renderer here; all linked records are released
         // with the owned building arena before 447bf0's reset pass.
+        //447bf0 calls445d10 on category-list heads before4456b0. Tree
+        // identities must be retired before their owning tails are zeroed.
+        let tree_state = self.models.tree_state.clone();
+        if tree_state.is_some() {
+            let mut visited = [false; 600];
+            let city = &mut self.world.city;
+            for category in &city.categories {
+                let mut reference = u32::from_le_bytes(category[0x15c..0x160].try_into().unwrap());
+                while reference != 0 {
+                    let offset = reference.checked_sub(0x591318).ok_or("tree restore owner precedes building pool")?;
+                    if !offset.is_multiple_of(916) { return Err("tree restore owner is not record-aligned".into()); }
+                    let slot = (offset / 916) as usize;
+                    if slot >= 600 || visited[slot] { return Err("tree restore category list is invalid/cyclic".into()); }
+                    visited[slot] = true;
+                    let record = &mut city.buildings[slot];
+                    reference = u32::from_le_bytes(record[0x44..0x48].try_into().unwrap());
+                    crate::building_models::release_record_with_trees(record, tree_state.as_ref())?;
+                }
+            }
+        }
         let mut temporary = [0; building_pool::RECORD_SIZE];
         building_pool::reset(&mut self.world.buildings, &mut temporary)?;
         for row in &mut self.world.categories {
@@ -967,7 +987,7 @@ impl<'data> Session<'data> {
         let mut geometry = BuildingGeometry::new(
             assets.board,
             assets.file,
-            crate::building_models::Models::default(),
+            crate::building_models::Models::with_tree_state(tree_state),
         );
         let city = &mut self.world.city;
         restore::buildings(
@@ -1448,6 +1468,7 @@ mod tests {
         ] {
             let saved = read(key);
             let inputs = || Inputs {
+                tree_locators: None,
                         image: &image,
                         board: &board,
                         file: &file,
@@ -2652,6 +2673,7 @@ mod tests {
             }
             let mut session = Session::load_original(
                 Inputs {
+                    tree_locators: None,
                     image: &image,
                     board: &board,
                     file: &file,
@@ -2867,6 +2889,7 @@ mod tests {
         {
             let saved = read(key);
             let inputs = || Inputs {
+                tree_locators: None,
                     image: &image,
                     board: &board,
                     file: &file,

@@ -33,6 +33,7 @@ fn natural_auction_resume(prior_mode: u32) {
             &executable_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         assert!(names.iter().all(|name| !name.is_empty()), "supplied character names must be populated");
         let inputs = || Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

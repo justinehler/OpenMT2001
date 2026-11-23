@@ -61,6 +61,7 @@ mod tests {
                 let selected = catalog.find(200001).unwrap();
                 let next_id = catalog.levels[selected + 1..].iter().find(|level| !level.tutorial()).unwrap().id();
                 let mut session = Session::initialize_campaign(Inputs {
+                    tree_locators: None,
                     image: &image, board: &board, file: &file,
                     people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
                     vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

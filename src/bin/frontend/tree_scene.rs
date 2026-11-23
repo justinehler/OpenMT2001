@@ -1,4 +1,4 @@
-//! Retained original ambient trunks and state10 foliage, independent of buildings.
+//! Retained original trunks and state10 foliage from authoritative tree slots.
 use crate::{compatibility::Mode, object_scene, people_scene};
 use openmt2001::{
     archive::ArchiveIndex,
@@ -25,10 +25,9 @@ struct Instance {
 
 pub struct Resources {
     assets: trees::Assets,
-    pool: trees::Pool,
+    ambient: Arc<Instances>,
     definition: [u8; 116],
     model: object_scene::Model,
-    instances: Vec<Instance>,
     surfaces: Vec<OwnedDraw>,
     trunk_pages: usize,
     sun: SunColors,
@@ -127,8 +126,48 @@ impl Resources {
             surface.diffuse_alpha = Some(Vec::new());
             surfaces.push(surface);
         }
-        let mut instances = Vec::with_capacity(pool.count());
-        for (i, slot) in pool.submission_slots() {
+        let ambient = Arc::new(Instances::prepare(&assets, &model, pool)?);
+        Ok(Self {
+            assets,
+            ambient,
+            definition,
+            model,
+            surfaces,
+            trunk_pages,
+            sun: SunColors::parse(suncols)?,
+        })
+    }
+}
+
+/// Immutable sparse world snapshot. Slot IDs retain native phase/variation;
+/// visible lists must never allocate, compact, or reorder global identities.
+pub struct Instances {
+    pool: trees::Pool,
+    slots: Vec<Option<Instance>>,
+}
+impl Instances {
+    pub fn matches(&self, pool: &trees::Pool) -> bool {
+        self.pool.count() == pool.count()
+            && (0..trees::CAPACITY).all(|i| match (self.pool.slot(i), pool.slot(i)) {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    a.position.map(f32::to_bits) == b.position.map(f32::to_bits)
+                        && a.scale.map(f32::to_bits) == b.scale.map(f32::to_bits)
+                }
+                _ => false,
+            })
+    }
+    fn prepare(
+        assets: &trees::Assets,
+        model: &object_scene::Model,
+        pool: trees::Pool,
+    ) -> Result<Self, String> {
+        let mut instances = Vec::with_capacity(trees::CAPACITY);
+        for i in 0..trees::CAPACITY {
+            let Some(slot) = pool.slot(i) else {
+                instances.push(None);
+                continue;
+            };
             let variation = assets.tables.variation(i, slot)?;
             let mut auxiliary = [0; 284];
             for (at, value) in [
@@ -156,7 +195,7 @@ impl Resources {
                 .collect();
             let mut near = Vec::new();
             let mut far = Vec::new();
-            // Placement is immutable for these ambient slots. Only selection,
+            // Placement is immutable in this snapshot. Only selection,
             // camera projection and palette modulation change on later frames.
             assets
                 .tables
@@ -164,28 +203,32 @@ impl Resources {
             assets
                 .tables
                 .append_points(i, slot, 300, &assets.attachments, &[0; 9], &mut far)?;
-            instances.push(Instance {
+            instances.push(Some(Instance {
                 matrix,
                 positions,
                 near,
                 far,
-            });
+            }));
         }
         Ok(Self {
-            assets,
             pool,
-            definition,
-            model,
-            instances,
-            surfaces,
-            trunk_pages,
-            sun: SunColors::parse(suncols)?,
+            slots: instances,
         })
+    }
+}
+impl Resources {
+    pub fn instances(&self, pool: trees::Pool) -> Result<Arc<Instances>, String> {
+        Ok(Arc::new(Instances::prepare(
+            &self.assets,
+            &self.model,
+            pool,
+        )?))
     }
 }
 
 pub struct Layer {
     resources: Arc<Resources>,
+    instances: Arc<Instances>,
     compatibility: Mode,
     range: Range<usize>,
     previous_visible: Vec<bool>,
@@ -199,8 +242,16 @@ pub struct Layer {
 
 impl Layer {
     pub fn new(resources: Arc<Resources>, compatibility: Mode) -> Self {
+        Self::with_instances(resources.clone(), resources.ambient.clone(), compatibility)
+    }
+    pub fn with_instances(
+        resources: Arc<Resources>,
+        instances: Arc<Instances>,
+        compatibility: Mode,
+    ) -> Self {
         Self {
             resources,
+            instances,
             compatibility,
             range: 0..0,
             previous_visible: Vec::new(),
@@ -223,12 +274,18 @@ impl Layer {
         let r = &self.resources;
         let mut surfaces = r.surfaces.clone();
         let mut capacity = vec![0; surfaces.len()];
-        for instance in &r.instances {
+        for instance in self.instances.slots.iter().flatten() {
             for (part, positions) in r.model.parts.iter().zip(&instance.positions) {
                 capacity[part.page] += positions.len();
             }
         }
-        for (i, instance) in r.instances.iter().enumerate() {
+        for (i, instance) in self
+            .instances
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
+        {
             capacity[r.trunk_pages + i % 3] += instance.near.len().max(instance.far.len()) * 6;
         }
         for (surface, count) in surfaces.iter_mut().zip(capacity) {
@@ -299,8 +356,13 @@ impl Layer {
         )?;
         self.submissions.clear();
         let d = |at| f32::from_le_bytes(r.definition[at..at + 4].try_into().unwrap());
-        let mut visible = Vec::with_capacity(r.pool.count());
-        for instance in &r.instances {
+        let mut visible = Vec::with_capacity(self.instances.pool.count());
+        for i in 0..self.instances.pool.count() {
+            let Some(instance) = &self.instances.slots[i] else {
+                visible.push(false);
+                self.submissions.push(0);
+                continue;
+            };
             let object_view = people_scene::object_view(view, instance.matrix);
             let bounds = std::array::from_fn(|i| {
                 camera::transform_scene_point(
@@ -328,7 +390,13 @@ impl Layer {
             }
             let lighting =
                 Palette::new(light.diffuse, light.ambient, light.diffuse, 0, light.scale);
-            for (_, instance) in r.instances.iter().enumerate().filter(|(i, _)| visible[*i]) {
+            for (i, &accepted) in visible.iter().enumerate() {
+                if !accepted {
+                    continue;
+                }
+                let instance = self.instances.slots[i]
+                    .as_ref()
+                    .ok_or("visible inactive tree")?;
                 let sun = people_scene::sunlight(instance.matrix, light.direction);
                 for (part, positions) in r.model.parts.iter().zip(&instance.positions) {
                     let draw = &mut draws[part.page];
@@ -372,12 +440,14 @@ impl Layer {
             let alpha = draw.diffuse_alpha.as_mut().unwrap();
             alpha.clear();
             draw.view_projection = Some(projection);
-            for i in (phase..r.pool.count()).step_by(3) {
+            for i in (phase..self.instances.pool.count()).step_by(3) {
                 let submission = self.submissions[i];
                 if submission == 0 {
                     continue;
                 }
-                let instance = &r.instances[i];
+                let instance = self.instances.slots[i]
+                    .as_ref()
+                    .ok_or("submitted inactive tree")?;
                 let points = if submission < 300 {
                     &instance.near
                 } else {
@@ -474,13 +544,15 @@ mod tests {
         let image = PeImage::parse(&executable).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let resources = Arc::new(Resources::load(&image, &index, &archive, &suncols).unwrap());
-        assert_eq!(resources.pool.count(), 137);
+        assert_eq!(resources.ambient.pool.count(), 137);
         assert_eq!(resources.assets.attachments.len(), 75);
         assert_eq!(resources.trunk_pages, 1);
         assert!(
             resources
-                .instances
+                .ambient
+                .slots
                 .iter()
+                .flatten()
                 .all(|i| i.near.len() == 44 && i.far.len() == 23)
         );
         let entry = index
@@ -494,7 +566,7 @@ mod tests {
             assert_eq!(&*draw.rgba, textures.textures[phase + 5].texels);
         }
         // Aim at actual transformed trunk geometry, without inventing a locator.
-        let vertices = &resources.instances[0].positions[0];
+        let vertices = &resources.ambient.slots[0].as_ref().unwrap().positions[0];
         let target = std::array::from_fn(|axis| {
             let lo = vertices
                 .iter()
@@ -634,8 +706,73 @@ mod tests {
             "48 retained/fresh original-data frames matched; {skipped} foliage uploads skipped"
         );
 
+        // Building rows share the same sparse global IDs as ambient rows.
+        // A removed low slot changes captured occupancy, not survivor identity.
+        let mut pool = trees::building::OwnedPool::ambient(&resources.assets.locators).unwrap();
+        let mut pose = *pool.pool().slot(0).unwrap();
+        pose.scale = [0.75; 3];
+        assert_eq!(pool.bind(5, &[pose]).unwrap(), [137]);
+        assert_eq!(pool.bind(1, &[pose]).unwrap(), [138]);
+        let initial = resources.instances(pool.pool().clone()).unwrap();
+        camera.eye = [target[0], target[1], target[2] - 100.];
+        camera.target = target;
+        for step in 0..3 {
+            if step == 1 {
+                pool.release(5).unwrap();
+            }
+            if step == 2 {
+                assert_eq!(pool.bind(5, &[pose]).unwrap(), [137]);
+            }
+            assert_eq!(pool.indices(1).unwrap(), [138]);
+            let instances = resources.instances(pool.pool().clone()).unwrap();
+            assert!(instances.matches(pool.pool()));
+            assert_eq!(initial.matches(pool.pool()), step != 1);
+            assert!(
+                instances.slots[138].is_some(),
+                "high survivor must retain its global ID"
+            );
+            assert_eq!(instances.slots[137].is_some(), step != 1);
+            let mut sparse_scene = base_scene.clone();
+            sparse_scene.reframe(camera).unwrap();
+            let mut sparse =
+                Layer::with_instances(resources.clone(), instances.clone(), Mode::Modern);
+            sparse.attach(&mut sparse_scene);
+            sparse.reframe(&mut sparse_scene, camera).unwrap();
+            assert_eq!(sparse.submissions.len(), if step == 1 { 138 } else { 139 });
+            if step == 1 {
+                assert_eq!(sparse.submissions[137], 0);
+            } else {
+                assert!(sparse.submissions[137] > 0 && sparse.submissions[138] > 0);
+            }
+            let mut expected = [0; 3];
+            for (i, &depth) in sparse.submissions.iter().enumerate() {
+                if depth == 0 {
+                    continue;
+                }
+                let instance = instances.slots[i].as_ref().unwrap();
+                expected[i % 3] += if depth < 300 {
+                    instance.near.len()
+                } else {
+                    instance.far.len()
+                };
+            }
+            assert_eq!(sparse.foliage_counts, expected);
+            assert!(
+                sparse
+                    .reframe(&mut sparse_scene, camera)
+                    .unwrap()
+                    .is_empty()
+            );
+            for (draw, texture) in sparse_scene.draws[sparse.range.clone()]
+                .iter()
+                .zip(&retained)
+            {
+                assert!(Arc::ptr_eq(&draw.rgba, texture));
+            }
+        }
+        assert!(initial.slots[137].is_some() && initial.slots[138].is_some());
         eprintln!(
-            "137 ambient trees: raw foliage pixels, near/far selection, palette/daylight, quad layout and retained textures verified; no native visual acceptance"
+            "Original tree resources: retained ambient frames and sparse building slots137/138, removal/occupancy/reuse, phase grouping and immutable snapshots verified; no native visual acceptance"
         );
     }
 }

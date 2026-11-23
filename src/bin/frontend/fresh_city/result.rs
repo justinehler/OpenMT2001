@@ -432,6 +432,7 @@ mod tests {
                 Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
             let assets = CommandAssets { image: &image, board: &board, file: &file };
             let mut session = Session::initialize(super::super::Inputs {
+                tree_locators: None,
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

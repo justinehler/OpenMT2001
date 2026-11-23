@@ -273,6 +273,7 @@ fn run_scenario_eleven(probe_shops: usize) {
             assert_eq!(level.attempts(), 0);
             let mut session = Session::initialize_campaign(
                 Inputs {
+                    tree_locators: None,
                     image: &image,
                     board: &board,
                     file: &file,

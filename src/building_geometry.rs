@@ -78,6 +78,14 @@ pub trait ModelRegistrar {
         building: &SceneBuilding,
         record: &mut [u8; building_pool::RECORD_SIZE],
     ) -> Result<(), String>;
+    /// Optional retained tree ownership for rendering hosts. Explicitly
+    /// headless registrars keep no global tree allocation or visual identity.
+    fn finish_tree_binding(
+        &mut self,
+        _building: &SceneBuilding,
+        _file: &BuildFile<'_>,
+        _record: &mut [u8; building_pool::RECORD_SIZE],
+    ) -> Result<(), String> { Ok(()) }
 }
 
 /// Adapter state shared by fresh-map geometry binding and category linking.
@@ -277,7 +285,8 @@ impl<'a, R> BuildingGeometry<'a, R> {
         let registered = self.registrar.register(building)?;
         let registered = RegisteredModel::new(registered.handle, registered.max_y)?;
         self.write_scene(record, building, registered)?;
-        self.registrar.finish_binding(building, record)
+        self.registrar.finish_binding(building, record)?;
+        self.registrar.finish_tree_binding(building, self.file, record)
     }
 }
 

@@ -189,6 +189,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
             assert!(!catalog.levels[catalog.find(200004).unwrap()].unlocked());
             assert!(!catalog.levels[catalog.find(200002).unwrap()].unlocked());
             let mut session = Session::initialize_campaign(Inputs {
+                tree_locators: None,
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
                 vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
@@ -451,6 +452,7 @@ fn campaign_continuation(
         assert_eq!(level.attempts(), 0, "use the preceding checkpoint profile, not an already completed level");
         assert!(!catalog.levels[catalog.find(next_id).unwrap()].unlocked());
         let mut session = Session::initialize_campaign(Inputs {
+            tree_locators: None,
             image: &image, board: &board, file: &file,
             people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
             vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),

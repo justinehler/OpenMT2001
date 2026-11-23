@@ -78,6 +78,9 @@ pub struct Policy {
     pub auxiliary_prior_bytes: [u8; 0x11c],
 }
 pub struct Inputs<'a, 'data> {
+    /// Native hosts provide original ambient locators before script binding.
+    /// Explicitly headless hosts may omit renderer tree state.
+    pub tree_locators: Option<Vec<[f32;3]>>,
     pub image: &'a openmt2001::pe::PeImage<'data>,
     pub board: &'a openmt2001::board::Board,
     pub file: &'a openmt2001::build_file::BuildFile<'data>,
@@ -538,6 +541,7 @@ impl<'data> Session<'data> {
                 ))
             }
         }
+        let tree_state = self.models.tree_state.clone();
         let result = openmt2001::live_commands::PendingRuntime {
             city: &mut self.world.city,
             roster: &self.roster,
@@ -553,10 +557,8 @@ impl<'data> Session<'data> {
                     call,
                     openmt2001::live_commands::PendingCall::ReleaseBuilding { .. }
                 ) {
-                    crate::building_models::release_record(
-                        record
-                            .as_deref_mut()
-                            .ok_or("missing building release record")?,
+                    crate::building_models::release_record_with_trees(
+                        record.as_deref_mut().ok_or("missing building release record")?, tree_state.as_ref(),
                     )?;
                 }
                 let value = effect(call, record)?;
@@ -820,7 +822,7 @@ impl<'data> Session<'data> {
         let mut geometry = openmt2001::building_geometry::BuildingGeometry::new(
             input.board,
             input.file,
-            crate::building_models::Models::default(),
+            crate::building_models::Models::with_tree_locators(input.tree_locators.as_deref())?,
         );
         let mut hooks = Hooks::new();
         let context = world.script_context(
@@ -2763,6 +2765,7 @@ mod tests {
             let kind = if case == 3 { 1 } else { case };
             let mut session = Session::initialize(
                 Inputs {
+                    tree_locators: None,
                     image: &image,
                     board: &board,
                     file: &file,
@@ -3535,6 +3538,7 @@ mod tests {
             }else{None};
             let scenario=match capacity_mode {4=>"SCENARIO6",5=>"SCENARIO11",_=>"SCENARIO1"};
             let input=Inputs{
+                tree_locators: None,
                 image:&image,board:&board,file:&file,
                 people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
                 vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -3902,6 +3906,7 @@ mod tests {
             let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
             let names=character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let mut session=Session::initialize(Inputs{
+                tree_locators: None,
                 image:&image,board:&board,file:&file,
                 people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),
                 vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),
@@ -4119,6 +4124,7 @@ mod tests {
             for difficulty in 0..3 {
                 let mut session = Session::initialize(
                     Inputs {
+                        tree_locators: None,
                         image: &image,
                         board: &board,
                         file: &file,

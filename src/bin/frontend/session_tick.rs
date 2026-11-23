@@ -703,6 +703,7 @@ impl Session<'_> {
                         }
                         scheduler::Event::Helper(0x4b0810) => {
                             let mut removed = false;
+                            let tree_state = geometry.registrar().tree_state.clone();
                             live_commands::PendingRuntime {
                                 city,
                                 roster: &self.roster,
@@ -732,10 +733,8 @@ impl Session<'_> {
                                         event,
                                         live_commands::PendingCall::ReleaseBuilding { .. }
                                     ) {
-                                        crate::building_models::release_record(
-                                            record
-                                                .as_deref_mut()
-                                                .ok_or("missing building release record")?,
+                                        crate::building_models::release_record_with_trees(
+                                            record.as_deref_mut().ok_or("missing building release record")?, tree_state.as_ref(),
                                         )?;
                                         removed = true;
                                     }
