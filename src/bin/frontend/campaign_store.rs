@@ -243,7 +243,15 @@ mod tests {
         assert_eq!(sources.iter().map(|(_, b)| b.as_slice()).collect::<Vec<_>>(),
             vec![b"-- base".as_slice(), b"child", b"a", b"z", b"parent"]);
         fixture.write("CuStOm/a/register.lua", b"collision");
-        assert!(registration_sources(&fixture.0).unwrap_err().contains("ambiguous"));
+        // Case-insensitive filesystems update A rather than creating a second
+        // entry. Only an actual ambiguous directory pair must be rejected.
+        let names = fs::read_dir(fixture.0.join("CuStOm")).unwrap()
+            .map(|entry| entry.unwrap().file_name()).collect::<Vec<_>>();
+        if names.iter().any(|name| name == "A") && names.iter().any(|name| name == "a") {
+            assert!(registration_sources(&fixture.0).unwrap_err().contains("ambiguous"));
+        } else {
+            assert!(registration_sources(&fixture.0).is_ok());
+        }
     }
     #[test]
     fn registration_limits_and_missing_hubs() {
