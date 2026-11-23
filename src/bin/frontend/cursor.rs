@@ -1,4 +1,4 @@
-//! Original cursor0/default and cursor2/right-drag and cursor3/pan images. The native host owns
+//! Original default, right-drag, pan and enabled-menu-hover images. The native host owns
 //! cursor presentation; no OS cursor API enters shared assets or simulation.
 use openmt2001::{
     archive::ArchiveIndex,
@@ -11,7 +11,7 @@ struct Image {
     rgba: Vec<u8>,
     hotspot: [u16; 2],
 }
-pub struct Images([Image; 3]);
+pub struct Images([Image; 4]);
 impl Images {
     pub fn load(index: &ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
         // Original004bd677 registers this collection in file order at6874f0.
@@ -22,7 +22,7 @@ impl Images {
             .get(entry.offset as usize..(entry.offset + entry.length) as usize)
             .ok_or("cursor collection outside archive")?;
         let set = TextureSet::parse(data).map_err(|e| e.to_string())?;
-        let images = [(0, [5, 1]), (2, [8, 8]), (3, [5, 0])]
+        let images = [(0, [5, 1]), (2, [8, 8]), (3, [5, 0]), (1, [8, 1])]
             .into_iter()
             .map(|(i, hotspot)| {
                 // Original004391e0 sets dimensions from the registered image and
@@ -47,7 +47,7 @@ impl Images {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(Self(images.try_into().map_err(|_| "cursor count")?))
     }
-    pub fn create(self, event_loop: &ActiveEventLoop) -> Result<[CustomCursor; 3], String> {
+    pub fn create(self, event_loop: &ActiveEventLoop) -> Result<[CustomCursor; 4], String> {
         let cursors = self
             .0
             .into_iter()

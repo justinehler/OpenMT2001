@@ -465,6 +465,26 @@ impl Menu {
         );
         held_entry_click(&mut self.light_click_target, target)
     }
+    /// Bounded original button hover. Query the actual pointer, never keyboard selection.
+    pub fn enabled_cursor_hover(&self) -> bool {
+        let Some(p) = self.pointer_position else { return false; };
+        // Placeholder overlays do not expose the background menu's hit regions.
+        if self.pending.is_some() { return false; }
+        if self.skirmish.error.is_some() { return self.hit(p).is_some(); }
+        // These routes have separate control policies; their hover is not yet closed.
+        if self.settings.page.is_some() || self.skirmish.visible()
+            || self.single.visible || self.profile.visible || self.single_mode {
+            return false;
+        }
+        if self.load.visible {
+            if self.load.delete_pending() { return self.hit(p).is_some(); }
+            // Load/Delete/Back use the existing disabled-state admission. List and
+            // slider widgets need their own original cursor policy before inclusion.
+            return self.load.hit(p).is_some_and(|i| i < 3
+                && self.load.generic_button_enabled(i));
+        }
+        self.hit(p).is_some()
+    }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         if self.skirmish.error.is_some() {
             let [l, t, r, b] = self.assets.prompts.button_at([0.; 2]);

@@ -2811,6 +2811,12 @@ impl Intro {
         }
     }
     pub fn inspection_cursor_kind(&self) -> Option<usize> {
+        if self.inspection.is_none() {
+            // Keep the existing city indices; appended index3 is original cursor1.
+            let hover = self.loading.is_none()
+                && self.menu.as_ref().is_some_and(|menu| menu.enabled_cursor_hover());
+            return Some(if hover { 3 } else { 0 });
+        }
         self.inspection.as_ref().map(|view| {
             // Original mode12/13 use cursor2 for right-only and cursor3 for both buttons.
             if view.strategic || !view.mouse_buttons[1] {
