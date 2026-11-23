@@ -307,7 +307,7 @@ impl Assets {
         };
         let image = PeImage::parse(exe)?;
         let color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
-        let panel = |name: &str, backing: &str, title: &str| -> Result<Panel, String> {
+        let panel = |name: &str, backing: &str, title: &str, parts: &[usize]| -> Result<Panel, String> {
             let mesh = CachedMesh::parse(payload(name)?)?;
             let regions = openmt2001::ui_mesh::regions(&mesh, 0)?;
             let bounds = |name: &str| {
@@ -323,7 +323,7 @@ impl Assets {
             fill.rect(backing, [color; 4]);
             fill.rect(title, [0xff909090, 0xff909090, 0x7f909090, 0x7f909090]);
             //43c3a0 draws the widget mesh before its custom draw callback.
-            let base = ui::panel_frame_base(index, archive, name, &[0], 0)?.0;
+            let base = ui::panel_frame_base(index, archive, name, parts, 0)?.0;
             Ok(Panel {
                 base,
                 fill,
@@ -336,17 +336,20 @@ impl Assets {
             "gamedata2/brand_new_panels/new_auction_bid_v2.tm",
             "AUCTION_BID_BACKING",
             "AUCTION_BID_BID_AMOUNT",
+            &[1],
         )?;
         let hidden_bid_toggle = [bid.title[2]-16.,bid.title[1],bid.title[2],bid.title[3]];
         let timer = panel(
             "gamedata2/brand_new_panels/new_auction_timer.tm",
             "AUCTION_TIMER_BACKING",
             "AUCTION_TIMER_TITLE_LABEL",
+            &[0],
         )?;
         let top = panel(
             "gamedata2/brand_new_panels/new_auction_top.tm",
             "AUCTION_TOP_BACKING",
             "AUCTION_TOP_SALE_AREA",
+            &[0],
         )?;
         let buttons = [
             "AUCTION_BID50",
@@ -672,5 +675,144 @@ impl Assets {
             ],
             None,
         )
+    }
+}
+
+
+#[cfg(test)]
+mod bid_facing_tests {
+    use super::*;
+    fn area(p: &[[f32;3]], ids: [usize;3]) -> f64 {
+        let [a,b,c]=ids.map(|i|[f64::from(p[i][0]),-f64::from(p[i][1])]);
+        (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+    }
+    #[test]
+    fn own_pose_oracle_rejects_clockwise_and_degenerate_triangles() {
+        let p=[[0.,0.,8.],[0.,-2.,8.],[3.,-2.,8.],[1.5,-1.,8.]];
+        assert_eq!(area(&p,[0,1,2]),-6.);assert_eq!(area(&p,[0,2,1]),6.);
+        assert_eq!(area(&p,[0,3,2]),0.);assert_eq!(area(&p,[0,0,1]),0.);
+        assert_eq!(area(&p.map(|[x,y,z]|[x,-y,z]),[0,1,2]),6.);
+        assert_eq!(area(&p.map(|[x,y,_]|[x+12.,y-4.,-9.]),[0,1,2]),-6.);
+    }
+    fn guard(bytes:&[u8],expected:&str) {
+        use std::io::Write;use std::process::{Command,Stdio};
+        let mut child=Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(bytes).unwrap();let result=child.wait_with_output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(std::str::from_utf8(&result.stdout).unwrap().split_whitespace().next(),Some(expected));
+    }
+    fn same(a:&Surface,b:&Surface) {
+        assert_eq!(a.vertices,b.vertices);assert_eq!(a.alpha,b.alpha);
+        assert_eq!((a.width,a.height),(b.width,b.height));assert_eq!(a.pixels,b.pixels);
+        assert!(matches!(a.draw().mode,openmt2001::render::SurfaceMode::Overlay));
+    }
+    #[test]
+    #[ignore="SHA-pinned original auction meshes/materials/PE/font/language; CPU fixture, optional capture"]
+    fn supplied_bid_omits_only_reversed_backing_and_preserves_timer_top() {
+        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");let exe=read("OPENMT2001_EXE");
+        guard(&directory,"8ecb0d18a3896eba61db9ff6edc10869a84a64229169b52f0f7d981b81980d52");
+        guard(&exe,"1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b");
+        let index=ArchiveIndex::parse(&directory,archive.len()as u64).unwrap();
+        let payload=|name:&str|{let e=index.find(name).unwrap();&archive[e.offset as usize..(e.offset+e.length)as usize]};
+        for (name,hash) in [
+            ("gamedata2/brand_new_panels/new_auction_bid_v2.tm","350a047ad94909a687878e5b74fdd36bd143d0225bb06f1885b6243c67eafaf2"),
+            ("gamedata2/brand_new_panels/new_auction_timer.tm","9a44fe1e200310f2333ad816b1d9cfa0bfa660bf3ae570e78089b99e6c16b2db"),
+            ("gamedata2/brand_new_panels/new_auction_top.tm","eb9783ff1fa45c81d44088afac3b9f0390b59123772bf6d1dafd8160a774b06a"),
+            ("1New_Maya_grey_border.tt","31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f"),
+            ("gamedata2/GenericTextures640/textures.gtd","10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4"),
+            ("gamedata2/font640/textures.gtd","21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912"),
+        ]{guard(payload(name),hash);}
+        let param=std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer=param.parent().unwrap().parent().unwrap();
+        guard(&fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(), "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be");
+        guard(&fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap(), "7df258462744a70bce18516dd6d79239cd0fd434c7e100ce4ef8ad399d36c644");
+        guard(&fs::read(installer.join("Standard/fonts/board/usa/tycoon.off")).unwrap(), "0cb07d00caba4717e0ae7ee5a757ce9e2a18eb3b3013d5812e9da485a1090f3a");
+        guard(&fs::read(installer.join("Standard/fonts/board/usa/tycoon.bin")).unwrap(), "42696b634f2b7517a645516317341cf40ed2d25efe6931e033f65c527a3d28e1");
+        let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language=std::env::var_os("OPENMT2001_AUCTION_LANGUAGE").map(std::path::PathBuf::from)
+            .unwrap_or_else(||exe_path.parent().unwrap().parent().unwrap().join("US/language/usa"));
+        let off=fs::read(language.join("tycoon.off")).unwrap();let bytes=fs::read(language.join("tycoon.bin")).unwrap();
+        guard(&off,"54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d");
+        guard(&bytes,"4d5e302035f3579d2c0cb8cd35a58abae5ea6d8159e6c3661bef091fedff6c38");
+        let mut at=0;let strings=off.chunks_exact(2).map(|n|{
+            let end=at+u16::from_le_bytes(n.try_into().unwrap())as usize;let row=&bytes[at..end];at=end;row
+        }).collect::<Vec<_>>();assert_eq!(at,bytes.len());
+        let assets=Assets::load(&index,&archive,installer,&strings,&exe).unwrap();
+        assert_eq!(assets.bid.base.len(),1,"one authored border surface; no part0 backing");
+        let image=PeImage::parse(&exe).unwrap();let body=u32::from_le_bytes(image.at(0x5362c0,4).unwrap().try_into().unwrap());
+        assert_eq!(body,0xbb000a28);assert_eq!(assets.background,body);
+        for (panel,name,count,backing,title,parts) in [
+            (&assets.bid,"new_auction_bid_v2.tm",9,"AUCTION_BID_BACKING","AUCTION_BID_BID_AMOUNT",&[1][..]),
+            (&assets.timer,"new_auction_timer.tm",4,"AUCTION_TIMER_BACKING","AUCTION_TIMER_TITLE_LABEL",&[0][..]),
+            (&assets.top,"new_auction_top.tm",7,"AUCTION_TOP_BACKING","AUCTION_TOP_SALE_AREA",&[0][..]),
+        ] {
+            let name=format!("gamedata2/brand_new_panels/{name}");let mesh=CachedMesh::parse(payload(&name)).unwrap();
+            let pos=mesh.positions(0).unwrap();let regions=openmt2001::ui_mesh::regions(&mesh,0).unwrap();
+            assert_eq!(regions.len(),count);assert_eq!(panel.regions,regions);
+            let (expected_base,bounds)=ui::panel_frame_base(&index,&archive,&name,parts,0).unwrap();
+            assert_eq!(panel.base.len(),parts.len());assert_eq!(bounds.len(),count);
+            for (a,b) in panel.base.iter().zip(&expected_base){same(a,b);}
+            for (i,r) in regions.iter().enumerate(){
+                let ids=mesh.parts[r.part].vertex_indices().collect::<Vec<_>>();
+                let expected=[ids.iter().map(|&j|pos[j][0]).fold(f32::INFINITY,f32::min),
+                    ids.iter().map(|&j|-pos[j][1]).fold(f32::INFINITY,f32::min),
+                    ids.iter().map(|&j|pos[j][0]).fold(f32::NEG_INFINITY,f32::max),
+                    ids.iter().map(|&j|-pos[j][1]).fold(f32::NEG_INFINITY,f32::max)];
+                assert_eq!(r.bounds,expected);assert_eq!(bounds[i],expected);
+            }
+            let bounds=|n|regions.iter().find(|r|r.name==n).unwrap().bounds;
+            assert_eq!(panel.backing,bounds(backing));assert_eq!(panel.title,bounds(title));
+            let mut fill=Surface::solid();fill.rect(bounds(backing),[body;4]);
+            fill.rect(bounds(title),[0xff909090,0xff909090,0x7f909090,0x7f909090]);same(&panel.fill,&fill);
+        }
+        let mesh=CachedMesh::parse(payload("gamedata2/brand_new_panels/new_auction_bid_v2.tm")).unwrap();
+        assert_eq!((mesh.vertex_count,mesh.parts.len(),mesh.frames),(60,9,10));
+        let p=mesh.positions(0).unwrap();let ids=mesh.parts[0].vertex_indices().collect::<Vec<_>>();
+        assert_eq!(ids.len(),6);assert!(ids.chunks_exact(3).all(|t|area(&p,t.try_into().unwrap())>0.));
+        let material=TextureSet::parse(payload(mesh.texture_names[mesh.parts[0].texture as usize])).unwrap();
+        assert!(material.textures[0].texels.chunks_exact(4).all(|p|p==[146,144,144,255]));
+        // Original parent submits the complete mesh; only part1 survives
+        // its CW cull. Its seven strips are not a bounding-box outline.
+        let border=&mesh.parts[1];assert_eq!((border.first_vertex,border.last_vertex),(4,31));
+        guard(border.header,"9271fc22bd7aad843492f48a663665d393e12869425206d44376d232def161b0");
+        guard(border.indices,"5149c5e580a38aa158b704739020a83fd14bc012f29c42ea4891041520a531ce");
+        assert_eq!(mesh.flags&0x30,0);
+        guard(&mesh.vertex_bytes[4*12..32*12],"ab6712831f264b23d8e175a92e925712c7f41e55b3220b7855f4e0e678faf99d");
+        let border_ids=border.vertex_indices().collect::<Vec<_>>();assert_eq!(border_ids.len(),42);
+        assert_eq!(border_ids.chunks_exact(3).count(),14);
+        assert!(border_ids.chunks_exact(3).all(|t|{let a=area(&p,t.try_into().unwrap());a.is_finite()&&a<0.}));
+        let uv=mesh.uvs();let texture=TextureSet::parse(payload(mesh.texture_names[border.texture as usize])).unwrap();
+        let mut expected_border=Surface::new(&texture.textures[0]);
+        for &i in &border_ids {expected_border.vertices.push([p[i][0],-p[i][1],0.5,1.,1.,1.,uv[i][0],uv[i][1]]);expected_border.alpha.push(255);}
+        let actual=&assets.bid.base[0];assert_eq!(actual.vertices.len(),42);
+        same(actual,&expected_border); // Exact original index/UV/material order and vertex alpha.
+        // All 42 actual vertices must belong to borderpart1. Since base has
+        // exactly this one surface, part0's opaque six-vertex quad is absent.
+        assert_ne!(actual.vertices.len(),ids.len());
+        for frame in 1..mesh.frames {let later=mesh.positions(frame).unwrap();
+            for &i in &border_ids {assert_eq!(later[i][..2],p[i][..2]);}}
+        let r=&assets.bid.regions;assert_eq!(r[0].name,"AUCTION_BID_BACKING");
+        for (i,name) in ["AUCTION_BID50","AUCTION_BID100","AUCTION_BID500","AUCTION_PULLOUT_BUTTON","AUCTION_PASS_BUTTON"].into_iter().enumerate(){
+            assert_eq!(assets.buttons[i],r.iter().find(|r|r.name==name).unwrap().bounds);
+        }
+        let title=assets.bid.title;assert_eq!(assets.hidden_bid_toggle,[title[2]-16.,title[1],title[2],title[3]]);
+        // All nine regions and live control/fill paths survive the static
+        // border admission; timer/top remain on their old explicit part0.
+        #[cfg(feature="capture")]
+        if let Ok(path)=std::env::var("OPENMT2001_AUCTION_BID_FACING_CAPTURE") {
+            let mut d=wgpu::InstanceDescriptor::new_without_display_handle();if cfg!(windows){d.backends=wgpu::Backends::DX12;}
+            let renderer=pollster::block_on(Renderer::new(d)).unwrap();
+            let state=crate::auction_controls::State{ticks:1,price_label:Some(1250),buttons_enabled:31,
+                timer_visible:true,timer_text:Some(crate::auction_controls::TimerText::Seconds(15)),..Default::default()};
+            let info=Info{category:33,category_color:0xff10b030,character:3,actor:b"Fixture\0".to_vec(),price:1250};
+            let panel=assets.prepare_with_info(&renderer,&state,None,false,Some(&info)).unwrap();
+            let mut checker=Surface::solid();for row in 0..15{for col in 0..20{
+                let c=if(row+col)%2==0{0xfff04020}else{0xff1040e0};
+                checker.rect([col as f32*32.,row as f32*32.,(col+1)as f32*32.,(row+1)as f32*32.],[c;4]);}}
+            let view=[2./640.,0.,0.,0.,0.,-2./480.,0.,0.,0.,0.,1.,0.,-1.,1.,0.,1.];
+            let underlay=renderer.prepare(&[checker.draw()],view,None).unwrap();
+            crate::capture_test::capture_overlay(&renderer,&underlay,&panel,&path);
+        }
     }
 }
