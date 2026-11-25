@@ -22,7 +22,7 @@ fn fixed_autosave_first_replace_and_profiles_are_exact() {
     let scratch=Scratch::new();let a=selected_profile_root(&scratch.0,b"Alice");
     let b=selected_profile_root(&scratch.0,b"Bob");
     let path=PreparedAutosave::prepare(&a).unwrap().publish(native(10)).unwrap();
-    assert_eq!(path,a.join("saves/autosave.sav"));
+    assert_eq!(path,fs::canonicalize(&a).unwrap().join("saves").join("autosave.sav"));
     assert_eq!(PreparedAutosave::prepare(&a).unwrap().publish(native(30)).unwrap(),path);
     PreparedAutosave::prepare(&b).unwrap().publish(native(20)).unwrap();
     assert_eq!(fs::read(path).unwrap(),native(30));
