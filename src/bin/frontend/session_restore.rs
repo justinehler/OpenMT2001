@@ -180,6 +180,13 @@ pub(crate) fn saved_command(packet: &[u8]) -> Result<openmt2001::live_commands::
                 building: word(20)?,
             }))
         }
+        0x1a if packet.len() == 32 => {
+            Ok(Command::EventCard(openmt2001::event_cards::lifecycle::Command {
+                card: word(20)?,
+                player: word(24)?,
+                target: word(28)? as i32,
+            }))
+        }
         0x18 if packet.len() == 64 => {
             Ok(Command::Terms(openmt2001::economy::PendingBusinessTerms {
                 business_index: word(20)?,

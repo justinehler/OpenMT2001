@@ -119,6 +119,16 @@ fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
             put(&mut b, 60, c.terms.rent.to_bits());
             b
         }
+        Command::EventCard(c) => {
+            let mut b = vec![0; 32];
+            put(&mut b, 0, 0x52515c);
+            put(&mut b, 4, 0x1a);
+            b[16] = 1;
+            put(&mut b, 20, c.card);
+            put(&mut b, 24, c.player);
+            put(&mut b, 28, c.target as u32);
+            b
+        }
         Command::Auction { descriptor } => descriptor.to_vec(),
         Command::PropertyTransfer {
             category,
@@ -1126,6 +1136,10 @@ impl<'data> Session<'data> {
         }))
     }
 }
+
+#[cfg(all(test, feature = "capture"))]
+#[path = "session_save_mixed_boundary_test.rs"]
+mod mixed_boundary_test;
 
 #[cfg(test)]
 #[path = "session_save_ai_test.rs"]
