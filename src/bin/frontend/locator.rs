@@ -2,6 +2,8 @@
 use crate::ui::{self, Surface};
 #[path = "toolbar_collapse.rs"]
 pub mod toolbar_collapse;
+#[path="locator/strategic.rs"]
+pub(crate) mod strategic;
 use openmt2001::{
     archive::ArchiveIndex,
     business_pool::BusinessCatalog,
@@ -193,7 +195,7 @@ impl Assets {
         assert!(!self.contains(&state, [32, 225]));
         state.mouse(self, scene, Some([32, 180]), true);
         state.mouse(self, scene, Some([32, 180]), false);
-        assert!(state.open && state.player_info);
+        assert!(state.body_open() && state.player_info);
         for (position, player) in state.player_display_order().into_iter().enumerate() {
             let rect = self.city_layout.buttons[position];
             let point = [(rect[0] + rect[2]) as i32, (rect[1] + rect[3]) as i32];
@@ -1917,6 +1919,7 @@ impl Assets {
     }
     pub fn people_state(&self) -> Result<Locator, String> {
         Ok(Locator {
+            strategic_state:None,
             city_info: false,
             city_people: None,
             people_mode: 0,
@@ -1954,21 +1957,20 @@ impl Assets {
             prepared: None,
         })
     }
-    pub fn prepare(
-        &self,
-        renderer: &Renderer,
-        state: &Locator,
-        scene: &Scene,
-    ) -> Result<PreparedScene, String> {
-        let mut surfaces = if state.open {
-            self.base.clone()
-        } else {
-            Vec::new()
-        };
+    pub fn prepare(&self,renderer:&Renderer,state:&Locator,scene:&Scene)->Result<PreparedScene,String>{
+        {let mut counter=0;self.prepare_graph(renderer,state,scene,true,true,None,state.navigation_report_mode(),&mut counter)}
+    }
+    ///C body and D world/report producers have separate actual owners.
+    ///Tint keys are original600-building slot identities, not render indices.
+    pub(crate) fn prepare_graph(
+        &self,renderer:&Renderer,state:&Locator,scene:&Scene,c_body:bool,d_body:bool,
+        colors:Option<&[u32;600]>,report_mode:u32,message_counter:&mut u32,
+    )->Result<PreparedScene,String>{
+        let mut surfaces=Vec::new();
         // Original42a710 submits residents after every city-info producer.
         // Non-People tabs reset global5336bc to zero (white marker mode).
-        if state.open && state.city_info {
-            let white_people = state.prestige_mode || state.ownership_mode || state.rights_mode;
+        if d_body && state.body_open() && state.city_info {
+            let white_people = matches!(report_mode,2|3|4);
             let mut dots = self.people_dot.clone();
             if let Some(report) = &state.city_people {
                 let matrix = glam::Mat4::from_cols_array(&scene.camera);
@@ -1992,7 +1994,7 @@ impl Assets {
             }
             surfaces.insert(0, dots);
         }
-        if state.open && state.city_info && state.prestige_mode {
+        if d_body && state.body_open() && state.city_info && report_mode==2 {
             let mut stars = self.prestige_star.clone();
             if let Some(report) = &state.prestige {
                 for &id in &report.overlay_categories {
@@ -2021,7 +2023,7 @@ impl Assets {
             }
             surfaces.insert(0, stars);
         }
-        if state.open && state.city_info && state.ownership_mode {
+        if d_body && state.body_open() && state.city_info && report_mode==3 {
             let mut badges = Vec::new();
             if let (Some(report), Some(prestige)) = (&state.ownership, &state.prestige) {
                 for &id in &prestige.overlay_categories {
@@ -2091,7 +2093,7 @@ impl Assets {
             badges.append(&mut surfaces);
             surfaces = badges;
         }
-        if state.open && state.city_info && state.rights_mode {
+        if d_body && state.body_open() && state.city_info && report_mode==4 {
             let mut badges = Vec::new();
             if let (Some(rights), Some(prestige)) = (&state.rights, &state.prestige) {
                 for &id in &prestige.overlay_categories {
@@ -2143,7 +2145,7 @@ impl Assets {
             badges.append(&mut surfaces);
             surfaces = badges;
         }
-        if state.open && state.city_info {
+        if d_body && state.body_open() && state.city_info {
             let mut labels = Vec::new();
             if let Some(report) = &state.prestige {
                 for &id in &report.overlay_categories {
@@ -2202,7 +2204,7 @@ impl Assets {
             labels.append(&mut surfaces);
             surfaces = labels;
         }
-        if let Some(id) = state.poll_category
+        if let Some(id) = state.poll_category.filter(|_|d_body)
             && state
                 .prestige
                 .as_ref()
@@ -2212,9 +2214,9 @@ impl Assets {
             let clip = glam::Mat4::from_cols_array(&scene.camera) * glam::Vec4::new(x, 0., z, 1.);
             if clip.w > 0. && clip.z >= 0. && clip.z <= clip.w {
                 let point = [(clip.x / clip.w + 1.) * 320., (1. - clip.y / clip.w) * 240.];
-                // Original42bff0 advances a widget callback counter. No UI timer
-                // dispatcher is connected in paused inspection: retain phase zero.
-                let bracket = crate::strategic_selection::brackets(point, 0);
+                //Actual42bff0 counter is owned by D, advanced at UI dispatch.
+                let bracket = crate::strategic_selection::brackets(point, *message_counter as i32);
+                *message_counter=bracket.counter as u32;
                 let mut draw = Surface::solid();
                 for rect in bracket.rectangles {
                     draw.rect(rect, [bracket.color; 4]);
@@ -2223,11 +2225,14 @@ impl Assets {
                 let before_panel =
                     surfaces
                         .len()
-                        .saturating_sub(if state.open { self.base.len() } else { 0 });
+                        .saturating_sub(if d_body && state.body_open() { self.base.len() } else { 0 });
                 surfaces.insert(before_panel, draw);
             }
         }
-        if state.open
+        let mut world_surfaces=std::mem::take(&mut surfaces);
+        if c_body {
+        surfaces=if state.body_open(){self.base.clone()}else{Vec::new()};
+        if state.body_open()
             && state.city_info
             && !state.prestige_mode
             && !state.ownership_mode
@@ -2296,9 +2301,9 @@ impl Assets {
         }
         let mut fonts = self.fonts.clone();
         let mut solid = Surface::solid();
-        if state.open && state.poll_info {
+        if state.body_open() && state.poll_info {
             self.poll_report(state, scene, &mut fonts)?;
-        } else if state.open && state.city_info {
+        } else if state.body_open() && state.city_info {
             solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
             if state.rights_mode {
                 surfaces.extend(self.rights_report(state, &mut fonts)?);
@@ -2343,9 +2348,9 @@ impl Assets {
                     surfaces.push(self.city_tabs[i].clone());
                 }
             }
-        } else if state.open && state.player_info {
+        } else if state.body_open() && state.player_info {
             surfaces.extend(self.player_report(state, &mut fonts)?);
-        } else if state.open {
+        } else if state.body_open() {
             ui::text(
                 &mut fonts,
                 &self.tab,
@@ -2510,7 +2515,10 @@ impl Assets {
         }
         surfaces.push(solid);
         surfaces.extend(fonts);
-        let footprint = self.footprints(state, scene)?;
+        } //C body and child owners
+        world_surfaces.extend(surfaces);
+        surfaces=world_surfaces;
+        let footprint = if d_body {self.footprints_graph(state,scene,colors)?}else{Surface::solid()};
         let mut ground = footprint.draw();
         ground.view_projection = Some(scene.camera);
         let mut draws = vec![ground];
@@ -3125,24 +3133,33 @@ impl Assets {
             crate::player_info::period_layout(self.bounds, [texture.width, texture.height]);
         [left, right]
     }
-    fn footprints(&self, state: &Locator, scene: &Scene) -> Result<Surface, String> {
+    fn footprints(&self,state:&Locator,scene:&Scene)->Result<Surface,String>{self.footprints_graph(state,scene,None)}
+    fn footprints_graph(&self,state:&Locator,scene:&Scene,colors:Option<&[u32;600]>)->Result<Surface,String>{
         let mut surface = Surface::solid();
-        if !state.open || state.city_info || state.poll_info {
+        if !state.body_open() || state.city_info || state.poll_info {
             return Ok(surface);
         }
+        let selected=state.world_selected()?;
         for building in &scene.inspection_buildings {
-            let base = owner_color(&self.owner_palette, building.saved_owner_character)?;
+            let base=if let Some(colors)=colors {
+                let slot=building.runtime_slot.or(building.saved_slot).ok_or("D footprint has no actual600-slot identity")?;
+                *colors.get(slot).ok_or("D footprint slot leaves600-record arena")?
+            }else{owner_color(&self.owner_palette,building.saved_owner_character)?};
             let color = if let Some(business) = building.business() {
                 if state.commodity {
-                    let mask = scene
+                    let mask = if let Some(native)=&state.strategic_state{
+                        let row=native.input.catalog.rows().get(business.business_type as usize)
+                            .ok_or("C current footprint business type outside actual catalog")?;
+                        u32::from_le_bytes(row[0x70..0x74].try_into().unwrap())
+                    }else{scene
                         .saved_business_catalog
                         .as_ref()
                         .and_then(|c| c.rows().get(business.business_type as usize))
                         .map(|r| u32::from_le_bytes(r[0x70..0x74].try_into().unwrap()))
-                        .unwrap_or(0);
-                    commodity_color(base, mask, state.selected, 0)
+                        .unwrap_or(0)};
+                    commodity_color(base, mask, selected, 0)
                 } else {
-                    type_color(base, business.business_type, state.selected, 0)
+                    type_color(base, business.business_type, selected, 0)
                 }
             } else {
                 0xffffffff
@@ -3168,6 +3185,7 @@ impl Assets {
         }
         Ok(surface)
     }
+    pub(crate) fn refresh_extents(&self)->[usize;2]{[self.visible(),self.owned_visible()]}
     fn visible(&self) -> usize {
         ((self.list[3] - self.list[1]) / 10.) as usize
     }
@@ -3191,7 +3209,7 @@ impl Assets {
             || state.polls.is_some() && inside(p, [5.6, 125.6, 28.8, 148.8])
             || !state.player.players.is_empty() && inside(p, [5.6, 77.6, 28.8, 100.8])
             || state.saved_panels && inside(p, [5.6, 101.6, 28.8, 124.8])
-            || state.open && inside(p, [4.8, 4.8, self.bounds[2], self.bounds[3]])
+            || state.body_open() && inside(p, [4.8, 4.8, self.bounds[2], self.bounds[3]])
     }
     fn hit(&self, state: &Locator, p: [i32; 2]) -> Action {
         let p = p.map(|x| x as f32 * 0.5);
@@ -3207,7 +3225,7 @@ impl Assets {
         if state.saved_panels && inside(p, [5.6, 101.6, 28.8, 124.8]) {
             return Action::Toggle;
         }
-        if state.open && state.city_info {
+        if state.body_open() && state.city_info {
             if state.prestige_mode && inside(p, [32., 74., 187., 244.]) {
                 let row = state.ownership_scroll + ((p[1] - 74.) / 10.) as usize;
                 if let Some(crate::city_prestige::Row::Block(category)) =
@@ -3254,7 +3272,7 @@ impl Assets {
                 return Action::CityMode(3);
             }
         }
-        if !state.open || state.city_info || state.poll_info {
+        if !state.body_open() || state.city_info || state.poll_info {
             return Action::None;
         }
         if state.player_info {
@@ -3349,6 +3367,7 @@ fn tutorial_control(action: Action) -> Option<u32> {
     }
 }
 pub struct Locator {
+    strategic_state:Option<strategic::State>,
     saved_panels: bool,
     catalog: Option<BusinessCatalog>,
     city_info: bool,
@@ -3396,12 +3415,24 @@ fn remap_scroll<T, K: PartialEq>(old: &[T], offset: usize, new: &[T], visible: u
 }
 
 impl Locator {
+    pub(crate) fn navigation_report_mode(&self)->u32 {
+        if let Some(state)=&self.strategic_state{return state.report_mode;}
+        if self.poll_info{1}else if self.city_info {
+            if self.prestige_mode{2}else if self.rights_mode{4}else if self.ownership_mode{3}else{0}
+        }else{0}
+    }
     /// Apply only presentation choices to a fully attached authoritative snapshot.
     pub fn retain_ui_from(&mut self, old: &Self, assets: &Assets, old_scene: &Scene, scene: &Scene) -> Result<(), String> {
+        self.retain_refresh_ui_from(old, assets.refresh_extents(),
+            &old_scene.inspection_buildings, &scene.inspection_buildings)
+    }
+    pub(crate) fn retain_refresh_ui_from(&mut self, old:&Self, extents:[usize;2],
+        old_scene:&[openmt2001::render_scene::InspectionBuilding],
+        scene:&[openmt2001::render_scene::InspectionBuilding])->Result<(),String>{
         // A building row is identified by its runtime slot, not its scene index.
-        let owned_key = |row: &OwnedRow, scene: &Scene| -> Option<(bool, usize)> {
+        let owned_key = |row: &OwnedRow, scene: &[openmt2001::render_scene::InspectionBuilding]| -> Option<(bool, usize)> {
             match row.building {
-                Some(index) => scene.inspection_buildings.get(index)?.runtime_slot
+                Some(index) => scene.get(index)?.runtime_slot
                     .map(|slot| (true, slot)),
                 None if row.label != u32::MAX => Some((false, row.label as usize)),
                 None => None,
@@ -3409,8 +3440,8 @@ impl Locator {
         };
         let anchor = old.owned_rows.get(old.owned_scroll).and_then(|r| owned_key(r, old_scene));
         let scroll = anchor.and_then(|key| self.owned_rows.iter().position(|r| owned_key(r, scene) == Some(key)))
-            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(assets.owned_visible()));
-        self.retain_ui_choices(old, assets.visible(), assets.owned_visible())?;
+            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(extents[1]));
+        self.retain_ui_choices(old, extents[0], extents[1])?;
         self.owned_scroll = scroll;
         Ok(())
     }
@@ -3501,6 +3532,7 @@ impl Locator {
     /// Original4138b0 walks eligible blocks then their linked buildings, keeping
     /// only businesses owned by the current manager (462ae0).
     pub fn refresh_scene(&mut self, scene: &Scene) {
+        if self.strategic_state.is_some(){return;} //owned rows update in the synchronous native callback
         let mut rows = Vec::new();
         if let Some(current) = self.player.current {
             for category in 0..52 {
@@ -5449,10 +5481,11 @@ mod tests {
 mod property_panel_tests;
 
 #[cfg(test)]
-mod refresh_ui_tests {
+pub(crate) mod refresh_ui_tests {
     use super::*;
-    fn fresh() -> Locator {
+    pub(crate) fn fresh() -> Locator {
         Locator {
+            strategic_state:None,
             city_info: false,
             city_people: None,
             people_mode: 0,

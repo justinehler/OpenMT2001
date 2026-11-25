@@ -214,6 +214,23 @@ pub(crate) fn saved_command(packet: &[u8]) -> Result<openmt2001::live_commands::
 }
 
 impl<'data> Session<'data> {
+    ///Exact4bb0d0 source helper, when the containing load owns a synchronous
+    ///UI-mode callback. The legacy bulk loader below explicitly lacks this
+    ///join; it is not admitted by saved mode or auction-presence inference.
+    pub(crate) fn restore_source_timing400<F:FnMut(&mut Self,i32)->Result<(),String>>(&mut self,payload:&[u8],process:&crate::live_host::process_runtime::Handle,
+        change_mode:F)->Result<(),String>{
+        struct Loan<'a,'data,F>{session:&'a mut Session<'data>,change:F}
+        let result=crate::intro::camera_live::process_lifetime::restore_timing400(payload,
+            &mut Loan{session:self,change:change_mode},
+            |loan,index,value|{loan.session.world.clock.timing[index]=value;Ok(())},
+            |loan|loan.session.roster.status.current_player!=0,
+            |loan,mode|(loan.change)(loan.session,mode));
+        match result {
+            Ok(())=>process.source_timing_completed().map_err(|e|e.to_string()),
+            Err(error)=>{process.source_timing_mode_unjoined().map_err(|e|e.to_string())?;Err(error)}
+        }
+    }
+
     /// The 45110e command11 branch for one isolated due-now 0x4000 record.
     /// This bounded case uses the original zero-detail model1744, so
     /// 4450a0 -> 485520 returns without renderer replacement. Other models

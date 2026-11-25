@@ -10,6 +10,7 @@ fn pose(mark: u32) -> Pose {
 }
 fn observation(boundary: Boundary, mark: u32) -> Observation {
     Observation {
+            strategic_writeback:None,finalization_fault:None,
         current: pose(mark),
         sampled: matches!(boundary, Boundary::Sample(_)).then(|| pose(mark.wrapping_add(2))),
         task_effects: vec![],
@@ -21,6 +22,7 @@ fn install() -> Operation {
     let mut records = [[0xa5; 196], [0x5a; 196]];
     records[0][..4].copy_from_slice(&u32::MAX.to_le_bytes());
     Operation::Install {
+        property:None,
         capture: Capture::from_records(records),
         admission: Admission::default(),
     }
@@ -42,7 +44,9 @@ fn inject(
             reply,
         })
         .unwrap();
-    (inbox.try_service(apply), response.recv().unwrap())
+    (inbox.try_service(apply), match response.recv().unwrap(){
+        Reply::Complete(result)=>result.map_err(|error|error.to_string()), Reply::Session(_)=>panic!("unexpected callback in camera-only fixture"),
+    })
 }
 
 #[test]
@@ -228,7 +232,7 @@ fn dropped_inbox_or_reply_never_falls_back() {
 
 #[test]
 fn forged_ack_identity_or_boundary_is_rejected() {
-    for field in 0..3 {
+    for field in 0..4 {
         let (mut worker, inbox) = channel(7);
         let server = std::thread::spawn(move || {
             let request = inbox.receiver.recv().unwrap();
@@ -237,13 +241,15 @@ fn forged_ack_identity_or_boundary_is_rejected() {
                 sequence: request.sequence,
                 boundary: Boundary::Install,
                 observation: observation(Boundary::Install, 1),
+                subcalls:0,
             };
             match field {
                 0 => ack.generation += 1,
                 1 => ack.sequence += 1,
-                _ => ack.boundary = Boundary::CurrentPose,
+                2 => ack.boundary = Boundary::CurrentPose,
+                _ => ack.subcalls += 1,
             }
-            request.reply.send(Ok(ack)).unwrap();
+            request.reply.send(Reply::Complete(Ok(ack))).unwrap();
         });
         assert!(
             worker
@@ -564,12 +570,13 @@ fn forged_ack_remains_failure_when_explicit_retirement_races_receipt() {
             .unwrap();
         request
             .reply
-            .send(Ok(Ack {
+            .send(Reply::Complete(Ok(Ack {
                 generation: 999,
                 sequence: request.sequence,
                 boundary: Boundary::Install,
                 observation: observation(Boundary::Install, 0),
-            }))
+                subcalls:0,
+            })))
             .unwrap();
         inbox.retire();
     });
@@ -592,4 +599,29 @@ fn unexpected_drop_is_typed_failure_and_never_sets_retirement() {
     assert!(matches!(&error, RequestError::Failed(message) if message.contains("disconnected")));
     assert!(!worker.retired());
     assert_eq!(worker.request(install()), Err(error));
+}
+
+#[test]
+fn completed_fault_direct_ack_survives_retirement_and_latches_real_failure(){
+    let (mut worker,mut inbox)=channel(802);
+    let client=std::thread::spawn(move||{
+        worker.request(install()).unwrap();
+        let completed=worker.request(Operation::CentralTail{admission:Admission::default()}).unwrap();
+        assert_eq!(completed.task_effects,vec![TaskEffect::ClearElapsed]);
+        assert_eq!(completed.finalization_fault.as_deref(),Some("late extractor failed"));
+        assert_eq!(worker.request(Operation::CurrentPose),Err(RequestError::Failed("late extractor failed".into())));
+    });
+    inbox.wait_service(std::time::Duration::from_secs(2),|_|Ok(observation(Boundary::Install,1))).unwrap();
+    let result=inbox.wait_service(std::time::Duration::from_secs(2),|_|{
+        let mut o=observation(Boundary::CentralTail,2);o.task_effects.push(TaskEffect::ClearElapsed);
+        o.finalization_fault=Some("late extractor failed".into());Ok(o)
+    });
+    assert_eq!(result,Err("late extractor failed".into()));inbox.retire();client.join().unwrap();
+}
+#[test]
+fn completion_fault_is_rejected_outside_protected_completion(){
+    for boundary in [Boundary::Admission,Boundary::Apply,Boundary::CurrentPose,Boundary::Sample(0)]{
+        let mut o=observation(boundary,1);o.finalization_fault=Some("wrong boundary".into());
+        assert!(validate_observation(boundary,&o).is_err());
+    }
 }

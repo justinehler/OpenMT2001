@@ -15,8 +15,16 @@ pub struct Assets {
 }
 
 impl Assets {
-    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path)
-        -> Result<Self, String> {
+    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, None)
+    }
+    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, Some(shared))
+    }
+    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
+        let (pages,tab,credit_heading_pages,credit_heading_tab) = if let Some(shared)=shared {
+            (shared.surfaces(4)?,shared.table(4)?.to_vec(),shared.surfaces(3)?,shared.table(3)?.to_vec())
+        } else {
         let entry = index.find("gamedata2/font640/textures.gtd")
             .ok_or("result font archive missing")?;
         let set = TextureSet::parse(archive.get(entry.offset as usize..(entry.offset + entry.length) as usize)
@@ -35,18 +43,14 @@ impl Assets {
         let credit_heading_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
             .map_err(|e| e.to_string())?;
         openmt2001::font::Font::parse(&credit_heading_tab)?;
-        let off = fs::read(language.join("tycoon.off")).map_err(|e| e.to_string())?;
-        let bin = fs::read(language.join("tycoon.bin")).map_err(|e| e.to_string())?;
-        if !off.len().is_multiple_of(2) { return Err("result language offsets truncated".into()); }
-        let mut at = 0usize;
-        let mut strings = Vec::with_capacity(off.len() / 2);
-        for length in off.chunks_exact(2) {
-            let end = at.checked_add(usize::from(u16::from_le_bytes(length.try_into().unwrap())))
-                .ok_or("result language length overflow")?;
-            strings.push(bin.get(at..end).ok_or("result language entry range")?.to_vec());
-            at = end;
-        }
-        if at != bin.len() { return Err("result language trailing bytes".into()); }
+            (pages,tab,credit_heading_pages,credit_heading_tab)
+        };
+        let loaded;
+        let packed = match shared {
+            Some(text) => &text.fonts().language,
+            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+        };
+        let strings = packed.rows().into_iter().map(<[u8]>::to_vec).collect();
         Ok(Self { pages, tab, credit_heading_pages, credit_heading_tab, strings })
     }
 

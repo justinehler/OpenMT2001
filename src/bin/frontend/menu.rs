@@ -53,16 +53,15 @@ pub struct Assets {
 }
 impl Assets {
     #[allow(clippy::too_many_arguments)] // Independent original-input roots and V2 output roots.
-    pub fn load(
-        index: &ArchiveIndex,
-        archive: &[u8],
-        installer: &Path,
-        language: &Path,
-        scripts: &Path,
-        profile_root: std::path::PathBuf,
-        save_root: std::path::PathBuf,
-        executable: &[u8],
-    ) -> Result<Self, String> {
+    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, scripts: &Path, profile_root: std::path::PathBuf, save_root: std::path::PathBuf, executable: &[u8]) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, scripts, profile_root, save_root, executable, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, scripts: &Path, profile_root: std::path::PathBuf, save_root: std::path::PathBuf, executable: &[u8], shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, scripts, profile_root, save_root, executable, Some(shared))
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, scripts: &Path, profile_root: std::path::PathBuf, save_root: std::path::PathBuf, executable: &[u8], shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index
                 .find(name)
@@ -99,30 +98,27 @@ impl Assets {
             );
             base.push(s);
         }
-        let fonts = TextureSet::parse(payload("gamedata2\\font640\\textures.gtd")?)
+        let (fonts,tab) = if let Some(shared)=shared {
+            (shared.surfaces(4)?,shared.table(4)?.to_vec())
+        } else {
+            let fonts = TextureSet::parse(payload("gamedata2\\font640\\textures.gtd")?)
             .map_err(|e| e.to_string())?
             .textures[8..10]
             .iter()
             .map(Surface::new)
             .collect();
-        let tab = fs::read(installer.join("Standard/fonts/coppgoth23p.tab"))
+            let tab = fs::read(installer.join("Standard/fonts/coppgoth23p.tab"))
             .map_err(|e| e.to_string())?;
-        let off = fs::read(language.join("tycoon.off")).map_err(|e| e.to_string())?;
-        let bin = fs::read(language.join("tycoon.bin")).map_err(|e| e.to_string())?;
-        if !off.len().is_multiple_of(2) {
-            return Err("incomplete language offsets".into());
-        }
-        let mut strings = vec![];
-        let mut offset = 0;
-        for n in off.chunks_exact(2) {
-            let end = offset + u16::from_le_bytes(n.try_into().unwrap()) as usize;
-            strings.push(bin.get(offset..end).ok_or("language length")?);
-            offset = end;
-        }
-        if offset != bin.len() {
-            return Err("language lengths do not cover text data".into());
-        }
-        let localized = crate::tooltip::localized_strings(installer, &strings)?;
+            (fonts,tab)
+        };
+        let loaded;
+        let packed = match shared {
+            Some(text) => &text.fonts().language,
+            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+        };
+        let strings = packed.rows();
+        let localized = if shared.is_some() { strings.iter().map(|s|s.to_vec()).collect() }
+            else { crate::tooltip::localized_strings(installer, &strings)? };
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
         for block in
             openmt2001::board::Board::from_v14(&openmt2001::pe::PeImage::parse(executable)?)?.blocks

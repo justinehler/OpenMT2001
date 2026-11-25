@@ -400,13 +400,13 @@ pub struct Assets {
     backing_color: u32,
 }
 impl Assets {
-    pub fn load(
-        index: &ArchiveIndex,
-        archive: &[u8],
-        installer: &Path,
-        language: &Path,
-        executable: &[u8],
-    ) -> Result<Self, String> {
+    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8]) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, executable, None)
+    }
+    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8], shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, executable, Some(shared))
+    }
+    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8], shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
         let entry = index
             .find(PANEL)
             .ok_or("Original top-right panel missing")?;
@@ -481,6 +481,9 @@ impl Assets {
                 .get(82)
                 .ok_or("Original Options button texture missing")?,
         );
+        let (font_pages,tab,button_pages,button_tab) = if let Some(shared)=shared {
+            (shared.surfaces(2)?,shared.table(2)?.to_vec(),shared.surfaces(3)?,shared.table(3)?.to_vec())
+        } else {
         let font_entry = index
             .find("gamedata2/font640/textures.gtd")
             .ok_or("Original UI font texture missing")?;
@@ -494,21 +497,17 @@ impl Assets {
             .map_err(|e| e.to_string())?;
         let button_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
             .map_err(|e| e.to_string())?;
-        let off = fs::read(language.join("tycoon.off")).map_err(|e| e.to_string())?;
-        let bin = fs::read(language.join("tycoon.bin")).map_err(|e| e.to_string())?;
-        let mut cursor = 0usize;
-        let rows = off
-            .chunks_exact(2)
-            .map(|length| {
-                let end = cursor + usize::from(u16::from_le_bytes(length.try_into().unwrap()));
-                let row = bin
-                    .get(cursor..end)
-                    .ok_or("Time language row outside data")?;
-                cursor = end;
-                Ok(row)
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        let localized = crate::tooltip::localized_strings(installer, &rows)?;
+            (font.textures.get(4..6).ok_or("shared font2 pages missing")?.iter().map(Surface::new).collect(),tab,
+                font.textures.get(6..8).ok_or("shared font3 pages missing")?.iter().map(Surface::new).collect(),button_tab)
+        };
+        let loaded;
+        let packed = match shared {
+            Some(text) => &text.fonts().language,
+            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+        };
+        let rows = packed.rows();
+        let localized = if shared.is_some() { rows.iter().map(|s|s.to_vec()).collect() }
+            else { crate::tooltip::localized_strings(installer, &rows)? };
         let row = |i| {
             localized
                 .get(i)
@@ -537,9 +536,9 @@ impl Assets {
             speed_bounds,
             options_button,
             generic: generic.textures.iter().map(Surface::new).collect(),
-            font: font.textures[4..6].iter().map(Surface::new).collect(),
+            font: font_pages,
             tab,
-            button_font: font.textures[6..8].iter().map(Surface::new).collect(),
+            button_font: button_pages,
             button_tab,
             am_pm: [row(1374)?, row(1375)?],
             options: row(1115)?,
@@ -599,6 +598,22 @@ impl Assets {
         let surfaces = self.surfaces_with_controls(display, true, None, None)?;
         renderer.refresh_prepared(prepared,
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(), VIEW, None)
+    }
+    fn split_surfaces(&self,display:Display<'_>,normal:bool,hover:Option<Button>,
+        pressed:Option<Button>)->Result<(Vec<Surface>,Vec<Surface>),String>{
+        let speed=display.speed;
+        let clock=self.surfaces_with_controls(display,false,hover,pressed)?;
+        let mut bottom=Vec::new();
+        if normal {
+            for (texture,bounds) in bottom_controls_with_state(self.manager_bounds,self.speed_bounds,
+                speed==4,hover,pressed){
+                let mut surface=self.generic.get(texture).ok_or("Bottom texture missing")?.clone();
+                let [l,t,r,b]=bounds;
+                surface.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+                bottom.push(surface);
+            }
+        }
+        Ok((clock,bottom))
     }
     fn surfaces_with_controls(
         &self, display: Display<'_>, normal: bool,
@@ -802,6 +817,11 @@ pub struct View {
     key: Option<ViewKey>,
     clock: ClockState,
     pub prepared: Option<PreparedScene>,
+    pub(crate) bottom_prepared:Option<PreparedScene>,
+    graph_bottom_visible:bool,
+    graph_clock_visible:bool,
+    graph_speed_disabled:bool,
+    graph_speed_blink:u8,
     hover: Option<Button>,
     pressed: Option<Button>,
     click_latched: Option<Button>,
@@ -812,6 +832,11 @@ impl View {
     pub fn displayed_name(&self) -> Option<&str> {
         self.key.as_ref().map(|key| key.4.as_str())
     }
+    ///Actual generic child phase3: clear hover and one-shot, retain down334.
+    pub(crate) fn leave_child(&mut self,button:Button) {
+        if self.hover==Some(button){self.hover=None;self.key=None;}
+        if self.click_latched==Some(button){self.click_latched=None;self.key=None;}
+    }
     pub fn cancel_input(&mut self) {
         if self.hover.take().is_some() || self.pressed.take().is_some()
             || self.click_latched.take().is_some() {
@@ -819,6 +844,21 @@ impl View {
         }
         self.pressed = None;
         self.click_latched = None;
+    }
+    ///Clock Options is57e77c; Speed/Manager are E57e764.
+    pub(crate) fn graph_button(&self,assets:&Assets,point:[f32;2],auction:bool)->Option<Button>{
+        assets.button_in_mode(point,auction).filter(|button| match button {
+            Button::Options=>self.graph_clock_visible,
+            Button::Speed=>self.graph_bottom_visible&&!self.graph_speed_disabled,
+            Button::Manager=>self.graph_bottom_visible,
+        })
+    }
+    pub(crate) fn graph_cursor(&mut self,hit:Option<Button>,held:bool)->Option<Button>{
+        self.hover_held(hit,held)
+    }
+    pub(crate) fn graph_gates(&mut self,clock:bool,bottom:bool,speed_disabled:bool,blink:u8){
+        self.graph_clock_visible=clock;self.graph_bottom_visible=bottom;
+        self.graph_speed_disabled=speed_disabled;self.graph_speed_blink=blink;
     }
     pub fn cursor(&mut self, assets: &Assets, point: Option<[f32; 2]>, auction: bool) {
         let hit = point.and_then(|point| assets.button_in_mode(point, auction));
@@ -916,6 +956,15 @@ impl View {
         key.0 = clock.year; key.1 = clock.hour;
         key.2 = clock.fraction; key.3 = clock.speed;
         self.render_key(assets, renderer, key)
+    }
+    pub(crate) fn prepare_graph(&mut self,assets:&Assets,renderer:&Renderer)->Result<(),String>{
+        let Some(key)=self.key.as_ref()else{self.prepared=None;self.bottom_prepared=None;return Ok(());};
+        let (clock,bottom)=assets.split_surfaces(Display{year:key.0,hour:key.1,fraction:key.2,
+            speed:key.3,name:&key.4,cash:key.5.map(f32::from_bits),character:key.6,cash_icon_phase:key.7},
+            self.normal,self.hover,self.pressed.filter(|button|self.hover==Some(*button)))?;
+        self.prepared=if self.graph_clock_visible{Some(renderer.prepare(&clock.iter().map(Surface::draw).collect::<Vec<_>>(),VIEW,None)?)}else{None};
+        self.bottom_prepared=if self.graph_bottom_visible{Some(renderer.prepare(&bottom.iter().map(Surface::draw).collect::<Vec<_>>(),VIEW,None)?)}else{None};
+        Ok(())
     }
     fn render_key(&mut self, assets: &Assets, renderer: &Renderer,
         key: ViewKey) -> Result<(), String> {

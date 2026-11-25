@@ -14,6 +14,7 @@ pub enum Command {
     Prompt,
     TutorialDisableAllControls,
     TutorialDisableAllPicking,
+    TutorialEnableAllPicking,
     TutorialDisableCameraControl,
     TutorialArrow,
     TutorialMessage,
@@ -178,7 +179,7 @@ impl Bindings {
         self.selected_objective.bind(level);
     }
 
-    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..745. Host buffers
+    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..746. Host buffers
     /// registered with Runtime::script_buffer satisfy nested C_RunScript calls.
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
         register_calendar(vm)?;
@@ -358,6 +359,7 @@ impl Bindings {
         // Native 4dc4a7, 4dc5ec and 4dc605 bind the three Tutorial 2
         // position/picking methods to 4db740, 4db970 and 4db9e0.
         vm.register_coerced("TutorialPositionPrompt", 731, "NN")?;
+        vm.register("TutorialEnableAllPicking",746)?;
         vm.register_coerced("TutorialEnableBlockPicking", 732, "N")?;
         vm.register_coerced("TutorialEnableBuildingPicking", 733, "N")?;
         //4dac40: two tonumber arguments and a lua_isnumber-gated third.
@@ -365,7 +367,7 @@ impl Bindings {
         vm.register_coerced("SetObjective", 4, "nnN")?;
         vm.execute(
             "Game bindings",
-            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
+            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,EnableAll3DPicking=TutorialEnableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
             &mut |_, _| Err("unexpected binding callback".into()),
         )?;
         vm.register_script_loader("C_RunScript")?;
@@ -582,6 +584,7 @@ impl Bindings {
                 Ok(None)
             }
             708 => Err("Random.ZeroTo requires its live result RNG owner".into()),
+            746=>{hooks.command(Command::TutorialEnableAllPicking,arguments)?;Ok(None)}
             720..=733 => {
                 let command = match id {
                     720 => Command::TutorialDisableAllControls,

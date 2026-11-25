@@ -242,6 +242,50 @@ fn apartment_numeric_controls(
         Ok((crate::business_edit::Action::Rent { increase }, bounds))
     }).collect()
 }
+/// Borrowed authoritative refresh inputs; no renderer or retained owner is consumed.
+#[derive(Clone, Copy)]
+pub(crate) struct RefreshScene<'a> {
+    pub buildings: &'a [openmt2001::render_scene::InspectionBuilding],
+    pub catalog: Option<&'a openmt2001::business_pool::BusinessCatalog>,
+    pub commodities: Option<&'a [[u8; 0x1c]; 32]>,
+}
+impl<'a> From<&'a Scene> for RefreshScene<'a> {
+    fn from(scene: &'a Scene) -> Self {
+        Self { buildings: &scene.inspection_buildings,
+            catalog: scene.saved_business_catalog.as_ref(),
+            commodities: scene.saved_commodity_rows.as_ref() }
+    }
+}
+/// All fallible decoding is complete. Commit preserves the actual State's
+/// channels, pending edits and control owners unless admission changed.
+pub(crate) struct PreparedRefresh { fresh: State, admission_changed: bool }
+impl PreparedRefresh {
+    pub(crate) fn commit(self, state: &mut State) {
+        let Self { fresh, admission_changed } = self;
+        if admission_changed {
+            state.cancel_press();
+            state.edit_request = None;
+            state.edit_pending = None;
+            state.edit_inflight = None;
+            state.close_after_apply = false;
+            state.requested_building = None;
+            state.tutorial_control = None;
+            state.tutorial_producer = None;
+        }
+        state.building = fresh.building;
+        state.edit_target = fresh.edit_target;
+        state.rows = fresh.rows;
+        state.apartment = fresh.apartment;
+        state.name = fresh.name;
+        state.block_name = fresh.block_name;
+        state.owner_color = fresh.owner_color;
+        state.initialized = fresh.initialized;
+        state.navigation = fresh.navigation;
+        state.dirty_terms = fresh.dirty_terms;
+        state.prepared = None;
+        state.dirty = true;
+    }
+}
 pub struct State {
     pub edit_target: Option<crate::business_edit::Target>,
     pub edit_request: Option<crate::business_edit::Action>,
@@ -544,16 +588,16 @@ fn inspection_record(
                 .map(|b| (b.slot, &b.record))
         })
 }
-fn business_navigation(scene: &Scene, owner: u8, kind: u8) -> Vec<usize> {
+fn business_navigation(scene: RefreshScene<'_>, owner: u8, kind: u8) -> Vec<usize> {
     let records = scene
-        .inspection_buildings
+        .buildings
         .iter()
         .filter_map(inspection_record);
     business_order(records, owner, kind)
         .iter()
         .map(|slot| {
             scene
-                .inspection_buildings
+                .buildings
                 .iter()
                 .position(|b| inspection_record(b).is_some_and(|(id, _)| id == *slot))
                 .unwrap()
@@ -572,10 +616,15 @@ impl Assets {
         building: usize,
         owner: Option<u8>,
     ) -> Result<Option<State>, String> {
-        let mut state = self.open(scene, building)?;
+        self.open_for_owner_view(scene.into(), building, owner)
+    }
+    pub(crate) fn open_for_owner_view(
+        &self, scene: RefreshScene<'_>, building: usize, owner: Option<u8>,
+    ) -> Result<Option<State>, String> {
+        let mut state = self.open_view(scene, building)?;
         if let Some(state) = &mut state {
             let editable = scene
-                .inspection_buildings
+                .buildings
                 .get(building)
                 .and_then(inspection_record)
                 .is_some_and(|(_, record)| owner == Some(record[10]));
@@ -595,13 +644,21 @@ impl Assets {
         state: &mut State,
         owner: Option<u8>,
     ) -> Result<bool, String> {
-        let Some(old) = previous.inspection_buildings.get(state.building) else {
-            return Ok(false);
+        let prepared = self.prepare_refresh(scene.into(), &previous.inspection_buildings, state, owner)?;
+        if let Some(prepared) = prepared { prepared.commit(state); Ok(true) } else { Ok(false) }
+    }
+    pub(crate) fn prepare_refresh(
+        &self, scene: RefreshScene<'_>,
+        previous: &[openmt2001::render_scene::InspectionBuilding],
+        state: &State, owner: Option<u8>,
+    ) -> Result<Option<PreparedRefresh>, String> {
+        let Some(old) = previous.get(state.building) else {
+            return Ok(None);
         };
         let Some((business, old_record)) = inspection_record(old) else {
-            return Ok(false);
+            return Ok(None);
         };
-        let Some(building) = scene.inspection_buildings.iter().position(|candidate| {
+        let Some(building) = scene.buildings.iter().position(|candidate| {
             let same_building = if let Some(slot) = old.runtime_slot {
                 candidate.runtime_slot == Some(slot)
             } else if let Some(slot) = old.saved_slot {
@@ -611,41 +668,19 @@ impl Assets {
             };
             same_building && inspection_record(candidate).is_some_and(|(slot, _)| slot == business)
         }) else {
-            return Ok(false);
+            return Ok(None);
         };
-        let Some(mut fresh) = self.open_for_owner(scene, building, owner)? else {
-            return Ok(false);
+        let Some(mut fresh) = self.open_for_owner_view(scene, building, owner)? else {
+            return Ok(None);
         };
-        let new_record = inspection_record(&scene.inspection_buildings[building]).unwrap().1;
+        let new_record = inspection_record(&scene.buildings[building]).unwrap().1;
         let admission_changed = old_record[..8] != new_record[..8]
             || old_record[10] != new_record[10]
             || state.edit_target.is_some() != fresh.edit_target.is_some();
-        if admission_changed {
-            state.cancel_press();
-            state.edit_request = None;
-            state.edit_pending = None;
-            state.edit_inflight = None;
-            state.close_after_apply = false;
-            state.requested_building = None;
-            state.tutorial_control = None;
-            state.tutorial_producer = None;
-        }
         if let (Some(old), Some(new)) = (&state.apartment, &mut fresh.apartment) {
             *new = Apartment::from_record(new_record, old.modes[0], old.modes[1])?;
         }
-        state.building = building;
-        state.edit_target = fresh.edit_target;
-        state.rows = fresh.rows;
-        state.apartment = fresh.apartment;
-        state.name = fresh.name;
-        state.block_name = fresh.block_name;
-        state.owner_color = fresh.owner_color;
-        state.initialized = fresh.initialized;
-        state.navigation = fresh.navigation;
-        state.dirty_terms = fresh.dirty_terms;
-        state.prepared = None;
-        state.dirty = true;
-        Ok(true)
+        Ok(Some(PreparedRefresh { fresh, admission_changed }))
     }
     fn edit_controls(&self, state: &State) -> Vec<(crate::business_edit::Action, [f32; 4])> {
         use crate::business_edit::Action;
@@ -846,8 +881,11 @@ impl Assets {
         })
     }
     pub fn open(&self, scene: &Scene, building: usize) -> Result<Option<State>, String> {
+        self.open_view(scene.into(), building)
+    }
+    fn open_view(&self, scene: RefreshScene<'_>, building: usize) -> Result<Option<State>, String> {
         let b = scene
-            .inspection_buildings
+            .buildings
             .get(building)
             .ok_or("adjustment building index")?;
         let Some((_, record)) = inspection_record(b) else {
@@ -909,12 +947,10 @@ impl Assets {
             return Ok(None);
         }
         let info = scene
-            .saved_business_catalog
-            .as_ref()
+            .catalog
             .ok_or("saved BusinessInfo missing")?;
         let commodities = scene
-            .saved_commodity_rows
-            .as_ref()
+            .commodities
             .ok_or("saved commodities missing")?;
         let products = self
             .products
@@ -1800,4 +1836,15 @@ mod tests {
         }
         assert_eq!(at, bytes.len());
     }
+}
+
+#[cfg(test)]
+pub(crate) fn refresh_assets_fixture() -> Assets {
+    // The refresh path reads only owner_colors, products and block_names.
+    Assets { base: vec![], retail_bounds: vec![], apartment_bounds: vec![],
+        body_color: 0, owner_colors: [0; 10], apartment_base: vec![],
+        apartment_regions: vec![], fonts: vec![], tab: vec![], strings: vec![],
+        regions: vec![], products: vec![], buttons: vec![], arrows: vec![],
+        retail_numeric: vec![], apartment_numeric: vec![], numeric_arrows: vec![],
+        block_names: vec![0; 52] }
 }

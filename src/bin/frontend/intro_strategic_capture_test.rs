@@ -12,6 +12,7 @@ fn capture_saved_preview_manager_stats() {
         let parameter=PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let inputs=SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,style:test_board_style(&executable),time_runtime:Default::default(),
             profile_root:PathBuf::from("work/frontend/stats-capture-profile"),
             character_names:crate::fresh_city::character_names(&openmt2001::pe::PeImage::parse(&executable).unwrap(),&language).unwrap(),
@@ -66,6 +67,7 @@ fn capture_saved_preview_strategic_composition() {
         let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let inputs = SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable),
             time_runtime: Default::default(),

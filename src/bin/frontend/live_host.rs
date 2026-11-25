@@ -1,8 +1,12 @@
 //! Host controls for the retained session. A failed simulation boundary latches
 //! a stop: resuming must never replay a partially completed original tick.
 pub mod auction_audio;
+#[path = "live_host/process_runtime.rs"]
+pub mod process_runtime;
 #[path = "live_host/camera_bridge.rs"]
 pub mod camera_bridge;
+#[path = "live_host/camera_session_service.rs"]
+mod camera_session_service;
 use crate::{
     fresh_city::{self, CommandAssets, Session},
     prompt,
@@ -30,6 +34,7 @@ pub struct Status {
     /// Current original 4112a0 resident counts and ratios for the City tab.
     pub city_people_rows: Option<Vec<crate::city_people::Row>>,
     pub tutorial_controls: TutorialControls,
+    pub source_picking:Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
     pub tutorial_message: Option<prompt::Request>,
     pub tutorial_enabled_controls: Vec<u32>,
@@ -124,9 +129,25 @@ pub struct Auction {
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum StatsAction { Open, Close, Cycle(bool), Toggle(usize) }
 
+/// Caller chooses the actual install path. CameraOnly does not capture C
+/// tables/inputs or fabricate F globals for an inactive ordinary UI graph.
+pub enum CameraSupplierPolicy {
+    CameraOnly,
+    Graph { upper:crate::navigator::upper::Producer },
+}
+enum CameraSuppliers {
+    CameraOnly,
+    Graph { tables:std::sync::Arc<crate::locator::strategic::Tables>,
+        upper:crate::navigator::upper::Producer },
+}
+
 pub struct Host {
+    //Missing process source is explicit for legacy CPU Hosts. Production binds
+    //the SAME Assets-born handle before commands/startup are consumed.
+    pub process_runtime:Option<process_runtime::Handle>,
     /// None retains existing callers. Installation is an explicit ack barrier.
     camera_bridge: Option<camera_bridge::Worker>,
+    camera_suppliers:Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
@@ -289,7 +310,9 @@ impl Host {
 
     pub fn new(camera: [f32; 3]) -> Self {
         Self {
+            process_runtime:None,
             camera_bridge: None,
+            camera_suppliers:None,
             time_runtime: Default::default(),
             presentation_started: false,
             game_active: false,
@@ -394,6 +417,8 @@ impl Host {
     }
     fn camera_admission(&self, session: &Session<'_>) -> camera_bridge::Admission {
         camera_bridge::Admission {
+            strategic:None,
+            upper:None,
             tutorial_session: session.tutorial_state == 1,
             all_disabled: self.tutorial_controls.all_disabled,
             camera_disabled: self.tutorial_controls.camera_disabled,
@@ -405,9 +430,12 @@ impl Host {
     /// dropping queued legacy events here would silently change startup history.
     pub fn install_camera_bridge(
         &mut self,
-        session: &Session<'_>,
+        session: &mut Session<'_>,
+        image:&openmt2001::pe::PeImage<'_>,
+        supplier_policy:CameraSupplierPolicy,
         mut worker: camera_bridge::Worker,
         capture: openmt2001::camera::bank::Capture,
+        pavement:crate::selection::pavement_resource::LocalPavementHandle,
     ) -> Result<(), camera_bridge::RequestError> {
         if self.failure.is_some() || self.camera_bridge.is_some() {
             return Err("Camera bridge cannot replace an installed/stopped host".into());
@@ -417,11 +445,19 @@ impl Host {
         }
         // Retain a failed endpoint too: a partially completed install cannot
         // silently fall back to legacy camera progression or be retried.
-        let result = worker.request(camera_bridge::Operation::Install {
-            capture, admission: self.camera_admission(session),
+        self.camera_suppliers=Some(match supplier_policy {
+            CameraSupplierPolicy::CameraOnly=>CameraSuppliers::CameraOnly,
+            CameraSupplierPolicy::Graph{upper}=>CameraSuppliers::Graph{
+                tables:std::sync::Arc::new(crate::locator::strategic::Tables::capture(image)?),upper},
         });
+        let admission=self.supplied_camera_admission(session,true)?;
+        let result = worker.request(camera_bridge::Operation::Install {capture,admission,property:Some(std::sync::Arc::new(camera_bridge::PropertySource::capture(session,pavement)))});
         self.camera_bridge = Some(worker);
-        match result.and_then(|observation| self.observe_camera(&observation).map_err(Into::into)) {
+        match result.and_then(|mut observation| {
+            Self::check_camera_finalization(&observation)?;
+            if let Some(writeback)=observation.strategic_writeback.take(){writeback.commit(session)?;}
+            self.observe_camera(&observation).map_err(Into::into)
+        }) {
             Ok(()) => Ok(()),
             Err(error) => { self.camera_error(error.clone()); Err(error) }
         }
@@ -432,7 +468,11 @@ impl Host {
     pub fn observe_presentation_camera(&mut self, eye:[f32;3]) {
         if self.camera_bridge.is_none() {self.policy.camera=eye;}
     }
+    fn check_camera_finalization(observation:&camera_bridge::Observation)->Result<(),String>{
+        match &observation.finalization_fault{Some(error)=>Err(error.clone()),None=>Ok(())}
+    }
     fn observe_camera(&mut self, observation: &camera_bridge::Observation) -> Result<(), String> {
+        Self::check_camera_finalization(observation)?;
         let eye = observation.current.eye.map(f32::from_bits);
         if eye.iter().any(|v| !v.is_finite()) {
             return Err("Acknowledged current camera eye is unsupported by live world consumers".into());
@@ -456,6 +496,17 @@ impl Host {
         let Some(worker) = &mut self.camera_bridge else { return Ok(None) };
         worker.request(operation).map(Some)
     }
+    /// Actual Session remains on this Host stack throughout the UI operation.
+    /// Both Worker and Session are exclusively borrowed, so a callback cannot
+    /// re-enter this request or send dependent work to the blocked Host.
+    pub(crate) fn exchange_camera_with_session(&mut self,session:&mut Session<'_>,
+        operation:camera_bridge::Operation,
+    )->Result<Option<camera_bridge::Observation>,camera_bridge::RequestError> {
+        if let Some(error)=&self.failure { return Err(error.clone().into()); }
+        let Some(worker)=&mut self.camera_bridge else { return Ok(None) };
+        let process=self.process_runtime.as_ref();
+        worker.request_with_handler(operation,|call|camera_session_service::handle_with_process(session,process,call)).map(Some)
+    }
     fn tutorial_camera_action(&mut self, session: &Session<'_>, action: TutorialCameraAction) {
         if self.camera_bridge.is_none() {
             self.tutorial_camera_events.push(action);
@@ -467,24 +518,64 @@ impl Host {
             TutorialCameraAction::CityView => camera_bridge::NativeOperation::TutorialCityView,
             TutorialCameraAction::PlanView => camera_bridge::NativeOperation::TutorialPlanView,
         };
-        let result = self.request_camera(camera_bridge::Operation::Apply {
-            operation, admission: self.camera_admission(session),
-        });
+        let result=(||{
+            let admission=self.supplied_camera_admission(session,false)?;
+            self.request_camera(camera_bridge::Operation::Apply{operation,admission})
+        })();
         if let Err(error) = result { self.camera_error(error); }
+    }
+    fn supplied_camera_admission(&self,session:&Session<'_>,protected:bool)->Result<camera_bridge::Admission,String>{
+        let mut admission=self.camera_admission(session);
+        match self.camera_suppliers.as_ref().ok_or("Camera supplier policy not installed")?{
+            CameraSuppliers::CameraOnly=>{},
+            CameraSuppliers::Graph{tables,upper}=>{
+                if protected{admission.strategic=Some(std::sync::Arc::new(
+                    crate::locator::strategic::Inputs::capture(session,tables.clone())?));}
+                admission.upper=Some(upper.capture(session)?);
+            },
+        }
+        Ok(admission)
+    }
+    ///Bind at the actual presentation policy writer; count belongs to World topology.
+    pub fn upper_presentation_mode(&mut self,mode8b2318:u32)->Result<(),String>{
+        let Some(CameraSuppliers::Graph{upper,..})=&mut self.camera_suppliers else{
+            return Err("F globals before actual graph producer install".into());
+        };
+        upper.mode8b2318=mode8b2318;Ok(())
     }
     fn camera_central_tail(&mut self, session: &mut Session<'_>) -> Result<(), camera_bridge::RequestError> {
         if self.camera_bridge.is_none() { return Ok(()) }
-        let observation = self.exchange_camera(camera_bridge::Operation::CentralTail {
-            admission: self.camera_admission(session),
-        })?;
-        if let Some(observation) = observation {
-            self.complete_camera_central(&mut session.hooks.timers, observation)?;
+        let admission=self.supplied_camera_admission(session,true)?;
+        let central=if let Some(process)=&self.process_runtime {
+            let identity=self.camera_bridge.as_ref().expect("checked camera bridge").central_identity()?;
+            Some(process.begin_central(identity).map_err(|e|e.to_string())?)
+        }else{None};
+        let exchanged=self.exchange_camera_with_session(session,camera_bridge::Operation::CentralTail{admission});
+        let mut observation=match exchanged {
+            Ok(Some(value))=>value,
+            Ok(None)=>{if let (Some(process),Some(token))=(&self.process_runtime,central){let _=process.fail_central(token);}
+                return Err("Camera bridge disappeared during admitted central".into())},
+            Err(error)=>{if let (Some(process),Some(token))=(&self.process_runtime,central){let _=process.fail_central(token);}return Err(error);}
+        };
+        {
+            //All already-committed camera effects precede fallible C/world projection.
+            Self::apply_camera_effects(&mut session.hooks.timers,&observation);
+            //A completed ack's timers survive even a later process-token/lock
+            //failure. Only this operation can satisfy its quit tail obligation.
+            if let (Some(process),Some(token))=(&self.process_runtime,central){process.complete_central_tail(token).map_err(|e|e.to_string())?;}
+            Self::check_camera_finalization(&observation)?;
+            if let Some(writeback)=observation.strategic_writeback.take(){writeback.commit(session)?;}
+            self.observe_camera(&observation)?;
         }
         Ok(())
     }
     fn complete_camera_central(&mut self, tasks: &mut [openmt2001::timers::Task],
         observation: camera_bridge::Observation) -> Result<(), String>
     {
+        Self::apply_camera_effects(tasks,&observation);
+        self.observe_camera(&observation)
+    }
+    fn apply_camera_effects(tasks:&mut [openmt2001::timers::Task],observation:&camera_bridge::Observation) {
             for effect in &observation.task_effects {
                 match *effect {
                     camera_bridge::TaskEffect::SetEnabled { mask, enabled } => {
@@ -499,7 +590,6 @@ impl Host {
                     }
                 }
             }
-        self.observe_camera(&observation)
     }
     pub fn interface_ticks(&self) -> u64 { self.interface_ticks }
     pub fn auction_save_state(&self) -> Option<crate::session_save::AuctionHostState> {
@@ -708,6 +798,7 @@ impl Host {
                 .map(|p| p.bytes[0x1bc].wrapping_add(1)),
             city_people_rows,
             tutorial_controls: self.tutorial_controls,
+            source_picking:self.process_runtime.as_ref().and_then(|p|p.picking_projection().ok()),
             tutorial_arrows: self.tutorial_arrows.clone(),
             tutorial_message: self.tutorial_message.clone(),
             tutorial_enabled_controls: self.tutorial_enabled_controls.iter().copied().collect(),
@@ -811,6 +902,9 @@ impl Host {
     /// 4c3929/4c3979 dispatch 0 for block selection, 4c3beb/4c3cf6 dispatch
     /// 1 for block entry, and 4c3958 dispatches 2 for building selection.
     /// The script owns dismissal and the following prompt.
+    fn tutorial_pick_callback(&self,pick:crate::tutorial_two_interaction::Pick)->Option<i32>{
+        if self.tutorial_controls.picking_disabled{None}else{self.tutorial_interaction.callback(pick)}
+    }
     pub fn tutorial_pick(&mut self, session: &mut Session<'_>,
         assets: &CommandAssets<'_, '_>, pick: crate::tutorial_two_interaction::Pick)
         -> Result<bool, String> {
@@ -818,7 +912,7 @@ impl Host {
             return Ok(false);
         }
         self.collect_script_prompts(session);
-        let Some(callback) = self.tutorial_interaction.callback(pick) else {
+        let Some(callback) = self.tutorial_pick_callback(pick) else {
             return Ok(false);
         };
         // The original scripts also attach a 3D pick gate to a modal prompt
@@ -1027,7 +1121,13 @@ impl Host {
     fn collect_script_prompts(&mut self, session: &Session<'_>) {
         if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) { return; }
         for (command, arguments) in &session.hooks.commands[self.commands_seen..] {
+            if let Some(process)=&self.process_runtime {
+                if let Err(error)=apply_source_picking_command(process,command,arguments){self.fail(error);return;}
+            }
             match command {
+                level_script::Command::TutorialEnableAllPicking=>{
+                    self.tutorial_controls.picking_disabled=false;
+                }
                 level_script::Command::PlaySound => {
                     let result = match arguments.as_slice() {
                         [Value::Bytes(name)] => std::str::from_utf8(name)
@@ -1057,8 +1157,9 @@ impl Host {
                     self.tutorial_enabled_controls.clear();
                 }
                 level_script::Command::TutorialDisableAllPicking => {
+                    //Common enable toggles independently of retained block/
+                    //building policy. EnableAll must restore the same gate.
                     self.tutorial_controls.picking_disabled = true;
-                    self.tutorial_interaction.disable_all_picking();
                 }
                 level_script::Command::TutorialDisableCameraControl =>
                     self.tutorial_controls.camera_disabled = true,
@@ -2524,14 +2625,29 @@ pub(crate) fn auction_action(
     Ok(0)
 }
 
+///Same source FISTP-low-word conversion using the public portable arithmetic.
+///Nonfinite/indefinite conversions produce low word0; no private economy API.
+fn picking_ftol(value:f64)->i32{
+    openmt2001::x87::Sum::from_f64(value).map_or(0,|number|number.ftol_low_word())
+}
+fn apply_source_picking_command(process:&process_runtime::Handle,command:&level_script::Command,arguments:&[Value])->Result<(),String>{
+    use process_runtime::PickingWrite;
+    let target=||match arguments.first(){Some(Value::Number(value))=>Some(picking_ftol(*value)),_=>None};
+    let write=match command{
+        level_script::Command::TutorialDisableAllPicking=>PickingWrite::DisableAll,
+        level_script::Command::TutorialEnableAllPicking=>PickingWrite::EnableAll,
+        level_script::Command::TutorialDisableCameraControl=>PickingWrite::CameraDisable,
+        level_script::Command::TutorialEnableBlockPicking=>PickingWrite::Block(target()),
+        level_script::Command::TutorialEnableBuildingPicking=>PickingWrite::Building(target()),
+        _=>return Ok(()),
+    };
+    process.picking_write(write).map_err(|e|e.to_string())
+}
 fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
-    match arguments {
-        [Value::Nil] | [] => Ok(None),
-        [Value::Number(value)] if *value == -1. => Ok(None),
-        [Value::Number(value)] if value.is_finite() && *value >= 0.
-            && *value <= u32::MAX as f64 => Ok(Some(*value as u32)),
-        _ => Err("Tutorial 3D pick target changed".into()),
-    }
+    Ok(match arguments.first(){
+        Some(Value::Number(value))=>match picking_ftol(*value){-1=>None,value=>Some(value as u32)},
+        _=>None,
+    })
 }
 
 pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, String> {
@@ -2709,7 +2825,7 @@ mod camera_error_effect_tests {
         for task in &mut tasks {task[12..16].copy_from_slice(&7.5f32.to_le_bytes());}
         let observation=camera_bridge::Observation {
             current:camera_bridge::Pose {eye:[f32::NAN.to_bits(),0,0],target:[0;3],up:[0,1f32.to_bits(),0]},
-            sampled:None,task_effects:vec![camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false},camera_bridge::TaskEffect::ClearElapsed],
+            strategic_writeback:None,finalization_fault:None,sampled:None,task_effects:vec![camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false},camera_bridge::TaskEffect::ClearElapsed],
         };
         assert!(host.complete_camera_central(&mut tasks,observation).is_err());
         for task in &tasks {
@@ -2768,6 +2884,7 @@ mod camera_retirement_tests {
         for task in &mut tasks { task[12..16].copy_from_slice(&7.5f32.to_le_bytes()); }
         inbox.retire();
         host.complete_camera_central(&mut tasks, camera_bridge::Observation {
+            strategic_writeback:None,finalization_fault:None,
             current: camera_bridge::Pose { eye: [4f32, 5., 6.].map(f32::to_bits),
                 target: [0; 3], up: [0, 1f32.to_bits(), 0] },
             sampled: None, task_effects: vec![camera_bridge::TaskEffect::ClearElapsed,
@@ -2780,5 +2897,44 @@ mod camera_retirement_tests {
         }
         assert!(host.stop_retired_camera());
         assert!(host.failure.is_none());
+    }
+}
+
+#[cfg(test)]
+mod camera_finalization_fault_tests {
+    use super::*;
+    #[test]
+    fn real_host_applies_completed_ack_effects_then_fails_before_projection_and_next_work(){
+        let mut host=Host::new([1.,2.,3.]);let (worker,mut inbox)=camera_bridge::channel(801);
+        host.camera_bridge=Some(worker);
+        let ui=std::thread::spawn(move||{
+            let pose=camera_bridge::Pose{eye:[4f32,5.,6.].map(f32::to_bits),target:[0;3],up:[0,1f32.to_bits(),0]};
+            inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
+                assert!(matches!(operation,camera_bridge::Operation::Install{..}));
+                Ok(camera_bridge::Observation{current:pose,sampled:None,task_effects:vec![],strategic_writeback:None,finalization_fault:None})
+            }).unwrap();
+            let result=inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
+                assert!(matches!(operation,camera_bridge::Operation::CentralTail{..}));
+                Ok(camera_bridge::Observation{current:pose,sampled:None,strategic_writeback:None,
+                    task_effects:vec![camera_bridge::TaskEffect::ClearElapsed,camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false}],
+                    finalization_fault:Some("C late completed-boundary fault".into())})
+            });
+            assert_eq!(result,Err("C late completed-boundary fault".into()));
+            // A real failure remains Failed even if retirement races its ack.
+            inbox.retire();
+        });
+        host.exchange_camera(camera_bridge::Operation::Install{
+            property:None,capture:openmt2001::camera::bank::Capture::from_records([[0;196];2]),admission:camera_bridge::Admission::default()}).unwrap().unwrap();
+        let completed=host.exchange_camera(camera_bridge::Operation::CentralTail{admission:camera_bridge::Admission::default()}).unwrap().unwrap();
+        let mut tasks=openmt2001::timers::startup_tasks([0;20]);
+        for task in &mut tasks{task[12..16].copy_from_slice(&7.5f32.to_le_bytes());}
+        let error=host.complete_camera_central(&mut tasks,completed).unwrap_err();
+        assert_eq!(error,"C late completed-boundary fault");assert_eq!(host.policy.camera,[1.,2.,3.]);
+        for task in &tasks{assert_eq!(&task[12..16],&[0;4]);
+            if u32::from_le_bytes(task[4..8].try_into().unwrap())&2!=0{assert_eq!(task[0],0);}}
+        host.camera_error(camera_bridge::RequestError::Failed(error.clone()));
+        assert_eq!(host.failure.as_deref(),Some(error.as_str()));assert!(!host.running);
+        assert_eq!(host.exchange_camera(camera_bridge::Operation::CurrentPose),Err(camera_bridge::RequestError::Failed(error)));
+        ui.join().unwrap();
     }
 }

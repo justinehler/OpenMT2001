@@ -21,7 +21,32 @@ pub struct World {
 }
 /// Mutable city records separate from the clock so synchronous scheduler
 /// callbacks can borrow both without a copied or temporarily detached clock.
+/// Successful version1.4 topology initialization result. Native449a40 writes
+/// count52 after scanning property geometry, including inactive rows. It is
+/// not the number of visible Board blocks, loaded meshes or enabled rows.
+/// No public/default constructor or independent host setter exists.
+/// Process-local World identity, minted only by actual topology initialization.
+/// Not a native address, serialized id, geometry id, filename or timestamp.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord,Hash)]
+pub struct SourceEpoch(u64);
+static NEXT_SOURCE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn mint_source_epoch(next:&std::sync::atomic::AtomicU64)->Result<SourceEpoch,String>{
+    next.fetch_update(std::sync::atomic::Ordering::Relaxed,std::sync::atomic::Ordering::Relaxed,
+        |value|value.checked_add(1)).map(SourceEpoch)
+        .map_err(|_|"World source epoch exhausted".into())
+}
+impl SourceEpoch {pub fn serial(self)->u64{self.0}}
+#[derive(Debug)]
+pub struct Topology { count617624:i32, epoch:SourceEpoch }
+impl Topology {
+    fn after_v14_geometry()->Result<Self,String> {
+        Ok(Self{count617624:52,epoch:mint_source_epoch(&NEXT_SOURCE_EPOCH)?})
+    }
+    pub fn epoch(&self)->SourceEpoch{self.epoch}
+    pub fn count617624(&self)->i32 {self.count617624}
+}
 pub struct City {
+    pub topology: Topology,
     pub objective: crate::scenario_objective::State,
     pub settings: crate::startup_settings::State,
     pub configuration: crate::resident::Configuration,
@@ -92,6 +117,7 @@ impl World {
             &definitions.reset_values(),
         );
         crate::ai_neighbors::bind_geometry(&mut categories, board);
+        let topology=Topology::after_v14_geometry()?;
         let mut ai_neighbors = crate::ai_neighbors::Cache::default();
         ai_neighbors.refresh(&categories, image)?;
         let (roads, road_segment_count) = board.traffic_roads()?;
@@ -105,6 +131,7 @@ impl World {
         Ok(Self {
             clock,
             city: City {
+                topology,
                 road_network,
                 objective: crate::scenario_objective::State::default(),
                 settings: crate::startup_settings::State::fresh(),
@@ -915,5 +942,27 @@ impl Roster {
             &mut self.status,
             after_reset,
         )
+    }
+}
+
+#[cfg(test)]
+mod source_epoch_tests {
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+    #[test]
+    fn topology_epoch_mint_is_checked_and_exhaustion_does_not_reuse_identity(){
+        // Local counter exercises the SAME production mint operation without
+        // consuming or racing the process's World identity domain.
+        let next=AtomicU64::new(u64::MAX-1);
+        assert_eq!(mint_source_epoch(&next).unwrap().serial(),u64::MAX-1);
+        assert_eq!(mint_source_epoch(&next).unwrap_err(),"World source epoch exhausted");
+        assert_eq!(mint_source_epoch(&next).unwrap_err(),"World source epoch exhausted");
+    }
+    #[test]
+    fn topology_completion_retains_native_count_and_distinct_epoch(){
+        let first=Topology::after_v14_geometry().unwrap();
+        let second=Topology::after_v14_geometry().unwrap();
+        assert_eq!((first.count617624(),second.count617624()),(52,52));
+        assert!(second.epoch()>first.epoch());
     }
 }

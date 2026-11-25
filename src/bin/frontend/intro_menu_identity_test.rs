@@ -13,6 +13,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
         let language = executable_path.parent().unwrap().parent().unwrap()
             .join("US/language/usa");
         let inputs = SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable), time_runtime: Default::default(),
             profile_root: std::env::temp_dir().join("omt-v2-gui-regression"),
@@ -111,6 +112,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 .unwrap()
                 .join("US/language/usa");
             let inputs = Arc::new(SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::default(),
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),

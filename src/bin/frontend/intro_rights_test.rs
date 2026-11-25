@@ -110,6 +110,7 @@ fn saved_worker_rights_input_and_native_delay() {
         .unwrap()
         .join("US/language/usa");
     let inputs = Arc::new(SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
         style: test_board_style(&executable),
         time_runtime: Default::default(),
@@ -268,9 +269,10 @@ fn saved_worker_rights_input_and_native_delay() {
     let worker_inputs = inputs.clone();
     let worker_path = path.clone();
     let (reply, result) = mpsc::channel();
+    // Legacy saved-session coverage; this does not activate camera-owner review.
     let worker = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
-        .spawn(move || worker_inputs.saved_worker(worker_path, None, camera, reply))
+        .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(worker_path, None), camera, reply, None))
         .unwrap();
     let loaded = result
         .recv_timeout(std::time::Duration::from_secs(60))
@@ -429,7 +431,7 @@ fn saved_worker_rights_input_and_native_delay() {
     assert!(!view.property_rights_state().unwrap().activate_visible);
     let (reply, result) = mpsc::channel();
     sender
-        .send(FreshRequest::SaveSelected {
+        .send(FreshRequest::SaveSelected { capture: None,
             target: crate::save_menu::Target::NewName(format!("rights-{}",
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())),
             camera,
@@ -459,7 +461,7 @@ fn saved_worker_rights_input_and_native_delay() {
         std::thread::sleep(std::time::Duration::from_millis(25));
         let (reply, result) = mpsc::channel();
         sender
-            .send(FreshRequest::SaveSelected {
+            .send(FreshRequest::SaveSelected { capture: None,
                 target: crate::save_menu::Target::NewName(format!("rights-{}",
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())),
                 camera,
@@ -556,6 +558,7 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
         let language = executable_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let inputs = SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable),
             time_runtime: Default::default(),

@@ -1,4 +1,9 @@
 use crate::present::Presenter;
+
+#[path = "intro/camera_live.rs"]
+pub(crate) mod camera_live;
+#[path = "intro/refresh.rs"]
+mod refresh;
 use openmt2001::{
     flyby::{CameraSample, Flyby},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
@@ -74,6 +79,12 @@ pub struct Paths {
     pub save_root: PathBuf,
 }
 pub struct Assets {
+    //Process lifetime: moved into Intro, retained across city retirement.
+    pub(crate) main_prefix: camera_live::main_construction::AwaitingOtherMainChildren,
+    pub(crate) ui_images: camera_live::process_images::Images,
+    pub(crate) ui_text: camera_live::ui_text_resources::UiTextResources,
+    pub(crate) process_runtime:crate::live_host::process_runtime::Handle,
+    pub(crate) activity:crate::live_host::process_runtime::Activity,
     pub cursors: Option<crate::cursor::Images>,
     scene: Scene,
     samples: Vec<CameraSample>,
@@ -104,10 +115,12 @@ pub struct Assets {
     strategic_scene: crate::strategic_scene::Assets,
 }
 impl Assets {
-    pub fn load(paths: Paths) -> Result<Self, String> {
+    pub fn load(paths: Paths) -> Result<Self, String> { Self::load_with_source_options(paths,"") }
+    pub fn load_with_source_options(paths:Paths,source_options:&str)->Result<Self,String>{
         let read = |path: PathBuf| fs::read(&path).map_err(|e| format!("{}: {e}", path.display()));
         let build_file = read(paths.scene.join("BuildEditorModels/BuildFile.dat"))?;
         let executable = read(paths.executable)?;
+        let (process_runtime,activity)=crate::live_host::process_runtime::startup(&executable,source_options)?;
         let style = crate::block_sidewalk_labels::load_style(
             &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
         )?;
@@ -118,18 +131,26 @@ impl Assets {
         let map = read(paths.map)?;
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
             .map_err(|e| e.to_string())?;
+        let mut ui_text = camera_live::ui_text_resources::UiTextResources::load(
+            &executable, &paths.installer, &paths.language, &index, &archive)?;
         let cursors = Some(crate::cursor::Images::load(&index, &archive)?);
-        let navigation = crate::navigation::Navigation::load(&index, &archive, &executable)?;
+        let mut ui_images = camera_live::process_images::Images::load(&executable, &index, &archive, [640,480])?;
+        let navigation = crate::navigation::Navigation::load_shared(&index, &archive, &executable, &ui_images)?;
         let mut selection = crate::selection::Assets::load(&executable, &index, &archive)?;
         style.apply_blocks(&mut selection.blocks)?;
-        let navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks, &executable)?;
-        let tooltip = crate::tooltip::Tooltip::load(
-            &index, &archive, &paths.installer, &paths.language)?;
+        let mut navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks, &executable)?;
+        //The current frontend selects the supplied USA board here.
+        ui_text.install_usa_board(&executable, &paths.installer)?;
+        let main_prefix = camera_live::main_construction::Prefix::load(
+            &executable, &index, &archive, [640,480], &mut ui_text,
+            navigator.process_primitives_mut(), &mut ui_images)?;
+        let tooltip = crate::tooltip::Tooltip::load_shared(
+            &index, &archive, &paths.installer, &paths.language, &ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
         )?;
-        let result_text = crate::fresh_city::result::text::Assets::load(
-            &index, &archive, &paths.installer, &paths.language,
+        let result_text = crate::fresh_city::result::text::Assets::load_shared(
+            &index, &archive, &paths.installer, &paths.language, &ui_text,
         )?;
         let result_medallions = crate::fresh_city::result::medallions::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
@@ -149,8 +170,8 @@ impl Assets {
         let gameplay_sound = crate::gameplay_sound::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?, &paths.installer,
         )?;
-        let time_panel = crate::time_panel::Assets::load(&index, &archive, &paths.installer,
-            &paths.language, &executable,
+        let time_panel = crate::time_panel::Assets::load_shared(&index, &archive, &paths.installer,
+            &paths.language, &executable, &ui_text,
         )?;
         let cash_arrow = crate::cash_arrow::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive,
@@ -180,7 +201,7 @@ impl Assets {
             &openmt2001::pe::PeImage::parse(&executable)?, &index, &archive, &selection.blocks,
         )?;
         let profile_root = paths.profile_root.clone();
-        let menu = Some(crate::menu::Assets::load(
+        let menu = Some(crate::menu::Assets::load_shared(
             &index,
             &archive,
             &paths.installer,
@@ -189,6 +210,7 @@ impl Assets {
             paths.profile_root,
             paths.save_root,
             &executable,
+            &ui_text,
         )?);
         let suncols = read(paths.installer.join("Standard/SUNCOLS.tga"))?;
         let track = read(
@@ -233,6 +255,7 @@ impl Assets {
         let inputs = Arc::new(SceneInputs {
             compatibility: paths.compatibility,
             style,
+            process_runtime:Some(process_runtime.clone()),
             time_runtime: Default::default(),
             profile_root,
             character_names: crate::fresh_city::character_names(
@@ -249,6 +272,7 @@ impl Assets {
             maps,
         });
         Ok(Self {
+            process_runtime, activity, main_prefix, ui_images, ui_text,
             cursors,
             inputs,
             scene,
@@ -282,6 +306,7 @@ impl Assets {
 }
 
 struct SceneInputs {
+    process_runtime:Option<crate::live_host::process_runtime::Handle>,
     compatibility: crate::compatibility::Mode,
     style: openmt2001::board_style::Style,
     /// Native560a1c/560a20 persist across level widget reconstruction.
@@ -500,11 +525,15 @@ impl DetailVisibility {
 }
 
 struct LoadedInspection {
+    camera_inbox: Option<crate::live_host::camera_bridge::Inbox>,
     save_profile_root: Option<PathBuf>,
     logic_tick: Option<u32>,
     construction_active: bool,
     music_era: Option<u32>,
     environment_time: Option<(u32, u32)>,
+    // Import provenance only. A later live owner must move across refresh;
+    // never export this stale pair as current state after camera movement.
+    imported_cameras: Option<openmt2001::camera::bank::Capture>,
     saved_viewpoint: Option<(CameraSample, openmt2001::camera::BlockCamera)>,
     saved_prior_mode: Option<u32>,
     saved_auction: Option<crate::session_save::AuctionContinuation>,
@@ -626,6 +655,8 @@ enum FreshRequest {
     SaveSelected {
         target: crate::save_menu::Target,
         camera: CameraSample,
+        // Event-thread by-value cut; Some is supplied only by the live owner.
+        capture: Option<openmt2001::camera::bank::Capture>,
         game_mode: u32,
         interface_mode: u32,
         reply: mpsc::Sender<Result<PathBuf, String>>,
@@ -723,16 +754,29 @@ impl SceneInputs {
         camera: CameraSample,
         tx: mpsc::Sender<Result<LoadedInspection, String>>,
     ) {
-        self.session_worker(WorkerStart::Fresh(setup), camera, tx);
+        self.session_worker(WorkerStart::Fresh(setup), camera, tx, None);
     }
     fn saved_worker(&self, path: PathBuf, save_profile_root: Option<PathBuf>, camera: CameraSample,
         tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        pavement:crate::selection::pavement_resource::LocalPavementHandle,
     ) {
-        self.session_worker(WorkerStart::Saved(path, save_profile_root), camera, tx);
+        self.session_worker(WorkerStart::Saved(path, save_profile_root), camera, tx, Some(pavement));
     }
     fn session_worker(&self, start: WorkerStart, camera: CameraSample,
         tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
     ) {
+        if let Some(process)=&self.process_runtime {
+            if let Err(error)=process.world_controller_reset4c2b80(){let _=tx.send(Err(error.to_string()));return;}
+        }
+        struct OfflineLease(Option<crate::live_host::process_runtime::Handle>);
+        impl Drop for OfflineLease {fn drop(&mut self){if let Some(process)=&self.0{let _=process.network_teardown4e1c50();}}}
+        let _offline_lease=OfflineLease(self.process_runtime.clone());
+        if matches!(&start,WorkerStart::Fresh(_)|WorkerStart::Skirmish(_)) {
+            if let Some(process)=&self.process_runtime {
+                if let Err(error)=process.source_fresh_world(){let _=tx.send(Err(error.to_string()));return;}
+            }
+        }
         let mut cache = SnapshotCache::default();
         let selected_save_root = match &start {
             WorkerStart::Saved(_, root) => root.clone(),
@@ -741,6 +785,11 @@ impl SceneInputs {
                 crate::save_menu::profile_root_for_campaign(&self.profile_root, &setup.profile_path)
             }
         };
+        // Private native-review activation. It admits only imported ordinary
+        // routes with separately inspected first-Level effects. Fresh/menu and
+        // generic tutorial producer ordering remain outside this experiment.
+        let review_camera = matches!(&start, WorkerStart::Saved(..))
+            && std::env::var_os("OPENMT2001_CAMERA_OWNER_NATIVE_REVIEW").is_some();
         let result = match start {
             WorkerStart::Skirmish(request) => self.fresh_skirmish(request, camera, &mut cache),
             WorkerStart::Fresh(setup) => {
@@ -786,8 +835,45 @@ impl SceneInputs {
                 loaded.era_audio_requests = Some(era_audio_requests);
                 let (gameplay_sound, gameplay_sound_requests) = mpsc::channel();
                 loaded.gameplay_sound_requests = Some(gameplay_sound_requests);
+                let camera_connection = if review_camera {
+                    let id = session.catalog.selected_level().map(|level| level.id());
+                    if !matches!(id, Some(200003 | 400002)) {
+                        let _ = tx.send(Err("Private camera review has no first-Level contract for this route".into()));
+                        return;
+                    }
+                    let Some(capture) = loaded.imported_cameras else {
+                        let _ = tx.send(Err("Private camera review requires both imported raw records".into()));
+                        return;
+                    };
+                    let generation = session.world.topology.epoch().serial();
+                    let (worker, inbox) = crate::live_host::camera_bridge::channel(generation);
+                    loaded.camera_inbox = Some(inbox);
+                    let Some(pavement)=pavement else {
+                        let _=tx.send(Err("Private camera review requires originating selection pavement registration".into()));
+                        return;
+                    };
+                    Some((worker,capture,pavement))
+                } else {None};
                 if tx.send(Ok(loaded)).is_ok() {
                     let mut host = crate::live_host::Host::new(host_eye);
+                    host.process_runtime=self.process_runtime.clone();
+                    // Initialize the monotonic Frame before the acknowledged
+                    // install. Time spent waiting for UI installation remains
+                    // elapsed time at the first real dispatcher poll.
+                    let clock_epoch = Instant::now();
+                    let mut clock_frame = openmt2001::timers::Frame::default();
+                    clock_frame.initialize(0);
+                    if let Some((worker,capture,pavement)) = camera_connection {
+                        // Host already classifies the typed install result;
+                        // explicit retirement is not an incomplete simulation.
+                        match openmt2001::pe::PeImage::parse(&self.executable).map_err(crate::live_host::camera_bridge::RequestError::from)
+                            .and_then(|image|host.install_camera_bridge(&mut session,&image,crate::live_host::CameraSupplierPolicy::CameraOnly,worker,capture,pavement)) {
+                            Ok(()) => {}
+                            Err(crate::live_host::camera_bridge::RequestError::Retired) => return,
+                            Err(crate::live_host::camera_bridge::RequestError::Failed(error)) => host.fail(error),
+                        }
+                        if host.camera_retired() { return; }
+                    }
                     host.time_runtime = Arc::clone(&self.time_runtime);
                     host.auction_renderer = Some(auction_renderer);
                     host.auction_audio = Some(auction_audio);
@@ -797,16 +883,20 @@ impl SceneInputs {
                     if let Err(error) = host.begin_presentation(&session) {
                         host.fail(error);
                     }
+                    if host.camera_retired() { return; }
                     //4ba167 enables gameplay after the startup pause counter
                     //has drained; retained script/modal pause reasons still
                     //gate each logic dispatch independently.
                     host.set_running(true);
+                    if host.camera_retired() { return; }
                     if let Err(error) = host.apply_restored_presentation(restored_presentation) {
                         host.fail(error);
                     }
+                    if host.camera_retired() { return; }
                     if let Err(error) = host.activate_saved_auction(&mut session) {
                         host.fail(error);
                     }
+                    if host.camera_retired() { return; }
                     if let Some(continuation) = saved_auction
                         && let Err(error) = continuation.apply(&mut session)
                             .and_then(|()| {
@@ -841,11 +931,10 @@ impl SceneInputs {
                         board: &board,
                         file: &file,
                     };
-                    let clock_epoch = Instant::now();
-                    let mut clock_frame = openmt2001::timers::Frame::default();
-                    clock_frame.initialize(0);
+                    if host.camera_retired() { return; }
                     let mut last_tick = Instant::now();
                     loop {
+                        if host.camera_retired() { break; }
                         // Poll original interface/logic timers from monotonic host
                         // milliseconds. Rendering and worker requests are separate.
                         let period = std::time::Duration::from_millis(16);
@@ -856,12 +945,14 @@ impl SceneInputs {
                             Err(mpsc::RecvTimeoutError::Timeout) => None,
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         };
+                        if host.camera_retired() { break; }
                         if last_tick.elapsed() >= period {
                             let elapsed =
                                 clock_frame.elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
                             last_tick = Instant::now();
                             host.frame(&mut session, &assets, elapsed);
                         }
+                        if host.camera_retired() { break; }
                         let Some(request) = request else {
                             continue;
                         };
@@ -884,12 +975,20 @@ impl SceneInputs {
                                 };
                                 let _ = reply.send(result);
                             }
-                            FreshRequest::SaveSelected { target, camera, game_mode, interface_mode, reply,
+                            FreshRequest::SaveSelected { target, camera, capture, game_mode, interface_mode, reply,
                             } => {
                                 let result = (|| {
                                     let root = save_profile_root.as_deref()
                                         .ok_or("Save Game requires a selected V2 profile")?;
-                                    let cameras = crate::save_menu::cameras(session.saved_cameras, camera)?;
+                                    // Captured raw records are already coherent. Do not
+                                    // recompute a sample or overlay either record here.
+                                    let cameras = match capture {
+                                        Some(capture) => {
+                                        if review_camera {eprintln!("[camera] serializing captured raw pair");}
+                                        capture.into_records()
+                                    },
+                                        None => crate::save_menu::cameras(session.saved_cameras, camera)?,
+                                    };
                                     let auction = host.auction_save_state();
                                     let bytes = session.save_v2_with_auction_view(
                                         &image, cameras, game_mode, auction, interface_mode,
@@ -1032,6 +1131,7 @@ impl SceneInputs {
                                 let elapsed = clock_frame
                                     .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if host.camera_retired() { break; }
                                 host.set_running(running);
                                 last_tick = Instant::now();
                             }
@@ -1039,6 +1139,7 @@ impl SceneInputs {
                                 let elapsed = clock_frame
                                     .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if host.camera_retired() { break; }
                                 host.options(open);
                                 last_tick = Instant::now();
                             }
@@ -1052,6 +1153,7 @@ impl SceneInputs {
                                 let elapsed = clock_frame
                                     .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if host.camera_retired() { break; }
                                 if host.failure.is_none()
                                     && let Err(error) = session.dispatch_session_event(
                                         "InterfacePromptDismiss",
@@ -1084,7 +1186,7 @@ impl SceneInputs {
                                 }
                             }
                             FreshRequest::Status { camera, reply } => {
-                                host.policy.camera = camera;
+                                host.observe_presentation_camera(camera);
                                 let _ = reply.send(host.status(&session));
                             }
                             FreshRequest::LogicTick(reply) => {
@@ -1378,6 +1480,7 @@ impl SceneInputs {
         let save = openmt2001::save::SaveFile::parse(&bytes)?;
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
         save.validate_compatibility(&image)?;
+        if let Some(process)=&self.process_runtime {process.source_load_unjoined().map_err(|e|e.to_string())?;}
         let [id, _, _, difficulty] = save.level_metadata()?;
         let scripts = self.maps.parent().ok_or("script directory missing")?;
         let catalog = crate::campaign_store::load_catalog(&image, scripts)?;
@@ -2019,12 +2122,14 @@ impl SceneInputs {
             );
         }
         Ok(LoadedInspection {
+            camera_inbox: None,
             save_profile_root: None,
             logic_tick: Some(session.world.clock.timing[0]),
             construction_active: session.world.pending_world.records
                 .iter().any(|row| matches!(row[2], 1 | 2)),
             music_era: Some(session.world.clock.calendar[2]),
             environment_time: Some((session.world.clock.hour(), session.world.clock.timing[2])),
+            imported_cameras: session.saved_cameras.map(openmt2001::camera::bank::Capture::from_records),
             saved_viewpoint: None,
             saved_prior_mode: None,
             saved_auction: None,
@@ -2102,11 +2207,13 @@ impl SceneInputs {
         }, Some(&self.style),
         )
         .map(|scene| LoadedInspection {
+            camera_inbox: None,
             save_profile_root: None,
             logic_tick: None,
             construction_active: false,
             music_era: None,
             environment_time: None,
+            imported_cameras: None,
             saved_viewpoint: None,
             saved_prior_mode: None,
             saved_auction: None,
@@ -2141,6 +2248,13 @@ impl SceneInputs {
 
 }
 struct Inspection {
+    ui_graph:Option<camera_live::ui_graph::UiGraphState>,
+    camera_navigation:Option<camera_live::navigation::State>,
+    camera_focus:camera_live::focus::Focus,
+    navigation_click_latched:bool,
+    camera_endpoint: Option<camera_live::endpoint::Endpoint>,
+    camera_capture_pending: Option<(crate::save_menu::Target, mpsc::Receiver<Result<openmt2001::camera::bank::Capture,String>>)>,
+    camera_ui: Option<camera_live::State>,
     save_profile_root: Option<PathBuf>,
     saved_camera: bool,
     result_pending: Option<mpsc::Receiver<Result<ResultSnapshot, String>>>,
@@ -2299,6 +2413,43 @@ struct ResultView {
     title: Option<(Option<u32>, Option<usize>, u8, PreparedScene)>,
 }
 impl Inspection {
+    fn time_target(&self,assets:&crate::time_panel::Assets,point:[f32;2],auction:bool)
+        ->Option<crate::time_panel::Button>{
+        let target=assets.button_in_mode(point,auction)?;
+        let Some(g)=&self.ui_graph else{return Some(target);};
+        use camera_live::ui_graph::PanelId;
+        match target {
+            crate::time_panel::Button::Options=>g.input(PanelId::Clock).then_some(target),
+            crate::time_panel::Button::Manager=>g.input(PanelId::E).then_some(target),
+            crate::time_panel::Button::Speed=>(g.input(PanelId::E)&&g.speed_disabled==0).then_some(target),
+        }
+    }
+    fn time_occupied(&self,assets:&crate::time_panel::Assets,point:[f32;2],auction:bool)->bool{
+        let Some(g)=&self.ui_graph else{return assets.contains_in_mode(point,auction);};
+        if !assets.contains_in_mode(point,auction){return false;}
+        match assets.button_in_mode(point,auction){
+            Some(crate::time_panel::Button::Speed|crate::time_panel::Button::Manager)=>g.input(camera_live::ui_graph::PanelId::E),
+            _=>g.input(camera_live::ui_graph::PanelId::Clock),
+        }
+    }
+    fn secondary_enabled(&self)->bool {
+        self.ui_graph.as_ref().is_none_or(|g|g.group_enabled(camera_live::navigation::Group::Secondary))
+    }
+    fn options_visible(&self)->bool {self.secondary_enabled()&&self.game_options.open}
+    fn save_visible(&self)->bool {self.secondary_enabled()&&self.save_dialog.visible}
+    fn settings_visible(&self)->bool {self.secondary_enabled()&&self.settings_menu.page.is_some()}
+    fn auction_visible(&self)->bool {
+        self.auction.scene.is_some()&&self.ui_graph.as_ref().is_none_or(|g|g.group_enabled(camera_live::navigation::Group::Tertiary))
+    }
+    fn graph_input(&self,id:camera_live::ui_graph::PanelId)->bool {
+        self.ui_graph.as_ref().is_some_and(|graph|graph.input(id))
+    }
+    fn graph_body(&self,id:camera_live::ui_graph::PanelId)->bool {
+        self.ui_graph.as_ref().is_some_and(|graph|graph.body(id))
+    }
+    fn graph_group(&self,group:camera_live::navigation::Group)->bool {
+        self.ui_graph.as_ref().is_some_and(|graph|graph.group_enabled(group))
+    }
     fn normal_star_detail(&self) -> Option<u8> {
         (self.result.is_none() && self.result_pending.is_none()
             && !self.live_status.as_ref().is_some_and(|status| status.result_request.is_some()))
@@ -2309,7 +2460,7 @@ impl Inspection {
         // Before the first worker status, keep Save inert; authoritative
         // tutorial state refreshes the row as soon as Status arrives.
         self.game_options.set_save_disabled(self.live_status.as_ref()
-            .is_none_or(|s| s.tutorial_session));
+            .is_none_or(|s| s.tutorial_session || s.failure.is_some()));
         if let Some(sender) = &self._fresh_session {
             sender.send(FreshRequest::Options(true)).map_err(|e| e.to_string())?;
         }
@@ -2549,13 +2700,16 @@ impl Inspection {
         }
     }
     fn main_panel_visible(&self) -> bool {
+        if self.ui_graph.is_some(){return self.graph_body(camera_live::ui_graph::PanelId::A);}
         self.live_status.as_ref().is_none_or(|s| s.player_panels[0])
     }
     fn statistics_visible(&self) -> bool {
+        if self.ui_graph.is_some(){return self.graph_body(camera_live::ui_graph::PanelId::Comparison);}
         self.live_status.as_ref().is_none_or(|s| s.player_panels[1])
     }
     fn over_navigation(&self) -> bool {
-        self.pointer.is_some_and(|[x, y]| {
+        (self.ui_graph.is_none()||self.graph_input(camera_live::ui_graph::PanelId::E))
+        && self.pointer.is_some_and(|[x, y]| {
             let [l, t, r, b] = self.navigation_bounds;
             let x = x as f32 * 0.5;
             let y = y as f32 * 0.5;
@@ -2572,7 +2726,8 @@ impl Inspection {
             })
     }
     fn over_navigator(&self) -> bool {
-        self.pointer.is_some_and(|[x, y]| {
+        (self.ui_graph.is_none()||self.graph_input(camera_live::ui_graph::PanelId::F))
+        && self.pointer.is_some_and(|[x, y]| {
             let [l, t, r, b] = self.navigator_bounds;
             let x = x as f32 * 0.5;
             let y = y as f32 * 0.5;
@@ -2696,6 +2851,8 @@ impl MenuCamera {
 }
 
 pub struct Intro {
+    camera_physical: camera_live::PhysicalInput,
+    camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
     renderer: Renderer,
     prepared: PreparedScene,
@@ -2719,6 +2876,7 @@ pub struct Intro {
     loading_from_setup: bool,
     loading_skirmish: bool,
     refreshing_fresh: bool,
+    refresh_retry: refresh::Retry,
     inspection: Option<Inspection>,
     audio_levels: crate::settings_menu::Levels,
     graphics_levels: crate::settings_menu::GraphicsLevels,
@@ -2727,7 +2885,19 @@ pub struct Intro {
     saved_settings: crate::profile_settings::Snapshot,
     settings_save_error: Option<String>,
 }
+impl Drop for Intro {
+    fn drop(&mut self){
+        // Window close/error teardown must cross the same source retirement
+        // boundary before fields drop assets or the Session lease.
+        self.retire_inspection();
+    }
+}
 impl Intro {
+    pub fn request_process_exit(&self,writer:crate::live_host::process_runtime::QuitWriter)->Result<(),String>{
+        self.assets.process_runtime.request_quit(writer).map_err(|e|e.to_string())
+    }
+    pub fn process_exit_ready(&self)->Result<bool,String>{self.assets.process_runtime.exit_ready().map_err(|e|e.to_string())}
+
     pub fn ui_effects_level(&self) -> u8 { self.audio_levels.effects }
 
     fn settings_snapshot(&self) -> crate::profile_settings::Snapshot {
@@ -2781,6 +2951,10 @@ impl Intro {
     }
 
     fn retire_inspection(&mut self) {
+        if let Err(error)=refresh::retire(&mut self.refresh_retry,&mut self.refreshing_fresh,&mut self.loading,
+            self.inspection.as_mut().map(|view|&mut view.camera_endpoint),&mut self.camera_parked){
+            eprintln!("Property source retirement failed (latched in parked Owner): {error}");
+        }
         if let Some(view) = self.inspection.take() {
             self.graphics_levels = view.settings_menu.graphics;
             self.gameplay_levels = view.settings_menu.gameplay;
@@ -2895,7 +3069,10 @@ impl Intro {
             loading_from_setup: false,
             loading_skirmish: false,
             refreshing_fresh: false,
+            refresh_retry: refresh::Retry::default(),
             inspection: None,
+            camera_physical: camera_live::PhysicalInput::default(),
+            camera_parked: None,
             audio_levels: crate::settings_menu::Levels::default(),
             graphics_levels: crate::settings_menu::GraphicsLevels::default(),
             gameplay_levels: crate::settings_menu::GameplayLevels::default(),
@@ -2913,6 +3090,11 @@ impl Intro {
             self.last_sample = None;
         }
     }
+    pub fn inspection_cursor_presented(&mut self) {
+        if let Some(state) = self.inspection.as_mut().and_then(|view| view.camera_ui.as_mut()) {
+            state.cursor_presented();
+        }
+    }
     pub fn inspection_cursor_kind(&self) -> Option<usize> {
         if self.inspection.is_none() {
             // Keep the existing city indices; appended index3 is original cursor1.
@@ -2921,8 +3103,9 @@ impl Intro {
             return Some(if hover { 3 } else { 0 });
         }
         self.inspection.as_ref().map(|view| {
-            if let Some(page) = view.settings_menu.page {
-                let blocked = view.toolbar_right_held || view.save_dialog.visible
+            if let Some(state) = &view.camera_ui { return state.cursor_index(); }
+            if view.secondary_enabled() && let Some(page) = view.settings_menu.page {
+                let blocked = view.toolbar_right_held || view.save_visible()
                     || view.stats_requested
                     || view.live_status.as_ref().is_some_and(|status|status.stats.is_some());
                 let pointer = view.pointer.map(|p|p.map(|v|v as f32*0.5));
@@ -2974,19 +3157,28 @@ impl Intro {
             ._fresh_session
             .as_ref()
             .ok_or("city has no retained fresh session")?;
-        let (reply, result) = mpsc::channel();
-        sender
-            .send(FreshRequest::Inspect {
-                camera: view.camera,
-                reply,
-            })
-            .map_err(|e| e.to_string())?;
+        let result = self.refresh_retry.request(sender, view.camera)?;
         self.loading = Some(result);
         self.refreshing_fresh = true;
         Ok(())
     }
     pub fn inspecting(&self) -> bool {
         self.inspection.is_some()
+    }
+    /// App feeds every event before logical/menu/Inspection routing. Keep this
+    /// process input across city exit, true Load and presentation refresh.
+    pub fn camera_physical_event(&mut self, event: &winit::event::WindowEvent) {
+        use winit::event::{ElementState, WindowEvent};
+        match event {
+            WindowEvent::KeyboardInput { event, .. } =>
+                self.camera_physical.key(event.physical_key, event.state == ElementState::Pressed),
+            WindowEvent::MouseInput { button, state, .. } =>
+                self.camera_physical.button(*button, *state == ElementState::Pressed),
+            WindowEvent::CursorMoved { position, .. } =>
+                self.camera_physical.pointer([position.x, position.y]),
+            WindowEvent::Focused(false) => self.camera_physical.unfocus(),
+            _ => (),
+        }
     }
     pub fn inspection_key(
         &mut self,
@@ -3024,7 +3216,7 @@ impl Intro {
             return Ok(());
         }
         if pressed && let Some(view) = &mut self.inspection {
-            if view.save_dialog.visible {
+            if view.save_visible() {
                 match key {
                     NamedKey::Escape => {view.save_dialog.escape();}
                     NamedKey::Backspace => view.save_dialog.erase(),
@@ -3045,8 +3237,8 @@ impl Intro {
                 }
                 return Ok(());
             }
-            if view.game_options.open {
-                if view.settings_menu.page.is_some() {
+            if view.options_visible() {
+                if view.settings_visible() {
                     if key == NamedKey::Escape || key == NamedKey::Enter {
                         view.settings_menu.back();
                     }
@@ -3098,15 +3290,11 @@ impl Intro {
                 return Ok(());
             }
             self.retire_inspection();
-            if self.refreshing_fresh {
-                self.loading = None;
-                self.refreshing_fresh = false;
-            }
             self.last_sample = None;
             return Ok(());
         }
         if let Some(view) = &mut self.inspection {
-            if view.auction.scene.is_some()
+            if view.auction_visible()
                 || view.strategic
                 || view.adjustment.is_some()
                 || view.planning.is_some()
@@ -3137,7 +3325,7 @@ impl Intro {
     }
     pub fn inspection_text(&mut self,text:&str) {
         if let Some(view)=&mut self.inspection
-            && view.game_options.open && view.save_dialog.visible {
+            && view.options_visible() && view.save_visible() {
             view.save_dialog.input(text);
         }
     }
@@ -3171,26 +3359,56 @@ impl Intro {
         }
     }
     fn submit_save_target(view:&mut Inspection,target:crate::save_menu::Target) {
-        if view.save_pending.is_some() {return;}
+        if view.save_pending.is_some() || view.camera_capture_pending.is_some() {return;}
+        if let Some(error)=view.live_status.as_ref().and_then(|status|status.failure.as_ref()) {
+            view.save_dialog.busy=false;
+            view.save_dialog.message=Some(format!("Save failed: {error}"));
+            return;
+        }
+        if let Some(state)=&mut view.camera_ui {
+            view.camera_capture_pending=Some((target,state.queue_save_capture()));
+            view.save_dialog.busy=true;
+            view.save_dialog.message=Some("Saving...".into());
+            return;
+        }
+        Self::send_save_target(view,target,None);
+    }
+    fn poll_camera_save(view:&mut Inspection) {
+        let Some((_,receiver))=&view.camera_capture_pending else{return};
+        let result=match receiver.try_recv() {
+            Ok(value)=>value,
+            Err(mpsc::TryRecvError::Empty)=>return,
+            Err(mpsc::TryRecvError::Disconnected)=>Err("Camera capture boundary closed".into()),
+        };
+        let (target,_)=view.camera_capture_pending.take().unwrap();
+        match result {
+            Ok(capture)=>Self::send_save_target(view,target,Some(capture)),
+            Err(error)=>{view.save_dialog.busy=false;view.save_dialog.message=Some(format!("Save failed: {error}"));}
+        }
+    }
+    fn send_save_target(view:&mut Inspection,target:crate::save_menu::Target,
+        capture:Option<openmt2001::camera::bank::Capture>) {
         let Some(sender)=&view._fresh_session else {
+            view.save_dialog.busy=false;
             view.save_dialog.message=Some("Save unavailable in this view".into());
             return;
         };
         let (reply,result)=mpsc::channel();
-        let request=FreshRequest::SaveSelected {target,camera:view.camera,
+        let request=FreshRequest::SaveSelected {target,camera:view.camera,capture,
             game_mode:if view.auction.scene.is_some(){2}else{1},
             interface_mode:if view.strategic{3}else{0},reply,
         };
         match sender.send(request) {
             Ok(())=>{view.save_pending=Some(result);view.save_dialog.busy=true;
                 view.save_dialog.message=Some("Saving...".into());}
-            Err(_)=>view.save_dialog.message=Some("Save failed: session closed".into()),
+            Err(_)=>{view.save_dialog.busy=false;
+                view.save_dialog.message=Some("Save failed: session closed".into());},
         }
     }
     pub fn inspection_cursor(&mut self, position: [f64; 2], size: [u32; 2]) {
         if let Some(view) = &mut self.inspection {
             if view.adjustment.is_none()
-                && !view.game_options.open
+                && !view.options_visible()
                 && view.auction.scene.is_none()
                 && view.prompts.request().is_none()
                 && !view.stats_requested
@@ -3212,15 +3430,14 @@ impl Intro {
             view.pointer = internal_pointer(position, size);
             let time_input = !view.stats_requested
                 && !view.live_status.as_ref().is_some_and(|status| status.stats.is_some())
-                && !view.game_options.open && view.settings_menu.page.is_none()
+                && !view.options_visible() && view.settings_menu.page.is_none()
                 && view.prompts.request().is_none()
                 && view.live_status.as_ref().is_some_and(|status|status.time_display.visible);
             let time_pointer = time_input.then_some(view.pointer).flatten()
                 .map(|point| point.map(|v| v as f32 * 0.5));
             let auction_time = view.live_status.as_ref().is_some_and(|status| status.auction.is_some());
-            if view.time_panel.cursor_held(&self.assets.time_panel,
-                time_pointer, auction_time, time_input && view.mouse_buttons[0],
-                ).is_some()
+            let time_hit=time_pointer.and_then(|point|view.time_target(&self.assets.time_panel,point,auction_time));
+            if view.time_panel.graph_cursor(time_hit,time_input&&view.mouse_buttons[0]).is_some()
                 && let Err(error) = view.gameplay_sound_player
                     .apply(crate::gameplay_sound::Operation::UiLightClick)
             {
@@ -3234,7 +3451,7 @@ impl Intro {
                     view.mouse_buttons[0],snapshot,
                 );
             }
-            if matches!(view.settings_menu.page,
+            if view.secondary_enabled() && matches!(view.settings_menu.page,
                 Some(crate::settings_menu::Page::Sound|crate::settings_menu::Page::Graphics|
                     crate::settings_menu::Page::Gameplay))
             {
@@ -3249,7 +3466,7 @@ impl Intro {
                     view.reframe_pending = true;
                 }
             }
-            if view.settings_menu.page.is_some()
+            if view.settings_visible()
                 && view.settings_menu.pointer_click_cue(&self.assets.settings_menu,
                     view.pointer.map(|p| p.map(|v| v as f32*0.5)),
                 )
@@ -3258,7 +3475,7 @@ impl Intro {
             {
                 eprintln!("Settings held re-entry sound: {error}");
             }
-            if view.game_options.open && !view.save_dialog.visible
+            if view.options_visible() && !view.save_visible()
                 && view.settings_menu.page.is_none()
                 && view.game_options.pointer_click_cue(&self.assets.game_options,
                     view.pointer.map(|p| p.map(|v| v as f32*0.5)),
@@ -3268,7 +3485,7 @@ impl Intro {
             {
                 eprintln!("Options held re-entry sound: {error}");
             }
-            if view.save_dialog.visible {
+            if view.save_visible() {
                 let pointer=view.pointer.map(|p|p.map(|v|v as f32*0.5));
                 let cue=if view.save_dialog.generic_prompt().is_some() {
                     self.menu.as_ref().is_some_and(|menu| {
@@ -3284,7 +3501,7 @@ impl Intro {
                     eprintln!("Save Game held re-entry sound: {error}");
                 }
             }
-            if view.auction.scene.is_some()
+            if view.auction_visible()
                 && let (Some(menu),Some(auction))=(&self.menu,
                     view.live_status.as_ref().and_then(|status|status.auction.as_ref()),
                 )
@@ -3317,7 +3534,7 @@ impl Intro {
         }
     }
     pub fn inspection_scroll(&mut self, delta: i32) {
-        if let Some(view)=&mut self.inspection && view.save_dialog.visible {
+        if let Some(view)=&mut self.inspection && view.save_visible() {
             view.save_dialog.scroll(delta);
             return;
         }
@@ -3394,6 +3611,20 @@ impl Intro {
     }
     pub fn inspection_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
         if let Some(view) = &mut self.inspection {
+            if view.ui_graph.is_some()&&button==winit::event::MouseButton::Left{
+                //Read the SAME staged GUI owner; physical/display state
+                //cannot overwrite old current/prior GUI cells before poll.
+                let hit=camera_live::upper_f::panel_hit(view);
+                let rejected=match hit{
+                    Ok(false)=>None,
+                    Ok(true)=>Some("F original parent/group button transaction is unjoined; legacy Board/release-camera path rejected".to_owned()),
+                    Err(error)=>Some(error),
+                };
+                if let Some(error)=rejected{
+                    if let Some(state)=&mut view.camera_ui{state.reject_upper_input(error);}
+                    return;
+                }
+            }
             // Capture both edges BEFORE stats/save/settings/prompt/card/auction
             // returns. Do not move the camera dispatcher's late Right assignment.
             if button == winit::event::MouseButton::Right
@@ -3409,7 +3640,7 @@ impl Intro {
             let stats_modal=view.stats_requested
                 || view.live_status.as_ref().is_some_and(|status|status.stats.is_some());
             if stats_modal { view.auction_panel.cancel_press(); }
-            if stats_modal || view.settings_menu.page.is_some() || view.game_options.open
+            if stats_modal || view.settings_visible() || view.options_visible()
                 || view.prompts.request().is_some() {
                 view.time_panel.cancel_input();view.time_pressed=None;
             }
@@ -3431,7 +3662,7 @@ impl Intro {
                 return;
             }
             if stats_modal {return;}
-            if view.save_dialog.visible {
+            if view.save_visible() {
                 if button==winit::event::MouseButton::Left {
                     let pointer=view.pointer.map(|p|p.map(|v|v as f32*0.5));
                     let action = if view.save_dialog.generic_prompt().is_some() {
@@ -3465,7 +3696,7 @@ impl Intro {
                 }
                 return;
             }
-            if view.settings_menu.page.is_some() {
+            if view.settings_visible() {
                 if button == winit::event::MouseButton::Left {
                     let pointer=view.pointer.map(|p| p.map(|v| v as f32*0.5));
                     let distance=view.settings_menu.graphics.distance;
@@ -3486,7 +3717,7 @@ impl Intro {
                 }
                 return;
             }
-            if view.game_options.open {
+            if view.options_visible() {
                 if button == winit::event::MouseButton::Left {
                     let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
                     let activation = view.game_options.mouse(&self.assets.game_options, pointer, pressed);
@@ -3735,9 +3966,9 @@ impl Intro {
                 && let Some(pointer) = view.pointer.map(|p| p.map(|v| v as f32 * 0.5))
             {
                 let auction=view.live_status.as_ref().is_some_and(|status|status.auction.is_some());
-                let hit = self.assets.time_panel.button_in_mode(pointer,auction);
-                if self.assets.time_panel.contains_in_mode(pointer,auction) || view.time_pressed.is_some() {
-                    view.time_panel.cursor(&self.assets.time_panel,Some(pointer),auction);
+                let hit = view.time_target(&self.assets.time_panel,pointer,auction);
+                if view.time_occupied(&self.assets.time_panel,pointer,auction) || view.time_pressed.is_some() {
+                    view.time_panel.graph_cursor(hit,false);
                     if view.time_panel.mouse(pressed).is_some()
                         && let Err(error) = view.gameplay_sound_player
                             .apply(crate::gameplay_sound::Operation::UiLightClick)
@@ -3777,7 +4008,7 @@ impl Intro {
                     return;
                 }
             }
-            if view.auction.scene.is_some() {
+            if view.auction_visible() {
                 if button == winit::event::MouseButton::Left
                     && let (Some(menu), Some(auction)) = (
                         &self.menu,
@@ -4079,6 +4310,7 @@ impl Intro {
                 view.mouse_buttons=[false;2];view.drag=[0;2];view.double_click.clear();return;
             }
             view.locator_blocked = view.strategic
+                && (view.ui_graph.is_none()||view.graph_input(camera_live::ui_graph::PanelId::C))
                 && view.locator.as_ref().is_some_and(|locator| {
                     self.menu.as_ref().is_some_and(|menu| {
                         view.pointer
@@ -4162,12 +4394,12 @@ impl Intro {
                         }
                         return;
                     }
-                    if pressed && view.over_navigator() && !view.mouse_buttons[1] {
+                    if view.ui_graph.is_none()&&pressed&&view.over_navigator()&&!view.mouse_buttons[1] {
                         view.navigator_pressed = true;
                         view.double_click.clear();
                         return;
                     }
-                    if !pressed && view.navigator_pressed {
+                    if view.ui_graph.is_none()&&!pressed&&view.navigator_pressed {
                         view.navigator_pressed = false;
                         if view.over_navigator()
                             && let Some(point) = view.pointer
@@ -4492,7 +4724,50 @@ impl Intro {
             view.cursor = None;
         }
     }
+    fn refresh_inspection_projection(&mut self) -> Result<(), String> {
+        if let Some(view) = &mut self.inspection {
+            if !view.reframe_pending { return Ok(()); }
+            let mut changed = view.scene.reframe(view.camera)?;
+            if let Some(trees) = &mut view.trees {
+                changed.extend(trees.reframe(&mut view.scene, view.camera)?);
+            }
+            changed.extend(view.detail_visibility.reframe(&mut view.scene, view.camera,
+                view.settings_menu.graphics.distance,
+            )?);
+            if let Some(locator) = &mut view.locator {
+                locator.dirty = true;
+            }
+            let draw_distance = u32::from(view.settings_menu.graphics.distance);
+            let resident_draws = if let Some(people) = &view.people {
+                people.reframe(&mut view.scene, view.camera, draw_distance)?
+            } else {
+                0..0
+            };
+            changed.extend(resident_draws.clone());
+            if let Some(vehicles) = &view.vehicles {
+                changed.extend(vehicles.reframe(&mut view.scene, view.camera, draw_distance)?);
+            }
+            if let Some(transport) = &view.transport {
+                changed.extend(transport.reframe(&mut view.scene, view.camera, draw_distance)?);
+            }
+            let star_detail = view.normal_star_detail();
+            let changed = normal_city_scene_updates(&mut view.scene, view.camera, star_detail, changed)?;
+            for index in changed {
+                self.renderer.update_dynamic_vertices(&mut view.prepared, index,
+                    &view.scene.draws[index].borrowed(),
+                )?;
+            }
+            let cameras = view.scene.draws.iter().map(|draw|
+                draw.view_projection.unwrap_or(view.scene.camera)).collect::<Vec<_>>();
+            self.renderer.update_cameras(&view.prepared, &cameras, view.scene.fog)?;
+            view.reframe_pending = false;
+        }
+        Ok(())
+    }
     fn inspection_update(&mut self) -> Result<(), String> {
+        if self.inspection.as_ref().is_some_and(|view| view.camera_ui.is_some()) {
+            return self.refresh_inspection_projection();
+        }
         if let Some(view) = &mut self.inspection {
             let callback_time = view.started.elapsed().as_secs_f64() * 50.;
             let tick = callback_time.floor() as usize;
@@ -4920,6 +5195,13 @@ impl Intro {
         {
             self.loading = None;
         }
+        if self.loading.is_none() && self.inspection.is_some()
+            && self.refresh_retry.due(Instant::now())
+        {
+            if let Err(error) = self.refresh_fresh_city() {
+                self.refresh_retry.reject(error);
+            }
+        }
         // Normal level startup4b9fa0->4b9d40 writes this mode6 overview
         // at4b9e5f..91. Represent the same pose in retained city controls;
         // clicking a block then uses the original120/80 dimensions.
@@ -4936,13 +5218,14 @@ impl Intro {
             self.loading_skirmish = false;
             self.loading_from_setup = false;
             let save_profile_root = self.menu.as_ref().and_then(|m| m.current_save_root());
+            let pavement=self.assets.selection.pavement_resource().binding()?.handle();
             let inputs = self.assets.inputs.clone();
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
             std::thread::Builder::new()
                 .name("saved-city-simulation".into())
                 .stack_size(16 * 1024 * 1024)
-                .spawn(move || inputs.saved_worker(path, save_profile_root, inspection_camera, tx))
+                .spawn(move || inputs.saved_worker(path, save_profile_root, inspection_camera, tx, pavement))
                 .map_err(|error| error.to_string())?;
         }
         if self.loading.is_none()
@@ -4957,7 +5240,7 @@ impl Intro {
                 .name("skirmish-simulation".into())
                 .stack_size(16 * 1024 * 1024)
                 .spawn(move || {
-                    inputs.session_worker(WorkerStart::Skirmish(request), inspection_camera, tx)
+                    inputs.session_worker(WorkerStart::Skirmish(request), inspection_camera, tx, None)
                 })
             {
                 self.loading = None;
@@ -5046,24 +5329,12 @@ impl Intro {
                     let draws = scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>();
                     let profile_prepare = std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS")
                         .map(|_| Instant::now());
-                    let mut prepared = if refreshing && loaded.reuse_city {
-                        // Worker snapshots preserve this exact city/material layout.
-                        // Keep GPU textures and update only camera-dependent geometry/actors.
-                        std::mem::take(
-                            &mut self
-                                .inspection
-                                .as_mut()
-                                .ok_or("cached city has no retained GPU scene")?
-                                .prepared,
-                        )
-                    } else {
-                        self.renderer.prepare(&draws, scene.camera, scene.fog)?
-                    };
+                    let mut prepared = self.renderer.prepare(&draws, scene.camera, scene.fog)?;
                     if let Some(started) = profile_prepare {
                         eprintln!(
-                            "Snapshot frontend tick{:?} refreshing{refreshing} reuse_city{} full_prepare{} draws{} prepare_or_take host elapsed {:?}; includes waits, excludes subsequent updates and GPU execution",
+                            "Snapshot frontend tick{:?} refreshing{refreshing} reuse_city{} full_prepare{} draws{} detached_prepare host elapsed {:?}; includes waits, excludes subsequent updates and GPU execution",
                             loaded.logic_tick, loaded.reuse_city,
-                            !(refreshing && loaded.reuse_city), draws.len(), started.elapsed(),
+                            true, draws.len(), started.elapsed(),
                         );
                     }
                     if refreshing && loaded.reuse_city {
@@ -5205,7 +5476,16 @@ impl Intro {
                     let mut settings_menu = crate::settings_menu::View::default();
                     settings_menu.graphics = graphics_levels;
                     settings_menu.gameplay = gameplay_levels;
-                    Ok(Inspection {
+                    let camera_inbox = loaded.camera_inbox;
+                    let imported_cameras = loaded.imported_cameras;
+                    let mut view = Inspection {
+                        camera_endpoint: None,
+                        camera_capture_pending: None,
+                        camera_ui: None,
+                        ui_graph:None,
+                        camera_navigation:None,
+                        camera_focus:camera_live::focus::Focus::default(),
+                        navigation_click_latched:false,
                         save_profile_root: loaded.save_profile_root,
                         saved_camera: loaded.saved_viewpoint.is_some(),
                         result_pending: None,
@@ -5332,12 +5612,75 @@ impl Intro {
                         title_state: None,
                         started: Instant::now(),
                         tick: 0,
-                    })
+                    };
+                    let needs_ui = camera_inbox.is_some() || (refreshing && self.inspection.as_ref()
+                        .is_some_and(|old| old.camera_endpoint.is_some() && old.camera_ui.is_none()));
+                    if needs_ui {
+                        view.camera_ui = Some(camera_live::State::new(
+                            camera_live::Globals::after_normal_initialization(camera_live::OriginalGraphicsPolicy::NormalD3d,false),
+                            camera_live::Cursor::new(0,0)?, None, None));
+                    }
+                    if camera_inbox.is_some() && imported_cameras.is_none() {
+                        return Err("review channel requires imported pair".into());
+                    }
+                    if refreshing && camera_inbox.is_some() {
+                        return Err("scene refresh must retain its actual endpoint".into());
+                    }
+                    let property_install = if camera_inbox.is_some() {
+                        let image=openmt2001::pe::PeImage::parse(&self.assets.inputs.executable)?;
+                        Some(camera_live::endpoint::PropertyInstall::capture(&self.assets.selection,&image)?)
+                    } else {None};
+                    let plan = if refreshing {
+                        let previous = self.inspection.as_mut().ok_or("refresh has no retained inspection")?;
+                        let menu = self.menu.as_ref().ok_or("refresh menu assets missing")?;
+                        // Selection is a prospective presentation index, never
+                        // the C stable key or raw current-selection authority.
+                        view.selected = previous.selected.and_then(|hit| {
+                            let building = match hit.building {
+                                Some(index) => {
+                                    let slot = previous.scene.inspection_buildings.get(index)?.runtime_slot?;
+                                    Some(view.scene.inspection_buildings.iter()
+                                        .position(|b| b.runtime_slot == Some(slot))?)
+                                }
+                                None => None,
+                            };
+                            Some(crate::selection::Hit { category: hit.category, building })
+                        });
+                        let inputs = refresh::Inputs {
+                            previous_buildings: &previous.scene.inspection_buildings,
+                            next_scene: (&view.scene).into(),
+                            locator_extents: menu.locator_assets().refresh_extents(),
+                            business_owner: previous.live_status.as_ref().and_then(|s| s.business_owner),
+                        };
+                        // Borrow distinct production fields so the exact
+                        // GPU-independent transaction also serves the tests.
+                        let mut old = refresh::Owners {
+                            locator: &mut previous.locator, adjustment: &mut previous.adjustment,
+                            graph: &mut previous.ui_graph, ui: &mut previous.camera_ui,
+                            navigation: &mut previous.camera_navigation, focus: &mut previous.camera_focus,
+                            endpoint: &mut previous.camera_endpoint,
+                            navigation_click_latched: &mut previous.navigation_click_latched,
+                        };
+                        let mut next = refresh::Owners {
+                            locator: &mut view.locator, adjustment: &mut view.adjustment,
+                            graph: &mut view.ui_graph, ui: &mut view.camera_ui,
+                            navigation: &mut view.camera_navigation, focus: &mut view.camera_focus,
+                            endpoint: &mut view.camera_endpoint,
+                            navigation_click_latched: &mut view.navigation_click_latched,
+                        };
+                        Some(refresh::prepare(&mut old, &mut next, inputs,
+                            menu.adjustment_assets(), &mut self.refresh_retry)?)
+                    } else { None };
+                    Ok((view, plan, camera_inbox, property_install))
                 });
                 if let Some(menu) = &mut self.menu {
                     match result {
-                        Ok(mut view) => {
-                            if refreshing && let Some(previous) = &mut self.inspection {
+                        Ok((mut view, plan, camera_inbox, property_install)) => {
+                            if let Some(plan) = plan {
+                                let previous = self.inspection.as_mut().expect("prepared retained inspection");
+                                refresh::commit(&mut refresh::Owners::of(previous),
+                                    &mut refresh::Owners::of(&mut view), plan, &mut self.refresh_retry);
+                                // From here through publication every operation is infallible.
                                 // These five overlay states depend only on this Intro's
                                 // immutable navigation assets and renderer, not city reports.
                                 view.detail_icons = std::mem::take(&mut previous.detail_icons);
@@ -5401,6 +5744,7 @@ impl Intro {
                                 view.cursor = previous.cursor;
                                 view.pointer = previous.pointer;
                                 view.mouse_buttons = previous.mouse_buttons;
+                                view.camera_capture_pending = previous.camera_capture_pending.take();
                                 view.keys = previous.keys;
                                 view.taps = previous.taps;
                                 view.drag = previous.drag;
@@ -5421,50 +5765,17 @@ impl Intro {
                                 view.inertia = previous.inertia;
                                 view.saved_camera = previous.saved_camera;
 
-                                view.selected = previous.selected.and_then(|hit| {
-                                    let building = match hit.building {
-                                        Some(index) => {
-                                            let slot = previous
-                                                .scene
-                                                .inspection_buildings
-                                                .get(index)?
-                                                .runtime_slot?;
-                                            Some(
-                                                view.scene
-                                                    .inspection_buildings
-                                                    .iter()
-                                                    .position(|b| b.runtime_slot == Some(slot))?,
-                                            )
-                                        }
-                                        None => None,
-                                    };
-                                    Some(crate::selection::Hit {
-                                        category: hit.category,
-                                        building,
-                                    })
-                                });
-                                // Attachments and selected-building remapping are complete.
-                                // Transfer choices into fresh reports, never old report payloads.
-                                if let (Some(locator), Some(old)) = (&mut view.locator, &previous.locator) {
-                                    locator.retain_ui_from(old, menu.locator_assets(), &previous.scene, &view.scene,
-                                    )?;
+                                if let Some(locator) = &mut view.locator
+                                    && !locator.has_strategic() {
                                     locator.select_poll_category(view.selected.and_then(|hit| {
                                         self.assets.selection.blocks.get(hit.category).map(|block| block.id)
                                     }));
                                     locator.pointer(menu.locator_assets(), if view.strategic && view.adjustment.is_none() {
                                         view.pointer
-                                    } else { None },
-                                    );
+                                    } else { None });
                                 }
                                 if let (Some(comparison), Some(old)) = (&mut view.comparison, &previous.comparison) {
                                     comparison.retain_ui_from(old);
-                                }
-                                if let Some(mut adjustment) = previous.adjustment.take()
-                                    && menu.adjustment_assets().refresh(
-                                        &view.scene, &previous.scene, &mut adjustment,
-                                        view.live_status.as_ref().and_then(|status| status.business_owner),
-                                    )? {
-                                    view.adjustment = Some(adjustment);
                                 }
                                 view.utility_report = std::mem::take(&mut previous.utility_report);
                                 view.utility_report.select(view.utility_category(&self.assets.selection.blocks));
@@ -5484,6 +5795,13 @@ impl Intro {
                                     view.scene.building_count
                                 );
                             }
+                            if let Some(inbox) = camera_inbox {
+                                let owner = self.camera_parked.take().unwrap_or_else(||
+                                    camera_live::owner::Owner::new(openmt2001::camera::bank::Bank::loader_zero_storage(),1));
+                                view.camera_endpoint = Some(camera_live::endpoint::Endpoint::with_property_install(
+                                    owner,inbox,property_install.expect("prepared actual property install resources")));
+                            }
+                            self.refresh_retry.complete();
                             self.inspection = Some(view);
                             if self.loading_skirmish {
                                 menu.skirmish.finish(None);
@@ -5495,6 +5813,13 @@ impl Intro {
                             presenter.window.set_title("OpenMT2001 - city inspection (simulation paused) / arrows pan, right-drag orbit/zoom, Esc returns");
                         }
                         Err(e) => {
+                            if refreshing {
+                                // Keep the SAME inspection/endpoint running. A
+                                // bounded retry sends the real Inspect request;
+                                // no Intro::draw error reaches AppExit here.
+                                self.refresh_retry.reject(e.clone());
+                                eprintln!("Scene refresh deferred: {e}");
+                            }
                             if self.loading_skirmish {
                                 menu.skirmish.finish(Some(e));
                             } else if self.loading_from_setup {
@@ -5514,38 +5839,40 @@ impl Intro {
             }
         }
         if let Some(view) = &mut self.inspection {
-            while let Some(request) = view.auction_audio_requests.as_ref()
-                .and_then(|receiver| receiver.try_recv().ok())
-            {
-                let _ = request.reply.send(view.auction_audio_player.apply(request.operation));
+            camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;
+            camera_live::service_available(view)?;
+            if let Some(mut endpoint)=view.camera_endpoint.take() {
+                let result=(|| {
+                    let joins=camera_live::UiJoins{primary_clear:None,navigation:None,tutorial:None};
+                    let mut context=camera_live::UiContext::new(view,&mut self.camera_physical,&mut self.assets,
+                        &joins,camera_live::SoundBoundary::Existing2d)?;
+                    // A direct ack wakes the worker, which produces the next
+                    // ordered request. Do not force a full software-rendered
+                    // frame between every such request. Bound transport work
+                    // to8ms, waiting at most1ms between completed operations.
+                    // These times never enter numeric sampling or Host timers.
+                    let started=Instant::now();let budget=std::time::Duration::from_millis(8);
+                    let mut completed=0usize;
+                    loop {
+                        let remaining=budget.saturating_sub(started.elapsed());
+                        if completed>0 && remaining.is_zero(){break;}
+                        let service=if completed==0 {endpoint.service(&mut context)?}
+                            else {endpoint.wait_service(&mut context,remaining.min(std::time::Duration::from_millis(1)))?};
+                        if service==crate::live_host::camera_bridge::Service::Idle {break;}
+                        completed+=1;
+                    }
+                    if completed>1 && std::env::var_os("OPENMT2001_CAMERA_OWNER_NATIVE_REVIEW").is_some() {
+                        static REPORTED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+                        if !REPORTED.swap(true,std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[camera] serviced{completed} ordered requests within one bounded UI pass");
+                        }
+                    }
+                    Ok::<_,String>(())
+                })();
+                view.camera_endpoint=Some(endpoint);
+                result?;
             }
-            view.transport_audio_player.set_interface_mode(if view.strategic { 3 } else { 0 });
-            while let Some(request) = view.transport_audio_requests.as_ref()
-                .and_then(|receiver| receiver.try_recv().ok())
-            {
-                view.transport_audio_player.apply(request.operation);
-            }
-            while let Some(request) = view.era_audio_requests.as_ref()
-                .and_then(|receiver| receiver.try_recv().ok())
-            {
-                let _ = request.reply.send(view.era_audio_player.apply(request.operation));
-            }
-            if let Err(error) = view.era_audio_player.poll() {
-                eprintln!("Era music unavailable: {error}");
-            }
-            while let Some(request) = view.gameplay_sound_requests.as_ref()
-                .and_then(|receiver| receiver.try_recv().ok())
-            {
-                if matches!(request.operation, crate::gameplay_sound::Operation::Ledger { .. }) {
-                    view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
-                }
-                let result = view.gameplay_sound_player.apply(request.operation);
-                if request.reply.send(result.clone()).is_err()
-                    && let Err(error) = result
-                {
-                    eprintln!("Script sound unavailable: {error}");
-                }
-            }
+            Self::poll_camera_save(view);
             while let Some(request) = view
                 .auction_requests
                 .as_ref()
@@ -5576,6 +5903,7 @@ impl Intro {
                     crate::gameplay_sound::Operation::AuctionActor(cue))?;
             }
         }
+        self.refresh_inspection_projection()?;
         if !self
             .inspection
             .as_ref()
@@ -6053,6 +6381,9 @@ impl Intro {
                         if status.tutorial_camera_events.len() < view.tutorial_camera_seen {
                             return Err("tutorial camera event log regressed".into());
                         }
+                        if view.camera_endpoint.is_some() && status.tutorial_camera_events.len()!=view.tutorial_camera_seen {
+                            return Err("Bridged camera received unordered Status camera effects".into());
+                        }
                         for &action in &status.tutorial_camera_events[view.tutorial_camera_seen..] {
                             view.apply_tutorial_camera(action,
                                 &self.assets.selection, &self.assets.navigation,
@@ -6110,7 +6441,14 @@ impl Intro {
                         view.dust.update(&self.assets.dust, &self.renderer, &status.demolition_points,
                             view.camera, view.scene.camera,
                         )?;
-                        view.game_options.set_save_disabled(status.tutorial_session);
+                        if let Some(error)=&status.failure {
+                            if let Some(state)=&mut view.camera_ui {state.reject_save_captures(error);}
+                            if view.camera_capture_pending.take().is_some() {
+                                view.save_dialog.busy=false;
+                                view.save_dialog.message=Some(format!("Save failed: {error}"));
+                            }
+                        }
+                        view.game_options.set_save_disabled(status.tutorial_session || status.failure.is_some());
                         view.live_status = Some(status);
                         view.status_pending = None;
                     }
@@ -6187,6 +6525,7 @@ impl Intro {
                 view.last_environment_query = Instant::now();
             }
             refresh = self.loading.is_none()
+                && self.refresh_retry.error.is_none()
                 && view.auction.scene.is_none()
                 && view.adjustment.is_none()
                 && view.planning.is_none()
@@ -6213,6 +6552,7 @@ impl Intro {
             self.refresh_fresh_city()?;
         }
         if let Some(view) = &mut self.inspection
+            && view.ui_graph.as_ref().is_none_or(|g|g.group_enabled(camera_live::navigation::Group::Tertiary))
             && let Some((scene, true)) = &view.auction.scene
         {
             self.renderer
@@ -6294,6 +6634,11 @@ impl Intro {
                 .map_err(|e| e.to_string());
         }
         if let Some(view) = &mut self.inspection {
+            if view.ui_graph.is_some(){
+                if let Some(prepared)=camera_live::upper_f::body(view,&self.assets,&self.renderer)?{
+                    view.navigator=prepared;
+                }
+            }else{
             //43d0f0 reads the logic-step eye93af64/6c, not the interpolated render eye.
             let arrow_eye = if view.strategic {
                 view.camera.eye
@@ -6308,6 +6653,10 @@ impl Intro {
                 view.live_status.as_ref().map_or(0, |status| status.ticks),
                 &view.navigator_owners,
             )?;
+            }
+            if view.ui_graph.is_some() {
+                camera_live::focus::present(view,&self.assets,self.menu.as_ref(),&self.renderer)?;
+            }else{
             let navigator_tooltip = view
                 .pointer
                 .filter(|_| view.over_navigator())
@@ -6319,7 +6668,7 @@ impl Intro {
                 .map(|(category, point)|
                     (self.assets.selection.blocks[category].text_id, point));
             let icon = if navigator_tooltip.is_none()
-                && view.strategic && !view.game_options.open
+                && view.strategic && !view.options_visible()
                 && view.prompts.request().is_none() && view.adjustment.is_none()
                 && view.planning.is_none()
             {
@@ -6344,7 +6693,9 @@ impl Intro {
                     .transpose()?;
                 view.tooltip_state = tooltip_state;
             }
+            }
             view.locator_blocked = view.strategic
+                && (view.ui_graph.is_none()||view.graph_input(camera_live::ui_graph::PanelId::C))
                 && view.locator.as_ref().is_some_and(|locator| {
                     self.menu.as_ref().is_some_and(|menu| {
                         view.pointer
@@ -6361,7 +6712,8 @@ impl Intro {
                 }));
                 locator.pointer(
                     menu.locator_assets(),
-                    if view.strategic && view.adjustment.is_none() {
+                    if view.strategic && view.adjustment.is_none()
+                        && view.ui_graph.as_ref().is_none_or(|graph|graph.input(camera_live::ui_graph::PanelId::C)) {
                         view.pointer
                     } else {
                         None
@@ -6370,13 +6722,14 @@ impl Intro {
             }
             if view.strategic
                 && let (Some(locator), Some(menu)) = (&mut view.locator, &self.menu)
-                && (locator.dirty || locator.prepared.is_none())
+                && (view.ui_graph.is_some() || locator.dirty || locator.prepared.is_none())
             {
-                locator.prepared = Some(menu.locator_assets().prepare(
-                    &self.renderer,
-                    locator,
-                    &view.scene,
-                )?);
+                locator.prepared=Some(if let Some(graph)=&mut view.ui_graph {
+                    menu.locator_assets().prepare_graph(&self.renderer,locator,&view.scene,
+                        graph.body(camera_live::ui_graph::PanelId::C),
+                        graph.body(camera_live::ui_graph::PanelId::D),
+                        Some(&graph.world.colors),graph.world.mode,&mut graph.world.messages)?
+                }else{menu.locator_assets().prepare(&self.renderer,locator,&view.scene)?});
                 locator.dirty = false;
             }
             if view.statistics_visible()
@@ -6681,7 +7034,7 @@ impl Intro {
                     self.renderer.draw_overlay(&self.color_view,&self.depth_view,panel);
                 }
             }
-            if !view.game_options.open {
+            if !view.options_visible() {
             // Native 404eb0 closes the current main/Block Information panel
             // before 43be20 opens the construction planner. Keep its retained
             // state for dismissal, but do not composite glyphs behind the
@@ -6727,8 +7080,9 @@ impl Intro {
                     &view.detail_icons[usize::from(view.details_visible)],
                 );
             }
-            self.renderer
-                .draw_overlay(&self.color_view, &self.depth_view, &view.navigator);
+            if view.ui_graph.is_none()||view.ui_graph.as_ref().is_some_and(|g|g.shell(camera_live::ui_graph::PanelId::F)){
+                self.renderer.draw_overlay(&self.color_view,&self.depth_view,&view.navigator);
+            }
             if view.strategic
                 && let Some(panel) = view.locator.as_ref().and_then(|l| l.prepared.as_ref())
             {
@@ -6748,9 +7102,9 @@ impl Intro {
             } else {
                 0
             };
-            self.renderer
-                .draw_overlay(&self.color_view, &self.depth_view, &view.navigation[icon],
-                );
+            if view.ui_graph.is_none()||view.graph_body(camera_live::ui_graph::PanelId::E){
+                self.renderer.draw_overlay(&self.color_view,&self.depth_view,&view.navigation[icon]);
+            }
             // The bottom-right round controls share the navigation backing;
             // draw their original-texture faces after it, along with the clock.
             if let Some(status)=&view.live_status {
@@ -6758,6 +7112,14 @@ impl Intro {
                     view.time_panel.cancel_input();view.time_pressed=None;
                 }
                 view.time_panel.update(&self.assets.time_panel,&self.renderer,status)?;
+            }
+            if let Some(graph)=&view.ui_graph {
+                view.time_panel.graph_gates(graph.body(camera_live::ui_graph::PanelId::Clock),
+                    graph.body(camera_live::ui_graph::PanelId::E),graph.speed_disabled!=0,graph.speed_blink);
+                view.time_panel.prepare_graph(&self.assets.time_panel,&self.renderer)?;
+                if let Some(bottom)=&view.time_panel.bottom_prepared {
+                    self.renderer.draw_overlay(&self.color_view,&self.depth_view,bottom);
+                }
             }
             if let Some(panel) = &view.time_panel.prepared {
                 self.renderer.draw_overlay(&self.color_view, &self.depth_view, panel);
@@ -6904,8 +7266,8 @@ impl Intro {
                 self.renderer.draw_overlay(&self.color_view, &self.depth_view, &panel);
             }
             }
-            if view.game_options.open {
-                if view.save_dialog.visible {
+            if view.options_visible() {
+                if view.save_visible() {
                     let panel=self.assets.save_dialog.prepare(&self.renderer,
                         &view.save_dialog,view.pointer.map(|p|p.map(|v|v as f32*0.5)),
                     )?;
@@ -6924,7 +7286,7 @@ impl Intro {
                         )?;
                         self.renderer.draw_overlay(&self.color_view,&self.depth_view,&panel);
                     }
-                } else if view.settings_menu.page.is_some() {
+                } else if view.settings_visible() {
                     view.settings_menu.update_levels(&self.assets.settings_menu, &self.renderer,
                         view.pointer.map(|p| p.map(|v| v as f32 * 0.5)), self.audio_levels,
                     )?;
@@ -7021,6 +7383,86 @@ impl Intro {
 
 #[cfg(test)]
 mod tests {
+    /// Original-input regression. Serialization is entirely
+    /// in memory; this never launches the original executable or writes a save.
+    #[test]
+    #[ignore = "requires supplied original saves/scripts/assets; retirement world/clock regression"]
+    fn retired_camera_host_keeps_world_clock_and_committed_timers() {
+        std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
+            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let executable = read("OPENMT2001_EXE");
+            let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let inputs = SceneInputs {
+                process_runtime:None,
+                compatibility: crate::compatibility::Mode::StrictV14,
+                style: test_board_style(&executable), time_runtime: Default::default(),
+                // This test never creates or writes this path.
+                profile_root: PathBuf::from("unused-camera-retirement-test-profiles"),
+                character_names: crate::fresh_city::character_names(
+                    &openmt2001::pe::PeImage::parse(&executable).unwrap(),
+                    &exe_path.parent().unwrap().parent().unwrap().join("US/language/usa"),
+                ).unwrap(),
+                installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
+                language: exe_path.parent().unwrap().parent().unwrap().join("US/language/usa"),
+                maps: map.parent().unwrap().to_path_buf(), build_file: read("OPENMT2001_BUILD_FILE"),
+                executable, directory: read("OPENMT2001_ARCHIVE_DIR"),
+                archive: read("OPENMT2001_ARCHIVE_BIN"), suncols: read("OPENMT2001_SUNCOLS"),
+            };
+            let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
+                up: [0., 1., 0.], vertical_fov: 45. };
+            let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+            let board = inputs.styled_board(&image).unwrap();
+            let file = openmt2001::build_file::BuildFile::parse(&inputs.build_file).unwrap();
+            let assets = crate::fresh_city::CommandAssets { image: &image, board: &board, file: &file };
+            for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
+                let (loaded, mut session) = inputs.saved_preview(
+                    &PathBuf::from(std::env::var(key).unwrap()), camera,
+                    &mut SnapshotCache::default()).unwrap();
+                let capture = loaded.imported_cameras.unwrap();
+                let index=openmt2001::archive::ArchiveIndex::parse(&inputs.directory,inputs.archive.len() as u64).unwrap();
+                let selection=crate::selection::Assets::load(&inputs.executable,&index,&inputs.archive).unwrap();
+                let pavement=selection.pavement_resource().binding().unwrap().handle();
+                let mut host = crate::live_host::Host::new(camera.eye);
+                let (worker, inbox) = crate::live_host::camera_bridge::channel(session.world.topology.epoch().serial());
+                let install=camera_live::endpoint::PropertyInstall::capture(&selection,&image).unwrap();
+                let ui = std::thread::spawn(move || {
+                    let owner=camera_live::owner::Owner::new(openmt2001::camera::bank::Bank::loader_zero_storage(),1);
+                    let mut endpoint=camera_live::endpoint::Endpoint::with_property_install(owner,inbox,install);
+                    let mut context=camera_live::endpoint::tests::Ui::default();
+                    assert_eq!(endpoint.wait_service(&mut context,std::time::Duration::from_secs(2)).unwrap(),
+                        crate::live_host::camera_bridge::Service::Completed);
+                    assert_eq!(endpoint.owner().property_descriptors().unwrap().count().unwrap(),52);
+                    assert!(endpoint.camera_only_admission(),"CameraOnly must not capture C/F suppliers");
+                    let owner=endpoint.into_owner();
+                    assert!(owner.property_lifecycle_error().is_none());
+                });
+                host.install_camera_bridge(&mut session, &image, crate::live_host::CameraSupplierPolicy::CameraOnly, worker, capture, pavement).unwrap();
+                ui.join().unwrap();
+                assert!(host.camera_retired());
+                let before = session.save_v2(&image, capture.into_records(), 1).unwrap();
+                let timing = session.world.clock.timing;
+                let calendar = session.world.clock.calendar;
+                let timers = session.hooks.timers.clone();
+                let interface_ticks = host.interface_ticks();
+                // Even a stale running bit and catch-up-sized delta cannot
+                // dispatch a retired session's interface or world callbacks.
+                host.running = true;
+                host.frame(&mut session, &assets, 1000);
+                host.tick(&mut session, &assets);
+                host.options(false);
+                host.set_running(true);
+                assert!(!host.running && host.failure.is_none());
+                assert_eq!(session.world.clock.timing, timing);
+                assert_eq!(session.world.clock.calendar, calendar);
+                assert_eq!(session.hooks.timers, timers);
+                assert_eq!(host.interface_ticks(), interface_ticks);
+                assert_eq!(session.save_v2(&image, capture.into_records(), 1).unwrap(), before);
+            }
+        }).unwrap().join().unwrap();
+    }
+
     #[cfg(feature = "capture")]
     #[test]
     #[ignore = "requires original Time assets and offscreen GPU; release performance measurement"]
@@ -8252,6 +8694,7 @@ mod tests {
             let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
             let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
             let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
@@ -8342,6 +8785,7 @@ mod tests {
             let executable = read("OPENMT2001_EXE");
             let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
             let inputs = SceneInputs {
+                process_runtime:None,
                 compatibility: crate::compatibility::Mode::Modern,
                 style: test_board_style(&executable), time_runtime: Default::default(),
                 profile_root: std::env::temp_dir().join("tree-snapshot-profiles"),
@@ -8476,6 +8920,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
@@ -8734,6 +9179,7 @@ mod tests {
         let language = installer.join("US/language/usa");
         let executable = read("OPENMT2001_EXE");
         let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
@@ -8786,6 +9232,7 @@ mod tests {
             let executable = read("OPENMT2001_EXE");
             let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
             let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
@@ -8881,6 +9328,7 @@ mod tests {
                     .unwrap()
                     .join("US/language/usa");
                 let inputs = SceneInputs {
+                process_runtime:None,
                     compatibility: crate::compatibility::Mode::Modern,
                     style: test_board_style(&executable),
                     time_runtime: Default::default(),
@@ -9000,6 +9448,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
@@ -9123,7 +9572,7 @@ mod tests {
         let (reply, saved_result) = mpsc::channel();
         let save_name = format!("worker-{:012x}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64 & 0xffff_ffff_ffff);
-        sender.send(FreshRequest::SaveSelected { target: crate::save_menu::Target::NewName(save_name.clone()),
+        sender.send(FreshRequest::SaveSelected { target: crate::save_menu::Target::NewName(save_name.clone()), capture:None,
             camera, game_mode: 1, interface_mode: 0, reply,
             }).unwrap();
         let saved_path = saved_result.recv().unwrap().unwrap();
@@ -10100,6 +10549,7 @@ mod tests {
         let executable = read("OPENMT2001_EXE");
         let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
         let inputs = SceneInputs {
+                process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),

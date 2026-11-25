@@ -18,6 +18,11 @@ pub struct Navigation {
 }
 impl Navigation {
     pub fn load(index: &ArchiveIndex, archive: &[u8], executable: &[u8]) -> Result<Self, String> {
+        let images = crate::intro::camera_live::process_images::Images::load(executable,index,archive,[640,480])?;
+        Self::load_shared(index,archive,executable,&images)
+    }
+    pub(crate) fn load_shared(index:&ArchiveIndex,archive:&[u8],executable:&[u8],
+        images:&crate::intro::camera_live::process_images::Images)->Result<Self,String>{
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
@@ -32,13 +37,7 @@ impl Navigation {
         backing.rect(*regions.first().ok_or("missing navigation backing")?, [color; 4]);
         surfaces.push(backing);
         let bounds = *regions.get(3).ok_or("missing compass region")?;
-        let entry = index
-            .find("gamedata2\\GenericTextures640\\textures.gtd")
-            .ok_or("missing compass textures")?;
-        let textures = TextureSet::parse(
-            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
-        )
-        .map_err(|e| e.to_string())?;
+        let textures = images.textures()?;
         // Original425172..4251a5 assigns normal117, hover116, pressed115;
         // original4c0f9f registers the GTD at68ae28 in source order.
         if textures.textures.len() <= 117 {

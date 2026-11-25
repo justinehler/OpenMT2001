@@ -10,6 +10,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
     let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
     let executable = read("OPENMT2001_EXE");
     let inputs = Arc::new(SceneInputs {
+            process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
         time_runtime: Default::default(),
         style: test_board_style(&executable),
@@ -80,9 +81,10 @@ fn saved_auction_worker_rebuilds_and_saves() {
             let expected_host = expected.and_then(|expected| expected.host);
             let (reply, loaded_result) = mpsc::channel();
             let worker_inputs = inputs.clone();
+            // Legacy saved-session coverage; this does not activate camera-owner review.
             let worker = std::thread::Builder::new()
                 .stack_size(32 * 1024 * 1024)
-                .spawn(move || worker_inputs.saved_worker(path, None, camera, reply))
+                .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(path, None), camera, reply, None))
                 .unwrap();
             let mut loaded = loaded_result
                 .recv_timeout(std::time::Duration::from_secs(60))
@@ -246,7 +248,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
             }
             let (reply, saved_result) = mpsc::channel();
             sender
-                .send(FreshRequest::SaveSelected {
+                .send(FreshRequest::SaveSelected { capture: None,
                     target: crate::save_menu::Target::NewName(format!("auction-{}-{}", mode,
                         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())),
                     camera,

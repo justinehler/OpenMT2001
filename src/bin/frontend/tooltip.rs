@@ -12,10 +12,19 @@ pub struct Tooltip {
     tab: Vec<u8>,
     names: Vec<Vec<u8>>,
     icon_labels: [Vec<u8>; 7],
+    compass_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
-    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path,
-        language: &Path) -> Result<Self, String> {
+    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, None)
+    }
+    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
+        Self::load_impl(index, archive, installer, language, Some(shared))
+    }
+    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
+        let (pages,tab) = if let Some(shared)=shared {
+            (shared.surfaces(0)?,shared.table(0)?.to_vec())
+        } else {
         let entry = index
             .find("gamedata2/font640/textures.gtd")
             .ok_or("tooltip font texture missing")?;
@@ -35,33 +44,30 @@ impl Tooltip {
         let tab =
             fs::read(installer.join("Standard/fonts/cust640p.tab")).map_err(|e| e.to_string())?;
         Font::parse(&tab)?;
+            (pages,tab)
+        };
         let names = board_strings(installer)?;
-        let off = fs::read(language.join("tycoon.off")).map_err(|e| e.to_string())?;
-        let bin = fs::read(language.join("tycoon.bin")).map_err(|e| e.to_string())?;
-        if !off.len().is_multiple_of(2) { return Err("tooltip language offsets".into()); }
-        let mut at = 0usize;
-        let mut labels = Vec::new();
-        for length in off.chunks_exact(2) {
-            let end = at.checked_add(u16::from_le_bytes(length.try_into().unwrap()) as usize)
-                .ok_or("tooltip language length overflow")?;
-            labels.push(bin.get(at..end).ok_or("tooltip language row outside data")?);
-            at = end;
-        }
-        if at != bin.len() { return Err("tooltip language trailing bytes".into()); }
+        let loaded;
+        let packed = match shared {
+            Some(text) => &text.fonts().language,
+            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+        };
+        let labels = packed.rows();
         //40d8f2's four five-word descriptors store these text IDs in child+34.
         let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52].map(|id| labels.get(id)
             .map(|s| s.to_vec()).ok_or("panel icon tooltip missing".to_owned()))
             .into_iter().collect::<Result<Vec<_>, _>>()?.try_into()
             .map_err(|_| "panel icon tooltip count")?;
-        Ok(Self { pages, tab, names, icon_labels })
+        let compass_labels = [1142, 1143].map(|id| labels.get(id)
+            .map(|s| s.to_vec()).ok_or("compass focus caption missing".to_owned()))
+            .into_iter().collect::<Result<Vec<_>, _>>()?.try_into()
+            .map_err(|_| "compass focus caption count")?;
+        Ok(Self { pages, tab, names, icon_labels, compass_labels })
     }
-    pub fn prepare(
-        &self,
-        renderer: &Renderer,
-        text_id: u32,
-        point: [i32; 2],
-    ) -> Result<PreparedScene, String> {
+    fn focus_identifier(&self, text_id: u32) -> Result<&[u8], String> {
         let name = match text_id {
+            1142 => &self.compass_labels[0],
+            1143 => &self.compass_labels[1],
             1146 => &self.icon_labels[0],
             1147 => &self.icon_labels[1],
             1148 => &self.icon_labels[2],
@@ -72,11 +78,25 @@ impl Tooltip {
             id => self.names.get(id.checked_sub(2242).ok_or("tooltip text ID")? as usize + 1)
                 .ok_or("tooltip category text range")?,
         };
+        Ok(name)
+    }
+    /// Real 43e0a0 font/extent consumer for the finite identifier captions.
+    pub(crate) fn measure_focus_identifier(&self, text_id: u32) -> Result<i32, String> {
+        let name = self.focus_identifier(text_id)?;
         let width = measure_with_gap(&self.tab, name, -1)?;
-        // The original category and four icon captions fit the native 150-pixel line.
         if width >= 150 {
             return Err("tooltip requires unsupported multi-line layout".into());
         }
+        Ok(width)
+    }
+    pub fn prepare(
+        &self,
+        renderer: &Renderer,
+        text_id: u32,
+        point: [i32; 2],
+    ) -> Result<PreparedScene, String> {
+        let name = self.focus_identifier(text_id)?;
+        let width = self.measure_focus_identifier(text_id)?;
         //43e040 sets line gap2;4406a0 measures font0 W height8, giving10.
         //4e6d85 initializes font baseline0; glyph gap−1 is independent.
         let b = rectangle(point, [width as f32, 10.]);
@@ -182,22 +202,8 @@ pub(crate) fn board_strings(installer: &Path) -> Result<Vec<Vec<u8>>, String> {
     //4922e0 installs USA board strings at2242, skipping the source character map.
     //The current native inspection host uses the supplied USA board.
     let path = installer.join("Standard/fonts/board/usa");
-    let off = fs::read(path.join("tycoon.off")).map_err(|e| e.to_string())?;
-    let bin = fs::read(path.join("tycoon.bin")).map_err(|e| e.to_string())?;
-    if !off.len().is_multiple_of(2) {
-        return Err("tooltip language offsets".into());
-    }
-    let mut at = 0;
-    let mut names = vec![];
-    for n in off.chunks_exact(2) {
-        let end = at + u16::from_le_bytes(n.try_into().unwrap()) as usize;
-        names.push(bin.get(at..end).ok_or("tooltip language range")?.to_vec());
-        at = end;
-    }
-    if at != bin.len() {
-        return Err("tooltip language trailing bytes".into());
-    }
-    Ok(names)
+    let packed = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&path.join("tycoon"))?;
+    Ok(packed.rows().into_iter().map(<[u8]>::to_vec).collect())
 }
 
 /// Original4922e0 replaces base-language placeholders with the selected board's

@@ -341,6 +341,7 @@ impl ApplicationHandler for App {
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if let Some(intro) = &mut self.intro { intro.camera_physical_event(&event); }
         if matches!(&event, WindowEvent::RedrawRequested) {
             self.next_redraw = Instant::now() + FRAME_INTERVAL;
         }
@@ -407,7 +408,12 @@ impl ApplicationHandler for App {
             }
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if let Some(intro)=&self.intro {
+                    if let Err(error)=intro.request_process_exit(crate::live_host::process_runtime::QuitWriter::Window){self.failure=Some(error);}
+                    match intro.process_exit_ready(){Ok(true)=>event_loop.exit(),Ok(false)=>{},Err(error)=>{self.failure=Some(error);event_loop.exit();}}
+                }else{event_loop.exit();}
+            },
             WindowEvent::Focused(false) => {
                 if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
                     menu.cancel_input();
@@ -590,9 +596,15 @@ impl ApplicationHandler for App {
                     if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
                         menu.desktop_ui_event1(sample);
                         if menu.take_desktop_exit() {
-                            event_loop.exit(); // normal App/EventLoop teardown
-                            return;
+                            //Writer only; an in-progress central quit still waits
+                            //for its actual tail. Normal menu exit has no tail.
+                            if let Some(intro)=&self.intro {
+                                if let Err(error)=intro.request_process_exit(crate::live_host::process_runtime::QuitWriter::Menu){self.failure=Some(error);event_loop.exit();return;}
+                            }
                         }
+                    }
+                    if let Some(intro)=&self.intro {
+                        match intro.process_exit_ready(){Ok(true)=>{event_loop.exit();return;},Ok(false)=>{},Err(error)=>{self.failure=Some(error);event_loop.exit();return;}}
                     }
                     if let Some(intro) = &mut self.intro {
                         let draw_started = self.frame_profile.as_ref().map(|_| Instant::now());
@@ -615,6 +627,7 @@ impl ApplicationHandler for App {
                             }
                             self.cursor_kind = kind;
                         }
+                        intro.inspection_cursor_presented();
                         return;
                     }
                 }
@@ -709,6 +722,7 @@ pub fn run() -> Result<(), Error> {
     let mut skip_splash = false;
     let mut menu_onload = false;
     let mut exit_after = None;
+    let mut source_options=String::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -758,6 +772,7 @@ pub fn run() -> Result<(), Error> {
                 skip_splash = true;
                 menu_onload = true;
             }
+            "--source-options"=>{source_options=args.next().ok_or("--source-options requires the native option string")?;}
             "--assets" => {
                 root = args
                     .next()
@@ -779,7 +794,7 @@ pub fn run() -> Result<(), Error> {
             }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default low; original performance selection is not connected)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }
@@ -807,7 +822,7 @@ pub fn run() -> Result<(), Error> {
         profile_root,
     };
     std::thread::spawn(move || {
-        let _ = intro_sender.send(crate::intro::Assets::load(paths));
+        let _ = intro_sender.send(crate::intro::Assets::load_with_source_options(paths,&source_options));
     });
     let now = Instant::now();
     let mut app = App {

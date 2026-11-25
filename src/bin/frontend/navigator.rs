@@ -1,4 +1,6 @@
 //! Original Navigator category map,43d290/43dd90; paused inspection host.
+#[path="navigator_upper.rs"]
+pub(crate) mod upper;
 use crate::ui::{self, Surface};
 use openmt2001::{
     archive::ArchiveIndex,
@@ -8,6 +10,10 @@ use openmt2001::{
 pub struct Navigator {
     pub bounds: [f32; 4],
     surfaces: Vec<Surface>,
+    upper_shells:Vec<Vec<Surface>>,
+    upper_backing_color:u32,
+    ///Retained real primitive products; containing Primary graph stays closed.
+    native_primitives:crate::intro::camera_live::primitive_factory::Primitives,
     arrow: Surface,
     ownership: Surface,
     blocks: Vec<Block>,
@@ -70,6 +76,16 @@ pub fn saved_owners(
         .collect()
 }
 impl Navigator {
+    pub(crate) fn process_primitives_mut(&mut self) -> &mut crate::intro::camera_live::primitive_factory::Primitives { &mut self.native_primitives }
+
+    #[cfg(test)]
+    pub(crate) fn native_primitives(&self) -> &crate::intro::camera_live::primitive_factory::Primitives {
+        &self.native_primitives
+    }
+    #[cfg(test)]
+    pub(crate) fn native_primitives_mut(&mut self) -> &mut crate::intro::camera_live::primitive_factory::Primitives {
+        &mut self.native_primitives
+    }
     pub fn load(index: &ArchiveIndex, archive: &[u8], blocks: &[Block], executable: &[u8]) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,
@@ -80,6 +96,15 @@ impl Navigator {
         //43d010 resolves backing separately;43d0b0 fills it at depth0.5.
         // Part0 is that full rectangle, not border artwork. Keep only part1
         // textured; otherwise its opaque gray texture covers the palette fill.
+        let e=index.find("gamedata2/brand_new_panels/new_nav_top.tm").ok_or("F model absent")?;
+        let mesh=openmt2001::mesh::CachedMesh::parse(archive.get(e.offset as usize..(e.offset+e.length)as usize).ok_or("F model range")?)?;
+        if mesh.frames==0||mesh.frames>u16::MAX as usize{return Err("F supplied model frame count".into());}
+        let cpu_model=crate::intro::camera_live::panel_models::CpuModel::parsed(
+            crate::intro::camera_live::ui_graph::PanelId::F,e,&mesh)?;
+        let native_primitives=crate::intro::camera_live::primitive_factory::Primitives::navigator(executable,cpu_model)?;
+        let upper_shells=(0..mesh.frames).map(|frame|
+            ui::panel_frame_base(index,archive,"gamedata2/brand_new_panels/new_nav_top.tm",&[1],frame).map(|v|v.0)
+        ).collect::<Result<Vec<_>,_>>()?;
         let image = openmt2001::pe::PeImage::parse(executable)?;
         let color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
         let mut backing = Surface::solid();
@@ -126,7 +151,7 @@ impl Navigator {
         );
         Ok(Self {
             bounds,
-            surfaces,
+            surfaces,upper_shells,upper_backing_color:color,native_primitives,
             arrow,
             ownership: Surface::new(
                 textures
@@ -363,6 +388,17 @@ fn arrow_quad(origin: [f32; 2], eye: [f32; 2], angle: f32, tick: u32) -> [[f32; 
 
 #[cfg(test)]
 mod tests {
+    // Geometry oracle cases reuse one real asset owner; no placeholder primitive.
+    fn supplied_navigator() -> super::Navigator {
+        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap()
+    }
     #[test]
     #[ignore = "requires supplied original upper Navigator mesh"]
     fn original_upper_navigator_regions() {
@@ -386,6 +422,26 @@ mod tests {
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
         let navigator = super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap();
         assert_eq!(navigator.surfaces.len(), 3, "backing, border and map keep dynamic indices stable");
+        // Real asset-load boundary: one retained source-owned F construction.
+        use crate::intro::camera_live::{primitive_factory::{Phase, Step}, ui_graph::PanelId};
+        let primitive = &navigator.native_primitives;
+        let panel = primitive.panels.get(&0x58cdb0).unwrap();
+        assert_eq!(panel.phase, Phase::Bound);
+        assert_eq!(panel.descriptor, Some(PanelId::F));
+        assert_eq!(primitive.panels.len(), 1);
+        assert_eq!(primitive.texts.len(), 1);
+        assert_eq!(primitive.steps.iter().filter(|s| **s == Step::NavigatorSuffix(0x58cdb0)).count(), 1);
+        assert_eq!(primitive.cells().byte(0x58cdb0 + 0x184).unwrap(), 1);
+        let model = primitive.resources.model(PanelId::F).unwrap();
+        assert_eq!(model.source.path, e.path);
+        assert_eq!((model.source.offset, model.source.length), (e.offset, e.length));
+        assert_eq!(model.frames.len(), mesh.frames);
+        assert_eq!(primitive.cells().word(0x58cdb0 + 0x180).unwrap(), mesh.frames as u32);
+        assert!(primitive.require_process_graph().is_err());
+        assert!(primitive.require_text_layout(panel.caption).is_err());
+        eprintln!("retained F construction frames={} panel_count={} caption_count={} phase={:?}",
+            model.frames.len(), primitive.panels.len(), primitive.texts.len(), panel.phase);
+
         let backing = &navigator.surfaces[0];
         assert_eq!((backing.width, backing.height), (1, 1));
         assert_eq!(backing.pixels, [255; 4]);
@@ -501,6 +557,7 @@ mod tests {
     #[test]
     #[ignore = "private original Navigator ownership oracle"]
     fn matches_native_navigator_ownership() {
+        let mut navigator = supplied_navigator();
         let b =
             std::fs::read(std::env::var("OPENMT2001_NATIVE_NAVIGATOR_OWNERSHIP").unwrap()).unwrap();
         assert_eq!(&b[..8], b"MTNOWN01");
@@ -545,10 +602,8 @@ mod tests {
             let target = blocks.iter_mut().find(|block| block.id == category).unwrap();
             target.center = [f(at + 8), f(at + 12)];
             target.size = [f(at + 16), f(at + 20)];
-            let navigator = super::Navigator {
-                bounds: [f(at), f(at + 4), f(at), f(at + 4)], surfaces: vec![],
-                arrow: crate::ui::Surface::solid(), ownership: crate::ui::Surface::solid(), blocks,
-            };
+            navigator.bounds = [f(at), f(at + 4), f(at), f(at + 4)];
+            navigator.blocks = blocks;
             let surface = navigator.ownership_surface(&owners, w(at + 48));
             assert_eq!(surface.vertices.len(), count as usize * 6, "production gate {case}");
             if count != 0 {
@@ -603,8 +658,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires original Navigator geometry oracle"]
+    #[ignore = "requires original Navigator geometry oracle, executable and archive assets"]
     fn matches_native_navigator() {
+        let mut navigator = supplied_navigator();
         let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_NAVIGATOR").unwrap()).unwrap();
         assert_eq!(&b[..8], b"MTNAV001");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
@@ -630,13 +686,7 @@ mod tests {
                     w(at + 8) == 0,
                     "hit{case} {point:?}"
                 );
-                let navigator = super::Navigator {
-                    bounds: [origin[0], origin[1], origin[0], origin[1]],
-                    surfaces: vec![],
-                    arrow: crate::ui::Surface::solid(),
-                    ownership: crate::ui::Surface::solid(),
-                    blocks: vec![],
-                };
+                navigator.bounds = [origin[0], origin[1], origin[0], origin[1]];
                 let block = openmt2001::board::Block {
                     id: 0,
                     name: String::new(),

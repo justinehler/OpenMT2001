@@ -6,9 +6,13 @@ use openmt2001::{
     pe::PeImage,
 };
 
+#[path="pavement_resource.rs"]
+pub(crate) mod pavement_resource;
+
 pub struct Assets {
     pub blocks: Vec<Block>,
     center: [f32; 3],
+    pavement: pavement_resource::Directory,
     marker: crate::ui::Surface,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +74,10 @@ impl Assets {
             &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
         )?;
         let definition = mesh.model_definition()?;
+        // Install the SAME computed CPU definition and exact archive source.
+        // This finite resource is not the native mesh/material/render manager.
+        let pavement = pavement_resource::Directory::install(
+            pavement_resource::LoadedPavement::from_loaded(directory,archive,entry,definition)?)?;
         let f = |i: usize| f32::from_le_bytes(definition[i * 4..i * 4 + 4].try_into().unwrap());
         let entry = directory
             .find("gamedata2/bounding_box/bound_tubed.tm")
@@ -110,7 +118,31 @@ impl Assets {
             marker,
             blocks,
             center: [f(24), f(25), f(26)],
+            pavement,
         })
+    }
+    /// Sole retained occupied definition owner; callers resolve typed bindings.
+    pub(crate) fn pavement_resource(&self) -> &pavement_resource::Directory { &self.pavement }
+    pub(crate) fn pavement_definition(&self) -> Result<[u8;116],String> {
+        self.pavement.binding()?.definition()
+    }
+    /// Actual asset removal only. Root must retire dependent Pool allocations
+    /// BEFORE calling this, replacing Assets, or dropping the process owner.
+    pub(crate) fn retire_pavement_resource(&mut self) -> Result<(),String> { self.pavement.retire() }
+    #[cfg(test)]
+    pub(crate) fn descriptor_test_assets(blocks: Vec<Block>, definition: [u8;116]) -> Self {
+        // Authored test fixture only; never used as a live/default producer.
+        let center = [24,25,26].map(|i| f32::from_bits(u32::from_le_bytes(
+            definition[i*4..i*4+4].try_into().unwrap())));
+        Self { blocks,center,marker:crate::ui::Surface::solid(),
+            pavement:pavement_resource::Directory::synthetic(definition) }
+    }
+    #[cfg(test)]
+    pub(crate) fn replace_descriptor_test_resource(&mut self, definition:[u8;116]) -> Result<(),String> {
+        self.pavement.replace_synthetic(definition)?;
+        self.center = [24,25,26].map(|i| f32::from_bits(u32::from_le_bytes(
+            definition[i*4..i*4+4].try_into().unwrap())));
+        Ok(())
     }
     /// Retained allocation has room for selected and hovered boxes. Paused
     /// inspection holds the shared logic counter at zero.
@@ -198,6 +230,21 @@ impl Assets {
             block.id == scene.inspection_buildings[0].category
         }).ok_or("Planning preview category missing")?;
         self.marker_surface(Some(Hit { category, building: Some(0) }), None, scene)
+    }
+    /// 482580 consumes actor translation and model center SEPARATELY, with
+    /// retained x87 addition. Do not feed already-rounded center(index).
+    /// Original44faf0 creates pavement descriptors at [blockX,0,blockZ].
+    pub(crate) fn camera_block_initialization(&self, category_id: u32,
+        height_word: u32, radius_word: u32,
+    ) -> Result<openmt2001::camera::primary::BlockInitialization, String> {
+        let block = self.blocks.iter().find(|block| block.id == category_id as usize)
+            .filter(|block| block.flags & 1 == 0)
+            .ok_or("Camera category has no active immutable pavement descriptor")?;
+        Ok(openmt2001::camera::primary::BlockInitialization {
+            actor_translation: [block.center[0].to_bits(), 0, block.center[1].to_bits()],
+            model_offsets: self.center.map(f32::to_bits),
+            height_word, radius_word,
+        })
     }
     pub fn center(&self, index: usize) -> [f32; 3] {
         let block = &self.blocks[index];

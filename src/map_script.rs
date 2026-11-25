@@ -371,6 +371,7 @@ mod tests {
                 crate::level_script::Command::ResultFlyby
                 | crate::level_script::Command::TutorialDisableAllControls
                 | crate::level_script::Command::TutorialDisableAllPicking
+                | crate::level_script::Command::TutorialEnableAllPicking
                 | crate::level_script::Command::TutorialPositionPrompt
                 | crate::level_script::Command::TutorialEnableBlockPicking
                 | crate::level_script::Command::TutorialEnableBuildingPicking
@@ -691,6 +692,8 @@ mod tests {
             let mut world =
                 crate::level_startup::World::fresh(&image, &board, configuration(), creation)
                     .unwrap();
+            assert_eq!(world.topology.count617624(),52,
+                "original449a40 count includes inactive and unused topology rows");
             let centers = board.category_geometry().centers;
             // Geometry adapter supplied below; no saved city records are imported.
             struct Models {
@@ -879,6 +882,7 @@ mod tests {
                         pending_world: _,
                         ownership_refresh_counter: _,
                         auction: _,
+                        topology: _,
                         category_footprints: _,
                         ai_neighbors: _,
                         ai_demand: _,
