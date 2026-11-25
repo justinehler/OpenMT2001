@@ -49,6 +49,14 @@ pub enum Command {
 }
 
 pub trait Hooks: crate::map_script::Hooks {
+    /// Process-owned 008b26cc. Standalone hosts must explicitly supply an owner
+    /// to use this property; binding a VM never constructs/resets the process.
+    fn performance8b26cc(&mut self) -> Result<i32, String> {
+        Err("Game.performance process owner absent".into())
+    }
+    fn set_performance8b26cc(&mut self, _value: i32) -> Result<(), String> {
+        Err("Game.performance process owner absent".into())
+    }
     /// Original pause manager suspends/resumes timer group2 synchronously.
     fn pause_timers(&mut self, event: crate::pause::Timers) -> Result<(), String>;
     fn calendar_timers(
@@ -161,6 +169,31 @@ fn calendar_property(id: u32, arguments: &[Value], clock: &mut crate::clock::Clo
     Ok(None)
 }
 
+// Original4db328 binds signed integer storage, not a numeric table field.
+// IDs747/748 follow Calendar744/745 and TutorialEnableAllPicking746.
+fn register_game_performance(vm: &mut Runtime) -> Result<(), String> {
+    vm.register_number_properties("Game", 747)?;
+    //Original register_game.cpp: named intended bounds; storage is signed32.
+    for (name,value) in [("PERFORM_HIGH",2.),("PERFORM_MEDIUM",1.),("PERFORM_LOW",0.)] {
+        vm.set_number(name,value)?;
+    }
+    Ok(())
+}
+fn game_performance_property(id:u32, arguments:&[Value], hooks:&mut impl Hooks)
+    -> Result<Option<f64>,String> {
+    if !matches!(arguments.first(),Some(Value::Bytes(key)) if key.as_slice()==b"performance") {
+        return Err("unsupported Game numeric property".into());
+    }
+    if id==747 {return hooks.performance8b26cc().map(|v|Some(f64::from(v)));}
+    let Some(Value::Number(value))=arguments.get(1) else {
+        return Err("Game.performance setter missing C-coerced number".into());
+    };
+    //004d6980 uses tonumber then _ftol/EAX: truncate signed64, retain low32.
+    //No quality clamp; unsupported later Random bounds remain errors there.
+    hooks.set_performance8b26cc(crate::economy::ftol_low_word(*value))?;
+    Ok(None)
+}
+
 pub struct Bindings {
     selected_objective: objective_selection::Selection,
     startup_settings: crate::startup_settings::Bindings,
@@ -179,7 +212,7 @@ impl Bindings {
         self.selected_objective.bind(level);
     }
 
-    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..746. Host buffers
+    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..748. Host buffers
     /// registered with Runtime::script_buffer satisfy nested C_RunScript calls.
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
         register_calendar(vm)?;
@@ -365,9 +398,25 @@ impl Bindings {
         //4dac40: two tonumber arguments and a lua_isnumber-gated third.
         // Missing/invalid third arguments preserve the original flag.
         vm.register_coerced("SetObjective", 4, "nnN")?;
+        register_game_performance(vm)?;
+        // Install actual closures through protected raw table access. Runtime
+        // intentionally has no Lua base-library rawset global.
+        for (member,function) in [
+            ("GetObjectiveTarget","GetObjectiveTarget"),
+            ("GetDifficulty","GetDifficulty"),
+            ("SetObjective","SetObjective"),
+            ("Pause","Pause"),
+            ("Unpause","Unpause"),
+            ("StartFireworks","C_ResultFireworks"),
+            ("SetCutSceneIdentifier","C_ResultCutSceneIdentifier"),
+            ("EnableCutSceneBypass","C_ResultEnableBypass"),
+            ("DisableCutSceneBypass","C_ResultDisableBypass"),
+            ("SetCredits","C_ResultCredits"),
+            ("End","C_ResultEnd"),
+        ] { vm.alias_function("Game",member,function)?; }
         vm.execute(
             "Game bindings",
-            b"Game={GetObjectiveTarget=GetObjectiveTarget,GetDifficulty=GetDifficulty,SetObjective=SetObjective,Pause=Pause,Unpause=Unpause,StartFireworks=C_ResultFireworks,SetCutSceneIdentifier=C_ResultCutSceneIdentifier,EnableCutSceneBypass=C_ResultEnableBypass,DisableCutSceneBypass=C_ResultDisableBypass,SetCredits=C_ResultCredits,End=C_ResultEnd,performance=2}; Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,EnableAll3DPicking=TutorialEnableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
+            b"Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,EnableAll3DPicking=TutorialEnableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
             &mut |_, _| Err("unexpected binding callback".into()),
         )?;
         vm.register_script_loader("C_RunScript")?;
@@ -398,6 +447,9 @@ impl Bindings {
         let mut live_context = *context;
         live_context.update_clock(state.clock);
         let context = &live_context;
+        if matches!(id,747|748) {
+            return game_performance_property(id,arguments,hooks);
+        }
         if matches!(id, 744 | 745) {
             return calendar_property(id, arguments, state.clock);
         }
@@ -915,3 +967,6 @@ mod calendar_binding_tests {
     }
 
 }
+
+#[cfg(test)]
+#[path="level_script/performance_tests.rs"] mod performance_tests;

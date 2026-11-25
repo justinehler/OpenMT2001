@@ -252,6 +252,7 @@ pub enum SessionCall {
     /// Protected Install-only actual current World categories.
     PrimaryCategory { source:ResidentSource, row:Option<u8> },
     ProcessByte(super::process_runtime::Byte),
+    Performance8b26cc,
     Count822d38,
     IncrementCount4ba580,
     Scene822d30,
@@ -267,7 +268,7 @@ pub enum SessionCall {
     Missing(MissingFamily),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionReply { PrimaryCategory(Option<[u32;3]>), Byte(u8), Word(u32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
+pub enum SessionReply { PrimaryCategory(Option<[u32;3]>), Byte(u8), Word(u32), Signed(i32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
 impl SessionCall {
     fn admitted_on(&self,boundary:Boundary)->bool{
         if matches!(self,Self::PrimaryCategory{..}){boundary==Boundary::Install}
@@ -282,6 +283,7 @@ impl SessionCall {
             (Self::Resident{read:ResidentRead::Lookup6899a0(_),..},SessionReply::ResidentBinding(_)) |
             (Self::Resident{read:ResidentRead::Validate(_)|ResidentRead::Participant481a50(_),..},SessionReply::Completed) |
             (Self::PauseByte(_)|Self::Busy48dbf0|Self::ProcessByte(_),SessionReply::Byte(_)) |
+            (Self::Performance8b26cc,SessionReply::Signed(_)) |
             (Self::Count822d38|Self::Scene822d30,SessionReply::Word(_)) |
             (Self::IncrementCount4ba580|Self::Quit93442c|Self::Media4b9210|Self::Sequence4b1980,SessionReply::Completed) |
             (Self::Pause4bac90(_)|Self::Unpause4bacc0(_),SessionReply::Completed))

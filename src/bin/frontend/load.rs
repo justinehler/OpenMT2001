@@ -1013,7 +1013,8 @@ mod tests {
         let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
         let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
         let prompt_assets = crate::prompt::Assets::load(&index, &archive,
-            &installer, &rows).unwrap();
+            &installer, &rows,
+            &openmt2001::pe::PeImage::parse(&fs::read(&executable).unwrap()).unwrap()).unwrap();
         let stamp = SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .unwrap().as_nanos();
         let root = std::env::temp_dir().join(format!("omt-v2-load-capture-{stamp}"));

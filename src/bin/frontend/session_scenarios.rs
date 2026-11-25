@@ -704,7 +704,7 @@ mod tests {
         let mut host=crate::live_host::Host::new([0.,20.,0.]);
         host.begin_presentation(&session).unwrap();
         host.frame(&mut session,&assets,20);
-        let prompt_assets=crate::prompt::Assets::load(&index,&archive,&installer,&strings).unwrap();
+        let prompt_assets=crate::prompt::Assets::load(&index,&archive,&installer,&strings,&image).unwrap();
         let ack=|session:&mut Session<'_>,host:&mut crate::live_host::Host,id| {
             let status=host.status(session);
             let request=status.prompts.last().cloned().unwrap();
@@ -1369,7 +1369,7 @@ mod tests {
         // These are original modal prompts, not required widget callbacks.
         // Acknowledging15/16/17 advances the authored floor/quality/design
         // explanations; do not invent callbacks93/95/92 beneath an active modal.
-        let prompt_assets = crate::prompt::Assets::load(&index, &archive, &installer, &strings).unwrap();
+        let prompt_assets = crate::prompt::Assets::load(&index, &archive, &installer, &strings, &image).unwrap();
         for dismissal in [15, 16, 17] {
             let request = next_modal.prompts.last().cloned().unwrap();
             assert_eq!(request.dismissal_id, dismissal);
@@ -1479,7 +1479,7 @@ mod tests {
             std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         crate::campaign_store::save_progress(&session.catalog,&profile).unwrap();
         session.campaign_profile=Some(profile.clone());
-        let prompt_assets=crate::prompt::Assets::load(&index,&archive,installer,&strings).unwrap();
+        let prompt_assets=crate::prompt::Assets::load(&index,&archive,installer,&strings,&image).unwrap();
         let mut host=crate::live_host::Host::new([0.,20.,0.]);
         host.begin_presentation(&session).unwrap();
         host.set_running(true);
@@ -2341,7 +2341,7 @@ mod tests {
             std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         crate::campaign_store::save_progress(&session.catalog,&profile).unwrap();
         session.campaign_profile=Some(profile.clone());
-        let prompt_assets=crate::prompt::Assets::load(&index,&archive,installer,&strings).unwrap();
+        let prompt_assets=crate::prompt::Assets::load(&index,&archive,installer,&strings,&image).unwrap();
         let (renderer_sender,renderer_receiver)=std::sync::mpsc::channel::<crate::auction_bridge::Request>();
         let presenter=std::thread::Builder::new().stack_size(32*1024*1024).spawn(move ||{
             let exe=read("OPENMT2001_EXE");let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");

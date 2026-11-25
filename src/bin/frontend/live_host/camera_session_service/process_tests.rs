@@ -196,3 +196,13 @@ fn source_absence_and_unimplemented_families_are_not_known_zero(){
     assert_eq!(apply_process(Some(&p),&scene,SessionCall::Scene822d30).unwrap(),SessionReply::Word(1));
     p.source_load_unjoined().unwrap();assert!(apply_process(Some(&p),&scene,SessionCall::Scene822d30).is_err());
 }
+
+#[test]
+fn performance_session_reader_keeps_signed_value_and_shared_identity(){
+    use super::super::process_runtime;
+    let p=process_runtime::test_fixture();
+    assert!(apply_process(None,&0,SessionCall::Performance8b26cc).is_err());
+    assert_eq!(apply_process(Some(&p),&0,SessionCall::Performance8b26cc).unwrap(),SessionReply::Signed(2));
+    p.set_performance8b26cc(-7).unwrap();
+    assert_eq!(apply_process(Some(&p.clone()),&0,SessionCall::Performance8b26cc).unwrap(),SessionReply::Signed(-7));
+}

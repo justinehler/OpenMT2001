@@ -58,6 +58,12 @@ unsafe extern "C" {
     fn mt4_free(runtime: *mut c_void);
     fn mt4_error(runtime: *mut c_void) -> *const c_char;
     fn mt4_set_number(runtime: *mut c_void, name: *const c_char, value: f64) -> c_int;
+    fn mt4_function_alias(
+        runtime: *mut c_void,
+        table: *const c_char,
+        member: *const c_char,
+        function: *const c_char,
+    ) -> c_int;
     fn mt4_register_properties(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
     fn mt4_calendar_binding(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
     fn mt4_calendar_method(runtime: *mut c_void, table: *const c_char,
@@ -280,6 +286,17 @@ impl Runtime {
     pub fn register(&mut self, name: &str, id: u32) -> Result<(), String> {
         let name = CString::new(name).map_err(|_| "Lua function name contains NUL")?;
         self.check(unsafe { mt4_register(self.raw.as_ptr(), name.as_ptr(), id) })
+    }
+    /// Copy the existing registered global function closure into a table's raw
+    /// member. Preserves its identity and the table's numeric-property tag.
+    /// This protected operation calls no host callback and opens no library.
+    pub fn alias_function(&mut self, table: &str, member: &str, function: &str) -> Result<(), String> {
+        let table = CString::new(table).map_err(|_| "Lua alias table contains NUL")?;
+        let member = CString::new(member).map_err(|_| "Lua alias member contains NUL")?;
+        let function = CString::new(function).map_err(|_| "Lua alias function contains NUL")?;
+        self.check(unsafe {
+            mt4_function_alias(self.raw.as_ptr(), table.as_ptr(), member.as_ptr(), function.as_ptr())
+        })
     }
     /// Fixed native signature: `n` uses Lua tonumber and `s` uses tostring.
     /// `N` converts numeric values/strings and passes other values as Nil.
@@ -1400,3 +1417,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path="lua4/function_alias_tests.rs"]
+mod function_alias_tests;

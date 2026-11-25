@@ -621,25 +621,33 @@ mod tests {
                 .unwrap(),
             Some(13)
         );
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) {
-            descriptor.backends = wgpu::Backends::DX12;
-        }
-        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        #[cfg(feature = "capture")]
+        let renderer = {
+            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows) {
+                descriptor.backends = wgpu::Backends::DX12;
+            }
+            pollster::block_on(Renderer::new(descriptor)).unwrap()
+        };
+        #[cfg(feature = "capture")]
         let metadata = [strings[1885], strings[1654]]; // Actual labels; host value formatting is a separate boundary.
+        #[cfg(feature = "capture")]
         let encode = |bytes: &[u8]| {
             Ok(crate::load::ascii(
                 std::str::from_utf8(bytes).map_err(|e| e.to_string())?,
             ))
         };
-        let draw = panel
-            .draw(&state, &renderer, None, false, metadata, encode)
-            .unwrap();
-        crate::capture_test::capture_standalone(
-            &renderer,
-            &draw,
-            "work/frontend/skirmish-roster-empty.png",
-        );
+        #[cfg(feature = "capture")]
+        {
+            let draw = panel
+                .draw(&state, &renderer, None, false, metadata, encode)
+                .unwrap();
+            crate::capture_test::capture_standalone(
+                &renderer,
+                &draw,
+                "work/frontend/skirmish-roster-empty.png",
+            );
+        }
         state.activate(13).unwrap();
         assert!(state.enabled(25));
         state.busy = true;
@@ -667,14 +675,17 @@ mod tests {
         assert!(!state.enabled(25));
         state.activate(18).unwrap();
         assert!(state.enabled(25));
-        let draw = panel
-            .draw(&state, &renderer, Some(25), false, metadata, encode)
-            .unwrap();
-        crate::capture_test::capture_standalone(
-            &renderer,
-            &draw,
-            "work/frontend/skirmish-roster-one-ai.png",
-        );
+        #[cfg(feature = "capture")]
+        {
+            let draw = panel
+                .draw(&state, &renderer, Some(25), false, metadata, encode)
+                .unwrap();
+            crate::capture_test::capture_standalone(
+                &renderer,
+                &draw,
+                "work/frontend/skirmish-roster-one-ai.png",
+            );
+        }
         let Outcome::Start {
             setup,
             participants,

@@ -1239,7 +1239,8 @@ mod tests {
             );
             let strings = assets.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
             let generic =
-                crate::prompt::Assets::load(&index, &archive, installer, &strings).unwrap();
+                crate::prompt::Assets::load(&index, &archive, installer, &strings,
+                    &openmt2001::pe::PeImage::parse(&exe).unwrap()).unwrap();
             let buttons = generic.dialog_buttons(2);
             assert_eq!(buttons.len(), 2);
             view.modal = Some(Modal::Overwrite);

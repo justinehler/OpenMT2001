@@ -52,6 +52,11 @@ impl Primitives {
             }
             b.cells.set_word(D,0x5255f0)?;
             self.texts.insert(D+0x188,super::super::case_zero_factories::text_owner(&b.cells,D+0x188)?);
+            b.voting_static()?;
+            self.texts.insert(0x573b38+0x188,super::super::case_zero_factories::text_owner(&b.cells,0x573b38+0x188)?);
+            b.eventlist_static()?;
+            self.texts.insert(0x571378+0x188,super::super::case_zero_factories::text_owner(&b.cells,0x571378+0x188)?);
+            b.chat_static43a770(&mut self.texts)?;
             b.main_static()?;
             self.texts.insert(A+0x188,super::super::case_zero_factories::text_owner(&b.cells,A+0x188)?);
             b.navigator()?;
@@ -69,7 +74,7 @@ impl Primitives {
             ||self.main_phase!=MainPhase::Unstarted||self.resources.models.len()!=16||!self.resources.descriptors.is_empty(){
             return Err("Fresh prefix already started or owner/resource phases differ; no replay".into())
         }
-        for address in [D,A,F]{
+        for address in [D,0x573b38,0x571378,0x57ef28,A,F]{
             let panel=self.panels.get(&address).ok_or("Fresh required actual static Panel absent")?;
             if panel.phase!=Phase::Constructed||panel.descriptor.is_some()||self.cells().byte(address+0x184)?!=0{
                 return Err("Fresh panel was already bound or laid out".into())

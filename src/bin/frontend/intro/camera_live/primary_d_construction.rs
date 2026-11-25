@@ -31,11 +31,11 @@ impl Currency {
     }
 }
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum PrimaryPhase {Allocated,Preparing,AwaitingDLayout,LayingOutD,AwaitingVoting,AwaitingDRebind,Failed}
+pub enum PrimaryPhase {Allocated,Preparing,AwaitingDLayout,LayingOutD,AwaitingVoting,LayingOutVoting,AwaitingEventList,LayingOutEventList,AwaitingChat,LayingOutChat,AwaitingG,AwaitingDRebind,Failed}
 ///An explicit independent camera-install outcome, never a Graph/D completion
 ///when the actual warm layout/reset source path has not been joined.
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum InstallDisposition {CompletedD{epoch:u64},ParkedAwaitingDRebind{constructed_epoch:u64,requested_epoch:u64}}
+pub enum InstallDisposition {CompletedD{epoch:u64},CompletedVoting{epoch:u64},CompletedEventList{epoch:u64},CompletedChat{epoch:u64},ParkedAwaitingDRebind{constructed_epoch:u64,requested_epoch:u64}}
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum OrderingBoundary {AwaitingOrderedMain}
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -129,14 +129,14 @@ impl PrimaryConstruction {
     }
     pub(super) fn fail(&mut self,error:String){self.d.phase=PrimaryPhase::Failed;self.d.active_epoch=None;self.d.failure=Some(error);}
     pub fn d_current_for(&self,epoch:u64)->bool{
-        self.d.phase==PrimaryPhase::AwaitingVoting&&self.d.active_epoch==Some(epoch)
+        matches!(self.d.phase,PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingEventList|PrimaryPhase::AwaitingChat|PrimaryPhase::AwaitingG)&&self.d.active_epoch==Some(epoch)
             &&self.d.live_source.as_ref().is_some_and(|s|s.validate_live().is_ok())
     }
     ///Actual Intro city-exit hook invalidates current-world D before the
     ///existing Endpoint retires sources and wakes the waiting worker.
     pub fn retire_for_camera(&mut self,p:&mut Primitives)->Result<(),String>{
         if !self.process.same(&p.construction_identity){return Err("D retirement belongs to another process allocation".into())}
-        if self.d.phase==PrimaryPhase::AwaitingVoting {
+        if matches!(self.d.phase,PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingEventList|PrimaryPhase::AwaitingChat|PrimaryPhase::AwaitingG) {
             p.primary_park_d()?;self.d.phase=PrimaryPhase::AwaitingDRebind;
             self.d.active_epoch=None;self.d.parked_for=self.d.epoch;self.d.live_source=None;
         }Ok(())
@@ -152,7 +152,7 @@ impl PrimaryConstruction {
         if images.ui_dimensions!=[640,480]||source.epoch().serial()!=generation||generation!=services.generation(){return Err("D source/resource/domain/operation epoch mismatch".into())}
         source.validate_live()?;
         match self.d.phase {
-            PrimaryPhase::AwaitingDLayout|PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingDRebind=>(),
+            PrimaryPhase::AwaitingDLayout|PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingEventList|PrimaryPhase::AwaitingChat|PrimaryPhase::AwaitingG|PrimaryPhase::AwaitingDRebind=>(),
             _=>return Err(self.d.failure.clone().unwrap_or_else(||"Primary D reached partial phase cannot replay".into())),
         }
         if p.primary_phase!=Some(self.d.phase){return Err("D same primitive/typed phase mismatch".into())}
@@ -160,7 +160,7 @@ impl PrimaryConstruction {
         match services.call(SessionCall::PrimaryCategory{source:source.clone(),row:None}).map_err(|e|e.to_string())? {
             SessionReply::PrimaryCategory(None)=>(),_=>return Err("D category validation reply differs".into()),
         }
-        if matches!(self.d.phase,PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingDRebind){
+        if matches!(self.d.phase,PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingEventList|PrimaryPhase::AwaitingChat|PrimaryPhase::AwaitingG|PrimaryPhase::AwaitingDRebind){
             let constructed_epoch=self.d.epoch.ok_or("completed D construction epoch absent")?;
             p.primary_park_d()?;
             self.d.phase=PrimaryPhase::AwaitingDRebind;self.d.active_epoch=None;
@@ -179,6 +179,79 @@ impl PrimaryConstruction {
         match result {
             Ok(())=>{self.d.phase=PrimaryPhase::AwaitingVoting;self.d.active_epoch=Some(generation);self.d.live_source=Some(source.clone());Ok(InstallDisposition::CompletedD{epoch:generation})},
             Err(error)=>{p.primary_fail_d();self.fail(error.clone());Err(error)},
+        }
+    }
+    ///Mandatory next member of the fresh controller only. All preclaim
+    ///identity/source checks precede mutation of the retained Voting slot.
+    pub(super) fn install_voting(&mut self,voting:&mut super::voting_construction::VotingProduct,
+        source:&ResidentSource,generation:u64,p:&mut Primitives,text:&mut UiTextResources,images:&Images)
+        ->Result<InstallDisposition,String>{
+        use super::voting_construction::Phase as VotingPhase;
+        if self.d.phase!=PrimaryPhase::AwaitingVoting||!self.d_current_for(generation)
+            ||!self.process.same(&p.construction_identity)||!self.text.same(&text.construction_identity)
+            ||!self.images.same(&images.construction_identity)||images.ui_dimensions!=[640,480]
+            ||source.epoch().serial()!=generation||voting.phase!=VotingPhase::Unbound||!voting.same_process(p){
+            return Err("Voting requires SAME fresh returned D/source/resources/unbound owner; no replay".into())
+        }
+        source.validate_live()?;p.check_voting_ready()?;
+        voting.phase=VotingPhase::Binding;self.d.phase=PrimaryPhase::LayingOutVoting;
+        let result:Result<(),String>=(||{
+            p.voting_bind()?;
+            voting.layout(p,text,images)?; //actual42c420 return, still1840
+            p.voting_bind_return_and_register(voting)?; //43ba52 ->43cdf3
+            Ok(())
+        })();
+        match result{
+            Ok(())=>{voting.phase=VotingPhase::Registered;self.d.phase=PrimaryPhase::AwaitingEventList;
+                Ok(InstallDisposition::CompletedVoting{epoch:generation})},
+            Err(error)=>{p.primary_fail_d();voting.fail(error.clone());self.fail(error.clone());Err(error)},
+        }
+    }
+    ///Concrete next43ce0a ->41cdc0 ->43ba52 ->43ce12 continuation.
+    ///Only the fresh controller calls it after actual Voting registration.
+    pub(super) fn install_eventlist(&mut self,eventlist:&mut super::eventlist_construction::EventListProduct,
+        source:&ResidentSource,generation:u64,p:&mut Primitives,text:&mut UiTextResources,images:&Images)
+        ->Result<InstallDisposition,String>{
+        use super::eventlist_construction::Phase as EventPhase;
+        if self.d.phase!=PrimaryPhase::AwaitingEventList||!self.d_current_for(generation)
+            ||!self.process.same(&p.construction_identity)||!self.text.same(&text.construction_identity)
+            ||!self.images.same(&images.construction_identity)||images.ui_dimensions!=[640,480]
+            ||source.epoch().serial()!=generation||eventlist.phase!=EventPhase::Unbound||!eventlist.same_process(p){
+            return Err("EventList requires SAME returned Voting/live source/resources/unbound owner; no replay".into())
+        }
+        source.validate_live()?;p.check_eventlist_ready()?;
+        eventlist.phase=EventPhase::Binding;self.d.phase=PrimaryPhase::LayingOutEventList;
+        let result:Result<(),String>=(||{
+            p.eventlist_bind()?;
+            eventlist.layout(p,text)?; //actual41cfa1, still1840
+            p.eventlist_bind_return_and_register(eventlist)?;
+            Ok(())
+        })();
+        match result{
+            Ok(())=>{eventlist.phase=EventPhase::Registered;self.d.phase=PrimaryPhase::AwaitingChat;
+                Ok(InstallDisposition::CompletedEventList{epoch:generation})},
+            Err(error)=>{p.primary_fail_d();eventlist.fail(error.clone());self.fail(error.clone());Err(error)},
+        }
+    }
+    ///Actual43ce17 bind13 ->41a510 ->43ba52 ->43ce34, no completion token.
+    pub(super) fn install_chat(&mut self,chat:&mut super::chat_construction::ChatProduct,
+        event:&super::eventlist_construction::EventListProduct,source:&ResidentSource,generation:u64,
+        p:&mut Primitives,text:&mut UiTextResources,images:&Images)->Result<InstallDisposition,String>{
+        use super::chat_construction::Phase as ChatPhase;
+        if self.d.phase!=PrimaryPhase::AwaitingChat||!self.d_current_for(generation)
+            ||!self.process.same(&p.construction_identity)||!self.text.same(&text.construction_identity)
+            ||!self.images.same(&images.construction_identity)||images.ui_dimensions!=[640,480]
+            ||source.epoch().serial()!=generation||chat.phase!=ChatPhase::Unbound||!chat.same_process(p)
+            ||event.phase()!=super::eventlist_construction::Phase::Registered||!event.same_process(p){
+            return Err("Chat requires SAME actually returned EventList/live source/resources/unbound product; no replay".into())
+        }
+        source.validate_live()?;p.check_chat_ready()?;
+        chat.phase=ChatPhase::Binding;self.d.phase=PrimaryPhase::LayingOutChat;
+        let result:Result<(),String>=(||{p.chat_bind()?;chat.layout(p,text,images)?;p.chat_bind_return_and_register(chat)})();
+        match result{
+            Ok(())=>{chat.phase=ChatPhase::Registered;self.d.phase=PrimaryPhase::AwaitingG;
+                Ok(InstallDisposition::CompletedChat{epoch:generation})},
+            Err(error)=>{p.primary_fail_d();chat.fail(error.clone());self.fail(error.clone());Err(error)},
         }
     }
     fn layout(&mut self,source:&ResidentSource,services:&mut SessionServices<'_>,p:&mut Primitives,text:&mut UiTextResources)->Result<(),String>{

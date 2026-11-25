@@ -775,7 +775,7 @@ impl<'data> Session<'data> {
     }
 
     pub fn initialize(input: Inputs<'_, 'data>, policy: Policy) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14, None)
+        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14, None, None)
     }
 
     /// Start from the host's loaded campaign profile, preserving its unlocks
@@ -786,7 +786,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog,
         profile_path: std::path::PathBuf,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14, None)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14, None, None)
     }
 
     pub fn initialize_campaign_with_style(
@@ -794,7 +794,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14, None)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14, None, None)
     }
 
     /// Start with the host-selected compatibility policy. Legacy entry points
@@ -804,7 +804,7 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility, None)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility, None, None)
     }
 
     pub fn initialize_campaign_with_style_and_compatibility(
@@ -813,7 +813,7 @@ impl<'data> Session<'data> {
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility, None)
+        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility, None, None)
     }
 
     /// Fresh offline kernel only. Policy.seed is injected by the host; offline
@@ -822,7 +822,7 @@ impl<'data> Session<'data> {
         input: Inputs<'_, 'data>, policy: Policy,
         catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
     ) -> Result<Self, String> {
-        Self::initialize_skirmish_inner(input,policy,catalog,launch,None)
+        Self::initialize_skirmish_inner(input,policy,catalog,launch,None, None)
     }
 
     pub fn initialize_skirmish_with_style(
@@ -830,13 +830,14 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style))
+        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style), None)
     }
 
     fn initialize_skirmish_inner(
         mut input: Inputs<'_, 'data>, policy: Policy,
         catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
         style: Option<&openmt2001::board_style::Style>,
+        process:Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
         launch.validate()?;
         let options = openmt2001::skirmish::Options::from_pe(input.image)?;
@@ -848,7 +849,7 @@ impl<'data> Session<'data> {
         }
         input.difficulty = launch.difficulty;
         Self::initialize_with_catalog(input, policy, Some(catalog), None, false,
-            style, crate::compatibility::Mode::StrictV14, Some(launch))
+            style, crate::compatibility::Mode::StrictV14, Some(launch), process)
     }
 
     /// Authored startup without a named profile, for read-only/import callers.
@@ -876,7 +877,40 @@ impl<'data> Session<'data> {
             .ok_or("custom scenario missing from registered catalog")?;
         if !custom::valid_level(level) { return Err("invalid custom scenario identity".into()); }
         Self::initialize_with_catalog(input, policy, Some(catalog), profile_path, false,
-            Some(style), compatibility, None)
+            Some(style), compatibility, None, None)
+    }
+
+    /// Explicit process identity for standalone callers that execute Game.performance.
+    pub fn initialize_in_process(input:Inputs<'_, 'data>,policy:Policy,
+        process:crate::live_host::process_runtime::Handle)->Result<Self,String>{
+        Self::initialize_with_catalog(input,policy,None,None,false,None,
+            crate::compatibility::Mode::StrictV14,None,Some(process))
+    }
+    pub fn initialize_campaign_with_style_and_compatibility_in_process(
+        input:Inputs<'_, 'data>,policy:Policy,catalog:openmt2001::level_catalog::Catalog,
+        profile_path:std::path::PathBuf,style:&openmt2001::board_style::Style,
+        compatibility:crate::compatibility::Mode,process:Option<crate::live_host::process_runtime::Handle>,
+    )->Result<Self,String>{
+        Self::initialize_with_catalog(input,policy,Some(catalog),Some(profile_path),false,
+            Some(style),compatibility,None,process)
+    }
+    pub fn initialize_skirmish_with_style_in_process(input:Inputs<'_, 'data>,policy:Policy,
+        catalog:openmt2001::level_catalog::Catalog,launch:SkirmishLaunch,
+        style:&openmt2001::board_style::Style,process:Option<crate::live_host::process_runtime::Handle>,
+    )->Result<Self,String>{
+        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style),process)
+    }
+    pub fn initialize_custom_with_style_and_profile_in_process(input:Inputs<'_, 'data>,policy:Policy,
+        catalog:openmt2001::level_catalog::Catalog,profile_path:Option<std::path::PathBuf>,
+        style:&openmt2001::board_style::Style,compatibility:crate::compatibility::Mode,
+        process:Option<crate::live_host::process_runtime::Handle>,
+    )->Result<Self,String>{
+        let level=catalog.levels.iter().find(|level|
+            custom::same_directory(level.directory(),input.scenario.as_bytes()))
+            .ok_or("custom scenario missing from registered catalog")?;
+        if !custom::valid_level(level){return Err("invalid custom scenario identity".into());}
+        Self::initialize_with_catalog(input,policy,Some(catalog),profile_path,false,
+            Some(style),compatibility,None,process)
     }
 
     fn initialize_with_catalog(mut input: Inputs<'_, 'data>, policy: Policy,
@@ -886,6 +920,7 @@ impl<'data> Session<'data> {
         style: Option<&openmt2001::board_style::Style>,
         compatibility: crate::compatibility::Mode,
         skirmish: Option<SkirmishLaunch>,
+        process:Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
         if !(0..=2).contains(&input.difficulty){return Err("campaign difficulty outside three levels".into());}
         let mut catalog=if let Some(catalog)=supplied_catalog {catalog} else {
@@ -974,6 +1009,7 @@ impl<'data> Session<'data> {
             crate::building_models::Models::with_tree_locators(input.tree_locators.as_deref())?,
         );
         let mut hooks = Hooks::new();
+        hooks.process=process; // Before top-level, initialize and Level dispatch.
         let context = world.script_context(
             input.image,
             &resident_models,
@@ -1374,6 +1410,7 @@ impl<'data> Session<'data> {
 /// Recorded UI work is retained for a later presenter, never treated as applied.
 /// Non-city ownership, new-resident events and cash charges fail explicitly.
 pub struct Hooks {
+    process:Option<crate::live_host::process_runtime::Handle>,
     /// Only an audited original terminal forced-auction EVENT invocation.
     forced_auction_allowed: bool,
     forced_auction_handlers:std::collections::BTreeMap<String,Vec<u8>>,
@@ -1386,6 +1423,7 @@ pub struct Hooks {
 impl Hooks {
     pub(crate) fn new() -> Self {
         Self {
+            process:None,
             forced_auction_allowed: false,
             forced_auction_handlers:Default::default(),
             notifications: vec![],
@@ -1456,6 +1494,14 @@ impl map_script::Hooks for Hooks {
     }
 }
 impl level_script::Hooks for Hooks {
+    fn performance8b26cc(&mut self)->Result<i32,String>{
+        self.process.as_ref().ok_or("Game.performance process owner absent")?
+            .performance8b26cc().map_err(|e|e.to_string())
+    }
+    fn set_performance8b26cc(&mut self,value:i32)->Result<(),String>{
+        self.process.as_ref().ok_or("Game.performance process owner absent")?
+            .set_performance8b26cc(value).map_err(|e|e.to_string())
+    }
     fn pause_timers(&mut self, event: openmt2001::pause::Timers) -> Result<(), String> {
         event.apply(&mut self.timers);
         Ok(())

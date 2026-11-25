@@ -37,7 +37,7 @@ pub fn capture(
             text
         })
         .collect();
-    let panel = crate::prompt::Assets::load(&index, &archive, installer, &strings).unwrap();
+    let panel = crate::prompt::Assets::load(&index, &archive, installer, &strings, assets.image).unwrap();
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     if cfg!(windows) {
         descriptor.backends = wgpu::Backends::DX12;

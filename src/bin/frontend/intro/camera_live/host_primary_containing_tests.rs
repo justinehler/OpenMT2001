@@ -158,6 +158,35 @@ fn footprint(a:&mut Assets)->Footprint{
         (0x560a48,0xc8),(0x560b14,4)].into_iter().map(|(at,n)|p.cells().read(at,n).unwrap().to_vec()).collect();
     Footprint{identities,model_allocations,steps:p.steps.clone(),cells,fonts,images,texts,models,descriptors,rows}
 }
+// Original43b95a..43b996: two separate f32 stores, read from the
+// allocation snapshot before any bind/layout. No production bind is the oracle.
+fn assert_success_model_bytes(before:&Footprint,after:&Footprint,executable:&[u8]){
+    use openmt2001::{pe::PeImage,x87::Sum};
+    assert_eq!(before.models.len(),16);assert_eq!(after.models.len(),16);
+    let pe=PeImage::parse(executable).unwrap();
+    let negative=f32::from_le_bytes(pe.at(0x525264,4).unwrap().try_into().unwrap());
+    let offset=f32::from_le_bytes(pe.at(0x525034,4).unwrap().try_into().unwrap());
+    assert!(negative.is_finite()&&offset.is_finite());
+    // Fixed43cc60 pool ordinals13=Chat,14=EventList,15=Voting.
+    for ordinal in 0..16{
+        let raw=&before.models[ordinal];let actual=&after.models[ordinal];
+        if ordinal<13{assert_eq!(actual,raw,"unbound model ordinal{ordinal}");continue}
+        assert_eq!(actual.len(),raw.len());assert!(raw.len()>=280);
+        assert_eq!(&actual[..280],&raw[..280],"serialized definition/header preserved");
+        let vertices=usize::from(u16::from_le_bytes(raw[116..118].try_into().unwrap()));
+        let frames=usize::from(u16::from_le_bytes(raw[120..122].try_into().unwrap()));
+        assert_eq!((vertices,frames),match ordinal{13=>(72,1),14=>(80,1),15=>(88,1),_=>unreachable!()});
+        assert_eq!(raw.len(),280+12*vertices*frames);
+        for (old,new) in raw[280..].chunks_exact(12).zip(actual[280..].chunks_exact(12)){
+            assert_eq!(&new[..8],&old[..8],"XY preserved at bound ordinal{ordinal}");
+            let mut z=Sum::from_f32(f32::from_le_bytes(old[8..12].try_into().unwrap())).unwrap();
+            z.mul_f32(negative).unwrap();let stored=z.to_f32();
+            let mut z=Sum::from_f32(stored).unwrap();z.add_f32(offset).unwrap();
+            assert_eq!(u32::from_le_bytes(new[8..12].try_into().unwrap()),z.to_f32().to_bits(),
+                "two original43b770 f32 stores at bound ordinal{ordinal}");
+        }
+    }
+}
 struct Start{inbox:bridge::Inbox,epoch:u64,capture:Capture,retirement:Arc<AtomicBool>}
 fn host_run(inputs:Arc<SceneInputs>,pavement:crate::selection::pavement_resource::LocalPavementHandle,
     starts:mpsc::Sender<Start>,retired:mpsc::Receiver<()>,fault:bool){
@@ -256,7 +285,7 @@ fn run(fault:bool){
             let endpoint=view.camera_endpoint.as_ref().unwrap();assert_eq!(endpoint.capture(),start.capture);
             assert_eq!(endpoint.owner().property_descriptors().unwrap().count().unwrap(),52);assert!(endpoint.owner().resident_descriptors().is_ok());
             if world==0{
-                assert_eq!(primary(&a).phase(),PrimaryPhase::AwaitingVoting);primary(&a).require_current_d(start.epoch).unwrap();
+                assert_eq!(primary(&a).phase(),PrimaryPhase::AwaitingG);primary(&a).require_current_d(start.epoch).unwrap();
                 let d=primary(&a).d();assert_eq!(d.rows.iter().map(|r|(r.category,r.title,r.title_record,r.initialized)).collect::<Vec<_>>(),
                     vec![(Some(1),Some(45),Some(0x539518),true),(Some(41),Some(0),Some(0x5385a0),true)]);
                 assert!(d.rows.iter().all(|r|r.text.group.count>0));
@@ -264,11 +293,11 @@ fn run(fault:bool){
                 assert_eq!((p.cells().word(G+0x2c).unwrap(),p.cells().word(G+0x30).unwrap(),p.cells().byte(G+0x34).unwrap()),(16,16,1));
                 assert_eq!(p.resources.descriptors.len(),16);assert_eq!(p.panels[&D].descriptor,Some(DescriptorIdentity::EmbeddedD));
                 assert_eq!(p.panels[&D].phase,Phase::Bound);assert_eq!(p.cells().byte(D+0x184).unwrap(),1);
-                assert_eq!((p.cells().word(G+8).unwrap(),p.cells().word(G+12).unwrap(),p.cells().word(G+0x24).unwrap()),(D,D,17));
-                let expected=vec![Step::Currency,Step::DescriptorCopy(0),Step::DescriptorCopy(1),Step::DescriptorCopy(2),Step::DescriptorCopy(3),Step::DescriptorCopy(4),Step::DescriptorCopy(5),Step::DescriptorCopy(6),Step::DescriptorCopy(7),Step::DescriptorCopy(8),Step::DescriptorCopy(9),Step::DescriptorCopy(10),Step::DescriptorCopy(11),Step::DescriptorCopy(12),Step::DescriptorCopy(13),Step::DescriptorCopy(14),Step::DescriptorCopy(15),Step::PrimaryReferences,Step::Bind(D),Step::Layout(D),Step::LayoutReturned(D),Step::Bound(D),Step::Registered(D),Step::PrimaryCount(17)];
+                assert_eq!((p.cells().word(G+8).unwrap(),p.cells().word(G+12).unwrap(),p.cells().word(G+0x24).unwrap()),(0x57ef28,D,17));
+                let expected=vec![Step::Currency,Step::DescriptorCopy(0),Step::DescriptorCopy(1),Step::DescriptorCopy(2),Step::DescriptorCopy(3),Step::DescriptorCopy(4),Step::DescriptorCopy(5),Step::DescriptorCopy(6),Step::DescriptorCopy(7),Step::DescriptorCopy(8),Step::DescriptorCopy(9),Step::DescriptorCopy(10),Step::DescriptorCopy(11),Step::DescriptorCopy(12),Step::DescriptorCopy(13),Step::DescriptorCopy(14),Step::DescriptorCopy(15),Step::PrimaryReferences,Step::Bind(D),Step::Layout(D),Step::LayoutReturned(D),Step::Bound(D),Step::Registered(D),Step::PrimaryCount(17),Step::Bind(0x573b38),Step::Layout(0x573b38),Step::LayoutReturned(0x573b38),Step::Bound(0x573b38),Step::Registered(0x573b38),Step::Bind(0x571378),Step::Layout(0x571378),Step::LayoutReturned(0x571378),Step::Bound(0x571378),Step::Registered(0x571378),Step::Bind(0x57ef28),Step::Layout(0x57ef28),Step::LayoutReturned(0x57ef28),Step::Bound(0x57ef28),Step::Registered(0x57ef28)];
                 assert_eq!(p.steps.iter().filter(|s|matches!(s,Step::Currency|Step::DescriptorCopy(_)|Step::PrimaryReferences|Step::Bind(_)|Step::Layout(_)|Step::LayoutReturned(_)|Step::Bound(_)|Step::Registered(_)|Step::PrimaryCount(_))).copied().collect::<Vec<_>>(),expected);
                 let after=footprint(a);assert_eq!(&after.identities[..4],&birth.identities[..4]);
-                assert_eq!(after.model_allocations,birth.model_allocations);assert_eq!(after.models,birth.models);retained=Some(after);
+                assert_eq!(after.model_allocations,birth.model_allocations);assert_success_model_bytes(&birth,&after,&executable);retained=Some(after);
             }else{
                 assert_eq!(primary(&a).phase(),PrimaryPhase::AwaitingDRebind);assert_eq!(primary(&a).d().epoch,epoch_one);
                 assert_eq!(primary(&a).d().parked_for,Some(start.epoch));assert!(primary(&a).require_current_d(start.epoch).is_err());

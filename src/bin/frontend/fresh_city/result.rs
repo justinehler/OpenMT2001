@@ -288,7 +288,7 @@ fn credit_lines(image: &openmt2001::pe::PeImage<'_>, random_state: &mut u32)
 
 /// Original4db450: numeric upper bound is truncated by50e928, the separate
 /// static RNG at93aee8 advances once, then signed division returns 0..upper.
-/// The result hub passes Game.performance=2; larger script uses are bounded
+/// The result hub reads the live process Game.performance bound; larger uses are bounded
 /// here because native `inc ecx` overflows at i32::MAX.
 fn random_zero_to(state: &mut u32, args: &[Value]) -> Result<f64, String> {
     let [Value::Number(upper)] = args else {
@@ -424,7 +424,8 @@ mod tests {
             let era_styles = super::super::load_era_styles(
                 Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
             let assets = CommandAssets { image: &image, board: &board, file: &file };
-            let mut session = Session::initialize(super::super::Inputs {
+            let process=crate::live_host::process_runtime::startup(&executable,"").unwrap().0;
+            let mut session = Session::initialize_in_process(super::super::Inputs {
                 tree_locators: None,
                 image: &image, board: &board, file: &file,
                 people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
@@ -435,7 +436,7 @@ mod tests {
                 era_styles, timetable: std::str::from_utf8(&timetable).unwrap(),
                 scenario: "SCENARIO1", difficulty: 0, selected_character: 4,
                 profile_name: b"Complete validation", character_names: &names,
-            }, super::super::Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }).unwrap();
+            }, super::super::Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] },process).unwrap();
             let mut expected_state = session.script_random_state;
             let selected = random_zero_to(&mut expected_state, &[Value::Number(2.)]).unwrap() as u32;
             session.begin_result_sequence(Sequence::Complete, (0, 1), &assets).unwrap();
@@ -478,3 +479,6 @@ mod tests {
         }).unwrap().join().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path="performance_tests.rs"] mod performance_tests;

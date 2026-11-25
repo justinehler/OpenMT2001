@@ -91,6 +91,12 @@ pub(crate) mod primitive_factory;
 
 #[path="camera_live/primary_d_construction.rs"] pub(crate) mod primary_d_construction;
 #[path="camera_live/deferred_primary.rs"] pub(crate) mod deferred_primary;
+#[path="camera_live/voting_construction.rs"] pub(crate) mod voting_construction;
+
+#[path="camera_live/eventlist_construction.rs"] pub(crate) mod eventlist_construction;
+
+#[path="camera_live/visual_construction.rs"] pub(crate) mod visual_construction;
+#[path="camera_live/chat_construction.rs"] pub(crate) mod chat_construction;
 
 #[cfg(test)]
 #[path="camera_live/host_primary_containing_tests.rs"] mod host_primary_containing_tests;

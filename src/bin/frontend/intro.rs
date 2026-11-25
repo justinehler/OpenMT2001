@@ -461,10 +461,15 @@ fn mode12_input_tick(controls: &mut openmt2001::camera::BlockCamera,
     sensitivity: i32, invert_vertical: bool,
 )
     -> Result<([f32; 3], [f32; 3]), String> {
+    mode12_input_tick_with_height(controls,saved_camera,keys,drag,sensitivity,invert_vertical,false)
+}
+fn mode12_input_tick_with_height(controls:&mut openmt2001::camera::BlockCamera,
+    saved_camera:bool,keys:[bool;4],drag:[i32;2],sensitivity:i32,invert_vertical:bool,low_height:bool,
+)->Result<([f32;3],[f32;3]),String>{
     let mut pose = if saved_camera { saved_camera_tick(controls, keys) }
         else { controls.tick(keys) };
     if drag != [0; 2] {
-        controls.right_drag(&mut pose, drag, sensitivity, invert_vertical, false, false)?;
+        controls.right_drag(&mut pose, drag, sensitivity, invert_vertical, false, low_height)?;
     }
     Ok(pose)
 }
@@ -1316,7 +1321,7 @@ impl SceneInputs {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
             .as_secs() as u32;
-        let mut session = crate::fresh_city::Session::initialize_skirmish_with_style(
+        let mut session = crate::fresh_city::Session::initialize_skirmish_with_style_in_process(
             crate::fresh_city::Inputs {
                 tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
                 ),
@@ -1355,6 +1360,7 @@ impl SceneInputs {
             request.catalog,
             request.launch,
             &self.style,
+            self.process_runtime.clone(),
         )?;
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         Ok((loaded, session))
@@ -1454,21 +1460,23 @@ impl SceneInputs {
             auxiliary_prior_bytes: [0; 0x11c],
         };
         let mut session = if is_custom {
-            crate::fresh_city::Session::initialize_custom_with_style_and_profile(
+            crate::fresh_city::Session::initialize_custom_with_style_and_profile_in_process(
                 input,
                 policy,
                 setup.catalog.clone(),
                 Some(setup.profile_path.clone()),
                 &self.style,
                 self.compatibility,
+                self.process_runtime.clone(),
             )?
         } else {
-            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility(
+            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility_in_process(
                 input,
                 policy,
                 setup.catalog.clone(),
                 setup.profile_path.clone(), &self.style,
                 self.compatibility,
+                self.process_runtime.clone(),
             )?
         };
         eprintln!(
@@ -1532,7 +1540,7 @@ impl SceneInputs {
         let timetable = fs::read_to_string(self.installer.join("parameters/timetable.prm"))
             .map_err(|e| e.to_string())?;
         // An arbitrary original save has no authenticated V2 profile selection.
-        let (mut session, restored_presentation) = crate::fresh_city::Session::load_original_with_presentation_style(
+        let (mut session, restored_presentation) = crate::fresh_city::Session::load_original_with_presentation_style_in_process(
             crate::fresh_city::Inputs {
                 tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
                     ),
@@ -1557,6 +1565,7 @@ impl SceneInputs {
                 },
             &bytes,
             Some(&self.style),
+            self.process_runtime.clone(),
         )?;
         let metadata = session.restore_v2_extension_with_image(&save, &image)?;
         #[cfg(test)]
@@ -4830,6 +4839,8 @@ impl Intro {
                 }
                 // Preserve short host key taps until one original callback consumes them.
                 let keys = std::array::from_fn(|i| view.keys[i] || view.taps[i]);
+                // Sample the SAME process word once for this combined callback.
+                let low_height=self.assets.process_runtime.performance_nonzero().map_err(|e|e.to_string())?;
                 let pose = if view.mouse_buttons == [true, true] {
                     crate::navigation::pan_tick(
                         &mut view.controls,
@@ -4839,18 +4850,18 @@ impl Intro {
                         i32::from(view.settings_menu.gameplay.mouse_sensitivity),
                     )?
                 } else if view.building_camera {
-                    crate::navigation::building_tick_with_options(
+                    crate::navigation::building_tick_with_height(
                         &mut view.controls,
                         &mut view.building_angle,
                         keys,
                         view.drag,
                         i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                        view.settings_menu.gameplay.invert_vertical,
+                        view.settings_menu.gameplay.invert_vertical, low_height,
                     )?
                 } else {
-                    mode12_input_tick(&mut view.controls, view.saved_camera, keys, view.drag,
+                    mode12_input_tick_with_height(&mut view.controls, view.saved_camera, keys, view.drag,
                         i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                        view.settings_menu.gameplay.invert_vertical,
+                        view.settings_menu.gameplay.invert_vertical, low_height,
                     )?
                 };
                 view.drag = [0; 2];

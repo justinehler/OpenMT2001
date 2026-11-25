@@ -155,3 +155,34 @@ fn actual_picking_conversion_keeps_native_low_word_and_indefinite_semantics(){
     assert_eq!(tutorial_pick_target(&[Value::Number(-1.9)]).unwrap(),None);
     assert_eq!(tutorial_pick_target(&[Value::Number(-2.9)]).unwrap(),Some((-2i32) as u32));
 }
+
+#[test]
+fn performance_constructor_graphics_writers_and_world_lifetimes_are_distinct(){
+    let p=fixture();let retained=p.clone();
+    assert_eq!(p.performance8b26cc().unwrap(),2);
+    assert_eq!(p.performance_producer().unwrap(),PerformanceProducer::Constructor4b91c3);
+    p.set_performance8b26cc(1).unwrap();
+    p.graphics_construction4c6810(OriginalGraphicsPolicy::NormalD3d).unwrap();
+    assert_eq!(retained.performance8b26cc().unwrap(),1,"D3D retains a prior Lua integer");
+    p.graphics_construction4c6810(OriginalGraphicsPolicy::SoftwareKind2Or3).unwrap();
+    assert_eq!(retained.performance8b26cc().unwrap(),0);
+    assert_eq!(p.performance_producer().unwrap(),PerformanceProducer::Software4c684a);
+    p.graphics_construction4c6810(OriginalGraphicsPolicy::NormalD3d).unwrap();
+    assert_eq!(p.performance8b26cc().unwrap(),0,"D3D does not reinitialize after Software/Test");
+    p.set_performance8b26cc(-7).unwrap();
+    p.world_reset_post_camera4b9eb1().unwrap();p.world_controller_reset4c2b80().unwrap();
+    p.source_fresh_world().unwrap();
+    assert_eq!(retained.performance8b26cc().unwrap(),-7,"World reset is not process birth");
+    assert!(retained.performance_nonzero().unwrap(),"camera uses signed-word nonzero, not quality enum");
+    assert_eq!(p.performance_producer().unwrap(),PerformanceProducer::Lua4d6980);
+    let mut cells=Cells::process_allocation(&loader()).unwrap();cells.set_word(0x8b26cc,1).unwrap();
+    assert!(startup_from_loader(&cells,"").is_err(),"verify loader preimage before constructor store");
+}
+#[test]
+fn performance_poison_is_an_error_not_a_high_default(){
+    let p=fixture();let other=p.clone();
+    let _=std::thread::spawn(move||{let _guard=other.0.lock().unwrap();panic!("intentional process poison");}).join();
+    assert_eq!(p.performance8b26cc(),Err(Error::Poisoned));
+    assert_eq!(p.set_performance8b26cc(2),Err(Error::Poisoned));
+    assert_eq!(p.performance_nonzero(),Err(Error::Poisoned));
+}

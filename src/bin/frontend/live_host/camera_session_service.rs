@@ -22,7 +22,7 @@ pub(super) fn handle(session:&mut Session<'_>,call:SessionCall)->Result<SessionR
 pub(super) fn handle_with_process(session:&mut Session<'_>,process:Option<&super::process_runtime::Handle>,
     call:SessionCall)->Result<SessionReply,RequestError>{
     use SessionCall::*;
-    let process_call=matches!(&call,ProcessByte(_)|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980);
+    let process_call=matches!(&call,ProcessByte(_)|Performance8b26cc|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980);
     if !process_call{return handle(session,call)}
     apply_process(process,&session.world.clock.timing[5],call)
 }
@@ -31,6 +31,7 @@ fn apply_process(process:Option<&super::process_runtime::Handle>,scene:&u32,call
     let process=process.ok_or_else(||super::process_runtime::Error::Absent.to_string())?;
     match call{
         ProcessByte(cell)=>process.byte(cell).map(SessionReply::Byte).map_err(|e|e.to_string().into()),
+        Performance8b26cc=>process.performance8b26cc().map(SessionReply::Signed).map_err(|e|e.to_string().into()),
         Count822d38=>process.count822d38().map(SessionReply::Word).map_err(|e|e.to_string().into()),
         IncrementCount4ba580=>process.increment_count4ba580().map(|()|SessionReply::Completed).map_err(|e|e.to_string().into()),
         //SAME native timing sixth-word storage, already written by real map,
@@ -65,7 +66,7 @@ fn apply(pause:&mut openmt2001::pause::State,timers:&mut [openmt2001::timers::Ta
         PrimaryCategory{..}=>Err("D category read requires actual World handler".into()),
         Resident{..}=>Err("resident service requires actual Session World/pool handler".into()),
         Missing(family)=>Err(format!("Session source/callback join unavailable: {family:?}").into()),
-        ProcessByte(_)|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980=>Err(super::process_runtime::Error::Absent.to_string().into()),
+        ProcessByte(_)|Performance8b26cc|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980=>Err(super::process_runtime::Error::Absent.to_string().into()),
     }
 }
 

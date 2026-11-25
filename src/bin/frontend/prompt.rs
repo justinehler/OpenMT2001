@@ -564,12 +564,15 @@ impl Assets {
         archive: &[u8],
         installer: &Path,
         strings: &[&[u8]],
+        image: &openmt2001::pe::PeImage<'_>,
     ) -> Result<Self, String> {
-        let (base, regions) = ui::panel_base(
+        let (mut base, regions) = ui::panel_base(
             index,
             archive,
             "gamedata2/brand_new_panels/prompt_panel.tm",
-            &[0, 1, 2],
+            // Only the border is visible model geometry; parts1/2 are
+            // reverse-facing layout regions replaced by native runtime fills.
+            &[0],
         )?;
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index.find(name).ok_or("prompt asset missing")?;
@@ -609,6 +612,12 @@ impl Assets {
             .map(|n| fs::read(installer.join("Standard/fonts").join(n)).map_err(|e| e.to_string()))
             .collect::<Result<Vec<_>, _>>()?;
         let main = regions[2];
+        // Original5254c0+10 ->42a150 draws this PE-backed body before
+        // the model border;43c3a0 then draws429e30's title and children.
+        let body_color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
+        let mut backing = Surface::solid();
+        backing.rect(main, [body_color; 4]);
+        base.insert(0, backing);
         let y = ((f64::from(main[1]) + 3. * f64::from(main[3])) * 0.25 + 2.) as f32;
         let x = ((f64::from(main[2]) - f64::from(main[0]) - 60.) / 2. + f64::from(main[0])) as f32;
         Ok(Self {
@@ -926,7 +935,7 @@ pub fn verify_card_panel(scene: &openmt2001::render_scene::Scene, player: &[u8; 
             text
         })
         .collect::<Vec<_>>();
-    let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
+    let assets = Assets::load(&index, &archive, installer, &strings, &image).unwrap();
     let mut actor = vec![0; 0x220];
     actor[4..444].copy_from_slice(player);
     let request = card_request(
@@ -1348,7 +1357,7 @@ fn original_human_dialog_resources() {
             s
         })
         .collect::<Vec<_>>();
-    let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
+    let assets = Assets::load(&index, &archive, installer, &strings, &image).unwrap();
     let mut name = [0; 96];
     name[..4].copy_from_slice(b"Dog\0");
     let category = u32::from_le_bytes(image.at(0x5385a0 + 33 * 88, 4).unwrap().try_into().unwrap());
@@ -1589,7 +1598,9 @@ mod desktop_quit_assets_tests {
             let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
             let row = &bytes[at..end]; at = end; row
         }).collect::<Vec<_>>();
-        let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
+        let executable = read("OPENMT2001_EXE");
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let assets = Assets::load(&index, &archive, installer, &strings, &image).unwrap();
         let mut modal = crate::menu::desktop_quit::Modal::default(); modal.open(None);
         let mut state = State::default();
         state.submit(Request { script: None, dialog: Some(crate::menu::desktop_quit::dialog()),

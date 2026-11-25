@@ -179,7 +179,8 @@ impl Assets {
             planning: crate::build_view::Assets::load(
                 index, archive, installer, &strings, executable,
             )?,
-            prompts: crate::prompt::Assets::load(index, archive, installer, &strings)?,
+            prompts: crate::prompt::Assets::load(index, archive, installer, &strings,
+                &openmt2001::pe::PeImage::parse(executable)?)?,
             event_list: crate::event_list::Assets::load(index, archive, installer, &strings)?,
             stats: crate::stats_panel::Assets::load(index, archive, installer, &strings, executable,
             )?,

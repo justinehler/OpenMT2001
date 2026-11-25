@@ -239,6 +239,9 @@ pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,Constructin
 #[path="primary_d_primitives.rs"]
 mod primary_d_primitives;
 #[path="deferred_primitives.rs"] mod deferred_primitives;
+#[path="voting_primitives.rs"] mod voting_primitives;
+#[path="eventlist_primitives.rs"] mod eventlist_primitives;
+#[path="chat_primitives.rs"] mod chat_primitives;
 impl Primitives {
     ///Actual Navigator asset-load entry calls this with its successfully
     ///parsed retained model. This owner lives with that application's asset

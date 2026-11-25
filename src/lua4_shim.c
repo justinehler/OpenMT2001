@@ -27,6 +27,7 @@ typedef struct {
     int action;
     const char *name;
     const char *source;
+    const char *target;
     size_t length;
     const double *arguments;
     size_t count;
@@ -477,6 +478,17 @@ static void protected_operation(lua_State *L, void *data) {
         lua_pushcclosure(L, trigger_event, 3);
         lua_setglobal(L, op->name);
         break;
+    case 21:
+        /* Alias the actual registered closure; no Lua base-library rawset
+         * global and no call through the table's property setter is needed. */
+        lua_getglobal(L, op->name);
+        if (lua_type(L, -1) != LUA_TTABLE) lua_error(L, "function alias target is not a table");
+        lua_getglobal(L, op->target);
+        if (lua_type(L, -1) != LUA_TFUNCTION) lua_error(L, "function alias source is not a function");
+        lua_pushstring(L, op->source);
+        lua_insert(L, -2);
+        lua_rawset(L, -3);
+        break;
     case 20:
         lua_getglobal(L, op->name);
         if (lua_type(L, -1) != LUA_TTABLE) lua_error(L, "calendar method target is not a table");
@@ -704,4 +716,11 @@ int mt4_calendar_method(mt4_runtime *runtime, const char *table, const char *met
     memset(&op, 0, sizeof(op)); op.runtime = runtime; op.action = 20;
     op.name = table; op.source = method; op.id = id;
     return perform(&op);
+}
+
+int mt4_function_alias(mt4_runtime *runtime, const char *table, const char *member,
+                       const char *function) {
+    mt4_operation op;
+    memset(&op, 0, sizeof(op)); op.runtime = runtime; op.action = 21;
+    op.name = table; op.source = member; op.target = function; return perform(&op);
 }

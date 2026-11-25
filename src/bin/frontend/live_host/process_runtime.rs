@@ -62,8 +62,23 @@ pub struct CentralToken(CentralId);
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum TailObligation {Pending(CentralId),Completed(CentralId),Failed(CentralId)}
 struct Quit {requested:u8,active:Option<CentralId>,next_serial:u64,obligation:Option<TailObligation>}
+/// Original API construction policy; unrelated to modern adapter/FPS/detail.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum OriginalGraphicsPolicy { NormalD3d, SoftwareKind2Or3 }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum PerformanceProducer { Constructor4b91c3, Software4c684a, Lua4d6980 }
+struct Performance { value:i32,producer:PerformanceProducer }
+impl Performance {
+    fn constructor4b9140()->Self{Self{value:2,producer:PerformanceProducer::Constructor4b91c3}}
+    fn graphics4c6810(&mut self,policy:OriginalGraphicsPolicy){
+        // D3D construction retains the current word, including script writes.
+        if policy==OriginalGraphicsPolicy::SoftwareKind2Or3 {
+            self.value=0;self.producer=PerformanceProducer::Software4c684a;
+        }
+    }
+}
 struct ProcessRuntime {
-    options:Options,network:Network,alternative:u8,media:Media,sequence:Option<Sequence>,
+    performance:Performance,options:Options,network:Network,alternative:u8,media:Media,sequence:Option<Sequence>,
     picking:PickingProjection,count:u32,quit:Quit,
     // This is only availability/provenance, NEVER a second scene/clock word.
     // Scene822d30 is the already-existing Session.world.clock.timing[5].
@@ -97,11 +112,11 @@ fn startup_from_loader(cells:&Cells,command:&str)->std::result::Result<(Handle,A
         0x920888,0x920889,0x92088a,0x920890,0x93442c] {
         if cells.byte(address)?!=0{return Err(format!("unexpected process loader preimage {address:08x}"));}
     }
-    for address in [0x822d38,0x8fcaa4,0x8fcaa8] {
+    for address in [0x8b26cc,0x822d38,0x8fcaa4,0x8fcaa8] {
         if cells.word(address)?!=0{return Err(format!("unexpected process loader word {address:08x}"));}
     }
     let mut options=Options::defaults4b9140();options.parse4c7500(command).map_err(|e|e.to_string())?;
-    let mut runtime=ProcessRuntime{options,network:Network::constructor4e1290(),
+    let mut runtime=ProcessRuntime{performance:Performance::constructor4b9140(),options,network:Network::constructor4e1290(),
         alternative:cells.byte(0x8fca96)?,media:Media{byte:cells.byte(0x8fca98)?,producer:MediaProducer::Loader},
         sequence:Some(Sequence::constructor4b1790()),
         //4c2b30 first store,4c2b60 constructor and4c2b80 reset: common1,
@@ -111,6 +126,9 @@ fn startup_from_loader(cells:&Cells,command:&str)->std::result::Result<(Handle,A
             active:None,next_serial:0,obligation:None},scene_error:None};
     //4b9480 samples the native network constructor product once. Teardown
     //later cannot undo the city-entry b9 writer.
+    // Current frontend explicitly adopts the existing NormalD3d original
+    // compatibility policy. No WGPU/backend inference or new user setting.
+    runtime.performance.graphics4c6810(OriginalGraphicsPolicy::NormalD3d);
     runtime.city_main_entry();
     //Actual startup clear is committed. The missing probe is represented as
     //awaiting, NOT admitted as known valid0 or silently ignored success.
@@ -121,6 +139,17 @@ impl ProcessRuntime {fn city_main_entry(&mut self){if self.network.enabled!=0{se
 impl Handle {
     fn with<T>(&self,f:impl FnOnce(&mut ProcessRuntime)->Result<T>)->Result<T>{
         let mut state=self.0.lock().map_err(|_|Error::Poisoned)?;f(&mut state)
+    }
+    pub fn performance8b26cc(&self)->Result<i32>{self.with(|r|Ok(r.performance.value))}
+    pub fn performance_producer(&self)->Result<PerformanceProducer>{self.with(|r|Ok(r.performance.producer))}
+    pub fn performance_nonzero(&self)->Result<bool>{self.performance8b26cc().map(|v|v!=0)}
+    pub fn set_performance8b26cc(&self,value:i32)->Result<()>{self.with(|r|{
+        r.performance.value=value;r.performance.producer=PerformanceProducer::Lua4d6980;Ok(())
+    })}
+    /// Explicit construction operation only; never called by reads/rebinding.
+    /// Software/Test clears0; later D3D retains that0 (or a later script value).
+    pub fn graphics_construction4c6810(&self,policy:OriginalGraphicsPolicy)->Result<()>{
+        self.with(|r|{r.performance.graphics4c6810(policy);Ok(())})
     }
     pub fn byte(&self,cell:Byte)->Result<u8>{self.with(|r|Ok(match cell{
         Byte::Media8fca98=>{if matches!(r.media.producer,MediaProducer::Awaiting(_)){return Err(Error::MediaProbeUnavailable)}r.media.byte},

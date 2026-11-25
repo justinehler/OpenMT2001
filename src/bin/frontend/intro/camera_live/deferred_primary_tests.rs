@@ -92,7 +92,7 @@ fn actual_cold_assets_defers_effects_and_has_no_completed_main(){
 
 #[test]
 #[ignore="supplied actual World/Fonts/protected wire, independent original order"]
-fn original_prefix_order_all_sixteen_copies_d_only_and_same_owners(){
+fn original_prefix_order_all_sixteen_copies_d_voting_and_same_owners(){
     let input=Inputs::read();let (primary,p,text,images)=input.fresh();assert_unbound(&p);
     let main=primary.main().unbound_birth().unwrap();let main_ptr=main as *const MainBirth;let d_ptr=primary.d() as *const DProduct;
     let fonts=text.fonts() as *const _;let a=p.resources.model(PanelId::A).unwrap().frames.as_ptr();let f=p.resources.model(PanelId::F).unwrap().frames.as_ptr();
@@ -100,18 +100,18 @@ fn original_prefix_order_all_sixteen_copies_d_only_and_same_owners(){
     let (primary,p,text,_,result)=run(primary,p,text,images,&w);result.unwrap();assert_unbound(&p);
     //Independent retained43cc60 caller/store oracle, not registration::PRIMARY.
     let observed=p.steps.iter().filter(|s|matches!(s,Step::Currency|Step::DescriptorCopy(_)|Step::PrimaryReferences|Step::Bind(_)|Step::Layout(_)|Step::LayoutReturned(_)|Step::Bound(_)|Step::Registered(_)|Step::PrimaryCount(_))).copied().collect::<Vec<_>>();
-    assert_eq!(observed,vec![Step::Currency,Step::DescriptorCopy(0),Step::DescriptorCopy(1),Step::DescriptorCopy(2),Step::DescriptorCopy(3),Step::DescriptorCopy(4),Step::DescriptorCopy(5),Step::DescriptorCopy(6),Step::DescriptorCopy(7),Step::DescriptorCopy(8),Step::DescriptorCopy(9),Step::DescriptorCopy(10),Step::DescriptorCopy(11),Step::DescriptorCopy(12),Step::DescriptorCopy(13),Step::DescriptorCopy(14),Step::DescriptorCopy(15),Step::PrimaryReferences,Step::Bind(D),Step::Layout(D),Step::LayoutReturned(D),Step::Bound(D),Step::Registered(D),Step::PrimaryCount(17)]);
+    assert_eq!(observed,vec![Step::Currency,Step::DescriptorCopy(0),Step::DescriptorCopy(1),Step::DescriptorCopy(2),Step::DescriptorCopy(3),Step::DescriptorCopy(4),Step::DescriptorCopy(5),Step::DescriptorCopy(6),Step::DescriptorCopy(7),Step::DescriptorCopy(8),Step::DescriptorCopy(9),Step::DescriptorCopy(10),Step::DescriptorCopy(11),Step::DescriptorCopy(12),Step::DescriptorCopy(13),Step::DescriptorCopy(14),Step::DescriptorCopy(15),Step::PrimaryReferences,Step::Bind(D),Step::Layout(D),Step::LayoutReturned(D),Step::Bound(D),Step::Registered(D),Step::PrimaryCount(17),Step::Bind(0x573b38),Step::Layout(0x573b38),Step::LayoutReturned(0x573b38),Step::Bound(0x573b38),Step::Registered(0x573b38),Step::Bind(0x571378),Step::Layout(0x571378),Step::LayoutReturned(0x571378),Step::Bound(0x571378),Step::Registered(0x571378),Step::Bind(0x57ef28),Step::Layout(0x57ef28),Step::LayoutReturned(0x57ef28),Step::Bound(0x57ef28),Step::Registered(0x57ef28)]);
     assert_eq!(p.primary_pool().unwrap(),&[PanelId::F,PanelId::OtherPrimary(15),PanelId::C,PanelId::Comparison,PanelId::A,PanelId::Clock,PanelId::E,PanelId::OtherPrimary(9),PanelId::OtherPrimary(8),PanelId::OtherPrimary(7),PanelId::B,PanelId::H,PanelId::G,PanelId::OtherPrimary(3),PanelId::OtherPrimary(2),PanelId::OtherPrimary(1)]);
     for &id in p.primary_pool().unwrap(){let descriptor=p.resources.descriptor(id).unwrap();assert_eq!(descriptor.kind,11);assert_eq!(descriptor.angle_x,180.);assert_eq!(descriptor.definition,p.resources.model(id).unwrap().definition);}
     assert_ne!(a,p.resources.model(PanelId::G).unwrap().frames.as_ptr());assert_eq!(p.resources.model(PanelId::A).unwrap().frames.as_ptr(),a);assert_eq!(p.resources.model(PanelId::F).unwrap().frames.as_ptr(),f);
     assert_eq!((p.cells().word(G+0x2c).unwrap(),p.cells().word(G+0x30).unwrap(),p.cells().byte(G+0x34).unwrap()),(16,16,1));
     assert_eq!(p.panels[&D].descriptor,Some(DescriptorIdentity::EmbeddedD));assert_eq!(p.cells().byte(D+0x184).unwrap(),1);
-    assert_eq!((p.cells().word(G+8).unwrap(),p.cells().word(G+12).unwrap(),p.cells().word(G+0x24).unwrap()),(D,D,17));
-    assert_eq!((p.cells().word(D+0x380).unwrap(),p.cells().word(D+0x384).unwrap()),(0,0));
+    assert_eq!((p.cells().word(G+8).unwrap(),p.cells().word(G+12).unwrap(),p.cells().word(G+0x24).unwrap()),(0x57ef28,D,17));
+    assert_eq!((p.cells().word(D+0x380).unwrap(),p.cells().word(D+0x384).unwrap()),(0,0x573b38));
     assert_eq!(primary.d().rows.iter().map(|r|(r.category,r.title,r.title_record)).collect::<Vec<_>>(),vec![(Some(1),Some(45),Some(0x539518)),(Some(41),Some(0),Some(0x5385a0))]);
     let pe=PeImage::parse(&input.exe).unwrap();for r in &primary.d().rows{let id=u32::from_le_bytes(pe.at(r.title_record.unwrap(),4).unwrap().try_into().unwrap()).wrapping_add(1);assert!(!text.fonts().language.row(id).unwrap().is_empty());assert!(r.text.group.count>0);}
     let main=primary.main().unbound_birth().unwrap();assert_eq!(main as *const MainBirth,main_ptr);assert_eq!(primary.d() as *const DProduct,d_ptr);assert_eq!(text.fonts() as *const _,fonts);
-    assert_eq!(primary.phase(),PrimaryPhase::AwaitingVoting);assert!(primary.require_ordered_main().is_err());assert!(primary.require_supplier().is_err());
+    assert_eq!(primary.phase(),PrimaryPhase::AwaitingG);assert!(primary.require_ordered_main().is_err());assert!(primary.require_supplier().is_err());
 }
 
 #[test]
@@ -172,6 +172,12 @@ fn second_world_parks_without_currency_pool_birth_layout_or_registration_replay(
     assert_eq!(primary.phase(),PrimaryPhase::AwaitingDRebind);assert!(primary.require_current_d(two.topology.epoch().serial()).is_err());assert_eq!(p.steps,steps);assert_eq!(p.cells().read(D,0xdf8).unwrap(),d);
     assert_eq!(&*primary.d().rows[0] as *const _,child);assert_eq!(text.fonts() as *const _,fonts);assert_unbound(&p);
 }
+
+#[path="voting_construction_tests.rs"] mod voting_tests;
+
+#[path="eventlist_construction_tests.rs"] mod eventlist_tests;
+
+#[path="chat_construction_tests.rs"] mod chat_tests;
 
 
 #[test]

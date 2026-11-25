@@ -4363,6 +4363,7 @@ mod tests {
             &archive,
             sun.parent().unwrap().parent().unwrap(),
             &strings,
+            &openmt2001::pe::PeImage::parse(&exe).unwrap(),
         )
         .unwrap();
         for name in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {

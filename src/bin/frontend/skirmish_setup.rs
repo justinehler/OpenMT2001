@@ -926,7 +926,7 @@ mod tests {
         )
     }
     #[test]
-    #[ignore = "player-supplied original PE and scripts; root integration required"]
+    #[ignore = "player-supplied original PE and scripts; integration setup required"]
     fn original_catalog_setup_handoff_and_refusals() {
         let (options, catalog) = original();
         let rows = skirmish::scenario_rows(&catalog);
@@ -1136,27 +1136,30 @@ mod tests {
         );
         assert_eq!(moved(0, -1, 5), 0);
         assert_eq!(moved(0, 100, 5), 5);
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) {
-            descriptor.backends = wgpu::Backends::DX12;
+        #[cfg(feature = "capture")]
+        {
+            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows) {
+                descriptor.backends = wgpu::Backends::DX12;
+            }
+            let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+            let scene = panel.draw(&state, &renderer, None, false, None).unwrap();
+            crate::capture_test::capture_standalone(
+                &renderer,
+                &scene,
+                "work/frontend/skirmish-setup.png",
+            );
+            // Component captures: synthetic trusted fixture names, actual supplied
+            // panel/fonts/colors/renderer. No map startup or compatibility claim.
+            panel.keyboard_activate(&mut state,Action::MapRow(24),&mut |_|Ok(3)).unwrap();
+            let selected_scene=panel.draw(&state,&renderer,None,false,Some(Action::MapRow(24))).unwrap();
+            crate::capture_test::capture_standalone(&renderer,&selected_scene,
+                "work/frontend/skirmish-map-selected.png");
+            state.set_maps(vec![],None).unwrap();
+            let empty_scene=panel.draw(&state,&renderer,None,false,None).unwrap();
+            crate::capture_test::capture_standalone(&renderer,&empty_scene,
+                "work/frontend/skirmish-map-empty.png");
         }
-        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let scene = panel.draw(&state, &renderer, None, false, None).unwrap();
-        crate::capture_test::capture_standalone(
-            &renderer,
-            &scene,
-            "work/frontend/skirmish-setup.png",
-        );
-        // Component captures: synthetic trusted fixture names, actual supplied
-        // panel/fonts/colors/renderer. No map startup or compatibility claim.
-        panel.keyboard_activate(&mut state,Action::MapRow(24),&mut |_|Ok(3)).unwrap();
-        let selected_scene=panel.draw(&state,&renderer,None,false,Some(Action::MapRow(24))).unwrap();
-        crate::capture_test::capture_standalone(&renderer,&selected_scene,
-            "work/frontend/skirmish-map-selected.png");
-        state.set_maps(vec![],None).unwrap();
-        let empty_scene=panel.draw(&state,&renderer,None,false,None).unwrap();
-        crate::capture_test::capture_standalone(&renderer,&empty_scene,
-            "work/frontend/skirmish-map-empty.png");
     }
 }
 

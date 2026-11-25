@@ -332,11 +332,19 @@ pub fn building_tick_with_options(
     sensitivity: i32,
     invert_vertical: bool,
 ) -> Result<([f32; 3], [f32; 3]), String> {
+    // Historical standalone API explicitly uses the zero predicate. Production
+    // calls the height-taking entry below with its live process projection.
+    building_tick_with_height(controls,target_angle,keys,drag,sensitivity,invert_vertical,false)
+}
+pub fn building_tick_with_height(
+    controls:&mut openmt2001::camera::BlockCamera,target_angle:&mut f32,
+    keys:[bool;4],drag:[i32;2],sensitivity:i32,invert_vertical:bool,low_height:bool,
+)->Result<([f32;3],[f32;3]),String>{
     let target = controls.center;
     controls.tick(keys);
     let mut pose = ([0.; 3], target);
     if drag != [0; 2] {
-        controls.right_drag(&mut pose, drag, sensitivity, invert_vertical, false, false)?;
+        controls.right_drag(&mut pose, drag, sensitivity, invert_vertical, false, low_height)?;
         if drag[0] != 0 {
             *target_angle = controls.angle;
         }

@@ -12,15 +12,16 @@ use std::{collections::VecDeque, sync::mpsc};
 #[derive(Clone, Copy)]
 pub struct Globals {
     pub legacy_yaw: bool,       // 8b23c3
-    pub low_height: bool,       // 8b26cc != 0
+    pub low_height: bool,       // standalone fixture snapshot only; production reads process
     pub force_default_cursor: bool, // 8b22d8 && 8b22dc && !86d675
 }
 
 /// Original compatibility policy selected by the caller. This is unrelated
 /// to whether this host happens to render through Vulkan/Metal/software WGPU.
-pub enum OriginalGraphicsPolicy { NormalD3d, SoftwareKind2Or3 }
+pub use crate::live_host::process_runtime::OriginalGraphicsPolicy;
 impl Globals {
-    /// Named ordinary initialization only, never a reset performed on Load.
+    /// Legacy standalone fixture projection; this does not construct/reset
+    /// ProcessRuntime. Production ignores low_height here and reads Assets.
     /// 4b91a5 initializes legacy0; 4b91c3 initializes height-kind2.
     /// D3D retains2; the original software policy writes0.
     pub fn after_normal_initialization(policy: OriginalGraphicsPolicy,
@@ -281,6 +282,9 @@ impl super::endpoint::Context for UiContext<'_> {
         let (keys, buttons, delta) = self.physical.snapshot()?;
         let settings = self.view.settings_menu.gameplay;
         let flags = self.state().globals;
+        // Assets retains the same synchronized process identity lent to Session
+        // hooks. No lock crosses callbacks; one read serves both input modes.
+        let low_height=self.assets.process_runtime.performance_nonzero().map_err(|e|e.to_string())?;
         // 920889 has its own producer. all_disabled is a different UI group
         // control and MUST NOT be folded into this byte or raw event capture.
         let enabled = !admission.camera_disabled;
@@ -293,13 +297,13 @@ impl super::endpoint::Context for UiContext<'_> {
                 enable_rotation: enabled, enable_zoom: enabled,
                 keys, buttons, delta, sensitivity: i32::from(settings.mouse_sensitivity),
                 legacy_yaw: flags.legacy_yaw, invert_vertical: settings.invert_vertical,
-                low_height: flags.low_height,
+                low_height,
             },
             mode13: Mode13Input {
                 enable_translation: enabled, enable_keyboard: enabled, enable_zoom: enabled,
                 keys, buttons, delta, sensitivity: i32::from(settings.mouse_sensitivity),
                 legacy_yaw: flags.legacy_yaw, invert_vertical: settings.invert_vertical,
-                low_height: flags.low_height,
+                low_height,
             },
         })
     }

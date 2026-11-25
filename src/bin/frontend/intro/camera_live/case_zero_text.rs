@@ -60,6 +60,17 @@ impl Fonts {
         if self.selector.pending!=[0,0]{return Err("font selector requires unsupported pending page-batch flush".into())}
         self.direct_index(id)?;self.selector.cached=id;Ok(())
     }
+    ///455420 finite retained construction path. Cache hit precedes all reads;
+    ///missing page-batch/notify callbacks remain unsupported frontiers.
+    ///4e7470 stores current BEFORE calling notify; cache publishes afterward.
+    pub(super) fn select455420_retained(&mut self,id:u32)->Result<(),String>{
+        if self.selector.cached==id{return Ok(())}
+        if self.selector.pending!=[0,0]{return Err("455420 unsupported pending page-batch callback frontier".into())}
+        if !self.fonts.contains_key(&id){return Err(format!("actual font{id} not registered"))}
+        self.current=id;
+        if self.selector.notify!=0{return Err("4e7470 unsupported notify callback after retained current store".into())}
+        self.selector.cached=id;Ok(())
+    }
     ///4e7470; deliberately does NOT update global6aad08 selector cache.
     pub fn direct_index(&mut self,id:u32)->Result<(),String>{
         if !self.fonts.contains_key(&id){return Err(format!("actual font{id} not registered"))}
@@ -233,6 +244,61 @@ impl Text {
     pub fn set_font(&mut self,font:&mut Fonts,id:u32)->Result<(),String>{
         if self.font!=id{self.font=id;self.dirty=0;}font.select(id)
     }
+    ///Unpadded441220 through4412ed, before440330's array growth.
+    ///One SAME Fonts/Group algorithm for the retained construction callers.
+    ///A reached modern refusal retains preceding effects; no cleanup/replay.
+    pub(super) fn identifier441220_before_resize(&mut self,font:&mut Fonts,id:u32)->Result<(),String>{
+        if self.padding!=0{return Err("441220 unpadded construction branch required".into())}
+        font.select455420_retained(self.font)?;
+        font.fonts.get_mut(&font.current).ok_or("441220 actual current font absent")?.scale=self.scale;
+        let saved=font.line_mode;font.line_mode=self.line_mode;
+        let mut width=openmt2001::x87::Sum::from_f32(self.bounds[2]).map_err(str::to_owned)?;
+        width.add(openmt2001::x87::Sum::from_f32(self.bounds[0]).map_err(str::to_owned)?.negated());
+        width.add(openmt2001::x87::Sum::from_i32(self.inset.wrapping_mul(2)).negated());
+        let width=ftol_layout(width)?;
+        //4e8435 writes error4 for an out-of-range id. The modern safety
+        //boundary refuses instead of appending a stale formatter product.
+        if let Err(error)=font.language.row(id){font.error=ErrorWord::Known(4);return Err(error)}
+        let glyphs=font.packed(id)?; //actual unsupported varargs never invented
+        font.emit(&glyphs,width)?;self.group.append(&font.formatted)?;
+        self.dirty=0;font.line_mode=saved;
+        font.fonts.get_mut(&font.current).ok_or("441220 active font disappeared")?.scale=1.;
+        Ok(())
+    }
+    ///Retained construction441220 using the existing ordinary array carrier.
+    ///Unwritten native X provenance is a separate owner concern; no alignment.
+    pub(super) fn identifier441220_unpadded(&mut self,font:&mut Fonts,id:u32)->Result<(),String>{
+        self.identifier441220_before_resize(font,id)?;self.resize()
+    }
+    ///440b70 using the retained selector frontier for original constructors.
+    pub(super) fn set_font440b70_retained(&mut self,font:&mut Fonts,id:u32)->Result<(),String>{
+        if self.font!=id{self.font=id;self.dirty=0;}font.select455420_retained(id)
+    }
+    ///Plain441220 with explicit unknown X allocation state, no4406a0.
+    ///The retained caller owns this SAME Text and its actual X capacity carrier.
+    pub(super) fn identifier441220_unaligned(&mut self,font:&mut Fonts,id:u32,x:&mut Vec<Option<i16>>)->Result<(),String>{
+        if !self.x.is_empty()||x.len()!=self.colors.len(){
+            return Err("441220 unaligned owner/capacity domain differs".into())
+        }
+        self.identifier441220_before_resize(font,id)?;
+        self.resize_unaligned(x)
+    }
+    ///One native440330 growth body for retained unaligned Text owners.
+    ///Native X storage has capacity but no first writer on construction paths.
+    pub(super) fn resize_unaligned(&mut self,x:&mut Vec<Option<i16>>)->Result<(),String>{
+        if !self.x.is_empty()||x.len()!=self.colors.len(){return Err("unaligned Text capacity authority differs".into())}
+        let n=self.group.count as usize;
+        if n>i16::MAX as usize{return Err("440330 unaligned arrays exceed signed16 capacity after append/restoration".into())}
+        if self.colors.len()<n{
+            self.colors.resize(n,0);self.blink_colors.resize(n,0);self.blink.resize(n,0);x.resize(n,None);
+        }
+        if self.blink_colors.len()!=x.len()||self.blink.len()!=x.len(){return Err("440330 unaligned capacity owners differ".into())}
+        Ok(())
+    }
+    pub(super) fn reset_unaligned(&mut self,x:&mut Vec<Option<i16>>)->Result<(),String>{
+        self.reset_before_resize()?;self.resize_unaligned(x)?;
+        self.colors[..self.group.count as usize].fill(0);Ok(())
+    }
     pub fn resize(&mut self)->Result<(),String>{
         let n=self.group.count as usize;
         if n>i16::MAX as usize{return Err("text arrays leave native signed16 capacity domain".into())}
@@ -242,15 +308,15 @@ impl Text {
     /// 441940: clears buffers, calls actual virtual layout, updates +148,
     /// resizes and clears colors for the actual now-empty group only.
     pub fn reset(&mut self,_font:&mut Fonts)->Result<(),String>{
+        self.reset_before_resize()?;
+        self.resize()?;for c in &mut self.colors[..self.group.count as usize]{*c=0;}Ok(())
+    }
+    fn reset_before_resize(&mut self)->Result<(),String>{
         self.group.clear();
-        //525908+2c is43b370 RET: no metric mapping, font selection, pitch,
-        //alignment or dirty/geometry writes. Non-RET subtypes need their real
-        //target implementation rather than a substituted4406a0 call.
         if let ResetTarget::Unsupported(target)=self.reset_target{
             return Err(format!("441940 Text virtual+2c target{target:08x} unsupported"))
         }
-        self.visible=self.visible_ratio()?;
-        self.resize()?;for c in &mut self.colors[..self.group.count as usize]{*c=0;}Ok(())
+        self.visible=self.visible_ratio()?;Ok(())
     }
     fn visible_ratio(&self)->Result<u32,String>{
         if self.pitch==0{return Err("actual case0 text pitch zero".into())}
@@ -285,19 +351,24 @@ impl Text {
     /// from supplied PE, and %i consumes the two real integers in order.
     pub fn literal(&mut self,font:&mut Fonts,format:&[u8],args:&[i32])->Result<(),String>{
         font.select(self.font)?;
-        let mut raw=Vec::new();for _ in 0..self.padding.max(0){raw.push(b' ')}
-        let mut at=0;let mut arg=0;
-        while at<format.len()&&format[at]!=0{
-            let ch=format[at];at+=1;if ch!=b'%'{raw.push(ch);continue}
-            let token=*format.get(at).ok_or("unterminated native format token")?;
-            match token{
-                b'%'=>{raw.push(b'%');at+=1;},
-                b'i'|b'd'=>{let n=args.get(arg).ok_or("case0 native format argument absent")?;arg+=1;raw.extend_from_slice(n.to_string().as_bytes());at+=1;},
-                _=>{} //native revisits unknown selector as a literal
-            }
-        }
-        if raw.len()>=512{return Err("case0 literal exceeds native output buffer".into())}
+        let raw=literal_bytes(self.padding,format,args)?;
         let glyphs=font.map(&raw)?;self.append_glyphs(font,&glyphs)
+    }
+    ///441770 retained construction branch, zero extra arguments. Uses the
+    ///SAME formatter as literal; retains native reached selector/scale/mode.
+    pub(super) fn literal441770_unaligned(&mut self,font:&mut Fonts,format:&[u8],x:&mut Vec<Option<i16>>)->Result<(),String>{
+        font.select455420_retained(self.font)?;
+        let raw=literal_bytes(self.padding,format,&[])?;
+        font.select455420_retained(self.font)?;
+        font.fonts.get_mut(&font.current).ok_or("441770 active font absent")?.scale=self.scale;
+        let saved=font.line_mode;font.line_mode=self.line_mode;
+        let mut width=openmt2001::x87::Sum::from_f32(self.bounds[2]).map_err(str::to_owned)?;
+        width.add(openmt2001::x87::Sum::from_f32(self.bounds[0]).map_err(str::to_owned)?.negated());
+        width.add(openmt2001::x87::Sum::from_i32(self.inset.wrapping_mul(2)).negated());
+        let width=ftol_layout(width)?;let glyphs=font.map(&raw)?;
+        font.emit(&glyphs,width)?;self.group.append(&font.formatted)?;self.dirty=0;
+        font.line_mode=saved; font.fonts.get_mut(&font.current).ok_or("441770 active font disappeared")?.scale=1.;
+        self.resize_unaligned(x)
     }
     pub fn layout(&mut self,font:&mut Fonts)->Result<(),String>{
         self.resize()?;
@@ -345,6 +416,22 @@ impl Text {
         if self.pitch==0{return Err("text row-at pitch zero".into())}
         Ok(trunc((f64::from(pointer_y.wrapping_sub(3))-f64::from(self.bounds[1]))/f64::from(self.pitch)+f64::from(self.first))? as u32)
     }
+}
+///Common finite literal bytes; no independent Chat formatter.
+fn literal_bytes(padding:i32,format:&[u8],args:&[i32])->Result<Vec<u8>,String>{
+        let mut raw=Vec::new();for _ in 0..padding.max(0){raw.push(b' ')}
+        let mut at=0;let mut arg=0;
+        while at<format.len()&&format[at]!=0{
+            let ch=format[at];at+=1;if ch!=b'%'{raw.push(ch);continue}
+            let token=*format.get(at).ok_or("unterminated native format token")?;
+            match token{
+                b'%'=>{raw.push(b'%');at+=1;},
+                b'i'|b'd'=>{let n=args.get(arg).ok_or("case0 native format argument absent")?;arg+=1;raw.extend_from_slice(n.to_string().as_bytes());at+=1;},
+                _=>{} //native revisits unknown selector as a literal
+            }
+        }
+        if raw.len()>=512{return Err("case0 literal exceeds native output buffer".into())}
+        Ok(raw)
 }
 pub struct GlyphPacket {pub font:u32,pub color:u32,pub glyph:GlyphQuad}
 pub enum Packet {Background{bounds:[f32;4],depth:f32,color:u32},Glyph(GlyphPacket)}

@@ -73,7 +73,7 @@ impl Primitives {
         reset_descriptor(self.primary_cells()?,D+0x388)
     }
     pub(in crate::intro::camera_live) fn primary_park_d(&mut self)->Result<(),String>{
-        if !matches!(self.primary_phase,Some(PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingDRebind)){return Err("D park requires same retained completed/parked owner".into())}
+        if !matches!(self.primary_phase,Some(PrimaryPhase::AwaitingVoting|PrimaryPhase::AwaitingEventList|PrimaryPhase::AwaitingChat|PrimaryPhase::AwaitingG|PrimaryPhase::AwaitingDRebind)){return Err("D park requires same retained completed/parked owner".into())}
         let panel=self.panels.get_mut(&D).ok_or("D park static owner absent")?;
         if !matches!(panel.phase,Phase::Bound|Phase::Parked)||panel.descriptor!=Some(DescriptorIdentity::EmbeddedD){return Err("D park actual retained identity differs".into())}
         panel.phase=Phase::Parked;self.primary_phase=Some(PrimaryPhase::AwaitingDRebind);Ok(())

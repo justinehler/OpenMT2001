@@ -401,7 +401,7 @@ impl<'data> Session<'data> {
         policy: Policy,
         saved_bytes: &[u8],
     ) -> Result<Self, String> {
-        Self::load_original_with_catalog(input, policy, saved_bytes, None, None, None, None)
+        Self::load_original_with_catalog(input, policy, saved_bytes, None, None, None, None, None)
     }
 
     /// Presentation-aware loading returns original synchronous UI calls for
@@ -419,8 +419,7 @@ impl<'data> Session<'data> {
     ) -> Result<(Self, Vec<openmt2001::category_ownership::Seam>), String> {
         let mut calls = Vec::new();
         let session = Self::load_original_with_catalog(
-            input, policy, saved_bytes, None, None, Some(&mut calls), style,
-        )?;
+            input, policy, saved_bytes, None, None, Some(&mut calls), style, None)?;
         Ok((session, calls))
     }
 
@@ -438,8 +437,18 @@ impl<'data> Session<'data> {
             Some(catalog),
             Some(profile_path),
             None,
-            None,
-        )
+            None, None)
+    }
+
+    pub fn load_original_with_presentation_style_in_process(
+        input:Inputs<'_, 'data>,policy:Policy,saved_bytes:&[u8],
+        style:Option<&openmt2001::board_style::Style>,
+        process:Option<crate::live_host::process_runtime::Handle>,
+    )->Result<(Self,Vec<openmt2001::category_ownership::Seam>),String>{
+        let mut calls=Vec::new();
+        let session=Self::load_original_with_catalog(input,policy,saved_bytes,None,None,
+            Some(&mut calls),style,process)?;
+        Ok((session,calls))
     }
 
     fn load_original_with_catalog(
@@ -450,6 +459,7 @@ impl<'data> Session<'data> {
         profile_path: Option<std::path::PathBuf>,
         presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
         style: Option<&openmt2001::board_style::Style>,
+        process:Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
         let save = SaveFile::parse(saved_bytes)?;
         save.validate_compatibility(input.image)?;
@@ -486,7 +496,7 @@ impl<'data> Session<'data> {
             file: input.file,
         };
         let mut session =
-            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14, None)?;
+            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14, None, process)?;
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());
         }

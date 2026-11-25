@@ -37,7 +37,7 @@ impl MainSlot {
     }
 }
 pub struct DeferredPrimary {
-    d:PrimaryConstruction,main:MainSlot,process:ResourceIdentity,text:ResourceIdentity,images:ResourceIdentity,
+    d:PrimaryConstruction,main:MainSlot,voting:Box<super::voting_construction::VotingProduct>,eventlist:Box<super::eventlist_construction::EventListProduct>,chat:Box<super::chat_construction::ChatProduct>,process:ResourceIdentity,text:ResourceIdentity,images:ResourceIdentity,
 }
 impl DeferredPrimary {
     /// Only the cold loader can supply an unclaimed deferred allocation.
@@ -50,6 +50,7 @@ impl DeferredPrimary {
         let currency=Currency::from_language(text)?;
         let pe=PeImage::parse(executable)?;
         for (at,n) in [(0x439840,0x78),(0x439ae0,0x80),(0x42a370,0x285),(0x4df9c0,0x7f),
+            (0x43a770,0x83),(0x41a510,0x40a),(0x5258c0,0x3c),(0x43f340,0x1c5),(0x5259f4,0x28),(0x41a190,0x380),(0x442960,0x16d),(0x439ce0,0x77),(0x41cdc0,0x1e2),(0x5256e0,0x3c),(0x534a08,0x50),(0x439df0,0xf0),(0x42c000,0x421),(0x43ed20,0x144),(0x442600,0xce),(0x52571c,0x3c),(0x5259a4,0x34),
             (0x43cc60,0x17d),(0x43b770,0x310),(0x43e9a0,0x197),(0x5255f0,0x3c),(0x525908,0x34),(0x559730,48)]{
             if pe.at(at,n)?!=p.cells().read(at,n)?{return Err(format!("Fresh Primary source{at:x} differs from same PE allocation"))}
         }
@@ -67,22 +68,28 @@ impl DeferredPrimary {
         }
         let main=MainSlot{phase:MainBirthPhase::StaticPending,birth:Box::new(MainBirth{source:0x58e3c0,caption:0x58e548,child0_source:0x560920,
             static_preimage:p.cells().read(0x58e3c0,0x50c)?.to_vec(),child0_preimage:p.cells().read(0x560920,16)?.to_vec()})};
+        let voting=super::voting_construction::VotingProduct::allocated(p)?;
+        let eventlist=super::eventlist_construction::EventListProduct::allocated(p)?;
+        let chat=super::chat_construction::ChatProduct::allocated(p)?;
         let d=PrimaryConstruction::deferred_owner(currency,p,text,images)?;
-        let mut this=Self{d,main,process:p.construction_identity.clone(),text:text.construction_identity.clone(),images:images.construction_identity.clone()};
+        let mut this=Self{d,main,voting,eventlist,chat,process:p.construction_identity.clone(),text:text.construction_identity.clone(),images:images.construction_identity.clone()};
         p.claim_deferred()?;
         match p.deferred_static_births(models){
-            Ok(())=>this.main.phase=MainBirthPhase::Unbound,
-            Err(error)=>{p.primary_fail_d();this.main.phase=MainBirthPhase::FailedBeforeLayout;this.d.fail(error);},
+            Ok(())=>{this.main.phase=MainBirthPhase::Unbound;this.voting.phase=super::voting_construction::Phase::Unbound;this.eventlist.phase=super::eventlist_construction::Phase::Unbound;this.chat.phase=super::chat_construction::Phase::Unbound;},
+            Err(error)=>{p.primary_fail_d();this.main.phase=MainBirthPhase::FailedBeforeLayout;this.voting.fail(error.clone());this.eventlist.fail(error.clone());this.chat.fail(error.clone());this.d.fail(error);},
         }
         Ok(this)
     }
     pub fn phase(&self)->PrimaryPhase{self.d.phase()}
     pub fn d(&self)->&DProduct{self.d.d()}
     pub fn main(&self)->&MainSlot{&self.main}
+    pub fn voting(&self)->&super::voting_construction::VotingProduct{&self.voting}
+    pub fn eventlist(&self)->&super::eventlist_construction::EventListProduct{&self.eventlist}
+    pub fn chat(&self)->&super::chat_construction::ChatProduct{&self.chat}
     pub fn currency(&self)->&Currency{self.d.currency()}
-    pub fn require_ordered_main(&self)->Result<(),String>{Err("AwaitingVoting: real Voting through Clock and later Main are not supplied; A/F remain unbound".into())}
+    pub fn require_ordered_main(&self)->Result<(),String>{Err(format!("{:?}: real G through Clock and later Main are not supplied; A/F remain unbound",self.phase()))}
     pub fn require_current_d(&self,epoch:u64)->Result<(),String>{self.d.require_current_d(epoch)}
-    pub fn require_supplier(&self)->Result<(),String>{Err("Fresh prefix stops before Voting/Main/F; Graph/Source suppliers remain closed".into())}
+    pub fn require_supplier(&self)->Result<(),String>{Err("Fresh prefix stops before G/Main/F; Graph/Source suppliers remain closed".into())}
     pub fn retire_for_camera(&mut self,p:&mut Primitives)->Result<(),String>{self.d.retire_for_camera(p)}
     /// Existing protected Install is the sole producer boundary. This is
     /// internally ordered Primary work against this real Session, delayed
@@ -101,12 +108,27 @@ impl DeferredPrimary {
         //The same real D body/rows/Fonts and actual bind suffix/register are
         //reused. Its late failures remain sticky and retain completed effects.
         //On World2 it only parks; this never recreates D or replays the prelude.
-        let result=self.d.install(source,generation,services,p,text,images);
+        let result=self.d.install(source,generation,services,p,text,images).and_then(|outcome|{
+            match outcome{
+                InstallDisposition::CompletedD{..}=>{
+                    self.d.install_voting(&mut self.voting,source,generation,p,text,images)?;
+                    self.d.install_eventlist(&mut self.eventlist,source,generation,p,text,images)?;
+                    self.d.install_chat(&mut self.chat,&self.eventlist,source,generation,p,text,images)
+                },
+                other=>Ok(other), //warm park, never Voting replay
+            }
+        });
         //Once this containing operation wrote currency/copied descriptors,
         //even a later pre-layout source/protocol failure is a reached failure.
         //It cannot leave an apparently retryable intermediate prefix behind.
         if starting{
-            if let Err(error)=&result{p.primary_fail_d();self.d.fail(error.clone());}
+            if let Err(error)=&result{
+                p.primary_fail_d();
+                if self.voting.phase()!=super::voting_construction::Phase::Registered{self.voting.fail(error.clone());}
+                if self.eventlist.phase()!=super::eventlist_construction::Phase::Registered{self.eventlist.fail(error.clone());}
+                if self.chat.phase()!=super::chat_construction::Phase::Registered{self.chat.fail(error.clone());}
+                self.d.fail(error.clone());
+            }
         }
         result
     }
