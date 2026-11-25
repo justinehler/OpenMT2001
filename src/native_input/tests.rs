@@ -711,3 +711,82 @@ fn write_then_ownership_error_leaves_only_incomplete_poll_prefix_and_device_writ
     assert_eq!(input.cells.keyboard_poll_tick, 9);
     assert_eq!(input.cells.device_event_count, 16);
 }
+
+
+#[test]
+fn split_keyboard_poll_retains_device_prefix_until_late_recording_finishes() {
+    let mut input = owner();
+    input.cells.keyboard_current = [0x5a; 256];
+    input.cells.keyboard_poll_tick = u32::MAX;
+    let mut device = PartialDevice { unowned: false };
+    let pending = input
+        .poll1_live_before_recording(KeyboardMode::Unbuffered256, &mut device)
+        .unwrap();
+    assert_eq!(pending.report().hresult, -4);
+    assert_eq!(input.cells.keyboard_prior, [0x5a; 256]);
+    let mut expected = [0x5a; 256];
+    expected[255] = 0x80;
+    assert_eq!(input.cells.keyboard_current, expected);
+    assert_eq!(input.cells.keyboard_poll_tick, u32::MAX);
+    // A real caller can observe a recording transition after device delivery.
+    // This synthetic write does not supply an actual recording-stream provider.
+    input.cells.recording = 1;
+    input.window_input_effect(WindowInputEffect::Character { wparam: 0x20 });
+    assert_eq!(input.cells.space_recorded, 1);
+    assert_eq!(input.cells.keyboard_poll_tick, u32::MAX);
+    let report = input.finish_poll1_after_recording(pending);
+    assert_eq!(report.hresult, -4);
+    assert_eq!(input.cells.keyboard_poll_tick, 0);
+    assert_eq!(input.take_character(), 0x20);
+}
+
+#[test]
+fn unresolved_recording_keeps_prefix_without_advancing_keyboard_tick() {
+    let mut input = owner();
+    input.cells.keyboard_current = [0x5a; 256];
+    input.cells.keyboard_poll_tick = 9;
+    let mut device = PartialDevice { unowned: false };
+    let pending = input
+        .poll1_live_before_recording(KeyboardMode::Unbuffered256, &mut device)
+        .unwrap();
+    // Dropping unresolved work represents a rejected/missing recording handler.
+    // Prior and device writes remain committed; successful completion is absent.
+    drop(pending);
+    assert_eq!(input.cells.keyboard_poll_tick, 9);
+    assert_eq!(input.cells.keyboard_prior, [0x5a; 256]);
+    assert_eq!(input.cells.keyboard_current[255], 0x80);
+    assert_eq!(input.cells.keyboard_current[254], 0x5a);
+    device.unowned = true;
+    assert!(input
+        .poll1_live_before_recording(KeyboardMode::Unbuffered256, &mut device)
+        .is_err());
+    assert_eq!(input.cells.keyboard_poll_tick, 9);
+}
+
+#[test]
+fn live_wrapper_preserves_buffered_and_unbuffered_poll_results_and_cells() {
+    for mode in [KeyboardMode::Unbuffered256, KeyboardMode::Buffered16] {
+        for hresult in [0, -4] {
+            let mut complete = owner();
+            complete.cells.keyboard_current = [0x5a; 256];
+            complete.cells.keyboard_poll_tick = u32::MAX;
+            let mut split = complete.clone();
+            let fixture = || FixtureDevice {
+                mouse: [0; 16],
+                keyboard: [0x80; 256],
+                events: vec![KeyEvent { native_index: 255, data: 0x80 }],
+                hresult,
+                calls: vec![],
+            };
+            let mut complete_device = fixture();
+            let mut split_device = fixture();
+            let complete_report = complete.poll1_live(mode, &mut complete_device).unwrap();
+            let pending = split.poll1_live_before_recording(mode, &mut split_device).unwrap();
+            assert_eq!(split.cells.keyboard_poll_tick, u32::MAX);
+            let split_report = split.finish_poll1_after_recording(pending);
+            assert_eq!(complete_report, split_report);
+            assert_eq!(complete, split);
+            assert_eq!(complete_device.calls, split_device.calls);
+        }
+    }
+}

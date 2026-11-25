@@ -239,6 +239,16 @@ impl KeyboardMode {
     }
 }
 
+/// The live keyboard byte/event work completed, but native4e53c9 recording
+/// and4e53e2 tick have NOT. Linear ticket for the SAME StagedInput owner.
+/// Missing recording providers must retain prior/device writes and NOT tick.
+#[derive(Debug)]
+#[must_use = "Resolve actual recording gate/provider, then finish on SAME StagedInput"]
+pub struct KeyboardPollBeforeRecording { report: PollReport }
+impl KeyboardPollBeforeRecording {
+    pub fn report(&self) -> PollReport { self.report }
+}
+
 /// HRESULT remains observable, including native failures; the native 4e48f0
 /// reporter returns without clearing state. This does not assert hardware OK.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -344,6 +354,18 @@ impl StagedInput {
         mode: KeyboardMode,
         adapter: &mut impl PortableDeviceAdapter,
     ) -> Result<PollReport, BoundaryError> {
+        let pending = self.poll1_live_before_recording(mode, adapter)?;
+        Ok(self.finish_poll1_after_recording(pending))
+    }
+
+    /// Same live poll implementation, stopped BEFORE recording gate/callback
+    /// and tick. A source caller must observe receiver+19218 after device work;
+    /// it cannot silently skip serialization if that callback enabled recording.
+    pub fn poll1_live_before_recording(
+        &mut self,
+        mode: KeyboardMode,
+        adapter: &mut impl PortableDeviceAdapter,
+    ) -> Result<KeyboardPollBeforeRecording, BoundaryError> {
         self.cells.device_event_count = 16;
         self.cells.keyboard_prior = self.cells.keyboard_current;
         let report = match mode {
@@ -369,8 +391,14 @@ impl StagedInput {
                 }
             }
         };
+        Ok(KeyboardPollBeforeRecording { report })
+    }
+
+    /// 4e53e2..ea, only after actual recording handling/admitted off gate.
+    /// Consume once on SAME owner; never use a ticket to replay prior copies.
+    pub fn finish_poll1_after_recording(&mut self, pending: KeyboardPollBeforeRecording) -> PollReport {
         self.cells.keyboard_poll_tick = self.cells.keyboard_poll_tick.wrapping_add(1);
-        Ok(report)
+        pending.report
     }
 
     pub fn right_fell(&self) -> bool {
