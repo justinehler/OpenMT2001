@@ -47,18 +47,34 @@ impl Assets {
         })
     }
 
-    pub fn play(&self, address: u32) -> Result<(rodio::OutputStream, rodio::Sink), String> {
-        let samples = match address {
-            0x541d0c => &self.winner,
-            0x541cdc => &self.loser,
-            _ => return Err(format!("unsupported result music address {address:08x}")),
-        };
+    fn samples(&self, address: u32) -> Result<&[f32], String> {
+        match address {
+            0x541d0c => Ok(&self.winner),
+            0x541cdc => Ok(&self.loser),
+            _ => Err(format!("unsupported result music address {address:08x}")),
+        }
+    }
+
+    pub fn play(&self, address: u32, music_level: u8) -> Result<(rodio::OutputStream, rodio::Sink), String> {
+        let samples = self.samples(address)?;
         let stream = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|error| format!("result audio device unavailable: {error}"))?;
-        let sink = rodio::Sink::connect_new(stream.mixer());
-        sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.clone()));
+        let sink = connect(samples, stream.mixer(), music_level);
         Ok((stream, sink))
     }
+}
+
+// Use the same clamped linear preference mapping as the existing music Bus.
+// Native logarithmic volume fidelity remains a separate compatibility boundary.
+pub fn set_level(sink: &rodio::Sink, music_level: u8) {
+    sink.set_volume(f32::from(music_level.min(100)) / 100.);
+}
+
+fn connect(samples: &[f32], mixer: &rodio::mixer::Mixer, music_level: u8) -> rodio::Sink {
+    let sink = rodio::Sink::connect_new(mixer);
+    set_level(&sink, music_level);
+    sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.to_vec()));
+    sink
 }
 
 #[cfg(test)]
@@ -105,5 +121,55 @@ mod tests {
         let seconds = |samples: &[f32]| samples.len() as f64 / (44100. * 2.);
         assert!((17.0..19.0).contains(&seconds(&assets.winner)), "winner: {}", seconds(&assets.winner));
         assert!((11.0..13.0).contains(&seconds(&assets.loser)), "loser: {}", seconds(&assets.loser));
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+
+    #[test]
+    fn muted_result_is_silent_from_first_sample_for_both_songs() {
+        let assets = Assets { winner: vec![0.5; 32768], loser: vec![0.25; 32768] };
+        for address in [0x541d0c, 0x541cdc] {
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
+            let sink = connect(assets.samples(address).unwrap(), &output, 0);
+            let first: Vec<_> = rendered.by_ref().take(4096).collect();
+            assert_eq!(first.len(), 4096);
+            assert!(first.iter().all(|sample| *sample == 0.));
+            assert!(!sink.empty(), "muting preserves the selected stream");
+        }
+        assert!(assets.samples(0x542c20).is_err());
+    }
+
+    #[test]
+    fn live_result_gain_changes_output_on_the_same_sink() {
+        let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
+        let sink = connect(&vec![0.5; 32768], &output, 100);
+        let first: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(first.len(), 4096);
+        // rodio's connected Mixer can prebuffer silence while its queue is
+        // still empty. Require bounded startup and the actual subsequent gain.
+        assert!(first.iter().all(|sample| *sample == 0. || (*sample - 0.5).abs() < 1e-6));
+        assert!(first[2048..].iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+        let first_position = sink.get_pos();
+        set_level(&sink, 0);
+        let muted: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(muted.len(), 4096);
+        assert!(muted[2048..].iter().all(|sample| *sample == 0.));
+        assert!(sink.get_pos() > first_position, "muting advances the same queued source");
+        let muted_position = sink.get_pos();
+        set_level(&sink, 25);
+        let quieter: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(quieter.len(), 4096);
+        assert!(quieter[2048..].iter().all(|sample| (*sample - 0.125).abs() < 1e-6));
+        assert!(sink.get_pos() > muted_position, "changing gain preserves forward playback");
+        set_level(&sink, 255);
+        let clamped: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(clamped.len(), 4096);
+        assert!(clamped[2048..].iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+        sink.stop();
+        let stopped: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert!(stopped[stopped.len().min(2048)..].iter().all(|sample| *sample == 0.));
     }
 }

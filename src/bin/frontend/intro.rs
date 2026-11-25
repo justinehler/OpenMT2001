@@ -2981,6 +2981,11 @@ impl Intro {
         view.gameplay_sound_player.set_level(levels.effects);
         view.transport_audio_player.set_level(levels.effects);
         view.auction_audio_player.set_level(levels.effects);
+        if let Some(result) = &view.result {
+            if let Some((_, sink)) = &result._music {
+                crate::fresh_city::result::audio::set_level(sink, levels.music);
+            }
+        }
     }
     fn draw_tutorial_visual(
         assets: &Assets,
@@ -4974,7 +4979,7 @@ impl Intro {
                         .and_then(|status| status.result_request)
                         .ok_or("Result request disappeared before music selection")?.music_address;
                     view.era_audio_player.apply(crate::era_audio::Operation::Stop)?;
-                    let music = match self.assets.result_audio.play(music_address) {
+                    let music = match self.assets.result_audio.play(music_address, self.audio_levels.music) {
                         Ok(playing) => Some(playing),
                         Err(error) => { eprintln!("{error}"); None }
                     };
