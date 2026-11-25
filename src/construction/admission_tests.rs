@@ -24,6 +24,7 @@ fn routing() -> pm::Routing {
 }
 
 #[test]
+#[cfg(feature = "lua4")]
 fn accepted_rectangle_reserves_before_queue_and_blocks_second_packet() {
     let mut categories = [[0; 380]; 52];
     let mut players = vec![player(0, false), player(1, true), player(2, false)];
@@ -136,6 +137,7 @@ fn inactive_ai_and_signed_owner_failures_keep_native_mutation_order() {
 }
 
 #[test]
+#[cfg(feature = "lua4")]
 fn reservation_survives_a_later_queue_consumer_error() {
     let mut categories = [[0; 380]; 52];
     let mut players = vec![player(0, false), player(1, true)];
@@ -150,6 +152,7 @@ fn reservation_survives_a_later_queue_consumer_error() {
 }
 
 #[test]
+#[cfg(feature = "lua4")]
 fn saved_pending_queue_restore_preserves_packet_and_deadline() {
     let mut queue = crate::live_commands::Queue::default();
     let command = command(); let packet = command.packet();
