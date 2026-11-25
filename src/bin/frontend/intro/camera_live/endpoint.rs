@@ -9,6 +9,8 @@ use openmt2001::camera::{bank::{Capture,StrategicTransition},primary::CursorRequ
 /// its acknowledgement, including a completed boundary with a finalizer fault. Other operations must not stage scheduler effects.
 /// This finite contract does not promise rollback of camera/UI/cursor effects.
 pub trait Context {
+    /// Read only the actual UI view; no Session, input, provider or sample call.
+    fn save_interface_mode(&self)->Result<u32,String>;
     /// Read-only operation preflight, before suppliers, raw restore, UI intents
     /// or input consumption. A rejected request has no Context side effects.
     fn validate(&self,operation:&Operation,owner:&Owner)->Result<(),String>;
@@ -149,7 +151,7 @@ impl Endpoint {
             }
             context.validate(&operation,owner)?;
             let result=(|| {
-            let mut sampled=None;let mut task_effects=Vec::new();
+            let mut sampled=None;let mut raw_capture=None;let mut task_effects=Vec::new();
             let central=matches!(&operation,Operation::CentralTail{..});
             let installing=matches!(&operation,Operation::Install{..});
             let protected_writeback=matches!(&operation,Operation::Install{..}|Operation::CentralTail{..});
@@ -190,6 +192,11 @@ impl Endpoint {
                     let input=context.input(admission)?;let cursors=owner.central(input)?;
                     context.consumed_input();context.cursor(cursors)?;task_effects=context.take_task_effects();
                 }
+                Operation::RawCapture=>{
+                    raw_capture=Some(bridge::SaveCapture {
+                        cameras:owner.capture(),interface_mode:context.save_interface_mode(),
+                    });
+                },
                 Operation::CurrentPose=>{},
                 Operation::Sample{ratio_bits}=>{
                     // One frame boundary after the manager, not a side effect
@@ -208,7 +215,16 @@ impl Endpoint {
             }else{(None,None)};
             if central&&finalization_fault.is_none(){context.publish_save_captures();}
             if installing&&finalization_fault.is_none(){owner.trace_property_lifecycle("installed-source");}
-            Ok(Observation{current:owner.current().into(),sampled,task_effects,
+            // Preserve the existing observation shape without a CurrentPose
+            // operation/method on the raw-save branch. These redundant MOV
+            // words come only from the already captured primary record.
+            let current=if let Some(raw)=&raw_capture {
+                let record=&raw.cameras.records()[0];
+                let triple=|at:usize|std::array::from_fn(|i|u32::from_le_bytes(
+                    record[at+i*4..at+i*4+4].try_into().unwrap()));
+                bridge::Pose{eye:triple(4),target:triple(0x10),up:triple(0x64)}
+            }else{owner.current().into()};
+            Ok(Observation{raw_capture,current,sampled,task_effects,
                 strategic_writeback,finalization_fault})
             })();
             if result.is_err(){context.discard_task_effects();}

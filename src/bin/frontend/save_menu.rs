@@ -411,6 +411,98 @@ pub fn write_target(profile_root: &Path, target: &Target, bytes: &[u8]) -> Resul
     Err("Unable to allocate V2 save staging file".into())
 }
 
+/// Recoverable save attempts never become simulation failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AutosaveFailure {
+    MissingSelectedProfile,
+    UnsupportedCamera,
+    UnsupportedState(String),
+    Encoding(String),
+    Storage(String),
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AutosaveStatus {
+    Saved(PathBuf),
+    Failed { destination:Option<PathBuf>, error:AutosaveFailure },
+}
+
+/// The selected worker profile is bound before preparation. This temporary is
+/// opened before native producer mutations and never truncates the old slot.
+/// Only owned bytes and this destination cross the encode callback boundary.
+pub struct PreparedAutosave {
+    file:Option<fs::File>,
+    temporary:PathBuf,
+    destination:PathBuf,
+    previous:Option<fs::Metadata>,
+}
+fn autosave_metadata(path:&Path)->Result<Option<fs::Metadata>,String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file()=>Ok(Some(metadata)),
+        Ok(_)=>Err("Autosave destination must be a regular file, not a link or directory".into()),
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok(None),
+        Err(error)=>Err(format!("Inspect autosave destination: {error}")),
+    }
+}
+fn same_autosave_file(a:&fs::Metadata,b:&fs::Metadata)->bool {
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        if a.dev()!=b.dev() || a.ino()!=b.ino(){return false;}
+    }
+    a.len()==b.len() && a.modified().ok()==b.modified().ok()
+}
+impl PreparedAutosave {
+    pub fn prepare(selected_profile_root:&Path)->Result<Self,String> {
+        // Reuse the manual publisher's reference/containment and directory
+        // checks. Reject case collisions and nonregular fixed-slot entries.
+        let directory=writable_directory(selected_profile_root)?;
+        for entry in fs::read_dir(&directory).map_err(|e|format!("List autosave directory: {e}"))? {
+            let entry=entry.map_err(|e|e.to_string())?;
+            if let Some(name)=entry.file_name().to_str()
+                && name.eq_ignore_ascii_case("autosave.sav") && name!="autosave.sav" {
+                return Err("Autosave fixed slot has a case-colliding filename".into());
+            }
+        }
+        let destination=directory.join("autosave.sav");
+        let previous=autosave_metadata(&destination)?;
+        let nonce=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+        for sequence in 0..100u32 {
+            let temporary=directory.join(format!(".V2-{}-{nonce}-{sequence}.tmp",std::process::id()));
+            match OpenOptions::new().write(true).create_new(true).open(&temporary) {
+                Ok(file)=>return Ok(Self{file:Some(file),temporary,destination,previous}),
+                Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists=>continue,
+                Err(error)=>return Err(format!("Create V2 save: {error}")),
+            }
+        }
+        Err("Unable to allocate V2 save staging file".into())
+    }
+    pub fn destination(&self)->&Path {&self.destination}
+    pub fn publish(mut self,bytes:Vec<u8>)->Result<PathBuf,String> {
+        openmt2001::save::SaveFile::parse(&bytes)?;
+        let mut file=self.file.take().ok_or("Autosave staging file already closed")?;
+        let write=file.write_all(&bytes).and_then(|()|file.sync_all());
+        drop(file);
+        write.map_err(|e|format!("Write V2 save: {e}"))?;
+        let now=autosave_metadata(&self.destination)?;
+        match (&self.previous,&now) {
+            (None,None)=>fs::hard_link(&self.temporary,&self.destination),
+            (Some(before),Some(after)) if same_autosave_file(before,after)=>fs::rename(&self.temporary,&self.destination),
+            _=>return Err("Autosave slot changed during capture; prior file preserved".into()),
+        }.map_err(|e|format!("Publish V2 save: {e}"))?;
+        Ok(self.destination.clone())
+    }
+}
+impl Drop for PreparedAutosave {
+    fn drop(&mut self) {
+        // Windows requires closing the writer before deleting the temporary.
+        drop(self.file.take());
+        match fs::remove_file(&self.temporary) {
+            Ok(())=>{},
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound=>{},
+            Err(error)=>eprintln!("Autosave temporary cleanup failed: {error}"),
+        }
+    }
+}
+
 /// Called only after the Save Game panel's original 497c70 confirmation.
 /// The opaque ID must still name a regular file in the writable V2 profile.
 pub fn delete_slot(profile_root: &Path, id: &str) -> Result<(), String> {
@@ -639,3 +731,7 @@ mod tests {
             &utc.format("%Y-%m-%d").to_string()), "9:21pm 2026-06-22");
     }
 }
+
+#[cfg(test)]
+#[path="session_autosave_writer_test.rs"]
+mod autosave_writer_tests;

@@ -27,6 +27,7 @@ pub enum Event<'a> {
     ScriptCommands(&'a [(openmt2001::level_script::Command, Vec<openmt2001::lua4::Value>)]),
     Tick(scheduler::Event),
     Calendar(CalendarEvent),
+    Autosave(&'a mut dyn crate::session_save::AutosaveRequest),
     Command(live_commands::Event),
     Pending(live_commands::PendingCall, Option<&'a mut [u8; 0x394]>),
     Player(openmt2001::player_tick::Event),
@@ -291,6 +292,43 @@ impl Session<'_> {
                                                     },
                                                 }Ok(())
                                             })?;
+                                        }
+                                        CalendarEvent::Clock(openmt2001::clock::Event::Autosave) => {
+                                            let projection=crate::session_save::SaveProjection {
+                                                live_commands: &self.live_commands,
+                                                city: city,
+                                                clock: clock,
+                                                utilities: context.utilities,
+                                                frequency: &self.hooks.frequency,
+                                                timers: &self.hooks.timers,
+                                                scripts: &mut self.scripts,
+                                                roster: &mut self.roster,
+                                                population: population,
+                                                road_traffic: dispatch.roads,
+                                                transport: &self.transport,
+                                                catalog: &self.catalog,
+                                                campaign_profile: &self.campaign_profile,
+                                                skirmish_map: &self.skirmish_map,
+                                                saved_player_metadata: &self.saved_player_metadata,
+                                                history: &self.history,
+                                                random_registry: &self.random_registry,
+                                                event_cards: &self.event_cards,
+                                                pulse_lights: &self.pulse_lights,
+                                                demolition_effects: &self.demolition_effects,
+                                                policy: &self.policy,
+                                                difficulty: self.difficulty,
+                                                tutorial_state: self.tutorial_state,
+                                                result_present: self.result_presentation.is_some(),
+                                                script_random_state: self.script_random_state,
+                                                credit_random_state: self.credit_random_state,
+                                                particle_random_state: self.particle_random_state,
+                                                allocation_next: messages.borrow().arena.next,
+                                                static_rng_tail_next: self.static_rng_tail_next,
+                                                build_random_state: self.build_random_state,
+                                                building_selection: self.building_selection,
+                                            };
+                                            let mut request=crate::session_save::SaveRequest {projection:Some(projection),image};
+                                            boundary(Event::Autosave(&mut request),clock)?;
                                         }
                                         CalendarEvent::Clock(openmt2001::clock::Event::Rollover) => {
                                             openmt2001::ai_daily::advance(&mut self.roster.manager.players,&mut self.roster.ai_ownership)?;

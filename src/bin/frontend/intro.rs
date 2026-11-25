@@ -864,6 +864,7 @@ impl SceneInputs {
                 } else {None};
                 if tx.send(Ok(loaded)).is_ok() {
                     let mut host = crate::live_host::Host::new(host_eye);
+                    host.autosave_profile_root=save_profile_root.clone();
                     host.process_runtime=self.process_runtime.clone();
                     // Initialize the monotonic Frame before the acknowledged
                     // install. Time spent waiting for UI installation remains
@@ -1541,6 +1542,8 @@ impl SceneInputs {
             Some(&self.style),
         )?;
         let metadata = session.restore_v2_extension_with_image(&save, &image)?;
+        #[cfg(test)]
+        crate::session_save::natural_observer::after_restore(&session);
         session.repair_imported_resident_models(self.compatibility, metadata.is_some())?;
         let saved_auction = metadata.as_ref().and_then(|metadata| metadata.auction.clone());
         let saved_interface_mode = metadata.as_ref().and_then(|metadata| metadata.interface_mode);
@@ -10752,3 +10755,7 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path="intro_autosave_natural_host_test.rs"]
+mod natural_host_tests;

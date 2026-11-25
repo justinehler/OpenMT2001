@@ -53,7 +53,12 @@ impl AuctionContinuation {
         host: Option<AuctionHostState>,
         prior_mode: u32,
     ) -> Result<Self, String> {
-        let auction = &session.world.auction;
+        Self::capture_state(&session.world.auction,session.tutorial_state,game_mode,host,prior_mode)
+    }
+    pub(super) fn capture_state(
+        auction:&openmt2001::ai_messages::offers::auction::State,
+        tutorial_state:u8,game_mode:u32,host:Option<AuctionHostState>,prior_mode:u32,
+    )->Result<Self,String> {
         let record = auction.controller.record;
         if auction.controller.reference == 0
             || !matches!(prior_mode, 0 | 3)
@@ -70,7 +75,7 @@ impl AuctionContinuation {
                     .into(),
             );
         }
-        if session.tutorial_state != 0 {
+        if tutorial_state != 0 {
             return Err("Tutorial auction saving is unsupported".into());
         }
         let p = &auction.presentation;

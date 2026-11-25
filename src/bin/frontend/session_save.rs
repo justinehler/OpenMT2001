@@ -300,360 +300,39 @@ impl<'data> Session<'data> {
         host: Option<AuctionHostState>,
         interface_mode: u32,
     ) -> Result<Vec<u8>, String> {
-        if self.tutorial_state != 0 {
-            return Err("Saving tutorial script state is not yet supported".into());
-        }
-
-        if self.result_presentation.is_some() {
-            return Err("Saving a result presentation is not yet supported".into());
-        }
-        if !matches!(interface_mode, 0 | 3) {
-            return Err("Saving this interface view is unsupported".into());
-        }
-        let auction_active = self.world.auction.controller.reference != 0;
-        if !auction_active && game_mode != 1 {
-            return Err("Saving a modal game mode is not yet supported".into());
-        }
-        if auction_active { AuctionContinuation::capture(self, game_mode, host.clone(), interface_mode)?; }
-        let mut events = Output(vec![]);
-        let pending_events = self.scripts.events.pending();
-        if pending_events.len() > 4096 {
-            return Err("V2 scenario callback queue exceeds retained bound".into());
-        }
-        events.word(pending_events.len() as u32);
-        for event in pending_events {
-            let (name, body) = self
-                .scripts
-                .runtime
-                .event_reference_identity(event.reference)?
-                .ok_or("Cannot save an anonymous, collected or replaced scenario callback")?;
-            events.blob(name.as_bytes())?;
-            events.blob(&body)?;
-            events.word(event.remaining);
-            events.word(event.argument as u32);
-        }
-        let level = self
-            .catalog
-            .selected_level()
-            .ok_or("save has no selected level")?
-            .id();
-        let prefixes = self.roster.account_prefixes(&self.world.city)?;
-        let current = self
-            .roster
-            .manager
-            .players
-            .iter()
-            .position(|p| p.reference == self.roster.status.current_player)
-            .ok_or("save current player missing")?;
-        let player_rows: Vec<_> = prefixes
-            .iter()
-            .enumerate()
-            .map(|(i, p)| writer::Player {
-                metadata: &self.saved_player_metadata[i],
-                prefix: p,
-            })
-            .collect();
-        let residents = &self.world.ledgers.residents;
-        let resident_rows: Vec<_> = residents
-            .nodes
-            .iter()
-            .map(|n| writer::Resident {
-                prefix: n.as_bytes(),
-                active: n.active_byte(),
-            })
-            .collect();
-        let accounts: Vec<_> = residents.accounts.iter().map(|n| *n.as_bytes()).collect();
-        let mut headers = Vec::new();
-        let mut packets = Vec::new();
-        let mut queue = Output(vec![]);
-        let snapshots = self.live_commands.snapshot()?;
-        queue.word(snapshots.len() as u32);
-        for (domain, outer, admission, direct, command) in snapshots {
-            let domain = match domain {
-                openmt2001::scheduler::ClockDomain::Total => 0,
-                openmt2001::scheduler::ClockDomain::Normal => 1,
-            };
-            let mut h = [0; 24];
-            put(&mut h, 4, domain);
-            put(&mut h, 8, outer);
-            let p = if let Command::CategoryReady { category } = command {
-                if !direct {
-                    return Err("non-direct category queue encoding unsupported".into());
-                }
-                put(&mut h, 0, 1);
-                put(&mut h, 12, *category);
-                vec![]
-            } else {
-                if direct {
-                    return Err("direct packet queue encoding unsupported".into());
-                }
-                packet(command, admission)?
-            };
-            queue.word(domain);
-            queue.word(outer);
-            queue.word(admission);
-            queue.word(u32::from(direct));
-            queue.blob(&h)?;
-            queue.blob(&p)?;
-            headers.push(h);
-            packets.push(p);
-        }
-        let scheduled: Vec<_> = headers
-            .iter()
-            .zip(&packets)
-            .map(|(h, p)| writer::Scheduled {
-                header: h,
-                packet: (!p.is_empty()).then_some(p.as_slice()),
-            })
-            .collect();
-        let pending: [u8; 3588] = self
-            .world
-            .pending_world
-            .to_bytes()
-            .try_into()
-            .map_err(|_| "pending pool size mismatch")?;
-        let objective = self.world.objective.to_bytes();
-        let mut categories = self.world.categories;
-        let mut auction_record = self.world.auction.controller.record;
-        let mut state = writer::State {
-            compatibility: image.at(0x545d1c, 40)?.try_into().unwrap(),
-            level,
-            difficulty: self.difficulty as u32,
-            current_cash: self.world.ledgers.players[current].cash,
-            players: &player_rows,
-            businesses: &self.world.ledgers.businesses,
-            buildings: &self.world.buildings,
-            building_base: 0x591318,
-            building_sentinel_next: 0,
-            categories: &mut categories,
-            residents: &resident_rows,
-            cameras: &cameras,
-            calendar: self.world.clock.calendar,
-            timing: self.world.clock.timing,
-            pending: &pending,
-            resident_accounts: &accounts,
-            scheduled: &scheduled,
-            auction: auction_active.then_some(writer::Auction { record: &mut auction_record, countdown: self.world.auction.presentation.countdown,
-            }),
-            objective: &objective,
-            business_info: self.world.catalog.info.rows(),
-            commodities: &self.world.commodities.rows,
-            history: self
-                .history
-                .as_bytes()
-                .try_into()
-                .map_err(|_| "history size mismatch")?,
-            game_mode,
-        };
-        let mut bytes = writer::encode(&mut state, 0x7fffff, [0; 4])?;
-        let profile = self
-            .campaign_profile
-            .as_ref()
-            .map(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .ok_or("V2 profile filename is not UTF-8")
-            })
-            .transpose()?;
-        if !valid_profile(profile.unwrap_or("")) {
-            return Err("V2 profile filename does not match campaign store encoding".into());
-        }
-        let mut players = Output(vec![]);
-        players.word(self.roster.manager.players.len() as u32);
-        players.0.extend_from_slice(&self.roster.manager.bytes);
-        players.word(self.roster.status.current_player);
-        for p in &self.roster.manager.players {
-            players.word(p.reference);
-            players.blob(&p.bytes)?;
-            players.word(p.auxiliaries.len() as u32);
-            for a in &p.auxiliaries {
-                players.word(a.reference);
-                players.0.extend_from_slice(&a.bytes);
-            }
-        }
-        let mut ai = Output(vec![]);
-        ai.blob(&flat(&self.roster.profiles))?;
-        ai.blob(&words(self.roster.category_counts))?;
-        ai.word(self.roster.proposal_identity);
-        ai.word(self.roster.ai_ownership.lists.len() as u32);
-        for (reference, rows) in &self.roster.ai_ownership.lists {
-            ai.word(*reference);
-            ai.blob(&flat(rows))?;
-        }
-        ai.word(self.roster.liquidation_targets.len() as u32);
-        for (reference, record) in &self.roster.liquidation_targets {
-            ai.word(*reference);
-            ai.0.extend_from_slice(record);
-        }
-        ai.0.extend_from_slice(self.world.ai_demand.rows.as_flattened());
-        ai.word(u32::from(self.world.ai_demand.ready));
-        let mut rng = words(self.random_registry.process.into_iter().chain([
-            self.random_registry.head,
-            self.random_registry.tail,
-            self.script_random_state,
-            self.credit_random_state,
-            self.particle_random_state,
-            self.allocation_next,
-            self.static_rng_tail_next,
-            self.world.creation.initialization_rng.constructor,
-            self.world.creation.initialization_rng.movement,
-            self.world.creation.initialization_rng.objective,
-            self.world.creation.identity_rng,
-            self.world.creation.preference_rng,
-        ]));
-        rng.extend_from_slice(&self.policy.seed.to_le_bytes());
-        rng.extend_from_slice(&self.policy.auxiliary_prior_bytes);
-        rng.extend_from_slice(&self.pulse_lights.to_bytes());
-        let mut resident_runtime = Output(vec![]);
-        resident_runtime.word(residents.active_count);
-        resident_runtime.word(residents.nodes.len() as u32);
-        for n in &residents.nodes {
-            resident_runtime.0.extend_from_slice(n.as_bytes());
-            resident_runtime.word(u32::from(n.active_byte()));
-            resident_runtime.word(n.auxiliary_reference());
-        }
-        resident_runtime.word(self.world.creation.auxiliary.used() as u32);
-        resident_runtime.blob(&flat(self.world.creation.auxiliary.slots()))?;
-        let mut deck = words(
-            self.event_cards
-                .rng
-                .into_iter()
-                .chain(self.event_cards.cards)
-                .chain([self.event_cards.remaining]),
-        );
-        deck.extend_from_slice(&self.event_cards.used);
-        let mut availability = words([self
-            .world
-            .availability_cursor
-            .map_or(u32::MAX, |v| v as u32)]);
-        availability.extend_from_slice(&words(self.world.available.iter().map(|v| *v as u32)));
-        let mut runtime = Output(vec![]);
-        runtime
-            .0
-            .extend_from_slice(self.world.ai_neighbors.rows.as_flattened());
-        runtime.0.extend_from_slice(&words(
-            self.world.ai_neighbors.owned_properties.map(|v| v as u32),
-        ));
-        runtime.0.extend_from_slice(&words(
-            self.world.ai_neighbors.completed_groups.map(|v| v as u32),
-        ));
-        runtime.word(u32::from(self.world.ownership_refresh_counter));
-        runtime.word(u32::from(self.population.business_counts.age));
-        runtime.0.extend_from_slice(&words(
-            self.population.business_counts.values.map(|v| v as u32),
-        ));
-        runtime.word(u32::from(self.population.market.dirty));
-        runtime
-            .0
-            .extend_from_slice(&words(self.population.market.prices.map(f32::to_bits)));
-        runtime.word(self.population.market.rent.to_bits());
-        runtime
-            .0
-            .extend_from_slice(&self.roster.scripts.scores.bytes);
-        runtime.blob(&flat(self.population.animations.records()))?;
-        runtime.word(self.population.bindings.len() as u32);
-        for binding in &self.population.bindings {
-            runtime.word(binding.resident_reference);
-            runtime.word(binding.auxiliary_reference);
-            runtime.word(binding.auxiliary_slot as u32);
-            runtime.word(u32::from(binding.model_frame_count));
-        }
-        let mut economy = Output(vec![]);
-        economy
-            .0
-            .extend_from_slice(&words(self.hooks.utilities.owners.map(u32::from)));
-        economy
-            .0
-            .extend_from_slice(&words(self.hooks.utilities.enabled.map(u32::from)));
-        economy
-            .0
-            .extend_from_slice(&words(self.hooks.utilities.totals.map(f32::to_bits)));
-        economy
-            .0
-            .extend_from_slice(&words(self.population.properties.owners.map(u32::from)));
-        economy
-            .0
-            .extend_from_slice(&words(self.population.properties.totals.map(f32::to_bits)));
-        economy.0.extend_from_slice(&self.world.pause.bytes);
-        economy.word(self.hooks.frequency.frequency.to_bits());
-        economy.word(
-            self.hooks
-                .frequency
-                .calendar_timer
-                .map_or(u32::MAX, |v| v as u32),
-        );
-        economy.word(
-            self.hooks
-                .frequency
-                .logic_timer
-                .map_or(u32::MAX, |v| v as u32),
-        );
-        economy.blob(&flat(&self.hooks.timers))?;
-        economy.0.extend_from_slice(&words(self.building_selection));
-        economy
-            .0
-            .extend_from_slice(&words(self.world.construction_components.map(f32::to_bits)));
-        economy.0.extend_from_slice(&words(
-            self.world
-                .category_footprints
-                .as_flattened()
-                .iter()
-                .map(|v| *v as u32),
-        ));
-        //4bbe30 updates auction+80 before writing its complete record.
-        if auction_active { self.world.auction.controller.record[0x80..0x84].copy_from_slice(&auction_record[0x80..0x84]); }
-        let auction = if auction_active { Some(AuctionContinuation::capture(self, game_mode, host, interface_mode,
-            )?) } else { None };
-        let mut records = vec![
-                (1, profile.unwrap_or("").as_bytes().to_vec()),
-                (2, players.0),
-                (3, rng),
-                (4, flat(&self.world.buildings)),
-                (5, resident_runtime.0),
-                (6, ai.0),
-                (7, availability),
-                (8, deck),
-                (9, queue.0),
-                (10, runtime.0),
-                (11, transport::encode(self)?),
-                (12, economy.0),
-                (13, events.0),
-            ];
-        // VERSION3 adds the independent native placement RNG (560a08).
-        // Older extension records and native serialization retain their layout.
-        records.push((16, words([self.build_random_state])));
-        validate_dust_bindings(&self.demolition_effects,&self.world.pending_world,&self.world.buildings,
-        )?;
-        records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?,
-        ));
-        if let Some(auction) = auction { records.push((14, auction.encode())); }
-        else if interface_mode == 3 {
-            // Native camera triples retain the pose, but the retained frontend's
-            // strategic view is separate from the original game-mode global.
-            records.push((15, words([interface_mode])));
-        }
-        let selected = self
-            .catalog
-            .selected_level()
-            .ok_or("save has no selected level")?;
-        let version = if (300000..=300006).contains(&selected.id()) {
-            if selected.single_player() || !selected.objective_target().is_finite()
-                || !selected.directory().eq_ignore_ascii_case(format!("net{}", selected.id()-300000).as_bytes()) {
-                return Err("unsupported saved Skirmish identity".into());
-            }
-            // Independent selected+870 and retained map provenance, never inferred
-            // from the active objective or a reconstructed materialized city.
-            let map = self.skirmish_map.clone().ok_or("saved Skirmish provenance absent")?;
-            let version = if matches!(map, crate::skirmish_maps::MapIdentity::LegacyEmpty) { 5 } else { 6 };
-            records.push((18, crate::skirmish_maps::Selection {
-                level_id: selected.id(), target: selected.objective_target(), map,
-            }.encode(version)?));
-            version
-        } else { 4 };
-        extension::append_version(&mut bytes, &records, version)?;
-        // Check new due-now presentation boundaries before host publication.
-        verified_modern_presentation_queue(&SaveFile::parse(&bytes)?)?;
-        Ok(bytes)
+        SaveProjection {
+            live_commands: &self.live_commands,
+            city: &mut self.world.city,
+            clock: &self.world.clock,
+            utilities: &self.hooks.utilities,
+            frequency: &self.hooks.frequency,
+            timers: &self.hooks.timers,
+            scripts: &mut self.scripts,
+            roster: &mut self.roster,
+            population: &self.population,
+            road_traffic: &self.road_traffic,
+            transport: &self.transport,
+            catalog: &self.catalog,
+            campaign_profile: &self.campaign_profile,
+            skirmish_map: &self.skirmish_map,
+            saved_player_metadata: &self.saved_player_metadata,
+            history: &self.history,
+            random_registry: &self.random_registry,
+            event_cards: &self.event_cards,
+            pulse_lights: &self.pulse_lights,
+            demolition_effects: &self.demolition_effects,
+            policy: &self.policy,
+            difficulty: self.difficulty,
+            tutorial_state: self.tutorial_state,
+            result_present: self.result_presentation.is_some(),
+            script_random_state: self.script_random_state,
+            credit_random_state: self.credit_random_state,
+            particle_random_state: self.particle_random_state,
+            allocation_next: self.allocation_next,
+            static_rng_tail_next: self.static_rng_tail_next,
+            build_random_state: self.build_random_state,
+            building_selection: self.building_selection,
+        }.encode(image, cameras, game_mode, host, interface_mode)
     }
 
     /// Apply only after checked native restoration has reconstructed geometry
@@ -1746,3 +1425,434 @@ mod tests {
         }).unwrap().join().unwrap();
     }
 }
+
+/// Disjoint live save owners. Autosave supplies callback Clock/City/Population,
+/// moved hourly utilities/roads and the live message allocator. Models are not
+/// serialized; their registrar remains with the running geometry transaction.
+pub(crate) struct SaveProjection<'a> {
+    pub live_commands: &'a openmt2001::live_commands::Queue,
+    pub city: &'a mut openmt2001::level_startup::City,
+    pub clock: &'a openmt2001::clock::Clock,
+    pub utilities: &'a openmt2001::economy::Utilities,
+    pub frequency: &'a openmt2001::timers::CalendarFrequency,
+    pub timers: &'a [openmt2001::timers::Task],
+    pub scripts: &'a mut openmt2001::level_startup::Scripts,
+    pub roster: &'a mut openmt2001::level_startup::Roster,
+    pub population: &'a openmt2001::level_runtime::Population,
+    pub road_traffic: &'a openmt2001::traffic::road::runtime::RoadTraffic,
+    pub transport: &'a openmt2001::traffic::scene::Scene,
+    pub catalog: &'a openmt2001::level_catalog::Catalog,
+    pub campaign_profile: &'a Option<std::path::PathBuf>,
+    pub skirmish_map: &'a Option<crate::skirmish_maps::MapIdentity>,
+    pub saved_player_metadata: &'a [[u8;48];6],
+    pub history: &'a openmt2001::player_history::State,
+    pub random_registry: &'a openmt2001::player_manager::RandomRegistry,
+    pub event_cards: &'a openmt2001::event_cards::Deck,
+    pub pulse_lights: &'a openmt2001::pulse_lights::PulseLights,
+    pub demolition_effects: &'a openmt2001::demolition_effect::Manager,
+    pub policy: &'a crate::fresh_city::Policy,
+    pub difficulty: usize,
+    pub tutorial_state: u8,
+    pub result_present: bool,
+    pub script_random_state: u32,
+    pub credit_random_state: u32,
+    pub particle_random_state: u32,
+    pub allocation_next: u32,
+    pub static_rng_tail_next: u32,
+    pub build_random_state: u32,
+    pub building_selection: [u32;2],
+}
+impl SaveProjection<'_> {
+    pub(crate) fn encode(
+        mut self,
+        image: &openmt2001::pe::PeImage<'_>,
+        cameras: [[u8;196];2],
+        game_mode:u32,
+        host:Option<AuctionHostState>,
+        interface_mode:u32,
+    )->Result<Vec<u8>,String> {
+        if self.tutorial_state != 0 {
+            return Err("Saving tutorial script state is not yet supported".into());
+        }
+
+        if self.result_present {
+            return Err("Saving a result presentation is not yet supported".into());
+        }
+        if !matches!(interface_mode, 0 | 3) {
+            return Err("Saving this interface view is unsupported".into());
+        }
+        let auction_active = self.city.auction.controller.reference != 0;
+        if !auction_active && game_mode != 1 {
+            return Err("Saving a modal game mode is not yet supported".into());
+        }
+        if auction_active { AuctionContinuation::capture_state(&self.city.auction, self.tutorial_state, game_mode, host.clone(), interface_mode)?; }
+        let mut events = Output(vec![]);
+        let pending_events = self.scripts.events.pending();
+        if pending_events.len() > 4096 {
+            return Err("V2 scenario callback queue exceeds retained bound".into());
+        }
+        events.word(pending_events.len() as u32);
+        for event in pending_events {
+            let (name, body) = self
+                .scripts
+                .runtime
+                .event_reference_identity(event.reference)?
+                .ok_or("Cannot save an anonymous, collected or replaced scenario callback")?;
+            events.blob(name.as_bytes())?;
+            events.blob(&body)?;
+            events.word(event.remaining);
+            events.word(event.argument as u32);
+        }
+        let level = self
+            .catalog
+            .selected_level()
+            .ok_or("save has no selected level")?
+            .id();
+        let prefixes = self.roster.account_prefixes(&self.city)?;
+        let current = self
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == self.roster.status.current_player)
+            .ok_or("save current player missing")?;
+        let player_rows: Vec<_> = prefixes
+            .iter()
+            .enumerate()
+            .map(|(i, p)| writer::Player {
+                metadata: &self.saved_player_metadata[i],
+                prefix: p,
+            })
+            .collect();
+        let residents = &self.city.ledgers.residents;
+        let resident_rows: Vec<_> = residents
+            .nodes
+            .iter()
+            .map(|n| writer::Resident {
+                prefix: n.as_bytes(),
+                active: n.active_byte(),
+            })
+            .collect();
+        let accounts: Vec<_> = residents.accounts.iter().map(|n| *n.as_bytes()).collect();
+        let mut headers = Vec::new();
+        let mut packets = Vec::new();
+        let mut queue = Output(vec![]);
+        let snapshots = self.live_commands.snapshot()?;
+        queue.word(snapshots.len() as u32);
+        for (domain, outer, admission, direct, command) in snapshots {
+            let domain = match domain {
+                openmt2001::scheduler::ClockDomain::Total => 0,
+                openmt2001::scheduler::ClockDomain::Normal => 1,
+            };
+            let mut h = [0; 24];
+            put(&mut h, 4, domain);
+            put(&mut h, 8, outer);
+            let p = if let Command::CategoryReady { category } = command {
+                if !direct {
+                    return Err("non-direct category queue encoding unsupported".into());
+                }
+                put(&mut h, 0, 1);
+                put(&mut h, 12, *category);
+                vec![]
+            } else {
+                if direct {
+                    return Err("direct packet queue encoding unsupported".into());
+                }
+                packet(command, admission)?
+            };
+            queue.word(domain);
+            queue.word(outer);
+            queue.word(admission);
+            queue.word(u32::from(direct));
+            queue.blob(&h)?;
+            queue.blob(&p)?;
+            headers.push(h);
+            packets.push(p);
+        }
+        let scheduled: Vec<_> = headers
+            .iter()
+            .zip(&packets)
+            .map(|(h, p)| writer::Scheduled {
+                header: h,
+                packet: (!p.is_empty()).then_some(p.as_slice()),
+            })
+            .collect();
+        let pending: [u8; 3588] = self.city
+            .pending_world
+            .to_bytes()
+            .try_into()
+            .map_err(|_| "pending pool size mismatch")?;
+        let objective = self.city.objective.to_bytes();
+        let mut state = writer::State {
+            compatibility: image.at(0x545d1c, 40)?.try_into().unwrap(),
+            level,
+            difficulty: self.difficulty as u32,
+            current_cash: self.city.ledgers.players[current].cash,
+            players: &player_rows,
+            businesses: &self.city.ledgers.businesses,
+            buildings: &self.city.buildings,
+            building_base: 0x591318,
+            building_sentinel_next: 0,
+            categories: &mut self.city.categories,
+            residents: &resident_rows,
+            cameras: &cameras,
+            calendar: self.clock.calendar,
+            timing: self.clock.timing,
+            pending: &pending,
+            resident_accounts: &accounts,
+            scheduled: &scheduled,
+            auction: auction_active.then_some(writer::Auction { record: &mut self.city.auction.controller.record, countdown: self.city.auction.presentation.countdown,
+            }),
+            objective: &objective,
+            business_info: self.city.catalog.info.rows(),
+            commodities: &self.city.commodities.rows,
+            history: self
+                .history
+                .as_bytes()
+                .try_into()
+                .map_err(|_| "history size mismatch")?,
+            game_mode,
+        };
+        let mut bytes = writer::encode(&mut state, 0x7fffff, [0; 4])?;
+        #[cfg(test)]
+        natural_observer::after(&self.city.categories,&self.city.auction.controller.record);
+        let profile = self
+            .campaign_profile
+            .as_ref()
+            .map(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or("V2 profile filename is not UTF-8")
+            })
+            .transpose()?;
+        if !valid_profile(profile.unwrap_or("")) {
+            return Err("V2 profile filename does not match campaign store encoding".into());
+        }
+        let mut players = Output(vec![]);
+        players.word(self.roster.manager.players.len() as u32);
+        players.0.extend_from_slice(&self.roster.manager.bytes);
+        players.word(self.roster.status.current_player);
+        for p in &self.roster.manager.players {
+            players.word(p.reference);
+            players.blob(&p.bytes)?;
+            players.word(p.auxiliaries.len() as u32);
+            for a in &p.auxiliaries {
+                players.word(a.reference);
+                players.0.extend_from_slice(&a.bytes);
+            }
+        }
+        let mut ai = Output(vec![]);
+        ai.blob(&flat(&self.roster.profiles))?;
+        ai.blob(&words(self.roster.category_counts))?;
+        ai.word(self.roster.proposal_identity);
+        ai.word(self.roster.ai_ownership.lists.len() as u32);
+        for (reference, rows) in &self.roster.ai_ownership.lists {
+            ai.word(*reference);
+            ai.blob(&flat(rows))?;
+        }
+        ai.word(self.roster.liquidation_targets.len() as u32);
+        for (reference, record) in &self.roster.liquidation_targets {
+            ai.word(*reference);
+            ai.0.extend_from_slice(record);
+        }
+        ai.0.extend_from_slice(self.city.ai_demand.rows.as_flattened());
+        ai.word(u32::from(self.city.ai_demand.ready));
+        let mut rng = words(self.random_registry.process.into_iter().chain([
+            self.random_registry.head,
+            self.random_registry.tail,
+            self.script_random_state,
+            self.credit_random_state,
+            self.particle_random_state,
+            self.allocation_next,
+            self.static_rng_tail_next,
+            self.city.creation.initialization_rng.constructor,
+            self.city.creation.initialization_rng.movement,
+            self.city.creation.initialization_rng.objective,
+            self.city.creation.identity_rng,
+            self.city.creation.preference_rng,
+        ]));
+        rng.extend_from_slice(&self.policy.seed.to_le_bytes());
+        rng.extend_from_slice(&self.policy.auxiliary_prior_bytes);
+        rng.extend_from_slice(&self.pulse_lights.to_bytes());
+        let mut resident_runtime = Output(vec![]);
+        resident_runtime.word(residents.active_count);
+        resident_runtime.word(residents.nodes.len() as u32);
+        for n in &residents.nodes {
+            resident_runtime.0.extend_from_slice(n.as_bytes());
+            resident_runtime.word(u32::from(n.active_byte()));
+            resident_runtime.word(n.auxiliary_reference());
+        }
+        resident_runtime.word(self.city.creation.auxiliary.used() as u32);
+        resident_runtime.blob(&flat(self.city.creation.auxiliary.slots()))?;
+        let mut deck = words(
+            self.event_cards
+                .rng
+                .into_iter()
+                .chain(self.event_cards.cards)
+                .chain([self.event_cards.remaining]),
+        );
+        deck.extend_from_slice(&self.event_cards.used);
+        let mut availability = words([self.city
+            .availability_cursor
+            .map_or(u32::MAX, |v| v as u32)]);
+        availability.extend_from_slice(&words(self.city.available.iter().map(|v| *v as u32)));
+        let mut runtime = Output(vec![]);
+        runtime
+            .0
+            .extend_from_slice(self.city.ai_neighbors.rows.as_flattened());
+        runtime.0.extend_from_slice(&words(
+            self.city.ai_neighbors.owned_properties.map(|v| v as u32),
+        ));
+        runtime.0.extend_from_slice(&words(
+            self.city.ai_neighbors.completed_groups.map(|v| v as u32),
+        ));
+        runtime.word(u32::from(self.city.ownership_refresh_counter));
+        runtime.word(u32::from(self.population.business_counts.age));
+        runtime.0.extend_from_slice(&words(
+            self.population.business_counts.values.map(|v| v as u32),
+        ));
+        runtime.word(u32::from(self.population.market.dirty));
+        runtime
+            .0
+            .extend_from_slice(&words(self.population.market.prices.map(f32::to_bits)));
+        runtime.word(self.population.market.rent.to_bits());
+        runtime
+            .0
+            .extend_from_slice(&self.roster.scripts.scores.bytes);
+        runtime.blob(&flat(self.population.animations.records()))?;
+        runtime.word(self.population.bindings.len() as u32);
+        for binding in &self.population.bindings {
+            runtime.word(binding.resident_reference);
+            runtime.word(binding.auxiliary_reference);
+            runtime.word(binding.auxiliary_slot as u32);
+            runtime.word(u32::from(binding.model_frame_count));
+        }
+        let mut economy = Output(vec![]);
+        economy
+            .0
+            .extend_from_slice(&words(self.utilities.owners.map(u32::from)));
+        economy
+            .0
+            .extend_from_slice(&words(self.utilities.enabled.map(u32::from)));
+        economy
+            .0
+            .extend_from_slice(&words(self.utilities.totals.map(f32::to_bits)));
+        economy
+            .0
+            .extend_from_slice(&words(self.population.properties.owners.map(u32::from)));
+        economy
+            .0
+            .extend_from_slice(&words(self.population.properties.totals.map(f32::to_bits)));
+        economy.0.extend_from_slice(&self.city.pause.bytes);
+        economy.word(self.frequency.frequency.to_bits());
+        economy.word(
+            self.frequency
+                .calendar_timer
+                .map_or(u32::MAX, |v| v as u32),
+        );
+        economy.word(
+            self.frequency
+                .logic_timer
+                .map_or(u32::MAX, |v| v as u32),
+        );
+        economy.blob(&flat(self.timers))?;
+        economy.0.extend_from_slice(&words(self.building_selection));
+        economy
+            .0
+            .extend_from_slice(&words(self.city.construction_components.map(f32::to_bits)));
+        economy.0.extend_from_slice(&words(
+            self.city
+                .category_footprints
+                .as_flattened()
+                .iter()
+                .map(|v| *v as u32),
+        ));
+        let auction = if auction_active { Some(AuctionContinuation::capture_state(&self.city.auction, self.tutorial_state, game_mode, host, interface_mode,
+            )?) } else { None };
+        let mut records = vec![
+                (1, profile.unwrap_or("").as_bytes().to_vec()),
+                (2, players.0),
+                (3, rng),
+                (4, flat(&self.city.buildings)),
+                (5, resident_runtime.0),
+                (6, ai.0),
+                (7, availability),
+                (8, deck),
+                (9, queue.0),
+                (10, runtime.0),
+                (11, transport::encode_parts(&self.city.road_network, self.road_traffic, self.transport)?),
+                (12, economy.0),
+                (13, events.0),
+            ];
+        // VERSION3 adds the independent native placement RNG (560a08).
+        // Older extension records and native serialization retain their layout.
+        records.push((16, words([self.build_random_state])));
+        validate_dust_bindings(&self.demolition_effects,&self.city.pending_world,&self.city.buildings,
+        )?;
+        records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?,
+        ));
+        if let Some(auction) = auction { records.push((14, auction.encode())); }
+        else if interface_mode == 3 {
+            // Native camera triples retain the pose, but the retained frontend's
+            // strategic view is separate from the original game-mode global.
+            records.push((15, words([interface_mode])));
+        }
+        let selected = self
+            .catalog
+            .selected_level()
+            .ok_or("save has no selected level")?;
+        let version = if (300000..=300006).contains(&selected.id()) {
+            if selected.single_player() || !selected.objective_target().is_finite()
+                || !selected.directory().eq_ignore_ascii_case(format!("net{}", selected.id()-300000).as_bytes()) {
+                return Err("unsupported saved Skirmish identity".into());
+            }
+            // Independent selected+870 and retained map provenance, never inferred
+            // from the active objective or a reconstructed materialized city.
+            let map = self.skirmish_map.clone().ok_or("saved Skirmish provenance absent")?;
+            let version = if matches!(map, crate::skirmish_maps::MapIdentity::LegacyEmpty) { 5 } else { 6 };
+            records.push((18, crate::skirmish_maps::Selection {
+                level_id: selected.id(), target: selected.objective_target(), map,
+            }.encode(version)?));
+            version
+        } else { 4 };
+        extension::append_version(&mut bytes, &records, version)?;
+        // Check new due-now presentation boundaries before host publication.
+        verified_modern_presentation_queue(&SaveFile::parse(&bytes)?)?;
+        Ok(bytes)
+    }
+}
+
+/// Object-safe stack request; consuming the projection makes a second encode
+/// an explicit error. It cannot outlive the synchronous calendar callback.
+pub(crate) trait AutosaveRequest: std::fmt::Debug {
+    fn encode_once(&mut self,cameras:[[u8;196];2],game_mode:u32,
+        host:Option<AuctionHostState>,interface_mode:u32)->Result<Vec<u8>,String>;
+}
+pub(crate) struct SaveRequest<'a,'data> {
+    pub projection:Option<SaveProjection<'a>>,
+    pub image:&'a openmt2001::pe::PeImage<'data>,
+}
+impl std::fmt::Debug for SaveRequest<'_,'_> {
+    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {
+        f.debug_struct("SaveRequest").field("available",&self.projection.is_some()).finish()
+    }
+}
+impl AutosaveRequest for SaveRequest<'_,'_> {
+    fn encode_once(&mut self,cameras:[[u8;196];2],game_mode:u32,
+        host:Option<AuctionHostState>,interface_mode:u32)->Result<Vec<u8>,String> {
+        let projection=self.projection.take().ok_or("Autosave request already consumed")?;
+        #[cfg(test)]
+        let mut projection=projection;
+        #[cfg(test)]
+        natural_observer::before(&mut projection);
+        projection.encode(self.image,cameras,game_mode,host,interface_mode)
+    }
+}
+
+#[cfg(test)]
+#[path="session_autosave_live_test.rs"]
+mod autosave_live_tests;
+
+#[cfg(test)]
+#[path="session_autosave_natural_observer.rs"]
+pub(crate) mod natural_observer;

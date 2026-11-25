@@ -85,6 +85,14 @@ fn natural_auction_resume(prior_mode: u32) {
         assert!(session.world.auction.presentation.countdown > 0, "announcement phase not observed");
         let root = std::path::Path::new("work/save/v2-auction-profile");
         let countdown_bytes = session.save_v2_with_auction_view(&image, cameras, 1, host.auction_save_state(), prior_mode).unwrap();
+        // The shared encoder commits native+80
+        // directly before record14 captures its exact subsecond continuation.
+        assert_eq!(word(&session.world.auction.controller.record,0x80),
+            session.world.auction.presentation.countdown);
+        let captured=SaveFile::parse(&countdown_bytes).unwrap();
+        let continuation=extension::Extension::parse(&captured).unwrap().unwrap();
+        assert_eq!(word(continuation.required(14).unwrap(),20),session.world.auction.presentation.countdown);
+        assert_eq!(word(continuation.required(14).unwrap(),28+0x80),session.world.auction.presentation.countdown);
         let countdown_path = crate::save_menu::write_new(root, &countdown_bytes).unwrap();
         let countdown_bytes = std::fs::read(&countdown_path).unwrap();
         let countdown_save = SaveFile::parse(&countdown_bytes).unwrap();

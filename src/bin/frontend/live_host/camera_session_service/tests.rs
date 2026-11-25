@@ -6,7 +6,7 @@ use crate::live_host::camera_bridge::{self as bridge,PauseReason,PauseByte,Missi
 use std::{thread,time::Duration};
 const WAIT:Duration=Duration::from_secs(10);
 pub(super) fn observation()->Observation {
-    Observation{current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,
+    Observation{raw_capture:None,current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,
         strategic_writeback:None,finalization_fault:None,task_effects:vec![]}
 }
 pub(super) fn install()->Operation {

@@ -4,7 +4,7 @@ use super::*;
 use std::{thread,time::Duration};
 const WAIT:Duration=Duration::from_secs(3);
 fn observation()->Observation {
-    Observation{current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,
+    Observation{raw_capture:None,current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,
         strategic_writeback:None,finalization_fault:None,task_effects:vec![]}
 }
 fn central()->Operation { Operation::CentralTail{admission:Admission::default()} }

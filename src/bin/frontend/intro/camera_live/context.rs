@@ -229,12 +229,13 @@ fn validate_owner_packets(owners:Option<SupplierOwners<'_>>,value:&Admission,pro
 }
 
 impl super::endpoint::Context for UiContext<'_> {
+    fn save_interface_mode(&self)->Result<u32,String>{Ok(if self.view.strategic{3}else{0})}
     fn process_runtime(&self)->Option<&crate::live_host::process_runtime::Handle>{Some(&self.assets.process_runtime)}
     fn validate(&self,operation:&Operation,owner:&Owner)->Result<(),String>{
         let (value,protected)=match operation {
             Operation::Install{admission,..}|Operation::CentralTail{admission}=>(admission,true),
             Operation::Apply{admission,..}|Operation::Admission(admission)=>(admission,false),
-            Operation::CurrentPose|Operation::Sample{..}=>return Ok(()),
+            Operation::RawCapture|Operation::CurrentPose|Operation::Sample{..}=>return Ok(()),
         };
         if matches!(operation,Operation::CentralTail{..}) {
             if let Some(error)=&self.view.camera_ui.as_ref().ok_or("Camera UI state absent")?.upper_input_error{
@@ -365,7 +366,7 @@ impl super::endpoint::Context for UiContext<'_> {
         }
         // This drains only existing available service channels (try_recv).
         // Current eye/target cannot be meaningfully sent to these 2D sinks.
-        // Root joins original spatial58/orientation40/update10 separately;
+        // Original spatial58/orientation40/update10 remains a separate join;
         // road/crowd/construction/block producers ALREADY run in Host logic.
         super::audio::service_available(self.view)
     }

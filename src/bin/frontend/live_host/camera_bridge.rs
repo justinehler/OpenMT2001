@@ -161,6 +161,7 @@ pub enum Operation {
     CentralTail {
         admission: Admission,
     },
+    RawCapture,
     CurrentPose,
     /// Actual dispatcher export bits; no clamp, fract, clock, or synthetic tick.
     Sample {
@@ -173,6 +174,7 @@ enum Boundary {
     Apply,
     Admission,
     CentralTail,
+    RawCapture,
     CurrentPose,
     Sample(u32),
 }
@@ -183,6 +185,7 @@ impl Operation {
             Self::Apply { .. } => Boundary::Apply,
             Self::Admission(_) => Boundary::Admission,
             Self::CentralTail { .. } => Boundary::CentralTail,
+            Self::RawCapture => Boundary::RawCapture,
             Self::CurrentPose => Boundary::CurrentPose,
             Self::Sample { ratio_bits } => Boundary::Sample(*ratio_bits),
         }
@@ -196,7 +199,14 @@ pub enum TaskEffect {
     ClearElapsed,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveCapture {
+    pub cameras:Capture,
+    /// UI-owned view, captured without running inputs or providers.
+    pub interface_mode:Result<u32,String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
+    pub raw_capture:Option<SaveCapture>,
     /// Core boundary completed; Host must apply TaskEffects before surfacing
     /// this real fatal error. No save success was published for this boundary.
     pub finalization_fault:Option<String>,
@@ -360,7 +370,7 @@ pub struct Worker {
     sender: mpsc::Sender<Request>,
     retired: Arc<AtomicBool>,
     #[cfg(test)]
-    enqueued: Option<mpsc::Sender<()>>,
+    enqueued: Option<(Option<Boundary>,mpsc::Sender<()>)>,
 }
 /// Move this together with the same bank on Inspection refresh. A true session
 /// replacement gets a new generation/channel and an explicit Install instead.
@@ -404,6 +414,9 @@ pub fn channel(generation: Generation) -> (Worker, Inbox) {
 }
 
 fn validate_observation(boundary: Boundary, observation: &Observation) -> Result<(), String> {
+    if observation.raw_capture.is_some() != matches!(boundary,Boundary::RawCapture) {
+        return Err("Camera raw capture reply does not match boundary".into());
+    }
     if observation.finalization_fault.is_some() &&
         (!matches!(boundary,Boundary::Install|Boundary::CentralTail)||observation.strategic_writeback.is_some()){
         return Err("Camera finalization fault outside protected completion or with unfinalized writeback".into());
@@ -427,7 +440,13 @@ impl Worker {
     pub(crate) fn test_retirement_flag(&self)->Arc<AtomicBool>{Arc::clone(&self.retired)}
     /// One-shot notification after the actual successful request enqueue.
     #[cfg(test)]
-    pub(crate) fn test_notify_next_enqueue(&mut self,sender:mpsc::Sender<()>){self.enqueued=Some(sender);}
+    pub(crate) fn test_notify_next_enqueue(&mut self,sender:mpsc::Sender<()>){self.enqueued=Some((None,sender));}
+    /// Same actual-enqueue witness, filtered so CurrentPose does not consume a
+    /// RawCapture retirement observer. This changes no non-test transport code.
+    #[cfg(test)]
+    fn test_notify_enqueue_at(&mut self,boundary:Boundary,sender:mpsc::Sender<()>){
+        self.enqueued=Some((Some(boundary),sender));
+    }
     pub(crate) fn central_identity(&self)->Result<CentralIdentity,RequestError>{
         if let Some(error)=&self.failure{return Err(RequestError::Failed(error.clone()))}
         if self.retired(){return Err(RequestError::Retired)}
@@ -502,7 +521,8 @@ impl Worker {
             })
             .map_err(|_| self.disconnected("Camera event-thread inbox disconnected"))?;
         #[cfg(test)]
-        if let Some(enqueued)=self.enqueued.take(){
+        if self.enqueued.as_ref().is_some_and(|(expected,_)|expected.is_none_or(|at|at==boundary)){
+            let (_,enqueued)=self.enqueued.take().unwrap();
             enqueued.send(()).expect("request enqueue observer disconnected");
         }
         let mut subcalls=0u64;
@@ -702,3 +722,7 @@ mod tests;
 #[cfg(test)]
 #[path = "camera_bridge/session_service_tests.rs"]
 mod session_service_tests;
+
+#[cfg(test)]
+#[path = "camera_bridge/autosave_producer_failure_tests.rs"]
+mod autosave_producer_failure_tests;

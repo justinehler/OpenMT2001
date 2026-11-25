@@ -11,8 +11,14 @@ fn rows<const N: usize>(r: &mut Input<'_>, dst: &mut [[u8; N]]) -> Result<(), St
     Ok(())
 }
 pub(super) fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
+    encode_parts(&s.world.road_network,&s.road_traffic,&s.transport)
+}
+pub(super) fn encode_parts(
+    network:&openmt2001::traffic::road::construction::RoadNetwork,
+    roads:&openmt2001::traffic::road::runtime::RoadTraffic,
+    t:&openmt2001::traffic::scene::Scene,
+)->Result<Vec<u8>,String> {
     let mut out = Output(vec![]);
-    let network = &s.world.road_network;
     for b in [
         flat(&network.roads),
         flat(&network.segments),
@@ -22,13 +28,13 @@ pub(super) fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
     ] {
         out.blob(&b)?;
     }
-    out.blob(s.road_traffic.records.as_flattened())?;
-    out.word(s.road_traffic.auxiliaries.used() as u32);
-    out.blob(&flat(s.road_traffic.auxiliaries.slots()))?;
+    out.blob(roads.records.as_flattened())?;
+    out.word(roads.auxiliaries.used() as u32);
+    out.blob(&flat(roads.auxiliaries.slots()))?;
     out.0
-        .extend_from_slice(&words(s.road_traffic.admission.random));
+        .extend_from_slice(&words(roads.admission.random));
     out.0.extend_from_slice(&words(
-        s.road_traffic
+        roads
             .admission
             .demand
             .as_flattened()
@@ -36,23 +42,22 @@ pub(super) fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
             .map(|v| *v as u32),
     ));
     out.0
-        .extend_from_slice(&words(s.road_traffic.admission.selected.map(|v| v as u32)));
+        .extend_from_slice(&words(roads.admission.selected.map(|v| v as u32)));
     out.0
-        .extend_from_slice(&words(s.road_traffic.admission.counts));
-    out.word(s.road_traffic.admission.entries as u32);
-    out.word(s.road_traffic.signals.counter);
-    out.word(s.road_traffic.signals.phase);
+        .extend_from_slice(&words(roads.admission.counts));
+    out.word(roads.admission.entries as u32);
+    out.word(roads.signals.counter);
+    out.word(roads.signals.phase);
     out.0.extend_from_slice(&words(
-        s.road_traffic
+        roads
             .proximity
             .nearest
             .as_flattened()
             .iter()
             .copied(),
     ));
-    out.word(s.road_traffic.proximity.reciprocal_sum.to_bits());
-    out.word(s.road_traffic.proximity.count as u32);
-    let t = &s.transport;
+    out.word(roads.proximity.reciprocal_sum.to_bits());
+    out.word(roads.proximity.count as u32);
     out.0.extend_from_slice(&words([
         t.hourly.tier,
         t.hourly.random[0],

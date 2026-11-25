@@ -8,6 +8,7 @@ fn input()->Input {
         mode13:Mode13Input{enable_translation:true,enable_keyboard:true,enable_zoom:true,buttons:[false;2],delta:[0;2],keys:[true,false,false,false],sensitivity:50,legacy_yaw:false,invert_vertical:false,low_height:false}}
 }
 impl Context for Ui {
+    fn save_interface_mode(&self)->Result<u32,String>{Ok(0)}
     fn validate(&self,_:&Operation,_:&Owner)->Result<(),String>{
         if self.fail_validate{Err("read-only preflight rejected".into())}else{Ok(())}
     }
@@ -232,4 +233,26 @@ fn session_endpoint_completed_task_effects_survive_finalizer_fault_and_no_save_s
     assert_eq!(ack.task_effects,vec![TaskEffect::ClearElapsed]);
     assert_eq!(ack.finalization_fault.as_deref(),Some("late C finalization failure"));
     assert_eq!((ui.save_published,ui.save_failed),(0,1));
+}
+
+// RawCapture uses the real Endpoint and checked Worker exchange.
+#[test]
+fn raw_capture_is_exact_and_does_not_run_central_or_publish_pending_save() {
+    let pending_target=[20f32.to_bits(),120f32.to_bits(),(-30f32).to_bits()];
+    let (snapshots,final_pair,ui,errors)=drive(Ui{save_pending:true,queued_target:Some(pending_target),..Ui::default()},|worker,initial,property|{
+        worker.request(Operation::Install{capture:initial.clone(),admission:Admission::default(),property:Some(property)}).unwrap();
+        let first=worker.request(Operation::RawCapture).unwrap();
+        let second=worker.request(Operation::RawCapture).unwrap();
+        assert!(first.sampled.is_none());assert!(first.task_effects.is_empty());
+        assert!(first.strategic_writeback.is_none());assert!(first.finalization_fault.is_none());
+        let first=first.raw_capture.unwrap();let second=second.raw_capture.unwrap();
+        assert_eq!(first.interface_mode,Ok(0));assert_eq!(first.cameras,initial);
+        assert_eq!(second.cameras,initial);initial
+    });
+    assert_eq!(snapshots,final_pair);assert!(errors.is_empty());
+    assert_eq!(ui.consumed,0);assert_eq!((ui.save_published,ui.save_failed),(0,0));
+    assert!(ui.save_pending,"raw save capture leaves the existing manual capture pending");
+    assert_eq!(ui.queued_target,Some(pending_target),"raw save must not run the deferred setter");
+    assert!(ui.trace.is_empty());assert!(ui.pre_captures.is_empty());
+    assert_eq!(ui.writeback_cuts,1,"only Install may finalize protected C state");
 }

@@ -9,7 +9,7 @@ fn pose(mark: u32) -> Pose {
     }
 }
 fn observation(boundary: Boundary, mark: u32) -> Observation {
-    Observation {
+    Observation {raw_capture:None,
             strategic_writeback:None,finalization_fault:None,
         current: pose(mark),
         sampled: matches!(boundary, Boundary::Sample(_)).then(|| pose(mark.wrapping_add(2))),
@@ -624,4 +624,40 @@ fn completion_fault_is_rejected_outside_protected_completion(){
         let mut o=observation(boundary,1);o.finalization_fault=Some("wrong boundary".into());
         assert!(validate_observation(boundary,&o).is_err());
     }
+}
+
+// The operation uses existing envelope, type and retirement checks.
+#[test]
+fn raw_capture_reply_is_typed_and_read_only() {
+    let mut raw=observation(Boundary::CurrentPose,0);
+    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());
+    raw.raw_capture=Some(SaveCapture{cameras:Capture::from_records([[0xa5;196],[0x5a;196]]),interface_mode:Ok(3)});
+    assert!(validate_observation(Boundary::RawCapture,&raw).is_ok());
+    assert!(validate_observation(Boundary::CurrentPose,&raw).is_err());
+    raw.task_effects.push(TaskEffect::ClearElapsed);
+    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());raw.task_effects.clear();
+    raw.sampled=Some(pose(7));assert!(validate_observation(Boundary::RawCapture,&raw).is_err());raw.sampled=None;
+    raw.finalization_fault=Some("forged finalizer".into());
+    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());
+}
+#[test]
+fn raw_capture_rejects_bad_generation_and_sequence_before_capture() {
+    for (generation,sequence) in [(2,0),(1,1)] {
+        let (worker,mut inbox)=channel(1);
+        let (result,ack)=inject(&mut inbox,&worker.sender,generation,sequence,Operation::RawCapture,
+            |_|panic!("invalid envelope reached raw owner"));
+        assert!(result.unwrap_err().contains("generation/sequence"));
+        assert!(ack.unwrap_err().contains("generation/sequence"));
+    }
+}
+#[test]
+fn raw_capture_retirement_is_not_a_successful_save_or_fatal_camera_error() {
+    let (mut worker,inbox)=channel(211);worker.installed=true;
+    let sender=worker.sender.clone();let (done,finished)=mpsc::channel();
+    let client=std::thread::spawn(move||{let result=worker.request(Operation::RawCapture);done.send((worker,result)).unwrap();});
+    let pending=inbox.receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+    sender.send(pending).unwrap();inbox.retire();
+    let (mut worker,result)=finished.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+    assert_eq!(result,Err(RequestError::Retired));assert_eq!(worker.next,0);assert!(worker.failure.is_none());
+    assert_eq!(worker.request(Operation::RawCapture),Err(RequestError::Retired));client.join().unwrap();
 }

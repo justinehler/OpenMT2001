@@ -19,6 +19,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
+    pub autosave:Option<crate::save_menu::AutosaveStatus>,
     pub time_display: crate::time_panel::DisplayState,
     pub cash_arrow: crate::cash_arrow::State,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
@@ -147,6 +148,9 @@ pub struct Host {
     pub process_runtime:Option<process_runtime::Handle>,
     /// None retains existing callers. Installation is an explicit ack barrier.
     camera_bridge: Option<camera_bridge::Worker>,
+    /// Authority supplied only by Inputs::session_worker selected profile.
+    pub(crate) autosave_profile_root:Option<std::path::PathBuf>,
+    pub autosave_status:Option<crate::save_menu::AutosaveStatus>,
     camera_suppliers:Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
     presentation_started: bool,
@@ -312,6 +316,8 @@ impl Host {
         Self {
             process_runtime:None,
             camera_bridge: None,
+            autosave_profile_root:None,
+            autosave_status:None,
             camera_suppliers:None,
             time_runtime: Default::default(),
             presentation_started: false,
@@ -375,7 +381,7 @@ impl Host {
                     years_per_day: 0,
                     suppress_rollover_query: false,
                     rollover_events_enabled: true,
-                    autosave_disabled: true,
+                    autosave_disabled: false,
                 },
                 hourly: hourly::Controls {
                     suppressed: false,
@@ -785,6 +791,7 @@ impl Host {
             Err(error)=>{self.fail(error);None}
         };
         Status {
+            autosave:self.autosave_status.clone(),
             time_display,
             cash_arrow: self.cash_arrow,
             pulse_lights: session.pulse_lights.clone(),
@@ -1326,6 +1333,14 @@ impl Host {
             return;
         }
         if self.stop_retired_camera() { return; }
+        // Original93bbb9 is the network gate, not a new save preference.
+        self.policy.calendar.autosave_disabled=self.policy.scheduler.network_enabled;
+        let autosave_root=&self.autosave_profile_root;
+        let autosave_status=&mut self.autosave_status;
+        let camera_bridge=&mut self.camera_bridge;
+        let interface_ticks=self.interface_ticks;
+        let mut autosave_retired=false;
+        let mut autosave_fatal=None;
         let omitted = &mut self.pending_presentation;
         let transport_audio = self.transport_audio.clone();
         let auction_audio = self.auction_audio.clone();
@@ -1372,9 +1387,50 @@ impl Host {
                         .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
                 }
                 Ok(())
-            }, |event, _| {
+            }, |event, clock| {
             use fresh_city::tick::Event;
             match event {
+                Event::Autosave(request)=>{
+                    use crate::save_menu::{AutosaveFailure as Failure,AutosaveStatus as Status,PreparedAutosave};
+                    let destination=autosave_root.as_ref().map(|root|root.join("saves/autosave.sav"));
+                    let attempt=(||->Result<std::path::PathBuf,Failure>{
+                        let root=autosave_root.as_deref().ok_or(Failure::MissingSelectedProfile)?;
+                        let prepared=PreparedAutosave::prepare(root).map_err(Failure::Storage)?;
+                        let worker=camera_bridge.as_mut().ok_or(Failure::UnsupportedCamera)?;
+                        // Current central callback has already returned. A raw
+                        // capture admits no Session subcalls and runs no provider.
+                        let observation=match worker.request(camera_bridge::Operation::RawCapture) {
+                            Ok(observation)=>observation,
+                            Err(camera_bridge::RequestError::Retired)=>{
+                                autosave_retired=true;
+                                return Err(Failure::UnsupportedState("Camera generation retired".into()));
+                            },
+                            Err(camera_bridge::RequestError::Failed(error))=>{
+                                autosave_fatal=Some(error.clone());
+                                return Err(Failure::UnsupportedState(error));
+                            },
+                        };
+                        let raw=observation.raw_capture.ok_or_else(||Failure::UnsupportedState("Raw camera capture absent".into()))?;
+                        let mode=raw.interface_mode.map_err(Failure::UnsupportedState)?;
+                        let host=Some(crate::session_save::AuctionHostState {
+                            controls:auction.as_ref().map(|a|a.controls.clone()).unwrap_or_default(),
+                            visible:auction.as_ref().is_some_and(|a|a.visible),
+                            interface_ticks,announcement_seconds:*auction_seconds,
+                        });
+                        let bytes=request.encode_once(raw.cameras.into_records(),clock.timing[5],host,mode)
+                            .map_err(Failure::Encoding)?;
+                        prepared.publish(bytes).map_err(Failure::Storage)
+                    })();
+                    // A real protocol/owner failure remains fatal, independently
+                    // of ordinary save/storage/unsupported-state failures.
+                    if autosave_retired {return Err("Camera generation retired during Autosave".into());}
+                    if let Some(error)=autosave_fatal.take() {return Err(error);}
+                    *autosave_status=Some(match attempt {
+                        Ok(path)=>{eprintln!("Autosave saved: {}",path.display());Status::Saved(path)},
+                        Err(error)=>{eprintln!("Autosave failed: {error:?}");Status::Failed{destination,error}},
+                    });
+                    Ok(0)
+                }
                 Event::Command(openmt2001::live_commands::Event::Elimination(call)) => {
                     use openmt2001::player_elimination::Call;
                     match call {
@@ -1903,9 +1959,15 @@ impl Host {
         // Logic-scheduled tutorial callbacks can append Camera/Interface
         // commands before the next Status query. Consume them before moving
         // the shared command cursor past this tick's script effects.
+        // These local cells include effects completed before a later raw-save
+        // retirement. Commit them on both the ordinary and retired paths.
         self.cash_arrow = cash_arrow.into_inner();
         self.auction_actor_events = auction_actor_events.into_inner();
         self.policy.ai_event_gate = bid_gate.get();
+        if autosave_retired {
+            self.stop_retired_camera();
+            return;
+        }
         self.collect_script_prompts(session);
         match result {
             Ok(()) => {
@@ -2823,7 +2885,7 @@ mod camera_error_effect_tests {
         let mut host=Host::new([1.,2.,3.]);
         let mut tasks=openmt2001::timers::startup_tasks([0;20]);
         for task in &mut tasks {task[12..16].copy_from_slice(&7.5f32.to_le_bytes());}
-        let observation=camera_bridge::Observation {
+        let observation=camera_bridge::Observation {raw_capture:None,
             current:camera_bridge::Pose {eye:[f32::NAN.to_bits(),0,0],target:[0;3],up:[0,1f32.to_bits(),0]},
             strategic_writeback:None,finalization_fault:None,sampled:None,task_effects:vec![camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false},camera_bridge::TaskEffect::ClearElapsed],
         };
@@ -2883,7 +2945,7 @@ mod camera_retirement_tests {
         let mut tasks = openmt2001::timers::startup_tasks([0; 20]);
         for task in &mut tasks { task[12..16].copy_from_slice(&7.5f32.to_le_bytes()); }
         inbox.retire();
-        host.complete_camera_central(&mut tasks, camera_bridge::Observation {
+        host.complete_camera_central(&mut tasks, camera_bridge::Observation {raw_capture:None,
             strategic_writeback:None,finalization_fault:None,
             current: camera_bridge::Pose { eye: [4f32, 5., 6.].map(f32::to_bits),
                 target: [0; 3], up: [0, 1f32.to_bits(), 0] },
@@ -2911,11 +2973,11 @@ mod camera_finalization_fault_tests {
             let pose=camera_bridge::Pose{eye:[4f32,5.,6.].map(f32::to_bits),target:[0;3],up:[0,1f32.to_bits(),0]};
             inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
                 assert!(matches!(operation,camera_bridge::Operation::Install{..}));
-                Ok(camera_bridge::Observation{current:pose,sampled:None,task_effects:vec![],strategic_writeback:None,finalization_fault:None})
+                Ok(camera_bridge::Observation{raw_capture:None,current:pose,sampled:None,task_effects:vec![],strategic_writeback:None,finalization_fault:None})
             }).unwrap();
             let result=inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
                 assert!(matches!(operation,camera_bridge::Operation::CentralTail{..}));
-                Ok(camera_bridge::Observation{current:pose,sampled:None,strategic_writeback:None,
+                Ok(camera_bridge::Observation{raw_capture:None,current:pose,sampled:None,strategic_writeback:None,
                     task_effects:vec![camera_bridge::TaskEffect::ClearElapsed,camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false}],
                     finalization_fault:Some("C late completed-boundary fault".into())})
             });
