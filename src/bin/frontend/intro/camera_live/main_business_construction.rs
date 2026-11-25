@@ -269,3 +269,14 @@ impl NullReset for BirthReset<'_,'_>{
 #[cfg(test)]
 #[path="main_business_construction_tests.rs"]
 mod tests;
+
+#[path="main_parent_tail_construction.rs"]
+mod parent_tail;
+pub use parent_tail::CompletedMainLayout;
+
+impl Product {
+    fn parent_business_exit(&mut self,pe:&PeImage<'_>,p:&mut Primitives,fonts:&mut Fonts)->Result<(),String>{
+        if p.cells().word(0x590f60)?!=0{return Err("407890 selected590f60 unavailable".into())}
+        other_child_resets::null_exit(&mut BirthReset{product:self,primitives:p,fonts,pe,zero:float(pe,0x525040)?})
+    }
+}

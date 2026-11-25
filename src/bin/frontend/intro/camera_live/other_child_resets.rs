@@ -166,7 +166,7 @@ fn null_subcontrols(v:&mut impl NullReset)->Result<(),String>{
     for at in [0x1c,0x20,0x8c,0x64,0x90,0xc8,0x98,0xac]{v.hide(at,true)?;}
     v.selector()?;v.zero_notice()?;v.hide(0x88,true)?;Ok(())
 }
-fn null_exit(v:&mut impl NullReset)->Result<(),String>{
+pub(super) fn null_exit(v:&mut impl NullReset)->Result<(),String>{
     v.scalar(0xb4,u32::MAX,false)?;null_subcontrols(v)?;v.hide(0x64,true)?;
     //4078be intentionally blocks ac under the90 guard.
     if v.hide(0x90,true)?{v.block(0xac)?;}

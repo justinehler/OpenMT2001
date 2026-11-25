@@ -313,7 +313,10 @@ impl finite::ResetView for LayoutView<'_>{
     fn selector_hide(&mut self,offset:u32)->Result<(),String>{let id=self.product.child_field(offset)?;self.product.show_selector(id,0,self.zero,0x402c30)}
     fn active1c(&mut self,value:u8)->Result<(),String>{self.primitives.construction_cells()?.set_byte(CHILD+0x1c,value)}
 }
-impl finite::ExitView for LayoutView<'_>{fn notice_reset(&mut self)->Result<(),String>{let id=self.parent(0x3a0)?;self.product.text_mut(id)?.reset(self.fonts)}}
+impl finite::ExitView for LayoutView<'_>{fn notice_reset(&mut self)->Result<(),String>{
+    let id=self.parent(0x3a0)?;self.product.text_mut(id)?.reset(self.fonts)?;
+    self.product.record(0x402d22,id,Event::TextCall(0x441940));Ok(())
+}}
 impl finite::NoSelectionView for LayoutView<'_>{
     fn info_visibility(&mut self)->Result<(),String>{
         if self.primitives.cells().byte(A+0x509)?==1{return Ok(())}
@@ -324,13 +327,20 @@ impl finite::NoSelectionView for LayoutView<'_>{
     fn title_zero(&mut self)->Result<(),String>{
         let id=self.parent(0x4b8)?;let n=self.product.node_mut(id)?;
         let Subtype::Text(t)=&mut n.subtype else{return Err("property title must alias actual Text".into())};
-        finite::report_zero_title(t,self.fonts,&mut n.shown)
+        finite::report_zero_title(t,self.fonts,&mut n.shown)?;
+        for (source,call) in [(0x40494d,0x441940),(0x404981,0x441220),(0x404991,0x440ad0)]{self.product.record(source,id,Event::TextCall(call));}Ok(())
     }
     fn dispatch_zero(&mut self)->Result<(),String>{self.null()} //4044b0 NULL returns before rows
     fn select_info_zero(&mut self)->Result<(),String>{let id=self.parent(0x4a4)?;let v=self.product.visual_mut(id)?;if v.policy338==1{v.selected336=1;}Ok(())}
-    fn child_title_reset(&mut self)->Result<(),String>{let id=self.product.child_field(0x34)?;self.product.text_mut(id)?.reset(self.fonts)}
+    fn child_title_reset(&mut self)->Result<(),String>{
+        let id=self.product.child_field(0x34)?;self.product.text_mut(id)?.reset(self.fonts)?;
+        self.product.record(0x441940,id,Event::TextCall(0x441940));Ok(())
+    }
     fn mode_zero(&mut self)->Result<(),String>{self.primitives.construction_cells()?.set_word(CHILD+0x20,0)}
-    fn activate(&mut self)->Result<(),String>{self.null()?;self.primitives.construction_cells()?.set_word(A+0x4f4,u32::MAX)}
+    fn activate(&mut self)->Result<(),String>{
+        self.null()?;self.primitives.construction_cells()?.set_word(A+0x4f4,u32::MAX)?;
+        self.product.record(0x402366,self.product.root,Event::ScalarStore{field:A+0x4f4,value:u32::MAX});Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -339,4 +349,69 @@ mod tests;
 
 #[path="main_child_five_construction.rs"]
 mod five;
-pub use five::{AwaitingChild2,AwaitingParentTail,ChildTwo,ChildFive};
+pub use five::{CompletedMainLayout,AwaitingChild2,AwaitingParentTail,ChildTwo,ChildFive};
+
+//Finite no-selection4024b0 entry on the full typed constructor arena. The
+//shared reset/exit/info algorithms keep their real Text/list/selector owners.
+impl Product {
+    fn parent_property_exit(&mut self,pe:&PeImage<'_>,p:&mut Primitives,fonts:&mut Fonts)->Result<(),String>{
+        finite::exit_owned(&mut LayoutView{product:self,primitives:p,fonts,zero:float(pe,0x525040)?})
+    }
+    fn parent_property_activate(&mut self,p:&mut Primitives,fonts:&mut Fonts,zero:f32)->Result<(),String>{
+        //4021a0's independently sampled NULL branch; no selected projection.
+        let mut v=LayoutView{product:self,primitives:p,fonts,zero};
+        finite::NoSelectionView::activate(&mut v)
+    }
+    fn parent_property_enter(&mut self,pe:&PeImage<'_>,p:&mut Primitives,fonts:&mut Fonts,images:&Images)->Result<(),String>{
+        let zero=float(pe,0x525040)?;
+        for i in 0..3u32 {
+            let id=*self.aliases.get(&(0x48c+i*4)).ok_or("4024b0 mode owner absent")?;
+            let b=self.node(id)?.bounds;
+            let image=images.id(0x68ae28+word(pe,0x533244+i*4)?.checked_mul(4).ok_or("4024b0 image label overflow")?)?;
+            self.node_mut(id)?.shown=1;
+            let visual=self.visual_mut(id)?;visual.icon_bounds=[b[0],b[1],b[2],b[3],0.5];visual.icon=Some(image);
+            let animation=word(pe,0x533238+i*4)?;let node=self.node_mut(id)?;node.completion38=0;node.animation34=animation;
+            self.record(0x402538,id,Event::Geometry(0x4024b0));
+        }
+        //4048a0 returns0 on the actual NULL cell, retaining static flags.
+        if p.cells().word(0x822d50)?!=0{return Err("40253c/4048a0 selected property classification unavailable".into())}
+        for (o,source) in [(0x490,0x40266b),(0x494,0x4026d8)] {
+            //The real null guards disable the amount and rights modes.
+            if p.cells().word(0x822d50)?!=0{return Err("4024b0 selected mode enable unavailable".into())}
+            let id=*self.aliases.get(&o).ok_or("4024b0 mode field absent")?;
+            let v=self.visual_mut(id)?;v.disabled333=1;v.down335=0;
+            self.record(source,id,Event::Geometry(0x442ac0));
+        }
+        if p.cells().word(0x822d50)?!=0{return Err("402701 selected lock-state4053a0 unavailable".into())}
+        if p.cells().byte(A+0x509)?==1||p.cells().byte(A+0x508)?==0{return Ok(())}
+        for i in 0..5u32 {
+            let id=*self.aliases.get(&(0x4a4+i*4)).ok_or("402761 info owner absent")?;
+            self.node_mut(id)?.shown=1;let b=self.node(id)?.bounds;
+            let factor=Sum::from_f64(double(pe,0x525038)?).map_err(str::to_owned)?;
+            let mut extent=[0.;5];extent[4]=0.5;
+            for j in 0..4 {
+                let mut scaled=sum(b[j])?;scaled.mul(factor);
+                let mut v=sum(b[j])?;v.add(if j<2{scaled}else{scaled.negated()});extent[j]=store(v)?;
+            }
+            let image=images.id(0x68ae28+word(pe,0x533250+i*8)?.checked_mul(4).ok_or("4028a6 image label overflow")?)?;
+            let v=self.visual_mut(id)?;v.icon_bounds=extent;v.icon=Some(image);
+            let animation=word(pe,0x533254+i*8)?;let n=self.node_mut(id)?;n.completion38=0;n.animation34=animation;
+            self.record(0x4028e3,id,Event::Geometry(0x4024b0));
+        }
+        if p.cells().word(0x822d50)?!=0{return Err("4028ef/4048a0 selected classification unavailable".into())}
+        if p.cells().word(CHILD+0x20)?!=0||p.cells().word(CHILD+0x24)?!=0{
+            return Err("402a78 requires actual source-born child1 mode0/report0; selected/other-mode entry unavailable".into())
+        }
+        //402aa9 ensure-expanded is an actual guard read, not a model prepare.
+        if p.cells().byte(A+0x508)?==0{return Err("402aa9/41fc60 collapsed model consumer unavailable".into())}
+        self.record(0x402aa9,self.root,Event::Callback(0x41fc60));
+        finite::restore_no_selection_mode(&mut LayoutView{product:self,primitives:p,fonts,zero})?;
+        let id=*self.aliases.get(&0x48c).ok_or("402afd mode0 owner absent")?;
+        let v=self.visual_mut(id)?;if v.policy338==1{v.selected336=1;}
+        self.record(0x402afd,id,Event::Geometry(0x442af0));
+        self.parent_property_activate(p,fonts,zero)?; //402b04, repeated by source
+        //402b0e exit and restore the actual retained mode0, then info-mode.
+        finite::restore_no_selection_mode(&mut LayoutView{product:self,primitives:p,fonts,zero})?;
+        Ok(())
+    }
+}

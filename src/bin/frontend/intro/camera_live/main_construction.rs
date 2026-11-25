@@ -24,11 +24,11 @@ pub enum Field<T>{Unknown,Known(T)}
 pub enum Family {Panel,Text,Visual,List3Texts,SpecialList3Texts,Amount2Visuals,Selector2Arrows}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum Label {Main,Overlay,Previous,Next,Notice,Extra,ParentSelector,
-    Mode(usize),Info(usize),SharedTitle,Child0List,Child0Selector,Child5List,ArrowPrevious,ArrowNext,Property(u32),Business(u32),AmountFirst150,AmountSecond154}
+    Additional(u32),Mode(usize),Info(usize),SharedTitle,Child0List,Child0Selector,Child5List,ArrowPrevious,ArrowNext,Property(u32),Business(u32),AmountFirst150,AmountSecond154}
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub enum Event {Allocate(Family),Constructor(u32),Slot04(u32),
     Number(u32),Append(NodeId),Counter(u32),Alias(u32),
-    TextCall(u32),CaptionStore(u32),Geometry(u32),Show(u8),Attach(NodeId),ScalarStore{field:u32,value:u32},Stop}
+    TextCall(u32),CaptionStore(u32),Geometry(u32),Show(u8),Attach(NodeId),ScalarStore{field:u32,value:u32},Callback(u32),Returned(u32),Fault(String),Stop}
 #[derive(Clone,Debug)]
 pub struct Journal {pub source:u32,pub node:NodeId,pub event:Event}
 pub struct Visual {
@@ -427,4 +427,4 @@ mod tests;
 
 #[path="main_property_construction.rs"]
 mod property;
-pub use property::{AwaitingChild5,AwaitingChild2,AwaitingParentTail,ChildTwo,ChildOne,ChildFive,SpecialList,Amount};
+pub use property::{CompletedMainLayout,AwaitingChild5,AwaitingChild2,AwaitingParentTail,ChildTwo,ChildOne,ChildFive,SpecialList,Amount};

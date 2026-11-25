@@ -142,12 +142,12 @@ fn child2_failed_font_candidate_retains_original_slot_and_partial_products(){
 #[test]
 #[ignore="real Assets::load supplied resources/ffmpeg; no application/original execution"]
 fn actual_assets_calls_child2_once_and_failed_replacement_preserves_live_product(){
-    let mut published=Box::new(crate::intro::Assets::load(paths()).unwrap());assert_eq!(published.main_prefix.phase(),MainPhase::AwaitingParentTail);assert_eq!((published.main_prefix.counter(),published.main_prefix.nodes().count()),(69,83));
+    let mut published=Box::new(crate::intro::Assets::load(paths()).unwrap());assert_eq!(published.main_prefix.phase(),MainPhase::AwaitingBinding);assert_eq!((published.main_prefix.counter(),published.main_prefix.nodes().count()),(71,85));
     let root=published.main_prefix.root();let child=published.main_prefix.child2().field(0xa4).unwrap();let ptr=published.main_prefix.node(child).unwrap() as *const Node;let fonts=published.ui_text.fonts() as *const Fonts;
     let mut missing=paths();missing.executable=path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");
     if let Ok(candidate)=crate::intro::Assets::load(missing){published=Box::new(candidate);panic!("failed candidate unexpectedly published")}
     assert_eq!(published.main_prefix.root(),root);assert_eq!(published.main_prefix.node(child).unwrap() as *const Node,ptr);assert_eq!(published.ui_text.fonts() as *const Fonts,fonts);
-    assert_eq!(published.navigator.process_primitives_mut().main_phase(),MainPhase::AwaitingParentTail);assert_eq!(published.navigator.process_primitives_mut().cells().byte(A+0x184).unwrap(),0);
+    assert_eq!(published.navigator.process_primitives_mut().main_phase(),MainPhase::AwaitingBinding);assert_eq!(published.navigator.process_primitives_mut().cells().byte(A+0x184).unwrap(),0);
     assert_eq!(published.navigator.process_primitives_mut().steps.iter().filter(|s|**s==Step::Bind(A)).count(),1);assert!(published.main_prefix.require_full_main().is_err());
 }
 #[test]

@@ -114,4 +114,4 @@ mod tests;
 
 #[path="main_business_construction.rs"]
 mod business;
-pub use business::{AwaitingParentTail,ChildTwo};
+pub use business::{CompletedMainLayout,AwaitingParentTail,ChildTwo};

@@ -80,7 +80,7 @@ pub struct Paths {
 }
 pub struct Assets {
     //Process lifetime: moved into Intro, retained across city retirement.
-    pub(crate) main_prefix: camera_live::main_construction::AwaitingParentTail,
+    pub(crate) main_prefix: camera_live::main_construction::CompletedMainLayout,
     pub(crate) ui_images: camera_live::process_images::Images,
     pub(crate) ui_text: camera_live::ui_text_resources::UiTextResources,
     pub(crate) process_runtime:crate::live_host::process_runtime::Handle,
@@ -148,8 +148,10 @@ impl Assets {
             &mut prefix, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
         let mut child2 = Some(camera_live::main_construction::AwaitingChild2::continue_child5(
             &mut child5, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
-        let main_prefix = camera_live::main_construction::AwaitingParentTail::continue_child2(
-            &mut child2, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?;
+        let mut parent_tail = Some(camera_live::main_construction::AwaitingParentTail::continue_child2(
+            &mut child2, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
+        let main_prefix = camera_live::main_construction::CompletedMainLayout::continue_parent_tail(
+            &mut parent_tail, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?;
         let tooltip = crate::tooltip::Tooltip::load_shared(
             &index, &archive, &paths.installer, &paths.language, &ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(

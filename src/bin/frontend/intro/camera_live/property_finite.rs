@@ -55,6 +55,13 @@ pub(in super::super) trait NoSelectionView:ExitView {
 pub(in super::super) fn no_selection_cycle(v:&mut impl NoSelectionView)->Result<(),String>{
     reset_owned(v)?;v.info_visibility()?;v.report_zero()?;v.title_zero()?;
     v.dispatch_zero()?;v.select_info_zero()?;
-    exit_owned(v)?;v.child_title_reset()?;v.mode_zero()?;
+    restore_no_selection_mode(v)
+}
+///402aa9..402af1 and402b0e..402b74, also the existing4055f0/4063f0
+///mode0 suffix. Views resample actual selection, pending and typed list owners.
+pub(in super::super) fn info_no_selection(v:&mut impl NoSelectionView)->Result<(),String>{
     v.select_info_zero()?;v.info_visibility()?;v.title_zero()?;v.activate()
+}
+pub(in super::super) fn restore_no_selection_mode(v:&mut impl NoSelectionView)->Result<(),String>{
+    exit_owned(v)?;v.child_title_reset()?;v.mode_zero()?;info_no_selection(v)
 }

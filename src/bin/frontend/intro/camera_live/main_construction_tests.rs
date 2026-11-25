@@ -158,7 +158,7 @@ fn actual_assets_entry_retains_prefix_with_same_assets_across_retirement(){
         installer:path("OPENMT2001_INSTALLER"),ffmpeg:path("OPENMT2001_FFMPEG"),scene:path("OPENMT2001_SCENE"),
         executable:path("OPENMT2001_EXE"),map:path("OPENMT2001_INTRO_MAP"),quality:"low".into(),language:path("OPENMT2001_LANGUAGE"),
         profile_root:path("OPENMT2001_TEXT_PROFILE"),save_root:path("OPENMT2001_TEXT_SAVES")}).unwrap();
-    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingParentTail);assert!(assets.ui_text.board_stem.is_some());
+    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingBinding);assert!(assets.ui_text.board_stem.is_some());
     let root=assets.main_prefix.root();let fonts=assets.ui_text.fonts() as *const Fonts;
     let list=assets.main_prefix.child0().list;let list_pointer=assets.main_prefix.node(list).unwrap() as *const Node;
     let mut process=Some(Box::new(assets));let mut retry=crate::intro::refresh::Retry::default();let mut refreshing=false;let mut loading=None;let mut parked=None;

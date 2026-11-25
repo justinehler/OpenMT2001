@@ -201,7 +201,7 @@ pub struct Primitives {
     pub resources:CpuResources,pub steps:Vec<Step>,
 }
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,ConstructingProperty,AwaitingChild5,ConstructingChild5,AwaitingChild2,ConstructingBusiness,AwaitingParentTail,Failed}
+pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,ConstructingProperty,AwaitingChild5,ConstructingChild5,AwaitingChild2,ConstructingBusiness,AwaitingParentTail,ConstructingParentTail,AwaitingBinding,Failed}
 impl Primitives {
     ///Actual Navigator asset-load entry calls this with its successfully
     ///parsed retained model. This owner lives with that application's asset
@@ -246,6 +246,16 @@ impl Primitives {
         self.check_main_business_owner(owner)?;self.main_phase=MainPhase::ConstructingBusiness;Ok(())
     }
     pub(super) fn main_complete_business(&mut self){self.main_phase=MainPhase::AwaitingParentTail;}
+    pub(super) fn check_main_tail_owner(&self,owner:u64)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingParentTail||self.main_node_owner!=Some(owner){
+            return Err("41e759 continuation phase/retained node owner mismatch; no replay".into())
+        }Ok(())
+    }
+    pub(super) fn claim_main_tail(&mut self,owner:u64)->Result<(),String>{
+        self.check_main_tail_owner(owner)?;self.main_phase=MainPhase::ConstructingParentTail;Ok(())
+    }
+    ///41dcf0 returned;43ba52 and the owning43cc60 group join have not run.
+    pub(super) fn main_layout_returned(&mut self){self.main_phase=MainPhase::AwaitingBinding;}
     pub(super) fn reset_retained_child5(&mut self,owner:u64)->Result<(),String>{
         if self.main_phase!=MainPhase::AwaitingChild2||self.main_node_owner!=Some(owner){
             return Err("409f00 requires SAME retained child5 owner at child2 boundary".into())
@@ -278,7 +288,7 @@ impl Primitives {
         self.cells=Some(b.cells);self.panels=b.panels;self.resources=b.resources;self.steps=b.steps;result
     }
     pub(super) fn construction_cells(&mut self)->Result<&mut Cells,String>{
-        if !matches!(self.main_phase,MainPhase::Constructing|MainPhase::ConstructingProperty|MainPhase::ConstructingChild5|MainPhase::ConstructingBusiness){return Err("A source-field write outside construction phase".into())}
+        if !matches!(self.main_phase,MainPhase::Constructing|MainPhase::ConstructingProperty|MainPhase::ConstructingChild5|MainPhase::ConstructingBusiness|MainPhase::ConstructingParentTail){return Err("A source-field write outside construction phase".into())}
         self.cells.as_mut().ok_or_else(||"process cells are borrowed".into())
     }
     pub(super) fn main_named(&mut self,name:Option<&[u8]>,temporary:bool)->Result<[f32;5],String>{
@@ -326,5 +336,15 @@ impl Primitives {
     pub(super) fn test_business_guard_nonnull(&mut self)->Result<(),String>{
         if self.main_phase!=MainPhase::AwaitingChild2{return Err("business guard canary outside child2 boundary".into())}
         self.cells.as_mut().ok_or("source cells borrowed")?.set_word(0x590f60,1)
+    }
+}
+
+
+//Negative source-boundary injections only, never production selection/group producers.
+#[cfg(test)]
+impl Primitives {
+    pub(super) fn test_tail_word(&mut self,address:u32,value:u32)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingParentTail{return Err("tail injection outside retained41e759 boundary".into())}
+        self.cells.as_mut().ok_or("process cells borrowed")?.set_word(address,value)
     }
 }

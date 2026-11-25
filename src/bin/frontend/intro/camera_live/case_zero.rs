@@ -278,9 +278,24 @@ pub fn show(view:&mut impl super::main_panel::Access,owner:&mut Owner)->Result<(
 /// The finite algorithms shared by public transactions and parent plans.
 /// All Text writes share the same prospective manager in native order.
 pub(super) fn exit_owned(view:&mut super::main_panel::Prospective)->Result<(),String>{
-    super::main_panel::clear_notice(view)?;
-    let m=&mut view.main;m.property.colors=m.case_zero.literals.colors;
-    if let Some(list)=&mut m.case_zero.list{list.shown=0;}m.case_zero.set_indicator(0)
+    exit_finite(&mut OwnedExit{view})
+}
+///40a910's finite sequence; each view borrows actual retained resources.
+pub(super) trait ExitView {
+    fn clear_notice(&mut self)->Result<(),String>;
+    fn restore_colors(&mut self)->Result<(),String>;
+    fn hide_list(&mut self)->Result<(),String>;
+    fn hide_selector(&mut self)->Result<(),String>;
+}
+pub(super) fn exit_finite(view:&mut impl ExitView)->Result<(),String>{
+    view.clear_notice()?;view.restore_colors()?;view.hide_list()?;view.hide_selector()
+}
+struct OwnedExit<'a>{view:&'a mut super::main_panel::Prospective}
+impl ExitView for OwnedExit<'_>{
+    fn clear_notice(&mut self)->Result<(),String>{super::main_panel::clear_notice(self.view)}
+    fn restore_colors(&mut self)->Result<(),String>{let m=&mut self.view.main;m.property.colors=m.case_zero.literals.colors;Ok(())}
+    fn hide_list(&mut self)->Result<(),String>{if let Some(l)=&mut self.view.main.case_zero.list{l.shown=0;}Ok(())}
+    fn hide_selector(&mut self)->Result<(),String>{self.view.main.case_zero.set_indicator(0)}
 }
 pub(super) fn show_owned(view:&mut super::main_panel::Prospective)->Result<(),String>{
     super::main_panel::clear_notice(view)?;
