@@ -93,7 +93,7 @@ impl Product {
         let id=self.make_column_node(Label::Business(o),e,false,fonts,source)?;
         self.business_publish(o,id,source)?;
         //Unlike property41f510, these ordinary lists use secondary right4.
-        let l=self.columns_mut(id)?;l.primary.style440650(3,0,0);l.primary.padding=1;l.primary.layout(fonts)?;
+        let l=self.columns_mut(id)?;l.primary.style440650(0,0,3);l.primary.padding=1;l.primary.layout(fonts)?;
         l.secondary.style440650(2,4,3);l.primary.gap=2;l.secondary.gap=2;
         l.primary.set_font(fonts,3)?;l.secondary.set_font(fonts,3)?;
         for call in [0x440650,0x4406a0,0x440650,0x440b70,0x440b70]{self.record(source,id,Event::TextCall(call));}Ok(id)

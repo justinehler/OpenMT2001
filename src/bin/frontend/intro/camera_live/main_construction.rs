@@ -382,7 +382,7 @@ impl Product {
     ///There is no4409c0 measure, no selector binding and no extra Text.
     fn configure_plain_list(&mut self,id:NodeId,fonts:&mut Fonts)->Result<(),String>{
         let Subtype::List3Texts(l)=&mut self.node_mut(id)?.subtype else{return Err("41f750 requires ordinary List subtype".into())};
-        l.list.primary.style440650(3,0,0);l.list.primary.padding=1;
+        l.list.primary.style440650(0,0,3);l.list.primary.padding=1;
         l.list.primary.layout(fonts)?;
         l.list.secondary.style440650(2,3,3);l.list.primary.gap=2;l.list.secondary.gap=2;
         l.list.primary.set_font(fonts,3)?;l.list.secondary.set_font(fonts,3)?;l.list.shown=0;

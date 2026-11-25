@@ -103,7 +103,7 @@ impl Product {
     }}
     fn configure_columns(&mut self,id:NodeId,fonts:&mut Fonts,source:u32)->Result<(),String>{
         let l=self.columns_mut(id)?;
-        l.primary.style440650(3,0,0);l.primary.padding=1;
+        l.primary.style440650(0,0,3);l.primary.padding=1;
         l.primary.layout(fonts)?; //4406a0 direct, never4409c0
         l.secondary.style440650(2,3,3);l.primary.gap=2;l.secondary.gap=2;
         l.primary.set_font(fonts,3)?;l.secondary.set_font(fonts,3)?;

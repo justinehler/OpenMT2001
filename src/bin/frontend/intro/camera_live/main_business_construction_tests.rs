@@ -73,8 +73,18 @@ fn child2_subtypes_captions_colors_images_and_aliases_remain_concrete(){
     let s=Supplied::read();let mut t=s.text();let mut n=s.navigator();let mut images=s.images();let mut slot=Some(s.child5(&mut t,&mut n,&mut images));
     let done=AwaitingParentTail::continue_child2(&mut slot,&s.exe,&mut t,n.process_primitives_mut(),&mut images).unwrap();let b=done.child2();
     for o in [0x50,0x54,0x58,0x24,0xc4,0xbc,0xc0,0x9c,0xa0,0xa4]{let node=done.node(b.field(o).unwrap()).unwrap();assert_eq!(node.family,Family::Text);let Subtype::Text(text)=&node.subtype else{panic!()};assert_eq!(text.font,3);assert!(matches!(text.reset_target,ResetTarget::Ret43b370));}
-    for o in [0x64,0x88,0x8c]{let node=done.node(b.field(o).unwrap()).unwrap();let Subtype::List3Texts(l)=&node.subtype else{panic!("ordinary42f3d0")};assert_eq!((l.list.primary.font,l.list.secondary.font,l.list.scratch.font),(3,3,0));assert_eq!((l.list.secondary.inset,l.list.secondary.scroll),(4,3));assert_eq!(node.embedded_text_contexts24.len(),3);assert!(l.indicator.is_none());}
+    for o in [0x64,0x88,0x8c]{let node=done.node(b.field(o).unwrap()).unwrap();let Subtype::List3Texts(l)=&node.subtype else{panic!("ordinary42f3d0")};assert_eq!((l.list.primary.font,l.list.secondary.font,l.list.scratch.font),(3,3,0));//Native440650 first args0/0/3;4406a0 style0 Y=FTOL(top+3), low16.
+        let first=&l.list.primary;
+        assert_eq!((first.style,first.inset,first.scroll,first.padding),(0,0,3,1));
+        let mut native_y=Sum::from_f32(first.bounds[1]).unwrap();native_y.add(Sum::from_i32(3));
+        assert_eq!(first.y,native_y.ftol_low_word() as i16);assert_eq!((l.list.secondary.inset,l.list.secondary.scroll),(4,3));assert_eq!(node.embedded_text_contexts24.len(),3);assert!(l.indicator.is_none());}
     let list=b.field(0x98).unwrap();let selector=b.field(0xb8).unwrap();let Subtype::SpecialList3Texts(l)=&done.node(list).unwrap().subtype else{panic!("430790 special")};assert_eq!(l.indicator,Some(selector));assert_eq!(l.selectable680,1);
+    //Native440650 first args0/0/3;4406a0 style0 Y=FTOL(top+3), low16.
+    let first=&l.list.primary;
+    assert_eq!((first.style,first.inset,first.scroll,first.padding),(0,0,3,1));
+    let mut native_y=Sum::from_f32(first.bounds[1]).unwrap();native_y.add(Sum::from_i32(3));
+    assert_eq!(first.y,native_y.ftol_low_word() as i16);
+
     let Subtype::Selector2Arrows(sel)=&done.node(selector).unwrap().subtype else{panic!()};assert_eq!(sel.first_list,None);assert_eq!(sel.last_list,Some(list));assert_eq!(sel.admitted191,0);
     for arrow in [sel.previous.unwrap(),sel.next.unwrap()]{let node=done.node(arrow).unwrap();assert_eq!(node.parent,Some(selector));assert!(matches!(node.subtype,Subtype::Visual(_)));assert_eq!(node.disabled,1);}
     for (o,id,global) in [(0xc8,0x58,Some(0x86d3dc)),(0xac,0x55,Some(0x86d3d8)),(0x90,0x587,None)]{

@@ -86,6 +86,11 @@ fn child5_direct_layout_uses_same_current_font_and_preserves_cached_selector(){
     let Subtype::List3Texts(l)=&done.node(done.child5().list().unwrap()).unwrap().subtype else{panic!()};
     let glyph=usize::from(t.fonts().language.bytes()[usize::from(b'W'-32)]);let at=4+glyph*44+36;
     let height=i32::from_le_bytes(t.fonts().fonts[&0].table[at..at+4].try_into().unwrap());
+    //Native440650 first args0/0/3;4406a0 style0 Y=FTOL(top+3), low16.
+    let first=&l.list.primary;
+    assert_eq!((first.style,first.inset,first.scroll,first.padding),(0,0,3,1));
+    let mut native_y=Sum::from_f32(first.bounds[1]).unwrap();native_y.add(Sum::from_i32(3));
+    assert_eq!(first.y,native_y.ftol_low_word() as i16);
     assert_eq!(l.list.primary.pitch,height);assert_eq!(l.list.primary.extent,[0.;4]);
     assert_eq!((l.list.primary.font,l.list.secondary.font,l.list.scratch.font),(3,3,0));
     assert_eq!((l.list.secondary.pitch,l.list.scratch.pitch),(10,10));

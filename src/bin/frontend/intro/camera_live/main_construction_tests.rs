@@ -90,7 +90,11 @@ fn reached_list_reset_configuration_growth_shared_fonts_and_repeated_selector_sh
         assert_eq!(l.indicator,Some(selector));assert_eq!(l.list.key,list);assert_eq!((l.list.chosen,l.list.value),(-1,0));
         assert!(l.list.flags.is_empty()&&l.list.slots.is_empty()&&l.list.entries.is_empty());
         assert_eq!(l.list.primary.bounds,l.list.bounds);assert_eq!(l.list.secondary.bounds,l.list.bounds);assert_eq!(l.list.scratch.bounds,l.list.bounds);
-        assert_eq!((l.list.primary.style,l.list.primary.inset,l.list.primary.scroll,l.list.primary.padding),(3,0,0,1));
+        //Native440650 first args0/0/3;4406a0 style0 Y=FTOL(top+3), low16.
+        let first=&l.list.primary;
+        assert_eq!((first.style,first.inset,first.scroll,first.padding),(0,0,3,1));
+        let mut native_y=Sum::from_f32(first.bounds[1]).unwrap();native_y.add(Sum::from_i32(3));
+        assert_eq!(first.y,native_y.ftol_low_word() as i16);
         assert_eq!((l.list.secondary.style,l.list.secondary.inset,l.list.secondary.scroll),(2,3,3));
         assert_eq!((l.list.primary.gap,l.list.secondary.gap,l.list.primary.font,l.list.secondary.font),(2,2,3,3));
         assert_eq!(l.list.scratch.font,0,"scratch was not configured as a copied primary");

@@ -124,6 +124,16 @@ fn amount_and_special_list_use_native_subtypes_source_images_and_true_setters(){
     let Subtype::Amount2Visuals(a)=&mut done.prefix.inner.node_mut(amount).unwrap().subtype else{panic!()};
     a.dirty13c=0;a.range42efb0(3.,9.,1.);assert_eq!(a.dirty13c,0);assert_eq!((a.step144,a.minimum148,a.maximum14c),(3.,9.,1.));
     a.amount42ee70(-4.);assert_eq!((a.dirty13c,a.value140),(1,-4.),"setter does not clamp to the range");
+    //Six actual child1 column owners, not a detached generic Text.
+    for offset in [0x6c,0x38,0x64,0x74,0x80,0x8c]{
+        let node=done.node(done.child1().field(offset).unwrap()).unwrap();
+        let list=match &node.subtype{Subtype::List3Texts(l)=>&l.list,Subtype::SpecialList3Texts(l)=>&l.list,_=>panic!("actual property column")};
+        //Native440650 first args0/0/3;4406a0 style0 Y=FTOL(top+3), low16.
+        let first=&list.primary;
+        assert_eq!((first.style,first.inset,first.scroll,first.padding),(0,0,3,1));
+        let mut native_y=Sum::from_f32(first.bounds[1]).unwrap();native_y.add(Sum::from_i32(3));
+        assert_eq!(first.y,native_y.ftol_low_word() as i16);
+    }
     let special=done.child1().field(0x6c).unwrap();let normal=done.child1().field(0x38).unwrap();
     assert!(matches!(done.node(special).unwrap().subtype,Subtype::SpecialList3Texts(_)));assert!(matches!(done.node(normal).unwrap().subtype,Subtype::List3Texts(_)));
     let Subtype::SpecialList3Texts(l)=&done.node(special).unwrap().subtype else{panic!()};assert_eq!((l.list.primary.font,l.list.secondary.font,l.list.scratch.font),(3,3,0));assert_eq!(l.list.secondary.pitch,10,"RET reset retains pitch");assert_eq!((l.list.chosen,l.list.value),(-1,0));
