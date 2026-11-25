@@ -1,6 +1,7 @@
 //! The final 48b490 outcome call selects a result song after constructing
 //! the result scene. Music addresses are pointers to v1.4 mc.exe strings.
 use openmt2001::pe::PeImage;
+use rodio::Source;
 use std::{path::Path, process::Command};
 
 pub struct Assets {
@@ -72,7 +73,9 @@ pub fn set_level(sink: &rodio::Sink, music_level: u8) {
 fn connect(samples: &[f32], mixer: &rodio::mixer::Mixer, music_level: u8) -> rodio::Sink {
     let sink = rodio::Sink::connect_new(mixer);
     set_level(&sink, music_level);
-    sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.to_vec()));
+    // 4ad670 supplies repeat=1 for both final result songs. Keep the one
+    // decoded source and Sink alive until their existing owner stops or drops.
+    sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.to_vec()).repeat_infinite());
     sink
 }
 
@@ -199,5 +202,157 @@ mod level_tests {
         sink.stop();
         let stopped: Vec<_> = rendered.by_ref().take(4096).collect();
         assert!(stopped[stopped.len().min(2048)..].iter().all(|sample| *sample == 0.));
+    }
+}
+
+#[cfg(test)]
+mod repeat_tests {
+    use super::*;
+
+    // Each song is 512 stereo frames (1024 interleaved samples), with a
+    // different second half. These sources end several times within each
+    // fixed observation window. The loser fixture is half the winner.
+    const SONG_SAMPLES: usize = 1024;
+    const WINDOW: usize = 4096;
+    const SETTLED: usize = 2048;
+
+    fn assets() -> Assets {
+        Assets {
+            winner: [[0.5, -0.25].repeat(256), [-0.125, 0.375].repeat(256)].concat(),
+            loser: [[0.25, -0.125].repeat(256), [-0.0625, 0.1875].repeat(256)].concat(),
+        }
+    }
+
+    fn close(actual: f32, expected: f32) -> bool {
+        (actual - expected).abs() < 1e-6
+    }
+
+    fn assert_phase(pcm: &[f32], halves: [[f32; 2]; 2], phase: usize) {
+        for (index, actual) in pcm.iter().enumerate() {
+            let position = (phase + index) % SONG_SAMPLES;
+            let expected = halves[position / (SONG_SAMPLES / 2)][position % 2];
+            assert!(close(*actual, expected),
+                "sample {index}, phase {phase}: {actual} != {expected}");
+        }
+    }
+
+    // Find the second-half -> first-half stereo boundary within one fixed
+    // period; then validate EVERY sample of this already-settled window.
+    // This admits rodio's initial queue metadata conversion without choosing
+    // a phase from production gain/source helpers or accepting filler silence.
+    fn assert_repeat(pcm: &[f32], halves: [[f32; 2]; 2], after_boundary: usize) -> usize {
+        let boundary = (2..=SONG_SAMPLES).step_by(2).find(|&index| {
+            pcm[index - 2..index].iter().zip(halves[1]).all(|(a, b)| close(*a, b))
+                && pcm[index..index + 2].iter().zip(halves[0]).all(|(a, b)| close(*a, b))
+        }).expect("nonzero stereo song must wrap within one source length");
+        assert!(pcm.len() >= boundary + after_boundary);
+        let phase = (SONG_SAMPLES - boundary % SONG_SAMPLES) % SONG_SAMPLES;
+        assert_phase(pcm, halves, phase);
+        (phase + pcm.len()) % SONG_SAMPLES
+    }
+
+    fn take(rendered: &mut rodio::mixer::MixerSource, count: usize) -> Vec<f32> {
+        let pcm: Vec<_> = rendered.by_ref().take(count).collect();
+        assert_eq!(pcm.len(), count, "the retained playing queue must stay live");
+        pcm
+    }
+
+    #[test]
+    fn both_result_songs_repeat_with_live_gain_on_one_sink_until_stop() {
+        let assets = assets();
+        // Literal expected PCM: g25 -> -2920 hundredths dB, nominal gain
+        // 0.034673685; no call to the production gain function for the oracle.
+        for (address, full, quiet) in [
+            (0x541d0c, [[0.5, -0.25], [-0.125, 0.375]],
+                [[0.017336843, -0.008668421], [-0.0043342105, 0.013002632]]),
+            (0x541cdc, [[0.25, -0.125], [-0.0625, 0.1875]],
+                [[0.008668421, -0.0043342105], [-0.0021671053, 0.006501316]]),
+        ] {
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
+            let sink = connect(assets.samples(address).unwrap(), &output, 25);
+            let owner = std::ptr::from_ref(&sink);
+            assert!(close(sink.volume(), 0.034673685));
+            assert_eq!(sink.len(), 1);
+            let startup = take(&mut rendered, WINDOW);
+            let peak = quiet.iter().flatten().copied().map(f32::abs).fold(0.0_f32, f32::max);
+            assert!(startup.iter().all(|sample| sample.is_finite() && sample.abs() <= peak + 1e-6),
+                "gain must apply before append, including the interpolated metadata prefix");
+            // Three periods allow one period to locate a boundary and at
+            // least two complete source traversals after it. Finite append
+            // or keep-alive silence cannot satisfy the literal PCM oracle.
+            let repeated = take(&mut rendered, 3 * SONG_SAMPLES);
+            let phase = assert_repeat(&repeated, quiet, 2 * SONG_SAMPLES);
+            assert_eq!(sink.len(), 1, "repetition is one queued source");
+            let position = sink.get_pos();
+            set_level(&sink, 0);
+            assert_eq!(std::ptr::from_ref(&sink), owner);
+            assert_eq!(sink.get_pos(), position, "setting gain must not seek");
+            assert_eq!(sink.len(), 1);
+            let muted = take(&mut rendered, WINDOW);
+            assert!(muted[SETTLED..].iter().all(|sample| *sample == 0.));
+            assert!(sink.get_pos() > position, "muted repeated source still advances");
+            let position = sink.get_pos();
+            set_level(&sink, 100);
+            assert_eq!(std::ptr::from_ref(&sink), owner);
+            assert_eq!(sink.get_pos(), position);
+            assert_eq!(sink.len(), 1);
+            let restored = take(&mut rendered, WINDOW);
+            // WINDOW and SETTLED are whole source periods: preserving the
+            // established phase catches restarting at a volume change.
+            assert_phase(&restored[SETTLED..], full, phase);
+            assert!(sink.get_pos() > position);
+            assert_eq!(sink.len(), 1);
+            sink.stop();
+            let stopped = take(&mut rendered, WINDOW);
+            assert!(stopped[SETTLED..].iter().all(|sample| *sample == 0.));
+            assert!(sink.empty());
+            assert_eq!(sink.len(), 0);
+            drop(sink);
+            assert!(rendered.by_ref().take(WINDOW).count() < WINDOW,
+                "dropping the stopped owner must terminate its mixer queue");
+            assert_eq!(rendered.next(), None);
+        }
+    }
+
+    #[test]
+    fn both_result_songs_repeat_while_initially_muted_and_drop_terminates() {
+        let assets = assets();
+        for (address, full) in [
+            (0x541d0c, [[0.5, -0.25], [-0.125, 0.375]]),
+            (0x541cdc, [[0.25, -0.125], [-0.0625, 0.1875]]),
+        ] {
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
+            let sink = connect(assets.samples(address).unwrap(), &output, 0);
+            assert_eq!(sink.volume(), 0.);
+            let first = take(&mut rendered, WINDOW);
+            assert!(first.iter().all(|sample| *sample == 0.));
+            let position = sink.get_pos();
+            let beyond_ends = take(&mut rendered, 3 * SONG_SAMPLES);
+            assert!(beyond_ends.iter().all(|sample| *sample == 0.));
+            assert_eq!(sink.len(), 1);
+            assert!(sink.get_pos() > position);
+            let position = sink.get_pos();
+            set_level(&sink, 100);
+            assert_eq!(sink.get_pos(), position);
+            let restored = take(&mut rendered, WINDOW);
+            assert_repeat(&restored[SETTLED..], full, SONG_SAMPLES);
+            assert_eq!(sink.len(), 1);
+            assert!(sink.get_pos() > position);
+            // Drop an actively repeating owner, without calling stop first.
+            drop(sink);
+            let tail: Vec<_> = rendered.by_ref().take(WINDOW).collect();
+            assert!(tail.len() < WINDOW, "active owner drop must settle within the fixed window");
+            assert!(tail[tail.len().min(SETTLED)..].iter().all(|sample| *sample == 0.));
+            assert_eq!(rendered.next(), None, "no orphan repeat or silence queue survives");
+        }
+    }
+
+    #[test]
+    fn unsupported_result_address_is_rejected_before_opening_output() {
+        let assets = assets();
+        match assets.play(0x542c20, 100) {
+            Err(error) => assert_eq!(error, "unsupported result music address 00542c20"),
+            Ok(_) => panic!("intro address must not be accepted as a result song"),
+        }
     }
 }
