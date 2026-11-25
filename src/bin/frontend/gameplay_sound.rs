@@ -192,6 +192,9 @@ pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
     one_shots: Vec<rodio::Sink>,
+    ledger_cues: Vec<LedgerCue>,
+    ui_click_cues: Vec<UiClickCue>,
+    effects_factor: f32,
     scripted: HashMap<String, Vec<f32>>,
     ambient: Option<(u32, rodio::Sink)>,
     firework_bursts: Vec<rodio::Sink>,
@@ -199,6 +202,28 @@ pub struct Player {
     auction_bid_sinks: [Option<rodio::Sink>; 6],
     auction_withdraw_sinks: [Option<rodio::Sink>; 6],
     next_handle: u32,
+}
+
+/// Raw original +438 source word remains separate from applied Sink gain.
+struct LedgerCue {
+    source_level: i32,
+    sink: rodio::Sink,
+}
+
+/// Raw UI source word, independent of the applied gain just like +438.
+struct UiClickCue {
+    source_level: i32,
+    sink: rodio::Sink,
+}
+
+/// 4ab420/4abad0: factor was already stored binary32 by 4aa750.
+/// Only the fixed q60 ledger and q100 UI callers are qualified here.
+/// No binary32 spill of q*c is allowed before the final combined store.
+/// Each q*c needs at most 27 significant bits; multiplying a binary32 factor
+/// needs at most 51, exact in f64. This is not a general raw32/x87 API.
+fn fixed_cue_normalized(factor: f32, source_level: i32) -> f32 {
+    let percent = f64::from(f32::from_bits(0x3c23_d70a));
+    (f64::from(factor) * (f64::from(source_level) * percent)) as f32
 }
 
 fn play_bounded(
@@ -240,6 +265,10 @@ impl Player {
             assets,
             bus: crate::audio_bus::Bus::new(),
             one_shots: Vec::new(),
+            ledger_cues: Vec::new(),
+            ui_click_cues: Vec::new(),
+            // Preserve the existing Player/Bus initial 100-percent policy.
+            effects_factor: crate::music_gain::normalized_percentage(100),
             scripted: HashMap::new(),
             ambient: None,
             firework_bursts: Vec::new(),
@@ -253,12 +282,26 @@ impl Player {
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
         self.bus.mixer()
     }
-    pub fn set_level(&mut self, effects: u8) { self.bus.set_level(effects); }
+    pub fn set_level(&mut self, effects: u8) {
+        // Native factor setter stores only. Existing migrated one-shots retain
+        // the gain consumed at creation; unmigrated families keep their
+        // existing live linear master semantics.
+        self.effects_factor = crate::music_gain::normalized_percentage(effects);
+        self.bus.set_level(effects);
+    }
 
     pub fn apply(&mut self, operation: Operation) -> Result<u32, String> {
         self.one_shots.retain(|sink| !sink.empty());
+        self.ledger_cues.retain(|cue| !cue.sink.empty());
+        self.ui_click_cues.retain(|cue| !cue.sink.empty());
         match operation {
             Operation::Reset => {
+                for cue in self.ui_click_cues.drain(..) {
+                    cue.sink.stop();
+                }
+                for cue in self.ledger_cues.drain(..) {
+                    cue.sink.stop();
+                }
                 for sink in self.one_shots.drain(..) {
                     sink.stop();
                 }
@@ -420,20 +463,34 @@ impl Player {
             }
             Operation::Ledger { sale } => {
                 let samples = if sale { self.assets.sell.clone() } else { self.assets.buy.clone() };
-                if let Some(mixer) = self.mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    sink.set_volume(0.6);
-                    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
-                    self.one_shots.push(sink);
+                let factor = self.effects_factor;
+                if let Some(mixer) = self.bus.combined_mixer() {
+                    let cue = LedgerCue {
+                        source_level: 60, // Both native 48a5e6 and 48a61d push 0x3c.
+                        sink: rodio::Sink::connect_new(mixer),
+                    };
+                    cue.sink.set_volume(crate::music_gain::normalized_amplitude(
+                        fixed_cue_normalized(factor, cue.source_level)));
+                    // Gain precedes append: initial mute cannot leak full gain.
+                    cue.sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                    self.ledger_cues.push(cue);
                 }
                 Ok(0)
             }
             Operation::UiLightClick => {
                 let samples = self.assets.ui_light_click.clone();
-                if let Some(mixer) = self.mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
-                    self.one_shots.push(sink);
+                let factor = self.effects_factor;
+                if let Some(mixer) = self.bus.combined_mixer() {
+                    let cue = UiClickCue {
+                        // All three widget sites push 0x64 before 4ad760.
+                        source_level: 100,
+                        sink: rodio::Sink::connect_new(mixer),
+                    };
+                    cue.sink.set_volume(crate::music_gain::normalized_amplitude(
+                        fixed_cue_normalized(factor, cue.source_level)));
+                    // Native +1c precedes play +10; never append at full gain.
+                    cue.sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                    self.ui_click_cues.push(cue);
                 }
                 Ok(0)
             }
@@ -704,4 +761,17 @@ mod portable_pcm_tests {
         assert_eq!(crate::transport_audio::original_case_path(&root.join("cue.wav")).unwrap(), root.join("cue.wav"));
         assert!(crate::transport_audio::original_case_path(&root.join("CUE.WAV")).unwrap_err().contains("ambiguous"));
     }
+}
+
+
+// Bounded software-mixer regressions; no hardware output is opened.
+#[cfg(test)]
+mod ledger_gain_tests {
+    include!("gameplay_sound_ledger_gain_tests.rs");
+}
+
+// UI-click-only actual-owner regressions; no device is opened.
+#[cfg(test)]
+mod ui_click_gain_tests {
+    include!("gameplay_sound_ui_click_gain_tests.rs");
 }

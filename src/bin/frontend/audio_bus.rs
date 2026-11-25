@@ -9,6 +9,9 @@ pub struct Bus {
     stream: Option<rodio::OutputStream>,
     mixer: Option<Mixer>,
     master: Option<rodio::Sink>,
+    // Same device mixer, before this Bus's adjustable master. Combined
+    // source gains must not pass through the linear effects preference twice.
+    combined_output: Option<Mixer>,
     level: u8,
     gain: f32,
     attempted: bool,
@@ -23,6 +26,7 @@ impl Bus {
         let master = rodio::Sink::connect_new(output);
         master.set_volume(self.gain);
         master.append(source);
+        self.combined_output = Some(output.clone());
         self.mixer = Some(mixer);
         self.master = Some(master);
     }
@@ -41,6 +45,12 @@ impl Bus {
             self.stream = Some(stream);
         }
         self.mixer.as_ref()
+    }
+    /// Already-combined children share the existing stream and its cached
+    /// failure. The output mixer adds samples at unity; no extra master gain.
+    pub fn combined_mixer(&mut self) -> Option<&Mixer> {
+        self.mixer()?;
+        self.combined_output.as_ref()
     }
     pub fn set_level(&mut self, level: u8) {
         self.level = level.min(100);
@@ -77,6 +87,7 @@ mod tests {
         bus.set_level(40);
         assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
         bus.set_music_level(25);
+        for _ in 0..1000 { assert!(bus.combined_mixer().is_none()); }
         assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
         assert_eq!(attempts, 1);
         let mut next_launch = Bus::new();
