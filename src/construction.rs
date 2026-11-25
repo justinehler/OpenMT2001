@@ -97,6 +97,55 @@ impl Command {
     }
 }
 
+/// Original4517f2..4518ca local Build0f admission, before delay/enqueue.
+/// `false` is native rejection with sender success: callers must not enqueue.
+/// Due application and cold queue restoration must bypass this producer gate.
+pub fn admit(
+    command: &Command,
+    categories: &mut [[u8; 0x17c]; 52],
+    players: &mut impl crate::player_messages::Players,
+    arena: &mut crate::player_messages::Arena,
+    broadcast_enabled: u32,
+    routing: crate::player_messages::Routing,
+    external: impl FnMut(crate::player_messages::Route, &crate::player_messages::Packet) -> Result<(), String>,
+) -> Result<bool, String> {
+    if routing.network[0] && !routing.network[1] {
+        return Err("construction requires unresolved network command transport".into());
+    }
+    let category = categories.get_mut(command.category as usize)
+        .ok_or("construction admission category leaves pool")?;
+    let occupancy: &mut [u8; 49] = (&mut category[0x9c..0xcd]).try_into().unwrap();
+    let rectangle = command.rectangle.map(i32::from);
+    if building_pool::can_place(occupancy, rectangle) {
+        //45184e precedes450a30, including its allocator/error behavior. Do not
+        //roll back this store if the subsequent queue consumer fails.
+        building_pool::fill_occupancy(occupancy, rectangle, command.height as u8)?;
+        return Ok(true);
+    }
+    //451894 sign-extends packet+29;86d1fc+4*owner is the zero-based
+    //86d200 player table at owner-1, NOT player table[owner]. Resolve only
+    //on rejection, matching the native accepted path's lack of owner lookup.
+    let recipient = i32::from(command.owner) - 1;
+    let owner = usize::try_from(recipient).ok().and_then(|slot| players.get(slot))
+        .ok_or("construction rejection owner leaves roster")?;
+    let kind = owner.bytes.get(0x154..0x158)
+        .ok_or("construction rejection player truncated")?;
+    if u32::from_le_bytes(kind.try_into().unwrap()) == 1 {
+        //4518af..4518c5 ->48cab0(owner-1,-1,30,category,business,0,0,-999).
+        //The message owner's activity gate, allocation, inbox and prior bytes
+        //are shared with all real player messages, including failure ordering.
+        crate::player_messages::produce_in(
+            [recipient, -1, 0x30, i32::from(command.category), command.business as i32, 0, 0, -999],
+            broadcast_enabled, players, arena, routing, external,
+        )?;
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+#[path = "construction/admission_tests.rs"]
+mod admission_tests;
+
 pub struct World<'a> {
     pub buildings: &'a mut [[u8; 0x394]],
     pub categories: &'a mut [[u8; 0x17c]; 52],

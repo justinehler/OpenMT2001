@@ -55,6 +55,7 @@ pub enum Call {
     OfferAdmission(ai_messages::offers::Call),
     OfferExecution(ai_messages::offers::execution::Call),
     MessageRoute { route: crate::player_messages::Route, packet: crate::player_messages::Packet },
+    ///Already accepted/reserved by451720 admission; the host queues without re-admitting.
     ConstructionCommand { descriptor:[u8;60] },
     TakeoverCommand { building:u32 },
     AuctionCommand { descriptor:[u8;52], additional_delay:u32 },
@@ -663,7 +664,24 @@ pub fn advance(
                                 proposal_prior:[0;104],
                             };
                             let descriptor=crate::ai_actions::construction::produce(player,arguments,[0;60],&mut context,image)?;
-                            callback(Call::ConstructionCommand{descriptor},player,profiles,world)?;0
+                            let command=crate::construction::Command::from_packet(&descriptor)?;
+                            let routing=world.message_routing.ok_or("AI construction message routing unresolved")?;
+                            let mut arena=crate::player_messages::Arena{next:*world.allocation_next};
+                            let mut external=None;
+                            let admitted=crate::construction::admit(&command,world.categories,
+                                &mut crate::player_messages::SplitPlayers{before,current:player,after},
+                                &mut arena,broadcast_enabled,routing,
+                                |route,packet|{external=Some((route,*packet));Ok(())});
+                            //Keep committed allocation/inbox mutations even on an error.
+                            *world.allocation_next=arena.next;
+                            let admitted=admitted?;
+                            if let Some((route,packet))=external{
+                                callback(Call::MessageRoute{route,packet},player,profiles,world)?;
+                            }
+                            if admitted {
+                                callback(Call::ConstructionCommand{descriptor},player,profiles,world)?;
+                            }
+                            0
                         },
                         execution::Call::AuctionBudget=>ai_messages::offers::auction::budget::budget(player,state.auction.as_deref().ok_or("auction bid budget has no retained record")?),
                         execution::Call::Placement{category,rectangle}=>u32::from(execution::placement(

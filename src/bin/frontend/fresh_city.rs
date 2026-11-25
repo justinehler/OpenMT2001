@@ -526,6 +526,17 @@ impl<'data> Session<'data> {
                 scripts:&mut self.scripts,hooks:&hooks,context});
             let submission_tick = context.clock.timing[0];
             let mut drain_clocks = context.clock.timing[..2].try_into().unwrap();
+            if let Some(live_commands::Command::Build(command)) = &command {
+                let admitted = openmt2001::construction::admit(command, &mut runtime.city.categories,
+                    &mut runtime.roster.manager.players, &mut runtime.message_context.arena,
+                    u32::from_le_bytes(runtime.roster.manager.bytes[12..16].try_into().unwrap()),
+                    openmt2001::player_messages::Routing {
+                        current_player: runtime.message_context.current_player,
+                        network: runtime.message_context.network,
+                        prior: runtime.message_context.prior,
+                    }, |route, packet| event(live_commands::Event::PlayerMessageRoute{route,packet:*packet}))?;
+                if !admitted { return Ok(()); }
+            }
             let apply = |command: &live_commands::Command| {
                 runtime.apply_with_announcement(command, &mut context, &mut geometry,
                     announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement), |call,_clock|event(call))
@@ -2936,8 +2947,7 @@ mod tests {
             // Case 3 is catalog row 43, the special whole-group Hotel shown
             // under Residential even though its catalog type word is zero.
             let kind = if case == 3 { 1 } else { case };
-            let mut session = Session::initialize(
-                Inputs {
+            let inputs = || Inputs {
                     tree_locators: None,
                     image: &image,
                     board: &board,
@@ -2962,13 +2972,9 @@ mod tests {
                     selected_character: 4,
                     profile_name: b"Construction Fixture",
                     character_names: &names,
-                },
-                Policy {
-                    seed: 0x12345678,
-                    auxiliary_prior_bytes: [0; 0x11c],
-                },
-            )
-            .unwrap();
+                };
+            let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
+            let mut session = Session::initialize(inputs(), policy()).unwrap();
             session.world.clock.calendar[0] = 9;
             let assets = CommandAssets {
                 image: &image,
@@ -3125,6 +3131,13 @@ mod tests {
                     .post(-command.components[component], ledger)
                     .unwrap();
             }
+            //Native45184e reserves these literal x-major cells before enqueue.
+            let mut admitted_grid: [u8;49] = session.world.categories[category][0x9c..0xcd]
+                .try_into().unwrap();
+            for x in rectangle[0]..=rectangle[2] { for y in rectangle[1]..=rectangle[3] {
+                admitted_grid[(x*7+y) as usize] = command.height as u8;
+            }}
+            let cash_before_admission = session.world.ledgers.players[0].cash.to_bits();
             let mut events = Vec::new();
             session
                 .submit_command(
@@ -3137,13 +3150,57 @@ mod tests {
                 )
                 .unwrap();
             assert!(events.is_empty());
+            assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
+            assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
+            let pending_packet = match session.live_commands.snapshot().unwrap()[0].4 {
+                live_commands::Command::Build(c) => c.packet(), _ => panic!("wrong pending command"),
+            };
+            //A second direct packet sees the first pending footprint and returns
+            //sender success without another node, cash post, or human notice.
+            let pending_count = session.live_commands.snapshot().unwrap().len();
+            session.submit_command(live_commands::Command::Build(command.clone()), &assets,
+                |e| Err(format!("rejected human construction emitted {e:?}"))).unwrap();
+            assert_eq!(session.live_commands.snapshot().unwrap().len(), pending_count);
+            assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
+            assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
+            assert_eq!(pending_packet, command.packet(), "quoted components stay in the packet");
             let start = session.world.clock.timing[0];
+            let mut cold_pending = if case == 0 {
+                let camera = openmt2001::flyby::CameraSample { eye:[100.,120.,100.], target:[0.;3], up:[0.,1.,0.], vertical_fov:0.7 };
+                let cameras = crate::save_menu::cameras(None,camera).unwrap();
+                let bytes = session.save_v2(&image,cameras,1).unwrap();
+                let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+                let mut cold = Session::load_original(inputs(),policy(),&bytes).unwrap();
+                cold.restore_v2_extension(&save).unwrap();
+                let rows = cold.live_commands.snapshot().unwrap();
+                assert_eq!(rows.len(),pending_count);
+                assert_eq!((rows[0].1,rows[0].2,rows[0].3),(start+25,start+25,false));
+                let live_commands::Command::Build(restored) = rows[0].4 else { panic!("lost saved Build0f") };
+                assert_eq!(restored.packet(),pending_packet);
+                assert_eq!(cold.allocation_next,session.allocation_next,"restore cannot produce message30");
+                assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),cash_before_admission);
+                //Original447d70 rebuilds occupancy from buildings; the saved
+                //140-byte category prefix excludes+9c. A future packet enters
+                //450a30/480900, not451720. No fresh reservation on cold restore.
+                for x in rectangle[0]..=rectangle[2] { for y in rectangle[1]..=rectangle[3] {
+                    assert_eq!(cold.world.categories[category][0x9c+(x*7+y) as usize],0);
+                }}
+                Some(cold)
+            } else { None };
             for tick in start..start + 25 {
                 session.world.clock.timing[0] = tick;
                 session
                     .drain_commands(&assets, |_| panic!("construction dispatched early"))
                     .unwrap();
                 assert_eq!(session.world.buildings[slot], original_slot);
+                assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
+                assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
+                if let Some(cold) = cold_pending.as_mut() {
+                    cold.world.clock.timing[0] = tick;
+                    cold.drain_commands(&assets,|e|Err(format!("saved Build0f dispatched early: {e:?}"))).unwrap();
+                    assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),cash_before_admission);
+                    assert_eq!(cold.world.pending_world.count,0);
+                }
             }
             session.world.clock.timing[0] = start + 25;
             session
@@ -3153,6 +3210,14 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(session.world.pending_world.count, 1);
+            if let Some(cold) = cold_pending.as_mut() {
+                cold.world.clock.timing[0] = start+25;
+                cold.drain_commands(&assets,|_|Ok(())).unwrap();
+                assert_eq!(cold.world.pending_world.count,1,"saved packet must apply once at its original Total deadline");
+                assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),expected_account.cash.to_bits());
+                assert_eq!(&cold.world.categories[category][0x9c..0xcd],&admitted_grid);
+                assert!(cold.live_commands.snapshot().unwrap().is_empty());
+            }
             assert_eq!(session.world.buildings[slot][0x14..0x18], [0; 4]);
             assert_eq!(
                 session.world.ledgers.players[0].cash.to_bits(),
@@ -3783,6 +3848,7 @@ mod tests {
             let mut human_restocked=false;
             let mut terminal_context=None;
             let mut human_retail_ever_traded=false;
+            let mut ai_admissions = std::collections::BTreeSet::new();
             println!("Unrestricted AI with real auction GPU presenter; human acknowledges notices, refuses offers and uses enabled auction controls");
             println!("Initial DELI stockcapacity {}", f32::from_le_bytes(session.world.catalog.info.row(2).unwrap()[0x58..0x5c].try_into().unwrap()));
             for frame in 0..hours.saturating_mul(2500) {
@@ -3810,6 +3876,21 @@ mod tests {
                 terminal_context=idle_prompts(&mut host,&mut session,prompts).or(terminal_context);
                 if terminal_context.is_some(){break;}
                 host.frame(&mut session,&assets,40);
+                for (_, due, inner, direct, queued) in session.live_commands.snapshot().unwrap() {
+                    let openmt2001::live_commands::Command::Build(command) = queued else { continue };
+                    let owner = &session.roster.manager.players[(i32::from(command.owner)-1) as usize];
+                    if u32::from_le_bytes(owner.bytes[0x154..0x158].try_into().unwrap()) != 1 { continue; }
+                    assert!(!direct); assert_eq!(due,inner);
+                    let [x0,y0,x1,y1] = command.rectangle.map(i32::from);
+                    //Independent native45184e/445b90 stores, observed before
+                    //the actual due consumer. This is not full J2 equality.
+                    for x in x0..=x1 { for y in y0..=y1 {
+                        assert_eq!(session.world.categories[command.category as usize]
+                            [0x9c+(x*7+y) as usize], command.height as u8,
+                            "real AI producer reached queue without native footprint reservation");
+                    }}
+                    if command.height > 0 { ai_admissions.insert((due,command.packet().to_vec())); }
+                }
                 if let Some((target,due,old_price,old_target,expected_price,expected_target))=human_terms{
                     let row=&session.world.ledgers.businesses[target.business];
                     let observed=(u32::from_le_bytes(row[0x1c4..0x1c8].try_into().unwrap()),u16::from_le_bytes(row[0x1b8..0x1ba].try_into().unwrap()));
@@ -3951,6 +4032,9 @@ mod tests {
                 println!("Final account{slot}: cash{} nonzero-ledgers{ledgers:?}",account.cash);
             }
             if require_completion{
+                if hours == 24 && !human_build {
+                    assert!(!ai_admissions.is_empty(), "natural AI admission regression needs a real positive-height packet");
+                }
                 assert!(host.failure.is_none(),"Unrestricted opponents stopped: {:?}",host.failure);
                 if expect_loss {
                     assert_eq!(terminal_context,Some(3),"natural outcome callback context changed");
