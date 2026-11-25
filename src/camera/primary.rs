@@ -1,4 +1,4 @@
-//! Primary camera record arithmetic and an explicit mode12 callback.
+//! Primary camera record arithmetic and explicit mode12/13 callbacks.
 //! Owners supply mode dispatch, scheduling, live input and trigonometry.
 //! Common processing follows the mode callback; sampling runs at render.
 use crate::x87::Sum;
@@ -42,8 +42,11 @@ impl AngularTrig for MissingTrig {
     fn cosine(&mut self, _: Sum) -> Result<Sum> { Err("native FCOS provider required") }
 }
 
+#[cfg(test)]
+mod portable_tests;
+
 impl Primary {
-    /// Supported finite mode6/12 subset. Opaque bytes are never decoded as floats.
+    /// Supported finite mode6/12/13 subset. Opaque bytes are never decoded as floats.
     /// Positive divisors are required whenever a dirty flag can cause sampling.
     pub fn decode(raw: [u8; 196]) -> Result<Self> {
         let state = Self { raw };
@@ -72,8 +75,8 @@ impl Primary {
         }
     }
     fn validate(&self) -> Result<()> {
-        if !matches!(self.word(0) as i32, 6 | 12) {
-            return Err("primary core supports only mode6/12");
+        if !matches!(self.word(0) as i32, 6 | 12 | 13) {
+            return Err("primary core supports only mode6/12/13");
         }
         for at in (4..0x1c).step_by(4).chain((0x34..0x70).step_by(4))
             .chain([0x78,0x7c,0x88,0x90,0x98,0xb0,0xb4,0xb8,0xbc]) {
@@ -210,6 +213,31 @@ pub struct Mode12Input {
     pub invert_vertical: bool,
     pub low_height: bool,
 }
+/// Captured reads for the original mode13 callback. The same translation
+/// control is read before mouse pan and again before keys/rotation. Build's
+/// separate mode12 visibility gate does not occur in this callback.
+#[derive(Clone, Copy, Debug)]
+pub struct Mode13Input {
+    pub enable_translation: bool,
+    pub enable_keyboard: bool,
+    pub enable_zoom: bool,
+    pub buttons: [bool; 2],
+    pub delta: [i32; 2],
+    pub keys: [bool; 4],
+    pub sensitivity: i32,
+    pub legacy_yaw: bool,
+    pub invert_vertical: bool,
+    pub low_height: bool,
+}
+#[derive(Clone, Copy)]
+struct ZoomInput {
+    enabled: bool,
+    buttons: [bool; 2],
+    delta_y: i32,
+    sensitivity: i32,
+    invert_vertical: bool,
+    low_height: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CursorRequest { pub state: u32, pub priority: i32 }
 
@@ -224,6 +252,117 @@ impl Primary {
         let effects = next.mode12_inner(input, trig)?;
         next.validate()?;
         *self = next;
+        Ok(effects)
+    }
+    /// Original00481fe0 callback only. Desired pose is emitted from the
+    /// pre-input center. Common angular processing and render sampling follow
+    /// at their own owner boundaries. Errors leave the raw record unchanged.
+    pub fn mode13(&mut self, input: Mode13Input, trig: &mut impl AngularTrig)
+        -> Result<Vec<CursorRequest>> {
+        if self.view().mode != 13 { return Err("mode13 callback requires mode13"); }
+        let mut next = self.clone();
+        let effects = next.mode13_inner(input, trig)?;
+        next.validate()?;
+        *self = next;
+        Ok(effects)
+    }
+    fn mode13_inner(&mut self, i: Mode13Input, trig: &mut impl AngularTrig)
+        -> Result<Vec<CursorRequest>> {
+        let mut effects = Vec::new();
+        let center_x = self.ext(0xb4)?;
+        let center_z = self.ext(0xbc)?;
+        self.raw.copy_within(0xb4..0xbc,0x40);
+        if self.word(0xa8) != 2 {
+            let mut eye = trig.cosine(self.ext(0x7c)?)?;
+            eye.mul(self.ext(0xb0)?);
+            eye.add(center_x);
+            self.store(0x34,eye)?;
+            let mut eye = trig.sine(self.ext(0x7c)?)?;
+            eye.mul(self.ext(0xb0)?);
+            eye.add(center_z);
+            self.store(0x3c,eye)?;
+        }
+        self.raw.copy_within(0xbc..0xc0,0x48);
+        if i.enable_translation {
+            let mut speed = Sum::from_i32(i.sensitivity);
+            speed.mul_f32(0.01)?;
+            speed.add(speed);
+            speed.add_f32(1.)?;
+            let step = speed.to_f32();
+            if !step.is_finite() { return Err("mode13 pan step overflow"); }
+            if i.buttons == [true,true] {
+                effects.push(CursorRequest { state: 3, priority: 1 });
+                for (delta,xcache,zcache,xsub,zsub) in [
+                    (i.delta[0],0x88,0x90,i.delta[0]>0,i.delta[0]<0),
+                    (i.delta[1],0x90,0x88,i.delta[1]<0,i.delta[1]<0),
+                ] {
+                    if delta != 0 {
+                        // Native FILD retains the signed magnitude; it does
+                        // not round it to float32 before the products.
+                        let amount = delta.checked_abs().ok_or("unsupported INT_MIN pan magnitude")?;
+                        for (at,cache,subtract) in [(0xb4,xcache,xsub),(0xbc,zcache,zsub)] {
+                            let mut displacement = Sum::from_i32(amount);
+                            displacement.mul(self.ext(cache)?);
+                            displacement.mul_f32(step)?;
+                            let mut value = self.ext(at)?;
+                            value.add(if subtract {displacement.negated()} else {displacement});
+                            self.store(at,value)?;
+                        }
+                    }
+                }
+            }
+            if i.enable_keyboard {
+                for (active,xcache,zcache,xsub,zsub) in [
+                    (i.keys[0],0x88,0x90,true,false),
+                    (i.keys[1],0x88,0x90,false,true),
+                    (i.keys[2],0x90,0x88,false,false),
+                    (i.keys[3],0x90,0x88,true,true),
+                ] {
+                    if active {
+                        for (at,cache,subtract) in [(0xb4,xcache,xsub),(0xbc,zcache,zsub)] {
+                            let mut displacement = self.ext(cache)?;
+                            displacement.add(displacement);
+                            let mut value = self.ext(at)?;
+                            value.add(if subtract {displacement.negated()} else {displacement});
+                            self.store(at,value)?;
+                        }
+                    }
+                }
+                for at in [0xb4,0xbc] {
+                    let value = self.ext(at)?;
+                    if value.compare(Sum::from_i32(-500)) == Ordering::Less {
+                        self.store(at,Sum::from_i32(-500))?;
+                    } else if value.compare(Sum::from_i32(500)) == Ordering::Greater {
+                        self.store(at,Sum::from_i32(500))?;
+                    }
+                }
+                if self.word(0xa8)!=2 && i.buttons==[false,true] {
+                    effects.push(CursorRequest { state: 2, priority: 1 });
+                    if i.delta[0]!=0 {
+                        let numerator=i.delta[0].clamp(-14,14)*2;
+                        let mut yaw=self.ext(0x7c)?;
+                        if i.legacy_yaw {
+                            let quotient=numerator.checked_div(i.sensitivity.wrapping_add(50))
+                                .ok_or("unsupported mode13 IDIV")?;
+                            yaw.add(Sum::from_i32(quotient));
+                        } else {
+                            let mut quotient=Sum::from_i32(numerator);
+                            quotient.div(Sum::from_i32(200i32.wrapping_sub(i.sensitivity)))?;
+                            yaw.add(quotient.negated());
+                        }
+                        self.store(0x7c,yaw)?;
+                        let sine=trig.sine(self.ext(0x7c)?)?;
+                        self.raw.copy_within(0x7c..0x80,0x98);
+                        self.store(0x88,sine)?;
+                        let cosine=trig.cosine(self.ext(0x7c)?)?;
+                        self.store(0x90,cosine)?;
+                    }
+                }
+            }
+        }
+        effects.extend(self.zoom(ZoomInput { enabled:i.enable_zoom, buttons:i.buttons,
+            delta_y:i.delta[1], sensitivity:i.sensitivity,
+            invert_vertical:i.invert_vertical, low_height:i.low_height })?);
         Ok(effects)
     }
     fn mode12_inner(&mut self, i: Mode12Input, trig: &mut impl AngularTrig)
@@ -335,11 +474,21 @@ impl Primary {
                 self.store(0x90,cosine)?;
             }
         }
-        if !i.enable_zoom { return Ok(effects); }
+        effects.extend(self.zoom(ZoomInput { enabled:i.enable_zoom, buttons:i.buttons,
+            delta_y:i.delta[1], sensitivity:i.sensitivity,
+            invert_vertical:i.invert_vertical, low_height:i.low_height })?);
+        Ok(effects)
+    }
+    // Shared004823d0 service, reached after either mode callback. Its control
+    // read is separate from each callback's translation/rotation admission.
+    fn zoom(&mut self, i: ZoomInput) -> Result<Vec<CursorRequest>> {
+        let mut effects=Vec::new();
+        let right_only=i.buttons==[false,true];
+        if !i.enabled { return Ok(effects); }
         if self.word(0xa8)==2 {
             if !right_only { return Ok(effects); }
             effects.push(CursorRequest { state: 2, priority: 1 });
-            let dy = i.delta[1];
+            let dy = i.delta_y;
             if dy!=0 {
                 let amount = Sum::from_i32(dy.checked_abs().ok_or("unsupported INT_MIN special zoom")?);
                 let mut height = self.ext(0x38)?;
@@ -355,10 +504,10 @@ impl Primary {
         if !step.is_finite() { return Err("mode12 zoom step overflow"); }
         if !right_only { return Ok(effects); }
         effects.push(CursorRequest { state: 2, priority: 1 });
-        if i.delta[1]==0 { return Ok(effects); }
+        if i.delta_y==0 { return Ok(effects); }
         let dy = if i.invert_vertical {
-            i.delta[1].checked_neg().ok_or("unsupported INT_MIN inverted zoom")?
-        } else { i.delta[1] };
+            i.delta_y.checked_neg().ok_or("unsupported INT_MIN inverted zoom")?
+        } else { i.delta_y };
         let amount = Sum::from_i32(dy.checked_abs().ok_or("unsupported INT_MIN zoom magnitude")?);
         let mut displacement = amount;
         displacement.mul_f32(step)?;
@@ -382,6 +531,139 @@ impl Primary {
         radius.add(radial.negated());
         self.store(0xb0,radius)?;
         Ok(effects)
+    }
+}
+
+#[cfg(test)]
+mod mode13_tests {
+    use super::*;
+    fn put(raw: &mut [u8;196], at: usize, value: f32) {
+        raw[at..at+4].copy_from_slice(&value.to_le_bytes());
+    }
+    fn state() -> Primary {
+        let mut raw=[0;196];raw[0]=13;raw[0x70]=1;raw[0x71]=1;raw[0x74]=20;
+        for (at,value) in [(4,1.),(8,2.),(12,3.),(0x34,0.),(0x38,120.),
+            (0x4c,7.),(0x50,8.),(0x54,9.),(0x64,-0.),(0x68,1.),
+            (0x7c,0.75),(0x88,0.5),(0x90,0.25),(0x98,0.75),
+            (0xb0,80.),(0xb4,10.),(0xb8,4.),(0xbc,20.)] {
+            put(&mut raw,at,value);
+        }
+        raw[0x20..0x24].copy_from_slice(&0x7fc12345u32.to_le_bytes());
+        Primary::decode(raw).unwrap()
+    }
+    fn input() -> Mode13Input {
+        Mode13Input { enable_translation:true,enable_keyboard:true,enable_zoom:false,
+            buttons:[false;2],delta:[0;2],keys:[false;4],sensitivity:50,
+            legacy_yaw:false,invert_vertical:false,low_height:false }
+    }
+    #[derive(Default)]
+    struct Witness { calls:Vec<&'static str>, fail:Option<usize> }
+    impl Witness {
+        fn call(&mut self,name:&'static str,value:f32)->Result<Sum> {
+            self.calls.push(name);
+            if self.fail==Some(self.calls.len()) { return Err("witness failure"); }
+            Sum::from_f32(value)
+        }
+    }
+    impl AngularTrig for Witness {
+        fn sine(&mut self,_:Sum)->Result<Sum> { self.call("sine",0.5) }
+        fn cosine(&mut self,_:Sum)->Result<Sum> { self.call("cosine",0.25) }
+    }
+    #[test]
+    fn pose_precedes_pan_and_keys_without_advancing_common_state() {
+        let mut p=state();let before=p.clone();let mut i=input();
+        i.buttons=[true,true];i.delta=[2,3];i.keys[0]=true;
+        let mut trig=Witness::default();
+        assert_eq!(p.mode13(i,&mut trig).unwrap(),vec![CursorRequest{state:3,priority:1}]);
+        assert_eq!(trig.calls,vec!["cosine","sine"]);
+        assert_eq!(p.view().desired,[[30.,120.,60.],[10.,4.,20.]]);
+        assert_eq!(p.view().center,[8.5,4.,24.5]);
+        assert_eq!(p.view().current,before.view().current);
+        assert_eq!(p.view().sampled,before.view().sampled);
+        assert_eq!(&p.raw()[0x1c..0x34],&before.raw()[0x1c..0x34]);
+        assert_eq!(&p.raw()[0x64..0x70],&before.raw()[0x64..0x70]);
+    }
+    #[test]
+    fn second_control_read_suppresses_keyboard_clamp_and_rotation() {
+        let mut p=state();put(&mut p.raw,0xb4,600.);
+        let mut i=input();i.enable_keyboard=false;i.buttons=[false,true];i.delta=[14,0];
+        let before=p.view();let mut trig=Witness::default();
+        assert!(p.mode13(i,&mut trig).unwrap().is_empty());
+        assert_eq!(p.view().center,before.center);
+        assert_eq!(p.view().yaw,before.yaw);
+        assert_eq!(trig.calls,vec!["cosine","sine"]);
+    }
+    #[test]
+    fn special_parameter_skips_projection_but_still_reaches_shared_zoom() {
+        let mut p=state();p.raw[0xa8..0xac].copy_from_slice(&2u32.to_le_bytes());
+        let mut i=input();i.enable_translation=false;i.enable_zoom=true;
+        i.buttons=[false,true];i.delta=[10,3];
+        let mut trig=Witness::default();
+        assert_eq!(p.mode13(i,&mut trig).unwrap(),vec![CursorRequest{state:2,priority:1}]);
+        assert!(trig.calls.is_empty());
+        assert_eq!(p.view().desired,[[0.,117.,0.],[10.,4.,20.]]);
+        assert_eq!(p.view().center,[10.,4.,20.]);
+    }
+    #[test]
+    fn rotation_updates_yaw_goal_and_caches_after_emitting_pose() {
+        let mut p=state();let mut i=input();i.buttons=[false,true];
+        i.delta=[14,0];i.sensitivity=198;
+        let mut trig=Witness::default();
+        assert_eq!(p.mode13(i,&mut trig).unwrap(),vec![CursorRequest{state:2,priority:1}]);
+        assert_eq!(p.view().desired,[[30.,120.,60.],[10.,4.,20.]]);
+        assert_eq!(p.view().yaw,-13.25);assert_eq!(p.view().final_yaw,-13.25);
+        assert_eq!(trig.calls,vec!["cosine","sine","sine","cosine"]);
+    }
+    #[test]
+    fn provider_and_input_errors_are_atomic() {
+        let mut p=state();let before=p.clone();
+        let mut trig=Witness{calls:vec![],fail:Some(2)};
+        assert!(p.mode13(input(),&mut trig).is_err());assert_eq!(p,before);
+        let mut i=input();i.buttons=[true,true];i.delta=[i32::MIN,0];
+        assert!(p.mode13(i,&mut Witness::default()).is_err());assert_eq!(p,before);
+        i=input();i.buttons=[false,true];i.delta=[1,0];i.legacy_yaw=true;i.sensitivity=-50;
+        assert!(p.mode13(i,&mut Witness::default()).is_err());assert_eq!(p,before);
+    }
+    #[test]
+    #[ignore="requires retained original mode13 both-button pan records"]
+    fn retained_mode13_pan_records() {
+        // Portable mathematical trig; this finite fixture comparison does not
+        // establish general native x87 equivalence.
+        use crate::x87::portable_trig::PortableTrig;
+        let data=std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMERA_PAN").unwrap()).unwrap();
+        assert_eq!(&data[..8],b"MTCPAN01");
+        let word=|at|u32::from_le_bytes(data[at..at+4].try_into().unwrap());
+        assert_eq!(word(8),240);assert_eq!(data.len(),12+240*76);
+        let mut count=0;
+        for (index,row) in data[12..].chunks_exact(76).enumerate() {
+            let w=|at|u32::from_le_bytes(row[at..at+4].try_into().unwrap());
+            let f=|at|f32::from_bits(w(at));
+            if w(0)!=13 { continue; }
+            let mut raw=[0;196];raw[0]=13;raw[0x72]=1;raw[0x74]=20;
+            raw[0xa8..0xac].copy_from_slice(&50u32.to_le_bytes());
+            for j in 0..3 { put(&mut raw,0xb4+j*4,f(4+j*4)); }
+            let yaw=f(16);
+            // Separately retained own-code x87 initializer cache words.
+            let caches=match yaw.to_bits() {
+                0x3f333333=>[0x3f24eb73,0x3f43ccb3],
+                0x4019999a=>[0x3f2ceb27,0xbf3cc5d7],
+                _=>panic!("unrecorded pan seed"),
+            };
+            for (at,value) in [(0x38,120.),(0x68,1.),(0x7c,yaw),
+                (0x98,(f64::from(yaw)+0.5)as f32),(0xb0,80.),
+                (0x88,f32::from_bits(caches[0])),(0x90,f32::from_bits(caches[1]))] {
+                put(&mut raw,at,value);
+            }
+            let mut p=Primary::decode(raw).unwrap();let mut i=input();
+            i.buttons=[true,true];i.delta=[w(20)as i32,w(24)as i32];
+            i.sensitivity=w(28)as i32;i.keys=std::array::from_fn(|bit|w(32)&(1<<bit)!=0);
+            p.mode13(i,&mut PortableTrig).unwrap();p.common_with_trig(&mut PortableTrig).unwrap();
+            let actual:Vec<u8>=p.view().desired.into_iter().flatten()
+                .chain(p.view().center).chain([p.view().yaw])
+                .flat_map(f32::to_le_bytes).collect();
+            assert_eq!(actual,&row[36..76],"retained case{index}");count+=1;
+        }
+        assert_eq!(count,120);
     }
 }
 
@@ -466,7 +748,7 @@ mod tests {
     }
     #[test]
     fn finite_validation_and_atomic_store_overflow() {
-        for (at,bits) in [(0,13u32),(0x74,0),(0x74,u32::MAX),(0x34,f32::NAN.to_bits())] {
+        for (at,bits) in [(0,5u32),(0x74,0),(0x74,u32::MAX),(0x34,f32::NAN.to_bits())] {
             let mut r=fixture();r[at..at+4].copy_from_slice(&bits.to_le_bytes());
             assert!(Primary::decode(r).is_err());
         }

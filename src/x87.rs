@@ -1,6 +1,8 @@
 //! Finite arithmetic at original x87 PC64 precision. This is not a complete
 //! FPU emulator: it models finite nearest-even arithmetic, f32 stores and FTOL.
 
+pub mod portable_trig;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sum {
     negative: bool,
