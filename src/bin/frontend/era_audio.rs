@@ -171,7 +171,7 @@ impl Player {
     }
 
     pub fn set_levels(&mut self, music: u8, effects: u8) {
-        self.music_bus.set_level(music);
+        self.music_bus.set_music_level(music);
         self.effects_bus.set_level(effects);
     }
 
@@ -285,6 +285,85 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn music_gain_reaches_decoded_song_at_start_and_on_retained_bus() {
+        // Fixed original-derived command/amplitude cases, not values computed
+        // by music_gain or read back from Sink.volume(). PCM input is 0.5.
+        for (initial, expected) in [(0, 0.), (25, 0.017336843), (50, 0.0638955)] {
+            let assets = Assets {
+                songs: std::array::from_fn(|_| PathBuf::new()),
+                before_six: Vec::new(),
+                ffmpeg: PathBuf::new(),
+            };
+            let mut player = Player::new(assets);
+            player.set_levels(initial, 100);
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44_100);
+            player.music_bus.connect_test_output(&output, 2, 44_100);
+            let (sender, receiver) = mpsc::channel();
+            player.pending = Some((false, receiver));
+            // Prime the connected master while the real decode is still pending.
+            // Rodio connects an Empty mono48k queue before append; its initial
+            // conversion spans must not be conflated with decoded-song gain.
+            player.poll().unwrap();
+            assert!(player.pending.is_some());
+            assert!(player.song.is_none());
+            let pending_silence: Vec<_> = rendered.by_ref().take(4096).collect();
+            assert_eq!(pending_silence.len(), 4096);
+            assert!(pending_silence.iter().all(|sample| *sample == 0.),
+                "no decoded source exists during the pending master prime");
+            sender.send(Ok(vec![0.5; 65_536])).unwrap();
+            player.poll().unwrap();
+            assert!(player.pending.is_none());
+            let first: Vec<_> = rendered.by_ref().take(4096).collect();
+            assert_eq!(first.len(), 4096);
+            eprintln!("era startup initial={initial}: first_nonzero={:?}, last_gain_mismatch={:?}",
+                first.iter().position(|sample| *sample != 0.),
+                first.iter().rposition(|sample| (*sample - expected).abs() >= 1e-6));
+            // Allow queued startup silence, but no samples at the old linear
+            // or default full gain before the intended gain takes effect.
+            assert!(first.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
+            assert!(first[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            for (level, expected) in [
+                (0, 0.), (25, 0.017336843), (50, 0.0638955), (100, 0.5), (255, 0.5),
+            ] {
+                let position = player.song.as_ref().unwrap().get_pos();
+                player.set_levels(level, 100);
+                let changed: Vec<_> = rendered.by_ref().take(4096).collect();
+                assert_eq!(changed.len(), 4096);
+                assert!(changed[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6),
+                    "music percentage {level}, initial {initial}");
+                let song = player.song.as_ref().unwrap();
+                assert!(song.get_pos() > position, "gain changes keep the same source advancing");
+                assert_eq!(song.len(), 1, "gain changes do not queue replacement songs");
+            }
+            player.apply(Operation::Stop).unwrap();
+            assert!(player.song.is_none());
+            let stopped: Vec<_> = rendered.by_ref().take(4096).collect();
+            assert_eq!(stopped.len(), 4096);
+            assert!(stopped[2048..].iter().all(|sample| *sample == 0.));
+        }
+    }
+
+    #[test]
+    fn before_six_effect_retains_existing_linear_gain() {
+        let assets = Assets {
+            songs: std::array::from_fn(|_| PathBuf::new()),
+            before_six: vec![0.5; 32_768],
+            ffmpeg: PathBuf::new(),
+        };
+        let mut player = Player::new(assets);
+        player.set_levels(50, 25);
+        let (output, mut rendered) = rodio::mixer::mixer(1, 22_050);
+        player.effects_bus.connect_test_output(&output, 1, 22_050);
+        let handle = player.apply(Operation::BeforeSixCreate).unwrap();
+        assert_ne!(handle, 0);
+        let samples: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(samples.len(), 4096);
+        assert!(samples[2048..].iter().all(|sample| (*sample - 0.125).abs() < 1e-6));
+        player.apply(Operation::BeforeSixRelease(handle)).unwrap();
+    }
+
     #[test]
     fn stop_cancels_pending_decode_and_new_selection_replaces_it() {
         let assets = Assets {
@@ -358,5 +437,32 @@ mod tests {
         assert_eq!(assets.before_six.len(), 95_385);
         assert!(assets.songs.iter().all(|song| song.is_file()));
         assert!(decode(&assets.ffmpeg, &assets.songs[0]).unwrap().len() > 88_200);
+    }
+}
+
+
+#[cfg(test)]
+mod cold_gain_tests {
+    use super::*;
+    #[test]
+    fn cold_nested_music_start_has_only_silence_then_intended_gain() {
+        for (level,expected) in [(0,0.),(25,0.017336843),(50,0.0638955)] {
+            let assets=Assets{songs:std::array::from_fn(|_|PathBuf::new()),before_six:Vec::new(),ffmpeg:PathBuf::new()};
+            let mut player=Player::new(assets);player.set_levels(level,100);
+            let (output,mut rendered)=rodio::mixer::mixer(2,44_100);
+            player.music_bus.connect_test_output(&output,2,44_100);
+            let (sender,receiver)=mpsc::channel();player.pending=Some((false,receiver));
+            sender.send(Ok(vec![0.5;65_536])).unwrap();player.poll().unwrap();
+            assert!(player.pending.is_none());
+            // Both newly connected queues begin with their own silent/conversion
+            // spans. The decoded source may start later than the primed-master
+            // case; every nonzero sample must already have the intended gain.
+            let samples=rendered.by_ref().take(8192).collect::<Vec<_>>();
+            assert_eq!(samples.len(),8192);
+            assert!(samples.iter().all(|s|*s==0.||(*s-expected).abs()<1e-6));
+            assert!(samples[4096..].iter().all(|s|(*s-expected).abs()<1e-6),"cold music level {level}");
+            if level!=0 {assert!(samples[..4096].iter().any(|s|*s!=0.),"cold source must start within the fixed window");}
+            let song=player.song.as_ref().unwrap();assert!(song.get_pos()>std::time::Duration::ZERO);assert_eq!(song.len(),1);
+        }
     }
 }

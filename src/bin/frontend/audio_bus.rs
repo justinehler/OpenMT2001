@@ -1,5 +1,7 @@
 //! One adjustable master gain above each UI-owned rodio player. Child sinks
-//! retain original relative/positional gains; the master changes live output.
+//! retain their existing relative/positional gains; the master changes output.
+//! Music uses its native nominal transfer. Effects retain the linear mapping
+//! until combined preference/source gain and application timing are implemented.
 use rodio::{mixer::Mixer, source::Zero};
 
 #[derive(Default)]
@@ -8,17 +10,18 @@ pub struct Bus {
     mixer: Option<Mixer>,
     master: Option<rodio::Sink>,
     level: u8,
+    gain: f32,
     attempted: bool,
 }
 impl Bus {
-    pub fn new() -> Self { Self { level: 100, ..Self::default() } }
+    pub fn new() -> Self { Self { level: 100, gain: 1., ..Self::default() } }
     fn connect_to(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
         let (mixer, source) = rodio::mixer::mixer(channels, sample_rate);
         // A mixer with no source detaches from its parent and would not pick
         // up sounds submitted after the menu closes.
         mixer.add(Zero::new(channels, sample_rate));
         let master = rodio::Sink::connect_new(output);
-        master.set_volume(f32::from(self.level) / 100.);
+        master.set_volume(self.gain);
         master.append(source);
         self.mixer = Some(mixer);
         self.master = Some(master);
@@ -41,9 +44,21 @@ impl Bus {
     }
     pub fn set_level(&mut self, level: u8) {
         self.level = level.min(100);
+        self.gain = f32::from(self.level) / 100.;
         if let Some(master) = &self.master {
-            master.set_volume(f32::from(self.level) / 100.);
+            master.set_volume(self.gain);
         }
+    }
+    pub fn set_music_level(&mut self, level: u8) {
+        self.level = level.min(100);
+        self.gain = crate::music_gain::amplitude(self.level);
+        if let Some(master) = &self.master {
+            master.set_volume(self.gain);
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn connect_test_output(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
+        self.connect_to(output, channels, sample_rate);
     }
     #[cfg(test)]
     pub fn level(&self) -> u8 { self.level }
@@ -60,6 +75,8 @@ mod tests {
             assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
         }
         bus.set_level(40);
+        assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+        bus.set_music_level(25);
         assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
         assert_eq!(attempts, 1);
         let mut next_launch = Bus::new();

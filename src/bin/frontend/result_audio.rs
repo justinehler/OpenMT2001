@@ -64,10 +64,9 @@ impl Assets {
     }
 }
 
-// Use the same clamped linear preference mapping as the existing music Bus.
-// Native logarithmic volume fidelity remains a separate compatibility boundary.
+// Share the native nominal music transfer with the era music master.
 pub fn set_level(sink: &rodio::Sink, music_level: u8) {
-    sink.set_volume(f32::from(music_level.min(100)) / 100.);
+    sink.set_volume(crate::music_gain::amplitude(music_level));
 }
 
 fn connect(samples: &[f32], mixer: &rodio::mixer::Mixer, music_level: u8) -> rodio::Sink {
@@ -129,6 +128,28 @@ mod level_tests {
     use super::*;
 
     #[test]
+    fn both_results_apply_native_gain_before_first_queued_sample() {
+        let assets = Assets { winner: vec![0.5; 32768], loser: vec![0.25; 32768] };
+        // Original music25 -> -2920, music50 -> -1787 hundredths dB.
+        // These fixed PCM expectations come from those commands and the
+        // synthetic source amplitudes, not from production gain helpers.
+        for (address, level, expected) in [
+            (0x541d0c, 25, 0.017336843),
+            (0x541cdc, 25, 0.008668421),
+            (0x541d0c, 50, 0.0638955),
+            (0x541cdc, 50, 0.03194775),
+        ] {
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
+            let sink = connect(assets.samples(address).unwrap(), &output, level);
+            let first: Vec<_> = rendered.by_ref().take(4096).collect();
+            assert_eq!(first.len(), 4096);
+            assert!(first.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
+            assert!(first[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(!sink.empty());
+        }
+    }
+
+    #[test]
     fn muted_result_is_silent_from_first_sample_for_both_songs() {
         let assets = Assets { winner: vec![0.5; 32768], loser: vec![0.25; 32768] };
         for address in [0x541d0c, 0x541cdc] {
@@ -162,8 +183,15 @@ mod level_tests {
         set_level(&sink, 25);
         let quieter: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(quieter.len(), 4096);
-        assert!(quieter[2048..].iter().all(|sample| (*sample - 0.125).abs() < 1e-6));
+        // Original g25 -> command -2920 -> nominal gain 0.034673685.
+        assert!(quieter[2048..].iter().all(|sample| (*sample - 0.017336843).abs() < 1e-7));
         assert!(sink.get_pos() > muted_position, "changing gain preserves forward playback");
+        let quieter_position = sink.get_pos();
+        set_level(&sink, 50);
+        let middle: Vec<_> = rendered.by_ref().take(4096).collect();
+        assert_eq!(middle.len(), 4096);
+        assert!(middle[2048..].iter().all(|sample| (*sample - 0.0638955).abs() < 1e-6));
+        assert!(sink.get_pos() > quieter_position, "interior gain changes preserve forward playback");
         set_level(&sink, 255);
         let clamped: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(clamped.len(), 4096);

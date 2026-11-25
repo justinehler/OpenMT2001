@@ -143,6 +143,8 @@ pub mod era_audio;
 pub mod gameplay_sound;
 #[path = "frontend/audio_bus.rs"]
 mod audio_bus;
+#[path = "frontend/music_gain.rs"]
+mod music_gain;
 #[path = "frontend/tutorial_visual.rs"]
 mod tutorial_visual;
 
