@@ -45,6 +45,7 @@ impl PortableDeviceAdapter for Device {
 struct Synthetic {input:StagedInput,control:Rc<RefCell<Controls>>,device:Device,
     log:Rc<RefCell<Vec<Log>>>,ring:Option<Ring>,active:[u8;2],modes:VecDeque<i32>,
     current:Option<Selected>,player:u32,flags:Vec<u8>,transient:bool,
+    auxiliary:openmt2001::resident::AuxiliaryPool,registry:super::super::resident_descriptors::Registry,
     script:VecDeque<(Effect,Vec<Change>)>}
 fn selected(raw:u32,kind:i16)->Selected{Selected{key:SelectionKey::NativeObject(raw),kind,category:0,hit:None}}
 impl Synthetic {
@@ -68,9 +69,16 @@ impl Synthetic {
         let device=Device{control:control.clone(),log:log.clone(),keys:[0;256],mouse_hresult:0,
             key_hresult:0,key_error:false,replace_on_mouse:false,suppress_on_mouse:false,
             replay_after_mouse:0,recording_after_mouse:0,vtable_after_mouse:None,recording_after_keyboard:0};
-        Self{input,control,device,log,ring:Some(Ring::construct452040([[0x66;264];11])),
+        let auxiliary=openmt2001::resident::AuxiliaryPool::from_slots(vec![[0;284];3],3).unwrap();
+        let mut registry=super::super::resident_descriptors::Registry::new().unwrap();
+        registry.install(&crate::live_host::camera_bridge::ResidentSource::synthetic(880,&auxiliary),880).unwrap();
+        Self{auxiliary,registry,input,control,device,log,ring:Some(Ring::construct452040([[0x66;264];11])),
             active:[0,0],modes:VecDeque::new(),current:None,player:0,flags:vec![0;3],
             transient:false,script:VecDeque::new()}
+    }
+    // Actual issued identities even in the synthetic continuation-order harness.
+    fn resident(&mut self,index:usize,kind:i16)->ParticipantDescriptor{
+        self.registry.selected(self.auxiliary.bind(index).unwrap(),kind,index as u32).unwrap()
     }
     fn byte_set(&mut self,b:Byte,v:u8){self.control.borrow_mut().bytes.insert(b,v);}
     fn word_set(&mut self,w:Word,v:u32){self.control.borrow_mut().words.insert(w,v);}
@@ -106,8 +114,8 @@ impl Source for Synthetic {
     fn current822d50(&mut self)->Result<Option<SelectionKey>>{self.log.borrow_mut().push(Log::Current);Ok(self.current.map(|v|v.key))}
     fn selected_kind30(&mut self,k:SelectionKey)->Result<i16>{self.log.borrow_mut().push(Log::Kind);let v=self.current.ok_or("synthetic current absent")?;assert_eq!(v.key,k);Ok(v.kind)}
     fn participant_player38(&mut self,_k:SelectionKey)->Result<u32>{self.log.borrow_mut().push(Log::Player);Ok(self.player)}
-    fn participant_flags336(&mut self,i:i32)->Result<u8>{self.log.borrow_mut().push(Log::Flags(i));self.flags.get(i as usize).copied().ok_or("synthetic actual roster absent".into())}
-    fn participant6899a0(&mut self,i:i32)->Result<ParticipantDescriptor>{self.log.borrow_mut().push(Log::Lookup(i));ParticipantDescriptor::from_source(selected(0x6000+i as u32,1))}
+    fn participant_flags336(&mut self,i:i32)->Result<u8>{self.log.borrow_mut().push(Log::Flags(i));self.flags.get(i as usize).copied().ok_or("synthetic resident prefix absent".into())}
+    fn participant6899a0(&mut self,i:i32)->Result<ParticipantDescriptor>{self.log.borrow_mut().push(Log::Lookup(i));self.registry.selected(self.auxiliary.bind(usize::try_from(i).map_err(|_|"negative resident lookup")?)?,1,i as u32)}
     fn publish_current822d50(&mut self,v:ParticipantDescriptor)->Result<()>{self.log.borrow_mut().push(Log::Publish);self.current=Some(v.selected());Ok(())}
     fn transient823168_present(&mut self)->Result<bool>{Ok(self.transient)}
     fn effect(&mut self,e:Effect)->Result<()>{
@@ -254,8 +262,8 @@ impl Source for Synthetic {
     assert!(run(&mut c).unwrap_err().reason.contains("count<=0"));
 }
 #[test] fn participant_wrap_eligibility_publish_then_callbacks_and_partial_error(){
-    let mut c=Synthetic::new();c.key(0x22);c.current=Some(selected(0x90,2));c.player=2;c.flags=vec![1,0,1];
-    let next=ParticipantDescriptor::from_source(selected(0x6001,1)).unwrap();
+    let mut c=Synthetic::new();c.key(0x22);c.current=Some(c.resident(2,2).selected());c.player=2;c.flags=vec![1,0,1];
+    let next=c.resident(1,1);
     c.script(Effect::Participant481a50(next),vec![Change::Busy(2)]);
     c.script(Effect::FreshA41f290Mode5,vec![Change::Fail]);
     let e=run(&mut c).unwrap_err();assert!(e.at.contains("participant"));assert_eq!(c.current,Some(next.selected()));
@@ -326,12 +334,12 @@ impl Source for Synthetic {
     c.script(Effect::DebugCommand4ba9f0_450490,vec![Change::Busy(2)]);
     run(&mut c).unwrap();assert_eq!(c.count(Log::Busy),1);assert!(c.logs().contains(&Log::Lookup(0)));
 }
-#[test] fn participant_domain_rejects_null_current_and_player_outside_actual_count(){
+#[test] fn participant_domain_rejects_native_current_and_index_outside_actual_count(){
     let mut c=Synthetic::new();c.key(0x22);c.current=Some(selected(0,1));
-    assert!(run(&mut c).unwrap_err().reason.contains("null"));
-    let mut c=Synthetic::new();c.key(0x22);c.current=Some(selected(0x1111,1));c.player=3;
-    assert!(run(&mut c).unwrap_err().reason.contains("player outside"));
-    assert_eq!(c.count(Log::Flags(0)),0);assert!(ParticipantDescriptor::from_source(selected(0,1)).is_err());
+    assert!(run(&mut c).unwrap_err().reason.contains("actual6899a0"));
+    let mut c=Synthetic::new();c.key(0x22);c.current=Some(c.resident(0,1).selected());c.player=3;
+    assert!(run(&mut c).unwrap_err().reason.contains("descriptor+38 outside"));
+    assert_eq!(c.count(Log::Flags(0)),0);assert!(SelectionKey::NativeObject(0).require_resident().is_err());
 }
 #[test] fn owner_target_words_preserve_raw_nonfinite_words_without_eye_or_sample_alias(){
     use openmt2001::camera::bank::{Bank,Capture};

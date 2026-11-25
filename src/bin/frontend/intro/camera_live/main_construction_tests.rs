@@ -30,7 +30,7 @@ impl Inputs {
     }
 }
 #[test]
-#[ignore="supplied original PE/DIR/BIN/installer/language; source-only packet"]
+#[ignore="requires supplied original PE/DIR/BIN/installer/language"]
 fn actual_prefix_products_topology_aliases_and_same_model_authority(){
     let input=Inputs::supplied();let mut text=input.text();let mut n=input.navigator();let mut images=input.images();
     let fonts=text.fonts() as *const Fonts;let pages=text.pages.records.iter().map(|p|(p.ordinal,p.record.clone())).collect::<Vec<_>>();
@@ -152,13 +152,13 @@ fn failed_new_candidate_and_duplicate_birth_never_replace_a_retained_product(){
     let mut t=input.text();let mut n=input.navigator();let mut i=input.images();let retry=input.load(&mut t,&mut n,&mut i).unwrap();assert_ne!(retry.root(),root);
 }
 #[test]
-#[ignore="real Assets::load inputs/ffmpeg; root alone owns execution"]
+#[ignore="requires supplied Assets::load inputs and ffmpeg"]
 fn actual_assets_entry_retains_prefix_with_same_assets_across_retirement(){
     let assets=crate::intro::Assets::load(crate::intro::Paths{compatibility:crate::compatibility::Mode::StrictV14,
         installer:path("OPENMT2001_INSTALLER"),ffmpeg:path("OPENMT2001_FFMPEG"),scene:path("OPENMT2001_SCENE"),
         executable:path("OPENMT2001_EXE"),map:path("OPENMT2001_INTRO_MAP"),quality:"low".into(),language:path("OPENMT2001_LANGUAGE"),
         profile_root:path("OPENMT2001_TEXT_PROFILE"),save_root:path("OPENMT2001_TEXT_SAVES")}).unwrap();
-    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingOtherMainChildren);assert!(assets.ui_text.board_stem.is_some());
+    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingParentTail);assert!(assets.ui_text.board_stem.is_some());
     let root=assets.main_prefix.root();let fonts=assets.ui_text.fonts() as *const Fonts;
     let list=assets.main_prefix.child0().list;let list_pointer=assets.main_prefix.node(list).unwrap() as *const Node;
     let mut process=Some(Box::new(assets));let mut retry=crate::intro::refresh::Retry::default();let mut refreshing=false;let mut loading=None;let mut parked=None;
@@ -168,7 +168,7 @@ fn actual_assets_entry_retains_prefix_with_same_assets_across_retirement(){
     assert_eq!(moved.navigator.process_primitives_mut().steps.iter().filter(|s|**s==Step::Bind(A)).count(),1);
     assert!(moved.main_prefix.require_full_main().is_err());
     //Intro::new retains this entire Assets value. Real endpoint attach and
-    //fullMain activation remain deliberately gated by missing child1/5/2.
+    //fullMain activation remain deliberately gated by missing child2 and parent tail.
 }
 #[test]
 #[ignore="supplied PE for raw unknown-preimage control"]

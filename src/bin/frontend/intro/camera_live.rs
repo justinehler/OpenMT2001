@@ -15,6 +15,7 @@ pub(crate) mod strategic_factory;
 #[path="camera_live/group_dispatch.rs"] pub(crate) mod group_dispatch;
 #[path="camera_live/group_bridge.rs"] pub(crate) mod group_bridge;
 #[path="camera_live/chat_ring.rs"] pub(crate) mod chat_ring;
+#[path="camera_live/resident_descriptors.rs"] pub(crate) mod resident_descriptors;
 #[path="camera_live/continuation.rs"] pub(crate) mod continuation;
 #[path="camera_live/continuation_bridge.rs"] pub(crate) mod continuation_bridge;
 

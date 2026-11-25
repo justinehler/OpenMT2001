@@ -33,7 +33,7 @@ fn actual_request_services_in_order_and_next_read_sees_committed_effect() {
     });
     let mut actual=0u8;let mut calls=vec![];
     worker.request_with_handler(central(),|call|{
-        calls.push(call);
+        calls.push(call.clone());
         Ok(match call {
             SessionCall::PauseByte(_)=>SessionReply::Byte(actual),
             SessionCall::Pause4bac90(_)=>{actual+=1;SessionReply::Completed},

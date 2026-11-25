@@ -191,17 +191,17 @@ impl Builder {
             //must be supplied separately if text/layout reaches it.
             texts.insert(key,super::case_zero_factories::text_owner(&self.cells,key)?);
         }
-        Ok(Primitives{main_phase:MainPhase::Unstarted,cells:Some(self.cells),panels:self.panels,texts,resources:self.resources,steps:self.steps})
+        Ok(Primitives{main_phase:MainPhase::Unstarted,main_node_owner:None,cells:Some(self.cells),panels:self.panels,texts,resources:self.resources,steps:self.steps})
     }
 }
 pub struct Primitives {
     //Frozen construction cells after transfer to typed Text. Not exposed for
     //mutation, reset/replay, or use by the old raw descriptor installation.
-    main_phase:MainPhase,cells:Option<Cells>,pub panels:BTreeMap<u32,Panel>,pub texts:BTreeMap<u32,Text>,
+    main_phase:MainPhase,main_node_owner:Option<u64>,cells:Option<Cells>,pub panels:BTreeMap<u32,Panel>,pub texts:BTreeMap<u32,Text>,
     pub resources:CpuResources,pub steps:Vec<Step>,
 }
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,Failed}
+pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,ConstructingProperty,AwaitingChild5,ConstructingChild5,AwaitingChild2,ConstructingBusiness,AwaitingParentTail,Failed}
 impl Primitives {
     ///Actual Navigator asset-load entry calls this with its successfully
     ///parsed retained model. This owner lives with that application's asset
@@ -218,6 +218,40 @@ impl Primitives {
         self.main_phase=MainPhase::Constructing;Ok(())
     }
     pub(super) fn main_failed(&mut self){self.main_phase=MainPhase::Failed;}
+    pub(super) fn retain_main_node_owner(&mut self,owner:u64){self.main_node_owner=Some(owner);}
+    pub(super) fn check_main_property_owner(&self,owner:u64)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingOtherMainChildren||self.main_node_owner!=Some(owner){
+            return Err("4055f0 continuation phase/retained node owner mismatch; no replay".into())
+        }Ok(())
+    }
+    pub(super) fn claim_main_property(&mut self,owner:u64)->Result<(),String>{
+        self.check_main_property_owner(owner)?;self.main_phase=MainPhase::ConstructingProperty;Ok(())
+    }
+    pub(super) fn main_complete_property(&mut self){self.main_phase=MainPhase::AwaitingChild5;}
+    pub(super) fn check_main_child5_owner(&self,owner:u64)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingChild5||self.main_node_owner!=Some(owner){
+            return Err("409ec0 continuation phase/retained node owner mismatch; no replay".into())
+        }Ok(())
+    }
+    pub(super) fn claim_main_child5(&mut self,owner:u64)->Result<(),String>{
+        self.check_main_child5_owner(owner)?;self.main_phase=MainPhase::ConstructingChild5;Ok(())
+    }
+    pub(super) fn main_complete_child5(&mut self){self.main_phase=MainPhase::AwaitingChild2;}
+    pub(super) fn check_main_business_owner(&self,owner:u64)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingChild2||self.main_node_owner!=Some(owner){
+            return Err("408da0 continuation phase/retained node owner mismatch; no replay".into())
+        }Ok(())
+    }
+    pub(super) fn claim_main_business(&mut self,owner:u64)->Result<(),String>{
+        self.check_main_business_owner(owner)?;self.main_phase=MainPhase::ConstructingBusiness;Ok(())
+    }
+    pub(super) fn main_complete_business(&mut self){self.main_phase=MainPhase::AwaitingParentTail;}
+    pub(super) fn reset_retained_child5(&mut self,owner:u64)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingChild2||self.main_node_owner!=Some(owner){
+            return Err("409f00 requires SAME retained child5 owner at child2 boundary".into())
+        }
+        super::native_initializers::five409f00(self.cells.as_mut().ok_or("process cells are borrowed")?,0x5608e8)
+    }
     pub(super) fn main_complete_prefix(&mut self){self.main_phase=MainPhase::AwaitingOtherMainChildren;}
     /// Temporarily move the SAME retained resources/cells into the existing
     /// constructor. F and its mutable model payload are never reconstructed.
@@ -244,7 +278,7 @@ impl Primitives {
         self.cells=Some(b.cells);self.panels=b.panels;self.resources=b.resources;self.steps=b.steps;result
     }
     pub(super) fn construction_cells(&mut self)->Result<&mut Cells,String>{
-        if self.main_phase!=MainPhase::Constructing{return Err("A source-field write outside construction phase".into())}
+        if !matches!(self.main_phase,MainPhase::Constructing|MainPhase::ConstructingProperty|MainPhase::ConstructingChild5|MainPhase::ConstructingBusiness){return Err("A source-field write outside construction phase".into())}
         self.cells.as_mut().ok_or_else(||"process cells are borrowed".into())
     }
     pub(super) fn main_named(&mut self,name:Option<&[u8]>,temporary:bool)->Result<[f32;5],String>{
@@ -267,3 +301,30 @@ impl Primitives {
 #[cfg(test)]
 #[path="primitive_factory_tests.rs"]
 mod tests;
+
+//Negative regression injection only. No production source/selection adapter.
+#[cfg(test)]
+impl Primitives {
+    pub(super) fn test_property_selection_word(&mut self,value:u32)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingOtherMainChildren{return Err("fault injection outside prefix boundary".into())}
+        self.cells.as_mut().ok_or("source cells borrowed")?.set_word(0x822d50,value)
+    }
+}
+
+#[cfg(test)]
+impl Primitives {
+    ///Reset regression canary, not a production selected-context producer.
+    pub(super) fn test_child5_state_word(&mut self,value:u32)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingChild2{return Err("child5 reset canary outside retained boundary".into())}
+        self.cells.as_mut().ok_or("source cells borrowed")?.set_word(0x5608e8+0x24,value)
+    }
+}
+
+#[cfg(test)]
+impl Primitives {
+    ///Negative independent-authority regression only: cannot force NULL.
+    pub(super) fn test_business_guard_nonnull(&mut self)->Result<(),String>{
+        if self.main_phase!=MainPhase::AwaitingChild2{return Err("business guard canary outside child2 boundary".into())}
+        self.cells.as_mut().ok_or("source cells borrowed")?.set_word(0x590f60,1)
+    }
+}

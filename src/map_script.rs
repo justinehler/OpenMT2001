@@ -1717,7 +1717,7 @@ mod tests {
             buildings = initial_buildings;
             categories = initial_categories;
             available = initial_available;
-            creation.auxiliary = initial_auxiliary;
+            creation.auxiliary.replace_with(initial_auxiliary);
             creation.initialization_rng.constructor = initial_constructor_rng;
             creation.initialization_rng.objective = initial_objective_rng;
             let topology =

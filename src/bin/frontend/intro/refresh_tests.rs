@@ -284,3 +284,31 @@ fn retirement_helper_parks_same_retired_pool_and_reports_exhaustion(){
     // The old handle is retained as evidence; no category-based rebind occurs.
     let _retained_stale_alias=handle;
 }
+
+#[test]
+fn actual_refresh_commit_retains_same_resident_registry_until_real_retirement() {
+    let assets=business_adjustment::refresh_assets_fixture();
+    let pavement=crate::selection::Assets::descriptor_test_assets(vec![],[0;116]);
+    let(endpoint,worker,pool)=camera_live::endpoint::resident_lifecycle_tests::installed_for_refresh(960,&pavement);
+    let registry=endpoint.owner().resident_descriptors().unwrap().identity();
+    let selected=endpoint.owner().current_ui_selected().unwrap();
+    let source=endpoint.owner().resident_descriptors().unwrap().source().unwrap().clone();
+    let mut old=Headless::empty();old.endpoint=Some(endpoint);old.pavement=Some(pavement);
+    let mut next=Headless::empty();let mut retry=Retry::default();
+    let plan=prepare_refresh(&mut old,&mut next,&[],&[],&assets,&mut retry).unwrap();
+    assert_eq!(old.endpoint.as_ref().unwrap().owner().resident_descriptors().unwrap().identity(),registry);
+    commit(&mut old.owners(),&mut next.owners(),plan,&mut retry);
+    assert!(old.endpoint.is_none());assert!(!worker.retired());
+    let owner=next.endpoint.as_ref().unwrap().owner();
+    assert_eq!(owner.resident_descriptors().unwrap().identity(),registry);
+    assert_eq!(owner.resident_descriptors().unwrap().source().unwrap(),&source);
+    assert_eq!(owner.current_ui_selected().unwrap(),selected);
+    assert_eq!(owner.published_ui_selected().unwrap(),selected);
+    assert_eq!(owner.transient_ui_selected().unwrap(),selected);
+    // Actual outer retirement retires registry independently of pool drop.
+    let mut refreshing=false;let mut loading=None;let mut parked=None;
+    retire(&mut retry,&mut refreshing,&mut loading,Some(&mut next.endpoint),&mut parked).unwrap();
+    assert!(worker.retired());assert!(pool.source().validate_live().is_ok());
+    assert!(parked.as_ref().unwrap().resident_descriptors().unwrap().source().is_err());
+    assert!(parked.as_ref().unwrap().current_ui_selected().is_err());
+}

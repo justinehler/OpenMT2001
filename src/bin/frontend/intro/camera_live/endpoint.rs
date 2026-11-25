@@ -96,6 +96,7 @@ impl Endpoint {
     /// source invalidation and before the Inbox flag/reply senders are released.
     fn retire_into_owner(self,before_wake:impl FnOnce(&Owner))->Owner {
         let Self { mut owner, inbox, .. } = self;
+        owner.retire_resident_source();
         owner.retire_property_source();
         owner.trace_property_lifecycle("retired-before-wake");
         before_wake(&owner);
@@ -135,7 +136,11 @@ impl Endpoint {
                 let preflight:Result<(),String>=(||{
                     let source=property.as_deref().ok_or("Install requires completed Session property source")?;
                     let resources=property_install.as_ref().ok_or("Install property resource/reset producer absent")?;
-                    owner.validate_property_install(source,generation,&resources.model)
+                    owner.validate_property_install(source,generation,&resources.model)?;
+                    // Synthetic property fixtures have no resident authority.
+                    // Real capture always carries SAME Session weak origin.
+                    if let Some(resident)=source.resident_for_install()?{owner.validate_resident_install(resident,generation)?;}
+                    Ok(())
                 })();
                 if let Err(error)=preflight{
                     owner.latch_property_failure(error.clone());
@@ -153,6 +158,7 @@ impl Endpoint {
                     let source=property.as_deref().ok_or("Install property source absent")?;
                     let resources=property_install.as_ref().ok_or("Install property resources absent")?;
                     owner.install_property_source(source,generation,&resources.model,&resources.reset)?;
+                    if let Some(resident)=source.resident_for_install()?{owner.install_resident_source(resident,generation)?;}
                     context.admission(&value)?;*admission=value;
                     // Only after epoch/resource/allocation preflight and install.
                     owner.reset_yaw();owner.world_reset_final_fields();
@@ -220,3 +226,6 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path="endpoint/source_lifecycle_tests.rs"]
 pub(crate) mod source_lifecycle_tests;
+
+#[cfg(test)]
+#[path="endpoint/resident_lifecycle_tests.rs"] pub(crate) mod resident_lifecycle_tests;

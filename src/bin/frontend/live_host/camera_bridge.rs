@@ -8,6 +8,10 @@ use std::sync::{
     mpsc,
 };
 
+#[path="camera_bridge/resident_source.rs"]
+mod resident_source;
+pub use resident_source::{ResidentSource,ResidentRead};
+
 pub type Generation = u64;
 pub type Sequence = u64;
 ///Opaque identity of the next CentralTail on this serial Worker. Constructed
@@ -50,6 +54,7 @@ impl PropertyEpoch {
 /// remain gated; no full native callback is acknowledged by this payload.
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub struct PropertySource {
+    resident:Option<ResidentSource>,
     epoch:PropertyEpoch,
     resource:crate::selection::pavement_resource::LocalPavementHandle,
     rows:[[u8;380];52],
@@ -57,16 +62,25 @@ pub struct PropertySource {
 }
 impl PropertySource {
     pub fn capture(session:&crate::fresh_city::Session<'_>,resource:crate::selection::pavement_resource::LocalPavementHandle)->Self{
-        Self{epoch:PropertyEpoch::World(session.world.topology.epoch()),resource,
+        Self{resident:Some(ResidentSource::capture(session)),epoch:PropertyEpoch::World(session.world.topology.epoch()),resource,
             rows:session.world.categories,count:session.world.topology.count617624()}
     }
+    pub fn resident(&self)->Result<&ResidentSource,String>{self.resident.as_ref().ok_or_else(||"actual Session resident source absent".into())}
+    /// Only explicit cfg(test) property-only fixtures may omit resident authority.
+    pub fn resident_for_install(&self)->Result<Option<&ResidentSource>,String>{
+        if let Some(source)=&self.resident{return Ok(Some(source));}
+        #[cfg(test)] {Ok(None)}
+        #[cfg(not(test))] {Err("actual completed Session resident source absent".into())}
+    }
+    #[cfg(test)]
+    pub(crate) fn test_with_resident(mut self,source:ResidentSource)->Self{self.resident=Some(source);self}
     pub fn epoch(&self)->PropertyEpoch{self.epoch}
     pub fn resource(&self)->crate::selection::pavement_resource::LocalPavementHandle{self.resource}
     pub fn rows(&self)->&[[u8;380];52]{&self.rows}
     pub fn count(&self)->i32{self.count}
     #[cfg(test)]
     pub fn synthetic(epoch:u64,rows:[[u8;380];52],count:i32,assets:&crate::selection::Assets)->Self{
-        Self{epoch:PropertyEpoch::synthetic(epoch),resource:assets.pavement_resource().binding().unwrap().handle(),rows,count}
+        Self{resident:None,epoch:PropertyEpoch::synthetic(epoch),resource:assets.pavement_resource().binding().unwrap().handle(),rows,count}
     }
 }
 
@@ -222,8 +236,9 @@ pub enum MissingFamily {
     Media, Sequence, Graph, Menu, Pause43e5f0, DebugCommand,
     Participant481a50, Screenshot, Selection, Action, Script,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCall {
+    Resident { source:ResidentSource, read:ResidentRead },
     ProcessByte(super::process_runtime::Byte),
     Count822d38,
     IncrementCount4ba580,
@@ -239,11 +254,15 @@ pub enum SessionCall {
     ///An explicit reached unsupported source join, never a successful stub.
     Missing(MissingFamily),
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SessionReply { Byte(u8), Word(u32), Completed }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionReply { Byte(u8), Word(u32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
 impl SessionCall {
-    fn accepts(self,reply:SessionReply)->bool {
+    fn accepts(&self,reply:&SessionReply)->bool {
         matches!((self,reply),
+            (Self::Resident{read:ResidentRead::Count7a18ec|ResidentRead::Kind30(_)|ResidentRead::Index38(_),..},SessionReply::Word(_)) |
+            (Self::Resident{read:ResidentRead::Flags336(_),..},SessionReply::Byte(_)) |
+            (Self::Resident{read:ResidentRead::Lookup6899a0(_),..},SessionReply::ResidentBinding(_)) |
+            (Self::Resident{read:ResidentRead::Validate(_)|ResidentRead::Participant481a50(_),..},SessionReply::Completed) |
             (Self::PauseByte(_)|Self::Busy48dbf0|Self::ProcessByte(_),SessionReply::Byte(_)) |
             (Self::Count822d38|Self::Scene822d30,SessionReply::Word(_)) |
             (Self::IncrementCount4ba580|Self::Quit93442c|Self::Media4b9210|Self::Sequence4b1980,SessionReply::Completed) |
@@ -303,7 +322,7 @@ impl SessionServices<'_> {
         let next=self.next.checked_add(1).ok_or("Session subcall sequence exhausted")?;
         let id=CallId{subcall:self.next,..self.id};
         let (reply,response)=mpsc::channel();
-        self.sender.send(Reply::Session(SessionRequest{id,call,reply}))
+        self.sender.send(Reply::Session(SessionRequest{id,call:call.clone(),reply}))
             .map_err(|_|self.disconnected("Host dropped operation reply stream"))?;
         let response=response.recv().map_err(|_|self.disconnected("Host dropped Session callback reply"))?;
         // Validate even when a retirement races receipt. No stale/cross-op
@@ -314,7 +333,7 @@ impl SessionServices<'_> {
                 return Err("Session reply claimed retirement without explicit generation retirement".into()),
             result=>result?,
         };
-        if !call.accepts(value) { return Err("Session callback reply type mismatch".into()); }
+        if !call.accepts(&value) { return Err("Session callback reply type mismatch".into()); }
         self.next=next;
         Ok(value)
     }
@@ -514,8 +533,8 @@ impl Worker {
                     }else if let Some(error)=&callback_failure { Err(error.clone()) }
                     else if self.retired() { Err(RequestError::Retired) }
                     else if let Some(next)=subcalls.checked_add(1) {
-                        match handle(request.call) {
-                            Ok(value) if request.call.accepts(value)=>{subcalls=next;Ok(value)},
+                        match handle(request.call.clone()) {
+                            Ok(value) if request.call.accepts(&value)=>{subcalls=next;Ok(value)},
                             Ok(_)=>Err("Session handler reply type mismatch".into()),
                             Err(RequestError::Retired) if !self.retired()=>
                                 Err("Session handler claimed retirement without explicit generation retirement".into()),

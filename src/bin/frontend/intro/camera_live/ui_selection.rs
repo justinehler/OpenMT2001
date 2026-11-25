@@ -7,11 +7,20 @@ pub enum SelectionKey {
     /// category, render-vector position, or a modern Handle.
     NativeObject(u32),
     PropertyDescriptor(Handle),
+    ResidentDescriptor(super::resident_descriptors::Handle),
 }
 impl SelectionKey {
+    /// Source cycling accepts only an issued actual resident-domain handle.
+    pub fn require_resident(self)->Result<(),String> {
+        match self {
+            Self::ResidentDescriptor(_)=>Ok(()),
+            _=>Err("participant source requires actual6899a0 resident origin".into()),
+        }
+    }
     pub fn native_key(self) -> Result<u32,String> {
         match self {
             Self::NativeObject(key) => Ok(key),
+            Self::ResidentDescriptor(_)=>Err("resident handle has no native pointer/category/player conversion".into()),
             Self::PropertyDescriptor(_) => Err("modern property handle has no proven native pointer/key conversion".into()),
         }
     }

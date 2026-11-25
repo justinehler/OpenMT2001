@@ -130,7 +130,7 @@ fn reset_original_resident_pool(
     creation: &mut openmt2001::economy::ResidentCreationState,
     residents: &mut openmt2001::economy::ResidentAccounts,
 ) {
-    creation.auxiliary = openmt2001::resident::AuxiliaryPool::for_residents();
+    creation.auxiliary.reset_for_residents();
     *residents = openmt2001::economy::ResidentAccounts::new_pool();
 }
 use openmt2001::{

@@ -7,6 +7,13 @@ use super::{case_zero::{List,ListBirth},case_zero_text::{Text,Fonts},panel_model
     ui_text_resources::UiTextResources,navigation::Group,registration};
 use openmt2001::{archive::ArchiveIndex,mesh::CachedMesh,pe::PeImage,x87::Sum};
 use std::{collections::BTreeMap,sync::atomic::{AtomicU64,Ordering}};
+///Opaque move-stable resource allocation identity, never a native pointer/key.
+#[derive(Clone,Debug)]
+pub(super) struct ResourceIdentity(std::sync::Arc<()>);
+impl ResourceIdentity {
+    pub(super) fn new()->Self{Self(std::sync::Arc::new(()))}
+    fn same(&self,other:&Self)->bool{std::sync::Arc::ptr_eq(&self.0,&other.0)}
+}
 const A:u32=0x58e3c0;
 static NEXT_OWNER:AtomicU64=AtomicU64::new(1);
 #[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]
@@ -14,14 +21,14 @@ pub struct NodeId {owner:u64,slot:usize}
 #[derive(Clone,Debug,PartialEq)]
 pub enum Field<T>{Unknown,Known(T)}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum Family {Panel,Text,Visual,List3Texts,Selector2Arrows}
+pub enum Family {Panel,Text,Visual,List3Texts,SpecialList3Texts,Amount2Visuals,Selector2Arrows}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum Label {Main,Overlay,Previous,Next,Notice,Extra,ParentSelector,
-    Mode(usize),Info(usize),SharedTitle,Child0List,Child0Selector,ArrowPrevious,ArrowNext}
+    Mode(usize),Info(usize),SharedTitle,Child0List,Child0Selector,Child5List,ArrowPrevious,ArrowNext,Property(u32),Business(u32),AmountFirst150,AmountSecond154}
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub enum Event {Allocate(Family),Constructor(u32),Slot04(u32),
     Number(u32),Append(NodeId),Counter(u32),Alias(u32),
-    TextCall(u32),Geometry(u32),Show(u8),Attach(NodeId),Stop}
+    TextCall(u32),CaptionStore(u32),Geometry(u32),Show(u8),Attach(NodeId),ScalarStore{field:u32,value:u32},Stop}
 #[derive(Clone,Debug)]
 pub struct Journal {pub source:u32,pub node:NodeId,pub event:Event}
 pub struct Visual {
@@ -30,7 +37,7 @@ pub struct Visual {
     pub caption_mode:u32,pub policy338:u32,pub selected336:u8,
     pub disabled333:u8,pub down335:u8,pub hover330:u8,
     pub flags331_332:[u8;2],pub flag314:u8,pub flag2fc:u8,pub flag34c:u8,pub flag370:u8,
-    pub state33c:u32,
+    pub state33c:u32,pub caption_identifier2f4:Field<u32>,
     /// Remaining subclass bytes have no retained first writer in this port.
     pub extra:Field<Vec<u8>>,
 }
@@ -38,10 +45,11 @@ pub struct ListProduct {pub list:List<NodeId>,pub indicator:Option<NodeId>}
 pub struct SelectorProduct {
     pub body:[f32;5],pub slider:[f32;5],pub position150:i32,pub extent154:f32,
     pub vertical168:u8,pub flag174:u8,pub dragging190:u8,pub admitted191:u8,
-    pub drag_position18c:f32,pub first_list:Option<NodeId>,
+    pub drag_position18c:f32,pub first_list:Option<NodeId>,pub last_list:Option<NodeId>,
     pub previous:Option<NodeId>,pub next:Option<NodeId>,
 }
 pub enum Subtype {
+    SpecialList3Texts(property::SpecialList),Amount2Visuals(property::Amount),
     ///Internal candidate phase; a successful prefix never exposes this.
     ConstructingList,
     ///Caption stays in Navigator's SAME primitive owner; this is an alias.
@@ -59,6 +67,8 @@ pub struct Node {
 }
 pub struct ChildZero {pub source:u32,pub parent:NodeId,pub state:u32,pub list:NodeId,pub selector:NodeId,pub native_return:i32}
 struct Product {
+    text_identity:ResourceIdentity,image_identity:ResourceIdentity,
+    child1:Option<property::ChildOne>,child5:Option<property::ChildFive>,child2:Option<property::ChildTwo>,phase:MainPhase,
     owner:u64,nodes:Vec<Box<Node>>,journal:Vec<Journal>,root:NodeId,
     aliases:BTreeMap<u32,NodeId>,buttons:BTreeMap<u32,NodeId>,infos:[Option<NodeId>;5],
     counter:u32,regions:Vec<([f32;5],[u32;4])>,mode_metadata:Vec<[u32;5]>,main_window:[f32;5],scrollbar_width:f32,
@@ -68,7 +78,7 @@ struct Product {
 ///positive input. Later full construction must consume it, never replay it.
 pub struct AwaitingOtherMainChildren {inner:Box<Product>}
 impl AwaitingOtherMainChildren {
-    pub fn phase(&self)->MainPhase{MainPhase::AwaitingOtherMainChildren}
+    pub fn phase(&self)->MainPhase{self.inner.phase}
     pub fn root(&self)->NodeId{self.inner.root}
     pub fn node(&self,id:NodeId)->Result<&Node,String>{self.inner.node(id)}
     pub fn nodes(&self)->impl Iterator<Item=&Node>{self.inner.nodes.iter().map(Box::as_ref)}
@@ -119,7 +129,8 @@ impl Prefix {
         p.construct_main(model)?;
         let owner=NEXT_OWNER.fetch_update(Ordering::Relaxed,Ordering::Relaxed,|v|v.checked_add(1)).map_err(|_|"typed node owner identity exhausted")?;
         let root=NodeId{owner,slot:0};
-        let mut product=Product{owner,nodes:Vec::new(),journal:Vec::new(),root,aliases:BTreeMap::new(),buttons:BTreeMap::new(),infos:[None;5],
+        p.retain_main_node_owner(owner);
+        let mut product=Product{text_identity:text.construction_identity.clone(),image_identity:images.construction_identity.clone(),child1:None,child5:None,child2:None,phase:MainPhase::Constructing,owner,nodes:Vec::new(),journal:Vec::new(),root,aliases:BTreeMap::new(),buttons:BTreeMap::new(),infos:[None;5],
             counter:0,regions:Vec::new(),mode_metadata:Vec::new(),main_window:[0.,0.,0.,0.,0.5],scrollbar_width:0.,child0:None,
             source_static_preimage:preimage,child0_preimage};
         let id=product.allocate(Label::Main,Family::Panel,[0.;4],Subtype::Panel{caption_source:A+0x188},0x439ae0);
@@ -132,7 +143,7 @@ impl Prefix {
         product.child_zero(&pe,p,text.fonts_mut(),images)?;
         if p.cells().byte(A+0x184)?!=0{return Err("A184 must remain incomplete through41e70b".into())}
         if product.nodes.iter().any(|n|matches!(n.subtype,Subtype::ConstructingList)){return Err("41e70b contains an unfinished admitted List constructor".into())}
-        product.record(0x41e70b,root,Event::Stop);
+        product.record(0x41e70b,root,Event::Stop);product.phase=MainPhase::AwaitingOtherMainChildren;
         Ok(AwaitingOtherMainChildren{inner:Box::new(product)})
     }
 }
@@ -160,7 +171,7 @@ impl Product {
     }
     fn allocate(&mut self,label:Label,family:Family,b:[f32;4],subtype:Subtype,source:u32)->NodeId{
         let id=NodeId{owner:self.owner,slot:self.nodes.len()};
-        let contexts=match family{Family::Panel|Family::Visual=>1,Family::List3Texts=>3,_=>0};
+        let contexts=match family{Family::Panel|Family::Visual=>1,Family::List3Texts|Family::SpecialList3Texts=>3,_=>0};
         self.nodes.push(Box::new(Node{id,label,family,bounds:b,depth:0.5,field18:1,shown:1,disabled:0,parent:None,root:None,
             number:None,children:Vec::new(),animation34:0,completion38:0,padding1e:Field::Unknown,embedded_text_contexts24:vec![Field::Unknown;contexts],subtype}));
         self.record(source,id,Event::Allocate(family));id
@@ -198,7 +209,7 @@ impl Product {
         let caption=Text::normal_fields();
         let v=Visual{caption,images:[None;5],current:None,icon_bounds:[0.,0.,0.,0.,0.5],icon:None,
             caption_mode:2,policy338:0,selected336:0,disabled333:0,down335:0,hover330:0,flags331_332:[0;2],
-            flag314:0,flag2fc:0,flag34c:0,flag370:0,state33c:0,extra:Field::Unknown};
+            flag314:0,flag2fc:0,flag34c:0,flag370:0,state33c:0,caption_identifier2f4:Field::Unknown,extra:Field::Unknown};
         let id=self.allocate(label,Family::Visual,bounds(e),Subtype::Visual(v),source);
         self.record(source,id,Event::Constructor(0x43ed20));self.bind_node(id,parent)?;
         self.visual_mut(id)?.caption.extent440900(bounds(e)).map_err(|error|format!("{source:x} {label:?} Visual/440900: {error}"))?;
@@ -312,7 +323,7 @@ impl Product {
         let bottom=store(Sum::from_i32(height.wrapping_add(y.wrapping_sub(h)).wrapping_sub(2)))?;
         let body=[left,top,right,bottom,0.5];
         let sel=SelectorProduct{body:[0.,0.,0.,0.,0.5],slider:[0.,0.,0.,0.,0.5],position150:0,extent154:10.,vertical168:1,flag174:0,dragging190:0,admitted191:1,
-            drag_position18c:0.,first_list:None,previous:None,next:None};
+            drag_position18c:0.,first_list:None,last_list:None,previous:None,next:None};
         let id=self.allocate(label,Family::Selector2Arrows,bounds(body),Subtype::Selector2Arrows(sel),source);
         self.record(source,id,Event::Constructor(0x431dd0));self.append(id,self.root,number,0x42f140,source)?;
         if let Subtype::Selector2Arrows(s)=&mut self.node_mut(id)?.subtype{s.body=body;}
@@ -337,10 +348,13 @@ impl Product {
         Ok(id)
     }
     fn show_selector(&mut self,id:NodeId,value:u8,zero:f32,source:u32)->Result<(),String>{
-        let (initial,list,previous,next)={let n=self.node(id)?;let Subtype::Selector2Arrows(s)=&n.subtype else{return Err("4326b0 requires selector subtype".into())};
-            (s.extent154,s.first_list,s.previous.ok_or("selector previous arrow missing")?,s.next.ok_or("selector next arrow missing")?)};
-        let range=if let Some(list)=list{let Subtype::List3Texts(l)=&self.node(list)?.subtype else{return Err("431e80 attachment lacks actual List3Texts subtype".into())};Some(l.list.range())}else{None};
-        let (extent,effect)=selector_range_controls(initial,value,zero,None,range.as_ref(),None,None);
+        let (initial,first,last,previous,next)={let n=self.node(id)?;let Subtype::Selector2Arrows(s)=&n.subtype else{return Err("4326b0 requires selector subtype".into())};
+            (s.extent154,s.first_list,s.last_list,s.previous.ok_or("selector previous arrow missing")?,s.next.ok_or("selector next arrow missing")?)};
+        //431e80 binds ordinary List at15c;431ea0 binds special at160.
+        //4326d0 resamples these DISTINCT slots in native overwrite order.
+        let first=first.map(|list|->Result<_,String>{match &self.node(list)?.subtype{Subtype::List3Texts(l)=>Ok(l.list.range()),_=>Err("selector15c lacks actual ordinary List subtype".into())}}).transpose()?;
+        let last=last.map(|list|->Result<_,String>{match &self.node(list)?.subtype{Subtype::SpecialList3Texts(l)=>Ok(l.range()),_=>Err("selector160 lacks actual special List subtype".into())}}).transpose()?;
+        let (extent,effect)=selector_range_controls(initial,value,zero,None,first.as_ref(),None,last.as_ref());
         {let n=self.node_mut(id)?;n.shown=value;if let Subtype::Selector2Arrows(s)=&mut n.subtype{s.admitted191=value;s.extent154=extent;}}
         match effect{
             ControlEffect::Disable=>{self.node_mut(id)?.disabled=1;for arrow in [previous,next]{self.node_mut(arrow)?.disabled=1;let v=self.visual_mut(arrow)?;v.disabled333=1;v.down335=0;}},
@@ -349,6 +363,33 @@ impl Product {
             ControlEffect::Retain=>(),
         }
         self.record(source,id,Event::Show(value));Ok(())
+    }
+    ///Actual43eb40/42f3d0/42fdf0 ordinary List path shared by BOTH
+    ///41f750 no-title callers. All three embedded Text owners survive here.
+    fn make_plain_list(&mut self,label:Label,extent:[f32;5],fonts:&mut Fonts,source:u32)->Result<NodeId,String>{
+        let id=self.allocate(label,Family::List3Texts,bounds(extent),Subtype::ConstructingList,source);
+        let birth=ListBirth::new(id);self.record(source,id,Event::Constructor(0x42f3d0));
+        for _ in 0..3{self.record(0x42f3d0,id,Event::Constructor(0x440160));}
+        self.bind_node(id,self.root)?;
+        let list={let node=self.node_mut(id)?;birth.layout(bounds(extent),fonts,&mut node.field18)}
+            .map_err(|e|format!("41f88c {label:?} List3Texts/42fdf0: {e}"))?;
+        for _ in 0..3{self.record(0x42fdf0,id,Event::TextCall(0x440900));}
+        self.record(0x42fe7d,id,Event::TextCall(0x42f510));
+        self.node_mut(id)?.subtype=Subtype::List3Texts(ListProduct{list,indicator:None});
+        self.append_bound(id,self.root,self.counter,0x42fdf0,source)?;Ok(id)
+    }
+    ///41f8a3..41f904: direct4406a0 precedes the two font3 setters.
+    ///There is no4409c0 measure, no selector binding and no extra Text.
+    fn configure_plain_list(&mut self,id:NodeId,fonts:&mut Fonts)->Result<(),String>{
+        let Subtype::List3Texts(l)=&mut self.node_mut(id)?.subtype else{return Err("41f750 requires ordinary List subtype".into())};
+        l.list.primary.style440650(3,0,0);l.list.primary.padding=1;
+        l.list.primary.layout(fonts)?;
+        l.list.secondary.style440650(2,3,3);l.list.primary.gap=2;l.list.secondary.gap=2;
+        l.list.primary.set_font(fonts,3)?;l.list.secondary.set_font(fonts,3)?;l.list.shown=0;
+        for (source,call) in [(0x41f8a3,0x440650),(0x41f8ba,0x4406a0),(0x41f8cd,0x440650),(0x41f8ee,0x440b70),(0x41f8fd,0x440b70)]{
+            self.record(source,id,Event::TextCall(call));
+        }
+        self.node_mut(id)?.shown=0;Ok(())
     }
     fn child_zero(&mut self,pe:&PeImage<'_>,p:&mut Primitives,fonts:&mut Fonts,images:&mut Images)->Result<(),String>{
         //40a950: child0 parent store occurs before41f750, state after it.
@@ -360,22 +401,9 @@ impl Product {
         let top=store(Sum::from_f64(f64::from(y as u32)).map_err(str::to_owned)?)?;
         let bottom=store(sub(self.main_window[3],float(pe,0x525028)?)?)?;
         let extent=[self.main_window[0],top,right,bottom,0.5];
-        let id=self.allocate(Label::Child0List,Family::List3Texts,bounds(extent),Subtype::ConstructingList,0x41f88c);
-        let birth=ListBirth::new(id);self.record(0x41f88c,id,Event::Constructor(0x42f3d0));
-        for _ in 0..3{self.record(0x42f3d0,id,Event::Constructor(0x440160));}
-        self.bind_node(id,self.root)?;
-        let list={let node=self.node_mut(id)?;birth.layout(bounds(extent),fonts,&mut node.field18)}.map_err(|e|format!("41f88c Child0 List3Texts/42fdf0: {e}"))?;
-        for _ in 0..3{self.record(0x42fdf0,id,Event::TextCall(0x440900));}
-        self.record(0x42fe7d,id,Event::TextCall(0x42f510));
-        self.node_mut(id)?.subtype=Subtype::List3Texts(ListProduct{list,indicator:None});
-        self.append_bound(id,self.root,self.counter,0x42fdf0,0x41f88c)?;
-        {let Subtype::List3Texts(l)=&mut self.node_mut(id)?.subtype else{unreachable!()};
-            l.list.primary.style440650(3,0,0);l.list.primary.padding=1;l.list.primary.layout(fonts).map_err(|e|format!("41f8ba Child0List primary/4406a0: {e}"))?;
-            l.list.secondary.style440650(2,3,3);l.list.primary.gap=2;l.list.secondary.gap=2;
-            l.list.primary.set_font(fonts,3).map_err(|e|format!("41f8ee Child0List primary/440b70: {e}"))?;l.list.secondary.set_font(fonts,3).map_err(|e|format!("41f8fd Child0List secondary/440b70: {e}"))?;l.list.shown=0;
-        }
-        for (source,call) in [(0x41f8a3,0x440650),(0x41f8ba,0x4406a0),(0x41f8cd,0x440650),(0x41f8ee,0x440b70),(0x41f8fd,0x440b70)]{self.record(source,id,Event::TextCall(call));}
-        self.node_mut(id)?.shown=0;self.increment(p,0x41f911)?;
+        let id=self.make_plain_list(Label::Child0List,extent,fonts,0x41f88c)?;
+        self.configure_plain_list(id,fonts)?;
+        self.increment(p,0x41f911)?;
         let h=ftol(sub(self.main_window[3],top)?)?;let x=ftol(sub(self.main_window[2],self.scrollbar_width)?)?;
         let selector=self.make_selector(Label::Child0Selector,x,y,h,self.counter,pe,images,0x41f947)?;
         self.increment(p,0x41f955)?;
@@ -396,3 +424,7 @@ impl Product {
 #[cfg(test)]
 #[path="main_construction_tests.rs"]
 mod tests;
+
+#[path="main_property_construction.rs"]
+mod property;
+pub use property::{AwaitingChild5,AwaitingChild2,AwaitingParentTail,ChildTwo,ChildOne,ChildFive,SpecialList,Amount};

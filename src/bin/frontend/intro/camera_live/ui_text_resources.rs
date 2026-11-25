@@ -87,6 +87,7 @@ impl FontPages {
 /// No Clone implementation and no move-out manager API: panels borrow it.
 #[derive(Debug)]
 pub struct UiTextResources {
+    pub(super) construction_identity:super::main_construction::ResourceIdentity,
     manager:Box<Fonts>,pub literals:Literals,pub tables:Vec<TableSource>,pub pages:FontPages,
     pub language_stem:PathBuf,pub native_language_stem:Vec<u8>,pub board_stem:Option<PathBuf>,
 }
@@ -133,7 +134,7 @@ impl UiTextResources {
         let manager=Fonts{fonts,language:packed,current:0,gap:-1,line_mode:1,scratch,
             formatted:empty_group(),temporary:empty_group(),error:ErrorWord::Unknown,selector,
             context:u32::MAX,glyph_callback:0x4554e0,ready_callback:0,four_callback:0,pair:[2243,2244],tail:Some(2245)};
-        Ok(Self{manager:Box::new(manager),literals:Literals::from_pe(&pe)?,tables,pages,language_stem,native_language_stem,board_stem:None})
+        Ok(Self{construction_identity:super::main_construction::ResourceIdentity::new(),manager:Box::new(manager),literals:Literals::from_pe(&pe)?,tables,pages,language_stem,native_language_stem,board_stem:None})
     }
     ///Actual selected USA-board operation, not an implicit second language load.
     ///Call once when the caller selects the supplied USA board. A failed attempt

@@ -3,6 +3,10 @@
 use super::{camera_bridge::{SessionCall,SessionReply,RequestError},Session};
 
 pub(super) fn handle(session:&mut Session<'_>,call:SessionCall)->Result<SessionReply,RequestError> {
+    if let SessionCall::Resident{source,read}=call {
+        return apply_resident(super::camera_bridge::PropertyEpoch::World(session.world.topology.epoch()),
+            &session.world.ledgers.residents,&session.world.creation.auxiliary,&source,read);
+    }
     // Borrow only the source-owned pieces while the same Session stays with Host.
     // This inner function is also the CPU fixture seam; it is used by production,
     // not a separately reimplemented test dispatcher.
@@ -13,7 +17,7 @@ pub(super) fn handle(session:&mut Session<'_>,call:SessionCall)->Result<SessionR
 pub(super) fn handle_with_process(session:&mut Session<'_>,process:Option<&super::process_runtime::Handle>,
     call:SessionCall)->Result<SessionReply,RequestError>{
     use SessionCall::*;
-    let process_call=matches!(call,ProcessByte(_)|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980);
+    let process_call=matches!(&call,ProcessByte(_)|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980);
     if !process_call{return handle(session,call)}
     apply_process(process,&session.world.clock.timing[5],call)
 }
@@ -53,6 +57,7 @@ fn apply(pause:&mut openmt2001::pause::State,timers:&mut [openmt2001::timers::Ta
             pause.unpause(reason.index(),|event,_|{event.apply(timers);Ok(())})?;
             Ok(SessionReply::Completed)
         }
+        Resident{..}=>Err("resident service requires actual Session World/pool handler".into()),
         Missing(family)=>Err(format!("Session source/callback join unavailable: {family:?}").into()),
         ProcessByte(_)|Count822d38|IncrementCount4ba580|Scene822d30|Quit93442c|Media4b9210|Sequence4b1980=>Err(super::process_runtime::Error::Absent.to_string().into()),
     }
@@ -63,3 +68,45 @@ fn apply(pause:&mut openmt2001::pause::State,timers:&mut [openmt2001::timers::Ta
 #[cfg(test)]
 #[path="camera_session_service/tests.rs"]
 mod tests;
+
+/// Actual handler body; every request reborrows current Session storage after
+/// earlier callbacks. Source origin AND expected World epoch are checked first.
+fn apply_resident(expected:super::camera_bridge::PropertyEpoch,
+    residents:&openmt2001::economy::ResidentAccounts,
+    pool:&openmt2001::resident::AuxiliaryPool,
+    source:&super::camera_bridge::ResidentSource,
+    read:super::camera_bridge::ResidentRead,
+)->Result<SessionReply,RequestError> {
+    use super::camera_bridge::ResidentRead::*;
+    source.validate(expected,pool)?;
+    match read {
+        Count7a18ec=>Ok(SessionReply::Word(residents.active_count)),
+        Flags336(index)=>{
+            let count=residents.active_count as i32;
+            if count<=0 || index<0 || index>=count {return Err("resident prefix flag index outside signed-positive count".into());}
+            let node=residents.nodes.get(index as usize).ok_or("resident prefix flag index outside actual nodes")?;
+            Ok(SessionReply::Byte(node.as_bytes()[0x7e]))
+        }
+        Lookup6899a0(index)=>{
+            if index<0 {return Err("6899a0 signed negative lookup outside allocated domain".into());}
+            Ok(SessionReply::ResidentBinding(pool.bind(index as usize)?))
+        }
+        Kind30(binding)=>{
+            source.validate_binding(&binding)?;
+            let record=pool.resolve(&binding)?;
+            Ok(SessionReply::Word(i16::from_le_bytes(record[0x30..0x32].try_into().unwrap()) as i32 as u32))
+        }
+        Index38(binding)=>{
+            source.validate_binding(&binding)?;
+            let record=pool.resolve(&binding)?;
+            Ok(SessionReply::Word(u32::from_le_bytes(record[0x38..0x3c].try_into().unwrap())))
+        }
+        Validate(binding)=>{source.validate_binding(&binding)?;pool.resolve(&binding)?;Ok(SessionReply::Completed)}
+        Participant481a50(binding)=>{
+            source.validate_binding(&binding)?;pool.resolve(&binding)?;
+            Err("reached481a50 after current822d50 publication: resident model/pose-to-follow initializer and mode9 callback are not joined; no camera success or freshA5".into())
+        }
+    }
+}
+#[cfg(test)]
+#[path="camera_session_service/resident_tests.rs"] mod resident_tests;

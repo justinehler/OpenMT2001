@@ -1,58 +1,128 @@
 //! Resident spending accounts and preference allocation, separate from scheduling.
 
-/// Append-only auxiliary storage from004dfb50. Slot indices are host-neutral;
-/// the caller maps them to opaque references in resident records.
+use std::sync::{Arc, Weak};
+
+/// Nonserialized identity. Only the real pool owns strong references. No
+/// native address or caller-supplied numeric token establishes this origin.
+#[derive(Debug)]
+struct AuxiliaryOrigin;
+#[derive(Debug)]
+struct AuxiliaryAllocation;
+#[derive(Clone, Debug)]
+pub struct AuxiliarySource { origin: Weak<AuxiliaryOrigin> }
+impl PartialEq for AuxiliarySource {
+    fn eq(&self,other:&Self)->bool { self.origin.ptr_eq(&other.origin) }
+}
+impl Eq for AuxiliarySource {}
+impl AuxiliarySource {
+    pub fn validate_live(&self)->Result<(),String> {
+        self.origin.upgrade().map(|_|()).ok_or_else(||"resident auxiliary pool retired/replaced".into())
+    }
+    pub fn validate_pool(&self,pool:&AuxiliaryPool)->Result<(),String> {
+        self.validate_live()?;
+        if !self.origin.ptr_eq(&Arc::downgrade(&pool.origin)) {
+            return Err("resident auxiliary source belongs to another actual pool".into());
+        }
+        Ok(())
+    }
+}
+/// Weak binding issued only for an allocated record by AuxiliaryPool. The
+/// stored index is an access coordinate, not identity. Origin + allocation
+/// weak identity survive append and reject byte-identical replacement.
+#[derive(Clone, Debug)]
+pub struct AuxiliaryBinding {
+    source: AuxiliarySource,
+    allocation: Weak<AuxiliaryAllocation>,
+    index: usize,
+}
+impl PartialEq for AuxiliaryBinding {
+    fn eq(&self,other:&Self)->bool {
+        self.source==other.source && self.allocation.ptr_eq(&other.allocation)
+    }
+}
+impl Eq for AuxiliaryBinding {}
+impl AuxiliaryBinding {
+    pub fn validate_live(&self)->Result<(),String> {
+        self.source.validate_live()?;
+        self.allocation.upgrade().map(|_|()).ok_or_else(||"resident auxiliary allocation revoked".into())
+    }
+    pub fn validate_source(&self,source:&AuxiliarySource)->Result<(),String> {
+        self.validate_live()?;
+        source.validate_live()?;
+        if self.source!=*source {return Err("resident binding/source pool mismatch".into());}
+        Ok(())
+    }
+}
+
+/// Append-only auxiliary storage from004dfb50. Payload is unchanged; identity
+/// metadata never enters slots()/save/retained byte comparisons.
 pub struct AuxiliaryPool {
     slots: Vec<[u8; 0x11c]>,
     used: usize,
+    origin: Arc<AuxiliaryOrigin>,
+    allocations: Vec<Arc<AuxiliaryAllocation>>,
 }
-
 impl AuxiliaryPool {
     /// Original45badd..45bae7 allocates6899a0 with2000 records through4dfad0.
-    /// Zero-filled unused host storage is deliberate; allocation copies every
-    /// template byte before a record becomes visible.
-    pub fn for_residents() -> Self {
-        Self::new(2000)
-    }
-
+    pub fn for_residents() -> Self { Self::new(2000) }
     pub fn new(capacity: usize) -> Self {
-        Self {
-            slots: vec![[0; 0x11c]; capacity],
-            used: 0,
+        Self {slots:vec![[0;0x11c];capacity],used:0,
+            origin:Arc::new(AuxiliaryOrigin),allocations:Vec::new()}
+    }
+    /// Restore full storage including unused bytes. Every occupied allocation
+    /// receives a fresh identity; equal imported bytes never revive a binding.
+    pub fn from_slots(slots:Vec<[u8;0x11c]>,used:usize)->Result<Self,String> {
+        if used>slots.len(){return Err("auxiliary used count exceeds capacity".into());}
+        Ok(Self {slots,used,origin:Arc::new(AuxiliaryOrigin),
+            allocations:(0..used).map(|_|Arc::new(AuxiliaryAllocation)).collect()})
+    }
+    /// Real reset/import writer: revoke prior allocated identities FIRST. The
+    /// next pool is fully prepared before this infallible publication step.
+    pub fn replace_with(&mut self,next:Self) {
+        self.allocations.clear();
+        *self=next; // drops old sole origin before publishing the new pool
+    }
+    pub fn reset_for_residents(&mut self) { self.replace_with(Self::for_residents()); }
+    pub fn source(&self)->AuxiliarySource {
+        AuxiliarySource{origin:Arc::downgrade(&self.origin)}
+    }
+    pub fn bind(&self,index:usize)->Result<AuxiliaryBinding,String> {
+        let allocation=self.allocations.get(index).filter(|_|index<self.used)
+            .ok_or("resident auxiliary index is unused/out of range")?;
+        Ok(AuxiliaryBinding{source:self.source(),allocation:Arc::downgrade(allocation),index})
+    }
+    pub fn resolve(&self,binding:&AuxiliaryBinding)->Result<&[u8;0x11c],String> {
+        binding.source.validate_pool(self)?;
+        binding.validate_live()?;
+        let actual=self.allocations.get(binding.index).filter(|_|binding.index<self.used)
+            .ok_or("resident auxiliary binding is no longer allocated")?;
+        if !binding.allocation.ptr_eq(&Arc::downgrade(actual)) {
+            return Err("resident auxiliary allocation replaced".into());
         }
+        self.slots.get(binding.index).ok_or_else(||"resident auxiliary storage absent".into())
     }
-
-    /// Restore explicit runtime storage, including unused bytes, without
-    /// assuming that recycled auxiliary slots have been cleared.
-    pub fn from_slots(slots: Vec<[u8; 0x11c]>, used: usize) -> Result<Self, String> {
-        if used > slots.len() {
-            return Err("auxiliary used count exceeds capacity".into());
-        }
-        Ok(Self { slots, used })
-    }
-
-    pub fn used(&self) -> usize {
-        self.used
-    }
-    pub fn slots(&self) -> &[[u8; 0x11c]] {
-        &self.slots
-    }
-    pub fn slots_mut(&mut self) -> &mut [[u8; 0x11c]] {
-        &mut self.slots
-    }
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut [u8; 0x11c]> {
+    pub fn used(&self)->usize {self.used}
+    pub fn slots(&self)->&[[u8;0x11c]] {&self.slots}
+    pub fn slots_mut(&mut self)->&mut [[u8;0x11c]] {&mut self.slots}
+    pub fn get_mut(&mut self,index:usize)->Option<&mut [u8;0x11c]> {
         self.slots.get_mut(..self.used)?.get_mut(index)
     }
-
-    /// Copies all284 bytes, increments used only after a successful copy.
-    /// Exhaustion returnsNone without changing storage or count.
-    pub fn allocate(&mut self, template: &[u8; 0x11c]) -> Option<usize> {
-        let index = self.used;
-        *self.slots.get_mut(index)? = *template;
-        self.used += 1;
+    /// Every byte is copied before used/identity publication. Exhaustion has
+    /// no payload/identity/count effect. Appending retains prior identities.
+    pub fn allocate(&mut self,template:&[u8;0x11c])->Option<usize> {
+        let index=self.used;
+        let slot=self.slots.get_mut(index)?;
+        let allocation=Arc::new(AuxiliaryAllocation);
+        *slot=*template;
+        self.allocations.push(allocation);
+        self.used+=1;
         Some(index)
     }
 }
+
+#[cfg(test)]
+#[path="resident/auxiliary_identity_tests.rs"]
+mod auxiliary_identity_tests;
 
 /// Bind a registered model as004dfa40 does. `reference` is an opaque model
 /// table reference; `definition` is the model's116-byte block at native+5c.

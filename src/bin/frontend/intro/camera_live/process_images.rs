@@ -10,6 +10,7 @@ pub struct Record {
     pub dimensions:[u32;2],pub header:[u32;14],pub scale:Option<f32>,
 }
 pub struct Images {
+    pub(super) construction_identity:super::main_construction::ResourceIdentity,
     pub path:String,pub archive_range:Range<usize>,pub metadata:[u32;13],
     pub ui_dimensions:[u32;2],pub records:Vec<Record>,bytes:Vec<u8>,
 }
@@ -32,7 +33,7 @@ impl Images {
             records.push(Record{ordinal,registration,range:at..end,dimensions:[t.width,t.height],header:t.header,scale:None});at=end;
         }
         if at!=bytes.len(){return Err("4c0f9f unaccounted selected collection tail".into())}
-        Ok(Self{path,archive_range:first..last,metadata:e.metadata,ui_dimensions:ui,records,bytes})
+        Ok(Self{construction_identity:super::main_construction::ResourceIdentity::new(),path,archive_range:first..last,metadata:e.metadata,ui_dimensions:ui,records,bytes})
     }
     pub fn textures(&self)->Result<TextureSet<'_>,String>{TextureSet::parse(&self.bytes).map_err(|e|e.to_string())}
     pub fn id(&self,label:u32)->Result<ImageId,String>{

@@ -27,7 +27,7 @@ pub struct Currency {
     pub prefix_format:Vec<u8>,pub suffix_format:Vec<u8>,
 }
 impl Currency {
-    fn zero(&mut self)->Result<Vec<u8>,String>{
+    pub(super) fn zero(&mut self)->Result<Vec<u8>,String>{
         //43a8c0's selected positive-value source sprintf format. Read actual
         //formats from supplied PE536400/536410; do not substitute a locale.
         let format=if self.suffix==0{&self.prefix_format}else{&self.suffix_format};
@@ -91,52 +91,20 @@ impl Business {
     fn prepare(parts:&mut Parts<'_>){
         for info in parts.infos.iter_mut(){info.shown=0;info.set_selected(0);info.disabled=0;}
     }
-    ///408a50 resets only actual reached controls and notice, retaining all
-    ///list rows, amount/range contents and unrelated native words.
-    fn subcontrols(&mut self,parts:&mut Parts<'_>)->Result<(),String>{
-        Self::prepare(parts);self.cacheb4=u32::MAX;
-        for at in [0x1c,0x20,0x8c,0x64,0x90,0xc8,0x98,0xac]{self.hide(at,true)?;}
-        self.selector_hide()?;self.zero_notice(parts)?;self.hide(0x88,true)
-    }
-    ///408b50 with mode0 and actual590f60 null. Parent+4b8 is the SAME
-    ///property.title/info_text owner, not a separate business caption.
+    ///408b50 finite mode0/null590f60, on the existing shared Text owner.
     fn mode_zero(&mut self,parts:&mut Parts<'_>)->Result<(),String>{
         parts.info_text.reset(parts.font)?;parts.title.caption=Caption::Empty;
         if parts.pending!=1&&parts.expanded!=0{parts.infos[0].shown=1;parts.infos[1].shown=1;}
         parts.info_text.identifier(parts.font,0x1e)?;parts.title.caption=Caption::Id(0x1e);
         self.node(0x64)?.show();
-        //590f60-null suppresses linked-business availability writes+1c/+20.
         parts.info_text.resize()?;
         for color in &mut parts.info_text.colors[..parts.info_text.group.count as usize]{*color=16;}
         Ok(())
     }
-    ///407890 actual exit used by408880(0), not case0's exit.
-    fn exit(&mut self,parts:&mut Parts<'_>)->Result<(),String>{
-        self.cacheb4=u32::MAX;self.subcontrols(parts)?;
-        self.hide(0x64,true)?;
-        if self.pointer(0x90)?!=0{self.node(0x90)?.hide();self.node(0xac)?.block()?;}
-        if self.pointer(0xc8)?!=0{self.node(0xc8)?.hide();self.node(0xc8)?.block()?;}
-        self.hide(0x98,true)?;
-        if self.pointer(0xac)?!=0{self.node(0xac)?.hide();self.node(0xac)?.block()?;}
-        self.selector_hide()?;self.zero_notice(parts)?;self.hide(0x88,true)
-    }
-    ///409d20 complete finite branch.407010 immediately returns on null590f60,
-    ///before clearing any summary/list/text/value or updating a business.
     fn reset(&mut self,parts:&mut Parts<'_>)->Result<(),String>{
-        for at in [0x90,0x88,0x8c,0xac,0xc8,0x64,0x50]{self.hide(at,false)?;}
-        self.active4c=0;self.option34=0;
-        for at in [0x54,0x58]{self.hide(at,false)?;}
-        self.category28=0;self.action48=0;parts.controls[0].set_selected(1);
-        self.subcontrols(parts)?;self.selection_mode2c=0;self.mode_zero(parts)?;
-        //408c50(mode0)->407010 sees authoritative null590f60 and returns.
-        parts.infos[0].set_selected(1);
-        //408880(0): real exit, prepare, action0, select info0, show first two
-        //when admitted, then a SECOND actual408b50(mode0) call.
-        self.exit(parts)?;Self::prepare(parts);self.action48=0;
-        parts.infos[0].set_selected(1);
-        if parts.pending!=1&&parts.expanded!=0{parts.infos[0].shown=1;parts.infos[1].shown=1;}
-        self.mode_zero(parts)
+        null_reset(&mut LegacyNull{business:self,parts})
     }
+
 }
 fn check_null(owner:&Owner)->Result<(),String>{
     if owner.ui_selection()?.selected_building.is_some(){return Err("business409d20 selected590f60 branch unsupported".into())}Ok(())
@@ -176,4 +144,64 @@ fn process_five_check(view:&super::main_panel::ProcessTextAccess<'_>,owner:&Owne
 }
 fn process_five_reset(view:&mut super::main_panel::ProcessTextAccess<'_>,owner:&mut Owner)->Result<(),String>{
     five_reset(view,owner)
+}
+
+///Common409d20/408a50/407890 finite null-590f60 algorithm. Both adapters
+///operate on actual typed owners; no copied Business/world is constructed.
+pub(super) trait NullReset {
+    fn scalar(&mut self,offset:u32,value:u32,byte:bool)->Result<(),String>;
+    fn hide(&mut self,offset:u32,optional:bool)->Result<bool,String>;
+    fn block(&mut self,offset:u32)->Result<(),String>;
+    fn prepare(&mut self)->Result<(),String>;
+    fn selector(&mut self)->Result<(),String>;
+    fn zero_notice(&mut self)->Result<(),String>;
+    fn mode_zero(&mut self)->Result<(),String>;
+    fn select_control_zero(&mut self)->Result<(),String>;
+    fn select_info_zero(&mut self)->Result<(),String>;
+    fn info_visibility(&mut self)->Result<(),String>;
+    fn activation_null(&mut self)->Result<(),String>;
+}
+fn null_subcontrols(v:&mut impl NullReset)->Result<(),String>{
+    v.prepare()?;v.scalar(0xb4,u32::MAX,false)?;
+    for at in [0x1c,0x20,0x8c,0x64,0x90,0xc8,0x98,0xac]{v.hide(at,true)?;}
+    v.selector()?;v.zero_notice()?;v.hide(0x88,true)?;Ok(())
+}
+fn null_exit(v:&mut impl NullReset)->Result<(),String>{
+    v.scalar(0xb4,u32::MAX,false)?;null_subcontrols(v)?;v.hide(0x64,true)?;
+    //4078be intentionally blocks ac under the90 guard.
+    if v.hide(0x90,true)?{v.block(0xac)?;}
+    if v.hide(0xc8,true)?{v.block(0xc8)?;}
+    v.hide(0x98,true)?;if v.hide(0xac,true)?{v.block(0xac)?;}
+    v.selector()?;v.zero_notice()?;v.hide(0x88,true)?;Ok(())
+}
+pub(super) fn null_reset(v:&mut impl NullReset)->Result<(),String>{
+    for at in [0x90,0x88,0x8c,0xac,0xc8,0x64,0x50]{v.hide(at,false)?;}
+    v.scalar(0x4c,0,true)?;v.scalar(0x34,0,false)?;
+    for at in [0x54,0x58]{v.hide(at,false)?;}
+    v.scalar(0x28,0,false)?;v.scalar(0x48,0,false)?;v.select_control_zero()?;
+    null_subcontrols(v)?;v.scalar(0x2c,0,false)?;v.mode_zero()?;
+    v.activation_null()?;v.select_info_zero()?;
+    null_exit(v)?;v.prepare()?;v.scalar(0x48,0,false)?;v.select_info_zero()?;
+    v.info_visibility()?;v.mode_zero()
+}
+struct LegacyNull<'a,'b>{business:&'a mut Business,parts:&'a mut Parts<'b>}
+impl NullReset for LegacyNull<'_,'_>{
+    fn scalar(&mut self,o:u32,v:u32,byte:bool)->Result<(),String>{
+        match (o,byte){(0x4c,true)=>self.business.active4c=v as u8,(0x34,false)=>self.business.option34=v,
+            (0x28,false)=>self.business.category28=v,(0x48,false)=>self.business.action48=v,
+            (0x2c,false)=>self.business.selection_mode2c=v,(0xb4,false)=>self.business.cacheb4=v,
+            _=>return Err("business reset scalar subtype mismatch".into())}Ok(())
+    }
+    fn hide(&mut self,o:u32,optional:bool)->Result<bool,String>{
+        if optional&&self.business.pointer(o)?==0{return Ok(false)}self.business.node(o)?.hide();Ok(true)
+    }
+    fn block(&mut self,o:u32)->Result<(),String>{self.business.node(o)?.block()}
+    fn prepare(&mut self)->Result<(),String>{Business::prepare(self.parts);Ok(())}
+    fn selector(&mut self)->Result<(),String>{self.business.selector_hide()}
+    fn zero_notice(&mut self)->Result<(),String>{self.business.zero_notice(self.parts)}
+    fn mode_zero(&mut self)->Result<(),String>{self.business.mode_zero(self.parts)}
+    fn select_control_zero(&mut self)->Result<(),String>{self.parts.controls[0].set_selected(1);Ok(())}
+    fn select_info_zero(&mut self)->Result<(),String>{self.parts.infos[0].set_selected(1);Ok(())}
+    fn info_visibility(&mut self)->Result<(),String>{if self.parts.pending!=1&&self.parts.expanded!=0{self.parts.infos[0].shown=1;self.parts.infos[1].shown=1;}Ok(())}
+    fn activation_null(&mut self)->Result<(),String>{Ok(())} //caller already checks authoritative Owner
 }

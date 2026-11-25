@@ -80,7 +80,7 @@ pub struct Paths {
 }
 pub struct Assets {
     //Process lifetime: moved into Intro, retained across city retirement.
-    pub(crate) main_prefix: camera_live::main_construction::AwaitingOtherMainChildren,
+    pub(crate) main_prefix: camera_live::main_construction::AwaitingParentTail,
     pub(crate) ui_images: camera_live::process_images::Images,
     pub(crate) ui_text: camera_live::ui_text_resources::UiTextResources,
     pub(crate) process_runtime:crate::live_host::process_runtime::Handle,
@@ -141,9 +141,15 @@ impl Assets {
         let mut navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks, &executable)?;
         //The current frontend selects the supplied USA board here.
         ui_text.install_usa_board(&executable, &paths.installer)?;
-        let main_prefix = camera_live::main_construction::Prefix::load(
+        let mut prefix = Some(camera_live::main_construction::Prefix::load(
             &executable, &index, &archive, [640,480], &mut ui_text,
-            navigator.process_primitives_mut(), &mut ui_images)?;
+            navigator.process_primitives_mut(), &mut ui_images)?);
+        let mut child5 = Some(camera_live::main_construction::AwaitingChild5::continue_child1(
+            &mut prefix, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
+        let mut child2 = Some(camera_live::main_construction::AwaitingChild2::continue_child5(
+            &mut child5, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
+        let main_prefix = camera_live::main_construction::AwaitingParentTail::continue_child2(
+            &mut child2, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?;
         let tooltip = crate::tooltip::Tooltip::load_shared(
             &index, &archive, &paths.installer, &paths.language, &ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(

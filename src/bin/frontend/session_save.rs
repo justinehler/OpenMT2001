@@ -819,13 +819,14 @@ impl<'data> Session<'data> {
         if slots.len() != 2000 * 284 {
             return Err("V2 resident auxiliary pool size invalid".into());
         }
-        self.world.creation.auxiliary = openmt2001::resident::AuxiliaryPool::from_slots(
+        let imported_auxiliary = openmt2001::resident::AuxiliaryPool::from_slots(
             slots
                 .chunks_exact(284)
                 .map(|b| b.try_into().unwrap())
                 .collect(),
             used,
         )?;
+        self.world.creation.auxiliary.replace_with(imported_auxiliary);
         self.world.ledgers.residents.nodes = nodes;
         r.end()?;
         let mut a = Input::new(ext.required(6)?);

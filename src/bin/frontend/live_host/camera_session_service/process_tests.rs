@@ -6,7 +6,7 @@ const WAIT:Duration=Duration::from_secs(10);
 fn observation()->Observation{Observation{current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,strategic_writeback:None,finalization_fault:None,task_effects:vec![]}}
 fn install()->Operation{Operation::Install{property:None,admission:Admission::default(),capture:openmt2001::camera::bank::Capture::from_records([[0;196];2])}}
 #[test]
-#[ignore="requires supplied original Session and Intro assets; Root heavy lane only; no native/original execution"]
+#[ignore="requires supplied original Session and Intro assets"]
 fn actual_assets_startup_retained_handle_and_host_service_writers() {
     use crate::{fresh_city::{self,Inputs,Policy},live_host::Host};
     use std::{fs,path::{Path,PathBuf}};
@@ -180,7 +180,7 @@ fn checked_operation_process_reads_reread_same_owner_after_real_writer(){
     });
     worker.request(install()).unwrap();let central=process.begin_central(worker.central_identity().unwrap()).unwrap();let mut calls=vec![];let scene=2;
     let error=worker.request_with_handler(Operation::CentralTail{admission:Admission::default()},|call|{
-        assert!(process.mutex_available());calls.push(call);apply_process(Some(&process),&scene,call)
+        assert!(process.mutex_available());calls.push(call.clone());apply_process(Some(&process),&scene,call)
     }).unwrap_err();process.fail_central(central).unwrap();
     assert_eq!(calls.len(),6);assert!(error.to_string().contains("stop after source effects"));
     assert_eq!(process.count822d38().unwrap(),1);assert_eq!(process.quit_requested().unwrap(),1);assert!(!process.exit_ready().unwrap());

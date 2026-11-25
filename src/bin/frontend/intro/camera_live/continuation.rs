@@ -59,9 +59,8 @@ pub struct LiveDevice<'a>{pub receiver:Receiver,pub replay:u8,pub recording:u8,
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub struct ParticipantDescriptor(Selected);
 impl ParticipantDescriptor {
-    pub fn from_source(value:Selected)->Result<Self>{
-        if value.key.native_key()?==0{return Err("6899a0 null descriptor unsupported".into())}
-        Ok(Self(value))
+    pub(super) fn from_registered(value:Selected,registry:&super::resident_descriptors::Registry)->Result<Self>{
+        registry.validate_selected(value)?;Ok(Self(value))
     }
     pub fn selected(self)->Selected{self.0}
 }
@@ -152,16 +151,16 @@ fn edge<C:Source>(c:&C,i:usize)->Result<bool>{
 fn cycle<C:Source>(c:&mut C)->Result<()>{
     let selected=c.current822d50()?; //PE pointer first, then count, then kind.
     let count=c.word(Word::ParticipantCount7a18ec)? as i32;
-    if count<=0{return Err("participant count<=0: native division/roster dereference outside portable domain".into())}
+    if count<=0{return Err("participant count<=0: native division/resident dereference outside portable domain".into())}
     let (mut index,mut visited)=(0i32,0i32);
     if let Some(key)=selected{
         let kind=c.selected_kind30(key)?;
         if kind==1||kind==2{
-            if key.native_key()?==0{return Err("current participant key is null".into())}
+            key.require_resident()?;
             let player=c.participant_player38(key)?;
-            //PE INC+CDQ+IDIV, not unsigned modulo. Bound actual roster domain
+            //PE INC+CDQ+IDIV, not unsigned modulo. Bound actual resident domain
             //before signed overflow/negative remainder/native invalid indexing.
-            if player>=count as u32{return Err("current participant player outside actual count domain".into())}
+            if player>=count as u32{return Err("current descriptor+38 outside signed-positive resident count domain".into())}
             visited=1;index=((player+1) as i32)%count;
         }
     }
@@ -249,3 +248,6 @@ pub fn run<C:Source>(c:&mut C,_prefix:super::group_dispatch::PrefixComplete)->st
 }
 #[cfg(test)]
 #[path="continuation_tests.rs"] mod tests;
+
+#[cfg(test)]
+pub(crate) fn test_resident_cycle(source:&mut impl Source)->Result<()> {cycle(source)}

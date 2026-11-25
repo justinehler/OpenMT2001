@@ -9,6 +9,7 @@ pub struct Pose {pub eye:[u32;3],pub target:[u32;3],pub up:[u32;3]}
 pub struct Input {pub mode12:Mode12Input,pub mode13:Mode13Input}
 pub struct Owner {bank:Bank,kind_dirty:u8,
     ui_selection:Option<super::ui_selection::SelectionState>,
+    resident_descriptors:Option<super::resident_descriptors::Registry>,
     property_descriptors:Option<super::property_descriptors::Pool>,
     property_epoch:Option<crate::live_host::camera_bridge::PropertyEpoch>,
     last_property_epoch:Option<crate::live_host::camera_bridge::PropertyEpoch>,
@@ -17,6 +18,8 @@ pub struct Owner {bank:Bank,kind_dirty:u8,
 /// A field-readable selection borrowed from the owning allocation validator.
 /// Private construction and the Owner borrow prohibit pool retirement while a
 /// consumer holds this facade. source() copies the actual identity unchanged.
+/// Resident fields require a live Host service loan and cannot enter this
+/// UI-only field-readable representation.
 #[derive(Clone,Copy)]
 pub(super) struct ResolvedSelected<'a> {
     value:super::ui_selection::Selected,
@@ -36,7 +39,7 @@ fn pose(raw:&RawRecord,eye:usize,target:usize)->Pose {
 impl Owner {
     /// The separate process kind-dirty byte is supplied by the caller. It is
     /// not restored from disk or inferred from saved mode/interface flags.
-    pub fn new(bank:Bank,kind_dirty:u8)->Self {Self{bank,kind_dirty,ui_selection:None,property_descriptors:None,property_epoch:None,last_property_epoch:None,property_failure:None}}
+    pub fn new(bank:Bank,kind_dirty:u8)->Self {Self{bank,kind_dirty,ui_selection:None,resident_descriptors:None,property_descriptors:None,property_epoch:None,last_property_epoch:None,property_failure:None}}
     pub fn install_ui_selection(&mut self,value:super::ui_selection::SelectionState)->Result<(),String>{
         if self.ui_selection.is_some(){return Err("Live selection already installed".into());}
         self.ui_selection=Some(value);Ok(())
@@ -52,6 +55,9 @@ impl Owner {
     pub fn validate_ui_selected(&self,value:Option<super::ui_selection::Selected>)
         ->Result<Option<super::ui_selection::Selected>,String>{
         if let Some(selected)=value{
+            if matches!(selected.key,super::ui_selection::SelectionKey::ResidentDescriptor(_)){
+                self.resident_descriptors()?.validate_selected(selected)?;
+            }
             if matches!(selected.key,super::ui_selection::SelectionKey::PropertyDescriptor(_)){
                 self.property_descriptors()?.resolve_selected(selected)?;
             }
@@ -60,7 +66,11 @@ impl Owner {
     }
     pub(super) fn resolve_ui_selected(&self,value:Option<super::ui_selection::Selected>)
         ->Result<Option<ResolvedSelected<'_>>,String>{
-        Ok(self.validate_ui_selected(value)?.map(|value|ResolvedSelected{value,_owner:self}))
+        let value=self.validate_ui_selected(value)?;
+        if value.is_some_and(|selected|matches!(selected.key,super::ui_selection::SelectionKey::ResidentDescriptor(_))) {
+            return Err("resident field consumer requires same-operation Host descriptor reads; UI-only actor/main/follow join unavailable".into());
+        }
+        Ok(value.map(|value|ResolvedSelected{value,_owner:self}))
     }
     pub fn current_ui_selected(&self)->Result<Option<super::ui_selection::Selected>,String>{
         self.validate_ui_selected(self.ui_selection()?.current)
@@ -70,6 +80,30 @@ impl Owner {
     }
     pub fn transient_ui_selected(&self)->Result<Option<super::ui_selection::Selected>,String>{
         self.validate_ui_selected(self.ui_selection()?.transient)
+    }
+    pub fn resident_descriptors(&self)->Result<&super::resident_descriptors::Registry,String>{
+        self.resident_descriptors.as_ref().ok_or_else(||"actual resident registry not installed".into())
+    }
+    pub fn resident_descriptors_mut(&mut self)->Result<&mut super::resident_descriptors::Registry,String>{
+        self.resident_descriptors.as_mut().ok_or_else(||"actual resident registry not installed".into())
+    }
+    pub fn validate_resident_install(&self,source:&crate::live_host::camera_bridge::ResidentSource,generation:u64)->Result<(),String>{
+        match &self.resident_descriptors {
+            Some(registry)=>registry.validate_install(source,generation),
+            None=>{
+                source.validate_live()?;
+                if source.epoch().serial()!=generation{return Err("resident source/channel World epoch mismatch".into());}
+                Ok(())
+            }
+        }
+    }
+    pub fn install_resident_source(&mut self,source:&crate::live_host::camera_bridge::ResidentSource,generation:u64)->Result<(),String>{
+        self.validate_resident_install(source,generation)?;
+        if self.resident_descriptors.is_none(){self.resident_descriptors=Some(super::resident_descriptors::Registry::new()?);}
+        self.resident_descriptors_mut()?.install(source,generation)
+    }
+    pub fn retire_resident_source(&mut self){
+        if let Some(registry)=&mut self.resident_descriptors{registry.retire();}
     }
     /// Move the ONE actual pool into this SAME process owner once. This does
     /// not construct a pool from defaults or copy Content.selected/Scene.

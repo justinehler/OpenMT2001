@@ -5,11 +5,11 @@ use super::*;
 use crate::live_host::camera_bridge::{self as bridge,PauseReason,PauseByte,MissingFamily,Operation,Admission,Observation,Pose};
 use std::{thread,time::Duration};
 const WAIT:Duration=Duration::from_secs(10);
-fn observation()->Observation {
+pub(super) fn observation()->Observation {
     Observation{current:Pose{eye:[0;3],target:[0;3],up:[0;3]},sampled:None,
         strategic_writeback:None,finalization_fault:None,task_effects:vec![]}
 }
-fn install()->Operation {
+pub(super) fn install()->Operation {
     Operation::Install{property:None,admission:Admission::default(),
         capture:openmt2001::camera::bank::Capture::from_records([[0;196];2])}
 }
@@ -36,7 +36,7 @@ fn production_handler_body_mutates_actual_pause_and_timers_before_next_ui_read()
     let before=timers.clone();let catalog=openmt2001::level_catalog::Catalog::default();
     worker.request(install()).unwrap();let mut trace=vec![];
     let error=worker.request_with_handler(central(),|call|{
-        let reply=apply(&mut pause,&mut timers,&catalog,call)?;
+        let reply=apply(&mut pause,&mut timers,&catalog,call.clone())?;
         trace.push((call,pause.bytes,timers[0][0]));Ok(reply)
     }).unwrap_err();
     assert_eq!(error,RequestError::Failed("fault after actual effects".into()));
@@ -68,7 +68,7 @@ fn signed_reason_byte_retained_and_missing_family_is_not_success() {
 }
 
 #[test]
-#[ignore="requires supplied original Session and Intro assets; Root heavy lane only; no native/original execution"]
+#[ignore="requires supplied original Session and Intro assets"]
 fn actual_host_session_and_ui_assets_service_fresh_reads_before_late_fault() {
     use crate::{fresh_city::{self,Inputs,Policy},live_host::Host};
     use std::{fs,path::{Path,PathBuf}};

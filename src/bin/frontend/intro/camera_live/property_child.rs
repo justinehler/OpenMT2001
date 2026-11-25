@@ -20,7 +20,7 @@ impl Widget {
     fn reset_text(&mut self){self.caption=Caption::Empty;}
 }
 /// Actual4326b0/4326d0 range sources, in native overwrite order. These are
-/// retained live attached-list fields; root must transfer their actual writes,
+/// retained live attached-list fields; the caller must transfer their writes,
 /// including row-count/range changes, with the list owner (not a Scene).
 #[derive(Clone,Debug)]
 pub struct ListRange {pub limit480:i32,pub limit2cc:i32,pub first284:i32}
@@ -105,7 +105,7 @@ pub struct State {
     pub land_links:Vec<(Selected,usize)>,pub selected_category:u32,
     pub colors:[u32;4],pub inputs:Inputs,
 }
-// Construction has no guessed Default. Root installs actual constructor/layout
+// Construction has no guessed Default. The caller installs constructor/layout
 // state once, then replaces only inputs at the acknowledged live boundary.
 fn state(view:&Prospective)->Result<&State,String>{Ok(&view.main.property)}
 fn state_mut(view:&mut Prospective)->Result<&mut State,String>{Ok(&mut view.main.property)}
@@ -142,30 +142,12 @@ fn classify(view:&mut Prospective,owner:&Owner)->Result<u8,String>{
 }
 ///402c30 ->41f150 reset order. Retains all report rows and widget values.
 pub(super) fn reset_owned(view:&mut Prospective)->Result<(),String>{
-    state_mut(view)?.reset_flag=0;
-    for info in &mut state_mut(view)?.infos {
-        info.shown=0;info.set_selected(0);info.disabled=0;
-    }
-    let s=state_mut(view)?;s.title.shown=0;
-    hide(&mut s.widgets.previous);hide(&mut s.widgets.next);
-    hide(&mut s.widgets.report_one);selector_hide(&mut s.widgets.selector_one);
-    hide(&mut s.widgets.report_three);selector_hide(&mut s.widgets.selector_three);
-    hide(&mut s.widgets.report_four);selector_hide(&mut s.widgets.selector_four);
-    hide(&mut s.widgets.offer);s.active=0;hide(&mut s.widgets.rights);
-    hide(&mut s.widgets.auxiliary);hide(&mut s.widgets.report_five);
-    selector_hide(&mut s.widgets.selector_five);hide(&mut s.widgets.marker);hide(&mut s.widgets.text);
-    Ok(())
+    finite::reset_owned(&mut FiniteView{view,owner:None})
 }
 pub(super) fn exit_owned(view:&mut Prospective,owner:&Owner)->Result<(),String>{
-    current(view,owner)?;
-    reset_owned(view)?;super::main_panel::clear_notice(view)?;
-    let s=state_mut(view)?;
-    hide(&mut s.widgets.previous);hide(&mut s.widgets.next);
-    hide(&mut s.widgets.report_four);selector_hide(&mut s.widgets.selector_four);
-    hide(&mut s.widgets.offer);s.active=0;hide(&mut s.widgets.rights);
-    hide(&mut s.widgets.auxiliary);hide(&mut s.widgets.report_five);
-    selector_hide(&mut s.widgets.selector_five);hide(&mut s.widgets.marker);Ok(())
+    current(view,owner)?;finite::exit_owned(&mut FiniteView{view,owner:Some(owner)})
 }
+
 fn clear_child_notice(view:&mut Prospective)->Result<(),String>{
     if let Some(notice)=&mut state_mut(view)?.notice{notice.reset_text();}Ok(())
 }
@@ -187,6 +169,11 @@ fn select_mode_flag(view:&mut Prospective,index:u32,value:u8)->Result<(),String>
     main_mut(view)?.controls.get_mut(index as usize).ok_or("reached property mode flag outside6")?.set_selected(value);Ok(())
 }
 fn update_title(view:&mut Prospective)->Result<(),String>{
+    if state(view)?.report==0 {
+        {let (m,font)=super::main_panel::Access::text_parts_mut(view)?;
+            finite::report_zero_title(&mut m.info_text,font,&mut m.property.title.shown)?;}
+        let s=state_mut(view)?;s.title.shown=1;s.title.caption=Caption::Id(28);return Ok(())
+    }
     super::main_panel::reset_info_text(view)?;
     {let s=state_mut(view)?;s.title.reset_text();s.title.shown=1;}
     let (report,other,utility,index)={let s=state(view)?;(s.report,s.other_group,s.utility_group,s.utility_index)};
@@ -538,14 +525,11 @@ pub(super) fn reset_no_selection_owned(view:&mut Prospective,owner:&Owner)->Resu
         hide(&mut s.widgets.auxiliary);hide(&mut s.widgets.rights);hide(&mut s.widgets.offer);
         hide(&mut s.widgets.previous);hide(&mut s.widgets.next);}
     //41f120, actual six controls: preserve down335 and unrelated native cells.
-    for control in &mut main_mut(view)?.controls{control.shown=0;control.set_selected(0);control.disabled=0;}
+    for control in &mut main_mut(view)?.controls{
+        finite::reset_control(&mut control.shown,control.native_mode,&mut control.selected,&mut control.disabled);
+    }
     {let s=state_mut(view)?;s.mode=0;s.report=0;}
-    reset_owned(view)?;info_visibility(view,owner)?;
-    state_mut(view)?.report=0;update_title(view)?;dispatch_report(view,owner)?;
-    let report=state(view)?.report;select_info_flag(view,report)?;
-    exit_owned(view,owner)?;clear_child_notice(view)?;
-    state_mut(view)?.mode=0;let report=state(view)?.report;select_info_flag(view,report)?;
-    info_visibility(view,owner)?;update_title(view)?;activate_owned(view,owner)
+    finite::no_selection_cycle(&mut FiniteView{view,owner:Some(owner)})
 }
 /// Every public finite property operation executes fully on disposable
 /// Main/Text/Fonts/model state. Failed preflight/apply never mutates live UI.
@@ -699,4 +683,38 @@ fn process_reset_no_selection_check(view:&super::main_panel::ProcessTextAccess<'
 }
 fn process_reset_no_selection(view:&mut super::main_panel::ProcessTextAccess<'_>,owner:&mut Owner)->Result<(),String>{
     reset_no_selection(view,owner)
+}
+
+#[path="property_finite.rs"]
+pub(super) mod finite;
+struct FiniteView<'v,'o>{view:&'v mut Prospective,owner:Option<&'o Owner>}
+impl finite::ResetView for FiniteView<'_,'_>{
+    fn flag10(&mut self,value:u8)->Result<(),String>{state_mut(self.view)?.reset_flag=value;Ok(())}
+    fn infos_reset(&mut self)->Result<(),String>{for i in &mut state_mut(self.view)?.infos{finite::reset_control(&mut i.shown,i.native_mode,&mut i.selected,&mut i.disabled);}Ok(())}
+    fn title_hide(&mut self)->Result<(),String>{state_mut(self.view)?.title.shown=0;Ok(())}
+    fn hide(&mut self,offset:u32)->Result<(),String>{
+        let w=&mut state_mut(self.view)?.widgets;
+        let target=match offset{0x2c=>&mut w.previous,0x30=>&mut w.next,0x64=>&mut w.report_one,
+            0x74=>&mut w.report_three,0x80=>&mut w.report_four,0xb0=>&mut w.offer,
+            0xac=>&mut w.rights,0xbc=>&mut w.auxiliary,0x8c=>&mut w.report_five,
+            0x6c=>&mut w.marker,0x38=>&mut w.text,_=>return Err("unmapped finite child control offset".into())};
+        hide(target);Ok(())
+    }
+    fn selector_hide(&mut self,offset:u32)->Result<(),String>{
+        let w=&mut state_mut(self.view)?.widgets;
+        selector_hide(match offset{0x68=>&mut w.selector_one,0x78=>&mut w.selector_three,
+            0x84=>&mut w.selector_four,0x90=>&mut w.selector_five,_=>return Err("unmapped finite selector offset".into())});Ok(())
+    }
+    fn active1c(&mut self,value:u8)->Result<(),String>{state_mut(self.view)?.active=value;Ok(())}
+}
+impl finite::ExitView for FiniteView<'_,'_>{fn notice_reset(&mut self)->Result<(),String>{super::main_panel::clear_notice(self.view)}}
+impl finite::NoSelectionView for FiniteView<'_,'_>{
+    fn info_visibility(&mut self)->Result<(),String>{info_visibility(self.view,self.owner.ok_or("selection owner absent")?)}
+    fn report_zero(&mut self)->Result<(),String>{state_mut(self.view)?.report=0;Ok(())}
+    fn title_zero(&mut self)->Result<(),String>{update_title(self.view)}
+    fn dispatch_zero(&mut self)->Result<(),String>{dispatch_report(self.view,self.owner.ok_or("selection owner absent")?)}
+    fn select_info_zero(&mut self)->Result<(),String>{select_info_flag(self.view,0)}
+    fn child_title_reset(&mut self)->Result<(),String>{clear_child_notice(self.view)}
+    fn mode_zero(&mut self)->Result<(),String>{state_mut(self.view)?.mode=0;Ok(())}
+    fn activate(&mut self)->Result<(),String>{activate_owned(self.view,self.owner.ok_or("selection owner absent")?)}
 }

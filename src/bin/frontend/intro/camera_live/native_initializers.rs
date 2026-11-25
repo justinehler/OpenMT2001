@@ -76,7 +76,16 @@ pub fn bottom425400(c:&mut Cells,p:u32)->Result<(),String>{
     c.set_byte(compass+0x38,0)?;c.set_word(compass+0x34,id)
 }
 ///Direct prefix of4b9d40, also used by the process startup caller. This is
-///not the whole world reset; root must still run its remaining actual steps.
+///not the whole world reset; the caller must run its remaining actual steps.
 pub fn world_reset_selection_prefix(c:&mut Cells)->Result<(),String>{
     for a in [0x822d50,0x823168,0x590f60,0x6175f8]{c.set_word(a,0)?;}Ok(())
 }
+
+///409dd0 only clears the first eight words and parent+20. State+24,
+///list+28 and tail+2c..37 retain their genuine static preimage until layout.
+pub fn five409dd0(c:&mut Cells,p:u32)->Result<(),String>{
+    c.set_word(p+0x20,0)?;
+    for o in (0..0x20).step_by(4){c.set_word(p+o,0)?;}Ok(())
+}
+///409f00 is solely this store; no list, Text, row or selector reset.
+pub fn five409f00(c:&mut Cells,p:u32)->Result<(),String>{c.set_word(p+0x24,0)}
