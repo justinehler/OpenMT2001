@@ -457,7 +457,8 @@ impl Host {
                 tables:std::sync::Arc::new(crate::locator::strategic::Tables::capture(image)?),upper},
         });
         let admission=self.supplied_camera_admission(session,true)?;
-        let result = worker.request(camera_bridge::Operation::Install {capture,admission,property:Some(std::sync::Arc::new(camera_bridge::PropertySource::capture(session,pavement)))});
+        let operation = camera_bridge::Operation::Install {capture,admission,property:Some(std::sync::Arc::new(camera_bridge::PropertySource::capture(session,pavement)))};
+        let result = worker.request_with_handler(operation, |call| camera_session_service::handle(session,call));
         self.camera_bridge = Some(worker);
         match result.and_then(|mut observation| {
             Self::check_camera_finalization(&observation)?;
@@ -3000,3 +3001,10 @@ mod camera_finalization_fault_tests {
         ui.join().unwrap();
     }
 }
+
+#[cfg(test)]
+pub(crate) use camera_session_service::primary_category::read as test_primary_category_read;
+
+// Private containing-test observation of the actual validated World reader.
+#[cfg(test)]
+pub(crate) use camera_session_service::primary_category::observer as test_primary_category;

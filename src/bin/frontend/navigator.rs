@@ -86,7 +86,13 @@ impl Navigator {
     pub(crate) fn native_primitives_mut(&mut self) -> &mut crate::intro::camera_live::primitive_factory::Primitives {
         &mut self.native_primitives
     }
-    pub fn load(index: &ArchiveIndex, archive: &[u8], blocks: &[Block], executable: &[u8]) -> Result<Self, String> {
+    pub fn load(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8])->Result<Self,String>{
+        Self::load_path(index,archive,blocks,executable,false)
+    }
+    pub(crate) fn load_deferred(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8])->Result<Self,String>{
+        Self::load_path(index,archive,blocks,executable,true)
+    }
+    fn load_path(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8],deferred:bool)->Result<Self,String>{
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
@@ -101,7 +107,9 @@ impl Navigator {
         if mesh.frames==0||mesh.frames>u16::MAX as usize{return Err("F supplied model frame count".into());}
         let cpu_model=crate::intro::camera_live::panel_models::CpuModel::parsed(
             crate::intro::camera_live::ui_graph::PanelId::F,e,&mesh)?;
-        let native_primitives=crate::intro::camera_live::primitive_factory::Primitives::navigator(executable,cpu_model)?;
+        let native_primitives=if deferred{
+            crate::intro::camera_live::primitive_factory::Primitives::deferred_allocation(executable,cpu_model)?
+        }else{crate::intro::camera_live::primitive_factory::Primitives::navigator(executable,cpu_model)?};
         let upper_shells=(0..mesh.frames).map(|frame|
             ui::panel_frame_base(index,archive,"gamedata2/brand_new_panels/new_nav_top.tm",&[1],frame).map(|v|v.0)
         ).collect::<Result<Vec<_>,_>>()?;
@@ -423,11 +431,11 @@ mod tests {
         let navigator = super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap();
         assert_eq!(navigator.surfaces.len(), 3, "backing, border and map keep dynamic indices stable");
         // Real asset-load boundary: one retained source-owned F construction.
-        use crate::intro::camera_live::{primitive_factory::{Phase, Step}, ui_graph::PanelId};
+        use crate::intro::camera_live::{primitive_factory::{DescriptorIdentity, Phase, Step}, ui_graph::PanelId};
         let primitive = &navigator.native_primitives;
         let panel = primitive.panels.get(&0x58cdb0).unwrap();
         assert_eq!(panel.phase, Phase::Bound);
-        assert_eq!(panel.descriptor, Some(PanelId::F));
+        assert_eq!(panel.descriptor, Some(DescriptorIdentity::Archive(PanelId::F)));
         assert_eq!(primitive.panels.len(), 1);
         assert_eq!(primitive.texts.len(), 1);
         assert_eq!(primitive.steps.iter().filter(|s| **s == Step::NavigatorSuffix(0x58cdb0)).count(), 1);

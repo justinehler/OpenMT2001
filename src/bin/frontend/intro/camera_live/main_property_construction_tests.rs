@@ -198,11 +198,11 @@ fn actual_assets_entry_advances_once_and_failed_load_cannot_replace_published_as
         executable:path("OPENMT2001_EXE"),map:path("OPENMT2001_INTRO_MAP"),quality:"low".into(),language:path("OPENMT2001_LANGUAGE"),
         profile_root:path("OPENMT2001_TEXT_PROFILE"),save_root:path("OPENMT2001_TEXT_SAVES")};
     let mut published=Box::new(crate::intro::Assets::load(paths()).unwrap());
-    assert_eq!(published.main_prefix.phase(),MainPhase::AwaitingBinding);assert_eq!(published.main_prefix.child1().fields.len(),25);
-    let root=published.main_prefix.root();let fonts=published.ui_text.fonts() as *const Fonts;let child=published.main_prefix.child1().field(0xac).unwrap();let child_ptr=published.main_prefix.node(child).unwrap() as *const Node;
+    assert_eq!(published.reordered_main().unwrap().phase(),MainPhase::AwaitingBinding);assert_eq!(published.reordered_main().unwrap().child1().fields.len(),25);
+    let root=published.reordered_main().unwrap().root();let fonts=published.ui_text.fonts() as *const Fonts;let child=published.reordered_main().unwrap().child1().field(0xac).unwrap();let child_ptr=published.reordered_main().unwrap().node(child).unwrap() as *const Node;
     let mut missing=paths();missing.executable=path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");
     if let Ok(replacement)=crate::intro::Assets::load(missing){published=Box::new(replacement);panic!("missing supplied PE unexpectedly published");}
-    assert_eq!(published.main_prefix.root(),root);assert_eq!(published.ui_text.fonts() as *const Fonts,fonts);assert_eq!(published.main_prefix.node(child).unwrap() as *const Node,child_ptr);
+    assert_eq!(published.reordered_main().unwrap().root(),root);assert_eq!(published.ui_text.fonts() as *const Fonts,fonts);assert_eq!(published.reordered_main().unwrap().node(child).unwrap() as *const Node,child_ptr);
     assert_eq!(published.navigator.process_primitives_mut().main_phase(),MainPhase::AwaitingBinding);
-    let moved=published;assert_eq!(moved.main_prefix.node(child).unwrap() as *const Node,child_ptr);assert!(moved.main_prefix.require_full_main().is_err());
+    let moved=published;assert_eq!(moved.reordered_main().unwrap().node(child).unwrap() as *const Node,child_ptr);assert!(moved.reordered_main().unwrap().require_full_main().is_err());
 }

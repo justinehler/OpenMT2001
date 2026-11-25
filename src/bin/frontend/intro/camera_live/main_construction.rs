@@ -12,7 +12,7 @@ use std::{collections::BTreeMap,sync::atomic::{AtomicU64,Ordering}};
 pub(super) struct ResourceIdentity(std::sync::Arc<()>);
 impl ResourceIdentity {
     pub(super) fn new()->Self{Self(std::sync::Arc::new(()))}
-    fn same(&self,other:&Self)->bool{std::sync::Arc::ptr_eq(&self.0,&other.0)}
+    pub(super) fn same(&self,other:&Self)->bool{std::sync::Arc::ptr_eq(&self.0,&other.0)}
 }
 const A:u32=0x58e3c0;
 static NEXT_OWNER:AtomicU64=AtomicU64::new(1);

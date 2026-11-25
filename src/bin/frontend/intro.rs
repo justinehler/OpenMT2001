@@ -80,7 +80,7 @@ pub struct Paths {
 }
 pub struct Assets {
     //Process lifetime: moved into Intro, retained across city retirement.
-    pub(crate) main_prefix: camera_live::main_construction::CompletedMainLayout,
+    pub(crate) primary_products: camera_live::deferred_primary::PrimaryProducts,
     pub(crate) ui_images: camera_live::process_images::Images,
     pub(crate) ui_text: camera_live::ui_text_resources::UiTextResources,
     pub(crate) process_runtime:crate::live_host::process_runtime::Handle,
@@ -117,6 +117,15 @@ pub struct Assets {
 impl Assets {
     pub fn load(paths: Paths) -> Result<Self, String> { Self::load_with_source_options(paths,"") }
     pub fn load_with_source_options(paths:Paths,source_options:&str)->Result<Self,String>{
+        Self::load_primary_path(paths,source_options,false)
+    }
+    ///Explicit cold fresh lane; default/CLI behavior remains the reordered
+    ///eager lane; complete ordered construction and startup admission remain gated.
+    pub(crate) fn load_deferred_primary(paths:Paths,source_options:&str)->Result<Self,String>{
+        Self::load_primary_path(paths,source_options,true)
+    }
+    pub(crate) fn reordered_main(&self)->Result<&camera_live::main_construction::CompletedMainLayout,String>{self.primary_products.reordered()}
+    fn load_primary_path(paths:Paths,source_options:&str,deferred:bool)->Result<Self,String>{
         let read = |path: PathBuf| fs::read(&path).map_err(|e| format!("{}: {e}", path.display()));
         let build_file = read(paths.scene.join("BuildEditorModels/BuildFile.dat"))?;
         let executable = read(paths.executable)?;
@@ -138,9 +147,15 @@ impl Assets {
         let navigation = crate::navigation::Navigation::load_shared(&index, &archive, &executable, &ui_images)?;
         let mut selection = crate::selection::Assets::load(&executable, &index, &archive)?;
         style.apply_blocks(&mut selection.blocks)?;
-        let mut navigator = crate::navigator::Navigator::load(&index, &archive, &selection.blocks, &executable)?;
+        let mut navigator=if deferred{
+            crate::navigator::Navigator::load_deferred(&index,&archive,&selection.blocks,&executable)?
+        }else{crate::navigator::Navigator::load(&index,&archive,&selection.blocks,&executable)?};
         //The current frontend selects the supplied USA board here.
         ui_text.install_usa_board(&executable, &paths.installer)?;
+        let primary_products=if deferred{
+            camera_live::deferred_primary::PrimaryProducts::Deferred(camera_live::deferred_primary::DeferredPrimary::allocate(
+                &executable,&index,&archive,navigator.process_primitives_mut(),&ui_text,&ui_images)?)
+        }else{
         let mut prefix = Some(camera_live::main_construction::Prefix::load(
             &executable, &index, &archive, [640,480], &mut ui_text,
             navigator.process_primitives_mut(), &mut ui_images)?);
@@ -152,6 +167,8 @@ impl Assets {
             &mut child2, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?);
         let main_prefix = camera_live::main_construction::CompletedMainLayout::continue_parent_tail(
             &mut parent_tail, &executable, &mut ui_text, navigator.process_primitives_mut(), &mut ui_images)?;
+        camera_live::deferred_primary::PrimaryProducts::Reordered(main_prefix)
+        };
         let tooltip = crate::tooltip::Tooltip::load_shared(
             &index, &archive, &paths.installer, &paths.language, &ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(
@@ -280,7 +297,7 @@ impl Assets {
             maps,
         });
         Ok(Self {
-            process_runtime, activity, main_prefix, ui_images, ui_text,
+            process_runtime, activity, primary_products, ui_images, ui_text,
             cursors,
             inputs,
             scene,
@@ -2962,6 +2979,12 @@ impl Intro {
     }
 
     fn retire_inspection(&mut self) {
+        if let camera_live::deferred_primary::PrimaryProducts::Deferred(primary)=&mut self.assets.primary_products{
+            //Invalidate the current World claim before Endpoint retires/wakes.
+            if let Err(error)=primary.retire_for_camera(self.assets.navigator.process_primitives_mut()){
+                eprintln!("D current-World retirement failed: {error}");
+            }
+        }
         if let Err(error)=refresh::retire(&mut self.refresh_retry,&mut self.refreshing_fresh,&mut self.loading,
             self.inspection.as_mut().map(|view|&mut view.camera_endpoint),&mut self.camera_parked){
             eprintln!("Property source retirement failed (latched in parked Owner): {error}");

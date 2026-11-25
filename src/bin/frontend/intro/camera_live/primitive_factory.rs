@@ -10,14 +10,20 @@ use super::{case_zero_text::Text,native_initializers as init,
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum Step {Node(u32),PanelBounds(u32),CaptionNode(u32),CaptionDefaults(u32),
     PanelSuffix(u32),NavigatorSuffix(u32),Bind(u32),Names(u32),ModelZ(u32),
-    CaptionMode(u32),Frames(u32),Prepare(u32),BindFlags(u32),Layout(u32),Bound(u32)}
+    CaptionMode(u32),Frames(u32),Prepare(u32),BindFlags(u32),Layout(u32),Bound(u32),
+    Currency,DescriptorCopy(u8),PrimaryReferences,LayoutReturned(u32),Registered(u32),PrimaryCount(u32)}
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum Phase {Constructed,Binding,AwaitingLayout,Bound}
+pub enum Phase {Constructed,Binding,AwaitingLayout,Bound,Parked}
+/// Actual descriptor argument identity. Unbound is the outer Option::None.
+/// EmbeddedD is non-null D+388, with a separately null model reference.
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum DescriptorIdentity {Archive(PanelId),EmbeddedD,NativeNull}
 pub struct Panel {
     pub address:u32,pub caption:u32,pub phase:Phase,
-    /// Actual +37c reference in the new CPU owner. Raw Cells+37c is NOT filled
-    /// with a fake pointer. Old raw descriptor adapters cannot install this.
-    pub descriptor:Option<PanelId>,
+    /// Actual +37c argument identity in the typed CPU owner. Outer None is
+    /// unbound; NativeNull and the non-null EmbeddedD are distinct. Raw Cells
+    /// never receive a fabricated modern pointer.
+    pub descriptor:Option<DescriptorIdentity>,
 }
 #[derive(Clone,Copy)]
 pub enum Layout {Navigator,Unsupplied}
@@ -96,21 +102,42 @@ impl Builder {
         for at in [0x15c8,0x15e4,0x15f8]{extent(&mut self.cells,p+at,[0.,0.,0.,0.,0.5])?}
         self.cells.set_word(p,0x525578)?;self.steps.push(Step::NavigatorSuffix(p));Ok(())
     }
+    fn main_static(&mut self)->Result<(),String>{
+        self.admit_span(0x58e3c0,0x50c)?;
+        self.panel(0x58e3c0)?;self.spans.insert(0x58e3c0,0x50c);
+        for i in 0..6{extent(&mut self.cells,0x58e3c0+0x3b0+i*0x24,[0.,0.,0.,0.,0.5])?;}
+        extent(&mut self.cells,0x58e3c0+0x4d4,[0.,0.,0.,0.,0.5])?;
+        self.cells.set_word(0x58e3c0,0x525668)?;
+        //40a770 is static birth; no40a950 body or reset is reached here.
+        for o in [4,0]{self.cells.set_word(0x560920+o,0)?;}
+        Ok(())
+    }
     ///43b770 prefix through the actual layout call boundary. DescriptorNone
     ///means the native NULL argument, NOT a failed resource lookup. A present
     ///descriptor with referenceNone takes its native independent branch.
     ///A missing map entry, wrong slot or definition alias is always an error.
     pub fn bind_prefix(&mut self,p:u32,descriptor:Option<PanelId>,names:Option<[Option<&[u8]>;2]>,group:Group)
         ->Result<(),String>{
+        self.bind_descriptor_prefix(p,descriptor.map_or(DescriptorIdentity::NativeNull,DescriptorIdentity::Archive),names,group)
+    }
+    pub(super) fn bind_descriptor_prefix(&mut self,p:u32,descriptor:DescriptorIdentity,names:Option<[Option<&[u8]>;2]>,group:Group)->Result<(),String>{
         let panel=self.panels.get(&p).ok_or("Bind requires completed actual Panel constructor")?;
         if panel.phase!=Phase::Constructed{return Err("Panel binding cannot replay on a retained owner".into())}
-        let model=descriptor.map(|id|self.resources.resolve(id)).transpose()?.flatten();
-        if let Some(id)=descriptor {
+        let model=match descriptor {
+            DescriptorIdentity::Archive(id)=>self.resources.resolve(id)?,
+            DescriptorIdentity::NativeNull=>None,
+            DescriptorIdentity::EmbeddedD=>{
+                if p!=0x574488||group!=Group::Primary||self.cells.word(p+0x388)?!=0{
+                    return Err("D bind requires SAME real non-null embedded descriptor with null model".into())
+                }None
+            }
+        };
+        if let DescriptorIdentity::Archive(id)=descriptor {
             let actual=registration::entries(group).into_iter().find(|e|e.object==p).ok_or("Bind panel/group identity mismatch")?;
             if actual.id!=id{return Err("Bind descriptor aliases a different actual panel slot".into())}
         }
         self.panels.get_mut(&p).unwrap().phase=Phase::Binding;
-        self.panels.get_mut(&p).unwrap().descriptor=descriptor;
+        self.panels.get_mut(&p).unwrap().descriptor=Some(descriptor);
         self.cells.set_word(p+0x138,registration::group_address(group))?;
         self.steps.push(Step::Bind(p));
         if let Some(key)=model {
@@ -161,7 +188,7 @@ impl Builder {
         match layout {
             Layout::Unsupplied=>return Err("Actual specialized panel layout/children/fonts remain unsupplied".into()),
             Layout::Navigator=>{
-                if p!=0x58cdb0||self.cells.word(p)?!=0x525578||panel.descriptor!=Some(PanelId::F){
+                if p!=0x58cdb0||self.cells.word(p)?!=0x525578||panel.descriptor!=Some(DescriptorIdentity::Archive(PanelId::F)){
                     return Err("43d010 requires actual Navigator constructor/descriptor identity".into())
                 }
                 if self.cells.word(0x525578+4)?!=0x43d010{return Err("Actual Navigator slot04 differs from concrete43d010".into())}
@@ -185,23 +212,33 @@ impl Builder {
     pub fn finish(self)->Result<Primitives,String>{
         if self.panels.values().any(|p|p.phase==Phase::Binding){return Err("Failed partial bind cannot publish a retained primitive owner".into())}
         let mut texts=BTreeMap::new();
-        for key in self.caption_keys {
+        for &key in &self.caption_keys {
             //One native address, one actual Text subtype. It is NOT Visual;
             //+338/+336 are never read. A single eventual shared Fonts owner
             //must be supplied separately if text/layout reaches it.
             texts.insert(key,super::case_zero_factories::text_owner(&self.cells,key)?);
         }
-        Ok(Primitives{main_phase:MainPhase::Unstarted,main_node_owner:None,cells:Some(self.cells),panels:self.panels,texts,resources:self.resources,steps:self.steps})
+        Ok(Primitives{provenance:Provenance::Reordered,caption_keys:self.caption_keys,spans:self.spans,construction_identity:super::main_construction::ResourceIdentity::new(),primary_claimed:false,primary_currency_identity:None,primary_pool:None,primary_phase:None,main_phase:MainPhase::Unstarted,main_node_owner:None,cells:Some(self.cells),panels:self.panels,texts,resources:self.resources,steps:self.steps})
     }
 }
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub(super) enum Provenance {Reordered,DeferredUnclaimed,DeferredClaimed}
 pub struct Primitives {
+    provenance:Provenance,caption_keys:BTreeSet<u32>,spans:BTreeMap<u32,u32>,
     //Frozen construction cells after transfer to typed Text. Not exposed for
     //mutation, reset/replay, or use by the old raw descriptor installation.
+    pub(super) construction_identity:super::main_construction::ResourceIdentity,pub(super) primary_claimed:bool,
+    pub(super) primary_currency_identity:Option<super::main_construction::ResourceIdentity>,
+    pub(super) primary_pool:Option<[PanelId;16]>,
+    pub(super) primary_phase:Option<super::primary_d_construction::PrimaryPhase>,
     main_phase:MainPhase,main_node_owner:Option<u64>,cells:Option<Cells>,pub panels:BTreeMap<u32,Panel>,pub texts:BTreeMap<u32,Text>,
     pub resources:CpuResources,pub steps:Vec<Step>,
 }
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum MainPhase {Unstarted,Constructing,AwaitingOtherMainChildren,ConstructingProperty,AwaitingChild5,ConstructingChild5,AwaitingChild2,ConstructingBusiness,AwaitingParentTail,ConstructingParentTail,AwaitingBinding,Failed}
+#[path="primary_d_primitives.rs"]
+mod primary_d_primitives;
+#[path="deferred_primitives.rs"] mod deferred_primitives;
 impl Primitives {
     ///Actual Navigator asset-load entry calls this with its successfully
     ///parsed retained model. This owner lives with that application's asset
@@ -212,8 +249,10 @@ impl Primitives {
         b.bind_prefix(0x58cdb0,Some(PanelId::F),None,Group::Primary)?;
         b.layout(0x58cdb0,Layout::Navigator)?;b.finish()
     }
+    pub fn primary_pool(&self)->Option<&[PanelId;16]>{self.primary_pool.as_ref()}
     pub fn main_phase(&self)->MainPhase{self.main_phase}
     pub(super) fn claim_main(&mut self)->Result<(),String>{
+        if self.provenance!=Provenance::Reordered{return Err("Fresh Main must wait for the real Voting-through-Clock continuation; eager Prefix cannot consume it".into())}
         if self.main_phase!=MainPhase::Unstarted{return Err("439ae0/41dcf0 A construction phase already claimed; no replay".into())}
         self.main_phase=MainPhase::Constructing;Ok(())
     }
@@ -269,23 +308,17 @@ impl Primitives {
     pub(super) fn construct_main(&mut self,model:CpuModel)->Result<(),String>{
         if self.main_phase!=MainPhase::Constructing{return Err("A prefix phase not claimed".into())}
         let mut b=Builder{cells:self.cells.take().ok_or("nested process construction")?,
-            panels:std::mem::take(&mut self.panels),caption_keys:BTreeSet::new(),
-            spans:BTreeMap::from([(0x58cdb0,0x160c)]),
+            panels:std::mem::take(&mut self.panels),caption_keys:std::mem::take(&mut self.caption_keys),
+            spans:std::mem::take(&mut self.spans),
             resources:std::mem::replace(&mut self.resources,CpuResources::new()),steps:std::mem::take(&mut self.steps)};
         let result=(||{
-            b.add_primary_model(model)?;b.panel(0x58e3c0)?;
-            // Whole439ae0 suffix AFTER the existing whole Panel constructor.
-            for i in 0..6{extent(&mut b.cells,0x58e3c0+0x3b0+i*0x24,[0.,0.,0.,0.,0.5])?;}
-            extent(&mut b.cells,0x58e3c0+0x4d4,[0.,0.,0.,0.,0.5])?;
-            b.cells.set_word(0x58e3c0,0x525668)?;
-            // Actual40a770 static child0 constructor, not its later reset.
-            for o in [4,0]{b.cells.set_word(0x560920+o,0)?;}
+            b.add_primary_model(model)?;b.main_static()?;
             b.bind_prefix(0x58e3c0,Some(PanelId::A),None,Group::Primary)?;
             let key=0x58e3c0+0x188;
             self.texts.insert(key,super::case_zero_factories::text_owner(&b.cells,key)?);
             Ok(())
         })();
-        self.cells=Some(b.cells);self.panels=b.panels;self.resources=b.resources;self.steps=b.steps;result
+        self.cells=Some(b.cells);self.panels=b.panels;self.caption_keys=b.caption_keys;self.spans=b.spans;self.resources=b.resources;self.steps=b.steps;result
     }
     pub(super) fn construction_cells(&mut self)->Result<&mut Cells,String>{
         if !matches!(self.main_phase,MainPhase::Constructing|MainPhase::ConstructingProperty|MainPhase::ConstructingChild5|MainPhase::ConstructingBusiness|MainPhase::ConstructingParentTail){return Err("A source-field write outside construction phase".into())}

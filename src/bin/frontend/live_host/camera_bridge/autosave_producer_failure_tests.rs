@@ -36,6 +36,10 @@ struct CameraAudit { completed: Vec<camera_bridge::Boundary>, retired_queued: bo
 struct CaptureContext { expected: camera_bridge::Boundary, installing: bool }
 fn unsupported<T>(name: &str) -> Result<T, String> { Err(format!("capture-only fixture cannot service {name}")) }
 impl Context for CaptureContext {
+    fn primary_construction(&mut self)->Option<(&mut crate::intro::camera_live::deferred_primary::DeferredPrimary,
+        &mut crate::intro::camera_live::primitive_factory::Primitives,&mut crate::intro::camera_live::ui_text_resources::UiTextResources,
+        &crate::intro::camera_live::process_images::Images)>{None}
+
     fn save_interface_mode(&self) -> Result<u32,String> {
         // Explicit controlled normal-view component input, not a UI observation.
         if self.expected != camera_bridge::Boundary::RawCapture { return unsupported("view outside RawCapture"); }

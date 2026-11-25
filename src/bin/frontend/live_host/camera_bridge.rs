@@ -249,6 +249,8 @@ pub enum MissingFamily {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCall {
     Resident { source:ResidentSource, read:ResidentRead },
+    /// Protected Install-only actual current World categories.
+    PrimaryCategory { source:ResidentSource, row:Option<u8> },
     ProcessByte(super::process_runtime::Byte),
     Count822d38,
     IncrementCount4ba580,
@@ -265,10 +267,16 @@ pub enum SessionCall {
     Missing(MissingFamily),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionReply { Byte(u8), Word(u32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
+pub enum SessionReply { PrimaryCategory(Option<[u32;3]>), Byte(u8), Word(u32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
 impl SessionCall {
+    fn admitted_on(&self,boundary:Boundary)->bool{
+        if matches!(self,Self::PrimaryCategory{..}){boundary==Boundary::Install}
+        else{boundary==Boundary::CentralTail}
+    }
     fn accepts(&self,reply:&SessionReply)->bool {
         matches!((self,reply),
+            (Self::PrimaryCategory{row:None,..},SessionReply::PrimaryCategory(None)) |
+            (Self::PrimaryCategory{row:Some(_),..},SessionReply::PrimaryCategory(Some(_))) |
             (Self::Resident{read:ResidentRead::Count7a18ec|ResidentRead::Kind30(_)|ResidentRead::Index38(_),..},SessionReply::Word(_)) |
             (Self::Resident{read:ResidentRead::Flags336(_),..},SessionReply::Byte(_)) |
             (Self::Resident{read:ResidentRead::Lookup6899a0(_),..},SessionReply::ResidentBinding(_)) |
@@ -305,6 +313,7 @@ pub struct SessionServices<'a> {
     failure:Option<RequestError>,
 }
 impl SessionServices<'_> {
+    pub fn generation(&self)->Generation{self.id.generation}
     /// Check before entering the next UI phase or publishing an operation.
     /// Previously committed Host effects are never revoked by this check.
     pub fn check(&mut self)->Result<(),RequestError> {
@@ -326,7 +335,7 @@ impl SessionServices<'_> {
     }
     fn exchange(&mut self,call:SessionCall)->Result<SessionReply,RequestError> {
         if self.retired.load(Ordering::Acquire) { return Err(RequestError::Retired); }
-        if self.id.boundary!=Boundary::CentralTail {
+        if !call.admitted_on(self.id.boundary) {
             return Err("Session callback outside admitted central operation".into());
         }
         let next=self.next.checked_add(1).ok_or("Session subcall sequence exhausted")?;
@@ -548,7 +557,7 @@ impl Worker {
                     let expected=CallId{generation:self.generation,sequence:self.next,boundary,subcall:subcalls};
                     // An identity error takes priority over cancellation; forged
                     // messages never invoke even an otherwise admitted handler.
-                    let result=if request.id!=expected || boundary!=Boundary::CentralTail {
+                    let result=if request.id!=expected || !request.call.admitted_on(boundary) {
                         Err(RequestError::Failed("Session callback request generation/sequence/boundary/subcall mismatch".into()))
                     }else if let Some(error)=&callback_failure { Err(error.clone()) }
                     else if self.retired() { Err(RequestError::Retired) }

@@ -9,6 +9,11 @@ use openmt2001::camera::{bank::{Capture,StrategicTransition},primary::CursorRequ
 /// its acknowledgement, including a completed boundary with a finalizer fault. Other operations must not stage scheduler effects.
 /// This finite contract does not promise rollback of camera/UI/cursor effects.
 pub trait Context {
+    ///Explicit actual retained fresh process product, absent on the legacy
+    ///eager route and fixtures. No default success or fabricated D capability.
+    fn primary_construction(&mut self)->Option<(&mut super::deferred_primary::DeferredPrimary,
+        &mut super::primitive_factory::Primitives,&mut super::ui_text_resources::UiTextResources,
+        &super::process_images::Images)>;
     /// Read only the actual UI view; no Session, input, provider or sample call.
     fn save_interface_mode(&self)->Result<u32,String>;
     /// Read-only operation preflight, before suppliers, raw restore, UI intents
@@ -159,6 +164,10 @@ impl Endpoint {
                 Operation::Install{capture,admission:value,property}=>{
                     let source=property.as_deref().ok_or("Install property source absent")?;
                     let resources=property_install.as_ref().ok_or("Install property resources absent")?;
+                    if let Some((primary,p,text,images))=context.primary_construction(){
+                        if value.upper.is_some()||value.strategic.is_some(){primary.require_supplier()?;}
+                        primary.install(source.resident()?,generation,services,p,text,images)?;
+                    }
                     owner.install_property_source(source,generation,&resources.model,&resources.reset)?;
                     if let Some(resident)=source.resident_for_install()?{owner.install_resident_source(resident,generation)?;}
                     context.admission(&value)?;*admission=value;

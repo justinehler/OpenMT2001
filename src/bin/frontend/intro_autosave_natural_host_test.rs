@@ -40,6 +40,9 @@ struct Audit {install:usize,current:usize,raw:usize,mode_reads:usize,
 struct ReadOnlyContext {mode:u32,installing:bool,audit:Arc<Mutex<Audit>>}
 fn unsupported<T>(name:&str)->Result<T,String>{Err(format!("capture-only context cannot service {name}"))}
 impl Context for ReadOnlyContext {
+    fn primary_construction(&mut self)->Option<(&mut camera_live::deferred_primary::DeferredPrimary,
+        &mut camera_live::primitive_factory::Primitives,&mut camera_live::ui_text_resources::UiTextResources,
+        &camera_live::process_images::Images)>{None}
     fn save_interface_mode(&self)->Result<u32,String>{
         self.audit.lock().unwrap().mode_reads+=1;Ok(self.mode)
     }

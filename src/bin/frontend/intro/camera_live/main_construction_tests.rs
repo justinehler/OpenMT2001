@@ -39,7 +39,7 @@ fn actual_prefix_products_topology_aliases_and_same_model_authority(){
     let prefix=input.load(&mut text,&mut n,&mut images).unwrap();
     let p=n.process_primitives_mut();
     assert_eq!(p.main_phase(),MainPhase::AwaitingOtherMainChildren);assert_eq!(prefix.phase(),p.main_phase());
-    assert_eq!(p.panels[&A].phase,Phase::AwaitingLayout);assert_eq!(p.panels[&A].descriptor,Some(PanelId::A));
+    assert_eq!(p.panels[&A].phase,Phase::AwaitingLayout);assert_eq!(p.panels[&A].descriptor,Some(crate::intro::camera_live::primitive_factory::DescriptorIdentity::Archive(PanelId::A)));
     assert_eq!(p.cells().byte(A+0x184).unwrap(),0);assert_eq!(p.cells().word(A+0x37c).unwrap(),0,"no fabricated descriptor address");
     assert_eq!(p.resources.model(PanelId::F).unwrap().frames[0].as_ptr(),f);
     assert_eq!(p.steps.iter().filter(|s|**s==Step::NavigatorSuffix(0x58cdb0)).count(),1);
@@ -158,15 +158,15 @@ fn actual_assets_entry_retains_prefix_with_same_assets_across_retirement(){
         installer:path("OPENMT2001_INSTALLER"),ffmpeg:path("OPENMT2001_FFMPEG"),scene:path("OPENMT2001_SCENE"),
         executable:path("OPENMT2001_EXE"),map:path("OPENMT2001_INTRO_MAP"),quality:"low".into(),language:path("OPENMT2001_LANGUAGE"),
         profile_root:path("OPENMT2001_TEXT_PROFILE"),save_root:path("OPENMT2001_TEXT_SAVES")}).unwrap();
-    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingBinding);assert!(assets.ui_text.board_stem.is_some());
-    let root=assets.main_prefix.root();let fonts=assets.ui_text.fonts() as *const Fonts;
-    let list=assets.main_prefix.child0().list;let list_pointer=assets.main_prefix.node(list).unwrap() as *const Node;
+    assert_eq!(assets.reordered_main().unwrap().phase(),MainPhase::AwaitingBinding);assert!(assets.ui_text.board_stem.is_some());
+    let root=assets.reordered_main().unwrap().root();let fonts=assets.ui_text.fonts() as *const Fonts;
+    let list=assets.reordered_main().unwrap().child0().list;let list_pointer=assets.reordered_main().unwrap().node(list).unwrap() as *const Node;
     let mut process=Some(Box::new(assets));let mut retry=crate::intro::refresh::Retry::default();let mut refreshing=false;let mut loading=None;let mut parked=None;
     crate::intro::refresh::retire(&mut retry,&mut refreshing,&mut loading,None,&mut parked).unwrap();
     let mut moved=process.take().unwrap();assert!(process.is_none());
-    assert_eq!(root,moved.main_prefix.root());assert_eq!(fonts,moved.ui_text.fonts() as *const Fonts);assert_eq!(list_pointer,moved.main_prefix.node(list).unwrap() as *const Node);
+    assert_eq!(root,moved.reordered_main().unwrap().root());assert_eq!(fonts,moved.ui_text.fonts() as *const Fonts);assert_eq!(list_pointer,moved.reordered_main().unwrap().node(list).unwrap() as *const Node);
     assert_eq!(moved.navigator.process_primitives_mut().steps.iter().filter(|s|**s==Step::Bind(A)).count(),1);
-    assert!(moved.main_prefix.require_full_main().is_err());
+    assert!(moved.reordered_main().unwrap().require_full_main().is_err());
     //Intro::new retains this entire Assets value. Real endpoint attach and
     //fullMain activation remain deliberately gated by missing child2 and parent tail.
 }

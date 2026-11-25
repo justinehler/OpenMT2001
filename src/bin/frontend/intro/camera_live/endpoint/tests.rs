@@ -8,6 +8,10 @@ fn input()->Input {
         mode13:Mode13Input{enable_translation:true,enable_keyboard:true,enable_zoom:true,buttons:[false;2],delta:[0;2],keys:[true,false,false,false],sensitivity:50,legacy_yaw:false,invert_vertical:false,low_height:false}}
 }
 impl Context for Ui {
+    fn primary_construction(&mut self)->Option<(&mut crate::intro::camera_live::deferred_primary::DeferredPrimary,
+        &mut crate::intro::camera_live::primitive_factory::Primitives,&mut crate::intro::camera_live::ui_text_resources::UiTextResources,
+        &crate::intro::camera_live::process_images::Images)>{None}
+
     fn save_interface_mode(&self)->Result<u32,String>{Ok(0)}
     fn validate(&self,_:&Operation,_:&Owner)->Result<(),String>{
         if self.fail_validate{Err("read-only preflight rejected".into())}else{Ok(())}

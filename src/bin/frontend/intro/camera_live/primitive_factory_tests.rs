@@ -175,7 +175,7 @@ fn duplicate_asset_paths_still_own_distinct_primary_models(){
 #[test]
 fn actual_factory_entry_creates_retained_owner_and_rejects_unprovided_text_and_graph(){
     let mut owned=Primitives::navigator(&pe(),model(2)).unwrap();
-    assert_eq!(owned.panels[&F].phase,Phase::Bound);assert_eq!(owned.panels[&F].descriptor,Some(PanelId::F));
+    assert_eq!(owned.panels[&F].phase,Phase::Bound);assert_eq!(owned.panels[&F].descriptor,Some(crate::intro::camera_live::primitive_factory::DescriptorIdentity::Archive(PanelId::F)));
     assert_eq!(owned.texts.len(),1);assert_eq!(owned.texts[&CAP].font,0);
     assert_eq!(owned.cells().word(CAP+0x24).unwrap(),0,"only synthetic PE virtual allocation proves this zero");
     assert!(owned.require_text_layout(CAP).unwrap_err().contains("shared font"));

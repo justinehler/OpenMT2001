@@ -48,7 +48,7 @@ impl Assets {
         Ok(Self{frames})
     }
     ///43c3a0 model submission remains eligible while hiding or closed with a
-    ///main region. Body overlays use graph.body independently. Root must draw
+    ///main region. Body overlays use graph.body independently. The caller must draw
     ///only this shell during motion, in the real group's registration order.
     ///This uses the existing modern2D supplied-panel conversion; exact native
     ///material matrix/depth/backing parity is explicitly still a render gap.
@@ -183,6 +183,25 @@ impl CpuResources {
         if self.models.contains_key(&id)||self.descriptors.contains_key(&id){return Err("CPU UI descriptor/model alias already owned".into())}
         let descriptor=CpuDescriptor::primary(&model)?;
         self.models.insert(id,model);self.descriptors.insert(id,descriptor);Ok(())
+    }
+    /// Loader ownership only: no descriptor copy, name lookup or model bind.
+    pub(super) fn insert_unbound_model(&mut self,c:&super::process_image::Cells,model:CpuModel)->Result<(),String>{
+        let id=model.source.panel;
+        let entry=super::registration::PRIMARY.iter().find(|e|e.id==id).ok_or("No actual Primary model slot")?;
+        let super::registration::Descriptor::Model(ordinal)=entry.descriptor else{return Err("Special descriptor is not an archive model".into())};
+        let actual=super::registration::asset(c,super::navigation::Group::Primary,ordinal)?;
+        let normalize=|s:&str|s.replace('\\',"/").to_ascii_lowercase();
+        if normalize(&actual)!=normalize(&model.source.path)||self.models.contains_key(&id)||self.descriptors.contains_key(&id){
+            return Err("Unbound Primary source path/unique ownership differs".into())
+        }
+        self.models.insert(id,model);Ok(())
+    }
+    /// Reached43cd10 ordinal copy. The same parsed model stays in this owner.
+    pub(super) fn prepare_primary_descriptor(&mut self,ordinal:u8)->Result<PanelId,String>{
+        let entry=super::registration::PRIMARY.iter().find(|e|matches!(e.descriptor,super::registration::Descriptor::Model(i) if i==ordinal)).ok_or("Primary pool ordinal absent")?;
+        if self.descriptors.contains_key(&entry.id){return Err("Primary descriptor copy cannot replay".into())}
+        let descriptor=CpuDescriptor::primary(self.model(entry.id)?)?;
+        self.descriptors.insert(entry.id,descriptor);Ok(entry.id)
     }
     pub fn descriptor(&self,id:PanelId)->Result<&CpuDescriptor,String>{self.descriptors.get(&id).ok_or_else(||"CPU UI descriptor missing".into())}
     pub fn model(&self,id:PanelId)->Result<&CpuModel,String>{self.models.get(&id).ok_or_else(||"CPU UI model missing".into())}

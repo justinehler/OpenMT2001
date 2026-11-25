@@ -149,14 +149,14 @@ fn child5_rejects_before_moves_and_reached_failure_is_retained_without_replay(){
 #[ignore="requires supplied Assets::load inputs and ffmpeg"]
 fn actual_assets_load_keeps_child5_on_same_process_and_rejects_incomplete_main(){
     let assets=crate::intro::Assets::load(paths()).unwrap();
-    assert_eq!(assets.main_prefix.phase(),MainPhase::AwaitingBinding);assert_eq!((assets.main_prefix.counter(),assets.main_prefix.nodes().count()),(71,85));
-    let root=assets.main_prefix.root();let list=assets.main_prefix.child5().list().unwrap();let node=assets.main_prefix.node(list).unwrap() as *const Node;
+    assert_eq!(assets.reordered_main().unwrap().phase(),MainPhase::AwaitingBinding);assert_eq!((assets.reordered_main().unwrap().counter(),assets.reordered_main().unwrap().nodes().count()),(71,85));
+    let root=assets.reordered_main().unwrap().root();let list=assets.reordered_main().unwrap().child5().list().unwrap();let node=assets.reordered_main().unwrap().node(list).unwrap() as *const Node;
     let fonts=assets.ui_text.fonts() as *const Fonts;let rows=assets.ui_text.fonts().language.bytes().as_ptr();let images=assets.ui_images.records.as_ptr();
     let mut moved=Box::new(assets);
-    assert_eq!(moved.main_prefix.root(),root);assert_eq!(moved.main_prefix.node(list).unwrap() as *const Node,node);assert_eq!(moved.ui_text.fonts() as *const Fonts,fonts);
+    assert_eq!(moved.reordered_main().unwrap().root(),root);assert_eq!(moved.reordered_main().unwrap().node(list).unwrap() as *const Node,node);assert_eq!(moved.ui_text.fonts() as *const Fonts,fonts);
     assert_eq!(moved.ui_text.fonts().language.bytes().as_ptr(),rows);assert_eq!(moved.ui_images.records.as_ptr(),images);
     assert_eq!(moved.navigator.process_primitives_mut().main_phase(),MainPhase::AwaitingBinding);
-    assert!(moved.main_prefix.require_full_main().is_err());assert!(moved.main_prefix.require_input_or_render().is_err());
+    assert!(moved.reordered_main().unwrap().require_full_main().is_err());assert!(moved.reordered_main().unwrap().require_input_or_render().is_err());
     let mut missing=paths();missing.executable=path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");assert!(crate::intro::Assets::load(missing).is_err());
-    assert_eq!(moved.main_prefix.node(list).unwrap() as *const Node,node);assert_eq!(moved.navigator.process_primitives_mut().cells().byte(A+0x184).unwrap(),0);
+    assert_eq!(moved.reordered_main().unwrap().node(list).unwrap() as *const Node,node);assert_eq!(moved.navigator.process_primitives_mut().cells().byte(A+0x184).unwrap(),0);
 }

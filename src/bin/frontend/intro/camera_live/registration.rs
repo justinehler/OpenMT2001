@@ -8,14 +8,14 @@ use Descriptor::{Model,Special};use PanelId::*;
 pub const PRIMARY:[Entry;18]=[
     Entry{id:D,object:0x574488,descriptor:Special(0x574810)},
     Entry{id:OtherPrimary(1),object:0x573b38,descriptor:Model(15)}, //voting
-    Entry{id:OtherPrimary(2),object:0x571378,descriptor:Model(14)}, //prompt
+    Entry{id:OtherPrimary(2),object:0x571378,descriptor:Model(14)}, //EventList
     Entry{id:OtherPrimary(3),object:0x57ef28,descriptor:Model(13)}, //chat
     Entry{id:G,object:0x57e798,descriptor:Model(12)},
     Entry{id:H,object:0x571808,descriptor:Model(11)},
     Entry{id:B,object:0x577048,descriptor:Model(10)},
-    Entry{id:OtherPrimary(7),object:0x58f438,descriptor:Model(9)}, //event list
+    Entry{id:OtherPrimary(7),object:0x58f438,descriptor:Model(9)}, //CommunityChanceCard
     Entry{id:OtherPrimary(8),object:0x575280,descriptor:Model(8)}, //external auction
-    Entry{id:OtherPrimary(9),object:0x575d98,descriptor:Model(7)}, //card
+    Entry{id:OtherPrimary(9),object:0x575d98,descriptor:Model(7)}, //Prompt
     Entry{id:E,object:0x58ca08,descriptor:Model(6)},
     Entry{id:Clock,object:0x58fb40,descriptor:Model(5)},
     Entry{id:A,object:0x58e3c0,descriptor:Model(4)},

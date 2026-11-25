@@ -88,3 +88,9 @@ pub(crate) mod primitive_factory;
 #[path="camera_live/main_construction.rs"] pub(crate) mod main_construction;
 #[cfg(test)]
 #[path="camera_live/process_owner_tests.rs"] mod process_owner_tests;
+
+#[path="camera_live/primary_d_construction.rs"] pub(crate) mod primary_d_construction;
+#[path="camera_live/deferred_primary.rs"] pub(crate) mod deferred_primary;
+
+#[cfg(test)]
+#[path="camera_live/host_primary_containing_tests.rs"] mod host_primary_containing_tests;

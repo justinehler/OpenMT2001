@@ -67,7 +67,7 @@ impl CompletedMainLayout {
         if !matches!(product.node(selector)?.subtype,Subtype::Selector2Arrows(_)){return Err("41e759 parent selector subtype differs".into())}
         if product.aliases.contains_key(&0x4bc)||product.aliases.contains_key(&0x4c0){return Err("41e759 additional Text already allocated; no replay".into())}
         let panel=p.panels.get(&A).ok_or("41e759 actual A primitive absent")?;
-        if panel.phase!=crate::intro::camera_live::primitive_factory::Phase::AwaitingLayout||panel.descriptor!=Some(PanelId::A){
+        if panel.phase!=crate::intro::camera_live::primitive_factory::Phase::AwaitingLayout||panel.descriptor!=Some(crate::intro::camera_live::primitive_factory::DescriptorIdentity::Archive(PanelId::A)){
             return Err("41e759 actual A bind-prefix owner differs".into())
         }
         p.claim_main_tail(product.owner)?;
@@ -184,7 +184,7 @@ impl Product {
             self.parent_byte(p,0x344,1,0x43bee4)?;self.parent_byte(p,0x345,0,0x43beee)?;
             if count>1{
                 let descriptor=p.resources.descriptor(PanelId::A)?;
-                if p.panels.get(&A).ok_or("43bed0 actual panel absent")?.descriptor!=Some(descriptor.slot){
+                if p.panels.get(&A).ok_or("43bed0 actual panel absent")?.descriptor!=Some(crate::intro::camera_live::primitive_factory::DescriptorIdentity::Archive(descriptor.slot)){
                     return Err("43bf06 actual descriptor owner mismatch".into())
                 }
                 let position=descriptor.position;let divisor=Sum::from_i32(count.wrapping_sub(1));

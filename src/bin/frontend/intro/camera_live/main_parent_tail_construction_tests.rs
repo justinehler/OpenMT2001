@@ -184,18 +184,18 @@ fn nonbirth_hide_keeps_animation_and_specialized_ret_effects_then_faults_at_grou
 #[ignore="supplied originals; actual Assets reaches completed layout once and failed replacement retains owners"]
 fn actual_assets_retains_layout_and_process_runtime_activity_then_rejects_failed_replacement(){
     let mut published=Box::new(crate::intro::Assets::load(paths()).unwrap());
-    assert_eq!(published.main_prefix.phase(),MainPhase::AwaitingBinding);assert_eq!((published.main_prefix.counter(),published.main_prefix.nodes().count()),(71,85));
-    let root=published.main_prefix.root();let font=published.ui_text.fonts() as *const Fonts;
-    let id=published.main_prefix.alias(0x4bc).unwrap();let node=published.main_prefix.node(id).unwrap() as *const Node;
+    assert_eq!(published.reordered_main().unwrap().phase(),MainPhase::AwaitingBinding);assert_eq!((published.reordered_main().unwrap().counter(),published.reordered_main().unwrap().nodes().count()),(71,85));
+    let root=published.reordered_main().unwrap().root();let font=published.ui_text.fonts() as *const Fonts;
+    let id=published.reordered_main().unwrap().alias(0x4bc).unwrap();let node=published.reordered_main().unwrap().node(id).unwrap() as *const Node;
     let runtime=&published.process_runtime as *const _;let activity=&published.activity as *const _;
     let mut bad=paths();bad.executable=path("OPENMT2001_TEXT_PROFILE").join("absent-tail-original.exe");
     if let Ok(replacement)=crate::intro::Assets::load(bad){published=Box::new(replacement);panic!("missing original published")}
-    assert_eq!(published.main_prefix.root(),root);assert_eq!(published.ui_text.fonts() as *const Fonts,font);assert_eq!(published.main_prefix.node(id).unwrap() as *const Node,node);
+    assert_eq!(published.reordered_main().unwrap().root(),root);assert_eq!(published.ui_text.fonts() as *const Fonts,font);assert_eq!(published.reordered_main().unwrap().node(id).unwrap() as *const Node,node);
     assert_eq!(&published.process_runtime as *const _,runtime);assert_eq!(&published.activity as *const _,activity);
     assert_eq!(published.navigator.process_primitives_mut().main_phase(),MainPhase::AwaitingBinding);
-    assert_eq!(published.main_prefix.journal().iter().filter(|j|j.event==Event::Returned(0x41dcf0)).count(),1);
+    assert_eq!(published.reordered_main().unwrap().journal().iter().filter(|j|j.event==Event::Returned(0x41dcf0)).count(),1);
     assert_eq!(published.navigator.process_primitives_mut().cells().byte(A+0x184).unwrap(),0);
-    let moved=published;assert_eq!(moved.main_prefix.node(id).unwrap() as *const Node,node);assert!(moved.main_prefix.require_full_main().is_err());
+    let moved=published;assert_eq!(moved.reordered_main().unwrap().node(id).unwrap() as *const Node,node);assert!(moved.reordered_main().unwrap().require_full_main().is_err());
 }
 //Avoid Debug bounds on move-only successful products while asserting errors.
 trait ErrorText {fn unwrap_err_text(self)->String;}

@@ -229,6 +229,15 @@ fn validate_owner_packets(owners:Option<SupplierOwners<'_>>,value:&Admission,pro
 }
 
 impl super::endpoint::Context for UiContext<'_> {
+    fn primary_construction(&mut self)->Option<(&mut super::deferred_primary::DeferredPrimary,
+        &mut super::primitive_factory::Primitives,&mut super::ui_text_resources::UiTextResources,
+        &super::process_images::Images)>{
+        match &mut self.assets.primary_products{
+            super::deferred_primary::PrimaryProducts::Deferred(primary)=>Some((primary,
+                self.assets.navigator.process_primitives_mut(),&mut self.assets.ui_text,&self.assets.ui_images)),
+            super::deferred_primary::PrimaryProducts::Reordered(_)=>None,
+        }
+    }
     fn save_interface_mode(&self)->Result<u32,String>{Ok(if self.view.strategic{3}else{0})}
     fn process_runtime(&self)->Option<&crate::live_host::process_runtime::Handle>{Some(&self.assets.process_runtime)}
     fn validate(&self,operation:&Operation,owner:&Owner)->Result<(),String>{
@@ -237,6 +246,13 @@ impl super::endpoint::Context for UiContext<'_> {
             Operation::Apply{admission,..}|Operation::Admission(admission)=>(admission,false),
             Operation::RawCapture|Operation::CurrentPose|Operation::Sample{..}=>return Ok(()),
         };
+        if value.upper.is_some()||value.strategic.is_some(){
+            if let super::deferred_primary::PrimaryProducts::Deferred(primary)=&self.assets.primary_products{
+                //Read-only rejection on Install/Admission/Apply/CentralTail
+                //before packet/physical/UI/owner/source changes (D-01).
+                primary.require_supplier()?;
+            }
+        }
         if matches!(operation,Operation::CentralTail{..}) {
             if let Some(error)=&self.view.camera_ui.as_ref().ok_or("Camera UI state absent")?.upper_input_error{
                 return Err(error.clone());
@@ -249,6 +265,9 @@ impl super::endpoint::Context for UiContext<'_> {
         // Check both actual owners and all fallible C replacement conditions
         // BEFORE either packet or graph metadata is published. Pure Admission
         // may omit packets; omissions do not refresh or fabricate a producer.
+        if value.upper.is_some()||value.strategic.is_some(){
+            if let super::deferred_primary::PrimaryProducts::Deferred(primary)=&self.assets.primary_products{primary.require_supplier()?;}
+        }
         validate_suppliers(self.view,value,false,None)?;
         if self.view.ui_graph.is_some(){
             if let Some(input)=&value.strategic{super::strategic_panel::suppliers(self.view,input.clone())?;}
