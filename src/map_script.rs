@@ -815,7 +815,8 @@ mod tests {
                             &vec![
                                 Value::Number(1934. + before as f64 * 2.),
                                 Value::Number(1935. + before as f64 * 2.),
-                                Value::Number(1.)
+                                Value::Number(1.),
+                                Value::Number(0.), // ppnn: omitted final numeric argument
                             ]
                         );
                         assert!(world.pause.has_reason());
@@ -1511,6 +1512,7 @@ mod tests {
                                 Value::Number(1898. + previous as f64 * 2.),
                                 Value::Number(1899. + previous as f64 * 2.),
                                 Value::Number(1.),
+                                Value::Number(0.), // ppnn: omitted final numeric argument
                             ]
                         );
                         vm.call("CATCHEVENT_InterfacePromptDismiss", &[], &mut |id, args| {
@@ -2167,12 +2169,14 @@ mod tests {
                         vec![
                             Value::Number(1898.),
                             Value::Number(1899.),
-                            Value::Number(1.)
+                            Value::Number(1.),
+                            Value::Number(0.),
                         ],
                         vec![
                             Value::Number(1900.),
                             Value::Number(1901.),
-                            Value::Number(1.)
+                            Value::Number(1.),
+                            Value::Number(0.),
                         ],
                     ]
                 );
