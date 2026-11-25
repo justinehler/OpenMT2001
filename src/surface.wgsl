@@ -73,7 +73,7 @@ fn water_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn water_fallback_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let texel = textureSample(surface_texture, surface_sampler, in.uv);
+    let texel = textureSampleBias(surface_texture, surface_sampler, in.uv, -0.5);
     return apply_fog(vec4(in.color * texel.rgb, 0.0), in.eye_depth);
 }
 
