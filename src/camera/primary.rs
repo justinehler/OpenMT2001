@@ -44,9 +44,11 @@ impl AngularTrig for MissingTrig {
 
 #[cfg(test)]
 mod portable_tests;
+#[cfg(test)]
+mod block_init_tests;
 
 impl Primary {
-    /// Supported finite mode6/12/13 subset. Opaque bytes are never decoded as floats.
+    /// Supported finite mode4/6/12/13 subset. Opaque bytes are never decoded as floats.
     /// Positive divisors are required whenever a dirty flag can cause sampling.
     pub fn decode(raw: [u8; 196]) -> Result<Self> {
         let state = Self { raw };
@@ -75,8 +77,8 @@ impl Primary {
         }
     }
     fn validate(&self) -> Result<()> {
-        if !matches!(self.word(0) as i32, 6 | 12 | 13) {
-            return Err("primary core supports only mode6/12/13");
+        if !matches!(self.word(0) as i32, 4 | 6 | 12 | 13) {
+            return Err("primary core supports only mode4/6/12/13");
         }
         for at in (4..0x1c).step_by(4).chain((0x34..0x70).step_by(4))
             .chain([0x78,0x7c,0x88,0x90,0x98,0xb0,0xb4,0xb8,0xbc]) {
@@ -169,11 +171,12 @@ impl Primary {
         }
         Ok(()) // neither countdown nor dirty flag clearing
     }
-    /// Native next-step fraction, not previous/current lerp. Supports finite
-    /// normal residual fractions only; phase ownership is outside this core.
+    /// Native next-step sample, not previous/current lerp. The original accepts
+    /// its actual finite scheduler ratio without clamping, including adjusted
+    /// or disabled-row values outside0..1. Phase ownership is outside this core.
     pub fn sample(&mut self, amount: f32) -> Result<[[f32; 3]; 2]> {
-        if !amount.is_finite() || !(0. ..=1.).contains(&amount) {
-            return Err("unsupported camera residual fraction");
+        if !amount.is_finite() {
+            return Err("nonfinite camera residual fraction");
         }
         let mut next = self.clone();
         for (flag, current, desired, sampled) in [(0x70,4,0x34,0x4c),(0x71,0x10,0x40,0x58)] {
@@ -762,7 +765,7 @@ mod tests {
         }
         let mut p=Primary::decode(r).unwrap();assert!(p.common_with_trig(&mut Overflow).is_err());
         assert_eq!(p.raw(),&r);
-        for amount in [f32::NAN,-0.1,1.1] {assert!(p.sample(amount).is_err());assert_eq!(p.raw(),&r);}
+        for amount in [f32::NAN,f32::NEG_INFINITY,f32::INFINITY] {assert!(p.sample(amount).is_err());assert_eq!(p.raw(),&r);}
     }
     #[test]
     fn binary32_nearest_even_residual_is_not_a_freeze_policy() {
@@ -771,6 +774,17 @@ mod tests {
         let mut p=Primary::decode(r).unwrap();p.common().unwrap();
         assert_eq!(p.f(4).to_bits(),0x42a3fff6);
         assert_ne!(p.f(4),p.f(0x34));assert_eq!(p.view().dirty[0],1);
+    }
+    #[test]
+    fn strategic_noop_common_and_unclamped_scheduler_ratio() {
+        let mut r=fixture();r[0]=4;r[0x70]=1;r[0x71]=0;r[0x72]=0;r[0x74]=10;
+        put(&mut r,4,0.);put(&mut r,0x34,100.);put(&mut r,0x78,0.);
+        let mut p=Primary::decode(r).unwrap();p.common().unwrap();
+        assert_eq!(p.view().current[0][0],10.);
+        assert_eq!(p.sample(2.).unwrap()[0][0],28.);
+        assert_eq!(p.sample(-1.).unwrap()[0][0],1.);
+        assert_eq!(p.view().current[0][0],10.,"sampling must not advance current");
+        assert_eq!(&p.raw()[0x1c..0x34],&r[0x1c..0x34]);
     }
     #[test]
     #[ignore="reads both SHA-pinned supplied saves as data; needs OPENMT2001_SAVE_ONE/TWO and sha256sum"]
@@ -929,5 +943,62 @@ mod mode12_tests {
         assert_eq!(p.f(0x38),-9.,"special zoom ignores invert, speed and normal height gates");
         assert_eq!(p.f(0x44),0.25);assert_eq!(p.f(0xb0),2.);assert_eq!(t.calls.len(),2);
         assert_eq!(effects,vec![CursorRequest{state:2,priority:1}]);
+    }
+}
+
+/// Resolved inputs of 00482580. The owner resolves the selected descriptor's
+/// model index/occupied registry entry before calling; no absent-model default.
+/// Coordinates are raw binary32 words from actor +4/+8/+c and model +bc/+c0/+c4.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockInitialization {
+    pub actor_translation: [u32; 3],
+    pub model_offsets: [u32; 3],
+    /// Second argument, stored to desired eye Y by MOV (often 120.0).
+    pub height_word: u32,
+    /// Third argument, stored to radius by MOV (often 80.0).
+    pub radius_word: u32,
+}
+
+impl Primary {
+    /// 00482580..0048261c, successful resolved-model, finite PC64 arithmetic.
+    /// Starts with the authoritative raw primary BY VALUE: old mode, current,
+    /// sampled, yaw, target, opaque and all other unwritten bytes survive.
+    /// Does not decode/validate unrelated fields, change kind, reset yaw, run
+    /// common/sample or derive anything from a rendered CameraSample.
+    ///
+    /// Only arithmetic operands/results require finite values. Height/radius
+    /// are exact MOV words; NaNs/infinities there are transported unchanged,
+    /// just as in the other raw bank setters. Subsequent numeric operations
+    /// retain their own finite-domain checks. On error no raw result is returned;
+    /// provider side effects are outside this by-value transaction.
+    pub fn initialize_block_words(
+        raw: crate::camera::bank::RawRecord,
+        input: BlockInitialization,
+        trig: &mut impl AngularTrig,
+    ) -> Result<crate::camera::bank::RawRecord> {
+        let mut next = Self { raw };
+        // 482588: transport third argument BEFORE the model/coordinate reads.
+        next.raw[0xb0..0xb4].copy_from_slice(&input.radius_word.to_le_bytes());
+        let center = |axis: usize| -> Result<Sum> {
+            // Native FLD model offset, then FADD actor translation, at PC64.
+            let mut value = Sum::from_f32(f32::from_bits(input.model_offsets[axis]))?;
+            value.add_f32(f32::from_bits(input.actor_translation[axis]))?;
+            Ok(value)
+        };
+        next.store(0xb4, center(0)?)?; // 4825b5 FSTP
+        next.store(0xb8, center(1)?)?; // 4825c4 FSTP
+        let retained_z = center(2)?; // 4825ca..d0, not spilled yet
+        next.raw[0x72] = 0; // 4825d7
+        next.raw[0x38..0x3c].copy_from_slice(&input.height_word.to_le_bytes());
+        next.raw[0x70] = 1;
+        next.raw[0x71] = 1;
+        next.store(0xbc, retained_z)?; // 4825ef FSTP after those MOVs
+        let sine = trig.sine(next.ext(0x7c)?)?; // 4825f5..fb, existing yaw
+        next.raw[0x74..0x78].copy_from_slice(&20u32.to_le_bytes()); // 4825fd
+        next.store(0x88, sine)?; // 482607
+        // Native reloads the same stored yaw for FCOS. Initializer never writes it.
+        let cosine = trig.cosine(next.ext(0x7c)?)?;
+        next.store(0x90, cosine)?; // 482615
+        Ok(next.raw)
     }
 }

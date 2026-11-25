@@ -3,6 +3,9 @@
 //! Callers own UI effects, mode dispatch, input, common processing and sampling.
 use crate::x87::Sum;
 
+mod selected_actor;
+pub use selected_actor::SelectedActorInput;
+
 pub const RECORD_BYTES: usize = 196;
 pub type RawRecord = [u8; RECORD_BYTES];
 
