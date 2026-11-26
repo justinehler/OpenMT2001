@@ -5,6 +5,27 @@ pub fn quote(
     categories: &[[u8; 380]; 52],
     image: &crate::pe::PeImage<'_>,
 ) -> Result<crate::x87::Sum, String> {
+    let kind = crate::player_manager::word(building, 0x24);
+    let at = 0x5365f4u32.wrapping_add(kind.wrapping_mul(46));
+    let cost = u16::from_le_bytes(image.at(at, 2)?.try_into().unwrap());
+    quote_word(building, categories, cost, image)
+}
+/// Quote using the configured Session resource. The command retains its quote.
+pub fn quote_with_parameters(
+    building: &[u8; 916],
+    categories: &[[u8; 380]; 52],
+    parameters: &crate::building_parameters::BuildingKinds,
+    image: &crate::pe::PeImage<'_>,
+) -> Result<crate::x87::Sum, String> {
+    let cost = parameters.row(crate::player_manager::word(building, 0x24))?[2];
+    quote_word(building, categories, cost, image)
+}
+fn quote_word(
+    building: &[u8; 916],
+    categories: &[[u8; 380]; 52],
+    cost: u16,
+    image: &crate::pe::PeImage<'_>,
+) -> Result<crate::x87::Sum, String> {
     use crate::{player_manager::word, x87::Sum};
     let offset = word(building, 0x40)
         .checked_sub(0x617628)
@@ -22,10 +43,7 @@ pub fn quote(
     let mut value = Sum::from_f32(f32::from_bits(word(category, 0x84)))?;
     value.mul_f32(image.f32_at(0x52502c)?)?;
     value.add_f32(image.f32_at(0x525034)?)?;
-    let at = 0x5365f4u32.wrapping_add(word(building, 0x24).wrapping_mul(46));
-    value.mul(Sum::from_i32(i32::from(u16::from_le_bytes(
-        image.at(at, 2)?.try_into().unwrap(),
-    ))));
+    value.mul(Sum::from_i32(i32::from(cost)));
     value.mul(Sum::from_i32(volume));
     Ok(value)
 }

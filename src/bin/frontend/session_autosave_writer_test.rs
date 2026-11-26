@@ -48,6 +48,36 @@ fn encoding_write_and_publish_failures_preserve_prior_without_permission_changes
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(),1);
 }
 #[test]
+fn abandoned_capture_and_failed_write_allow_retry_in_the_same_fixed_slot() {
+    let scratch=Scratch::new();let root=scratch.0.join("profile");
+    let prior=native(17);
+    let path=PreparedAutosave::prepare(&root).unwrap().publish(prior.clone()).unwrap();
+    let directory=path.parent().unwrap();
+
+    // The host prepares storage before asking the camera/encoder. An early
+    // unsupported-state return drops this request without calling publish.
+    let prepared=PreparedAutosave::prepare(&root).unwrap();
+    let stage=prepared.temporary.clone();
+    assert!(stage.is_file());
+    drop(prepared);
+    assert!(!stage.exists());
+    assert_eq!(fs::read(&path).unwrap(),prior);
+
+    // Exercise an actual write error, then a fresh request in this process.
+    // Filesystem contents, rather than the codec, are the recovery oracle.
+    let mut prepared=PreparedAutosave::prepare(&root).unwrap();
+    let stage=prepared.temporary.clone();
+    prepared.file=Some(fs::File::open(&stage).unwrap());
+    assert!(prepared.publish(native(31)).is_err());
+    assert!(!stage.exists());
+    assert_eq!(fs::read(&path).unwrap(),prior);
+    assert_eq!(fs::read_dir(directory).unwrap().count(),1);
+
+    assert_eq!(PreparedAutosave::prepare(&root).unwrap().publish(native(47)).unwrap(),path);
+    assert_eq!(fs::read(&path).unwrap(),native(47));
+    assert_eq!(fs::read_dir(directory).unwrap().count(),1);
+}
+#[test]
 fn fixed_slot_refuses_directory_case_collision_and_changed_slot() {
     let scratch=Scratch::new();let root=scratch.0.join("profile");
     let directory=writable_directory(&root).unwrap();

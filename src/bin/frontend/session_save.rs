@@ -926,6 +926,22 @@ mod tests {
             let inputs=||Inputs{tree_locators: None, image:&image,board:&board,file:&file,people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts,parameters:std::str::from_utf8(&parameters).unwrap(),era_styles:styles.clone(),timetable:std::str::from_utf8(&timetable).unwrap(),scenario:"SCENARIO3",difficulty:0,selected_character:4,profile_name:b"Save fixture",character_names:&names};
             let policy=||Policy{seed:0x12345678,auxiliary_prior_bytes:[0;284]};
             let mut session=Session::initialize(inputs(),policy()).unwrap();
+            // The supplied bank must reach this actual Session before map
+            // production. Preserve an old save-owned rate10 across cold load.
+            assert_eq!([session.world.building_parameters.row(0).unwrap(),session.world.building_parameters.row(1).unwrap(),session.world.building_parameters.row(2).unwrap()],[[3,15,4],[3,15,4],[0,15,4]]);
+            let old_rate_slot=session.world.buildings.iter().position(|row|row[0x3f]!=0 && word(row,0x24)<2).expect("Scenario3 materialized retail/residential building");
+            assert_eq!(word(&session.world.buildings[old_rate_slot],0x28),3,"map/scenario producer must receive configured rent");
+            session.world.buildings[old_rate_slot][0x28..0x2c].copy_from_slice(&10u32.to_le_bytes());
+            // Reach the human quote adapter with exact, independent operands:
+            // volume2, prestige0, quality0, landscape before06 => base30.
+            let prior_prestige: [u8;4]=session.world.categories[0][0x84..0x88].try_into().unwrap();
+            let prior_components=session.world.construction_components;
+            session.world.categories[0][0x84..0x88].copy_from_slice(&0f32.to_le_bytes());
+            let mut quote_command=openmt2001::construction::Command { category:0,rectangle:[0,0,1,0],height:1,kind:2,business:0,variation:0,quality:0,owner:1,components:[0.;4] };
+            assert_eq!(openmt2001::live_commands::quote(&mut quote_command,&mut session.world.city,&session.roster,&image,5).unwrap(),30);
+            assert_eq!(quote_command.components.map(f32::to_bits),[30f32,0.,0.,0.].map(f32::to_bits));
+            session.world.categories[0][0x84..0x88].copy_from_slice(&prior_prestige);
+            session.world.construction_components=prior_components;
             let cold_build_state=session.build_random_state;
             let cold_dust_state=session.demolition_effects.random;
             let style_counts=session.era_styles[session.world.clock.calendar[2] as usize].qualities.each_ref().map(Vec::len);
@@ -947,6 +963,9 @@ mod tests {
             assert_eq!(resumed.world.ledgers.businesses,session.world.ledgers.businesses);
             assert_eq!(resumed.world.pending_world.to_bytes(),session.world.pending_world.to_bytes());
             assert_eq!(resumed.saved_cameras,Some(cameras));
+            assert_eq!(resumed.world.building_parameters.row(0).unwrap(),[3,15,4]);
+            assert_eq!(word(&resumed.world.buildings[old_rate_slot],0x28),10,"cold resource reinit must not rewrite saved rent");
+
             assert_eq!(resumed.world.creation.auxiliary.slots(),session.world.creation.auxiliary.slots());
             assert_eq!(resumed.roster.profiles,session.roster.profiles);
             assert_eq!(resumed.script_random_state,session.script_random_state);
@@ -1048,6 +1067,10 @@ mod tests {
                 assert_eq!(&resumed.world.buildings[slot][..64],&session.world.buildings[slot][..64]);
             }
             assert!(session.world.clock.timing[0]>build_due);
+            assert_eq!(word(&session.world.buildings[slot],0x28),3,"due human Build initializer uses configured rent");
+            assert_eq!(word(&resumed.world.buildings[slot],0x28),3,"cold queued Build uses configured rent");
+            assert_eq!(word(&resumed.world.buildings[old_rate_slot],0x28),10,"new construction must preserve old saved rate");
+
             assert_ne!(session.world.pending_world.count,0);
             assert_ne!(word(&session.world.buildings[slot],0x70),1f32.to_bits());
             assert!(!crate::intro::detail_model_at_unit_scale(&session.world.buildings[slot]),
@@ -1293,8 +1316,8 @@ mod tests {
             // Continue the legally built bakery through the real demolition
             // producer, dust allocator, scheduler and geometry retirement.
             let category = ((word(&session.world.buildings[slot],0x40)-0x617628)/380) as usize;
-            let amount = openmt2001::demolition::quote(&session.world.buildings[slot],
-                &session.world.categories,&image).unwrap().to_f32();
+            let amount = openmt2001::demolition::quote_with_parameters(&session.world.buildings[slot],
+                &session.world.categories,&session.world.city.building_parameters,&image).unwrap().to_f32();
             session.live_commands.submit(Command::Demolish(openmt2001::demolition::Command {
                 category:category as i8,building:slot as u16,amount,
             }),session.world.clock.timing[0],true,|_|Err("demolition dispatched early".into())).unwrap();

@@ -79,7 +79,7 @@ pub fn quote(
         }
     }
     let [x0, y0, x1, y1] = command.rectangle.map(i32::from);
-    let cost = crate::building_binding::construction_cost(
+    let cost = crate::building_binding::construction_cost_with_parameters(
         &crate::building_binding::ConstructionInputs {
             volume: (x1 - x0 + 1)
                 .wrapping_mul(y1 - y0 + 1)
@@ -94,6 +94,7 @@ pub fn quote(
             business: info,
             products: &products,
         },
+        &city.building_parameters,
         image,
     )?;
     city.construction_components = cost.components;
@@ -698,6 +699,7 @@ pub fn build(
             players: &mut city.ledgers.players,
         },
         &construction::Context {
+            building_parameters: city.building_parameters,
             image: context.image,
             building_base: 0x591318,
             category_base: 0x617628,

@@ -46,6 +46,9 @@ impl Topology {
     pub fn count617624(&self)->i32 {self.count617624}
 }
 pub struct City {
+    /// Readonly projection for this Session's admitted parameter source.
+    /// Rebuilt on cold startup; materialized saved building rates stay owned.
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub topology: Topology,
     pub objective: crate::scenario_objective::State,
     pub settings: crate::startup_settings::State,
@@ -131,6 +134,7 @@ impl World {
         Ok(Self {
             clock,
             city: City {
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(image)?,
                 topology,
                 road_network,
                 objective: crate::scenario_objective::State::default(),
@@ -173,6 +177,7 @@ impl World {
         host: HostContext,
     ) -> Result<level_script::Context<'a, 'image>, String> {
         Ok(level_script::Context {
+            building_parameters: self.city.building_parameters,
             total_clock: self.clock.timing[0],
             image,
             models,
@@ -438,6 +443,7 @@ impl Roster {
         self.publish_accounts(city)?;
         let totals = utilities.totals;
         let mut world = crate::ai_runtime::World {
+            building_parameters: city.building_parameters,
             neighbor_cache: &mut city.ai_neighbors,
             ownership_refresh_counter: &mut city.ownership_refresh_counter,
             colors: None,

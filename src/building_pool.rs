@@ -506,6 +506,19 @@ pub fn initialize(
     let unit_price = u32::from(u16::from_le_bytes(
         image.at(address, 2)?.try_into().unwrap(),
     ));
+    initialize_rent_word(record, input, unit_price);
+    Ok(())
+}
+/// New buildings copy configured rent; restored records never call this.
+pub fn initialize_with_parameters(
+    record: &mut [u8; RECORD_SIZE],
+    input: &Initialization,
+    parameters: &crate::building_parameters::BuildingKinds,
+) -> Result<(), String> {
+    initialize_rent_word(record, input, u32::from(parameters.row(input.kind)?[0]));
+    Ok(())
+}
+fn initialize_rent_word(record: &mut [u8; RECORD_SIZE], input: &Initialization, unit_price: u32) {
     for (offset, value) in (4..8).zip(input.rectangle) {
         record[offset] = value as u8;
     }
@@ -527,7 +540,6 @@ pub fn initialize(
     record[0x2d] = 0;
     record[0x34] = input.date[0].wrapping_mul(10).wrapping_add(input.date[1]);
     record[0x3c..0x3f].fill(0);
-    Ok(())
 }
 
 /// Resolve current live category links for read-only consumers such as the

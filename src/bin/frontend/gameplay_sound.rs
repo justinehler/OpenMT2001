@@ -217,7 +217,7 @@ struct UiClickCue {
 }
 
 /// 4ab420/4abad0: factor was already stored binary32 by 4aa750.
-/// Only the fixed q60 ledger and q100 UI callers are qualified here.
+/// Only the fixed q60 ledger and q100 UI/card-open callers are qualified here.
 /// No binary32 spill of q*c is allowed before the final combined store.
 /// Each q*c needs at most 27 significant bits; multiplying a binary32 factor
 /// needs at most 51, exact in f64. This is not a general raw32/x87 API.
@@ -376,9 +376,14 @@ impl Player {
                 } else {
                     self.assets.negative_boing.clone()
                 };
-                if let Some(mixer) = self.mixer() {
+                let factor = self.effects_factor;
+                if let Some(mixer) = self.bus.combined_mixer() {
                     let sink = rodio::Sink::connect_new(mixer);
                     // 41b436..41b467 supplies (1,0,0,0,100), with no retained handle.
+                    // The source consumes the current factor through 4ab420/4abad0
+                    // before play. Later preference stores do not rewrite it.
+                    sink.set_volume(crate::music_gain::normalized_amplitude(
+                        fixed_cue_normalized(factor, 100)));
                     sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.one_shots.push(sink);
                 }
@@ -662,6 +667,7 @@ mod tests {
         assert!(card_open_positive(&image, 65).unwrap());
         assert!(!card_open_positive(&image, 10).unwrap());
         // 41b443 compares the fourth 32-bit word of 20-byte card rows.
+        assert_eq!(image.at(0x41b436, 6).unwrap(), &[0x6a, 0x64, 0x6a, 0, 0x6a, 0]);
         assert_eq!(image.at(0x41b443, 8).unwrap(), &[0x83, 0x3c, 0x85, 0x14, 0x42, 0x53, 0x00, 6]);
         for (push, name) in [(0x41b44d, 0x5348f8u32), (0x41b45d, 0x5348e4)] {
             let instruction = image.at(push, 5).unwrap();
@@ -774,4 +780,9 @@ mod ledger_gain_tests {
 #[cfg(test)]
 mod ui_click_gain_tests {
     include!("gameplay_sound_ui_click_gain_tests.rs");
+}
+
+#[cfg(test)]
+mod card_open_gain_tests {
+    include!("gameplay_sound_card_open_gain_tests.rs");
 }
