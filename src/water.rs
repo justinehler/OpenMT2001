@@ -1,6 +1,8 @@
 //! Original fallback-water preparation (004c4f10). Scene timing and camera/sun
 //! selection are explicit inputs; this does not supply an estimated environment.
 
+pub mod multitexture;
+
 /// Daylight markers recovered by 004c5740 from the original sun-color image.
 #[derive(Clone, Copy, Debug)]
 pub struct Daylight {

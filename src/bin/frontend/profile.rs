@@ -578,6 +578,8 @@ impl Profile {
                 input,
                 [if self.selected_all {
                     0xff0070c0
+                } else if self.name.is_some() {
+                    0xff002896 // Registration painter 495e5e; deletion has a separate dialog.
                 } else {
                     0xff001a90
                 }; 4],

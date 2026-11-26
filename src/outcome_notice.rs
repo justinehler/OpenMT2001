@@ -45,6 +45,54 @@ pub struct World<'a, 'data> {
     pub current_reference: u32,
     pub objective: &'a scenario_objective::State,
 }
+/// Preserved unresolved command identity. A native tie is winner=-1/reason2;
+/// it is not a draw presentation, winner replacement or profile award.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnresolvedOutcome {
+    pub winner: i32,
+    pub reason: u32,
+    pub roster_len: usize,
+    pub objective_kind: i32,
+    pub target_bits: u32,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PresentationError {
+    Unresolved(UnresolvedOutcome),
+    Boundary(String),
+}
+
+/// Pure preflight; no modal, queue mutation, winning semantics or recovery.
+pub fn preflight(
+    winner: i32,
+    reason: u32,
+    roster_len: usize,
+    objective: &scenario_objective::State,
+) -> Result<u32, UnresolvedOutcome> {
+    if roster_len > 6 || winner < 0 || winner as usize >= roster_len {
+        return Err(UnresolvedOutcome {
+            winner,
+            reason,
+            roster_len,
+            objective_kind: objective.kind,
+            target_bits: objective.target.to_bits(),
+        });
+    }
+    Ok(winner as u32)
+}
+
+/// Proposed checked boundary, deliberately not wired into command/Host paths.
+/// Returning Unresolved must propagate out of queue dispatch (which retains
+/// failed payloads); the host recovery disposition is a separate contract.
+pub fn present_checked(
+    winner: i32,
+    reason: u32,
+    world: &World<'_, '_>,
+    call: impl FnMut(Call) -> Result<(), String>,
+) -> Result<(), PresentationError> {
+    let player = preflight(winner, reason, world.players.len(), world.objective)
+        .map_err(PresentationError::Unresolved)?;
+    present(player, reason, world, call).map_err(PresentationError::Boundary)
+}
 fn actor<'a>(world: &World<'a, '_>, slot: u32) -> Result<&'a Player, String> {
     world
         .players

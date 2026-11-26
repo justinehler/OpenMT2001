@@ -64,6 +64,7 @@ pub mod player_tick;
 pub mod startup_rng;
 pub mod scenario_objective;
 pub mod objective_tick;
+pub mod end_transaction;
 pub mod player_constructor;
 #[cfg(feature = "lua4")]
 pub mod lua4;
