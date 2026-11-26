@@ -4,6 +4,9 @@ use super::super::Inspection;
 use std::time::Instant;
 
 pub fn service_available(view: &mut Inspection) -> Result<(), String> {
+    service_with_music_poll(view,true)
+}
+pub(crate) fn service_with_music_poll(view:&mut Inspection,allow_music_poll:bool)->Result<(),String>{
     while let Some(request) = view.auction_audio_requests.as_ref()
         .and_then(|receiver| receiver.try_recv().ok())
     {
@@ -20,7 +23,8 @@ pub fn service_available(view: &mut Inspection) -> Result<(), String> {
     {
         let _ = request.reply.send(view.era_audio_player.apply(request.operation));
     }
-    if let Err(error) = view.era_audio_player.poll() {
+    let admitted=allow_music_poll && view.music_admission.as_ref().is_none_or(|gate|gate.permits_attachment());
+    if admitted && let Err(error) = view.era_audio_player.poll() {
         eprintln!("Era music unavailable: {error}");
     }
     while let Some(request) = view.gameplay_sound_requests.as_ref()

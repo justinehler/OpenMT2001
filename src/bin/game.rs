@@ -7,6 +7,8 @@ mod skirmish_setup;
 mod skirmish_roster;
 #[path = "frontend/compatibility.rs"]
 mod compatibility;
+#[path = "frontend/process_dispatch.rs"]
+mod process_dispatch;
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_notice.rs"]

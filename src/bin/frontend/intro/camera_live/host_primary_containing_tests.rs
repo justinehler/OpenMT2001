@@ -64,11 +64,12 @@ fn inspection(a:&Assets)->Inspection{
         a.auction_audio.clone(),a.transport_audio.clone(),a.era_audio.clone(),a.gameplay_sound.clone())
 }
 #[allow(clippy::too_many_arguments)]
-fn inspection_products(scene:openmt2001::render_scene::Scene,navigator_bounds:[f32;4],navigation_bounds:[f32;4],detail_bounds:[f32;4],
+pub(crate) fn inspection_products(scene:openmt2001::render_scene::Scene,navigator_bounds:[f32;4],navigation_bounds:[f32;4],detail_bounds:[f32;4],
     auction:crate::live_host::auction_audio::Assets,transport:crate::transport_audio::Assets,
     era:crate::era_audio::Assets,sound:crate::gameplay_sound::Assets)->Inspection{
     let (camera,controls)=crate::intro::fresh_city_camera();let now=Instant::now();
     Inspection{
+        music_admission:None, // explicit isolated fixture, no composed focus Route
         camera_producer:None,camera_ready:None,camera_epoch:None,camera_turns:Default::default(),
         ui_graph:None,camera_navigation:None,camera_focus:Default::default(),navigation_click_latched:false,
         camera_endpoint:None,camera_capture_pending:None,

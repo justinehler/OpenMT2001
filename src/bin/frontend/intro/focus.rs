@@ -1,7 +1,14 @@
 //! UI-owned whole-prefix broker. Workers retain only a revocable per-World
 //! mailbox, never a process Effects provider. The UI never waits for a worker.
 use super::FreshRequest;
-use std::{collections::VecDeque, sync::{Arc, Mutex, mpsc}};
+use std::{cell::Cell,rc::Rc,collections::VecDeque, sync::{Arc, Mutex, mpsc}};
+
+/// UI observation fence only; never an audio activation/volume guard. Route
+///alone closes/opens it. Views may only read it and keep progress nonblocking.
+#[derive(Clone)]
+pub(crate) struct MusicAdmission(Rc<Cell<bool>>);
+impl Default for MusicAdmission {fn default()->Self{Self(Rc::new(Cell::new(true)))}}
+impl MusicAdmission {pub(crate) fn permits_attachment(&self)->bool{self.0.get()}}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Prefix {
@@ -112,8 +119,15 @@ pub(super) struct Route {
     next_id: u64,
     pending: VecDeque<mpsc::Receiver<Result<(), String>>>,
     failure: Option<String>,
+    sent:u64,completed:u64,
+    music:MusicAdmission,
 }
 impl Route {
+    pub(super) fn music_admission(&self)->MusicAdmission{self.music.clone()}
+
+    pub(super) fn sent(&self)->u64{self.sent}
+    pub(super) fn completed(&self)->u64{self.completed}
+
     pub(super) fn install(&mut self, effects: Box<dyn Effects>) -> Result<(), String> {
         if self.effects.is_some() || self.binding.is_some() {
             return Err("Process focus effects already installed".into());
@@ -132,7 +146,9 @@ impl Route {
         binding.target.send(FreshRequest::Focus(Event { focused, attachment,
             mailbox: Arc::clone(&binding.mailbox), reply }))
             .map_err(|_| "Focus Session retired".to_owned())?;
+        self.sent=self.sent.checked_add(1).ok_or("Focus operation sequence exhausted")?;
         self.pending.push_back(result);
+        self.music.0.set(false);
         Ok(())
     }
     pub(super) fn observe(&mut self, focused: bool) -> Result<(), String> {
@@ -168,12 +184,14 @@ impl Route {
     /// lock, and a delayed old Event can never reach process Effects again.
     pub(super) fn detach(&mut self) {
         if let Some(binding) = self.binding.take() {
+            self.music.0.set(false);
             binding.mailbox.retire();
             if let Some(effects) = &mut self.effects {
                 if let Err(error) = effects.retire(binding.mailbox.id) { self.failure = Some(error); }
             }
         }
         self.pending.clear();
+        self.completed=self.sent;
     }
     /// Execute only actual UI prefix work, never send a reciprocal request to
     /// the waiting worker. Mutex protects transport only; it is released before
@@ -186,7 +204,7 @@ impl Route {
             .before_pause(binding.mailbox.id, request.focused, request.reason3);
         let failed = result.as_ref().err().cloned();
         let _ = request.reply.send(result);
-        if let Some(error) = failed { self.failure = Some(error.clone()); return Err(error); }
+        if let Some(error) = failed { self.music.0.set(false); self.failure = Some(error.clone()); return Err(error); }
         Ok(true)
     }
     pub(super) fn poll(&mut self) -> Result<(), String> {
@@ -194,13 +212,14 @@ impl Route {
         while let Some(reply) = self.pending.front() {
             match reply.try_recv() {
                 Err(mpsc::TryRecvError::Empty) => break,
-                Ok(result) => { self.pending.pop_front(); result?; }
+                Ok(result) => { self.pending.pop_front(); result?; self.completed=self.completed.checked_add(1).ok_or("Focus completion sequence exhausted")?; }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.pending.pop_front();
                     return Err("Focus operation retired before acknowledgement".into());
                 }
             }
         }
+        self.music.0.set(self.failure.is_none() && self.binding.is_some() && self.pending.is_empty());
         Ok(())
     }
 }
@@ -209,3 +228,13 @@ impl Drop for Route { fn drop(&mut self) { self.detach(); } }
 #[cfg(test)]
 #[path = "focus_tests.rs"]
 mod tests;
+
+/// Typed result completion gate used by draw_result; a held completion stays
+///in its existing receiver while camera and worker servicing can continue.
+pub(super) fn poll_result(
+    receiver:&mpsc::Receiver<Result<super::ResultSnapshot,String>>,
+    admission:Option<&MusicAdmission>,
+)->Result<Result<super::ResultSnapshot,String>,mpsc::TryRecvError>{
+    if admission.is_some_and(|gate|!gate.permits_attachment()){return Err(mpsc::TryRecvError::Empty);}
+    receiver.try_recv()
+}

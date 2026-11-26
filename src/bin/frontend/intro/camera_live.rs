@@ -68,7 +68,7 @@ mod input;
 #[path = "camera_live/cursor.rs"]
 mod cursor;
 #[path = "camera_live/audio.rs"]
-mod audio;
+pub(super) mod audio;
 
 pub(crate) use context::{Globals, OriginalGraphicsPolicy, State, UiContext, UiJoins,
     NavigationUi, SoundBoundary, Intent, ui_cursor_pass};
@@ -99,4 +99,4 @@ pub(crate) mod primitive_factory;
 #[path="camera_live/chat_construction.rs"] pub(crate) mod chat_construction;
 
 #[cfg(test)]
-#[path="camera_live/host_primary_containing_tests.rs"] mod host_primary_containing_tests;
+#[path="camera_live/host_primary_containing_tests.rs"] pub(crate) mod host_primary_containing_tests;

@@ -4,6 +4,9 @@
 //! until combined preference/source gain and application timing are implemented.
 use rodio::{mixer::Mixer, source::Zero};
 
+#[path = "audio_focus.rs"]
+pub mod focus;
+
 #[derive(Default)]
 pub struct Bus {
     stream: Option<rodio::OutputStream>,

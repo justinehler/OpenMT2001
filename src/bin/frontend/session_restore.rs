@@ -461,6 +461,19 @@ impl<'data> Session<'data> {
         style: Option<&openmt2001::board_style::Style>,
         process:Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
+        Self::load_original_joined(input,policy,saved_bytes,catalog,profile_path,presentation,style,process,None)
+    }
+    pub(crate) fn load_original_joined(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        saved_bytes: &[u8],
+        catalog: Option<openmt2001::level_catalog::Catalog>,
+        profile_path: Option<std::path::PathBuf>,
+        presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
+        style: Option<&openmt2001::board_style::Style>,
+        process:Option<crate::live_host::process_runtime::Handle>,
+        dispatch:Option<crate::process_dispatch::Seed>,
+    ) -> Result<Self, String> {
         let save = SaveFile::parse(saved_bytes)?;
         save.validate_compatibility(input.image)?;
         let metadata = save.level_metadata()?;
@@ -496,7 +509,7 @@ impl<'data> Session<'data> {
             file: input.file,
         };
         let mut session =
-            Self::initialize_with_catalog(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14, None, process)?;
+            Self::initialize_joined(input, policy, catalog, profile_path, true, style, crate::compatibility::Mode::StrictV14, None, process,dispatch)?;
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());
         }

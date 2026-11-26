@@ -57,11 +57,13 @@ fn distance(position: [f32; 3], camera: [f32; 3]) -> f64 {
 impl Source {
     /// Nonspatial 4ae7a0 recomputes distance on the x87 stack, clips to
     /// 1..300, then uses the truncating 50e928 conversion twice.
-    pub fn gain(self, camera: [f32; 3]) -> f32 {
+    pub fn level(self, camera: [f32; 3]) -> i32 {
         let rounded = distance(self.position, camera).clamp(1., 300.).trunc() + 1.;
         let scale = f64::from(f32::from_bits(0x3b11a2b4)); // native 5265c0
-        (100. - rounded * scale * 100.).trunc().clamp(0., 100.) as f32 / 100.
+        (100. - rounded * scale * 100.).trunc().clamp(0., 100.) as i32
     }
+    #[cfg(test)]
+    pub fn gain(self, camera: [f32; 3]) -> f32 { self.level(camera) as f32 / 100. }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -166,8 +166,11 @@ struct App {
     stage: usize,
     since: Instant,
     audio_bus: crate::audio_bus::Bus,
-    sink: Option<rodio::Sink>,
+    movie_sink: Option<rodio::Sink>,
+    process_frontend:Option<crate::intro::process_frontend::Owner>,
+    intro_music_token:Option<crate::audio_bus::focus::MusicToken>,
     ui_click_sinks: Vec<rodio::Sink>,
+    menu_click_pending:bool,
     intro_music_loading: Option<std::sync::mpsc::Receiver<Result<Vec<f32>, String>>>,
     intro_music_playing: bool,
     intro_music_attempted: bool,
@@ -215,12 +218,10 @@ impl FrameProfile {
 }
 impl App {
     fn play_menu_light_click(&mut self) {
-        if let Some(mixer) = self.audio_bus.mixer() {
+        if let Some(mixer) = self.audio_bus.combined_mixer() {
             self.ui_click_sinks.retain(|sink| !sink.empty());
             let sink = rodio::Sink::connect_new(mixer);
-            sink.set_volume(self.intro.as_ref().map_or(1., |intro| {
-                f32::from(intro.ui_effects_level()) / 100.
-            }));
+            sink.set_volume(self.process_frontend.as_ref().map_or(1.,|p|p.borrow().audio.source_gain(100)));
             sink.append(rodio::buffer::SamplesBuffer::new(
                 1,
                 22_050,
@@ -230,52 +231,57 @@ impl App {
         }
     }
     fn update_intro_music(&mut self) {
-        if self.intro.as_ref().is_some_and(|intro| intro.inspecting()) {
-            if self.intro_music_playing {
-                if let Some(sink) = &self.sink {
-                    sink.stop();
-                }
-                self.intro_music_playing = false;
-            }
-            self.intro_music_loading = None;
-            self.intro_music_attempted = false;
-            return;
+        let Some(process)=self.process_frontend.clone() else{return;};
+        if self.intro.as_ref().is_some_and(|intro|intro.inspecting()) {
+            self.intro_music_loading=None;self.intro_music_token=None;
+            self.intro_music_attempted=false;self.intro_music_playing=false;return;
         }
+        if process.borrow().phase!=crate::intro::process_frontend::Phase::Menu
+            || self.intro.as_ref().is_some_and(|intro|intro.focus_pending()) {return;}
         if !self.intro_music_attempted {
-            self.intro_music_loading = Some(load_intro_music(
-                self.intro_music_decoder.clone(), self.intro_music_path.clone()));
-            self.intro_music_attempted = true;
+            match process.borrow_mut().menu_token() {
+                Ok(token)=>self.intro_music_token=Some(token),
+                Err(error)=>{self.failure=Some(error);return;}
+            }
+            self.intro_music_loading=Some(load_intro_music(self.intro_music_decoder.clone(),self.intro_music_path.clone()));
+            self.intro_music_attempted=true;
         }
-        let Some(loading) = &self.intro_music_loading else {
-            return;
-        };
+        let Some(loading)=&self.intro_music_loading else{return;};
         match loading.try_recv() {
-            Ok(Ok(samples)) => {
-                self.intro_music_loading = None;
-                if let Some(mixer) = self.audio_bus.mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    sink.append(rodio::buffer::SamplesBuffer::new(2, 44_100, samples).repeat_infinite());
-                    self.sink = Some(sink);
-                    self.intro_music_playing = true;
-                    eprintln!("Audio: original intro music started");
-                } else {
-                    eprintln!("Audio device unavailable; intro music is silent");
-                }
+            Ok(Ok(samples))=>{
+                self.intro_music_loading=None;
+                let Some(token)=self.intro_music_token.take() else {self.failure=Some("Menu decode lost generation token".into());return;};
+                if !token.is_current(){return;}
+                if let Some(mixer)=self.audio_bus.combined_mixer() {
+                    match process.borrow_mut().attach_menu(mixer,token,samples) {
+                        Ok(())=>{self.intro_music_playing=true;eprintln!("Audio: original intro music started");}
+                        Err(error)=>self.failure=Some(error),
+                    }
+                }else{eprintln!("Audio output unavailable; logical frontend remains active");}
             }
-            Ok(Err(error)) => {
-                self.intro_music_loading = None;
-                eprintln!("Intro music unavailable: {error}");
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.intro_music_loading = None;
-                eprintln!("Intro music decoder disconnected");
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => (),
+            Ok(Err(error))=>{self.intro_music_loading=None;self.intro_music_token=None;eprintln!("Intro music unavailable: {error}");}
+            Err(std::sync::mpsc::TryRecvError::Disconnected)=>{self.intro_music_loading=None;self.intro_music_token=None;eprintln!("Intro music decoder disconnected");}
+            Err(std::sync::mpsc::TryRecvError::Empty)=>{},
         }
+    }
+    /// Called at window-event entry, redraw and minimized wake. Prefix service
+    /// is nonblocking; only typed physical projections may follow a receipt.
+    fn service_process_input(&mut self)->Result<(),String>{
+        if let Some(intro)=&mut self.intro {intro.service_focus()?;}
+        self.drain_physical();Ok(())
+    }
+    fn drain_physical(&mut self)->bool {
+        let samples=self.process_frontend.as_ref().map(|p|p.borrow_mut().take_samples()).unwrap_or_default();
+        let mut fresh=false;
+        for sample in samples {
+            fresh|=apply_desktop_sample(&mut self.desktop_keys,&mut self.participant_left,sample);
+            if let Some(intro)=&mut self.intro {intro.camera_physical_sample(sample);}
+        }
+        fresh
     }
     fn advance(&mut self) {
         if self.stage == 0
-            && let Some(sink) = &self.sink
+            && let Some(sink) = &self.movie_sink
         {
             sink.stop();
         }
@@ -327,7 +333,7 @@ impl ApplicationHandler for App {
                                 44100,
                                 std::mem::take(&mut self.assets.audio),
                             ));
-                            self.sink = Some(sink);
+                            self.movie_sink = Some(sink);
                         }
                         None => {
                             eprintln!("Audio device unavailable; playing movie silently")
@@ -342,8 +348,23 @@ impl ApplicationHandler for App {
             }
         }
     }
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        if let Some(intro) = &mut self.intro { intro.camera_physical_event(&event); }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
+        if self.presenter.as_ref().is_none_or(|p|p.window.id()!=window){return;}
+        let redraw=matches!(&event,WindowEvent::RedrawRequested);
+        // All early returns are confined to the inner dispatcher. Actual menu
+        // edits/profile identity changes commit before the next event's prefix.
+        self.window_event_inner(event_loop,window,event);
+        if let Some(intro)=&mut self.intro {
+            if let Err(error)=intro.commit_menu_settings(){self.failure=Some(error);event_loop.exit();return;}
+        }
+        if std::mem::take(&mut self.menu_click_pending) && self.failure.is_none(){self.play_menu_light_click();}
+        if redraw && self.stage==3 && self.failure.is_none(){self.update_intro_music();}
+    }
+    fn about_to_wait(&mut self,event_loop:&ActiveEventLoop){self.about_to_wait_inner(event_loop);}
+}
+impl App {
+    fn window_event_inner(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
+        if let Err(error)=self.service_process_input(){self.failure=Some(error);event_loop.exit();return;}
         // Process focus is observed even during loading and before every
         // inspection/modal early return. Sending never waits for worker effects.
         if let WindowEvent::Focused(focused) = &event {
@@ -359,21 +380,14 @@ impl ApplicationHandler for App {
         if matches!(&event, WindowEvent::RedrawRequested) {
             self.next_redraw = Instant::now() + FRAME_INTERVAL;
         }
-        let participant_down = self.participant_left.sample(&event);
-        // Track physical samples BEFORE logical routing, including releases,
-        // repeats and events consumed by inspection. No city behavior changes.
-        if self.stage == 3 {
-            match &event {
-                WindowEvent::KeyboardInput { event, .. } => self.desktop_keys.physical(
-                    event.physical_key, event.state == ElementState::Pressed, event.repeat),
-                WindowEvent::MouseInput { button: MouseButton::Right, state, .. } =>
-                    self.desktop_keys.mouse_right(*state == ElementState::Pressed),
-                WindowEvent::Focused(false) => self.desktop_keys.release_on_unfocus(),
-                _ => (),
+        let participant_down=if let Some(sample)=crate::intro::process_frontend::PhysicalSample::from_event(&event) {
+            if let Some(intro)=&mut self.intro {
+                if let Err(error)=intro.physical_sample(window,sample){self.failure=Some(error);event_loop.exit();return;}
             }
-            if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
-                menu.desktop_right_button(self.desktop_keys.right());
-            }
+            self.drain_physical()
+        } else {false};
+        if let Some(menu)=self.intro.as_mut().and_then(|i|i.menu.as_mut()) {
+            menu.desktop_right_button(self.desktop_keys.right());
         }
         if let Some(intro) = &mut self.intro
             && intro.inspecting()
@@ -515,7 +529,7 @@ impl ApplicationHandler for App {
                     }
                 }
                 if light_click {
-                    self.play_menu_light_click();
+                    self.menu_click_pending=true;
                 }
             }
             WindowEvent::MouseInput {
@@ -533,7 +547,7 @@ impl ApplicationHandler for App {
                     }
                 }
                 if light_click {
-                    self.play_menu_light_click();
+                    self.menu_click_pending=true;
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -571,6 +585,12 @@ impl ApplicationHandler for App {
                                 );
                                 match result {
                                     Ok(mut intro) => {
+                                        if self.menu_onload {intro.open_menu();}
+                                        if let Err(error)=intro.birth_process_frontend(self.presenter.as_ref().unwrap().window.id()) {
+                                            self.failure=Some(error);event_loop.exit();return;
+                                        }
+                                        self.process_frontend=intro.process_frontend.clone();
+                                        self.window_focus=Some(self.presenter.as_ref().unwrap().window.has_focus());
                                         if let Some(focused) = self.window_focus {
                                             // Initial observation only; the
                                             // Session attachment occurs later.
@@ -579,9 +599,6 @@ impl ApplicationHandler for App {
                                                 event_loop.exit();
                                                 return;
                                             }
-                                        }
-                                        if self.menu_onload {
-                                            intro.open_menu();
                                         }
                                         self.intro = Some(intro);
                                         self.presenter.as_ref().unwrap().reset_presentation_profile();
@@ -610,9 +627,7 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
-                    if self.intro.is_some() {
-                        self.update_intro_music();
-                    }
+                    if let Err(error)=self.service_process_input(){self.failure=Some(error);event_loop.exit();return;}
                     // One sampled UI event1 per menu redraw; current/previous
                     // survive opening and closing. Camera50Hz is a separate clock.
                     let sample = self.desktop_keys.sample();
@@ -686,16 +701,10 @@ impl ApplicationHandler for App {
             _ => (),
         }
     }
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait_inner(&mut self, event_loop: &ActiveEventLoop) {
         // Service pending UI-only prefixes even if no surface redraw is
         // available (for example, while minimized). Never wait on a worker.
-        if let Some(intro) = &mut self.intro {
-            if let Err(error) = intro.service_focus() {
-                self.failure = Some(error);
-                event_loop.exit();
-                return;
-            }
-        }
+        if let Err(error)=self.service_process_input(){self.failure=Some(error);event_loop.exit();return;}
         if self
             .exit_after
             .is_some_and(|limit| self.launched.elapsed() >= limit)
@@ -839,7 +848,6 @@ pub fn run() -> Result<(), Error> {
     let assets = Assets::load(&root, &ffmpeg, skip_splash)?;
     let music_path = root.join("Standard/sound/music/music_intro.wma");
     let music_decoder = ffmpeg.clone();
-    let intro_music_loading = load_intro_music(music_decoder.clone(), music_path.clone());
     let (intro_sender, intro_loading) = std::sync::mpsc::channel();
     let paths = crate::intro::Paths {
         compatibility,
@@ -869,11 +877,14 @@ pub fn run() -> Result<(), Error> {
         stage: if skip_splash { 3 } else { 0 },
         since: now,
         audio_bus: crate::audio_bus::Bus::new(),
-        sink: None,
+        movie_sink: None,
+        process_frontend:None,
+        intro_music_token:None,
         ui_click_sinks: Vec::new(),
-        intro_music_loading: Some(intro_music_loading),
+        menu_click_pending:false,
+        intro_music_loading: None,
         intro_music_playing: false,
-        intro_music_attempted: true,
+        intro_music_attempted: false,
         intro_music_path: music_path,
         intro_music_decoder: music_decoder,
         failure: None,
@@ -919,5 +930,38 @@ mod participant_physical_input_tests {
         assert!(sample.sample(&left(true)), "missing OS release after focus loss is harmless");
         assert!(!sample.sample(&left(false)));
         assert!(!sample.sample(&left(false)));
+    }
+}
+
+pub(crate) fn apply_desktop_sample(keys:&mut crate::menu::desktop_quit::Keys,left:&mut ParticipantLeft,
+    sample:crate::intro::process_frontend::PhysicalSample)->bool {
+    use crate::intro::process_frontend::PhysicalSample;
+    match sample {
+        PhysicalSample::Key{key,down,repeat}=>keys.physical(key,down,repeat),
+        PhysicalSample::Button{button:MouseButton::Right,down}=>keys.mouse_right(down),
+        PhysicalSample::Button{button:MouseButton::Left,down}=>{let fresh=down&&!left.held;left.held=down;return fresh;}
+        PhysicalSample::Unfocus=>{keys.release_on_unfocus();left.held=false;}
+        _=>{},
+    }
+    false
+}
+
+#[cfg(test)]
+mod process_input_tests {
+    use super::*;
+    use crate::intro::process_frontend::{ProcessFrontend,PhysicalSample};
+    #[test]
+    fn app_physical_producers_consume_actual_foreground_receiver_admission(){
+        let (process,receipt)=crate::live_host::process_runtime::test_frontend_startup();
+        let owner=ProcessFrontend::new(receipt,process,WindowId::from(7),crate::settings_menu::Levels::default()).unwrap();
+        let mut keys=crate::menu::desktop_quit::Keys::default();let mut left=ParticipantLeft::default();
+        for (focused,expected) in [(false,false),(true,true)] {
+            let mut p=owner.borrow_mut();p.observe(focused).unwrap();
+            p.sample(WindowId::from(7),PhysicalSample::Button{button:MouseButton::Left,down:true},0,0).unwrap();
+            let samples=p.take_samples();drop(p);
+            let fresh=samples.into_iter().any(|s|apply_desktop_sample(&mut keys,&mut left,s));
+            assert_eq!(fresh,expected);assert_eq!(left.held,expected);
+        }
+        apply_desktop_sample(&mut keys,&mut left,PhysicalSample::Unfocus);assert!(!left.held);
     }
 }

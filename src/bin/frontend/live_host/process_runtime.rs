@@ -88,8 +88,18 @@ struct ProcessRuntime {
 pub struct Handle(Arc<Mutex<ProcessRuntime>>);
 /// UI-owned pair. Not Clone, not in Host/Session, not rebuilt on World reset.
 /// Assets owns it before any graph, and retains it across park/attach/refresh.
-pub struct Activity { a4:u32,a8:u32 }
+pub struct Activity { a4:u32,a8:u32, frontend:Option<FrontendStartup> }
+/// Plain verified receipt; no Rc/audio/device object enters the shared mutex.
+pub(crate) struct FrontendStartup {
+    pub input:openmt2001::native_input::RetainedCells,
+    pub pause:openmt2001::pause::State,
+    pub suspended:u8,
+    pub disable_sound:u8, pub disable_music:u8, pub sound:u8,
+}
 impl Activity {
+    pub(crate) fn take_frontend_startup(&mut self)->std::result::Result<FrontendStartup,String>{
+        self.frontend.take().ok_or_else(||"Process frontend receipt already consumed".into())
+    }
     pub fn a4(&self)->u32{self.a4}
     pub fn a8(&self)->u32{self.a8}
     pub fn store_a4(&mut self,value:u32){self.a4=value;}
@@ -115,6 +125,7 @@ fn startup_from_loader(cells:&Cells,command:&str)->std::result::Result<(Handle,A
     for address in [0x8b26cc,0x822d38,0x8fcaa4,0x8fcaa8] {
         if cells.word(address)?!=0{return Err(format!("unexpected process loader word {address:08x}"));}
     }
+    let frontend=FrontendStartup::ordinary(cells)?;
     let mut options=Options::defaults4b9140();options.parse4c7500(command).map_err(|e|e.to_string())?;
     let mut runtime=ProcessRuntime{performance:Performance::constructor4b9140(),options,network:Network::constructor4e1290(),
         alternative:cells.byte(0x8fca96)?,media:Media{byte:cells.byte(0x8fca98)?,producer:MediaProducer::Loader},
@@ -133,7 +144,7 @@ fn startup_from_loader(cells:&Cells,command:&str)->std::result::Result<(Handle,A
     //Actual startup clear is committed. The missing probe is represented as
     //awaiting, NOT admitted as known valid0 or silently ignored success.
     runtime.media.byte=0;runtime.media.producer=MediaProducer::Awaiting(MediaSite::Startup4b94eb);
-    Ok((Handle(Arc::new(Mutex::new(runtime))),Activity{a4:cells.word(0x8fcaa4)?,a8:cells.word(0x8fcaa8)?}))
+    Ok((Handle(Arc::new(Mutex::new(runtime))),Activity{a4:cells.word(0x8fcaa4)?,a8:cells.word(0x8fcaa8)?,frontend:Some(frontend)}))
 }
 impl ProcessRuntime {fn city_main_entry(&mut self){if self.network.enabled!=0{self.options.quit_on_escape=1;}}}
 impl Handle {
@@ -239,3 +250,28 @@ impl Handle {
 #[cfg(test)] pub(crate) fn test_fixture()->Handle{tests::fixture()}
 #[cfg(test)]
 #[path="process_runtime/tests.rs"] mod tests;
+
+impl FrontendStartup {
+    fn ordinary(cells:&Cells)->std::result::Result<Self,String>{
+        use openmt2001::native_input::{RetainedCells,MousePacket,LogicalPointer};
+        for (address,length) in [(0x8af23a,2),(0x8b23ba,2),(0x8b22d0,9),
+            (0x8af401,1),(0x8b2374,1),(0x8b22dd,1),(0x93c5c0,594)] {
+            if cells.read(address,length)?.iter().any(|&b|b!=0){
+                return Err(format!("Unexpected ordinary frontend loader preimage {address:08x}"));
+            }
+        }
+        //4ad020 writes3a only;4b9140 writes sound/music1;4bab70 enabled1/transition0.
+        //Heap CHAR slots/event count/recording use explicit modern zero priors.
+        Ok(Self { input:RetainedCells { mouse_current:MousePacket([0;16]), mouse_prior:MousePacket([0;16]),
+            keyboard_current:[0;256],keyboard_prior:[0;256],logical_pointer:LogicalPointer{x:0,y:0},
+            left_override:0,right_override:0,double_click:0,keyboard_poll_tick:0,device_event_count:0,
+            input_enabled:1,focus_transition:0,recording:0,space_recorded:0 },
+            pause:openmt2001::pause::State{bytes:cells.read(0x8b22d0,9)?.try_into().unwrap()},
+            suspended:0,disable_sound:0,disable_music:cells.byte(0x8af23b)?,sound:1 })
+    }
+}
+
+#[cfg(test)] pub(crate) fn test_frontend_startup()->(Handle,FrontendStartup){
+    let (process,mut activity)=startup(&tests::loader(),"").unwrap();
+    (process,activity.take_frontend_startup().unwrap())
+}

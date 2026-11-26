@@ -29,7 +29,7 @@ impl Drop for Scratch {
         fs::remove_dir_all(&self.0).unwrap();
     }
 }
-fn inputs(root: PathBuf) -> Arc<SceneInputs> {
+pub(super) fn inputs(root: PathBuf) -> Arc<SceneInputs> {
     let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
     let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
     let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
@@ -62,7 +62,7 @@ fn inputs(root: PathBuf) -> Arc<SceneInputs> {
         suncols: read("OPENMT2001_SUNCOLS"),
     })
 }
-fn setup(inputs: &SceneInputs) -> crate::singleplayer::Setup {
+pub(super) fn setup(inputs: &SceneInputs) -> crate::singleplayer::Setup {
     let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
     crate::singleplayer::Setup {
         preview: crate::singleplayer::Preview::Scenario(200003),

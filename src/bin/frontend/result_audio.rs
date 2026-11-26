@@ -63,6 +63,67 @@ impl Assets {
         let sink = connect(samples, stream.mixer(), music_level);
         Ok((stream, sink))
     }
+
+    /// Complete focus adapter route. The process keeps `audio` across views;
+    /// result ownership keeps the existing stream and registered music Sink.
+    pub fn play_with_audio(&self, address: u32, audio: &crate::audio_bus::focus::SharedAudio)
+        -> Result<(rodio::OutputStream, crate::audio_bus::focus::Music), String>
+    {
+        let samples = self.samples(address)?;
+        let stream = rodio::OutputStreamBuilder::open_default_stream()
+            .map_err(|error| format!("result audio device unavailable: {error}"))?;
+        let sink = connect_managed(samples, stream.mixer(), audio)?;
+        Ok((stream, sink))
+    }
+}
+
+fn connect_managed(samples: &[f32], mixer: &rodio::mixer::Mixer,
+    audio: &crate::audio_bus::focus::SharedAudio) -> Result<crate::audio_bus::focus::Music, String>
+{
+    let owner = crate::audio_bus::focus::MusicOwner::new();
+    let sink = audio.music_sink(mixer, owner.token()?)?;
+    sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.to_vec()).repeat_infinite())?;
+    Ok(sink)
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::audio_bus::focus::{Action, Guards, SharedAudio};
+    #[test]
+    fn result_music_uses_same_retained_focus_state_and_does_not_restart_or_revive() {
+        let guards = Guards { active: true, sound_enabled: true, music_enabled: true };
+        for sample in [0.5, 0.25] {
+            let audio = SharedAudio::new(75, 25);
+            audio.apply(Action::Suspend, guards);
+            let (mixer, mut output) = rodio::mixer::mixer(2, 44100);
+            mixer.add(rodio::source::Zero::new(2, 44100));
+            let song = connect_managed(&vec![sample; 262144], &mixer, &audio).unwrap();
+            let first: Vec<_> = output.by_ref().take(8192).collect();
+            assert!(first.iter().all(|sample| *sample == 0.));
+            assert!(song.is_paused());
+            assert_eq!(song.get_pos(), std::time::Duration::ZERO);
+            let identity = &*song as *const rodio::Sink;
+            audio.apply(Action::Resume, guards);
+            let expected = if sample == 0.5 { 0.192517415 } else { 0.09625871 };
+            let resumed: Vec<_> = output.by_ref().take(8192).collect();
+            assert!(resumed.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
+            assert!(resumed[4096..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert_eq!(&*song as *const rodio::Sink, identity);
+            assert_eq!(song.len(), 1);
+            let position = song.get_pos();
+            audio.apply(Action::Suspend, guards);
+            for _ in 0..8192 { output.next(); }
+            let paused_position = song.get_pos();
+            assert!(paused_position >= position);
+            for _ in 0..8192 { output.next(); }
+            assert_eq!(song.get_pos(), paused_position);
+            drop(song);
+            audio.apply(Action::Resume, guards);
+            let retired: Vec<_> = output.by_ref().take(8192).collect();
+            assert!(retired[4096..].iter().all(|sample| *sample == 0.));
+        }
+    }
 }
 
 // Share the native nominal music transfer with the era music master.
@@ -355,4 +416,11 @@ mod repeat_tests {
             Ok(_) => panic!("intro address must not be accepted as a result song"),
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn composition_result_pcm(mixer:&rodio::mixer::Mixer,audio:&crate::audio_bus::focus::SharedAudio)->crate::audio_bus::focus::Music{
+    // The same managed attachment used by play_with_audio, with controlled
+    //decoded PCM and neutral output so composition tests never open a device.
+    connect_managed(&[0.5;64],mixer,audio).unwrap()
 }

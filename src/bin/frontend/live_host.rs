@@ -700,7 +700,9 @@ impl Host {
             if prefix == crate::intro::focus::Prefix::ReceiverAbsent { return Ok(()); }
             // Native tests this gate after the frontend callback, not instead
             // of it. No fabricated success when a required provider is absent.
-            let blocked = self.policy.scheduler.network_enabled;
+            let blocked = if let Some(process)=&self.process_runtime {
+                process.byte(process_runtime::Byte::Network93bbb9).map_err(|e|e.to_string())?!=0
+            } else {self.policy.scheduler.network_enabled};
             if focused {
                 pause.focus_gained(blocked, |change, _| { change.apply(timers); Ok(()) })
             } else {

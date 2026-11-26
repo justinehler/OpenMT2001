@@ -63,7 +63,7 @@ fn ui_click_new_creation_consumes_preference_without_rewriting_prior_click() {
     let prior_gain = player.ui_click_cues[0].sink.volume();
 
     player.set_level(0);
-    assert_eq!(player.effects_factor, 0.);
+    assert_eq!(player.audio.factor(), 0.);
     assert_eq!(player.ui_click_cues[0].source_level, 100);
     assert_eq!(player.ui_click_cues[0].sink.volume(), prior_gain);
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.5),
@@ -132,16 +132,16 @@ fn ui_click_and_ledger_share_existing_bus_output_without_rewriting_ledger() {
 }
 
 #[test]
-fn ui_click_migration_preserves_both_targeted_variants_linear_live_gain() {
+fn both_targeted_variants_retain_creation_gain() {
     for actor_is_current in [false, true] {
         let (mut player, mut output) = owner(25);
         player.apply(Operation::Targeted { actor_is_current }).unwrap();
         assert!(player.ui_click_cues.is_empty() && player.ledger_cues.is_empty());
-        assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.125));
+        assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
         player.set_level(50);
-        assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.25));
+        assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
         player.set_level(0);
-        assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.));
+        assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
     }
 }
 
@@ -166,7 +166,7 @@ fn ui_click_independent_original_fixture_through_actual_owner_pcm() {
         assert!(expected_gain.is_finite() && (0.0..=1.0).contains(&expected_gain));
         assert!(seen.insert(effects), "duplicate independent fixture");
         let (mut player, mut output) = owner(effects);
-        let combined = fixed_cue_normalized(player.effects_factor, source_level);
+        let combined = fixed_cue_normalized(player.audio.factor(), source_level);
         assert_eq!(combined.to_bits(), bits, "original final binary32 argument");
         assert_eq!(crate::music_gain::normalized_command(combined), command);
         player.apply(Operation::UiLightClick).unwrap();
