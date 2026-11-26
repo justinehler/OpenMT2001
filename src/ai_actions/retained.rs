@@ -6,6 +6,7 @@ use crate::{
     player_manager::{Player, word},
 };
 pub struct World<'a> {
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub categories: &'a [[u8; 380]; 52],
     pub buildings: &'a [[u8; 916]],
     pub catalog: &'a BusinessCatalog,
@@ -70,7 +71,7 @@ pub(crate) fn quote(
             });
         }
     }
-    crate::building_binding::construction_cost(
+    crate::building_binding::construction_cost_with_parameters(
         &crate::building_binding::ConstructionInputs {
             volume: arguments[1] as i32,
             kind,
@@ -83,6 +84,7 @@ pub(crate) fn quote(
             business: info,
             products: &products,
         },
+        &world.building_parameters,
         image,
     )
 }
@@ -395,6 +397,7 @@ mod tests {
             let mut components = std::array::from_fn(|i| f32::from_bits(word(before[10], i * 4)));
             let mut identity = 0;
             let mut world = World {
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
                 categories: &categories,
                 buildings: &buildings,
                 catalog: &catalog,
@@ -461,5 +464,56 @@ mod tests {
             }
         }
         assert!(r.0.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod configured_parameter_tests {
+    use super::*;
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/building_image.rs"));
+
+    #[test]
+    fn ai_quote_and_demolition_receive_configured_resource() {
+        let bytes = fixture();
+        let image = PeImage::parse(&bytes).unwrap();
+        let parameters = crate::building_parameters::BuildingKinds::from_parameters(
+            "BuildingRent Retail 3\nBuildingCostPerUnit Retail 15\nBuildingCostToDemolish Retail 4",
+            &image,
+        ).unwrap();
+        let mut categories = [[0; 380]; 52];
+        let mut buildings = vec![[0; 916]; 600];
+        let catalog = BusinessCatalog::from_rows([[0; 116]; 45]);
+        let products = [[[0; 2]; 6]; 45];
+        let commodities = [[0; 28]; 32];
+        let residents = ResidentAccounts::new_pool();
+        let player = Player { reference: 1, bytes: vec![], auxiliaries: vec![] };
+        let mut counts = [0; 52 * 45];
+        let mut identity = 0;
+        let mut components = [0.0; 4];
+        let world = World {
+            building_parameters: parameters, categories: &categories,
+            buildings: &buildings, catalog: &catalog, products: &products,
+            commodities: &commodities, residents: &residents,
+            player_references: &[1], player_count: 1, category_counts: &mut counts,
+            proposal_identity: &mut identity, construction_components: &mut components,
+            hour: 6, mode: 0, allowance: 0, affordability_override: false,
+            discount: 0.0, proposal_prior: [0; 104],
+        };
+        let cost = quote(&[0, 2, 0, 0, 0, 0, 0, 0, 0, 0], &player, &world, &image).unwrap();
+        assert_eq!(cost.total, 36);
+        assert_eq!(cost.components.map(f32::to_bits), [30.0f32, 0.0, 6.0, 0.0].map(f32::to_bits));
+        // Release the borrowed AI proposal view before independent demolition.
+        drop(world);
+        categories[0][0x84..0x88].copy_from_slice(&2f32.to_le_bytes());
+        buildings[0][4..8].copy_from_slice(&[0, 0, 1, 2]);
+        buildings[0][8] = 2;
+        buildings[0][0x40..0x44].copy_from_slice(&0x617628u32.to_le_bytes());
+        let maintenance = crate::ai_maintenance::World {
+            building_parameters: parameters, image: &image, profiles: &[],
+            categories: &categories, buildings: &buildings, businesses: &[],
+            catalog: &catalog, entries: &[], counts: &mut counts,
+            identity: &mut identity, prior: [0; 104],
+        };
+        assert_eq!(crate::ai_maintenance::demolition_quote(0, &maintenance).unwrap().to_f32().to_bits(), 96f32.to_bits());
     }
 }

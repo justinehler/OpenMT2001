@@ -153,6 +153,7 @@ pub struct World<'a> {
     pub players: &'a mut [PlayerAccount],
 }
 pub struct Context<'a, 'image> {
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub image: &'a PeImage<'image>,
     pub building_base: u32,
     pub category_base: u32,
@@ -196,7 +197,7 @@ pub fn apply(
         .ok_or("construction category leaves table")?;
     let rectangle = command.rectangle.map(i32::from);
     let center = building_pool::center(category_row, rectangle, context.image)?;
-    building_pool::initialize(
+    building_pool::initialize_with_parameters(
         &mut world.buildings[slot],
         &building_pool::Initialization {
             rectangle,
@@ -208,7 +209,7 @@ pub fn apply(
             total_cost: total.to_bits(),
             date: context.date,
         },
-        context.image,
+        &context.building_parameters,
     )?;
     let reference = context
         .category_base
@@ -509,6 +510,7 @@ mod tests {
                 .map(|raw| PlayerAccount::from_runtime(raw).unwrap())
                 .collect::<Vec<_>>();
             let context = Context {
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
                 image: &image,
                 building_base: 0x591318,
                 category_base: 0x617628,

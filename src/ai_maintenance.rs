@@ -5,6 +5,7 @@ use crate::{
     x87::Sum,
 };
 pub struct World<'a> {
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub image: &'a PeImage<'a>,
     pub profiles: &'a [[u8; 0x650]],
     pub categories: &'a [[u8; 380]; 52],
@@ -153,7 +154,7 @@ fn building<'a>(id: u32, w: &'a World<'_>) -> Result<&'a [u8; 916], String> {
 }
 ///445520, retaining PC64 until the caller's FST32 quote.
 pub fn demolition_quote(id: u32, w: &World<'_>) -> Result<Sum, String> {
-    crate::demolition::quote(building(id, w)?, w.categories, w.image)
+    crate::demolition::quote_with_parameters(building(id, w)?, w.categories, &w.building_parameters, w.image)
 }
 ///4453b0 with the live scripted business catalog and original binary64 constants.
 pub fn conversion_quote(id: u32, kind: u32, w: &World<'_>) -> Result<Sum, String> {
@@ -406,6 +407,7 @@ fn matches_native_maintenance() {
         let mut counts = std::array::from_fn(|i| word(b[7], i * 4));
         let mut identity = 77;
         let mut w = World {
+            building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
             image: &image,
             profiles: &profiles,
             categories: categories.as_slice().try_into().unwrap(),

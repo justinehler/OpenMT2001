@@ -835,6 +835,7 @@ impl Session<'_> {
                                         let totals=context.utilities.totals;
                                         let mut message_context=messages.borrow_mut();
                                         let mut world=openmt2001::ai_runtime::World{
+                                            building_parameters:city.building_parameters,
                                             neighbor_cache:&mut city.ai_neighbors,
                                             ownership_refresh_counter:&mut city.ownership_refresh_counter,
                                             utility_enabled:context.utilities.enabled,

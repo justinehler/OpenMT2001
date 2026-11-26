@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub struct World<'a> {
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub neighbor_cache: &'a mut crate::ai_neighbors::Cache,
     pub ownership_refresh_counter: &'a mut u8,
     pub utility_enabled: [bool;4],
@@ -80,7 +81,7 @@ pub fn planning(
 )->Result<bool,String>{
     let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
     let mut state=crate::ai_actions::Planning{outputs:*outputs,..Default::default()};
-    let mut context=crate::ai_actions::retained::World{
+    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
         categories:world.categories,buildings:world.buildings,catalog:world.catalog,
         products:world.products,commodities:world.commodities,residents:world.residents,
         player_references:&references,player_count:world.active_player_count as i32,
@@ -260,7 +261,7 @@ pub(crate) fn allocate(next: &mut u32, size: usize) -> Result<u32, String> {
 
 fn expand_housing(player:&mut Player,profiles:&mut[[u8;0x650]],image:&PeImage<'_>,peers:&[Option<&Player>],world:&mut World<'_>)->Result<(),String>{
     let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let mut context=crate::ai_actions::retained::World{
+    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
         categories:world.categories,buildings:world.buildings,catalog:world.catalog,products:world.products,
         commodities:world.commodities,residents:world.residents,player_references:&references,
         player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
@@ -326,7 +327,7 @@ fn business_kind(player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage<'_
     let ranking=crate::ai_business_ranking::World{image,catalog:world.catalog,products:world.products,commodities:world.commodities,
         categories:world.categories,buildings:world.buildings,businesses:world.businesses,counts:&counts,
         demand:world.ai_demand_rows,residents:world.residents,time};
-    let mut context=crate::ai_actions::retained::World{categories:world.categories,buildings:world.buildings,catalog:world.catalog,
+    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:world.categories,buildings:world.buildings,catalog:world.catalog,
         products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
         player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
         construction_components:world.construction_components,hour:time.hour,mode:world.strategy_mode as u32,
@@ -349,13 +350,13 @@ fn maintain_businesses(selling:bool,player:&mut Player,profiles:&mut [[u8;0x650]
     let profile_view=profiles.to_vec();let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
     let count=usize::from(u16::from_le_bytes(player.bytes[0xb46..0xb48].try_into().unwrap()));
     let entries=if count==0{&[][..]}else{world.ownership.lists.get(&word(&player.bytes,0xb3c)).and_then(|r|r.get(..count)).ok_or("AI maintenance ownership allocation missing")?};
-    let mut maintenance=crate::ai_maintenance::World{image,profiles:&profile_view,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
+    let mut maintenance=crate::ai_maintenance::World{building_parameters:world.building_parameters,image,profiles:&profile_view,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
         catalog:world.catalog,entries,counts:world.category_counts,identity:world.proposal_identity,prior:[0;104]};
     crate::ai_maintenance::maintain(selling,player,&mut maintenance,|player,mode,w|{
         let counts=*w.counts;
         let ranking=crate::ai_business_ranking::World{image,catalog:w.catalog,products:world.products,commodities:world.commodities,
             categories:w.categories,buildings:w.buildings,businesses:w.businesses,counts:&counts,demand:world.ai_demand_rows,residents:world.residents,time};
-        let mut context=crate::ai_actions::retained::World{categories:w.categories,buildings:w.buildings,catalog:w.catalog,
+        let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:w.categories,buildings:w.buildings,catalog:w.catalog,
             products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
             player_count:world.active_player_count as i32,category_counts:w.counts,proposal_identity:w.identity,construction_components:world.construction_components,
             hour:time.hour,mode:world.strategy_mode as u32,allowance:world.construction_allowance,affordability_override:world.affordability_override,
@@ -371,7 +372,7 @@ fn maintain_businesses(selling:bool,player:&mut Player,profiles:&mut [[u8;0x650]
 fn portfolio_value(player:&Player,profiles:&[[u8;0x650]],image:&PeImage<'_>,world:&mut World<'_>)->Result<i32,String>{
     let count=usize::from(u16::from_le_bytes(player.bytes[0xb44..0xb46].try_into().unwrap()));
     let entries=if count==0{&[][..]}else{world.ownership.lists.get(&word(&player.bytes,0xb3c)).and_then(|r|r.get(..count)).ok_or("AI portfolio ownership allocation missing")?};
-    crate::ai_maintenance::portfolio(player,&crate::ai_maintenance::World{image,profiles,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
+    crate::ai_maintenance::portfolio(player,&crate::ai_maintenance::World{building_parameters:world.building_parameters,image,profiles,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
         catalog:world.catalog,entries,counts:world.category_counts,identity:world.proposal_identity,prior:[0;104]})
 }
 
@@ -380,7 +381,7 @@ fn developed_target(player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage
     let profile_view=profiles.to_vec();let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
     let target=crate::ai_developed_targets::World{image,profiles:&profile_view,hour:time.hour,categories:world.categories,
         buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,ownership:world.ownership,residents:world.residents,commodity_active:&world.commodity_active};
-    let mut context=crate::ai_actions::retained::World{categories:world.categories,buildings:world.buildings,catalog:world.catalog,
+    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:world.categories,buildings:world.buildings,catalog:world.catalog,
         products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
         player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
         construction_components:world.construction_components,hour:time.hour,mode:world.strategy_mode as u32,
@@ -450,7 +451,7 @@ fn dispatch(
                 }
                 Ok(0)
             } else if event == crate::ai_dispatch::Event::Helper(0x4687e0) {
-                crate::ai_actions::expansion::clear_space(player,world.category_footprints,&mut crate::ai_maintenance::World{
+                crate::ai_actions::expansion::clear_space(player,world.category_footprints,&mut crate::ai_maintenance::World{building_parameters:world.building_parameters,
                     image,profiles,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
                     catalog:world.catalog,entries:&[],counts:world.category_counts,identity:world.proposal_identity,prior:[0;104],
                 }).map(|_|0)
@@ -652,7 +653,7 @@ pub fn advance(
                                 return Err("AI construction requires unresolved network command transport".into());
                             }
                             let references:Vec<_>=before.iter().map(|p|p.reference).chain(std::iter::once(player.reference)).chain(after.iter().map(|p|p.reference)).collect();
-                            let mut context=crate::ai_actions::retained::World{
+                            let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
                                 categories:world.categories,buildings:world.buildings,catalog:world.catalog,
                                 products:world.products,commodities:world.commodities,residents:world.residents,
                                 player_references:&references,player_count:world.active_player_count as i32,

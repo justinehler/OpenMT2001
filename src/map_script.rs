@@ -180,6 +180,7 @@ pub trait Hooks: business_pool::BusinessPoolHooks {
     fn stock_charge(&mut self, business: &mut [u8; 0x220], amount: f32) -> Result<(), String>;
 }
 pub struct State<'a, 'image> {
+    pub building_parameters: crate::building_parameters::BuildingKinds,
     pub world: business_binding::World<'a>,
     pub runtime: business_binding::Runtime<'a>,
     pub image: &'a PeImage<'image>,
@@ -235,7 +236,7 @@ impl State<'_, '_> {
                 });
             }
         }
-        let cost = crate::building_binding::construction_cost(
+        let cost = crate::building_binding::construction_cost_with_parameters(
             &crate::building_binding::ConstructionInputs {
                 volume: request.volume,
                 kind: request.kind,
@@ -248,11 +249,12 @@ impl State<'_, '_> {
                 business: info,
                 products: &products,
             },
+            &self.building_parameters,
             self.image,
         )?;
         self.construction_components = cost.components;
         let center = building_pool::center(category, request.rectangle, self.image)?;
-        building_pool::initialize(
+        building_pool::initialize_with_parameters(
             &mut self.world.buildings[slot],
             &building_pool::Initialization {
                 rectangle: request.rectangle,
@@ -264,7 +266,7 @@ impl State<'_, '_> {
                 total_cost: cost.building_argument_bits(),
                 date: self.date,
             },
-            self.image,
+            &self.building_parameters,
         )?;
         let reference = self
             .world
@@ -522,6 +524,7 @@ mod tests {
                 buildings[0][0x40..0x44].copy_from_slice(&0x617628_u32.to_le_bytes());
             }
             let mut state = State {
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
                 world: business_binding::World {
                     buildings: &mut buildings,
                     businesses: businesses.as_mut_slice(),
@@ -886,6 +889,7 @@ mod tests {
                         category_footprints: _,
                         ai_neighbors: _,
                         ai_demand: _,
+                        building_parameters: _,
                     },
             } = world;
             let crate::level_startup::Scripts {
@@ -1219,6 +1223,7 @@ mod tests {
             // Remaining direct map calls below only exercise refused placement.
             let bindings = Bindings::register(&mut vm, 1, 2).unwrap();
             let mut state = State {
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
                 world: business_binding::World {
                     buildings: &mut buildings,
                     businesses: businesses.as_mut_slice(),

@@ -91,13 +91,6 @@ pub fn construction_cost(
     input: &ConstructionInputs<'_>,
     image: &crate::pe::PeImage<'_>,
 ) -> Result<ConstructionCost, String> {
-    let word = |offset| u32::from_le_bytes(input.business[offset..offset + 4].try_into().unwrap());
-    let float = |offset| f32::from_bits(word(offset));
-    let double = |address| -> Result<f64, String> {
-        Ok(f64::from_le_bytes(
-            image.at(address, 8)?.try_into().unwrap(),
-        ))
-    };
     let type_address = input
         .kind
         .checked_mul(0x2e)
@@ -106,6 +99,30 @@ pub fn construction_cost(
     let type_row = image.at(type_address, 4)?;
     let unit_price = u16::from_le_bytes(type_row[..2].try_into().unwrap());
     let base_price = u16::from_le_bytes(type_row[2..].try_into().unwrap());
+    construction_cost_words(input, image, [unit_price, base_price])
+}
+/// Quote using the configured Session resource; literal image helper remains
+/// available for original observations and geometry previews.
+pub fn construction_cost_with_parameters(
+    input: &ConstructionInputs<'_>,
+    parameters: &crate::building_parameters::BuildingKinds,
+    image: &crate::pe::PeImage<'_>,
+) -> Result<ConstructionCost, String> {
+    let [rent, cost, _] = parameters.row(input.kind)?;
+    construction_cost_words(input, image, [rent, cost])
+}
+fn construction_cost_words(
+    input: &ConstructionInputs<'_>,
+    image: &crate::pe::PeImage<'_>,
+    [unit_price, base_price]: [u16; 2],
+) -> Result<ConstructionCost, String> {
+    let word = |offset| u32::from_le_bytes(input.business[offset..offset + 4].try_into().unwrap());
+    let float = |offset| f32::from_bits(word(offset));
+    let double = |address| -> Result<f64, String> {
+        Ok(f64::from_le_bytes(
+            image.at(address, 8)?.try_into().unwrap(),
+        ))
+    };
     let quality = match input.quality {
         0 => 1_f32,
         1 => 1.2_f32,

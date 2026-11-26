@@ -163,7 +163,7 @@ impl Session<'_> {
             None => None,
         };
         let demolition_price = if permissions.demolish {
-            Some(openmt2001::demolition::quote(row, &city.categories, image)?.to_f32())
+            Some(openmt2001::demolition::quote_with_parameters(row, &city.categories, &city.building_parameters, image)?.to_f32())
         } else {
             None
         };
@@ -347,6 +347,7 @@ impl Session<'_> {
         }
         let tick = self.world.clock.timing[0];
         let mut world = business_controls::World {
+            building_parameters: self.world.city.building_parameters,
             image,
             selected: Some(building),
             selected_category: word(category, 0) as i32,

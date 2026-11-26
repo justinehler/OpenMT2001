@@ -966,6 +966,7 @@ impl<'data> Session<'data> {
             .resident_creation(openmt2001::resident::AuxiliaryPool::for_residents());
         let mut world =
             level_startup::World::fresh(input.image, input.board, configuration, creation)?;
+        world.city.building_parameters = openmt2001::building_parameters::BuildingKinds::from_parameters(input.parameters, input.image)?;
         if let Some(style) = style { style.apply_categories(&mut world.categories); }
         let mut scripts = level_startup::Scripts::new(input.image)?;
         let read = |relative: &str| {
@@ -3165,7 +3166,25 @@ mod tests {
             .unwrap();
             assert!(quote > 0);
             if case == 3 {
-                assert_eq!(quote, 735, "Hotel lifecycle quote differs from the UI preview");
+                // Original445720/461550 with supplied Residential15/rent3,
+                // Hotel refurb10, Atlantic prestige4 and six cells at height2:
+                // base600 + rent69.588455f32 + utilities24 -> FTOL693.
+                // Pin the operands; raw PE defaults10/10 instead quote735.
+                assert_eq!((category, business, kind, height, hour), (33, 43, 1, 2, 9));
+                assert_eq!((rectangle[2] - rectangle[0] + 1)
+                    * (rectangle[3] - rectangle[1] + 1), 6);
+                assert_eq!(command.quality, 0);
+                assert_eq!(session.world.city.building_parameters.row(1).unwrap(), [3, 15, 4]);
+                assert_eq!(f32::from_le_bytes(session.world.categories[33][0x84..0x88]
+                    .try_into().unwrap()), 4.);
+                let hotel = session.world.catalog.info.row(43).unwrap();
+                let hotel_word = |at| u32::from_le_bytes(hotel[at..at + 4].try_into().unwrap());
+                assert_eq!((hotel_word(0x38), hotel_word(0x3c), hotel_word(0x48),
+                    hotel_word(0x54)), (6, 16, 2, 10));
+                assert_eq!(image.f32_at(0x53be78).unwrap(), 0.5);
+                assert_eq!(command.components.map(f32::to_bits),
+                    [600_f32, 0., 69.588455, 24.].map(f32::to_bits));
+                assert_eq!(quote, 693, "configured Hotel lifecycle quote");
             }
             let slot = building_pool::first_free(&session.world.buildings)
                 .unwrap()

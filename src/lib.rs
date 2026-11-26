@@ -99,6 +99,7 @@ pub mod ui_mesh;
 pub mod font;
 pub mod ui_button;
 pub mod building_binding;
+pub mod building_parameters;
 pub mod business_binding;
 pub mod business_initialize;
 pub mod building_pool;
