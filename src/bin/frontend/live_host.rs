@@ -148,6 +148,9 @@ pub struct Host {
     pub process_runtime:Option<process_runtime::Handle>,
     /// None retains existing callers. Installation is an explicit ack barrier.
     camera_bridge: Option<camera_bridge::Worker>,
+    /// Explicit legacy UI snapshot source, mutually exclusive with the native
+    /// camera bridge. Absence retains the pre-connection supported routes.
+    ui_camera_source: Option<crate::save_menu::camera_source::Reader>,
     /// Authority supplied only by Inputs::session_worker selected profile.
     pub(crate) autosave_profile_root:Option<std::path::PathBuf>,
     pub autosave_status:Option<crate::save_menu::AutosaveStatus>,
@@ -316,6 +319,7 @@ impl Host {
         Self {
             process_runtime:None,
             camera_bridge: None,
+            ui_camera_source: None,
             autosave_profile_root:None,
             autosave_status:None,
             camera_suppliers:None,
@@ -443,7 +447,7 @@ impl Host {
         capture: openmt2001::camera::bank::Capture,
         pavement:crate::selection::pavement_resource::LocalPavementHandle,
     ) -> Result<(), camera_bridge::RequestError> {
-        if self.failure.is_some() || self.camera_bridge.is_some() {
+        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some() {
             return Err("Camera bridge cannot replace an installed/stopped host".into());
         }
         if !self.tutorial_camera_events.is_empty() {
@@ -468,6 +472,35 @@ impl Host {
             Ok(()) => Ok(()),
             Err(error) => { self.camera_error(error.clone()); Err(error) }
         }
+    }
+    /// Bind only the actual Session topology epoch. Missing initial publication
+    /// is retained as an explicit unavailable source, never legacy fallback.
+    pub(crate) fn install_ui_camera_source(&mut self, session: &Session<'_>,
+        source: crate::save_menu::camera_source::Reader,
+    ) -> Result<(), String> {
+        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some() {
+            return Err("UI camera source cannot replace an installed/stopped host".into());
+        }
+        source.check_epoch(session.world.topology.epoch())?;
+        self.ui_camera_source = Some(source);
+        Ok(())
+    }
+    pub(crate) fn has_ui_camera_source(&self) -> bool { self.ui_camera_source.is_some() }
+    /// Producer-dependent ordinary SaveSelected consumer. The same atomic
+    /// pair/mode source is used by autosave below; no cached request pose is
+    /// overlaid and Options stays held throughout encoding/publication.
+    pub(crate) fn save_selected_from_ui_snapshot(&self, session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>, root: &std::path::Path,
+        target: &crate::save_menu::Target, game_mode: u32,
+    ) -> Result<std::path::PathBuf, String> {
+        if !self.options_save_allowed(&session.world.pause, &session.hooks.timers) {
+            return Err("Save requires the active Options hold".into());
+        }
+        let source = self.ui_camera_source.as_ref().ok_or("UI camera source is not installed")?;
+        let snapshot = source.read(session.world.topology.epoch())?;
+        let bytes = session.save_v2_with_options_view(image, snapshot.capture().into_records(),
+            game_mode, self, snapshot.interface_mode())?;
+        crate::save_menu::write_target_from_snapshot(root, target, &bytes, source, &snapshot)
     }
     /// Legacy Status clients supply their render sample. An installed owner
     /// already supplies current vectors at the acknowledged boundaries; a
@@ -652,6 +685,30 @@ impl Host {
             let _ = crate::transport_audio::submit(&self.transport_audio,
                 crate::transport_audio::Operation::Construction([[None; 2]; 4]));
         }
+    }
+    /// Apply one received offline host focus operation, before the next frame.
+    /// The required provider finishes device/input and guarded frontend-audio
+    /// effects first. Player running and all ordinary pause owners stay intact.
+    pub(crate) fn focus(&mut self, pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task], focused: bool,
+        prefix: impl FnOnce(i8) -> Result<crate::intro::focus::Prefix, String>,
+    ) -> Result<(), String> {
+        if self.stop_retired_camera() { return Err("Focus Session retired".into()); }
+        if let Some(error) = &self.failure { return Err(error.clone()); }
+        let result = (|| {
+            let prefix = prefix(pause.bytes[3] as i8)?;
+            if prefix == crate::intro::focus::Prefix::ReceiverAbsent { return Ok(()); }
+            // Native tests this gate after the frontend callback, not instead
+            // of it. No fabricated success when a required provider is absent.
+            let blocked = self.policy.scheduler.network_enabled;
+            if focused {
+                pause.focus_gained(blocked, |change, _| { change.apply(timers); Ok(()) })
+            } else {
+                pause.focus_lost(blocked, |change, _| { change.apply(timers); Ok(()) })
+            }
+        })();
+        if let Err(error) = &result { self.fail(error.clone()); }
+        result
     }
     ///49e860/49e994 local Options owns one reason0 transition. The UI's
     ///oneshot acknowledgement is sent only after this actual owner operation.
@@ -1376,6 +1433,8 @@ impl Host {
         let autosave_root=&self.autosave_profile_root;
         let autosave_status=&mut self.autosave_status;
         let camera_bridge=&mut self.camera_bridge;
+        let ui_camera_source=&self.ui_camera_source;
+        let ui_camera_epoch=session.world.topology.epoch();
         let interface_ticks=self.interface_ticks;
         let mut autosave_retired=false;
         let mut autosave_fatal=None;
@@ -1434,30 +1493,41 @@ impl Host {
                     let attempt=(||->Result<std::path::PathBuf,Failure>{
                         let root=autosave_root.as_deref().ok_or(Failure::MissingSelectedProfile)?;
                         let prepared=PreparedAutosave::prepare(root).map_err(Failure::Storage)?;
-                        let worker=camera_bridge.as_mut().ok_or(Failure::UnsupportedCamera)?;
-                        // Current central callback has already returned. A raw
-                        // capture admits no Session subcalls and runs no provider.
-                        let observation=match worker.request(camera_bridge::Operation::RawCapture) {
-                            Ok(observation)=>observation,
-                            Err(camera_bridge::RequestError::Retired)=>{
-                                autosave_retired=true;
-                                return Err(Failure::UnsupportedState("Camera generation retired".into()));
-                            },
-                            Err(camera_bridge::RequestError::Failed(error))=>{
-                                autosave_fatal=Some(error.clone());
-                                return Err(Failure::UnsupportedState(error));
-                            },
+                        let mut ui_snapshot=None;
+                        let (cameras,mode)=if let Some(worker)=camera_bridge.as_mut() {
+                            // Native route retains its actual protocol and
+                            // fatal owner-error/retirement behavior unchanged.
+                            let observation=match worker.request(camera_bridge::Operation::RawCapture) {
+                                Ok(observation)=>observation,
+                                Err(camera_bridge::RequestError::Retired)=>{
+                                    autosave_retired=true;
+                                    return Err(Failure::UnsupportedState("Camera generation retired".into()));
+                                },
+                                Err(camera_bridge::RequestError::Failed(error))=>{
+                                    autosave_fatal=Some(error.clone());
+                                    return Err(Failure::UnsupportedState(error));
+                                },
+                            };
+                            let raw=observation.raw_capture.ok_or_else(||Failure::UnsupportedState("Raw camera capture absent".into()))?;
+                            (raw.cameras,raw.interface_mode.map_err(Failure::UnsupportedState)?)
+                        } else {
+                            let source=ui_camera_source.as_ref().ok_or(Failure::UnsupportedCamera)?;
+                            let snapshot=source.read(ui_camera_epoch).map_err(Failure::UnsupportedState)?;
+                            let pair=(snapshot.capture(),snapshot.interface_mode());
+                            ui_snapshot=Some((source,snapshot));
+                            pair
                         };
-                        let raw=observation.raw_capture.ok_or_else(||Failure::UnsupportedState("Raw camera capture absent".into()))?;
-                        let mode=raw.interface_mode.map_err(Failure::UnsupportedState)?;
                         let host=Some(crate::session_save::AuctionHostState {
                             controls:auction.as_ref().map(|a|a.controls.clone()).unwrap_or_default(),
                             visible:auction.as_ref().is_some_and(|a|a.visible),
                             interface_ticks,announcement_seconds:*auction_seconds,
                         });
-                        let bytes=request.encode_once(raw.cameras.into_records(),clock.timing[5],host,mode)
+                        let bytes=request.encode_once(cameras.into_records(),clock.timing[5],host,mode)
                             .map_err(Failure::Encoding)?;
-                        prepared.publish(bytes).map_err(Failure::Storage)
+                        match ui_snapshot {
+                            Some((source,snapshot))=>prepared.publish_from_snapshot(bytes,source,&snapshot),
+                            None=>prepared.publish(bytes),
+                        }.map_err(Failure::Storage)
                     })();
                     // A real protocol/owner failure remains fatal, independently
                     // of ordinary save/storage/unsupported-state failures.

@@ -180,6 +180,7 @@ struct App {
     next_redraw: Instant,
     desktop_keys: crate::menu::desktop_quit::Keys,
     participant_left: ParticipantLeft,
+    window_focus: Option<bool>,
 }
 struct FrameProfile {
     started: Instant,
@@ -313,6 +314,7 @@ impl ApplicationHandler for App {
         })();
         match result {
             Ok(p) => {
+                self.window_focus = Some(p.window.has_focus());
                 self.presenter = Some(p);
                 self.since = Instant::now();
                 self.launched = self.since;
@@ -342,6 +344,18 @@ impl ApplicationHandler for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         if let Some(intro) = &mut self.intro { intro.camera_physical_event(&event); }
+        // Process focus is observed even during loading and before every
+        // inspection/modal early return. Sending never waits for worker effects.
+        if let WindowEvent::Focused(focused) = &event {
+            self.window_focus = Some(*focused);
+            if let Some(intro) = &mut self.intro {
+                if let Err(error) = intro.window_focus(*focused) {
+                    self.failure = Some(error);
+                    event_loop.exit();
+                    return;
+                }
+            }
+        }
         if matches!(&event, WindowEvent::RedrawRequested) {
             self.next_redraw = Instant::now() + FRAME_INTERVAL;
         }
@@ -557,6 +571,15 @@ impl ApplicationHandler for App {
                                 );
                                 match result {
                                     Ok(mut intro) => {
+                                        if let Some(focused) = self.window_focus {
+                                            // Initial observation only; the
+                                            // Session attachment occurs later.
+                                            if let Err(error) = intro.window_focus(focused) {
+                                                self.failure = Some(error);
+                                                event_loop.exit();
+                                                return;
+                                            }
+                                        }
                                         if self.menu_onload {
                                             intro.open_menu();
                                         }
@@ -664,6 +687,15 @@ impl ApplicationHandler for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Service pending UI-only prefixes even if no surface redraw is
+        // available (for example, while minimized). Never wait on a worker.
+        if let Some(intro) = &mut self.intro {
+            if let Err(error) = intro.service_focus() {
+                self.failure = Some(error);
+                event_loop.exit();
+                return;
+            }
+        }
         if self
             .exit_after
             .is_some_and(|limit| self.launched.elapsed() >= limit)
@@ -850,6 +882,7 @@ pub fn run() -> Result<(), Error> {
         next_redraw: now,
         desktop_keys: Default::default(),
         participant_left: Default::default(),
+        window_focus: None,
         frame_profile: std::env::var_os("OPENMT2001_PROFILE_PACE").map(|_| FrameProfile {
             started: now,
             frames: 0,

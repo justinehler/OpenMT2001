@@ -1,5 +1,7 @@
 //! Host-only save destination and atomic file publication.
 //! --save-dir is a read source; writes always use the selected V2 profile root.
+#[path = "save_camera.rs"]
+pub(crate) mod camera_source;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -348,6 +350,16 @@ fn validate_stem(name: &str, max_bytes: usize) -> Result<(), String> {
 /// 4bbe30 uses CreateFileA(CREATE_ALWAYS) after dialog acceptance; staging
 /// first preserves the previous complete file when serialization or I/O fails.
 pub fn write_target(profile_root: &Path, target: &Target, bytes: &[u8]) -> Result<PathBuf, String> {
+    write_target_inner(profile_root, target, bytes, None)
+}
+pub(crate) fn write_target_from_snapshot(profile_root: &Path, target: &Target, bytes: &[u8],
+    source: &camera_source::Reader, snapshot: &camera_source::Snapshot,
+) -> Result<PathBuf, String> {
+    write_target_inner(profile_root, target, bytes, Some((source, snapshot)))
+}
+fn write_target_inner(profile_root: &Path, target: &Target, bytes: &[u8],
+    source: Option<(&camera_source::Reader, &camera_source::Snapshot)>,
+) -> Result<PathBuf, String> {
     openmt2001::save::SaveFile::parse(bytes)?;
     let name = match target {
         Target::NewName(name) => name.as_str(),
@@ -393,13 +405,17 @@ pub fn write_target(profile_root: &Path, target: &Target, bytes: &[u8]) -> Resul
             let _ = fs::remove_file(&temporary);
             return Err(format!("Write V2 save: {error}"));
         }
-        let publish = match target {
+        let publish = || match target {
             Target::NewName(_) => fs::hard_link(&temporary, &destination),
             Target::ExistingSlot(_) => fs::rename(&temporary, &destination),
+        }.map_err(|error| format!("Publish V2 save: {error}"));
+        let published = match source {
+            Some((reader, snapshot)) => reader.with_live(snapshot, publish),
+            None => publish(),
         };
-        if let Err(error) = publish {
+        if let Err(error) = published {
             let _ = fs::remove_file(&temporary);
-            return Err(format!("Publish V2 save: {error}"));
+            return Err(error);
         }
         if matches!(target, Target::NewName(_))
             && let Err(error) = fs::remove_file(&temporary)
@@ -476,18 +492,32 @@ impl PreparedAutosave {
         Err("Unable to allocate V2 save staging file".into())
     }
     pub fn destination(&self)->&Path {&self.destination}
-    pub fn publish(mut self,bytes:Vec<u8>)->Result<PathBuf,String> {
+    pub fn publish(self,bytes:Vec<u8>)->Result<PathBuf,String> {
+        self.publish_inner(bytes,None)
+    }
+    pub(crate) fn publish_from_snapshot(self,bytes:Vec<u8>,source:&camera_source::Reader,
+        snapshot:&camera_source::Snapshot)->Result<PathBuf,String> {
+        self.publish_inner(bytes,Some((source,snapshot)))
+    }
+    fn publish_inner(mut self,bytes:Vec<u8>,source:Option<(&camera_source::Reader,&camera_source::Snapshot)>)
+        ->Result<PathBuf,String> {
         openmt2001::save::SaveFile::parse(&bytes)?;
         let mut file=self.file.take().ok_or("Autosave staging file already closed")?;
         let write=file.write_all(&bytes).and_then(|()|file.sync_all());
         drop(file);
         write.map_err(|e|format!("Write V2 save: {e}"))?;
-        let now=autosave_metadata(&self.destination)?;
-        match (&self.previous,&now) {
-            (None,None)=>fs::hard_link(&self.temporary,&self.destination),
-            (Some(before),Some(after)) if same_autosave_file(before,after)=>fs::rename(&self.temporary,&self.destination),
-            _=>return Err("Autosave slot changed during capture; prior file preserved".into()),
-        }.map_err(|e|format!("Publish V2 save: {e}"))?;
+        let publish=|| {
+            let now=autosave_metadata(&self.destination)?;
+            match (&self.previous,&now) {
+                (None,None)=>fs::hard_link(&self.temporary,&self.destination),
+                (Some(before),Some(after)) if same_autosave_file(before,after)=>fs::rename(&self.temporary,&self.destination),
+                _=>return Err("Autosave slot changed during capture; prior file preserved".into()),
+            }.map_err(|e|format!("Publish V2 save: {e}"))
+        };
+        match source {
+            Some((reader,snapshot))=>reader.with_live(snapshot,publish),
+            None=>publish(),
+        }?;
         Ok(self.destination.clone())
     }
 }

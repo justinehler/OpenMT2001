@@ -29,6 +29,44 @@ impl State {
         self.bytes[..4] != [0; 4]
     }
 
+    /// Pause slice of focus loss004bab90, AFTER device unacquire, input-disable
+    /// and frontend suspend. Byte4 is a separate signed counter, not reason4.
+    /// The network gate skips only this slice, not those preceding effects.
+    pub fn focus_lost(
+        &mut self,
+        network_blocked: bool,
+        mut timers: impl FnMut(Timers, &mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if network_blocked || self.bytes[4] as i8 > 0 {
+            return Ok(());
+        }
+        self.bytes[4] = self.bytes[4].wrapping_add(1);
+        if self.bytes[4] == 1 && self.bytes[8] == 0 {
+            timers(Timers::Suspend, self)?;
+            self.bytes[8] = 1;
+        }
+        Ok(())
+    }
+
+    /// Pause slice of focus gain004bac00, AFTER device acquire, input-enable
+    /// and frontend resume. Native tests only the ordinary word after decrement;
+    /// even a remaining positive focus count does not prevent timer resumption.
+    pub fn focus_gained(
+        &mut self,
+        network_blocked: bool,
+        mut timers: impl FnMut(Timers, &mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if network_blocked || self.bytes[4] as i8 <= 0 {
+            return Ok(());
+        }
+        self.bytes[4] = self.bytes[4].wrapping_sub(1);
+        if !self.has_reason() && self.bytes[8] != 0 {
+            timers(Timers::Resume, self)?;
+            self.bytes[8] = 0;
+        }
+        Ok(())
+    }
+
     pub fn pause(
         &mut self,
         reason: usize,
@@ -64,6 +102,10 @@ impl State {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "pause/focus_tests.rs"]
+mod focus_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1904,9 +1904,10 @@ impl SaveProjection<'_> {
         records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?,
         ));
         if let Some(auction) = auction { records.push((14, auction.encode())); }
-        else if interface_mode == 3 {
-            // Native camera triples retain the pose, but the retained frontend's
-            // strategic view is separate from the original game-mode global.
+        else {
+            // Preserve explicit normal as well as strategic UI authority. CityView
+            // can leave raw kind4, so absence is not equivalent to explicit mode0.
+            // Record15 already admits both values; auction record14 owns its view.
             records.push((15, words([interface_mode])));
         }
         let selected = self

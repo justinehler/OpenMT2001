@@ -6,6 +6,10 @@ pub(crate) mod camera_live;
 mod refresh;
 #[path = "intro/options_ack.rs"]
 mod options_ack;
+#[path = "intro/focus.rs"]
+pub(crate) mod focus;
+#[path = "intro/camera_producer.rs"]
+mod camera_producer;
 use openmt2001::{
     flyby::{CameraSample, Flyby},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
@@ -557,6 +561,8 @@ impl DetailVisibility {
 }
 
 struct LoadedInspection {
+    camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
+    camera_publisher: Option<crate::save_menu::camera_source::Publisher>,
     camera_inbox: Option<crate::live_host::camera_bridge::Inbox>,
     save_profile_root: Option<PathBuf>,
     logic_tick: Option<u32>,
@@ -674,6 +680,9 @@ pub(crate) fn inspection_hit(
     })
 }
 enum FreshRequest {
+    CameraTurn { turn: camera_producer::Turn,
+        reply: mpsc::Sender<Result<camera_producer::Payload,String>> },
+    UiCameraReady { reply: mpsc::Sender<Result<(), String>> },
     PropertyRights {
         category: u32,
         panel_mode: u8,
@@ -742,6 +751,7 @@ enum FreshRequest {
         reply: mpsc::Sender<Result<[u8; 544], String>>,
     },
     Run(bool),
+    Focus(focus::Event),
     Options { open:bool, reply:mpsc::Sender<Result<(),String>> },
     ToggleSpeed,
     DismissPrompt(u32, Option<mpsc::Sender<Vec<crate::prompt::Request>>>),
@@ -798,12 +808,32 @@ impl SceneInputs {
         tx: mpsc::Sender<Result<LoadedInspection, String>>,
         pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
     ) {
+        self.session_worker_with_focus(start, camera, tx, pavement, false);
+    }
+    fn session_worker_with_focus(&self, start: WorkerStart, camera: CameraSample,
+        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
+        require_focus_attachment: bool,
+    ) {
+        self.session_worker_with_sources(start, camera, tx, pavement, require_focus_attachment, false);
+    }
+    fn session_worker_with_sources(&self, start: WorkerStart, camera: CameraSample,
+        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
+        require_focus_attachment: bool, produce_camera: bool,
+    ) {
+        self.session_worker_with_terminal(start,camera,tx,pavement,require_focus_attachment,produce_camera,
+            camera_producer::ExitFailures::default());
+    }
+    fn session_worker_with_terminal(&self,start:WorkerStart,camera:CameraSample,
+        tx:mpsc::Sender<Result<LoadedInspection,String>>,
+        pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
+        require_focus_attachment:bool,produce_camera:bool,exit_failures:camera_producer::ExitFailures,
+    ) {
         if let Some(process)=&self.process_runtime {
             if let Err(error)=process.world_controller_reset4c2b80(){let _=tx.send(Err(error.to_string()));return;}
         }
-        struct OfflineLease(Option<crate::live_host::process_runtime::Handle>);
-        impl Drop for OfflineLease {fn drop(&mut self){if let Some(process)=&self.0{let _=process.network_teardown4e1c50();}}}
-        let _offline_lease=OfflineLease(self.process_runtime.clone());
+        let _offline_lease=camera_producer::OfflineLease{process:self.process_runtime.clone(),failures:Arc::clone(&exit_failures)};
         if matches!(&start,WorkerStart::Fresh(_)|WorkerStart::Skirmish(_)) {
             if let Some(process)=&self.process_runtime {
                 if let Err(error)=process.source_fresh_world(){let _=tx.send(Err(error.to_string()));return;}
@@ -886,8 +916,19 @@ impl SceneInputs {
                     };
                     Some((worker,capture,pavement))
                 } else {None};
+                let ui_camera_reader = if produce_camera && !review_camera {
+                    let (publisher, reader) = crate::save_menu::camera_source::channel(session.world.topology.epoch());
+                    loaded.camera_epoch = Some(session.world.topology.epoch());
+                    loaded.camera_publisher = Some(publisher);
+                    Some(reader)
+                } else { None };
                 if tx.send(Ok(loaded)).is_ok() {
                     let mut host = crate::live_host::Host::new(host_eye);
+                    if let Some(reader) = &ui_camera_reader {
+                        if let Err(error) = host.install_ui_camera_source(&session, reader.clone()) {
+                            host.fail(error); return;
+                        }
+                    }
                     host.autosave_profile_root=save_profile_root.clone();
                     host.process_runtime=self.process_runtime.clone();
                     // Initialize the monotonic Frame before the acknowledged
@@ -965,9 +1006,40 @@ impl SceneInputs {
                         file: &file,
                     };
                     if host.camera_retired() { return; }
+                    if let Some(reader) = &ui_camera_reader {
+                        // The UI publishes its complete cold transaction before
+                        // this barrier. No frame/save observes a partial owner.
+                        match released.recv() {
+                            Ok(FreshRequest::UiCameraReady { reply }) => {
+                                let result = reader.read(session.world.topology.epoch()).map(|_| ());
+                                let failed = result.is_err();
+                                let _ = reply.send(result);
+                                if failed { return; }
+                            }
+                            _ => return,
+                        }
+                    }
+                    if require_focus_attachment {
+                        // Explicit modern cold policy: all restore/startup and
+                        // presentation effects above precede ONE live OS-focus
+                        // snapshot. No frame or queued save may pass this barrier.
+                        match released.recv() {
+                            Ok(FreshRequest::Focus(event)) if event.is_attachment() => {
+                                if event.apply(&mut host, &mut session.world.pause, &mut session.hooks.timers).is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(_) => {
+                                host.fail("First focus-enabled request must attach current OS focus".into());
+                                return;
+                            }
+                            Err(_) => return,
+                        }
+                    }
                     let mut last_tick = Instant::now();
                     loop {
-                        if host.camera_retired() { break; }
+                        if host.camera_retired() || ui_camera_reader.as_ref().is_some_and(|reader|
+                            reader.read(session.world.topology.epoch()).is_err()) { break; }
                         // Poll original interface/logic timers from monotonic host
                         // milliseconds. Rendering and worker requests are separate.
                         let period = std::time::Duration::from_millis(16);
@@ -978,7 +1050,32 @@ impl SceneInputs {
                             Err(mpsc::RecvTimeoutError::Timeout) => None,
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         };
-                        if host.camera_retired() { break; }
+                        if host.camera_retired() || ui_camera_reader.as_ref().is_some_and(|reader|
+                            reader.read(session.world.topology.epoch()).is_err()) { break; }
+                        // Camera selection is an admitted FIFO prefix too. All
+                        // Session borrows end before its by-value reply wait.
+                        let request = match request {
+                            Some(FreshRequest::CameraTurn {turn,reply}) => {
+                                let admitted = camera_producer::admit(&session,turn);
+                                if let Ok(posts) = camera_producer::deliver(turn,admitted,reply) {
+                                    // Consumed once, on this SAME validated Session, after
+                                    // camera/UI publication and before next frame/request.
+                                    if camera_producer::run_posts(&mut host,&mut session,&assets,posts,&exit_failures).is_err(){return;}
+                                }
+                                if ui_camera_reader.as_ref().is_some_and(|reader|
+                                    reader.read(session.world.topology.epoch()).is_err()) { break; }
+                                continue;
+                            }
+                            other => other,
+                        };
+                        // Received focus takes effect before any next due frame.
+                        // No Options-style preflush and no completed-frame replay.
+                        let request = match focus::before_frame(request, &mut host,
+                            &mut session.world.pause, &mut session.hooks.timers) {
+                            Ok(focus::BeforeFrame::FocusApplied) => continue,
+                            Ok(focus::BeforeFrame::Request(other)) => other,
+                            Err(_) => break,
+                        };
                         if last_tick.elapsed() >= period {
                             let elapsed =
                                 clock_frame.elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
@@ -990,6 +1087,11 @@ impl SceneInputs {
                             continue;
                         };
                         match request {
+                            FreshRequest::Focus(_) => unreachable!("focus handled before frame"),
+                            FreshRequest::CameraTurn {..} => unreachable!("camera turn handled before frame"),
+                            FreshRequest::UiCameraReady { reply } => {
+                                let _ = reply.send(Err("Camera attachment already completed".into()));
+                            }
                             FreshRequest::PropertyRights { category, panel_mode, activate, reply,
                             } => {
                                 let _ = reply.send(host.property_rights(
@@ -1013,6 +1115,10 @@ impl SceneInputs {
                                 let result = (|| {
                                     let root = save_profile_root.as_deref()
                                         .ok_or("Save Game requires a selected V2 profile")?;
+                                    if host.has_ui_camera_source() {
+                                        return host.save_selected_from_ui_snapshot(&mut session,
+                                            &image, root, &target, game_mode);
+                                    }
                                     if capture.is_some() && !host.options_save_allowed(&session.world.pause,&session.hooks.timers) {
                                         return Err("Save requires the active Options hold".to_owned());
                                     }
@@ -2165,6 +2271,8 @@ impl SceneInputs {
             );
         }
         Ok(LoadedInspection {
+            camera_epoch: None,
+            camera_publisher: None,
             camera_inbox: None,
             save_profile_root: None,
             logic_tick: Some(session.world.clock.timing[0]),
@@ -2250,6 +2358,8 @@ impl SceneInputs {
         }, Some(&self.style),
         )
         .map(|scene| LoadedInspection {
+            camera_epoch: None,
+            camera_publisher: None,
             camera_inbox: None,
             save_profile_root: None,
             logic_tick: None,
@@ -2291,6 +2401,10 @@ impl SceneInputs {
 
 }
 struct Inspection {
+    camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
+    camera_turns: std::collections::VecDeque<camera_producer::Pending>,
+    camera_producer: Option<camera_producer::Producer>,
+    camera_ready: Option<mpsc::Receiver<Result<(), String>>>,
     ui_graph:Option<camera_live::ui_graph::UiGraphState>,
     camera_navigation:Option<camera_live::navigation::State>,
     camera_focus:camera_live::focus::Focus,
@@ -2386,7 +2500,7 @@ struct Inspection {
     navigation_pressed: bool,
     double_click: crate::navigation::DoubleClick,
     strategic: bool,
-    return_camera: Option<(CameraSample, Option<crate::selection::Hit>)>,
+    return_camera: Option<camera_producer::Controls>,
     reframe_pending: bool,
     information: Option<(PreparedScene, [f32; 4])>,
     details_visible: bool,
@@ -2457,6 +2571,83 @@ struct ResultView {
     title: Option<(Option<u32>, Option<usize>, u8, PreparedScene)>,
 }
 impl Inspection {
+    fn apply_status_camera_events(&mut self, status: &crate::live_host::Status,
+        selection:&crate::selection::Assets, navigation:&crate::navigation::Navigation)->Result<(),String>{
+        if status.tutorial_camera_events.len() < self.tutorial_camera_seen {
+            return Err("tutorial camera event log regressed".into());
+        }
+        if self.camera_endpoint.is_some() && status.tutorial_camera_events.len()!=self.tutorial_camera_seen {
+            return Err("Bridged camera received unordered Status camera effects".into());
+        }
+        for &action in &status.tutorial_camera_events[self.tutorial_camera_seen..] {
+            self.apply_tutorial_camera(action,
+                selection, navigation,
+            )?;
+        }
+        self.tutorial_camera_seen = status.tutorial_camera_events.len();
+        Ok(())
+    }
+    fn service_camera_turns(&mut self, selection: &crate::selection::Assets,
+        adjustment_assets: Option<&crate::business_adjustment::Assets>) {
+        let view=self;
+        loop {
+            let Some(front)=view.camera_turns.front() else{break};
+            let result=match front.reply.try_recv(){
+                Ok(value)=>value,
+                Err(mpsc::TryRecvError::Empty)=>break,
+                Err(mpsc::TryRecvError::Disconnected)=>Err("Camera selection Session closed".into()),
+            };
+            let mut pending=view.camera_turns.pop_front().expect("front pending turn");
+            let payload=match result{Ok(payload)=>payload,Err(error)=>{view.save_dialog.message=Some(error);continue;}};
+            let prepared=(||{
+                if view.camera_epoch!=Some(payload.turn.epoch) {return Err("Retired camera selection origin".to_owned());}
+                if let camera_producer::Event::Actor{selected,auto_rotate,origin}=pending.event {
+                    let identity=pending.turn.building.ok_or("Actor turn omitted identity")?;
+                    let index=view.scene.inspection_buildings.iter().position(|b|
+                        b.runtime_slot.or(b.saved_slot)==Some(identity.building_slot as usize)
+                        && b.category as u32==identity.category_id).ok_or("Live selected building is not in current presentation")?;
+                    let category=selection.blocks.iter().position(|b|b.id as u32==identity.category_id).ok_or("Selected category no longer presented")?;
+                    let _=selected; // Scene vector position is presentation only.
+                    pending.event=camera_producer::Event::Actor{selected:crate::selection::Hit{category,building:Some(index)},auto_rotate,origin};
+                    if pending.open_adjustment {
+                        if let Some(assets)=adjustment_assets {
+                            pending.adjustment=assets.open_for_owner(&view.scene,index,
+                                view.live_status.as_ref().and_then(|status|status.business_owner))?;
+                        }
+                    }
+                }
+                Ok::<(),String>(())
+            })();
+            if let Err(error)=prepared {payload.receipt.complete(Err(error.clone()));view.save_dialog.message=Some(error);continue;}
+            let Some(mut producer)=view.camera_producer.take() else{payload.receipt.complete(Err("Camera producer retired".into()));continue};
+            let mut state=camera_producer::View::read(view);
+            let result=camera_producer::complete_with_posts(&mut producer,&mut state,pending.turn,pending.event,payload,
+                selection,std::mem::take(&mut pending.posts),|state|{
+                    state.put(view);
+                    if let Some(adjustment)=pending.adjustment.take(){view.adjustment=Some(adjustment);}
+                    view.hovered=None;view.title_state=None;view.reframe_pending=true;
+                    let (reset_keys,reset_mouse)=match pending.event {
+                        camera_producer::Event::Actor{origin:camera_producer::ActorOrigin::Tutorial,..}=>(true,true),
+                        camera_producer::Event::Actor{origin:camera_producer::ActorOrigin::Scene,..}=>(pending.open_adjustment,pending.open_adjustment),
+                        camera_producer::Event::Actor{origin:camera_producer::ActorOrigin::Locator,..}=>(true,false),
+                        camera_producer::Event::Actor{..}|camera_producer::Event::Deselect=>(false,false),
+                        camera_producer::Event::ChooseView{..}=>(true,true),
+                        _=>(true,false),
+                    };
+                    if reset_keys{view.keys=[false;4];view.taps=[false;4];view.drag=[0;2];}
+                    if reset_mouse{view.mouse_buttons=[false;2];}
+                    if let Some(locator)=&mut view.locator{
+                        if matches!(pending.event,camera_producer::Event::Compass{..}){locator.cancel_press();}
+                        locator.dirty=true;
+                    }
+                    if matches!(pending.event,camera_producer::Event::Actor{origin:camera_producer::ActorOrigin::Locator,..}){
+                        if let Some(comparison)=&mut view.comparison{comparison.cancel_press();}
+                    }
+                });
+            view.camera_producer=Some(producer);
+            if let Err(error)=result {view.save_dialog.message=Some(error);}
+        }
+    }
     fn time_target(&self,assets:&crate::time_panel::Assets,point:[f32;2],auction:bool)
         ->Option<crate::time_panel::Button>{
         let target=assets.button_in_mode(point,auction)?;
@@ -2530,18 +2721,47 @@ impl Inspection {
         self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
         Ok(())
     }
+    fn queue_camera_event(&mut self,event:camera_producer::Event,building:Option<camera_producer::ExpectedBuilding>,
+        adjustment:Option<crate::business_adjustment::State>,open_adjustment:bool)->Result<&mut camera_producer::Pending,String>{
+        let turn=camera_producer::Turn{epoch:self.camera_epoch.ok_or("Camera UI has no actual Session origin")?,building};
+        let sender=self._fresh_session.as_ref().ok_or("Camera UI Session closed")?;
+        camera_producer::enqueue(&mut self.camera_turns,sender,turn,event,adjustment,open_adjustment)?;
+        Ok(self.camera_turns.back_mut().expect("enqueued camera turn"))
+    }
+    fn queue_actor_camera(&mut self,selected:crate::selection::Hit,assets:&crate::selection::Assets,
+        origin:camera_producer::ActorOrigin,adjustment:Option<crate::business_adjustment::State>,open_adjustment:bool)->Result<&mut camera_producer::Pending,String>{
+        let expected=camera_producer::identity_for_hit(&self.scene,assets,selected)?;
+        self.queue_camera_event(camera_producer::Event::Actor{selected,auto_rotate:self.settings_menu.gameplay.auto_rotate,origin},Some(expected),adjustment,open_adjustment)
+    }
+    fn commit_camera(&mut self) {
+        if let Some(producer) = &mut self.camera_producer {
+            if let Err(error) = producer.commit(self.camera, if self.strategic {3} else {0}) {
+                self.game_options.set_save_disabled(true);
+                self.save_dialog.message = Some(format!("Save failed: {error}"));
+            }
+        }
+    }
     fn toggle_navigation(&mut self, navigation: &crate::navigation::Navigation) {
+        if self.camera_producer.is_some() {
+            let post=self.camera_control_post(73);
+            match self.queue_camera_event(camera_producer::Event::Compass { strategic:navigation.camera },None,None,false) {
+                Ok(pending)=>pending.posts.extend(post),
+                Err(error)=>self.save_dialog.message=Some(error),
+            }
+            return;
+        }
         if let Some(locator) = &mut self.locator { locator.cancel_press(); }
-        if let Some((camera, selected)) = self.return_camera.take() {
-            self.camera = camera;
-            self.selected = selected;
+        let current = camera_producer::Controls::read(self);
+        if let Some(normal) = self.return_camera.take() {
+            normal.put(self);
             self.strategic = false;
         } else {
-            self.return_camera = Some((self.camera, self.selected));
+            self.return_camera = Some(current);
             self.camera = navigation.camera;
             self.selected = None;
             self.strategic = true;
         }
+        self.commit_camera();
         self.hovered = None;
         self.title_state = None;
         self.reframe_pending = true;
@@ -2556,6 +2776,26 @@ impl Inspection {
         navigation: &crate::navigation::Navigation,
     ) -> Result<(), String> {
         use crate::live_host::TutorialCameraAction;
+        if self.camera_producer.is_some() {
+            match action {
+                TutorialCameraAction::Mode{mode:12,target}=>{
+                    let category=selection.blocks.iter().position(|b|b.id==target as usize).ok_or("Tutorial category identity missing")?;
+                    self.queue_camera_event(camera_producer::Event::Block{category:target,selected:crate::selection::Hit{category,building:None},origin:camera_producer::BlockOrigin::Tutorial},None,None,false)?;
+                }
+                TutorialCameraAction::Mode{mode:13,target}=>{
+                    let index=self.scene.inspection_buildings.iter().position(|b|
+                        b.business().is_some_and(|b|b.slot==target as usize)
+                        || b.initialized_apartment.as_ref().is_some_and(|b|b.slot==target as usize)).ok_or("Tutorial live building identity not presented")?;
+                    let b=&self.scene.inspection_buildings[index];
+                    let hit=inspection_hit(&selection.blocks,b.category,Some(index)).ok_or("Tutorial category identity missing")?;
+                    self.queue_actor_camera(hit,selection,camera_producer::ActorOrigin::Tutorial,None,false)?;
+                }
+                TutorialCameraAction::PlanView=>{self.queue_camera_event(camera_producer::Event::ChooseView{mode:3,strategic:navigation.camera},None,None,false)?;},
+                TutorialCameraAction::CityView=>{self.queue_camera_event(camera_producer::Event::ChooseView{mode:0,strategic:navigation.camera},None,None,false)?;},
+                TutorialCameraAction::Mode{mode,target}=>return Err(format!("Unsupported tutorial camera mode{mode} target{target}")),
+            }
+            return Ok(());
+        }
         match action {
             TutorialCameraAction::Mode { mode: 12, target } => {
                 let category = selection.blocks.iter().position(|block| block.id == target as usize)
@@ -2563,7 +2803,9 @@ impl Inspection {
                 self.focus_category(category, selection);
             }
             TutorialCameraAction::PlanView => {
-                self.return_camera = Some((self.camera, self.selected));
+                // SetPlanView calls choose_view(3), not the compass's4baf10
+                // copy transaction. Its unjoined raw boundary cannot invent S.
+                self.return_camera = Some(camera_producer::Controls::read(self));
                 self.camera = navigation.camera;
                 self.selected = None;
                 self.strategic = true;
@@ -2619,7 +2861,12 @@ impl Inspection {
         self.taps = [false; 4];
         self.drag = [0; 2];
         self.mouse_buttons = [false; 2];
+        self.commit_camera();
         Ok(())
+    }
+    fn camera_control_post(&self,id:u32)->Option<camera_producer::Post>{
+        (self.live_status.as_ref().is_some_and(|status|status.failure.is_none()&&status.tutorial_enabled_controls.contains(&id))
+            && self._fresh_session.is_some()).then_some(camera_producer::Post::TutorialControl(id))
     }
     fn send_tutorial_control(&mut self, id: u32) {
         if self.live_status.as_ref().is_some_and(|status| {
@@ -2644,6 +2891,14 @@ impl Inspection {
         }
     }
     fn focus_category(&mut self, category: usize, selection: &crate::selection::Assets) {
+        if self.camera_producer.is_some() {
+            if let Err(error)=self.queue_camera_event(camera_producer::Event::Block {
+                category:selection.blocks[category].id as u32,
+                selected:crate::selection::Hit {category,building:None},
+                origin:camera_producer::BlockOrigin::Selection,
+            },None,None,false){self.save_dialog.message=Some(error);}
+            return;
+        }
         self.selected = Some(crate::selection::Hit {
             category,
             building: None,
@@ -2661,6 +2916,7 @@ impl Inspection {
         self.keys = [false; 4];
         self.taps = [false; 4];
         self.drag = [0; 2];
+        self.commit_camera();
     }
     fn reply_human_dialog(&mut self, response: crate::human_dialog::Reply) -> Result<(), String> {
         let sender = self
@@ -2896,6 +3152,9 @@ impl MenuCamera {
 }
 
 pub struct Intro {
+    camera_worker: Option<camera_producer::WorkerExit>,
+    camera_worker_failure: Option<String>,
+    focus: focus::Route,
     camera_physical: camera_live::PhysicalInput,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
@@ -2938,6 +3197,31 @@ impl Drop for Intro {
     }
 }
 impl Intro {
+    pub(crate) fn window_focus(&mut self, focused: bool) -> Result<(), String> {
+        self.service_camera_turns();
+        self.focus.observe(focused)
+    }
+    /// Drain before modal/loading early returns and every dependent worker poll.
+    /// No call in this service can request work from the suspended Session.
+    fn service_camera_turns(&mut self) {
+        if let Some(view)=&mut self.inspection {
+            view.service_camera_turns(&self.assets.selection,
+                self.menu.as_ref().map(|menu|menu.adjustment_assets()));
+        }
+    }
+    /// Full default activation waits for the real audio prefix provider.
+    /// Install only before starting a World; installation is not cold attach.
+    pub(crate) fn install_focus_effects(&mut self, effects: Box<dyn focus::Effects>) -> Result<(), String> {
+        if self.inspection.is_some() || self.loading.is_some() {
+            return Err("Focus effects must be installed before World loading".into());
+        }
+        self.focus.install(effects)
+    }
+    pub(crate) fn service_focus(&mut self) -> Result<(), String> {
+        self.service_camera_turns();
+        while self.focus.service_one()? {}
+        self.focus.poll()
+    }
     pub fn request_process_exit(&self,writer:crate::live_host::process_runtime::QuitWriter)->Result<(),String>{
         self.assets.process_runtime.request_quit(writer).map_err(|e|e.to_string())
     }
@@ -2996,6 +3280,14 @@ impl Intro {
     }
 
     fn retire_inspection(&mut self) {
+        self.focus.detach();
+        if let Some(producer) = self.inspection.as_mut().and_then(|view|view.camera_producer.take()) {
+            let (owner, result) = producer.retire();
+            assert!(self.camera_parked.is_none(), "camera Owner has one process custodian");
+            self.camera_parked = Some(owner);
+            if let Err(error) = result { eprintln!("Camera source retirement failed: {error}"); }
+        }
+        if let Some(view) = &mut self.inspection { camera_producer::cancel_pending(&mut view.camera_turns); }
         if let camera_live::deferred_primary::PrimaryProducts::Deferred(primary)=&mut self.assets.primary_products{
             //Invalidate the current World claim before Endpoint retires/wakes.
             if let Err(error)=primary.retire_for_camera(self.assets.navigator.process_primitives_mut()){
@@ -3102,6 +3394,9 @@ impl Intro {
         let depth_view = depth.create_view(&Default::default());
         let binding = presenter.image_binding(&display_view);
         Ok(Self {
+            camera_worker: None,
+            camera_worker_failure: None,
+            focus: focus::Route::default(),
             assets,
             renderer,
             prepared,
@@ -3128,7 +3423,7 @@ impl Intro {
             refresh_retry: refresh::Retry::default(),
             inspection: None,
             camera_physical: camera_live::PhysicalInput::default(),
-            camera_parked: None,
+            camera_parked: Some(camera_producer::new_process_owner()?),
             audio_levels: crate::settings_menu::Levels::default(),
             graphics_levels: crate::settings_menu::GraphicsLevels::default(),
             gameplay_levels: crate::settings_menu::GameplayLevels::default(),
@@ -3205,18 +3500,9 @@ impl Intro {
     }
     /// Refresh authoritative scene/report records after the worker has executed a command.
     pub fn refresh_fresh_city(&mut self) -> Result<(), String> {
-        if self.loading.is_some() {
-            return Err("a city snapshot is already pending".into());
-        }
-        let view = self.inspection.as_ref().ok_or("no city is open")?;
-        let sender = view
-            ._fresh_session
-            .as_ref()
-            .ok_or("city has no retained fresh session")?;
-        let result = self.refresh_retry.request(sender, view.camera)?;
-        self.loading = Some(result);
-        self.refreshing_fresh = true;
-        Ok(())
+        camera_producer::request_refresh(self.inspection.as_mut(), &self.assets.selection,
+            self.menu.as_ref().map(|menu|menu.adjustment_assets()), &mut self.loading,
+            &mut self.refreshing_fresh, &mut self.refresh_retry)
     }
     pub fn inspecting(&self) -> bool {
         self.inspection.is_some()
@@ -3236,7 +3522,13 @@ impl Intro {
             _ => (),
         }
     }
-    pub fn inspection_key(
+    pub fn inspection_key(&mut self, key: winit::keyboard::NamedKey, pressed: bool) -> Result<(), String> {
+        self.service_camera_turns();
+        let result = self.inspection_key_inner(key, pressed);
+        if let Some(view) = &mut self.inspection { view.commit_camera(); }
+        result
+    }
+    fn inspection_key_inner(
         &mut self,
         key: winit::keyboard::NamedKey,
         pressed: bool,
@@ -3419,6 +3711,9 @@ impl Intro {
         }
     }
     fn submit_save_target(view:&mut Inspection,target:crate::save_menu::Target) {
+        if let Some(error) = view.camera_producer.as_ref().and_then(|p|p.error()) {
+            view.save_dialog.message = Some(format!("Save failed: {error}")); return;
+        }
         if view.save_pending.is_some() || view.camera_capture_pending.is_some() {return;}
         if !view.options_ack.ready() {
             view.save_dialog.message=Some("Preparing Save Game...".into());
@@ -3679,6 +3974,11 @@ impl Intro {
         }
     }
     pub fn inspection_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
+        self.service_camera_turns();
+        self.inspection_mouse_inner(button, pressed);
+        if let Some(view) = &mut self.inspection { view.commit_camera(); }
+    }
+    fn inspection_mouse_inner(&mut self, button: winit::event::MouseButton, pressed: bool) {
         if let Some(view) = &mut self.inspection {
             if view.ui_graph.is_some()&&button==winit::event::MouseButton::Left{
                 //Read the SAME staged GUI owner; physical/display state
@@ -3995,8 +4295,15 @@ impl Intro {
                     let activate = view.tutorial_go_to_block_pressed && tutorial_go_to_block_hit;
                     view.tutorial_go_to_block_pressed = false;
                     if activate && let Some(hit) = view.selected {
-                        view.focus_category(hit.category, &self.assets.selection);
-                        view.send_tutorial_control(14);
+                        if view.camera_producer.is_some() {
+                            let post=view.camera_control_post(14);
+                            let event=camera_producer::Event::Block{category:self.assets.selection.blocks[hit.category].id as u32,
+                                selected:crate::selection::Hit{category:hit.category,building:None},origin:camera_producer::BlockOrigin::Selection};
+                            match view.queue_camera_event(event,None,None,false){Ok(pending)=>pending.posts.extend(post),Err(error)=>view.save_dialog.message=Some(error)}
+                        } else {
+                            view.focus_category(hit.category, &self.assets.selection);
+                            view.send_tutorial_control(14);
+                        }
                     }
                 }
                 view.mouse_buttons[0] = false;
@@ -4308,11 +4615,16 @@ impl Intro {
                         .navigate(&view.scene, adjustment, building)
                     {
                         Ok(panel) => {
-                            view.adjustment = Some(panel);
                             let b = &view.scene.inspection_buildings[building];
                             let Some(hit) = inspection_hit(&self.assets.selection.blocks,
                                 b.category, Some(building),
                             ) else { return; };
+                            if view.camera_producer.is_some() {
+                                if let Err(error)=view.queue_actor_camera(hit,&self.assets.selection,camera_producer::ActorOrigin::Adjustment,Some(panel),false){view.save_dialog.message=Some(error);}
+                                if let Some(id)=tutorial_control {view.send_tutorial_control(id);}
+                                return;
+                            }
+                            view.adjustment = Some(panel);
                             view.selected = Some(hit);
                             if let Some((controls, angle)) = crate::navigation::building_entry(
                                 self.assets.selection.blocks[hit.category].center,
@@ -4422,10 +4734,12 @@ impl Intro {
                             else {
                                 return;
                             };
-                            view.selected = Some(crate::selection::Hit {
-                                category,
-                                building: Some(i),
-                            });
+                            let hit=crate::selection::Hit{category,building:Some(i)};
+                            if view.camera_producer.is_some() {
+                                if let Err(error)=view.queue_actor_camera(hit,&self.assets.selection,camera_producer::ActorOrigin::Locator,None,false){view.save_dialog.message=Some(error);}
+                                return;
+                            }
+                            view.selected = Some(hit);
                             let close_up = crate::navigation::building_entry(
                                 self.assets.selection.blocks[category].center,
                                 [building.translation[0], building.translation[2]],
@@ -4477,6 +4791,13 @@ impl Intro {
                                 .navigator
                                 .pick_inspection(&self.assets.selection.blocks, point)
                         {
+                            if view.camera_producer.is_some() {
+                                let event=camera_producer::Event::Block{category:self.assets.selection.blocks[category].id as u32,
+                                    selected:crate::selection::Hit{category,building:None},origin:camera_producer::BlockOrigin::Navigator};
+                                let post=view.camera_control_post(103);
+                                match view.queue_camera_event(event,None,None,false){Ok(pending)=>pending.posts.extend(post),Err(error)=>view.save_dialog.message=Some(error)}
+                                return;
+                            }
                             view.selected = Some(crate::selection::Hit {
                                 category,
                                 building: None,
@@ -4536,6 +4857,8 @@ impl Intro {
                             !status.tutorial_session || status.tutorial_enabled_controls.contains(&91)
                         });
                         if view.utility_report.mouse_with_rights_admission(pressed, rights_enabled) {
+                            let tutorial_after=view.utility_report.take_tutorial_control();
+                            let camera_post=(tutorial_after==Some(6)).then(||view.camera_control_post(6)).flatten();
                             let mut hyperlink_committed = false;
                             if let Some(slot) = view.utility_report.requested_slot.take()
                                 && let Some(i) =
@@ -4547,6 +4870,12 @@ impl Intro {
                                 && let Some(hit) = inspection_hit(&self.assets.selection.blocks,
                                     category, Some(i))
                             {
+                                if view.camera_producer.is_some() {
+                                    match view.queue_actor_camera(hit,&self.assets.selection,camera_producer::ActorOrigin::Hyperlink,None,false){
+                                        Ok(pending)=>{pending.posts.extend(camera_post);hyperlink_committed=true;},
+                                        Err(error)=>view.save_dialog.message=Some(error),
+                                    }
+                                } else {
                                 let building = &view.scene.inspection_buildings[i];
                                 view.selected = Some(hit);
                                 if let Some((controls, angle)) = crate::navigation::building_entry(
@@ -4573,11 +4902,12 @@ impl Intro {
                                 view.reframe_pending = true;
                                 view.title_state = None;
                                 hyperlink_committed = true;
+                                }
                             }
-                            if let Some(id) = view.utility_report.take_tutorial_control()
-                                && (id != 6 || hyperlink_committed)
-                            {
-                                view.send_tutorial_control(id);
+                            if let Some(id) = tutorial_after && (id != 6 || hyperlink_committed) {
+                                // Only6 is conditional on the camera/UI hyperlink
+                                // commit. Other handler actions remain unconditional.
+                                if id!=6 || view.camera_producer.is_none(){view.send_tutorial_control(id);}
                             }
                             view.mouse_buttons[0] = false;
                             view.double_click.clear();
@@ -4606,7 +4936,7 @@ impl Intro {
                         view.navigation_pressed = false;
                         if view.over_navigation() {
                             view.toggle_navigation(&self.assets.navigation);
-                            if view.live_status.as_ref().is_some_and(|status| {
+                            if view.camera_producer.is_none() && view.live_status.as_ref().is_some_and(|status| {
                                 status.tutorial_enabled_controls.contains(&73)
                             }) {
                                 view.send_tutorial_control(73);
@@ -4657,12 +4987,41 @@ impl Intro {
                             })
                         } else { picked };
                         let changed = view.selected != selected;
+                        if !view.strategic && view.camera_producer.is_some() {
+                            if let Some(hit)=selected {
+                                let post=if changed{tutorial_pick.map(camera_producer::Post::TutorialPick)}else{None};
+                                let open_adjustment=double
+                                    && !view.live_status.as_ref().is_some_and(|s|s.tutorial_interaction.has_pick_gate())
+                                    && !view.live_status.as_ref().is_some_and(|s|s.auction_locked_categories.contains(&self.assets.selection.blocks[hit.category].id));
+                                let result=if hit.building.is_some(){
+                                    view.queue_actor_camera(hit,&self.assets.selection,camera_producer::ActorOrigin::Scene,None,open_adjustment)
+                                }else{
+                                    view.queue_camera_event(camera_producer::Event::Block{category:self.assets.selection.blocks[hit.category].id as u32,
+                                        selected:hit,origin:camera_producer::BlockOrigin::Selection},None,None,false)
+                                };
+                                match result{Ok(pending)=>pending.posts.extend(post),Err(error)=>view.save_dialog.message=Some(error)}
+                                return;
+                            } else {
+                                if let Err(error)=view.queue_camera_event(camera_producer::Event::Deselect,None,None,false){view.save_dialog.message=Some(error);}
+                                return;
+                            }
+                        }
                         view.selected = selected;
                         if view.strategic {
                             if changed && let Some(pick) = tutorial_pick {
                                 view.send_tutorial_pick(pick);
                             }
                             if double && let Some(hit) = view.selected {
+                                if view.camera_producer.is_some() {
+                                    let event=camera_producer::Event::Block{category:self.assets.selection.blocks[hit.category].id as u32,
+                                        selected:hit,origin:camera_producer::BlockOrigin::StrategicDoubleClick};
+                                    let post=match tutorial_pick{
+                                        Some(crate::tutorial_two_interaction::Pick::Block{category_id})=>Some(camera_producer::Post::TutorialPick(crate::tutorial_two_interaction::Pick::BlockEntry{category_id})),
+                                        _=>None,
+                                    };
+                                    match view.queue_camera_event(event,None,None,false){Ok(pending)=>pending.posts.extend(post),Err(error)=>view.save_dialog.message=Some(error)}
+                                    return;
+                                }
                                 view.building_camera = false;
                                 view.controls = crate::navigation::block_entry(
                                     self.assets.selection.center(hit.category),
@@ -4838,6 +5197,7 @@ impl Intro {
             return self.refresh_inspection_projection();
         }
         if let Some(view) = &mut self.inspection {
+            if !view.camera_turns.is_empty() { return Ok(()); }
             let callback_time = view.started.elapsed().as_secs_f64() * 50.;
             let tick = callback_time.floor() as usize;
             let previous = view.camera;
@@ -4853,7 +5213,7 @@ impl Intro {
                     view.mouse_buttons = [false; 2];
                     break;
                 }
-                if view.strategic {
+                if !view.camera_producer.as_ref().map_or(!view.strategic,|p|p.legacy_callback_enabled(view.strategic)) {
                     view.tick = tick + 1;
                     view.drag = [0; 2];
                     break;
@@ -4893,11 +5253,12 @@ impl Intro {
             }
             // Original4b9c94 samples4e0590 using the camera scheduler's remainder
             // fraction (4eb7f0). Host monotonic time supplies the50Hz interval.
-            if !view.strategic {
+            if view.camera_producer.as_ref().map_or(!view.strategic,|p|p.legacy_callback_enabled(view.strategic)) {
                 let (eye, target) = view.inertia.sample(callback_time.fract() as f32)?;
                 view.camera.eye = eye;
                 view.camera.target = target;
             }
+            view.commit_camera();
             if !view.reframe_pending
                 && previous.eye == view.camera.eye
                 && previous.target == view.camera.target
@@ -5105,6 +5466,9 @@ impl Intro {
             let sample = result.samples[tick.min(result.samples.len() - 1)];
             if view.camera != sample {
                 view.camera = sample;
+                if let Some(producer) = &mut view.camera_producer {
+                    let _ = producer.commit(sample, if view.strategic {3} else {0});
+                }
                 let mut changed = view.scene.reframe(sample)?;
                 if let Some(trees) = &mut view.trees {
                     changed.extend(trees.reframe(&mut view.scene, sample)?);
@@ -5242,6 +5606,30 @@ impl Intro {
     }
 
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
+        self.service_focus()?;
+        if let Some(worker)=&mut self.camera_worker {
+            if let Some(result)=worker.poll(){
+                self.camera_worker=None;
+                if let Err(error)=result{
+                    self.camera_worker_failure=Some(error.clone());
+                    self.loading=None;
+                    self.retire_inspection();
+                    eprintln!("City worker failed; replacement startup blocked: {error}");
+                    if let Some(menu)=&mut self.menu{
+                        menu.load.message=Some(error.clone());menu.single.message=Some(error.clone());menu.skirmish.error=Some(error);
+                        menu.load.busy=false;menu.single.busy=false;menu.invalidate();
+                    }
+                }
+            }
+        }
+        let camera_start_ready=camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure);
+        if !camera_start_ready && let Some(menu)=&mut self.menu {
+            if menu.load.request.is_some(){menu.load.message=Some(self.camera_worker_failure.clone().unwrap_or_else(||"Finishing previous city before loading...".into()));}
+            if menu.single.request.is_some(){menu.single.message=Some(self.camera_worker_failure.clone().unwrap_or_else(||"Finishing previous city before starting...".into()));}
+            // Skirmish request/busy remains retained; its ordinary start error
+            // is surfaced by finish on a terminal failure, not fake completion.
+            if menu.skirmish.request.is_some() && let Some(error)=&self.camera_worker_failure{menu.skirmish.finish(Some(error.clone()));}
+        }
         self.sync_profile_settings()?;
         if self.inspection.is_none() && let Some(menu) = &self.menu {
             let snapshot = menu.settings_snapshot();
@@ -5283,7 +5671,7 @@ impl Intro {
             inspection_controls = view.controls;
             inspection_camera = view.camera;
         }
-        if self.loading.is_none()
+        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
             && let Some(path) = self.menu.as_mut().and_then(|m| m.load.request.take())
         {
             self.loading_skirmish = false;
@@ -5291,29 +5679,25 @@ impl Intro {
             let save_profile_root = self.menu.as_ref().and_then(|m| m.current_save_root());
             let pavement=self.assets.selection.pavement_resource().binding()?.handle();
             let inputs = self.assets.inputs.clone();
+            let focus_enabled = self.focus.enabled();
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            std::thread::Builder::new()
-                .name("saved-city-simulation".into())
-                .stack_size(16 * 1024 * 1024)
-                .spawn(move || inputs.saved_worker(path, save_profile_root, inspection_camera, tx, pavement))
-                .map_err(|error| error.to_string())?;
+            self.camera_worker=Some(camera_producer::spawn_session("saved-city-simulation",inputs,
+                WorkerStart::Saved(path,save_profile_root),inspection_camera,tx,Some(pavement),focus_enabled)?);
         }
-        if self.loading.is_none()
+        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
             && let Some(request) = self.menu.as_mut().and_then(|m| m.skirmish.request.take())
         {
             self.loading_skirmish = true;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
+            let focus_enabled = self.focus.enabled();
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            if let Err(error) = std::thread::Builder::new()
-                .name("skirmish-simulation".into())
-                .stack_size(16 * 1024 * 1024)
-                .spawn(move || {
-                    inputs.session_worker(WorkerStart::Skirmish(request), inspection_camera, tx, None)
-                })
-            {
+            match camera_producer::spawn_session("skirmish-simulation",inputs,WorkerStart::Skirmish(request),
+                inspection_camera,tx,None,focus_enabled) {
+                Ok(worker)=>self.camera_worker=Some(worker),
+                Err(error)=>{
                 self.loading = None;
                 self.loading_skirmish = false;
                 self.loading_from_setup = false;
@@ -5321,23 +5705,20 @@ impl Intro {
                     menu.skirmish.finish(Some(error.to_string()));
                     menu.invalidate();
                 }
+                }
             }
         }
-        if self.loading.is_none()
+        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
             && let Some(preview) = self.menu.as_mut().and_then(|m| m.single.request.take())
         {
             self.loading_skirmish = false;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
+            let focus_enabled = self.focus.enabled();
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            std::thread::Builder::new()
-                .name("city-simulation".into())
-                // The retained original fixed arenas and debug-build constructor
-                // temporaries exceed Windows' default worker stack.
-                .stack_size(16 * 1024 * 1024)
-                .spawn(move || inputs.preview_worker(preview, inspection_camera, tx))
-                .map_err(|error| error.to_string())?;
+            self.camera_worker=Some(camera_producer::spawn_session("city-simulation",inputs,
+                WorkerStart::Fresh(preview),inspection_camera,tx,None,focus_enabled)?);
         }
         if let Some(rx) = &self.loading {
             let result = match rx.try_recv() {
@@ -5350,8 +5731,16 @@ impl Intro {
                 let refreshing = self.refreshing_fresh;
                 self.refreshing_fresh = false;
                 let result = result.and_then(|loaded| {
-                    let (inspection_camera, inspection_controls) = loaded.saved_viewpoint
-                        .unwrap_or((inspection_camera, inspection_controls));
+                    let camera_initial = if loaded.camera_publisher.is_some() {
+                        Some(camera_producer::Initial::from_loaded(&loaded, camera_producer::Controls {
+                                camera: inspection_camera, controls: inspection_controls,
+                                inertia: openmt2001::camera::BlockCameraInertia::new(inspection_camera.eye, inspection_camera.target),
+                                saved: false, building: false, building_angle: 0., selected: None,
+                            })?)
+                    } else { None };
+                    let (inspection_camera, inspection_controls) = camera_initial.as_ref()
+                        .map(|i|(i.active.camera,i.active.controls))
+                        .or(loaded.saved_viewpoint).unwrap_or((inspection_camera, inspection_controls));
                     let retained_session = loaded.fresh_session.or_else(|| {
                         if refreshing {
                             self.inspection
@@ -5550,6 +5939,10 @@ impl Intro {
                     let camera_inbox = loaded.camera_inbox;
                     let imported_cameras = loaded.imported_cameras;
                     let mut view = Inspection {
+                        camera_epoch: loaded.camera_epoch,
+                        camera_turns: Default::default(),
+                        camera_producer: None,
+                        camera_ready: None,
                         camera_endpoint: None,
                         camera_capture_pending: None,
                         camera_ui: None,
@@ -5659,7 +6052,7 @@ impl Intro {
                         navigation_bounds: self.assets.navigation.bounds,
                         navigation_pressed: false,
                         double_click: crate::navigation::DoubleClick::default(),
-                        strategic: loaded.saved_prior_mode == Some(3),
+                        strategic: camera_initial.as_ref().map_or(loaded.saved_prior_mode == Some(3), |initial|initial.strategic()),
                         return_camera: None,
                         reframe_pending: false,
                         scene,
@@ -5743,6 +6136,12 @@ impl Intro {
                         Some(refresh::prepare(&mut old, &mut next, inputs,
                             menu.adjustment_assets(), &mut self.refresh_retry)?)
                     } else { None };
+                    if let Some(initial) = camera_initial {
+                        initial.active.put(&mut view);
+                        view.return_camera = initial.normal_return;
+                        view.camera_producer = Some(camera_producer::Producer::attach(&mut self.camera_parked,
+                            loaded.camera_publisher.expect("prepared unique publisher"), &initial)?);
+                    }
                     Ok((view, plan, camera_inbox, property_install))
                 });
                 if let Some(menu) = &mut self.menu {
@@ -5811,7 +6210,6 @@ impl Intro {
                                 view.event_list = std::mem::take(&mut previous.event_list);
                                 view.stats_panel = std::mem::take(&mut previous.stats_panel);
                                 view.stats_requested = previous.stats_requested;
-                                view.tutorial_camera_seen = previous.tutorial_camera_seen;
                                 view.auction_notice = std::mem::take(&mut previous.auction_notice);
                                 view.prompt_reply = previous.prompt_reply.take();
                                 view.cursor = previous.cursor;
@@ -5827,16 +6225,25 @@ impl Intro {
                                 view.navigator_pressed = previous.navigator_pressed;
                                 view.details_pressed = previous.details_pressed;
                                 view.strategic = previous.strategic;
-                                view.return_camera = previous.return_camera;
+                                view.return_camera = previous.return_camera.map(|mut state| {
+                                    state.selected = state.selected.and_then(|hit| {
+                                        let building = match hit.building {
+                                            Some(index) => {
+                                                let slot = previous.scene.inspection_buildings.get(index)?.runtime_slot?;
+                                                Some(view.scene.inspection_buildings.iter().position(|b|b.runtime_slot==Some(slot))?)
+                                            }
+                                            None => None,
+                                        };
+                                        Some(crate::selection::Hit { category:hit.category,building })
+                                    });
+                                    state
+                                });
+                                camera_producer::commit_refresh(previous,&mut view);
                                 view.details_visible = previous.details_visible;
                                 view.toolbar_input = std::mem::take(&mut previous.toolbar_input);
                                 // Read the current event-thread sample; never
                                 // derive it from a snapshot's stale camera flags.
                                 view.toolbar_right_held = previous.toolbar_right_held;
-                                view.building_angle = previous.building_angle;
-                                view.building_camera = previous.building_camera;
-                                view.inertia = previous.inertia;
-                                view.saved_camera = previous.saved_camera;
 
                                 if let Some(locator) = &mut view.locator
                                     && !locator.has_strategic() {
@@ -5869,13 +6276,24 @@ impl Intro {
                                 );
                             }
                             if let Some(inbox) = camera_inbox {
-                                let owner = self.camera_parked.take().unwrap_or_else(||
-                                    camera_live::owner::Owner::new(openmt2001::camera::bank::Bank::loader_zero_storage(),1));
+                                let owner = self.camera_parked.take().expect("one process camera Owner parked before native attach");
                                 view.camera_endpoint = Some(camera_live::endpoint::Endpoint::with_property_install(
                                     owner,inbox,property_install.expect("prepared actual property install resources")));
                             }
                             self.refresh_retry.complete();
+                            if !refreshing && view.camera_producer.is_some() {
+                                if let Some(sender) = &view._fresh_session {
+                                    let (reply, result) = mpsc::channel();
+                                    if let Err(error) = sender.send(FreshRequest::UiCameraReady { reply }) {
+                                        view.camera_producer.as_mut().expect("attached producer").invalidate(error.to_string());
+                                    }
+                                    view.camera_ready = Some(result);
+                                }
+                            }
+                            let focus_sender = (!refreshing && self.focus.enabled())
+                                .then(||view._fresh_session.clone()).flatten();
                             self.inspection = Some(view);
+                            if let Some(sender) = focus_sender { self.focus.attach(sender)?; }
                             if self.loading_skirmish {
                                 menu.skirmish.finish(None);
                             } else if self.loading_from_setup {
@@ -5912,8 +6330,20 @@ impl Intro {
             }
         }
         if let Some(view) = &mut self.inspection {
+            if let Some(receiver) = &view.camera_ready {
+                match receiver.try_recv() {
+                    Ok(Ok(())) => { view.camera_ready = None; }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    other => {
+                        let error = match other { Ok(Err(e)) => e, _ => "Camera attachment boundary closed".into() };
+                        if let Some(producer) = &mut view.camera_producer { producer.invalidate(error.clone()); }
+                        view.save_dialog.message = Some(error); view.camera_ready = None;
+                    }
+                }
+            }
             match view.options_ack.poll() {
                 Ok(Some(_))=>view.game_options.set_save_disabled(!view.options_ack.ready()
+                    || view.camera_producer.as_ref().is_some_and(|p|p.error().is_some())
                     || view.live_status.as_ref().is_none_or(|s|s.tutorial_session||s.failure.is_some())),
                 Ok(None)=>{},
                 Err(error)=>{view.game_options.set_save_disabled(true);view.game_options.set_message(error);}
@@ -6457,18 +6887,8 @@ impl Intro {
                         crate::live_host::report_status(&status, view.live_status.as_ref());
                         view.stats_requested=status.stats.is_some();
                         tutorial_completed = status.tutorial_completed;
-                        if status.tutorial_camera_events.len() < view.tutorial_camera_seen {
-                            return Err("tutorial camera event log regressed".into());
-                        }
-                        if view.camera_endpoint.is_some() && status.tutorial_camera_events.len()!=view.tutorial_camera_seen {
-                            return Err("Bridged camera received unordered Status camera effects".into());
-                        }
-                        for &action in &status.tutorial_camera_events[view.tutorial_camera_seen..] {
-                            view.apply_tutorial_camera(action,
-                                &self.assets.selection, &self.assets.navigation,
-                            )?;
-                        }
-                        view.tutorial_camera_seen = status.tutorial_camera_events.len();
+                        view.apply_status_camera_events(&status,
+                            &self.assets.selection, &self.assets.navigation)?;
                         for request in status.prompts.drain(..) {
                             view.prompts.submit(request);
                             view.keys = [false; 4];
@@ -6527,7 +6947,8 @@ impl Intro {
                                 view.save_dialog.message=Some(format!("Save failed: {error}"));
                             }
                         }
-                        view.game_options.set_save_disabled(!view.options_ack.ready() || status.tutorial_session || status.failure.is_some());
+                        view.game_options.set_save_disabled(!view.options_ack.ready() || status.tutorial_session || status.failure.is_some()
+                            || view.camera_producer.as_ref().is_some_and(|p|p.error().is_some()));
                         view.live_status = Some(status);
                         view.status_pending = None;
                     }
@@ -10860,3 +11281,11 @@ mod tests {
 #[cfg(test)]
 #[path="intro_autosave_natural_host_test.rs"]
 mod natural_host_tests;
+
+#[cfg(test)]
+#[path="intro/focus_worker_tests.rs"]
+mod focus_worker_tests;
+
+#[cfg(test)]
+#[path = "intro/camera_producer_live_tests.rs"]
+mod camera_producer_live_tests;
