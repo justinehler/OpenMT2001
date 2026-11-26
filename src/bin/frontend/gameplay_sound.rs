@@ -194,7 +194,7 @@ pub struct Player {
     one_shots: Vec<rodio::Sink>,
     ledger_cues: Vec<LedgerCue>,
     ui_click_cues: Vec<UiClickCue>,
-    effects_factor: f32,
+    audio: crate::audio_bus::focus::SharedAudio,
     scripted: HashMap<String, Vec<f32>>,
     ambient: Option<(u32, rodio::Sink)>,
     firework_bursts: Vec<rodio::Sink>,
@@ -222,8 +222,7 @@ struct UiClickCue {
 /// Each q*c needs at most 27 significant bits; multiplying a binary32 factor
 /// needs at most 51, exact in f64. This is not a general raw32/x87 API.
 fn fixed_cue_normalized(factor: f32, source_level: i32) -> f32 {
-    let percent = f64::from(f32::from_bits(0x3c23_d70a));
-    (f64::from(factor) * (f64::from(source_level) * percent)) as f32
+    crate::music_gain::source_normalized(factor, source_level)
 }
 
 fn play_bounded(
@@ -247,6 +246,7 @@ fn replace_auction_voice(
     mixer: Option<&rodio::mixer::Mixer>,
     samples: Vec<f32>,
     suppressed: bool,
+    gain: f32,
 ) {
     // Native 465a8b/4647a5 release the previous retained handle before
     // testing panel+858. A muted callback still stops the earlier voice.
@@ -254,6 +254,7 @@ fn replace_auction_voice(
     if suppressed { return; }
     if let Some(mixer) = mixer {
         let sink = rodio::Sink::connect_new(mixer);
+        sink.set_volume(gain);
         sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
         *slot = Some(sink);
     }
@@ -268,7 +269,7 @@ impl Player {
             ledger_cues: Vec::new(),
             ui_click_cues: Vec::new(),
             // Preserve the existing Player/Bus initial 100-percent policy.
-            effects_factor: crate::music_gain::normalized_percentage(100),
+            audio: crate::audio_bus::focus::SharedAudio::new(100, 100),
             scripted: HashMap::new(),
             ambient: None,
             firework_bursts: Vec::new(),
@@ -280,14 +281,13 @@ impl Player {
     }
 
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
-        self.bus.mixer()
+        self.bus.combined_mixer()
+    }
+    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) {
+        self.audio = audio;
     }
     pub fn set_level(&mut self, effects: u8) {
-        // Native factor setter stores only. Existing migrated one-shots retain
-        // the gain consumed at creation; unmigrated families keep their
-        // existing live linear master semantics.
-        self.effects_factor = crate::music_gain::normalized_percentage(effects);
-        self.bus.set_level(effects);
+        self.audio.set_effects(effects);
     }
 
     pub fn apply(&mut self, operation: Operation) -> Result<u32, String> {
@@ -325,8 +325,10 @@ impl Player {
                 } else {
                     self.assets.spell.clone()
                 };
+                let gain = self.audio.source_gain(100);
                 if let Some(mixer) = self.mixer() {
                     let sink = rodio::Sink::connect_new(mixer);
+                    sink.set_volume(gain);
                     sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.one_shots.push(sink);
                 }
@@ -338,10 +340,12 @@ impl Player {
                     return Err("auction ambient handle already active".into());
                 }
                 let samples = self.assets.auction_murmur.clone();
+                let gain = self.audio.source_gain(100);
                 let Some(mixer) = self.mixer() else {
                     return Ok(0);
                 };
                 let sink = rodio::Sink::connect_new(mixer);
+                sink.set_volume(gain);
                 // 464aa0 supplies playback words (1,1,0,1,100); the retained
                 // ambient handle is released by admission or closure.
                 sink.append(
@@ -376,7 +380,7 @@ impl Player {
                 } else {
                     self.assets.negative_boing.clone()
                 };
-                let factor = self.effects_factor;
+                let factor = self.audio.factor();
                 if let Some(mixer) = self.bus.combined_mixer() {
                     let sink = rodio::Sink::connect_new(mixer);
                     // 41b436..41b467 supplies (1,0,0,0,100), with no retained handle.
@@ -391,14 +395,15 @@ impl Player {
             }
             Operation::ResultFirework(cue) => {
                 use crate::fresh_city::result::fireworks::Cue;
-                let (samples, gain, whistle) = match cue {
-                    Cue::Launch1 => (&self.assets.firework_launch1, 1., false),
-                    Cue::Launch2 => (&self.assets.firework_launch2, 1., false),
-                    Cue::EchoCrackle => (&self.assets.firework_echo_crackle, 1., false),
-                    Cue::EchoSingle => (&self.assets.firework_echo_single, 1., false),
-                    Cue::LaunchWhistle => (&self.assets.firework_whistle, 0.8, true),
+                let (samples, source_level, whistle) = match cue {
+                    Cue::Launch1 => (&self.assets.firework_launch1, 100, false),
+                    Cue::Launch2 => (&self.assets.firework_launch2, 100, false),
+                    Cue::EchoCrackle => (&self.assets.firework_echo_crackle, 100, false),
+                    Cue::EchoSingle => (&self.assets.firework_echo_single, 100, false),
+                    Cue::LaunchWhistle => (&self.assets.firework_whistle, 80, true),
                 };
                 let samples = samples.clone();
+                let gain = self.audio.source_gain(source_level);
                 let Some(mixer) = self.mixer().cloned() else { return Ok(0) };
                 let pool = if whistle { &mut self.firework_whistles } else { &mut self.firework_bursts };
                 // 453290 scans six burst handles, 454965 scans four whistles;
@@ -413,32 +418,38 @@ impl Player {
                     ActorCue::Bid { participant, character, suppressed } => {
                         let samples = self.assets.auction_voices.get(character as usize)
                             .ok_or("Auction bid character outside original roster")?[0].clone();
+                        let gain = self.audio.source_gain(100);
                         let mixer = self.mixer().cloned();
                         let slot = self.auction_bid_sinks.get_mut(participant as usize)
                             .ok_or("Auction bid participant outside original roster")?;
-                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed);
+                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
                     }
                     ActorCue::Withdraw { participant, character, suppressed } => {
                         let samples = self.assets.auction_voices.get(character as usize)
                             .ok_or("Auction withdraw character outside original roster")?[2].clone();
+                        let gain = self.audio.source_gain(100);
                         let mixer = self.mixer().cloned();
                         let slot = self.auction_withdraw_sinks.get_mut(participant as usize)
                             .ok_or("Auction withdraw participant outside original roster")?;
-                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed);
+                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
                     }
                     ActorCue::Win { character } => {
                         let samples = self.assets.auction_voices.get(character as usize)
                             .ok_or("Auction win character outside original roster")?[1].clone();
+                        let gain = self.audio.source_gain(100);
                         if let Some(mixer) = self.mixer().cloned() {
                             let sink = rodio::Sink::connect_new(&mixer);
+                            sink.set_volume(gain);
                             sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                             self.one_shots.push(sink);
                         }
                     }
                     ActorCue::Applause => {
                         let samples = self.assets.auction_applause.clone();
+                        let gain = self.audio.source_gain(100);
                         if let Some(mixer) = self.mixer().cloned() {
                             let sink = rodio::Sink::connect_new(&mixer);
+                            sink.set_volume(gain);
                             sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                             self.one_shots.push(sink);
                         }
@@ -459,8 +470,10 @@ impl Player {
                     self.scripted.insert(name.clone(), samples);
                 }
                 let samples = self.scripted.get(&name).unwrap().clone();
+                let gain = self.audio.source_gain(100);
                 if let Some(mixer) = self.mixer() {
                     let sink = rodio::Sink::connect_new(mixer);
+                    sink.set_volume(gain);
                     sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.one_shots.push(sink);
                 }
@@ -468,7 +481,7 @@ impl Player {
             }
             Operation::Ledger { sale } => {
                 let samples = if sale { self.assets.sell.clone() } else { self.assets.buy.clone() };
-                let factor = self.effects_factor;
+                let factor = self.audio.factor();
                 if let Some(mixer) = self.bus.combined_mixer() {
                     let cue = LedgerCue {
                         source_level: 60, // Both native 48a5e6 and 48a61d push 0x3c.
@@ -484,7 +497,7 @@ impl Player {
             }
             Operation::UiLightClick => {
                 let samples = self.assets.ui_light_click.clone();
-                let factor = self.effects_factor;
+                let factor = self.audio.factor();
                 if let Some(mixer) = self.bus.combined_mixer() {
                     let cue = UiClickCue {
                         // All three widget sites push 0x64 before 4ad760.
@@ -608,11 +621,11 @@ mod tests {
             vec![0.5; 64]).repeat_infinite());
         let mut slot = Some(previous);
         assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
-        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], true);
+        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], true, 1.);
         assert!(slot.is_none(), "native 4647a5 releases even when +858 suppresses the new voice");
         let silent: Vec<_> = (0..8192).map(|_| output.next()).collect();
         assert!(silent[silent.len()-1024..].iter().all(|sample| *sample == Some(0.)));
-        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], false);
+        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], false, 1.);
         assert!(slot.is_some());
         assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
     }
@@ -785,4 +798,9 @@ mod ui_click_gain_tests {
 #[cfg(test)]
 mod card_open_gain_tests {
     include!("gameplay_sound_card_open_gain_tests.rs");
+}
+
+#[cfg(test)]
+mod focus_tests {
+    include!("gameplay_sound_focus_tests.rs");
 }

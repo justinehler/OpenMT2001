@@ -120,6 +120,7 @@ impl Assets {
 pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
+    audio: crate::audio_bus::focus::SharedAudio,
     sinks: BTreeMap<u32, rodio::Sink>,
     next_handle: u32,
 }
@@ -128,11 +129,13 @@ impl Player {
         Self {
             assets,
             bus: crate::audio_bus::Bus::new(),
+            audio: crate::audio_bus::focus::SharedAudio::new(100, 100),
             sinks: BTreeMap::new(),
             next_handle: 1,
         }
     }
-    pub fn set_level(&mut self, effects: u8) { self.bus.set_level(effects); }
+    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) { self.audio = audio; }
+    pub fn set_level(&mut self, effects: u8) { self.audio.set_effects(effects); }
     pub fn apply(&mut self, operation: Operation) -> Result<u32, String> {
         match operation {
             Operation::Reset => {
@@ -145,13 +148,15 @@ impl Player {
                 // Original auction callers accept a zero 4ad760 result and skip
                 // release while the stored handle is zero.
                 let samples = self.assets.samples(kind).to_vec();
-                let Some(mixer) = self.bus.mixer() else { return Ok(0); };
+                let gain = self.audio.source_gain(100);
+                let Some(mixer) = self.bus.combined_mixer() else { return Ok(0); };
                 let handle = self.next_handle;
                 if handle == 0 || self.sinks.contains_key(&handle) {
                     return Err("auction audio handle space exhausted".into());
                 }
                 self.next_handle = handle.checked_add(1).unwrap_or(0);
                 let sink = rodio::Sink::connect_new(mixer);
+                sink.set_volume(gain);
                 sink.append(rodio::buffer::SamplesBuffer::new(
                     1,
                     22_050,
@@ -175,6 +180,40 @@ impl Drop for Player {
     fn drop(&mut self) {
         for sink in self.sinks.values() {
             sink.stop();
+        }
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::audio_bus::focus::{Action, Guards, SharedAudio};
+    #[test]
+    fn announcement_and_timer_keep_creation_gain_through_focus_and_settings() {
+        for kind in [Kind::Announcement, Kind::TurnTimer] {
+            for (initial, expected) in [(0, 0.), (25, 0.017336842)] {
+                let audio = SharedAudio::new(75, initial);
+                let mut player = Player::new(Assets { announcement: vec![0.5; 65536], turn_timer: vec![0.5; 65536] });
+                player.bind_audio(audio.clone());
+                let (mixer, mut output) = rodio::mixer::mixer(1, 22050);
+                mixer.add(rodio::source::Zero::new(1, 22050));
+                player.bus.connect_test_output(&mixer, 1, 22050);
+                let handle = player.apply(Operation::Create(kind)).unwrap();
+                assert_ne!(handle, 0);
+                for stage in 0..4 {
+                    match stage {
+                        1 => { player.set_level(100); }
+                        2 => { audio.apply(Action::Suspend, Guards { active: true, sound_enabled: true, music_enabled: true }); }
+                        3 => { audio.apply(Action::Resume, Guards { active: true, sound_enabled: true, music_enabled: true }); }
+                        _ => (),
+                    }
+                    let samples: Vec<_> = output.by_ref().take(4096).collect();
+                    assert!(samples.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
+                    assert!(samples[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+                }
+                player.apply(Operation::Reset).unwrap();
+                player.apply(Operation::Release(handle)).unwrap();
+            }
         }
     }
 }

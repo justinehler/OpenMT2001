@@ -76,7 +76,7 @@ fn ledger_factor_store_preserves_old_cue_and_only_new_cue_consumes_mute() {
     assert!(old_pcm > 0.);
 
     player.set_level(0);
-    assert_eq!(player.effects_factor, 0.);
+    assert_eq!(player.audio.factor(), 0.);
     assert_eq!(player.ledger_cues[0].source_level, 60);
     assert_eq!(player.ledger_cues[0].sink.volume(), old_gain);
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == old_pcm),
@@ -121,15 +121,15 @@ fn ledger_prune_reset_and_player_drop_stop_real_children() {
 }
 
 #[test]
-fn ledger_migration_preserves_unmigrated_targeted_family_linear_output() {
+fn targeted_family_consumes_factor_only_at_creation() {
     let (mut player, mut output) = owner(25);
     player.apply(Operation::Targeted { actor_is_current: true }).unwrap();
-    assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.125));
+    assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
     player.set_level(50);
-    assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.25),
-        "unmigrated families keep the same live linear master");
+    assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6),
+        "factor stores do not rewrite the existing targeted source");
     player.set_level(0);
-    assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.));
+    assert!(tail(&window(&mut output)).iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn ledger_independent_original_fixture_through_actual_owner_pcm() {
         assert!(seen.insert(effects), "duplicate independent fixture");
         for sale in [false, true] {
             let (mut player, mut output) = owner(effects);
-            let normalized = fixed_cue_normalized(player.effects_factor, source_level);
+            let normalized = fixed_cue_normalized(player.audio.factor(), source_level);
             assert_eq!(normalized.to_bits(), bits, "single final RN32 store");
             if effects == 60 {
                 // LG-01: the fixture's correct bits are external expectations.
@@ -162,7 +162,7 @@ fn ledger_independent_original_fixture_through_actual_owner_pcm() {
                 // it never computes the correct expected bits or emitted PCM.
                 let percent = f64::from(f32::from_bits(0x3c23_d70a));
                 let prematurely_stored = (f64::from(source_level) * percent) as f32;
-                let early_spill = (f64::from(player.effects_factor)
+                let early_spill = (f64::from(player.audio.factor())
                     * f64::from(prematurely_stored)) as f32;
                 assert_ne!(bits, early_spill.to_bits(),
                     "mandatory p60/q60 fixture must reject intermediate RN32(q*c)");

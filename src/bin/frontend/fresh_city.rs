@@ -922,6 +922,30 @@ impl<'data> Session<'data> {
         skirmish: Option<SkirmishLaunch>,
         process:Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
+        Self::initialize_joined(input,policy,supplied_catalog,profile_path,load_mode,style,compatibility,skirmish,process,None)
+    }
+
+    pub(crate) fn initialize_joined(mut input: Inputs<'_, 'data>, policy: Policy,
+        supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
+        profile_path: Option<std::path::PathBuf>,
+        load_mode: bool,
+        style: Option<&openmt2001::board_style::Style>,
+        compatibility: crate::compatibility::Mode,
+        skirmish: Option<SkirmishLaunch>,
+        process:Option<crate::live_host::process_runtime::Handle>,
+        mut dispatch:Option<crate::process_dispatch::Seed>,
+    ) -> Result<Self, String> {
+        if !load_mode && dispatch.as_ref().is_some_and(|seed|(seed.pause.bytes[0] as i8)<0) {
+            return Err("Unsupported negative reason0 before World reset".into());
+        }
+        if let Some(launch)=&skirmish {
+            launch.validate()?;
+            let options=openmt2001::skirmish::Options::from_pe(input.image)?;
+            let rule=options.rules().iter().find(|r|r.kind==launch.objective_kind).ok_or("unknown Skirmish objective")?;
+            if launch.target<rule.minimum as f32 || launch.target>rule.maximum as f32 || launch.target.fract()!=0. {
+                return Err("Skirmish target outside original bounds".into());
+            }
+        }
         if !(0..=2).contains(&input.difficulty){return Err("campaign difficulty outside three levels".into());}
         let mut catalog=if let Some(catalog)=supplied_catalog {catalog} else {
             let mut catalog=crate::campaign_store::load_catalog(input.image,input.scripts)?;
@@ -1009,7 +1033,13 @@ impl<'data> Session<'data> {
             input.file,
             crate::building_models::Models::with_tree_locators(input.tree_locators.as_deref())?,
         );
-        let mut hooks = Hooks::new();
+        if let Some(seed)=dispatch.as_mut(){
+            if load_mode {seed.world_reset_accumulators();} else {seed.fresh_reset()?;}
+        }
+        let mut hooks = if let Some(seed)=dispatch.take() {
+            world.pause=seed.pause; // SAME process image, before any top-level script.
+            Hooks::with_dispatch(seed.tasks,seed.frequency)
+        } else { Hooks::new() };
         hooks.process=process; // Before top-level, initialize and Level dispatch.
         let context = world.script_context(
             input.image,
@@ -1423,6 +1453,10 @@ pub struct Hooks {
 }
 impl Hooks {
     pub(crate) fn new() -> Self {
+        Self::with_dispatch(openmt2001::timers::startup_tasks([0;20]),
+            openmt2001::timers::CalendarFrequency { frequency:0.,calendar_timer:None,logic_timer:None })
+    }
+    fn with_dispatch(timers:Vec<openmt2001::timers::Task>,frequency:openmt2001::timers::CalendarFrequency)->Self {
         Self {
             process:None,
             forced_auction_allowed: false,
@@ -1430,12 +1464,7 @@ impl Hooks {
             notifications: vec![],
             commands: vec![],
             utilities: economy::Utilities::new([0; 4]),
-            frequency: openmt2001::timers::CalendarFrequency {
-                frequency: 0.,
-                calendar_timer: None,
-                logic_timer: None,
-            },
-            timers: openmt2001::timers::startup_tasks([0; 20]),
+            frequency, timers,
         }
     }
 }

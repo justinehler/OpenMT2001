@@ -2,7 +2,7 @@ use super::*;
 use openmt2001::camera::{bank::Bank,primary::{Mode12Input,Mode13Input}};
 use std::{sync::mpsc,thread,time::{Duration,Instant}};
 #[derive(Default)]
-pub(crate) struct Ui {fail_continuation:bool,fail_focus:bool,fail_validate:bool,fail_finalize:bool,save_pending:bool,save_published:usize,save_failed:usize,writeback_cuts:usize,trace:Vec<&'static str>,staged:Vec<TaskEffect>,fail_cursor:bool,clear_changes_kind:bool,consumed:usize,queued_target:Option<[u32;3]>,pre_captures:Vec<Capture>}
+pub(crate) struct Ui {pub(crate) pending_sound_view:Option<Box<crate::intro::Inspection>>,fail_continuation:bool,fail_focus:bool,fail_validate:bool,fail_finalize:bool,save_pending:bool,save_published:usize,save_failed:usize,writeback_cuts:usize,trace:Vec<&'static str>,staged:Vec<TaskEffect>,fail_cursor:bool,clear_changes_kind:bool,consumed:usize,queued_target:Option<[u32;3]>,pre_captures:Vec<Capture>}
 fn input()->Input {
     Input {mode12:Mode12Input{build_visible:false,enable_translation:true,enable_keyboard:true,enable_rotation:true,enable_zoom:true,buttons:[false;2],delta:[0;2],keys:[true,false,false,false],sensitivity:50,legacy_yaw:false,invert_vertical:false,low_height:false},
         mode13:Mode13Input{enable_translation:true,enable_keyboard:true,enable_zoom:true,buttons:[false;2],delta:[0;2],keys:[true,false,false,false],sensitivity:50,legacy_yaw:false,invert_vertical:false,low_height:false}}
@@ -32,17 +32,21 @@ impl Context for Ui {
         owner.strategic_after_ui_clear();self.trace.push("navigation");Ok(())
     }
     fn tutorial(&mut self,_:NativeOperation,_:&mut Owner)->Result<(),String>{Err("test does not implement tutorial operations".into())}
-    fn pending_sound(&mut self,_:Pose)->Result<(),String>{self.trace.push("sound-current");Ok(())}
+    fn pending_sound(&mut self,_:Pose)->Result<(),String>{
+        self.trace.push("sound-current");
+        if let Some(view)=self.pending_sound_view.as_mut(){super::super::context::pending_sound_service(view,super::super::SoundBoundary::Existing2d)?;}
+        Ok(())
+    }
     fn present(&mut self,_:Pose)->Result<(),String>{self.trace.push("present-sample");Ok(())}
     fn take_task_effects(&mut self)->Vec<TaskEffect>{std::mem::take(&mut self.staged)}
     fn discard_task_effects(&mut self){self.staged.clear();if self.save_pending{self.save_pending=false;self.save_failed+=1;}}
 }
-pub(super) fn capture()->Capture {
+pub(crate) fn capture()->Capture {
     let mut p=[0u8;196];p[0]=6;p[0x70]=1;p[0x71]=1;p[0x74]=10;
     for (at,v) in [(0x34,100f32),(0x38,120.),(0x68,1.),(0x90,1.),(0xb0,80.)]{p[at..at+4].copy_from_slice(&v.to_le_bytes());}
     Capture::from_records([p,[0xcd;196]])
 }
-fn drive<T:Send+'static>(ui:Ui,run:impl FnOnce(&mut bridge::Worker,Capture,std::sync::Arc<bridge::PropertySource>)->T+Send+'static)->(T,Capture,Ui,Vec<String>) {
+pub(crate) fn drive<T:Send+'static>(ui:Ui,run:impl FnOnce(&mut bridge::Worker,Capture,std::sync::Arc<bridge::PropertySource>)->T+Send+'static)->(T,Capture,Ui,Vec<String>) {
     let assets=crate::selection::Assets::descriptor_test_assets(vec![],[0;116]);
     let (mut worker,inbox)=bridge::channel(47);let initial=capture();
     let source=std::sync::Arc::new(bridge::PropertySource::synthetic(47,[[0;380];52],52,&assets));
@@ -259,4 +263,67 @@ fn raw_capture_is_exact_and_does_not_run_central_or_publish_pending_save() {
     assert_eq!(ui.queued_target,Some(pending_target),"raw save must not run the deferred setter");
     assert!(ui.trace.is_empty());assert!(ui.pre_captures.is_empty());
     assert_eq!(ui.writeback_cuts,1,"only Install may finalize protected C state");
+}
+
+#[test]
+#[ignore="private supplied WAV/scene inputs, CPU only; actual Sample/pending_sound with newer Loss queued"]
+fn camera_sample_and_ready_result_keep_pcm_behind_unavailable_newer_focus_prefix(){
+    use crate::intro::{focus,FreshRequest,ResultSnapshot,process_frontend::Provider};
+    use crate::fresh_city::result::ResultPresentation;
+    let scratch=std::path::PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").unwrap()).join(format!("pf-audio-fence-{}",std::process::id()));
+    assert!(!scratch.exists());std::fs::create_dir_all(&scratch).unwrap();
+    struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
+    let _cleanup=Cleanup(scratch.clone());
+    let (mut view,owner)=crate::intro::process_review_tests::audio_view(scratch.join("profiles"));
+    let custody=owner.borrow_mut().take_custody(false).unwrap();
+    let mut pause=custody.pause;let mut tasks=custody.tasks;
+    let (focus_tx,focus_rx)=mpsc::channel();let mut route=focus::Route::default();route.install(Box::new(Provider(owner.clone()))).unwrap();
+    route.observe(true).unwrap();route.attach(focus_tx).unwrap();owner.borrow_mut().note_sent(route.sent());
+    let event=match focus_rx.recv().unwrap(){FreshRequest::Focus(event)=>event,_=>panic!("attachment")};
+    let handle=thread::spawn(move||{let mut host=crate::live_host::Host::new([0.;3]);event.apply(&mut host,&mut pause,&mut tasks).unwrap();(pause,tasks)});
+    route.wait_prefix();route.service_one().unwrap();(pause,tasks)=handle.join().unwrap();route.poll().unwrap();
+    let gate=route.music_admission();assert!(gate.permits_attachment());view.music_admission=Some(gate.clone());
+    let audio=owner.borrow().audio.clone();let (mixer,mut output)=rodio::mixer::mixer(2,44100);
+    let decoded=view.era_audio_player.composition_pending_pcm(audio.clone(),&mixer);decoded.send(Ok(vec![0.5;65536])).unwrap();
+    let (result_tx,result_rx)=mpsc::channel();
+    result_tx.send(Ok(ResultSnapshot{presentation:ResultPresentation{
+        sequence:openmt2001::outcome_notice::Sequence::Win,characters:(0,0),flyby:None,fireworks:None,fireworks_seed:None,
+        medallion_characters:[None;52],cut_scene_identifier:None,credits:false,credit_rows:0,credit_lines:vec![],bypass_enabled:true,fixed_camera:false,end_requested:None,
+    },tick:77,hour:6,counter:0})).unwrap();
+    let assets=crate::selection::Assets::descriptor_test_assets(vec![],[0;116]);
+    let (mut worker,inbox)=bridge::channel(47);let initial=capture();
+    let source=std::sync::Arc::new(bridge::PropertySource::synthetic(47,[[0;380];52],52,&assets));
+    let mut endpoint=Endpoint::with_property_install(Owner::new(Bank::loader_zero_storage(),9),inbox,PropertyInstall::synthetic(&assets));
+    let (queued,waiting)=mpsc::channel();let (done,result)=mpsc::channel();
+    let camera_thread=thread::spawn(move||{
+        install(&mut worker,initial,source);
+        worker.test_notify_next_enqueue(queued);
+        done.send(worker.request(Operation::Sample{ratio_bits:0f32.to_bits()})).unwrap();
+    });
+    let mut ui=Ui::default();ui.pending_sound_view=Some(Box::new(view));
+    let deadline=Instant::now()+Duration::from_secs(10);
+    // Existing enqueue notification proves the actual Sample is pending.
+    loop {assert!(Instant::now()<deadline);if endpoint.service(&mut ui).unwrap()==Service::Completed {break;}thread::yield_now();}
+    waiting.recv_timeout(Duration::from_secs(10)).unwrap();
+    owner.borrow_mut().observe(false).unwrap();route.observe(false).unwrap();owner.borrow_mut().note_sent(route.sent());
+    assert!(!gate.permits_attachment());assert!(!route.service_one().unwrap(),"newer Loss prefix is not available yet");
+    assert!(matches!(focus::poll_result(&result_rx,Some(&gate)),Err(mpsc::TryRecvError::Empty)));
+    // Actual Sample services actual pending_sound, which must keep the ready
+    //era decode held while completing the camera receipt without blocking.
+    endpoint.service(&mut ui).unwrap();let observation=result.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+    assert!(observation.sampled.is_some());camera_thread.join().unwrap();
+    assert!(ui.pending_sound_view.as_ref().unwrap().era_audio_player.composition_song_state().is_none());
+    assert_eq!(audio.music_level(),63);assert!(!audio.music_paused());
+    let event=match focus_rx.recv().unwrap(){FreshRequest::Focus(event)=>event,_=>panic!("Loss")};
+    let handle=thread::spawn(move||{let mut host=crate::live_host::Host::new([0.;3]);event.apply(&mut host,&mut pause,&mut tasks).unwrap();});
+    route.wait_prefix();route.service_one().unwrap();handle.join().unwrap();route.poll().unwrap();assert!(gate.permits_attachment());
+    let view=ui.pending_sound_view.as_mut().unwrap();
+    super::super::context::pending_sound_service(view,super::super::SoundBoundary::Existing2d).unwrap();
+    assert_eq!(view.era_audio_player.composition_song_state(),Some((true,0.)));
+    let snapshot=focus::poll_result(&result_rx,Some(&gate)).unwrap().unwrap();assert_eq!(snapshot.tick,77);
+    view.era_audio_player.apply(crate::era_audio::Operation::Stop).unwrap();
+    let result_music=crate::fresh_city::result::audio::composition_result_pcm(&mixer,&audio);
+    assert!(result_music.is_paused());assert_eq!(result_music.volume(),0.);
+    assert!(output.by_ref().take(1024).all(|sample|sample==0.));
+    route.detach();
 }

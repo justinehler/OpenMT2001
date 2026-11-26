@@ -103,9 +103,11 @@ pub fn resident_crowd_weight(categories: &[[u8; 0x17c]; 52], camera: [f32; 3]) -
     weight
 }
 
-fn crowd_gain(weight: f32) -> Option<f32> {
-    (weight > 30.).then(|| (f64::from(weight) - 30.).trunc().clamp(0., 65.) as f32 / 100.)
+fn crowd_level(weight: f32) -> Option<i32> {
+    (weight > 30.).then(|| (f64::from(weight) - 30.).trunc().clamp(0., 65.) as i32)
 }
+#[cfg(test)]
+fn crowd_gain(weight: f32) -> Option<f32> { crowd_level(weight).map(|q| q as f32 / 100.) }
 
 pub struct Request {
     pub operation: Operation,
@@ -301,6 +303,7 @@ impl Assets {
 pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
+    audio: crate::audio_bus::focus::SharedAudio,
     train_motion: Option<rodio::Sink>,
     train_toot: Option<rodio::Sink>,
     road_ambient: Option<rodio::Sink>,
@@ -325,6 +328,7 @@ impl Player {
         Self {
             assets,
             bus: crate::audio_bus::Bus::new(),
+            audio: crate::audio_bus::focus::SharedAudio::new(100, 100),
             train_motion: None,
             train_toot: None,
             road_ambient: None,
@@ -346,25 +350,28 @@ impl Player {
     }
 
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
-        self.bus.mixer()
+        self.bus.combined_mixer()
     }
+    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) { self.audio = audio; }
     pub fn set_level(&mut self, effects: u8) {
-        self.bus.set_level(effects);
+        self.audio.set_effects(effects);
     }
     pub fn set_interface_mode(&mut self, mode: u32) {
         self.interface_mode = mode;
     }
 
-    fn loop_sink(mixer: &rodio::mixer::Mixer, samples: &[f32]) -> rodio::Sink {
+    fn loop_sink(mixer: &rodio::mixer::Mixer, samples: &[f32], gain: f32) -> rodio::Sink {
         let sink = rodio::Sink::connect_new(mixer);
+        sink.set_volume(gain);
         sink.append(
             rodio::buffer::SamplesBuffer::new(1, 22_050, samples.to_vec()).repeat_infinite(),
         );
         sink
     }
 
-    fn one_shot(mixer: &rodio::mixer::Mixer, samples: &[f32]) -> rodio::Sink {
+    fn one_shot(mixer: &rodio::mixer::Mixer, samples: &[f32], gain: f32) -> rodio::Sink {
         let sink = rodio::Sink::connect_new(mixer);
+        sink.set_volume(gain);
         sink.append(rodio::buffer::SamplesBuffer::new(
             1,
             22_050,
@@ -451,14 +458,14 @@ impl Player {
                         };
                         if let Some(mixer) = self.mixer() {
                             self.block_sinks[category] = Some(if kind.looping() {
-                                Self::loop_sink(mixer, &samples)
+                                Self::loop_sink(mixer, &samples, 0.)
                             } else {
-                                Self::one_shot(mixer, &samples)
+                                Self::one_shot(mixer, &samples, 0.)
                             });
                         }
                     }
                     if let Some(sink) = &self.block_sinks[category] {
-                        sink.set_volume(source.gain(snapshot.camera));
+                        sink.set_volume(self.audio.source_gain(source.level(snapshot.camera)));
                     }
                 }
             }
@@ -490,11 +497,11 @@ impl Player {
                         _ => self.assets.construction_hammer.clone(),
                     };
                     if let Some(mixer) = self.mixer() {
-                        self.construction[index] = Some(Self::loop_sink(mixer, &samples));
+                        self.construction[index] = Some(Self::loop_sink(mixer, &samples, 0.));
                     }
                 }
                 if let Some(sink) = &self.construction[index] {
-                    sink.set_volume(construction_fallback_gain(candidate.distance));
+                    sink.set_volume(self.audio.source_gain(construction_fallback_level(candidate.distance)));
                 }
             }
         }
@@ -513,20 +520,47 @@ impl Player {
             if self.near_aircraft.is_none() {
                 let samples = self.assets.near_aircraft.clone();
                 if let Some(mixer) = self.mixer() {
-                    self.near_aircraft = Some(Self::loop_sink(mixer, &samples));
+                    self.near_aircraft = Some(Self::loop_sink(mixer, &samples, 0.));
                 }
+                return;
             }
             if let Some(sink) = &self.near_aircraft {
                 // 4af6e0 sends a signed, truncated gain to its backend;
                 // Rodio's nonnegative volume uses the audible portion.
-                sink.set_volume(aircraft_volume(call.distance).clamp(0, 100) as f32 / 100.);
+                sink.set_volume(self.audio.source_gain(aircraft_volume(call.distance)));
             }
             return;
         }
-        // Native 4aefc0 indices 7, 8 and 11 dispatch to 4af430. 11 stops
-        // the retained train-motion handle; 7 refreshes its gain and rate.
+        // Existing route coverage is 7/8/11. The id11 motion stop remains a
+        // separate lifetime limitation (native silences that retained handle).
+        // Toot volume is refreshed on each supported non-id8 in-range call.
         if !matches!(call.id, 7 | 8 | 11) {
             return;
+        }
+        if !(call.distance.is_finite() && call.distance <= 500.) {
+            if let Some(sink) = self.train_motion.take() {
+                sink.stop();
+            }
+            // 4af5e0..4af5eb silences the existing toot without restarting,
+            // releasing, or rewinding it. Factor stores alone do not do this.
+            if let Some(sink) = &self.train_toot {
+                sink.set_volume(self.audio.source_gain(0));
+            }
+            return;
+        }
+        if call.id == 8 {
+            let toot_gain = self.audio.source_gain(train_level(call.distance, 0.05, false));
+            let samples = self.assets.train_toot.clone();
+            if let Some(mixer) = self.mixer() {
+                let sink = Self::one_shot(mixer, &samples, toot_gain);
+                // 4af430 truncates 70 - (distance + 1) * binary32(0.05).
+                sink.set_volume(toot_gain);
+                self.train_toot = Some(sink);
+            }
+        } else if let Some(sink) = &self.train_toot {
+            // 4af502..4af50c precedes id7 motion work and consumes the live
+            // effects factor with the freshly computed toot source word.
+            sink.set_volume(self.audio.source_gain(train_level(call.distance, 0.05, false)));
         }
         if call.id == 11 {
             if let Some(sink) = self.train_motion.take() {
@@ -534,30 +568,15 @@ impl Player {
             }
             return;
         }
-        if !(call.distance.is_finite() && call.distance < 500.) {
-            if let Some(sink) = self.train_motion.take() {
-                sink.stop();
-            }
-            return;
-        }
-        if call.id == 8 {
-            let samples = self.assets.train_toot.clone();
-            if let Some(mixer) = self.mixer() {
-                let sink = Self::one_shot(mixer, &samples);
-                // 4af430: 70 - TRUNC((distance + 1) * f32(0.05)).
-                sink.set_volume(train_gain(call.distance, 0.05, false));
-                self.train_toot = Some(sink);
-            }
-        }
         if call.id == 7 && self.train_motion.is_none() {
             let samples = self.assets.train_motion.clone();
             if let Some(mixer) = self.mixer() {
-                self.train_motion = Some(Self::loop_sink(mixer, &samples));
+                self.train_motion = Some(Self::loop_sink(mixer, &samples, 0.));
             }
         }
         if let Some(sink) = &self.train_motion {
             // 4af430 stores distance + 1 as f32 before this second gain.
-            sink.set_volume(train_gain(call.distance, 0.1, true));
+            sink.set_volume(self.audio.source_gain(train_level(call.distance, 0.1, true)));
             if call.id == 7 {
                 let speed = f32::from_bits(call.arguments[0]);
                 // Original frequency: speed * 0.25 * 22050 + 11025 Hz.
@@ -592,11 +611,11 @@ impl Player {
         if self.road_ambient.is_none() {
             let samples = self.assets.road_ambient.clone();
             if let Some(mixer) = self.mixer() {
-                self.road_ambient = Some(Self::loop_sink(mixer, &samples));
+                self.road_ambient = Some(Self::loop_sink(mixer, &samples, 0.));
             }
         }
         if let Some(sink) = &self.road_ambient {
-            sink.set_volume(road_gain(reciprocal_sum));
+            sink.set_volume(self.audio.source_gain(road_level(reciprocal_sum)));
         }
         let needs_mixer = nearest.iter().enumerate().any(|(slot, row)| {
             f32::from_bits(row[0]).is_finite()
@@ -620,13 +639,13 @@ impl Player {
             }
             if self.road_motors[slot].is_none() {
                 if let Some(mixer) = mixer {
-                    self.road_motors[slot] = Some(Self::loop_sink(mixer, &self.assets.road_motor));
+                    self.road_motors[slot] = Some(Self::loop_sink(mixer, &self.assets.road_motor, 0.));
                 }
                 // 4af9b5 jumps past both setters on the creation frame.
                 continue;
             }
             if let Some(sink) = &self.road_motors[slot] {
-                sink.set_volume(road_motor_volume(distance).clamp(0, 100) as f32 / 100.);
+                sink.set_volume(self.audio.source_gain(road_motor_volume(distance)));
                 let speed = f32::from_bits(row[2]);
                 if speed.is_finite() {
                     sink.set_speed((road_motor_frequency(speed) as f32 / 22_050.).max(0.01));
@@ -643,14 +662,15 @@ impl Player {
         }
         // 4afb28 compares the stored total to 30, then retains a looping
         // ambi_day_peop_busycity.wav handle with integer volume capped at 65.
-        let Some(gain) = crowd_gain(weight) else {
+        let Some(level) = crowd_level(weight) else {
             stop(&mut self.resident_crowd);
             return;
         };
+        let gain = self.audio.source_gain(level);
         if self.resident_crowd.is_none() {
             let samples = self.assets.resident_crowd.clone();
             if let Some(mixer) = self.mixer() {
-                self.resident_crowd = Some(Self::loop_sink(mixer, &samples));
+                self.resident_crowd = Some(Self::loop_sink(mixer, &samples, 0.));
             }
         }
         if let Some(sink) = &self.resident_crowd {
@@ -679,10 +699,10 @@ impl Player {
                 if self.ship_engine.is_none() {
                     let samples = self.assets.ship_engine.clone();
                     if let Some(mixer) = self.mixer() {
-                        self.ship_engine = Some(Self::loop_sink(mixer, &samples));
+                        self.ship_engine = Some(Self::loop_sink(mixer, &samples, 0.));
                     }
                 }
-                let gain = positional_gain(distance, 800.);
+                let gain = self.audio.source_gain(positional_level(distance, 800.));
                 if let Some(sink) = &self.ship_engine {
                     sink.set_volume(gain);
                 }
@@ -696,7 +716,7 @@ impl Player {
                         self.assets.ship_horn.clone()
                     };
                     if let Some(mixer) = self.mixer() {
-                        self.ship_horn = Some(Self::one_shot(mixer, &samples));
+                        self.ship_horn = Some(Self::one_shot(mixer, &samples, 0.));
                     }
                 }
                 if let Some(sink) = &self.ship_horn {
@@ -743,11 +763,12 @@ impl Player {
                 }
                 let Some(mixer) = self.mixer() else { return };
                 let sink = if looping {
-                    Self::loop_sink(mixer, &samples)
+                    Self::loop_sink(mixer, &samples, 0.)
                 } else {
-                    Self::one_shot(mixer, &samples)
+                    Self::one_shot(mixer, &samples, 0.)
                 };
-                sink.set_volume(positional_gain(distance, 300.));
+                // Nonspatial 4ae2b0 creates at source0 and returns. Only the
+                // separate 4ae1f0 Refresh path applies positional level/factor.
                 match id {
                     27 => self.crane_start = Some(sink),
                     28 => self.crane_end = Some(sink),
@@ -765,7 +786,7 @@ impl Player {
                     stop(&mut self.crane_loop);
                     return;
                 }
-                let gain = positional_gain(distance, 300.);
+                let gain = self.audio.source_gain(positional_level(distance, 300.));
                 for sink in [
                     &self.crane_start,
                     &self.crane_end,
@@ -788,22 +809,22 @@ fn stop(handle: &mut Option<rodio::Sink>) {
     }
 }
 
-fn positional_gain(distance: f32, radius: f32) -> f32 {
+fn positional_level(distance: f32, radius: f32) -> i32 {
     // 4addd0 / 4ae1f0 call the truncating 50e928 conversion twice.
     // Their reciprocal constants are stored as f32 before x87 multiplication.
     let units = f64::from(distance).trunc() + 1.;
     let reciprocal = f64::from(1. / radius);
-    (100. - units * reciprocal * 100.).trunc().clamp(0., 100.) as f32 / 100.
+    (100. - units * reciprocal * 100.).trunc().clamp(0., 100.) as i32
 }
 
-fn construction_fallback_gain(distance: f32) -> f32 {
+fn construction_fallback_level(distance: f32) -> i32 {
     // 4ad9be/4ad9ee call 50e928, which temporarily selects x87 truncation.
     // The intermediate division and 90-point scale stay on the x87 stack.
     let units = f64::from(distance).trunc() + 1.;
-    (90. - units / 250. * 90.).trunc().clamp(0., 90.) as f32 / 100.
+    (90. - units / 250. * 90.).trunc().clamp(0., 90.) as i32
 }
 
-fn train_gain(distance: f32, scale: f32, stored_units: bool) -> f32 {
+fn train_level(distance: f32, scale: f32, stored_units: bool) -> i32 {
     // 4af479 keeps the first toot calculation on the x87 stack; 4af58b
     // reloads a stored f32 for train motion. 50e928 truncates the result.
     let units = f64::from(distance) + 1.;
@@ -812,7 +833,7 @@ fn train_gain(distance: f32, scale: f32, stored_units: bool) -> f32 {
     } else {
         units
     };
-    (70. - units * f64::from(scale)).trunc().clamp(0., 100.) as f32 / 100.
+    (70. - units * f64::from(scale)).trunc().clamp(0., 100.) as i32
 }
 
 fn aircraft_volume(distance: f32) -> i32 {
@@ -820,13 +841,12 @@ fn aircraft_volume(distance: f32) -> i32 {
     (60. - (f64::from(distance) + 1.) * f64::from(0.125f32)).trunc() as i32
 }
 
-fn road_gain(sum: f32) -> f32 {
+fn road_level(sum: f32) -> i32 {
     // 4af91d..4af934 retains the f32 reciprocal sum on x87, then 50e928
     // truncates 20 + 200 * sum before the native upper cap of 80.
     (20. + f64::from(sum) * f64::from(200f32))
         .trunc()
-        .clamp(0., 80.) as f32
-        / 100.
+        .clamp(0., 80.) as i32
 }
 
 fn road_motor_volume(distance: f32) -> i32 {
@@ -837,6 +857,20 @@ fn road_motor_volume(distance: f32) -> i32 {
 fn road_motor_frequency(speed: f32) -> i32 {
     // 4af9bd..4af9d6 keeps each f32 multiplier on x87 until truncation.
     (f64::from(speed) * f64::from(f32::from_bits(0x3f8e38e4)) * 11_025. + 22_050.).trunc() as i32
+}
+
+#[cfg(test)]
+fn positional_gain(d: f32, r: f32) -> f32 { positional_level(d, r) as f32 / 100. }
+#[cfg(test)]
+fn construction_fallback_gain(d: f32) -> f32 { construction_fallback_level(d) as f32 / 100. }
+#[cfg(test)]
+fn train_gain(d: f32, scale: f32, stored: bool) -> f32 { train_level(d, scale, stored) as f32 / 100. }
+#[cfg(test)]
+fn road_gain(sum: f32) -> f32 { road_level(sum) as f32 / 100. }
+
+#[cfg(test)]
+mod focus_tests {
+    include!("transport_audio_focus_tests.rs");
 }
 
 #[cfg(test)]
@@ -916,9 +950,9 @@ mod tests {
             assert_eq!(output.next(), Some(0.));
         }
         let mut player = Player::new(assets);
-        player.road_ambient = Some(Player::loop_sink(&mixer, &samples));
-        player.resident_crowd = Some(Player::loop_sink(&mixer, &samples));
-        player.construction[0] = Some(Player::loop_sink(&mixer, &samples));
+        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.));
+        player.resident_crowd = Some(Player::loop_sink(&mixer, &samples, 1.));
+        player.construction[0] = Some(Player::loop_sink(&mixer, &samples, 1.));
         assert!(
             (0..512)
                 .filter_map(|_| output.next())
@@ -938,8 +972,8 @@ mod tests {
         player.construction(construction);
         let sink = player.construction[0].as_ref().unwrap();
         assert_eq!(sink as *const rodio::Sink, retained);
-        assert_eq!(sink.volume(), 0.53);
-        player.road_ambient = Some(Player::loop_sink(&mixer, &samples));
+        assert!((sink.volume() - 0.14723125).abs() < 1e-7);
+        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.));
         let road = player.road_ambient.as_ref().unwrap() as *const rodio::Sink;
         player.set_interface_mode(3);
         player.road(0.1, [[101f32.to_bits(), 0, 0]; 3]);
@@ -1030,16 +1064,16 @@ mod tests {
         player.update_road_motors(nearest, Some(&mixer));
         for handle in &player.road_motors {
             let sink = handle.as_ref().unwrap();
-            assert_eq!(sink.volume(), 1.);
+            assert_eq!(sink.volume(), 0., "native creation word is zero");
             assert_eq!(sink.speed(), 1.);
         }
         player.update_road_motors(nearest, Some(&mixer));
-        for (slot, (volume, frequency)) in [(0.49, 34_300), (0.39, 28_175), (0.29, 25_112)]
+        for (slot, (volume, frequency)) in [(0.12175870, 34_300), (0.07413103, 28_175), (0.04345102, 25_112)]
             .into_iter()
             .enumerate()
         {
             let sink = player.road_motors[slot].as_ref().unwrap();
-            assert_eq!(sink.volume(), volume);
+            assert!((sink.volume() - volume).abs() < 1e-7);
             assert_eq!(sink.speed(), frequency as f32 / 22_050.);
         }
         nearest[1][0] = 101f32.to_bits();

@@ -996,13 +996,17 @@ pub(super) fn record_exit(failures: &ExitFailures, error: String) {
     }
 }
 pub(super) struct WorkerExit {
-    receiver: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    receiver: Option<std::sync::mpsc::Receiver<Result<Option<crate::process_dispatch::DispatchCustody>, String>>>,
+    custody: Option<crate::process_dispatch::DispatchCustody>,
 }
 impl WorkerExit {
+    pub(super) fn take_custody(&mut self)->Option<crate::process_dispatch::DispatchCustody>{self.custody.take()}
+
     pub(super) fn poll(&mut self) -> Option<Result<(), String>> {
         let receiver = self.receiver.as_ref()?;
         let result = match receiver.try_recv() {
-            Ok(result) => Some(result),
+            Ok(Ok(custody)) => { self.custody=custody; Some(Ok(())) },
+            Ok(Err(error)) => Some(Err(error)),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(
                 "Worker terminal channel disconnected without qualified completion".into(),
@@ -1024,6 +1028,12 @@ pub(super) fn supervise(
     failures: ExitFailures,
     name: &str,
 ) -> WorkerExit {
+    supervise_worker(worker,failures,name,|()|Ok(None))
+}
+fn supervise_worker<T:Send+'static>(
+    worker:std::thread::JoinHandle<T>,failures:ExitFailures,name:&str,
+    finish:fn(T)->Result<Option<crate::process_dispatch::DispatchCustody>,String>,
+)->WorkerExit {
     let (reply, receiver) = std::sync::mpsc::channel();
     let _ = std::thread::Builder::new()
         .name(format!("{name}-join"))
@@ -1034,8 +1044,8 @@ pub(super) fn supervise(
                 Err(_) => {
                     Err("City worker panicked; terminal success is not established".to_owned())
                 }
-                Ok(()) => match failures.lock() {
-                    Ok(errors) if errors.is_empty() => Ok(()),
+                Ok(value) => match failures.lock() {
+                    Ok(errors) if errors.is_empty() => finish(value),
                     Ok(errors) => Err(errors.join("; ")),
                     Err(_) => Err("Worker completion status poisoned".into()),
                 },
@@ -1043,7 +1053,7 @@ pub(super) fn supervise(
             let _ = reply.send(result);
         });
     WorkerExit {
-        receiver: Some(receiver),
+        receiver: Some(receiver),custody:None,
     }
 }
 #[allow(clippy::too_many_arguments)]
@@ -1067,6 +1077,31 @@ pub(super) fn spawn_session(
         })
         .map_err(|e| e.to_string())?;
     Ok(supervise(worker, failures, name))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn spawn_session_joined(
+    name: &str,
+    inputs: std::sync::Arc<super::SceneInputs>,
+    start: super::WorkerStart,
+    camera: CameraSample,
+    tx: std::sync::mpsc::Sender<Result<super::LoadedInspection, String>>,
+    pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
+    focus: bool,
+    custody:Option<crate::process_dispatch::DispatchCustody>,
+) -> Result<WorkerExit, String> {
+    let failures = ExitFailures::default();
+    let status = std::sync::Arc::clone(&failures);
+    let worker = std::thread::Builder::new()
+        .name(name.into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            inputs.session_worker_joined(start, camera, tx, pavement, focus, true, status,custody)
+            // inputs and every Session/OfflineLease drop before the joiner replies.
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(supervise_worker(worker, failures, name,|custody|
+        custody.map(Some).ok_or_else(||"Worker failed to return actual dispatch custody".into())))
 }
 
 pub(super) struct OfflineLease {

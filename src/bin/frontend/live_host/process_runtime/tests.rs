@@ -1,6 +1,6 @@
 //! Production startup/writer/read code without a parallel model.
 use super::*;
-fn loader()->Vec<u8>{
+pub(super) fn loader()->Vec<u8>{
     let mut pe=vec![0;0x200];pe[..2].copy_from_slice(b"MZ");
     let put=|pe:&mut[u8],at:usize,value:u32|pe[at..at+4].copy_from_slice(&value.to_le_bytes());
     put(&mut pe,0x3c,0x80);pe[0x80..0x84].copy_from_slice(b"PE\0\0");
@@ -185,4 +185,15 @@ fn performance_poison_is_an_error_not_a_high_default(){
     assert_eq!(p.performance8b26cc(),Err(Error::Poisoned));
     assert_eq!(p.set_performance8b26cc(2),Err(Error::Poisoned));
     assert_eq!(p.performance_nonzero(),Err(Error::Poisoned));
+}
+
+#[test]
+fn ordinary_frontend_receipt_is_single_use_and_rejects_changed_loader_mode(){
+    let (_,mut activity)=startup(&loader(),"").unwrap();
+    let receipt=activity.take_frontend_startup().unwrap();
+    assert_eq!((receipt.disable_sound,receipt.disable_music,receipt.sound,receipt.suspended),(0,0,1,0));
+    assert_eq!(receipt.input.input_enabled,1);assert_eq!(receipt.pause.bytes,[0;9]);
+    assert!(activity.take_frontend_startup().is_err());
+    let mut cells=Cells::process_allocation(&loader()).unwrap();
+    cells.set_byte(0x8af23b,1).unwrap();assert!(startup_from_loader(&cells,"").is_err());
 }

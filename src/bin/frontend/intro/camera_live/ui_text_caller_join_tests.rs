@@ -29,6 +29,7 @@ fn inspection(assets:&Assets)->Inspection{
     //the missing containing F staged-input factory just to reach Main.
     for id in [PanelId::E,PanelId::F]{graph.panel_mut(id).unwrap().requested=1;}
     Inspection{
+        music_admission:None, // explicit isolated fixture, no composed focus Route
         camera_producer:None,camera_ready:None,camera_epoch:None,camera_turns:Default::default(),
         ui_graph:Some(graph),
         camera_navigation:Some(navigation::State::new(0,0,0,[0;3],Some(ui_graph::consumers()))),

@@ -384,14 +384,7 @@ impl super::endpoint::Context for UiContext<'_> {
     }
 
     fn pending_sound(&mut self, _current: Pose) -> Result<(), String> {
-        if matches!(self.sound, SoundBoundary::RequireOriginalListener) {
-            return Err("Existing 2D audio has no native current-pose listener consumer".into());
-        }
-        // This drains only existing available service channels (try_recv).
-        // Current eye/target cannot be meaningfully sent to these 2D sinks.
-        // Original spatial58/orientation40/update10 remains a separate join;
-        // road/crowd/construction/block producers ALREADY run in Host logic.
-        super::audio::service_available(self.view)
+        pending_sound_service(self.view,self.sound)
     }
 
     fn present(&mut self, sampled: Pose) -> Result<(), String> {
@@ -567,3 +560,12 @@ mod supplier_preflight_tests {
 #[cfg(test)]
 #[path="ui_text_caller_join_tests.rs"]
 mod caller_join_tests;
+
+/// Actual Sample/pending_sound consumer, shared with the bounded camera CPU
+///witness. It never waits; PCM completion uses the view's SAME Route fence.
+pub(crate) fn pending_sound_service(view:&mut Inspection,sound:SoundBoundary)->Result<(),String>{
+    if matches!(sound,SoundBoundary::RequireOriginalListener){
+        return Err("Existing 2D audio has no native current-pose listener consumer".into());
+    }
+    super::audio::service_available(view)
+}

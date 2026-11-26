@@ -8,6 +8,10 @@ mod refresh;
 mod options_ack;
 #[path = "intro/focus.rs"]
 pub(crate) mod focus;
+#[path = "intro/process_frontend.rs"]
+pub(crate) mod process_frontend;
+#[path="intro/menu_preferences.rs"]
+pub(crate) mod menu_preferences;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
 use openmt2001::{
@@ -679,7 +683,10 @@ pub(crate) fn inspection_hit(
         building,
     })
 }
+#[cfg(test)]
+struct DispatchProbe {pause:[u8;9],tasks:Vec<openmt2001::timers::Task>,frequency:(f32,Option<usize>,Option<usize>),frame:openmt2001::timers::Frame,epoch:Instant}
 enum FreshRequest {
+    #[cfg(test)] DispatchProbe(mpsc::Sender<DispatchProbe>),
     CameraTurn { turn: camera_producer::Turn,
         reply: mpsc::Sender<Result<camera_producer::Payload,String>> },
     UiCameraReady { reply: mpsc::Sender<Result<(), String>> },
@@ -830,13 +837,34 @@ impl SceneInputs {
         pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
         require_focus_attachment:bool,produce_camera:bool,exit_failures:camera_producer::ExitFailures,
     ) {
+        let _=self.session_worker_joined(start,camera,tx,pavement,require_focus_attachment,produce_camera,exit_failures,None);
+    }
+    fn session_worker_joined(&self,start:WorkerStart,camera:CameraSample,
+        tx:mpsc::Sender<Result<LoadedInspection,String>>,
+        pavement:Option<crate::selection::pavement_resource::LocalPavementHandle>,
+        require_focus_attachment:bool,produce_camera:bool,exit_failures:camera_producer::ExitFailures,
+        custody:Option<crate::process_dispatch::DispatchCustody>,
+    ) -> Option<crate::process_dispatch::DispatchCustody> {
+        let joined=custody.is_some();
+        let fresh_completion=matches!(&start,WorkerStart::Fresh(_)|WorkerStart::Skirmish(_));
+        let (mut dispatch,mut timing)=if let Some(custody)=custody {
+            match custody.prepare_start(matches!(&start,WorkerStart::Fresh(_)|WorkerStart::Skirmish(_))) {
+                Ok((seed,timing))=>(Some(seed),timing),
+                Err(error)=>{let _=tx.send(Err(error));return None;}
+            }
+        } else {
+            // Explicit isolated caller path. Ordinary App ALWAYS supplies custody.
+            let mut frame=openmt2001::timers::Frame::default(); frame.initialize(0);
+            (None,crate::process_dispatch::Timing{frame,epoch:Instant::now()})
+        };
+
         if let Some(process)=&self.process_runtime {
-            if let Err(error)=process.world_controller_reset4c2b80(){let _=tx.send(Err(error.to_string()));return;}
+            if let Err(error)=process.world_controller_reset4c2b80(){let _=tx.send(Err(error.to_string()));return None;}
         }
         let _offline_lease=camera_producer::OfflineLease{process:self.process_runtime.clone(),failures:Arc::clone(&exit_failures)};
         if matches!(&start,WorkerStart::Fresh(_)|WorkerStart::Skirmish(_)) {
             if let Some(process)=&self.process_runtime {
-                if let Err(error)=process.source_fresh_world(){let _=tx.send(Err(error.to_string()));return;}
+                if let Err(error)=process.source_fresh_world(){let _=tx.send(Err(error.to_string()));return None;}
             }
         }
         let mut cache = SnapshotCache::default();
@@ -853,7 +881,7 @@ impl SceneInputs {
         let review_camera = matches!(&start, WorkerStart::Saved(..))
             && std::env::var_os("OPENMT2001_CAMERA_OWNER_NATIVE_REVIEW").is_some();
         let result = match start {
-            WorkerStart::Skirmish(request) => self.fresh_skirmish(request, camera, &mut cache),
+            WorkerStart::Skirmish(request) => self.fresh_skirmish_joined(request, camera, &mut cache,dispatch.take()),
             WorkerStart::Fresh(setup) => {
                 let retained = match setup.preview {
                     crate::singleplayer::Preview::Scenario(id) => {
@@ -866,14 +894,14 @@ impl SceneInputs {
                     crate::singleplayer::Preview::Sandbox => true,
                 };
                 if retained {
-                    self.fresh_preview(setup, camera, &mut cache)
+                    self.fresh_preview_joined(setup, camera, &mut cache,dispatch.take())
                 } else {
                     let _ = tx.send(self.preview_scene(setup, camera));
-                    return;
+                    return None;
                 }
             }
-            WorkerStart::Saved(path, _) => self.saved_preview_with_selection(
-                &path, camera, &mut cache, Some(selected_save_root.as_deref()),
+            WorkerStart::Saved(path, _) => self.saved_preview_with_selection_joined(
+                &path, camera, &mut cache, Some(selected_save_root.as_deref()),dispatch.take(),
             ),
         };
         match result {
@@ -901,18 +929,18 @@ impl SceneInputs {
                     let id = session.catalog.selected_level().map(|level| level.id());
                     if !matches!(id, Some(200003 | 400002)) {
                         let _ = tx.send(Err("Private camera review has no first-Level contract for this route".into()));
-                        return;
+                        return None;
                     }
                     let Some(capture) = loaded.imported_cameras else {
                         let _ = tx.send(Err("Private camera review requires both imported raw records".into()));
-                        return;
+                        return None;
                     };
                     let generation = session.world.topology.epoch().serial();
                     let (worker, inbox) = crate::live_host::camera_bridge::channel(generation);
                     loaded.camera_inbox = Some(inbox);
                     let Some(pavement)=pavement else {
                         let _=tx.send(Err("Private camera review requires originating selection pavement registration".into()));
-                        return;
+                        return None;
                     };
                     Some((worker,capture,pavement))
                 } else {None};
@@ -922,31 +950,43 @@ impl SceneInputs {
                     loaded.camera_publisher = Some(publisher);
                     Some(reader)
                 } else { None };
+                if fresh_completion {
+                    timing.frame.synchronize(timing.epoch.elapsed().as_millis() as u32);
+                    for task in &mut session.hooks.timers {task[12..16].copy_from_slice(&0f32.to_le_bytes());}
+                }
                 if tx.send(Ok(loaded)).is_ok() {
                     let mut host = crate::live_host::Host::new(host_eye);
+                    macro_rules! cancelled_session {
+                        () => {{
+                            if let Some(error)=&host.failure {camera_producer::record_exit(&exit_failures,error.clone());}
+                            if joined {
+                                match crate::process_dispatch::DispatchCustody::from_session(&mut session,timing) {
+                                    Ok(custody)=>return Some(custody),
+                                    Err(error)=>camera_producer::record_exit(&exit_failures,error),
+                                }
+                            }
+                            return None;
+                        }};
+                    }
                     if let Some(reader) = &ui_camera_reader {
                         if let Err(error) = host.install_ui_camera_source(&session, reader.clone()) {
-                            host.fail(error); return;
+                            host.fail(error); return None;
                         }
                     }
                     host.autosave_profile_root=save_profile_root.clone();
                     host.process_runtime=self.process_runtime.clone();
-                    // Initialize the monotonic Frame before the acknowledged
-                    // install. Time spent waiting for UI installation remains
-                    // elapsed time at the first real dispatcher poll.
-                    let clock_epoch = Instant::now();
-                    let mut clock_frame = openmt2001::timers::Frame::default();
-                    clock_frame.initialize(0);
+                    // SAME process Frame/epoch; fresh completion above uses
+                    //4ebaa0 only. Saved adoption never initializes the manager.
                     if let Some((worker,capture,pavement)) = camera_connection {
                         // Host already classifies the typed install result;
                         // explicit retirement is not an incomplete simulation.
                         match openmt2001::pe::PeImage::parse(&self.executable).map_err(crate::live_host::camera_bridge::RequestError::from)
                             .and_then(|image|host.install_camera_bridge(&mut session,&image,crate::live_host::CameraSupplierPolicy::CameraOnly,worker,capture,pavement)) {
                             Ok(()) => {}
-                            Err(crate::live_host::camera_bridge::RequestError::Retired) => return,
+                            Err(crate::live_host::camera_bridge::RequestError::Retired) => cancelled_session!(),
                             Err(crate::live_host::camera_bridge::RequestError::Failed(error)) => host.fail(error),
                         }
-                        if host.camera_retired() { return; }
+                        if host.camera_retired() { cancelled_session!(); }
                     }
                     host.time_runtime = Arc::clone(&self.time_runtime);
                     host.auction_renderer = Some(auction_renderer);
@@ -957,20 +997,20 @@ impl SceneInputs {
                     if let Err(error) = host.begin_presentation(&session) {
                         host.fail(error);
                     }
-                    if host.camera_retired() { return; }
+                    if host.camera_retired() { cancelled_session!(); }
                     //4ba167 enables gameplay after the startup pause counter
                     //has drained; retained script/modal pause reasons still
                     //gate each logic dispatch independently.
                     host.set_running(true);
-                    if host.camera_retired() { return; }
+                    if host.camera_retired() { cancelled_session!(); }
                     if let Err(error) = host.apply_restored_presentation(restored_presentation) {
                         host.fail(error);
                     }
-                    if host.camera_retired() { return; }
+                    if host.camera_retired() { cancelled_session!(); }
                     if let Err(error) = host.activate_saved_auction(&mut session) {
                         host.fail(error);
                     }
-                    if host.camera_retired() { return; }
+                    if host.camera_retired() { cancelled_session!(); }
                     if let Some(continuation) = saved_auction
                         && let Err(error) = continuation.apply(&mut session)
                             .and_then(|()| {
@@ -983,21 +1023,21 @@ impl SceneInputs {
                         Ok(value) => value,
                         Err(error) => {
                             eprintln!("{error}");
-                            return;
+                            return None;
                         }
                     };
                     let board = match self.styled_board(&image) {
                         Ok(value) => value,
                         Err(error) => {
                             eprintln!("{error}");
-                            return;
+                            return None;
                         }
                     };
                     let file = match openmt2001::build_file::BuildFile::parse(&self.build_file) {
                         Ok(value) => value,
                         Err(error) => {
                             eprintln!("{error}");
-                            return;
+                            return None;
                         }
                     };
                     let assets = crate::fresh_city::CommandAssets {
@@ -1005,7 +1045,7 @@ impl SceneInputs {
                         board: &board,
                         file: &file,
                     };
-                    if host.camera_retired() { return; }
+                    if host.camera_retired() { cancelled_session!(); }
                     if let Some(reader) = &ui_camera_reader {
                         // The UI publishes its complete cold transaction before
                         // this barrier. No frame/save observes a partial owner.
@@ -1014,9 +1054,10 @@ impl SceneInputs {
                                 let result = reader.read(session.world.topology.epoch()).map(|_| ());
                                 let failed = result.is_err();
                                 let _ = reply.send(result);
-                                if failed { return; }
+                                if failed { return None; }
                             }
-                            _ => return,
+                            Err(_)=>cancelled_session!(),
+                            Ok(_)=>{camera_producer::record_exit(&exit_failures,"Expected real camera Ready barrier".into());return None;},
                         }
                     }
                     if require_focus_attachment {
@@ -1026,14 +1067,14 @@ impl SceneInputs {
                         match released.recv() {
                             Ok(FreshRequest::Focus(event)) if event.is_attachment() => {
                                 if event.apply(&mut host, &mut session.world.pause, &mut session.hooks.timers).is_err() {
-                                    return;
+                                    return None;
                                 }
                             }
                             Ok(_) => {
                                 host.fail("First focus-enabled request must attach current OS focus".into());
-                                return;
+                                return None;
                             }
-                            Err(_) => return,
+                            Err(_) => cancelled_session!(),
                         }
                     }
                     let mut last_tick = Instant::now();
@@ -1060,7 +1101,7 @@ impl SceneInputs {
                                 if let Ok(posts) = camera_producer::deliver(turn,admitted,reply) {
                                     // Consumed once, on this SAME validated Session, after
                                     // camera/UI publication and before next frame/request.
-                                    if camera_producer::run_posts(&mut host,&mut session,&assets,posts,&exit_failures).is_err(){return;}
+                                    if camera_producer::run_posts(&mut host,&mut session,&assets,posts,&exit_failures).is_err(){return None;}
                                 }
                                 if ui_camera_reader.as_ref().is_some_and(|reader|
                                     reader.read(session.world.topology.epoch()).is_err()) { break; }
@@ -1078,7 +1119,7 @@ impl SceneInputs {
                         };
                         if last_tick.elapsed() >= period {
                             let elapsed =
-                                clock_frame.elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
+                                timing.frame.elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                             last_tick = Instant::now();
                             host.frame(&mut session, &assets, elapsed);
                         }
@@ -1269,16 +1310,16 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Run(running) => {
-                                let elapsed = clock_frame
-                                    .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.frame
+                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
                                 if host.camera_retired() { break; }
                                 host.set_running(running);
                                 last_tick = Instant::now();
                             }
                             FreshRequest::Options{open,reply} => {
-                                let elapsed = clock_frame
-                                    .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.frame
+                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
                                 if host.camera_retired() { break; }
                                 let result=host.options(&mut session.world.pause,&mut session.hooks.timers,open);
@@ -1293,8 +1334,8 @@ impl SceneInputs {
                                 }
                             }
                             FreshRequest::DismissPrompt(id, reply) => {
-                                let elapsed = clock_frame
-                                    .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.frame
+                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
                                 if host.camera_retired() { break; }
                                 if host.failure.is_none()
@@ -1331,6 +1372,11 @@ impl SceneInputs {
                             FreshRequest::Status { camera, reply } => {
                                 host.observe_presentation_camera(camera);
                                 let _ = reply.send(host.status(&session));
+                            }
+                            #[cfg(test)] FreshRequest::DispatchProbe(reply)=>{
+                                let _=reply.send(DispatchProbe{pause:session.world.pause.bytes,tasks:session.hooks.timers.clone(),
+                                    frequency:(session.hooks.frequency.frequency,session.hooks.frequency.calendar_timer,session.hooks.frequency.logic_timer),
+                                    frame:timing.frame.clone(),epoch:timing.epoch});
                             }
                             FreshRequest::LogicTick(reply) => {
                                 let clock = &session.world.clock;
@@ -1387,6 +1433,13 @@ impl SceneInputs {
                             }
                         }
                     }
+                    if let Some(error)=&host.failure {camera_producer::record_exit(&exit_failures,error.clone());}
+                }
+                if joined {
+                    match crate::process_dispatch::DispatchCustody::from_session(&mut session,timing) {
+                        Ok(custody)=>{drop(session);return Some(custody);}
+                        Err(error)=>camera_producer::record_exit(&exit_failures,error),
+                    }
                 }
                 drop(session);
             }
@@ -1394,12 +1447,22 @@ impl SceneInputs {
                 let _ = tx.send(Err(error));
             }
         }
+        None
     }
     fn fresh_skirmish(
         &self,
         request: crate::menu::skirmish_route::Request,
         camera: CameraSample,
         cache: &mut SnapshotCache,
+    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+        self.fresh_skirmish_joined(request,camera,cache,None)
+    }
+    fn fresh_skirmish_joined(
+        &self,
+        request: crate::menu::skirmish_route::Request,
+        camera: CameraSample,
+        cache: &mut SnapshotCache,
+        dispatch:Option<crate::process_dispatch::Seed>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         let directory = request.launch.directory.clone();
         let profile_name = request.launch.participants[0].name.clone();
@@ -1433,7 +1496,7 @@ impl SceneInputs {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
             .as_secs() as u32;
-        let mut session = crate::fresh_city::Session::initialize_skirmish_with_style_in_process(
+        let mut session = crate::fresh_city::Session::initialize_joined(
             crate::fresh_city::Inputs {
                 tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
                 ),
@@ -1469,10 +1532,8 @@ impl SceneInputs {
                 seed,
                 auxiliary_prior_bytes: [0; 0x11c],
             },
-            request.catalog,
-            request.launch,
-            &self.style,
-            self.process_runtime.clone(),
+            Some(request.catalog),None,false,Some(&self.style),crate::compatibility::Mode::StrictV14,
+            Some(request.launch),self.process_runtime.clone(),dispatch,
         )?;
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         Ok((loaded, session))
@@ -1481,6 +1542,13 @@ impl SceneInputs {
     fn fresh_preview(&self,
         setup: crate::singleplayer::Setup, camera: CameraSample,
         cache: &mut SnapshotCache,
+    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+        self.fresh_preview_joined(setup,camera,cache,None)
+    }
+    fn fresh_preview_joined(&self,
+        setup: crate::singleplayer::Setup, camera: CameraSample,
+        cache: &mut SnapshotCache,
+        dispatch:Option<crate::process_dispatch::Seed>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         let (scenario_id, scenario_token) = match setup.preview {
             crate::singleplayer::Preview::Scenario(id) => {
@@ -1571,26 +1639,9 @@ impl SceneInputs {
             seed,
             auxiliary_prior_bytes: [0; 0x11c],
         };
-        let mut session = if is_custom {
-            crate::fresh_city::Session::initialize_custom_with_style_and_profile_in_process(
-                input,
-                policy,
-                setup.catalog.clone(),
-                Some(setup.profile_path.clone()),
-                &self.style,
-                self.compatibility,
-                self.process_runtime.clone(),
-            )?
-        } else {
-            crate::fresh_city::Session::initialize_campaign_with_style_and_compatibility_in_process(
-                input,
-                policy,
-                setup.catalog.clone(),
-                setup.profile_path.clone(), &self.style,
-                self.compatibility,
-                self.process_runtime.clone(),
-            )?
-        };
+        let mut session = crate::fresh_city::Session::initialize_joined(input,policy,
+            Some(setup.catalog.clone()),Some(setup.profile_path.clone()),false,Some(&self.style),
+            self.compatibility,None,self.process_runtime.clone(),dispatch)?;
         eprintln!(
             "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; host seed{seed} / auxiliary prior bytes zero; player roster initialized; live worker enabled",
             scenario_token,
@@ -1622,6 +1673,16 @@ impl SceneInputs {
         cache: &mut SnapshotCache,
         selected_root: Option<Option<&std::path::Path>>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+        self.saved_preview_with_selection_joined(path,camera,cache,selected_root,None)
+    }
+    fn saved_preview_with_selection_joined(
+        &self,
+        path: &std::path::Path,
+        camera: CameraSample,
+        cache: &mut SnapshotCache,
+        selected_root: Option<Option<&std::path::Path>>,
+        dispatch:Option<crate::process_dispatch::Seed>,
+    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let save = openmt2001::save::SaveFile::parse(&bytes)?;
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
@@ -1652,7 +1713,8 @@ impl SceneInputs {
         let timetable = fs::read_to_string(self.installer.join("parameters/timetable.prm"))
             .map_err(|e| e.to_string())?;
         // An arbitrary original save has no authenticated V2 profile selection.
-        let (mut session, restored_presentation) = crate::fresh_city::Session::load_original_with_presentation_style_in_process(
+        let mut restored_presentation=Vec::new();
+        let mut session = crate::fresh_city::Session::load_original_joined(
             crate::fresh_city::Inputs {
                 tree_locators: Some(openmt2001::trees::Assets::load(&image, &index, &self.archive)?.locators,
                     ),
@@ -1675,10 +1737,13 @@ impl SceneInputs {
             },
             crate::fresh_city::Policy { seed: 0, auxiliary_prior_bytes: [0; 0x11c],
                 },
-            &bytes,
-            Some(&self.style),
-            self.process_runtime.clone(),
+            &bytes,None,None,Some(&mut restored_presentation),Some(&self.style),
+            self.process_runtime.clone(),dispatch,
         )?;
+        // Native restore success4bcd74/7b precedes the explicit modern extension.
+        // Input/wrapper transition is published only by the later real focus
+        // prefix; no reset or synthesized acquisition occurs on this worker.
+        crate::process_dispatch::native_load_completed(&mut session)?;
         let metadata = session.restore_v2_extension_with_image(&save, &image)?;
         #[cfg(test)]
         crate::session_save::natural_observer::after_restore(&session);
@@ -2401,6 +2466,7 @@ impl SceneInputs {
 
 }
 struct Inspection {
+    music_admission:Option<focus::MusicAdmission>,
     camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
     camera_turns: std::collections::VecDeque<camera_producer::Pending>,
     camera_producer: Option<camera_producer::Producer>,
@@ -2554,7 +2620,7 @@ struct ResultView {
     fireworks: Option<crate::fresh_city::result::fireworks::Fireworks>,
     fireworks_draw: Option<usize>,
     fireworks_ticks: usize,
-    _music: Option<(rodio::OutputStream, rodio::Sink)>,
+    _music: Option<(rodio::OutputStream, crate::audio_bus::focus::Music)>,
     samples: Vec<CameraSample>,
     started: Instant,
     phase: ResultPhase,
@@ -3155,6 +3221,7 @@ pub struct Intro {
     camera_worker: Option<camera_producer::WorkerExit>,
     camera_worker_failure: Option<String>,
     focus: focus::Route,
+    pub(crate) process_frontend:Option<process_frontend::Owner>,
     camera_physical: camera_live::PhysicalInput,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
@@ -3199,7 +3266,10 @@ impl Drop for Intro {
 impl Intro {
     pub(crate) fn window_focus(&mut self, focused: bool) -> Result<(), String> {
         self.service_camera_turns();
-        self.focus.observe(focused)
+        if let Some(process)=&self.process_frontend {process.borrow_mut().observe(focused)?;}
+        self.focus.observe(focused)?;
+        if let Some(process)=&self.process_frontend {process.borrow_mut().note_sent(self.focus.sent());}
+        Ok(())
     }
     /// Drain before modal/loading early returns and every dependent worker poll.
     /// No call in this service can request work from the suspended Session.
@@ -3219,14 +3289,42 @@ impl Intro {
     }
     pub(crate) fn service_focus(&mut self) -> Result<(), String> {
         self.service_camera_turns();
-        while self.focus.service_one()? {}
-        self.focus.poll()
+        let result:Result<(),String>=(|| {
+            self.focus.poll()?;
+            if let Some(process)=&self.process_frontend {process.borrow_mut().complete_physical(self.focus.completed());}
+            // A single prefix: release its typed suffix before the next prefix.
+            self.focus.service_one()?;
+            self.focus.poll()?;
+            if let Some(process)=&self.process_frontend {process.borrow_mut().complete_physical(self.focus.completed());}
+            Ok(())
+        })();
+        if let Err(error)=&result {if let Some(process)=&self.process_frontend {process.borrow_mut().fail(error.clone());}}
+        result
     }
     pub fn request_process_exit(&self,writer:crate::live_host::process_runtime::QuitWriter)->Result<(),String>{
         self.assets.process_runtime.request_quit(writer).map_err(|e|e.to_string())
     }
     pub fn process_exit_ready(&self)->Result<bool,String>{self.assets.process_runtime.exit_ready().map_err(|e|e.to_string())}
 
+    pub(crate) fn birth_process_frontend(&mut self,window:winit::window::WindowId)->Result<(),String>{
+        self.sync_profile_settings()?;
+        let receipt=self.assets.activity.take_frontend_startup()?;
+        let process=process_frontend::ProcessFrontend::new(receipt,self.assets.process_runtime.clone(),window,self.audio_levels)?;
+        self.install_focus_effects(Box::new(process_frontend::Provider(process.clone())))?;
+        self.process_frontend=Some(process);Ok(())
+    }
+    pub(crate) fn physical_sample(&mut self,window:winit::window::WindowId,sample:process_frontend::PhysicalSample)->Result<(),String>{
+        if let Some(process)=&self.process_frontend {process.borrow_mut().sample(window,sample,self.focus.sent(),self.focus.completed())?;}
+        Ok(())
+    }
+    fn process_start_ready(&self)->bool {
+        camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure)
+            && !self.focus_pending() && self.process_frontend.as_ref().is_none_or(|p|p.borrow().phase==process_frontend::Phase::Menu)
+    }
+    fn start_custody(&mut self,fresh:bool)->Result<Option<crate::process_dispatch::DispatchCustody>,String>{
+        self.process_frontend.as_ref().map(|p|p.borrow_mut().take_custody(fresh)).transpose()
+    }
+    pub(crate) fn focus_pending(&self)->bool {self.focus.sent()!=self.focus.completed()}
     pub fn ui_effects_level(&self) -> u8 { self.audio_levels.effects }
 
     fn settings_snapshot(&self) -> crate::profile_settings::Snapshot {
@@ -3240,47 +3338,32 @@ impl Intro {
     }
 
     fn persist_settings(&mut self) {
-        let snapshot = self.settings_snapshot();
-        if snapshot == self.saved_settings { return; }
-        if let Some(path) = &self.settings_profile {
-            match snapshot.save(path) {
-                Ok(()) => {
-                    self.saved_settings = snapshot;
-                    self.settings_save_error = None;
-                }
-                Err(error) => {
-                    if self.settings_save_error.as_deref() != Some(&error) {
-                        eprintln!("[Options] Could not save selected profile settings: {error}");
-                    }
-                    self.settings_save_error = Some(error);
-                }
-            }
-        }
+        let snapshot=self.settings_snapshot();
+        menu_preferences::Cells{profile:&mut self.settings_profile,saved:&mut self.saved_settings,
+            error:&mut self.settings_save_error,audio:&mut self.audio_levels,
+            graphics:&mut self.graphics_levels,gameplay:&mut self.gameplay_levels}.persist(snapshot);
     }
-
-    fn sync_profile_settings(&mut self) -> Result<(), String> {
-        let selected = self.menu.as_ref().and_then(crate::menu::Menu::current_settings_path);
-        if selected == self.settings_profile { return Ok(()); }
-        let snapshot = match &selected {
-            Some(path) => crate::profile_settings::Snapshot::load(path)?,
-            None => crate::profile_settings::Snapshot::default(),
-        };
-        self.settings_profile = selected;
-        self.saved_settings = snapshot;
-        self.settings_save_error = None;
-        self.audio_levels = snapshot.audio;
-        self.graphics_levels = snapshot.graphics;
-        self.gameplay_levels = snapshot.gameplay;
-        if let Some(menu) = &mut self.menu {
-            menu.settings_audio = snapshot.audio;
-            menu.settings.graphics = snapshot.graphics;
-            menu.settings.gameplay = snapshot.gameplay;
-        }
+    fn sync_profile_settings(&mut self)->Result<(),String>{
+        menu_preferences::Cells{profile:&mut self.settings_profile,saved:&mut self.saved_settings,
+            error:&mut self.settings_save_error,audio:&mut self.audio_levels,
+            graphics:&mut self.graphics_levels,gameplay:&mut self.gameplay_levels}
+            .sync_profile(self.menu.as_mut(),self.process_frontend.as_ref())
+    }
+    /// App invokes this once after EVERY synchronous window-event dispatch,
+    /// including inner early returns, before any following OS focus prefix.
+    pub(crate) fn commit_menu_settings(&mut self)->Result<(),String>{
+        if self.inspection.is_none() && let Some(menu)=&mut self.menu {
+            menu_preferences::Cells{profile:&mut self.settings_profile,saved:&mut self.saved_settings,
+                error:&mut self.settings_save_error,audio:&mut self.audio_levels,
+                graphics:&mut self.graphics_levels,gameplay:&mut self.gameplay_levels}
+                .commit_menu(menu,self.process_frontend.as_ref())?;
+        } else {self.sync_profile_settings()?;self.persist_settings();}
         Ok(())
     }
 
     fn retire_inspection(&mut self) {
         self.focus.detach();
+        if let Some(process)=&self.process_frontend {process.borrow_mut().draining();}
         if let Some(producer) = self.inspection.as_mut().and_then(|view|view.camera_producer.take()) {
             let (owner, result) = producer.retire();
             assert!(self.camera_parked.is_none(), "camera Owner has one process custodian");
@@ -3308,16 +3391,8 @@ impl Intro {
             }
         }
     }
-    fn apply_audio_levels(view: &mut Inspection, levels: crate::settings_menu::Levels) {
-        view.era_audio_player.set_levels(levels.music, levels.effects);
-        view.gameplay_sound_player.set_level(levels.effects);
-        view.transport_audio_player.set_level(levels.effects);
-        view.auction_audio_player.set_level(levels.effects);
-        if let Some(result) = &view.result {
-            if let Some((_, sink)) = &result._music {
-                crate::fresh_city::result::audio::set_level(sink, levels.music);
-            }
-        }
+    fn apply_audio_levels(process:&Option<process_frontend::Owner>,levels:crate::settings_menu::Levels) {
+        if let Some(process)=process {process.borrow_mut().commit_levels(levels);}
     }
     fn draw_tutorial_visual(
         assets: &Assets,
@@ -3397,6 +3472,7 @@ impl Intro {
             camera_worker: None,
             camera_worker_failure: None,
             focus: focus::Route::default(),
+            process_frontend:None,
             assets,
             renderer,
             prepared,
@@ -3521,6 +3597,9 @@ impl Intro {
             WindowEvent::Focused(false) => self.camera_physical.unfocus(),
             _ => (),
         }
+    }
+    pub(crate) fn camera_physical_sample(&mut self,sample:process_frontend::PhysicalSample){
+        process_frontend::project_camera_sample(&mut self.camera_physical,self.inspection.as_mut(),sample);
     }
     pub fn inspection_key(&mut self, key: winit::keyboard::NamedKey, pressed: bool) -> Result<(), String> {
         self.service_camera_turns();
@@ -3660,7 +3739,7 @@ impl Intro {
                 NamedKey::ArrowUp => Some(3),
                 _ => None,
             };
-            if let Some(i) = index {
+            if let Some(i) = index && self.process_frontend.is_none() {
                 view.keys[i] = pressed;
                 view.taps[i] |= pressed;
             }
@@ -3781,7 +3860,7 @@ impl Intro {
                     status.tutorial_controls.camera_disabled
                         || status.tutorial_controls.all_disabled
                 })
-                && view.mouse_buttons[1]
+                && view.mouse_buttons[1] && self.process_frontend.is_none()
                 && let Some(previous) = view.cursor
             {
                 for i in 0..2 {
@@ -3824,7 +3903,7 @@ impl Intro {
                     view.pointer.map(|p| p.map(|v| v as f32*0.5)), &mut self.audio_levels,
                 )
                 {
-                    Self::apply_audio_levels(view, self.audio_levels);
+                    Self::apply_audio_levels(&self.process_frontend, self.audio_levels);
                 }
                 if view.settings_menu.graphics.distance != distance {
                     view.reframe_pending = true;
@@ -4072,7 +4151,7 @@ impl Intro {
                     if view.settings_menu.mouse(&self.assets.settings_menu,pointer,pressed,
                         &mut self.audio_levels,
                     ) {
-                        Self::apply_audio_levels(view, self.audio_levels);
+                        Self::apply_audio_levels(&self.process_frontend, self.audio_levels);
                     }
                     if view.settings_menu.graphics.distance != distance {
                         view.reframe_pending=true;
@@ -5222,7 +5301,8 @@ impl Intro {
                 let keys = std::array::from_fn(|i| view.keys[i] || view.taps[i]);
                 // Sample the SAME process word once for this combined callback.
                 let low_height=self.assets.process_runtime.performance_nonzero().map_err(|e|e.to_string())?;
-                let pose = if view.mouse_buttons == [true, true] {
+                let buttons=if self.process_frontend.is_some(){self.camera_physical.snapshot()?.1}else{view.mouse_buttons};
+                let pose = if buttons == [true, true] {
                     crate::navigation::pan_tick(
                         &mut view.controls,
                         view.building_camera.then_some(&mut view.building_angle),
@@ -5249,6 +5329,7 @@ impl Intro {
                 let (eye, target) = pose;
                 view.taps = [false; 4];
                 view.inertia.tick(eye, target);
+                if self.process_frontend.is_some(){self.camera_physical.consumed();}
                 view.tick += 1;
             }
             // Original4b9c94 samples4e0590 using the camera scheduler's remainder
@@ -5313,7 +5394,7 @@ impl Intro {
             view.result_pending = Some(answer);
         }
         if let Some(receiver) = &view.result_pending {
-            match receiver.try_recv() {
+            match focus::poll_result(receiver,view.music_admission.as_ref()) {
                 Ok(result) => {
                     view.result_pending = None;
                     let snapshot = result?;
@@ -5395,7 +5476,7 @@ impl Intro {
                         .and_then(|status| status.result_request)
                         .ok_or("Result request disappeared before music selection")?.music_address;
                     view.era_audio_player.apply(crate::era_audio::Operation::Stop)?;
-                    let music = match self.assets.result_audio.play(music_address, self.audio_levels.music) {
+                    let music = match self.assets.result_audio.play_with_audio(music_address, &self.process_frontend.as_ref().ok_or("Result requires process audio owner")?.borrow().audio) {
                         Ok(playing) => Some(playing),
                         Err(error) => { eprintln!("{error}"); None }
                     };
@@ -5606,11 +5687,20 @@ impl Intro {
     }
 
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
-        self.service_focus()?;
+        // App serviced focus and fed admitted physical samples at redraw entry.
+        self.service_camera_turns();
         if let Some(worker)=&mut self.camera_worker {
             if let Some(result)=worker.poll(){
+                let custody=worker.take_custody();
                 self.camera_worker=None;
+                let result=result.and_then(|()| {
+                    if let Some(process)=&self.process_frontend {
+                        process.borrow_mut().return_custody(custody.ok_or("Joined worker returned no custody")?)?;
+                    }
+                    Ok(())
+                });
                 if let Err(error)=result{
+                    if let Some(process)=&self.process_frontend {process.borrow_mut().fail(error.clone());}
                     self.camera_worker_failure=Some(error.clone());
                     self.loading=None;
                     self.retire_inspection();
@@ -5622,7 +5712,7 @@ impl Intro {
                 }
             }
         }
-        let camera_start_ready=camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure);
+        let camera_start_ready=self.process_start_ready();
         if !camera_start_ready && let Some(menu)=&mut self.menu {
             if menu.load.request.is_some(){menu.load.message=Some(self.camera_worker_failure.clone().unwrap_or_else(||"Finishing previous city before loading...".into()));}
             if menu.single.request.is_some(){menu.single.message=Some(self.camera_worker_failure.clone().unwrap_or_else(||"Finishing previous city before starting...".into()));}
@@ -5630,14 +5720,7 @@ impl Intro {
             // is surfaced by finish on a terminal failure, not fake completion.
             if menu.skirmish.request.is_some() && let Some(error)=&self.camera_worker_failure{menu.skirmish.finish(Some(error.clone()));}
         }
-        self.sync_profile_settings()?;
-        if self.inspection.is_none() && let Some(menu) = &self.menu {
-            let snapshot = menu.settings_snapshot();
-            self.audio_levels = snapshot.audio;
-            self.graphics_levels = snapshot.graphics;
-            self.gameplay_levels = snapshot.gameplay;
-        }
-        self.persist_settings();
+        self.commit_menu_settings()?;
         // A host worker reuses the same original byte inputs and shared assembler.
         // Native startup enables gameplay; Space controls the host pause gate.
         // The worker retains its Lua VM and world until inspection is dismissed.
@@ -5671,7 +5754,7 @@ impl Intro {
             inspection_controls = view.controls;
             inspection_camera = view.camera;
         }
-        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
+        if self.process_start_ready() && self.loading.is_none()
             && let Some(path) = self.menu.as_mut().and_then(|m| m.load.request.take())
         {
             self.loading_skirmish = false;
@@ -5680,24 +5763,28 @@ impl Intro {
             let pavement=self.assets.selection.pavement_resource().binding()?.handle();
             let inputs = self.assets.inputs.clone();
             let focus_enabled = self.focus.enabled();
+            let custody=self.start_custody(false)?;
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            self.camera_worker=Some(camera_producer::spawn_session("saved-city-simulation",inputs,
-                WorkerStart::Saved(path,save_profile_root),inspection_camera,tx,Some(pavement),focus_enabled)?);
+            self.camera_worker=Some(camera_producer::spawn_session_joined("saved-city-simulation",inputs,
+                WorkerStart::Saved(path,save_profile_root),inspection_camera,tx,Some(pavement),focus_enabled,custody)?);
         }
-        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
+        if self.process_start_ready() && self.loading.is_none()
             && let Some(request) = self.menu.as_mut().and_then(|m| m.skirmish.request.take())
         {
             self.loading_skirmish = true;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
             let focus_enabled = self.focus.enabled();
+            let custody=self.start_custody(true)?;
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            match camera_producer::spawn_session("skirmish-simulation",inputs,WorkerStart::Skirmish(request),
-                inspection_camera,tx,None,focus_enabled) {
+            match camera_producer::spawn_session_joined("skirmish-simulation",inputs,WorkerStart::Skirmish(request),
+                inspection_camera,tx,None,focus_enabled,custody) {
                 Ok(worker)=>self.camera_worker=Some(worker),
                 Err(error)=>{
+                self.camera_worker_failure=Some(error.clone());
+                if let Some(process)=&self.process_frontend {process.borrow_mut().fail(error.clone());}
                 self.loading = None;
                 self.loading_skirmish = false;
                 self.loading_from_setup = false;
@@ -5708,17 +5795,18 @@ impl Intro {
                 }
             }
         }
-        if camera_producer::startup_ready(&self.camera_worker,&self.camera_worker_failure) && self.loading.is_none()
+        if self.process_start_ready() && self.loading.is_none()
             && let Some(preview) = self.menu.as_mut().and_then(|m| m.single.request.take())
         {
             self.loading_skirmish = false;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
             let focus_enabled = self.focus.enabled();
+            let custody=self.start_custody(true)?;
             let (tx, rx) = mpsc::channel();
             self.loading = Some(rx);
-            self.camera_worker=Some(camera_producer::spawn_session("city-simulation",inputs,
-                WorkerStart::Fresh(preview),inspection_camera,tx,None,focus_enabled)?);
+            self.camera_worker=Some(camera_producer::spawn_session_joined("city-simulation",inputs,
+                WorkerStart::Fresh(preview),inspection_camera,tx,None,focus_enabled,custody)?);
         }
         if let Some(rx) = &self.loading {
             let result = match rx.try_recv() {
@@ -5913,32 +6001,31 @@ impl Intro {
                     }
                     let mut era_audio_player = crate::era_audio::Player::new(
                         self.assets.era_audio.clone());
-                    era_audio_player.set_levels(self.audio_levels.music, self.audio_levels.effects);
+                    if let Some(process)=&self.process_frontend {era_audio_player.bind_audio(process.borrow().audio.clone())?;}
+                    else {era_audio_player.set_levels(self.audio_levels.music,self.audio_levels.effects);}
                     let mut auction_audio_player = crate::live_host::auction_audio::Player::new(
                         self.assets.auction_audio.clone());
-                    auction_audio_player.set_level(self.audio_levels.effects);
+                    if let Some(process)=&self.process_frontend {auction_audio_player.bind_audio(process.borrow().audio.clone());}
+                    else {auction_audio_player.set_level(self.audio_levels.effects);}
                     let mut transport_audio_player = crate::transport_audio::Player::new(
                         self.assets.transport_audio.clone());
-                    transport_audio_player.set_level(self.audio_levels.effects);
+                    if let Some(process)=&self.process_frontend {transport_audio_player.bind_audio(process.borrow().audio.clone());}
+                    else {transport_audio_player.set_level(self.audio_levels.effects);}
                     let mut gameplay_sound_player = crate::gameplay_sound::Player::new(
                         self.assets.gameplay_sound.clone());
-                    gameplay_sound_player.set_level(self.audio_levels.effects);
+                    if let Some(process)=&self.process_frontend {gameplay_sound_player.bind_audio(process.borrow().audio.clone());}
+                    else {gameplay_sound_player.set_level(self.audio_levels.effects);}
                     // Native fresh startup 4b9f3f calls 4806b0 with the
                     // current era, selecting its music through 4ad6f0.
                     // Later decade changes use the same 4806b0 callback.
-                    if !refreshing && retained_session.is_some()
-                        && let Some(era) = loaded.music_era
-                    {
-                        era_audio_player.apply(crate::era_audio::Operation::Select {
-                            era, repeat: true,
-                        })?;
-                    }
                     let mut settings_menu = crate::settings_menu::View::default();
                     settings_menu.graphics = graphics_levels;
                     settings_menu.gameplay = gameplay_levels;
                     let camera_inbox = loaded.camera_inbox;
                     let imported_cameras = loaded.imported_cameras;
+                    let pending_music_era=loaded.music_era;
                     let mut view = Inspection {
+                        music_admission:self.focus.enabled().then(||self.focus.music_admission()),
                         camera_epoch: loaded.camera_epoch,
                         camera_turns: Default::default(),
                         camera_producer: None,
@@ -6142,11 +6229,11 @@ impl Intro {
                         view.camera_producer = Some(camera_producer::Producer::attach(&mut self.camera_parked,
                             loaded.camera_publisher.expect("prepared unique publisher"), &initial)?);
                     }
-                    Ok((view, plan, camera_inbox, property_install))
+                    Ok((view, plan, camera_inbox, property_install,pending_music_era))
                 });
                 if let Some(menu) = &mut self.menu {
                     match result {
-                        Ok((mut view, plan, camera_inbox, property_install)) => {
+                        Ok((mut view, plan, camera_inbox, property_install,pending_music_era)) => {
                             if let Some(plan) = plan {
                                 let previous = self.inspection.as_mut().expect("prepared retained inspection");
                                 refresh::commit(&mut refresh::Owners::of(previous),
@@ -6177,6 +6264,7 @@ impl Intro {
                                     &mut view.gameplay_sound_player,
                                     &mut previous.gameplay_sound_player,
                                 );
+                                view.result=previous.result.take();
                                 view.auction = std::mem::take(&mut previous.auction);
                                 view.auction_panel = std::mem::take(&mut previous.auction_panel);
                                 view.notifications = std::mem::take(&mut previous.notifications);
@@ -6290,10 +6378,19 @@ impl Intro {
                                     view.camera_ready = Some(result);
                                 }
                             }
+                            if !refreshing {
+                                if let Some(process)=&self.process_frontend {process.borrow_mut().stop_menu()?;}
+                                if view._fresh_session.is_some() && let Some(era)=pending_music_era {
+                                    view.era_audio_player.apply(crate::era_audio::Operation::Select{era,repeat:true})?;
+                                }
+                            }
                             let focus_sender = (!refreshing && self.focus.enabled())
                                 .then(||view._fresh_session.clone()).flatten();
                             self.inspection = Some(view);
-                            if let Some(sender) = focus_sender { self.focus.attach(sender)?; }
+                            if let Some(sender) = focus_sender {
+                                self.focus.attach(sender)?;
+                                if let Some(process)=&self.process_frontend {process.borrow_mut().note_sent(self.focus.sent());}
+                            }
                             if self.loading_skirmish {
                                 menu.skirmish.finish(None);
                             } else if self.loading_from_setup {
@@ -6349,7 +6446,7 @@ impl Intro {
                 Err(error)=>{view.game_options.set_save_disabled(true);view.game_options.set_message(error);}
             }
             camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;
-            camera_live::service_available(view)?;
+            camera_live::audio::service_with_music_poll(view,self.focus.sent()==self.focus.completed())?;
             if let Some(mut endpoint)=view.camera_endpoint.take() {
                 let result=(|| {
                     let joins=camera_live::UiJoins{primary_clear:None,navigation:None,tutorial:None};
@@ -11289,3 +11386,11 @@ mod focus_worker_tests;
 #[cfg(test)]
 #[path = "intro/camera_producer_live_tests.rs"]
 mod camera_producer_live_tests;
+
+#[cfg(test)]
+#[path="intro/process_worker_tests.rs"]
+mod process_worker_tests;
+
+#[cfg(test)]
+#[path="intro/process_review_tests.rs"]
+pub(crate) mod process_review_tests;

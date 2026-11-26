@@ -151,8 +151,11 @@ pub struct Player {
     assets: Assets,
     music_bus: crate::audio_bus::Bus,
     effects_bus: crate::audio_bus::Bus,
-    song: Option<rodio::Sink>,
+    audio: crate::audio_bus::focus::SharedAudio,
+    music_owner: crate::audio_bus::focus::MusicOwner,
+    song: Option<crate::audio_bus::focus::Music>,
     pending: Option<(bool, TrackDecode)>,
+    pending_token: Option<crate::audio_bus::focus::MusicToken>,
     before_six: Option<(u32, rodio::Sink)>,
     next_handle: u32,
 }
@@ -163,28 +166,41 @@ impl Player {
             assets,
             music_bus: crate::audio_bus::Bus::new(),
             effects_bus: crate::audio_bus::Bus::new(),
+            audio: crate::audio_bus::focus::SharedAudio::new(100, 100),
+            music_owner: crate::audio_bus::focus::MusicOwner::new(),
             song: None,
             pending: None,
+            pending_token: None,
             before_six: None,
             next_handle: 1,
         }
     }
 
+    /// Bind before Select/creation. Warm transfers retain this same Player.
+    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) -> Result<(), String> {
+        if self.audio.same_owner(&audio) { return Ok(()); }
+        if self.song.is_some() || self.pending.is_some() {
+            return Err("Cannot replace an active era music owner".into());
+        }
+        self.audio = audio;
+        Ok(())
+    }
     pub fn set_levels(&mut self, music: u8, effects: u8) {
-        self.music_bus.set_music_level(music);
-        self.effects_bus.set_level(effects);
+        self.audio.set_music(music);
+        self.audio.set_effects(effects);
     }
 
-    fn start_song(&mut self, source: rodio::buffer::SamplesBuffer, repeat: bool) {
-        if let Some(mixer) = self.music_bus.mixer() {
-            let sink = rodio::Sink::connect_new(mixer);
-            if repeat {
-                sink.append(source.repeat_infinite());
-            } else {
-                sink.append(source);
-            }
+    fn start_song(&mut self, source: rodio::buffer::SamplesBuffer, repeat: bool,
+        token: crate::audio_bus::focus::MusicToken) -> Result<(), String>
+    {
+        if !token.is_current() { return Err("Stale era decode generation".into()); }
+        if let Some(mixer) = self.music_bus.combined_mixer() {
+            let sink = self.audio.music_sink(mixer, token)?;
+            if repeat { sink.append(source.repeat_infinite())?; }
+            else { sink.append(source)?; }
             self.song = Some(sink);
         }
+        Ok(())
     }
 
     /// Finish a selected song without blocking the UI frame on WMA decoding.
@@ -197,14 +213,17 @@ impl Player {
         match receiver.try_recv() {
             Ok(result) => {
                 let (repeat, _) = self.pending.take().unwrap();
+                let token = self.pending_token.take().ok_or("Era decode has no generation token")?;
+                if !token.is_current() { return Err("Stale era decode generation".into()); }
                 let samples = result?;
                 let source = rodio::buffer::SamplesBuffer::new(2, 44_100, samples);
-                self.start_song(source, repeat);
+                self.start_song(source, repeat, token)?;
                 Ok(())
             }
             Err(mpsc::TryRecvError::Empty) => Ok(()),
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.pending = None;
+                self.pending_token = None;
                 Err("era music decoder disconnected".into())
             }
         }
@@ -213,7 +232,9 @@ impl Player {
     pub fn apply(&mut self, operation: Operation) -> Result<u32, String> {
         match operation {
             Operation::Stop => {
+                self.music_owner.cancel()?;
                 self.pending = None;
+                self.pending_token = None;
                 if let Some(song) = self.song.take() {
                     song.stop();
                 }
@@ -230,7 +251,9 @@ impl Player {
                     .get(index)
                     .ok_or("era song index outside original catalog")?
                     .clone();
+                self.music_owner.cancel()?;
                 self.pending = None;
+                self.pending_token = None;
                 if let Some(old) = self.song.take() {
                     old.stop();
                 }
@@ -242,6 +265,7 @@ impl Player {
                         let _ = sender.send(decode(&ffmpeg, &path));
                     })
                     .map_err(|error| format!("era music decoder thread: {error}"))?;
+                self.pending_token = Some(self.music_owner.token()?);
                 self.pending = Some((repeat, receiver));
                 Ok(0)
             }
@@ -250,10 +274,12 @@ impl Player {
                     return Err("pre-six sound already active".into());
                 }
                 let samples = self.assets.before_six.clone();
-                let Some(mixer) = self.effects_bus.mixer() else {
+                let gain = self.audio.source_gain(100);
+                let Some(mixer) = self.effects_bus.combined_mixer() else {
                     return Ok(0);
                 };
                 let sink = rodio::Sink::connect_new(mixer);
+                sink.set_volume(gain);
                 sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                 let handle = self.next_handle;
                 self.next_handle = handle
@@ -282,6 +308,21 @@ impl Player {
     }
 }
 
+impl Drop for Player {
+    fn drop(&mut self) {
+        self.music_owner.retire();
+        self.pending = None;
+        self.pending_token = None;
+        // Music's Drop stops its non-detached Sink; Bus stream drops afterward.
+        self.song = None;
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    include!("era_audio_focus_tests.rs");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +342,7 @@ mod tests {
             let (output, mut rendered) = rodio::mixer::mixer(2, 44_100);
             player.music_bus.connect_test_output(&output, 2, 44_100);
             let (sender, receiver) = mpsc::channel();
+            player.pending_token = Some(player.music_owner.token().unwrap());
             player.pending = Some((false, receiver));
             // Prime the connected master while the real decode is still pending.
             // Rodio connects an Empty mono48k queue before append; its initial
@@ -346,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn before_six_effect_retains_existing_linear_gain() {
+    fn before_six_effect_consumes_q100_factor_at_creation() {
         let assets = Assets {
             songs: std::array::from_fn(|_| PathBuf::new()),
             before_six: vec![0.5; 32_768],
@@ -360,7 +402,7 @@ mod tests {
         assert_ne!(handle, 0);
         let samples: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(samples.len(), 4096);
-        assert!(samples[2048..].iter().all(|sample| (*sample - 0.125).abs() < 1e-6));
+        assert!(samples[2048..].iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
         player.apply(Operation::BeforeSixRelease(handle)).unwrap();
     }
 
@@ -373,6 +415,7 @@ mod tests {
         };
         let mut player = Player::new(assets);
         let (stale_sender, stale_receiver) = mpsc::channel();
+        player.pending_token = Some(player.music_owner.token().unwrap());
         player.pending = Some((true, stale_receiver));
         player.apply(Operation::Stop).unwrap();
         assert!(player.pending.is_none());
@@ -380,7 +423,9 @@ mod tests {
 
         let (older_sender, older_receiver) = mpsc::channel();
         let (newer_sender, newer_receiver) = mpsc::channel();
+        player.pending_token = Some(player.music_owner.token().unwrap());
         player.pending = Some((true, older_receiver));
+        player.pending_token = Some(player.music_owner.token().unwrap());
         player.pending = Some((false, newer_receiver));
         assert!(older_sender.send(Ok(vec![0.; 8])).is_err());
         // Check the nonblocking path while decoding is still in flight.
@@ -452,6 +497,7 @@ mod cold_gain_tests {
             let (output,mut rendered)=rodio::mixer::mixer(2,44_100);
             player.music_bus.connect_test_output(&output,2,44_100);
             let (sender,receiver)=mpsc::channel();player.pending=Some((false,receiver));
+            player.pending_token = Some(player.music_owner.token().unwrap());
             sender.send(Ok(vec![0.5;65_536])).unwrap();player.poll().unwrap();
             assert!(player.pending.is_none());
             // Both newly connected queues begin with their own silent/conversion
@@ -465,4 +511,15 @@ mod cold_gain_tests {
             let song=player.song.as_ref().unwrap();assert!(song.get_pos()>std::time::Duration::ZERO);assert_eq!(song.len(),1);
         }
     }
+}
+
+#[cfg(test)]
+impl Player {
+    pub(crate) fn composition_pending_pcm(&mut self,audio:crate::audio_bus::focus::SharedAudio,mixer:&rodio::mixer::Mixer)->mpsc::Sender<Result<Vec<f32>,String>>{
+        self.bind_audio(audio).unwrap();
+        self.music_bus.connect_test_output(mixer,2,44100);
+        self.pending_token=Some(self.music_owner.token().unwrap());
+        let (sender,receiver)=mpsc::channel();self.pending=Some((true,receiver));sender
+    }
+    pub(crate) fn composition_song_state(&self)->Option<(bool,f32)>{self.song.as_ref().map(|song|(song.is_paused(),song.volume()))}
 }
