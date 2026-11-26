@@ -176,7 +176,69 @@ fn run(era:bool) {
         assert!(real_host.failure.is_none(),"{:?}",real_host.failure);
         assert!(real_host.policy.calendar.autosave_disabled);assert!(real_host.autosave_status.is_none());
         assert_eq!(recovering.world.clock.calendar,[0,1,0,24,1]);
-        assert_eq!(std::fs::read(prior).unwrap(),bytes);
+        assert_eq!(std::fs::read(&prior).unwrap(),bytes);
+
+        if !era {
+            // Controlled real consumer coverage; the production Intro producer
+            // remains a separate dependency, not fabricated by this fixture.
+            use crate::save_menu::camera_source;
+            let (wrong_publisher,wrong_reader)=camera_source::channel(loaded.world.topology.epoch());
+            assert!(real_host.install_ui_camera_source(&recovering,wrong_reader).is_err());
+            drop(wrong_publisher);
+            let (mut publisher,reader)=camera_source::channel(recovering.world.topology.epoch());
+            real_host.install_ui_camera_source(&recovering,reader).unwrap();
+            assert!(real_host.has_ui_camera_source());
+            let (spare_publisher,spare_reader)=camera_source::channel(recovering.world.topology.epoch());
+            assert!(real_host.install_ui_camera_source(&recovering,spare_reader).is_err(),
+                "a second publisher must not replace the installed source");
+            drop(spare_publisher);
+            real_host.policy.scheduler.network_enabled=false;
+            recovering.world.clock.calendar=[23,0,0,23,0];
+            recovering.world.clock.timing=[1000,624,624,14999,0,1];
+            real_host.tick(&mut recovering,&assets);
+            assert!(real_host.failure.is_none(),"{:?}",real_host.failure);
+            assert!(matches!(real_host.autosave_status,Some(crate::save_menu::AutosaveStatus::Failed{
+                error:crate::save_menu::AutosaveFailure::UnsupportedState(_),..})));
+            assert_eq!(std::fs::read(&prior).unwrap(),bytes,"no missing-source fallback");
+
+            let mut expected=cameras;
+            expected[1][..4].copy_from_slice(&13u32.to_le_bytes());
+            expected[1][0x4c..0x50].copy_from_slice(&333f32.to_le_bytes());
+            expected[1][0xb0]=0xa7; // opaque byte must survive both publishers
+            publisher.publish(openmt2001::camera::bank::Capture::from_records(expected),0).unwrap();
+            recovering.world.clock.calendar=[23,0,0,23,0];
+            recovering.world.clock.timing=[1000,624,624,14999,0,1];
+            real_host.tick(&mut recovering,&assets);
+            assert!(real_host.failure.is_none(),"{:?}",real_host.failure);
+            assert!(matches!(&real_host.autosave_status,Some(crate::save_menu::AutosaveStatus::Saved(path)) if path==&prior));
+            let automatic=std::fs::read(&prior).unwrap();
+            assert_eq!(SaveFile::parse(&automatic).unwrap().cameras().unwrap(),[&expected[0],&expected[1]]);
+
+            let root=real_host.autosave_profile_root.clone().unwrap();
+            let target=crate::save_menu::Target::NewName("SameSnapshot".into());
+            assert!(real_host.save_selected_from_ui_snapshot(&mut recovering,&image,&root,&target,1).is_err(),
+                "manual consumer requires the actual Options hold");
+            real_host.options(&mut recovering.world.pause,&mut recovering.hooks.timers,true).unwrap();
+            let pause=recovering.world.pause.clone();let timers=recovering.hooks.timers.clone();
+            let manual=real_host.save_selected_from_ui_snapshot(&mut recovering,&image,&root,&target,1).unwrap();
+            let manual_bytes=std::fs::read(&manual).unwrap();
+            assert_eq!(SaveFile::parse(&manual_bytes).unwrap().cameras().unwrap(),[&expected[0],&expected[1]]);
+            assert_eq!(recovering.world.pause,pause,"live Options hold must remain owned");
+            assert_eq!(recovering.hooks.timers,timers,"serialization cannot release live timers");
+            publisher.retire().unwrap();
+            assert!(real_host.save_selected_from_ui_snapshot(&mut recovering,&image,&root,
+                &crate::save_menu::Target::ExistingSlot("SameSnapshot.sav".into()),1).is_err());
+            assert_eq!(std::fs::read(&manual).unwrap(),manual_bytes);
+            real_host.options(&mut recovering.world.pause,&mut recovering.hooks.timers,false).unwrap();
+            recovering.world.clock.calendar=[23,0,0,23,0];
+            recovering.world.clock.timing=[1000,624,624,14999,0,1];
+            real_host.tick(&mut recovering,&assets);
+            assert!(real_host.failure.is_none(),"retired save source is recoverable: {:?}",real_host.failure);
+            assert!(matches!(real_host.autosave_status,Some(crate::save_menu::AutosaveStatus::Failed{
+                error:crate::save_menu::AutosaveFailure::UnsupportedState(_),..})));
+            assert_eq!(std::fs::read(&prior).unwrap(),automatic);
+            assert_eq!(std::fs::read_dir(prior.parent().unwrap()).unwrap().count(),2);
+        }
 
     }).unwrap().join().unwrap();
 }

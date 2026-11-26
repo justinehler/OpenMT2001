@@ -60,18 +60,26 @@ fn assert_first_reads(audit:&live_host::test_primary_category::Observe,epoch:u64
 // Fonts/images, pavement, raw pair and Session come from actual resource owners.
 // Missing navigation/tutorial/primary-clear joins stay None and fail if reached.
 fn inspection(a:&Assets)->Inspection{
+    inspection_products(a.scene.clone(),a.navigator.bounds,a.navigation.bounds,a.navigation.detail_bounds,
+        a.auction_audio.clone(),a.transport_audio.clone(),a.era_audio.clone(),a.gameplay_sound.clone())
+}
+#[allow(clippy::too_many_arguments)]
+fn inspection_products(scene:openmt2001::render_scene::Scene,navigator_bounds:[f32;4],navigation_bounds:[f32;4],detail_bounds:[f32;4],
+    auction:crate::live_host::auction_audio::Assets,transport:crate::transport_audio::Assets,
+    era:crate::era_audio::Assets,sound:crate::gameplay_sound::Assets)->Inspection{
     let (camera,controls)=crate::intro::fresh_city_camera();let now=Instant::now();
     Inspection{
+        camera_producer:None,camera_ready:None,camera_epoch:None,camera_turns:Default::default(),
         ui_graph:None,camera_navigation:None,camera_focus:Default::default(),navigation_click_latched:false,
         camera_endpoint:None,camera_capture_pending:None,
         camera_ui:Some(State::new(Globals::after_normal_initialization(OriginalGraphicsPolicy::NormalD3d,false),
             Cursor::new(0,0).unwrap(),None,None)),
         save_profile_root:None,saved_camera:true,result_pending:None,result:None,
         auction_requests:None,auction_audio_requests:None,
-        auction_audio_player:crate::live_host::auction_audio::Player::new(a.auction_audio.clone()),
-        transport_audio_requests:None,transport_audio_player:crate::transport_audio::Player::new(a.transport_audio.clone()),
-        era_audio_requests:None,era_audio_player:crate::era_audio::Player::new(a.era_audio.clone()),
-        gameplay_sound_requests:None,gameplay_sound_player:crate::gameplay_sound::Player::new(a.gameplay_sound.clone()),
+        auction_audio_player:crate::live_host::auction_audio::Player::new(auction),
+        transport_audio_requests:None,transport_audio_player:crate::transport_audio::Player::new(transport),
+        era_audio_requests:None,era_audio_player:crate::era_audio::Player::new(era),
+        gameplay_sound_requests:None,gameplay_sound_player:crate::gameplay_sound::Player::new(sound),
         auction:Default::default(),auction_panel:Default::default(),notifications:Default::default(),
         planning:None,planning_pending:None,planning_pressed:false,live_status:None,time_panel:Default::default(),
         cash_arrow:Default::default(),dust:Default::default(),time_pressed:None,game_options:Default::default(),
@@ -85,14 +93,14 @@ fn inspection(a:&Assets)->Inspection{
         rights_pending:None,comparison:None,trees:None,people:None,people_pending:None,last_people_query:now,
         vehicles:None,vehicles_pending:None,last_vehicles_query:now,transport:None,transport_pending:None,
         last_transport_query:now,_fresh_session:None,adjustment:None,operations:Default::default(),
-        locator:None,locator_blocked:false,scene:a.scene.clone(),detail_visibility:DetailVisibility::default(),
+        locator:None,locator_blocked:false,scene:scene,detail_visibility:DetailVisibility::default(),
         prepared:PreparedScene::default(),markers:PreparedScene::default(),navigator:PreparedScene::default(),
-        navigator_owners:Vec::new(),navigator_bounds:a.navigator.bounds,navigator_pressed:false,
+        navigator_owners:Vec::new(),navigator_bounds:navigator_bounds,navigator_pressed:false,
         tutorial_go_to_block_pressed:false,tooltip:None,tooltip_state:None,icon_tooltip_dwell:Default::default(),
-        navigation:Default::default(),navigation_bounds:a.navigation.bounds,navigation_pressed:false,
+        navigation:Default::default(),navigation_bounds:navigation_bounds,navigation_pressed:false,
         double_click:Default::default(),strategic:false,return_camera:None,reframe_pending:false,information:None,
         details_visible:true,details_pressed:false,toolbar_input:Default::default(),toolbar_right_held:false,
-        toolbar_bounds:[[0.;4];3],toolbar_regions:[None;3],detail_icons:Default::default(),detail_bounds:a.navigation.detail_bounds,
+        toolbar_bounds:[[0.;4];3],toolbar_regions:[None;3],detail_icons:Default::default(),detail_bounds:detail_bounds,
         camera,controls,building_angle:0.,building_camera:false,
         inertia:openmt2001::camera::BlockCameraInertia::new(camera.eye,camera.target),keys:[false;4],taps:[false;4],
         cursor:None,mouse_buttons:[false;2],drag:[0;2],pointer:None,hovered:None,selected:None,title_state:None,started:now,tick:0,
@@ -327,3 +335,20 @@ fn actual_host_install_deferred_assets_uicontext_d_reads_retirement_and_world2()
 #[test]
 #[ignore="supplied actual Assets/Session ordinal6 resource fault; fresh-process validation"]
 fn actual_host_install_descriptor_fault_retains_six_completed_copies(){run(true)}
+
+// Reuse this actual CPU Inspection constructor in the camera refresh regression;
+// the associated item needs no exposure of this private fixture module.
+impl Inspection {
+    // Only the concrete fields used by this CPU camera/UI transaction. Four
+    // retained audio owners are constructed exactly as on the worker; none is
+    // serviced. The unused eager result-music loader/decoder is never entered.
+    pub(in crate::intro) fn camera_refresh_test_fixture(inputs:&SceneInputs,
+        scene:openmt2001::render_scene::Scene,navigation:&crate::navigation::Navigation)->Self {
+        let image=openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+        inspection_products(scene,[0.;4],navigation.bounds,navigation.detail_bounds,
+            crate::live_host::auction_audio::Assets::load(&image,&inputs.installer).unwrap(),
+            crate::transport_audio::Assets::load(&image,&inputs.installer).unwrap(),
+            crate::era_audio::Assets::load(&image,&inputs.installer,std::path::Path::new("unused-cpu-no-decoder")).unwrap(),
+            crate::gameplay_sound::Assets::load(&image,&inputs.installer).unwrap())
+    }
+}

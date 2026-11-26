@@ -8,6 +8,8 @@ pub const BUFFERED_EVENT_LIMIT: usize = 16;
 pub const LEFT_BYTE: usize = 12;
 pub const RIGHT_BYTE: usize = 13;
 
+pub mod focus;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MousePacket(pub [u8; MOUSE_BYTES]);
 
