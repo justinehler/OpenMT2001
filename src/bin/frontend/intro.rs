@@ -4,6 +4,8 @@ use crate::present::Presenter;
 pub(crate) mod camera_live;
 #[path = "intro/refresh.rs"]
 mod refresh;
+#[path = "intro/options_ack.rs"]
+mod options_ack;
 use openmt2001::{
     flyby::{CameraSample, Flyby},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
@@ -740,7 +742,7 @@ enum FreshRequest {
         reply: mpsc::Sender<Result<[u8; 544], String>>,
     },
     Run(bool),
-    Options(bool),
+    Options { open:bool, reply:mpsc::Sender<Result<(),String>> },
     ToggleSpeed,
     DismissPrompt(u32, Option<mpsc::Sender<Vec<crate::prompt::Request>>>),
     TutorialControl(u32),
@@ -1011,8 +1013,11 @@ impl SceneInputs {
                                 let result = (|| {
                                     let root = save_profile_root.as_deref()
                                         .ok_or("Save Game requires a selected V2 profile")?;
-                                    // Captured raw records are already coherent. Do not
-                                    // recompute a sample or overlay either record here.
+                                    if capture.is_some() && !host.options_save_allowed(&session.world.pause,&session.hooks.timers) {
+                                        return Err("Save requires the active Options hold".to_owned());
+                                    }
+                                    //The by-value pair retains Owner's raw bytes. Do not
+                                    //recompute a sample or overlay either record here.
                                     let cameras = match capture {
                                         Some(capture) => {
                                         if review_camera {eprintln!("[camera] serializing captured raw pair");}
@@ -1020,9 +1025,8 @@ impl SceneInputs {
                                     },
                                         None => crate::save_menu::cameras(session.saved_cameras, camera)?,
                                     };
-                                    let auction = host.auction_save_state();
-                                    let bytes = session.save_v2_with_auction_view(
-                                        &image, cameras, game_mode, auction, interface_mode,
+                                    let bytes = session.save_v2_with_options_view(
+                                        &image, cameras, game_mode, &host, interface_mode,
                                     )?;
                                     crate::save_menu::write_target(root, &target, &bytes)
                                 })();
@@ -1166,12 +1170,14 @@ impl SceneInputs {
                                 host.set_running(running);
                                 last_tick = Instant::now();
                             }
-                            FreshRequest::Options(open) => {
+                            FreshRequest::Options{open,reply} => {
                                 let elapsed = clock_frame
                                     .elapsed(Some(clock_epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
                                 if host.camera_retired() { break; }
-                                host.options(open);
+                                let result=host.options(&mut session.world.pause,&mut session.hooks.timers,open);
+                                if let Err(error)=&result {host.fail(error.clone());}
+                                let _=reply.send(result);
                                 last_tick = Instant::now();
                             }
                             FreshRequest::ToggleSpeed => host.toggle_speed(),
@@ -2319,6 +2325,7 @@ struct Inspection {
     game_options: crate::game_options::View,
     save_dialog: crate::save_dialog::View,
     save_pending: Option<mpsc::Receiver<Result<PathBuf, String>>>,
+    options_ack: options_ack::Gate,
     save_delete_pending: Option<mpsc::Receiver<Result<(), String>>>,
     settings_menu: crate::settings_menu::View,
     pulse_draw: Option<usize>,
@@ -2496,12 +2503,13 @@ impl Inspection {
         self.game_options.open(self.live_status.as_ref().is_some_and(|s| s.running));
         // Before the first worker status, keep Save inert; authoritative
         // tutorial state refreshes the row as soon as Status arrives.
-        self.game_options.set_save_disabled(self.live_status.as_ref()
-            .is_none_or(|s| s.tutorial_session || s.failure.is_some()));
+        self.game_options.set_save_disabled(true);
+        self.options_ack.cancel();
         if let Some(sender) = &self._fresh_session {
-            sender.send(FreshRequest::Options(true)).map_err(|e| e.to_string())?;
+            let (reply,result)=mpsc::channel();
+            sender.send(FreshRequest::Options{open:true,reply}).map_err(|e|e.to_string())?;
+            self.options_ack.begin(true,result);
         }
-        if let Some(status) = &mut self.live_status { status.running = false; }
         // Status carries drained, exactly-once prompt events. Retain its
         // receiver across menu transitions, then request current state again.
         self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
@@ -2512,12 +2520,12 @@ impl Inspection {
         Ok(())
     }
     fn close_options(&mut self) -> Result<(), String> {
-        let running = self.game_options.close();
+        self.game_options.close();
+        self.options_ack.cancel();
         if let Some(sender) = &self._fresh_session {
-            sender.send(FreshRequest::Options(false)).map_err(|e| e.to_string())?;
-        }
-        if let Some(status) = &mut self.live_status {
-            status.running = running && status.failure.is_none();
+            let (reply,result)=mpsc::channel();
+            sender.send(FreshRequest::Options{open:false,reply}).map_err(|e|e.to_string())?;
+            self.options_ack.begin(false,result);
         }
         self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
         Ok(())
@@ -3379,6 +3387,10 @@ impl Intro {
     }
     fn submit_save_dialog_action(view:&mut Inspection,action:crate::save_dialog::Action) {
         use crate::save_dialog::Action;
+        if !matches!(&action,Action::Back) && !view.options_ack.ready() {
+            view.save_dialog.message=Some("Preparing Save Game...".into());
+            return;
+        }
         match action {
             Action::Back=>(),
             Action::NewName(name)=> {
@@ -3408,6 +3420,10 @@ impl Intro {
     }
     fn submit_save_target(view:&mut Inspection,target:crate::save_menu::Target) {
         if view.save_pending.is_some() || view.camera_capture_pending.is_some() {return;}
+        if !view.options_ack.ready() {
+            view.save_dialog.message=Some("Preparing Save Game...".into());
+            return;
+        }
         if let Some(error)=view.live_status.as_ref().and_then(|status|status.failure.as_ref()) {
             view.save_dialog.busy=false;
             view.save_dialog.message=Some(format!("Save failed: {error}"));
@@ -3436,6 +3452,11 @@ impl Intro {
     }
     fn send_save_target(view:&mut Inspection,target:crate::save_menu::Target,
         capture:Option<openmt2001::camera::bank::Capture>) {
+        if !view.options_ack.ready() {
+            view.save_dialog.busy=false;
+            view.save_dialog.message=Some("Save cancelled: Options closed".into());
+            return;
+        }
         let Some(sender)=&view._fresh_session else {
             view.save_dialog.busy=false;
             view.save_dialog.message=Some("Save unavailable in this view".into());
@@ -3790,7 +3811,7 @@ impl Intro {
                             Some(crate::game_options::Button::Settings) => {
                                 view.settings_menu.open();
                             }
-                            Some(crate::game_options::Button::Save) if view.save_pending.is_none() => {
+                            Some(crate::game_options::Button::Save) if view.save_pending.is_none() && view.options_ack.ready() => {
                                 if let Some(root) = view.save_profile_root.as_deref() {
                                     view.save_dialog.open(root);
                                 } else {view.game_options.set_message("Save unavailable in this view".into());}
@@ -5562,6 +5583,7 @@ impl Intro {
                         game_options: crate::game_options::View::default(),
                         save_dialog: crate::save_dialog::View::default(),
                         save_pending: None,
+                        options_ack: options_ack::Gate::default(),
                         save_delete_pending: None,
                         settings_menu,
                         detail_visibility,
@@ -5772,6 +5794,7 @@ impl Intro {
                                 view.save_profile_root = previous.save_profile_root.take();
                                 view.save_dialog = std::mem::take(&mut previous.save_dialog);
                                 view.save_pending = previous.save_pending.take();
+                                view.options_ack = std::mem::take(&mut previous.options_ack);
                                 view.save_delete_pending = previous.save_delete_pending.take();
                                 view.settings_menu = std::mem::take(&mut previous.settings_menu);
                                 view.pulse_state = previous.pulse_state.take();
@@ -5889,6 +5912,12 @@ impl Intro {
             }
         }
         if let Some(view) = &mut self.inspection {
+            match view.options_ack.poll() {
+                Ok(Some(_))=>view.game_options.set_save_disabled(!view.options_ack.ready()
+                    || view.live_status.as_ref().is_none_or(|s|s.tutorial_session||s.failure.is_some())),
+                Ok(None)=>{},
+                Err(error)=>{view.game_options.set_save_disabled(true);view.game_options.set_message(error);}
+            }
             camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;
             camera_live::service_available(view)?;
             if let Some(mut endpoint)=view.camera_endpoint.take() {
@@ -6498,7 +6527,7 @@ impl Intro {
                                 view.save_dialog.message=Some(format!("Save failed: {error}"));
                             }
                         }
-                        view.game_options.set_save_disabled(status.tutorial_session || status.failure.is_some());
+                        view.game_options.set_save_disabled(!view.options_ack.ready() || status.tutorial_session || status.failure.is_some());
                         view.live_status = Some(status);
                         view.status_pending = None;
                     }
@@ -6540,6 +6569,17 @@ impl Intro {
                             )?);
                             if let Some(trees) = &mut view.trees {
                                 changed.extend(trees.reframe(&mut view.scene, view.camera)?);
+                            }
+                            if let Some(people) = &view.people {
+                                changed.extend(people.reframe(&mut view.scene, view.camera,
+                                    u32::from(view.settings_menu.graphics.distance))?);
+                            }
+                            let distance = u32::from(view.settings_menu.graphics.distance);
+                            if let Some(vehicles) = &view.vehicles {
+                                changed.extend(vehicles.reframe(&mut view.scene, view.camera, distance)?);
+                            }
+                            if let Some(transport) = &view.transport {
+                                changed.extend(transport.reframe(&mut view.scene, view.camera, distance)?);
                             }
                             let star_detail = view.normal_star_detail();
                             let changed = normal_city_scene_updates(
@@ -7501,7 +7541,7 @@ mod tests {
                 host.running = true;
                 host.frame(&mut session, &assets, 1000);
                 host.tick(&mut session, &assets);
-                host.options(false);
+                assert!(host.options(&mut session.world.pause,&mut session.hooks.timers,false).is_err());
                 host.set_running(true);
                 assert!(!host.running && host.failure.is_none());
                 assert_eq!(session.world.clock.timing, timing);
@@ -10661,11 +10701,19 @@ mod tests {
 
         let loaded = rx.recv().unwrap().unwrap();
         let sender = loaded.fresh_session.as_ref().unwrap().clone();
-        let status = || {
+        let status_raw = || {
             let (reply, answer) = mpsc::channel();
             sender.send(FreshRequest::Status { camera: camera.eye, reply,
                 }).unwrap();
             answer.recv_timeout(std::time::Duration::from_secs(15)).unwrap()
+        };
+        // Every Status consumes its actual one-shot prompt batch, even when
+        // this test asks only about running/failure. Retain all such batches.
+        let retained_prompts=std::cell::RefCell::new(std::collections::VecDeque::new());
+        let status=|| {
+            let mut observed=status_raw();
+            retained_prompts.borrow_mut().extend(std::mem::take(&mut observed.prompts));
+            observed
         };
         sender.send(FreshRequest::Run(false)).unwrap();
         let initial = status();
@@ -10707,13 +10755,17 @@ mod tests {
             }).unwrap();
         assert!(answer.recv().unwrap().unwrap().submitted);
         assert!(status().failure.is_none(), "building before first tip must remain legal");
+        let options=|open| {
+            let(reply,ack)=mpsc::channel();sender.send(FreshRequest::Options{open,reply}).unwrap();
+            ack.recv_timeout(std::time::Duration::from_secs(15)).expect("actual Options owner reply").unwrap();
+        };
         for running in [false, true] {
             sender.send(FreshRequest::Run(running)).unwrap();
-            sender.send(FreshRequest::Options(true)).unwrap();
-            sender.send(FreshRequest::Options(true)).unwrap();
+            options(true);
+            options(true);
             sender.send(FreshRequest::Run(true)).unwrap();
             assert!(!status().running);
-            sender.send(FreshRequest::Options(false)).unwrap();
+            options(false);
             assert_eq!(status().running, running);
         }
         sender.send(FreshRequest::ToggleSpeed).unwrap();
@@ -10726,24 +10778,33 @@ mod tests {
             let (reply, answer) = mpsc::channel();
             sender.send(FreshRequest::Status { camera: camera.eye, reply,
                 }).unwrap();
-            sender.send(FreshRequest::Options(true)).unwrap();
-            let barrier = status();
+            options(true);
+            let mut barrier = status_raw();
             assert!(!barrier.running && barrier.failure.is_none(), "{barrier:?}");
-            let snapshot = answer.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
-            sender.send(FreshRequest::Options(false)).unwrap();
+            let mut snapshot = answer.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
+            options(false);
             assert!(snapshot.failure.is_none(), "{snapshot:?}");
-            if !snapshot.prompts.is_empty() { break snapshot; }
+            // Worker FIFO produced A before B, regardless of which receiver
+            // the test read first. Neither actual returned batch may be lost.
+            if !snapshot.prompts.is_empty()||!barrier.prompts.is_empty(){
+                eprintln!("retained tutorial Status batches A={} B={}",snapshot.prompts.len(),barrier.prompts.len());
+            }
+            retained_prompts.borrow_mut().extend(std::mem::take(&mut snapshot.prompts));
+            retained_prompts.borrow_mut().extend(std::mem::take(&mut barrier.prompts));
+            let has_tip=!retained_prompts.borrow().is_empty();
+            if has_tip { break status(); } // actual post-close pause observation
             assert!(Instant::now() < deadline, "first original tip did not arrive");
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
         assert!(paused.script_paused, "original prompt owns its own pause reason");
-        assert_eq!(paused.prompts[0].dismissal_id, 1);
-        sender.send(FreshRequest::Options(true)).unwrap();
-        sender.send(FreshRequest::Options(false)).unwrap();
+        assert_eq!(retained_prompts.borrow().front().unwrap().dismissal_id, 1);
+        options(true);
+        options(false);
         assert!(status().script_paused, "Options must not dismiss the scenario tip");
         let (reply, answer) = mpsc::channel();
         sender.send(FreshRequest::DismissPrompt(1, Some(reply))).unwrap();
         answer.recv().unwrap();
+        assert_eq!(retained_prompts.borrow_mut().pop_front().unwrap().dismissal_id,1);
         let after = status();
         assert!(after.running && !after.script_paused && after.failure.is_none(), "{after:?}");
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
@@ -10766,7 +10827,8 @@ mod tests {
         loop {
             let next = status();
             assert!(next.failure.is_none(), "{next:?}");
-            for prompt in next.prompts {
+            let prompts:Vec<_>=retained_prompts.borrow_mut().drain(..).collect();
+            for prompt in prompts {
                 let (reply, answer) = mpsc::channel();
                 sender.send(FreshRequest::DismissPrompt(prompt.dismissal_id, Some(reply),
                     )).unwrap();

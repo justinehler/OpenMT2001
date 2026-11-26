@@ -75,7 +75,7 @@ fn inspection(a:&Assets)->Inspection{
         auction:Default::default(),auction_panel:Default::default(),notifications:Default::default(),
         planning:None,planning_pending:None,planning_pressed:false,live_status:None,time_panel:Default::default(),
         cash_arrow:Default::default(),dust:Default::default(),time_pressed:None,game_options:Default::default(),
-        save_dialog:Default::default(),save_pending:None,save_delete_pending:None,settings_menu:Default::default(),
+        save_dialog:Default::default(),save_pending:None,options_ack:Default::default(),save_delete_pending:None,settings_menu:Default::default(),
         pulse_draw:None,pulse_state:None,status_pending:None,environment_pending:None,environment_tick:0,
         environment_time:None,last_environment_query:now,last_status_query:now,last_snapshot:now,
         construction_active:false,snapshot_tick:0,card_input:Default::default(),card_selection:None,

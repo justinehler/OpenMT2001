@@ -62,7 +62,7 @@ fn inspection(assets:&Assets)->Inspection{
         time_pressed:None,
         game_options:Default::default(),
         save_dialog:Default::default(),
-        save_pending:None,
+        save_pending:None,options_ack:Default::default(),
         save_delete_pending:None,
         settings_menu:Default::default(),
         pulse_draw:None,

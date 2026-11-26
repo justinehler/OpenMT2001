@@ -300,6 +300,23 @@ impl<'data> Session<'data> {
         host: Option<AuctionHostState>,
         interface_mode: u32,
     ) -> Result<Vec<u8>, String> {
+        self.save_v2_with_auction_view_inner(image,cameras,game_mode,host,interface_mode,None)
+    }
+    /// UI SaveSelected owns the actual worker Host. Serialize its cold-load
+    /// continuation without dropping the live Options hold before the cut.
+    pub(crate) fn save_v2_with_options_view(
+        &mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],
+        game_mode:u32,host:&crate::live_host::Host,interface_mode:u32,
+    )->Result<Vec<u8>,String> {
+        let continuation=host.options_save_projection(&self.world.pause,&self.hooks.timers)?
+            .map(|(pause,timers)|OptionsContinuation{pause,timers});
+        self.save_v2_with_auction_view_inner(image,cameras,game_mode,
+            host.auction_save_state(),interface_mode,continuation)
+    }
+    fn save_v2_with_auction_view_inner(
+        &mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],game_mode:u32,
+        host:Option<AuctionHostState>,interface_mode:u32,continuation:Option<OptionsContinuation>,
+    )->Result<Vec<u8>,String> {
         SaveProjection {
             live_commands: &self.live_commands,
             city: &mut self.world.city,
@@ -332,7 +349,7 @@ impl<'data> Session<'data> {
             static_rng_tail_next: self.static_rng_tail_next,
             build_random_state: self.build_random_state,
             building_selection: self.building_selection,
-        }.encode(image, cameras, game_mode, host, interface_mode)
+        }.encode_continuation(image,cameras,game_mode,host,interface_mode,continuation)
     }
 
     /// Apply only after checked native restoration has reconstructed geometry
@@ -835,6 +852,64 @@ mod terms_test;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires original game assets; owned Options save and cold Clock continuation"]
+    fn options_save_cold_load_preserves_independent_pause_owners() {
+        std::thread::Builder::new().stack_size(32*1024*1024).spawn(||{
+            use crate::fresh_city::{Inputs,Policy,CommandAssets};
+            let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let exe=read("OPENMT2001_EXE");let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
+            let board=openmt2001::board::Board::from_v14(&image).unwrap();let build=read("OPENMT2001_BUILD_FILE");let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
+            let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
+            let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
+            let default=std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());let scripts=default.parent().unwrap().parent().unwrap();
+            let styles=crate::fresh_city::load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
+            let names=std::array::from_fn(|_|Vec::new());
+            let inputs=||Inputs{tree_locators: None, image:&image,board:&board,file:&file,people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts,parameters:std::str::from_utf8(&parameters).unwrap(),era_styles:styles.clone(),timetable:std::str::from_utf8(&timetable).unwrap(),scenario:"SCENARIO3",difficulty:0,selected_character:4,profile_name:b"Save fixture",character_names:&names};
+            let policy=||Policy{seed:0x12345678,auxiliary_prior_bytes:[0;284]};
+            let mut session=Session::initialize(inputs(),policy()).unwrap();
+
+            let assets=CommandAssets{image:&image,board:&board,file:&file};
+            let camera=openmt2001::flyby::CameraSample{eye:[100.,120.,100.],target:[0.,0.,0.],up:[0.,1.,0.],vertical_fov:0.7};
+            let cameras=crate::save_menu::cameras(None,camera).unwrap();
+            // These real Session saves exercise serialization/restore and a fresh
+            // Host's actual registered logic/Clock. Camera/UI admission stays a
+            // separate native containing regression, not a synthetic capture.
+            for other in [None,Some(0usize),Some(1usize)] {
+                if let Some(reason)=other {
+                    session.world.pause.pause(reason,|c,_|{c.apply(&mut session.hooks.timers);Ok(())}).unwrap();
+                }
+                let expected_pause=session.world.pause.clone();
+                let expected_timers=session.hooks.timers.clone();
+                let mut host=crate::live_host::Host::new(camera.eye);host.set_running(true);
+                host.options(&mut session.world.pause,&mut session.hooks.timers,true).unwrap();
+                assert!(host.options_save_allowed(&session.world.pause,&session.hooks.timers));
+                let live_pause=session.world.pause.clone();let live_timers=session.hooks.timers.clone();
+                let bytes=session.save_v2_with_options_view(&image,cameras,1,&host,0).unwrap();
+                assert_eq!(session.world.pause,live_pause);assert_eq!(session.hooks.timers,live_timers);
+                assert!(!host.running);assert!(host.options_save_allowed(&session.world.pause,&session.hooks.timers));
+                let save=SaveFile::parse(&bytes).unwrap();
+                let mut cold=Session::load_original(inputs(),policy(),&bytes).unwrap();
+                cold.restore_v2_extension_with_image(&save,&image).unwrap();
+                assert_eq!(cold.saved_cameras,Some(cameras));
+                assert_eq!(cold.world.pause,expected_pause);assert_eq!(cold.hooks.timers,expected_timers);
+                let mut fresh=crate::live_host::Host::new(camera.eye);fresh.set_running(true);
+                assert!(!fresh.options_save_allowed(&cold.world.pause,&cold.hooks.timers));
+                let tick=cold.world.clock.timing[0];
+                fresh.frame(&mut cold,&assets,40);assert!(fresh.failure.is_none(),"{:?}",fresh.failure);
+                if let Some(reason)=other {
+                    assert_eq!(cold.world.clock.timing[0],tick);
+                    assert_eq!(cold.world.pause,expected_pause);
+                    cold.world.pause.unpause(reason,|c,_|{c.apply(&mut cold.hooks.timers);Ok(())}).unwrap();
+                    fresh.frame(&mut cold,&assets,40);assert!(fresh.failure.is_none(),"{:?}",fresh.failure);
+                }
+                assert!(cold.world.clock.timing[0]>tick,"cold logic must advance without opening/closing a new Options owner");
+                host.options(&mut session.world.pause,&mut session.hooks.timers,false).unwrap();
+                assert_eq!(session.world.pause,expected_pause);assert_eq!(session.hooks.timers,expected_timers);
+                if let Some(reason)=other {session.world.pause.unpause(reason,|c,_|{c.apply(&mut session.hooks.timers);Ok(())}).unwrap();}
+            }
+        }).unwrap().join().unwrap();
+    }
     #[test]
     #[ignore = "requires original v1.4 game assets and audited scripts"]
     fn retained_save_host_roundtrip_and_delayed_terms() {
@@ -1462,14 +1537,26 @@ pub(crate) struct SaveProjection<'a> {
     pub build_random_state: u32,
     pub building_selection: [u32;2],
 }
+// Private serialized projection: produced only by the actual worker Host's
+// owned Options operation. It is not a native owner, saved token or live state.
+struct OptionsContinuation {
+    pause:openmt2001::pause::State,
+    timers:Vec<openmt2001::timers::Task>,
+}
 impl SaveProjection<'_> {
     pub(crate) fn encode(
-        mut self,
+        self,
         image: &openmt2001::pe::PeImage<'_>,
         cameras: [[u8;196];2],
         game_mode:u32,
         host:Option<AuctionHostState>,
         interface_mode:u32,
+    )->Result<Vec<u8>,String> {
+        self.encode_continuation(image,cameras,game_mode,host,interface_mode,None)
+    }
+    fn encode_continuation(
+        mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],game_mode:u32,
+        host:Option<AuctionHostState>,interface_mode:u32,continuation:Option<OptionsContinuation>,
     )->Result<Vec<u8>,String> {
         if self.tutorial_state != 0 {
             return Err("Saving tutorial script state is not yet supported".into());
@@ -1743,7 +1830,9 @@ impl SaveProjection<'_> {
         economy
             .0
             .extend_from_slice(&words(self.population.properties.totals.map(f32::to_bits)));
-        economy.0.extend_from_slice(&self.city.pause.bytes);
+        let (pause,timers)=continuation.as_ref()
+            .map_or((&self.city.pause,self.timers),|c|(&c.pause,c.timers.as_slice()));
+        economy.0.extend_from_slice(&pause.bytes);
         economy.word(self.frequency.frequency.to_bits());
         economy.word(
             self.frequency
@@ -1755,7 +1844,7 @@ impl SaveProjection<'_> {
                 .logic_timer
                 .map_or(u32::MAX, |v| v as u32),
         );
-        economy.blob(&flat(self.timers))?;
+        economy.blob(&flat(timers))?;
         economy.0.extend_from_slice(&words(self.building_selection));
         economy
             .0

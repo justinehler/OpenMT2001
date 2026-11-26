@@ -357,8 +357,8 @@ impl Resources {
 pub struct Layer {
     residents: Vec<Resident>,
     models: std::collections::BTreeMap<(usize, bool, i16), Vec<Part>>,
-    palette: openmt2001::lighting::Palette,
-    sun: [f32; 3],
+    suncolors: openmt2001::lighting::SunColors,
+    initial_time: (u32, u32),
     surfaces: Vec<openmt2001::render_scene::OwnedDraw>,
     range: std::ops::Range<usize>,
 }
@@ -407,15 +407,11 @@ impl Layer {
         suncols: &[u8],
         resources: &Resources,
     ) -> Result<Self, String> {
-        let light = openmt2001::lighting::SunColors::parse(suncols)?
-            .sample(session.world.clock.hour(), 0)?;
-        let palette = openmt2001::lighting::Palette::new(
-            light.diffuse,
-            light.ambient,
-            light.diffuse,
-            0,
-            light.scale,
-        );
+        let suncolors = openmt2001::lighting::SunColors::parse(suncols)?;
+        // Initial-draw snapshots keep their existing explicit phase-zero-counter
+        // contract. Retained scene reframes sample the actual scene time below.
+        let initial_time = (session.world.clock.hour(), 0);
+        suncolors.sample(initial_time.0, initial_time.1)?;
         let surfaces = resources.surfaces.clone();
         let pool = &session.world.creation.auxiliary;
         let residents: Vec<Resident> = pool.slots()[..pool.used()]
@@ -498,8 +494,8 @@ impl Layer {
         Ok(Self {
             residents,
             models,
-            palette,
-            sun: light.direction,
+            suncolors,
+            initial_time,
             surfaces,
             range: 0..0,
         })
@@ -509,7 +505,12 @@ impl Layer {
         &self,
         draws: &mut [openmt2001::render_scene::OwnedDraw],
         requests: &[DrawRequest],
+        time: (u32, u32),
     ) -> Result<(), String> {
+        let light = self.suncolors.sample(time.0, time.1)?;
+        let palette = openmt2001::lighting::Palette::new(
+            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+        );
         let color = |value: u32| [16, 8, 0].map(|shift| ((value >> shift) & 255) as f32 / 255.);
         for draw in draws.iter_mut() {
             draw.vertices.clear();
@@ -520,7 +521,7 @@ impl Layer {
                 .residents
                 .get(request.auxiliary_slot)
                 .ok_or("resident request leaves snapshot")?;
-            let light = sunlight(object_matrix(&resident.auxiliary)?, self.sun);
+            let light = sunlight(object_matrix(&resident.auxiliary)?, light.direction);
             for part in self
                 .models
                 .get(&(request.model_row, request.lod, request.frame))
@@ -533,7 +534,7 @@ impl Layer {
                         .transform
                         .position([vertex[0], vertex[1], vertex[2]]);
                     vertex[..3].copy_from_slice(&position);
-                    let shades = self.palette.shade_static(normal, light)?;
+                    let shades = palette.shade_static(normal, light)?;
                     vertex[3..6].copy_from_slice(&color(shades[0]));
                     draw.vertices.push(vertex);
                     draw.specular.as_mut().unwrap().push(color(shades[1]));
@@ -571,10 +572,12 @@ impl Layer {
         detail: u32,
     ) -> Result<std::ops::Range<usize>, String> {
         let policy = Policy::from_detail(detail)?;
+        let time = scene.daylight_time()
+            .ok_or("resident layer needs original scene daylight")?;
         let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
         let [near, _] = camera::city_clip(sample.eye[1])?;
         if near >= policy.far_distance {
-            self.fill(&mut scene.draws[self.range.clone()], &[])?;
+            self.fill(&mut scene.draws[self.range.clone()], &[], time)?;
             return Ok(self.range.clone());
         }
         let projection =
@@ -602,7 +605,7 @@ impl Layer {
             .draws
             .get_mut(self.range.clone())
             .ok_or("resident layer is not attached")?;
-        self.fill(draws, &requests)?;
+        self.fill(draws, &requests, time)?;
         Ok(self.range.clone())
     }
 }
@@ -618,7 +621,7 @@ pub fn initial_draws(
 ) -> Result<Vec<openmt2001::render_scene::OwnedDraw>, String> {
     let mut layer = Layer::new(session, image, index, archive, suncols)?;
     let mut draws = std::mem::take(&mut layer.surfaces);
-    layer.fill(&mut draws, requests)?;
+    layer.fill(&mut draws, requests, layer.initial_time)?;
     draws.retain(|draw| !draw.vertices.is_empty());
     Ok(draws)
 }

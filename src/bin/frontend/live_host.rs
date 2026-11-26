@@ -653,16 +653,53 @@ impl Host {
                 crate::transport_audio::Operation::Construction([[None; 2]; 4]));
         }
     }
-    pub fn options(&mut self, open: bool) {
-        if self.stop_retired_camera() { return; }
+    ///49e860/49e994 local Options owns one reason0 transition. The UI's
+    ///oneshot acknowledgement is sent only after this actual owner operation.
+    ///Keep the existing player-run latch distinct from native pause bytes.
+    pub fn options(&mut self,pause:&mut openmt2001::pause::State,
+        timers:&mut [openmt2001::timers::Task],open:bool)->Result<(),String> {
+        if self.stop_retired_camera(){return Err("Options session retired".into());}
         if open {
+            if let Some(error)=&self.failure{return Err(error.clone());}
             if self.options_resume.is_none() {
-                self.options_resume = Some(self.running);
+                if !self.policy.scheduler.network_enabled {
+                    pause.pause(0,|change,_|{change.apply(timers);Ok(())})?;
+                }
+                self.options_resume=Some(self.running);
                 self.set_running(false);
             }
-        } else if let Some(running) = self.options_resume.take() {
+        } else if let Some(running)=self.options_resume {
+            if !self.policy.scheduler.network_enabled {
+                pause.unpause(0,|change,_|{change.apply(timers);Ok(())})?;
+            }
+            self.options_resume=None;
             self.set_running(running);
         }
+        Ok(())
+    }
+    ///Recheck the SAME worker/Session at ordinary captured-save consumption.
+    ///This is a current modal hold check, not a native construction token.
+    pub fn options_save_allowed(&self,pause:&openmt2001::pause::State,timers:&[openmt2001::timers::Task])->bool {
+        self.options_resume.is_some() && !self.running && self.failure.is_none()
+            && !self.camera_retired()
+            && (self.policy.scheduler.network_enabled || (pause.bytes[0]!=0 && pause.bytes[8]!=0
+                && timers.iter().filter(|t|u32::from_le_bytes(t[4..8].try_into().unwrap())&2!=0).all(|t|t[0]==0)))
+    }
+    /// Project only this live Options owner's transient pause into a cold-load
+    /// continuation. The actual Session stays held until the UI closes Options.
+    /// Other reason0 holders, other reasons, timer padding and accumulators stay.
+    pub(crate) fn options_save_projection(&self,pause:&openmt2001::pause::State,
+        timers:&[openmt2001::timers::Task])
+        ->Result<Option<(openmt2001::pause::State,Vec<openmt2001::timers::Task>)>,String> {
+        if self.options_resume.is_none(){return Ok(None);}
+        if !self.options_save_allowed(pause,timers){return Err("Options save owner is not held".into());}
+        if self.policy.scheduler.network_enabled{return Ok(None);}
+        // Native unpause is signed. A wrapped/nonpositive count cannot account
+        // for the one owned release: refuse rather than clear or repair it.
+        if pause.bytes[0] as i8<=0{return Err("Options save pause count cannot release one owner".into());}
+        let mut continuation=pause.clone();let mut tasks=timers.to_vec();
+        continuation.unpause(0,|change,_|{change.apply(&mut tasks);Ok(())})?;
+        Ok(Some((continuation,tasks)))
     }
     /// Native 481910 chooses one or four logic/interface passes per timer
     /// callback in an offline game; 481940 toggles between those settings.
@@ -2800,23 +2837,99 @@ mod tests {
     #[test]
     fn options_restore_worker_pause_state_and_cannot_resume_a_fault() {
         let mut host = Host::new([0.; 3]);
+        let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x5a;20]);
         for was_running in [false, true] {
             host.set_running(was_running);
-            host.options(true);
-            host.options(true);
+            host.options(&mut pause,&mut timers,true).unwrap();
+            host.options(&mut pause,&mut timers,true).unwrap();
             host.set_running(true);
             assert!(!host.running, "Options must retain its pause during other queued input");
-            host.options(false);
+            host.options(&mut pause,&mut timers,false).unwrap();
             assert_eq!(host.running, was_running);
-            host.options(false);
+            host.options(&mut pause,&mut timers,false).unwrap();
             assert_eq!(host.running, was_running);
         }
-        host.options(true);
+        host.options(&mut pause,&mut timers,true).unwrap();
         host.fail("failure after retained mutation".into());
-        host.options(false);
+        host.options(&mut pause,&mut timers,false).unwrap();
         assert!(!host.running);
         host.fail("later stale action".into());
         assert_eq!(host.failure.as_deref(), Some("failure after retained mutation"));
+    }
+    #[test]
+    fn options_reason_zero_preserves_other_reason_and_interface_task() {
+        let mut host=Host::new([0.;3]);host.set_running(true);
+        let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
+        for t in &mut timers{t[12..16].copy_from_slice(&37.5f32.to_le_bytes());}
+        let before=timers.clone();
+        host.options(&mut pause,&mut timers,true).unwrap();
+        host.options(&mut pause,&mut timers,true).unwrap();
+        assert_eq!(&pause.bytes[..4],&[1,0,0,0]);assert_eq!(pause.bytes[8],1);
+        assert!(host.options_save_allowed(&pause,&timers));
+        for (i,t) in timers.iter().enumerate(){
+            let mut wanted=before[i];if i==3{wanted[0]=0;}assert_eq!(*t,wanted);
+        }
+        assert_eq!(timers[2][0],1,"interface mask1 stays live");
+        pause.pause(1,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
+        host.options(&mut pause,&mut timers,false).unwrap();
+        host.options(&mut pause,&mut timers,false).unwrap();
+        assert_eq!(&pause.bytes[..4],&[0,1,0,0]);assert_eq!(pause.bytes[8],1);
+        assert!(!host.options_save_allowed(&pause,&timers),"another reason cannot impersonate this Options owner");
+        assert_eq!(timers[3][0],0);assert_eq!(timers[2][0],1);assert!(host.running);
+        pause.unpause(1,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
+        assert_eq!(timers,before);assert_eq!(pause.bytes,[0;9]);
+    }
+    #[test]
+    fn options_close_retains_another_reason_zero_and_rechecks_real_timer_state() {
+        let mut host=Host::new([0.;3]);host.set_running(true);
+        let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
+        pause.pause(0,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
+        host.options(&mut pause,&mut timers,true).unwrap();assert_eq!(pause.bytes[0],2);
+        assert!(host.options_save_allowed(&pause,&timers));
+        timers[3][0]=1;assert!(!host.options_save_allowed(&pause,&timers));timers[3][0]=0;
+        host.options(&mut pause,&mut timers,false).unwrap();
+        assert_eq!(pause.bytes[0],1);assert_eq!(timers[3][0],0);
+        assert!(!host.options_save_allowed(&pause,&timers));
+    }
+    #[test]
+    fn options_save_projection_releases_only_the_owned_copy() {
+        for other in [None,Some(0),Some(1)] {
+            let mut host=Host::new([0.;3]);host.set_running(true);
+            let mut pause=openmt2001::pause::State::default();
+            let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
+            for (i,t) in timers.iter_mut().enumerate(){t[12..16].copy_from_slice(&(13.25+i as f32).to_le_bytes());}
+            if let Some(reason)=other {pause.pause(reason,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();}
+            let expected=(pause.clone(),timers.clone());
+            host.options(&mut pause,&mut timers,true).unwrap();
+            let live=(pause.clone(),timers.clone());
+            let projected=host.options_save_projection(&pause,&timers).unwrap().unwrap();
+            assert_eq!(projected,expected);assert_eq!((pause.clone(),timers.clone()),live);
+            assert!(host.options_save_allowed(&pause,&timers));assert!(!host.running);
+            host.options(&mut pause,&mut timers,false).unwrap();
+            assert_eq!((pause,timers),expected);
+        }
+    }
+    #[test]
+    fn options_save_projection_refuses_unaccountable_owned_counter() {
+        let mut host=Host::new([0.;3]);let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x3c;20]);
+        assert!(host.options_save_projection(&pause,&timers).unwrap().is_none());
+        host.options(&mut pause,&mut timers,true).unwrap();
+        pause.bytes[0]=128;let live=(pause.clone(),timers.clone());
+        assert!(host.options_save_projection(&pause,&timers).is_err());
+        assert_eq!((pause,timers),live);
+    }
+    #[test]
+    fn network_options_does_not_mint_local_pause_reason() {
+        let mut host=Host::new([0.;3]);host.policy.scheduler.network_enabled=true;
+        let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);let before=timers.clone();
+        host.options(&mut pause,&mut timers,true).unwrap();
+        host.options(&mut pause,&mut timers,false).unwrap();
+        assert_eq!(pause.bytes,[0;9]);assert_eq!(timers,before);
     }
     #[test]
     fn scenario_prompt_preserves_callback_identity() {
@@ -2922,13 +3035,15 @@ mod camera_retirement_tests {
     #[test]
     fn retirement_cannot_resume_and_does_not_clear_a_real_failure() {
         let mut host = Host::new([1., 2., 3.]);
+        let mut pause=openmt2001::pause::State::default();
+        let mut timers=openmt2001::timers::startup_tasks([0x5a;20]);
         let (worker, inbox) = camera_bridge::channel(401);
         host.camera_bridge = Some(worker);
         host.set_running(true);
-        host.options(true);
+        host.options(&mut pause,&mut timers,true).unwrap();
         inbox.retire();
         assert!(host.stop_retired_camera());
-        host.options(false);
+        assert!(host.options(&mut pause,&mut timers,false).is_err());
         host.set_running(true);
         assert!(!host.running);
         assert!(host.failure.is_none());

@@ -520,8 +520,8 @@ impl Renderer {
         self.submit(target, depth, &scene.draws, true, false);
     }
 
-    /// Update a retained surface. Its image/material and maximum vertex count
-    /// stay fixed; changing either requires preparing a new scene.
+    /// Update a retained surface. Primary image, pipeline and maximum vertex
+    /// count stay fixed. FacadeBlend may select its retained day/night secondary.
     pub fn update_surface(
         &self,
         scene: &mut PreparedScene,
@@ -539,6 +539,9 @@ impl Renderer {
         }
         let expanded = expand_vertices(draw)?;
         let values = camera_uniform(draw.view_projection.unwrap_or(camera), fog)?;
+        if let Some(secondary) = self.retained_facade_image(draw)? {
+            self.bind_retained_facade(surface, secondary);
+        }
         self.queue
             .write_buffer(&surface.camera, surface.camera_offset, bytemuck::cast_slice(&values));
         if !expanded.is_empty() {
@@ -550,7 +553,8 @@ impl Renderer {
     }
 
     /// Update vertices for an unchanged material, growing only its vertex buffer
-    /// when camera-dependent sky or live actors need more geometry. Textures stay resident.
+    /// when camera-dependent sky or live actors need more geometry. Primary
+    /// textures stay resident; FacadeBlend may change its secondary image.
     pub fn update_dynamic_surface(
         &self,
         scene: &mut PreparedScene,
@@ -578,14 +582,17 @@ impl Renderer {
         self.update_surface(scene, index, draw, camera, fog)
     }
 
-    /// Update camera-dependent vertices before one batch camera upload. Image,
-    /// material, and camera slots remain unchanged; only geometry may grow.
+    /// Update dynamic vertices before one batch camera upload. Primary image,
+    /// pipeline and camera slots stay fixed. FacadeBlend can rebind its secondary.
     pub fn update_dynamic_vertices(
         &self, scene: &mut PreparedScene, index: usize, draw: &TexturedDraw<'_>,
     ) -> Result<(), String> {
         let surface = scene.draws.get_mut(index).ok_or("missing retained surface")?;
         if surface.mode != draw.mode { return Err("dynamic surface material changed".into()); }
         let expanded = expand_vertices(draw)?;
+        if let Some(secondary) = self.retained_facade_image(draw)? {
+            self.bind_retained_facade(surface, secondary);
+        }
         let bytes = draw.vertices.len() as u64 * 56;
         if bytes > surface.vertices.size() {
             surface.vertices = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -601,8 +608,8 @@ impl Renderer {
     }
 
     /// Copy camera-dependent geometry with one temporary upload allocation.
-    /// Validate all inputs before changing retained buffers; camera/material
-    /// resources remain untouched. Queue order keeps these copies before draws.
+    /// Validate all inputs before changing retained buffers or facade bindings;
+    /// camera slots stay fixed. Queue order keeps these copies before draws.
     pub fn update_dynamic_vertices_batch(
         &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
     ) -> Result<(), String> {
@@ -618,11 +625,15 @@ impl Renderer {
             bytes.saturating_add(draw.vertices.len() as u64 * 56)) > upload_limit;
         let mut expanded = Vec::<[f32; 14]>::new();
         let mut copies = Vec::with_capacity(updates.len());
+        let mut facades = Vec::new();
         for (index, draw) in updates {
             let surface = scene.draws.get(*index).ok_or("missing retained surface")?;
             if surface.mode != draw.mode { return Err("dynamic surface material changed".into()); }
             let offset = expanded.len() as u64 * 56;
             let vertices = expand_vertices(draw)?;
+            if let Some(secondary) = self.retained_facade_image(draw)? {
+                facades.push((*index, secondary));
+            }
             let bytes = vertices.len() as u64 * 56;
             if !oversized { expanded.extend(vertices); }
             copies.push((*index, draw.vertices.len() as u32, offset, bytes));
@@ -638,6 +649,9 @@ impl Renderer {
                 self.update_dynamic_vertices(scene, *index, draw)?;
             }
             return Ok(());
+        }
+        for (index, secondary) in facades {
+            self.bind_retained_facade(&mut scene.draws[index], secondary);
         }
         for &(index, count, _, bytes) in &copies {
             let surface = &mut scene.draws[index];
@@ -701,6 +715,39 @@ impl Renderer {
         self.queue
             .write_buffer(&surface.camera, surface.camera_offset, bytemuck::cast_slice(&values));
         Ok(())
+    }
+
+    // Only the existing facade pipeline admits a secondary selector change.
+    // The cache resolves the exact retained pixels; primary image, camera slot,
+    // sampler and vertex allocation are preserved across a day/night boundary.
+    fn retained_facade_image(&self, draw: &TexturedDraw<'_>)
+        -> Result<Option<(wgpu::Texture, wgpu::TextureView)>, String> {
+        if draw.mode != SurfaceMode::FacadeBlend { return Ok(None); }
+        let image = draw.secondary.as_ref().ok_or("retained facade secondary missing")?;
+        self.upload_texture(image.width, image.height, image.rgba, image.mipmaps).map(Some)
+    }
+
+    fn bind_retained_facade(&self, surface: &mut GpuDraw,
+        secondary: (wgpu::Texture, wgpu::TextureView)) {
+        if surface.secondary.as_ref().is_some_and(|old| old.0 == secondary.0) { return; }
+        surface.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("retained facade texture bindings"),
+            layout: &self.facade_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &surface.camera, offset: surface.camera_offset,
+                        size: std::num::NonZeroU64::new(96),
+                    }) },
+                wgpu::BindGroupEntry { binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&surface.texture_view) },
+                wgpu::BindGroupEntry { binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&surface.sampler) },
+                wgpu::BindGroupEntry { binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&secondary.1) },
+            ],
+        });
+        surface.secondary = Some(secondary);
     }
 
     fn upload_draw(
@@ -1442,5 +1489,66 @@ mod depth_tests {
             ui[2] > ui[0],
             "ordinary UI overlay still clears depth: {ui:?}"
         );
+    }
+}
+
+#[cfg(all(test, feature = "capture"))]
+mod retained_facade_upload_regressions {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires supplied original BuildingTextures and a GPU adapter"]
+    fn native_facade_selector_images_reach_each_retained_gpu_update_path() {
+        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let entry = index.find("gamedata2/BuildingTextures/textures.gtd").unwrap();
+        let set = crate::texture::TextureSet::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+        // Original4b7dd4 and4b7e17 choose handles26 and0. Their input
+        // representations are pinned separately by the cached-row-zero test.
+        let day = &set.textures[0];
+        let night = &set.textures[26];
+        let night_pixels = crate::texture::loader_pixels(night);
+        let vertices = [[0., 0., 0., 0.4, 0.5, 0.6, 0., 0.]; 3];
+        let specular = [[0.1, 0.2, 0.3]; 3];
+        let uv = [[0., 0.]; 3];
+        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        let draw_for = |daytime| TexturedDraw {
+            view_projection: None, vertices: &vertices, specular: Some(&specular),
+            diffuse_alpha: None, mode: SurfaceMode::FacadeBlend,
+            width: 1, height: 1, rgba: &[255; 4], mipmaps: false,
+            secondary: Some(SecondaryTexture { uv: &uv, diffuse_alpha: 127,
+                width: if daytime { day.width } else { night.width },
+                height: if daytime { day.height } else { night.height },
+                rgba: if daytime { day.texels } else { &night_pixels }, mipmaps: true }),
+        };
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        for path in 0..4 {
+            let mut scene = renderer.prepare(&[draw_for(false)], identity, None).unwrap();
+            let original_camera = scene.draws[0].camera.clone();
+            let original_vertices = scene.draws[0].vertices.clone();
+            let original_primary = scene.draws[0].texture.clone();
+            for daytime in [true, false, true] {
+                let draw = draw_for(daytime);
+                match path {
+                    0 => renderer.update_dynamic_vertices(&mut scene, 0, &draw).unwrap(),
+                    1 => renderer.update_dynamic_surface(&mut scene, 0, &draw, identity, None).unwrap(),
+                    2 => renderer.update_dynamic_vertices_batch(&mut scene, &[(0, draw)]).unwrap(),
+                    _ => renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
+                        &[(0, draw)], 0).unwrap(),
+                }
+                let image = draw.secondary.as_ref().unwrap();
+                let expected = renderer.upload_texture(image.width, image.height,
+                    image.rgba, true).unwrap();
+                assert_eq!(scene.draws[0].secondary.as_ref().unwrap().0, expected.0);
+                assert_eq!(scene.draws[0].camera, original_camera);
+                assert_eq!(scene.draws[0].vertices, original_vertices);
+                assert_eq!(scene.draws[0].texture, original_primary);
+                assert_eq!(scene.draws[0].mode, SurfaceMode::FacadeBlend);
+            }
+        }
     }
 }

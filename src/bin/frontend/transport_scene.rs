@@ -74,8 +74,7 @@ impl Resources {
 pub struct Layer {
     auxiliaries: Vec<[u8; 284]>,
     models: Arc<BTreeMap<u32, Model>>,
-    palette: openmt2001::lighting::Palette,
-    sun: [f32; 3],
+    suncolors: openmt2001::lighting::SunColors,
     surfaces: Vec<OwnedDraw>,
     range: Range<usize>,
 }
@@ -87,19 +86,12 @@ impl Layer {
         resources: &Resources,
         auxiliaries: Vec<[u8; 284]>,
     ) -> Result<Self, String> {
-        let light = openmt2001::lighting::SunColors::parse(suncols)?
-            .sample(session.world.clock.hour(), 0)?;
+        let suncolors = openmt2001::lighting::SunColors::parse(suncols)?;
+        suncolors.sample(session.world.clock.hour(), 0)?;
         Ok(Self {
             auxiliaries,
             models: Arc::clone(&resources.models),
-            palette: openmt2001::lighting::Palette::new(
-                light.diffuse,
-                light.ambient,
-                light.diffuse,
-                0,
-                light.scale,
-            ),
-            sun: light.direction,
+            suncolors,
             surfaces: resources.surfaces.clone(),
             range: 0..0,
         })
@@ -129,6 +121,12 @@ impl Layer {
         sample: openmt2001::flyby::CameraSample,
         detail: u32,
     ) -> Result<Range<usize>, String> {
+        let time = scene.daylight_time()
+            .ok_or("moving layer needs original scene daylight")?;
+        let light = self.suncolors.sample(time.0, time.1)?;
+        let palette = openmt2001::lighting::Palette::new(
+            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+        );
         let draws = scene
             .draws
             .get_mut(self.range.clone())
@@ -169,14 +167,14 @@ impl Layer {
                 continue;
             }
             let transform = crate::people_scene::transform_from_matrix(matrix);
-            let light = crate::people_scene::sunlight(matrix, self.sun);
+            let light = crate::people_scene::sunlight(matrix, light.direction);
             for part in &model.parts {
                 let draw = &mut draws[part.page];
                 for (vertex, &normal) in part.vertices.iter().zip(&part.normals) {
                     let mut vertex = *vertex;
                     let position = transform.position([vertex[0], vertex[1], vertex[2]]);
                     vertex[..3].copy_from_slice(&position);
-                    let shades = self.palette.shade_static(normal, light)?;
+                    let shades = palette.shade_static(normal, light)?;
                     vertex[3..6].copy_from_slice(&color(shades[0]));
                     draw.vertices.push(vertex);
                     draw.specular.as_mut().unwrap().push(color(shades[1]));

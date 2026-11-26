@@ -601,6 +601,7 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
     // Texture family 0 is diagnostic white, 1 facade, 2 roof.
     let mut batches = BTreeMap::<(usize, usize), Vec<[f32; 8]>>::new();
     let mut runtime_spans = Vec::<RuntimeSpan>::new();
+    let mut lighting_spans = Vec::<CityLightingSpan>::new();
     let mut fallback_texture = None;
     let mut category_model_heights = BTreeMap::<usize, f32>::new();
     let mut inspection_buildings = Vec::new();
@@ -676,9 +677,10 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                     if runtime_slot.is_some() {
                         let building = building.as_ref().ok_or("runtime span has no building")?;
                         source_positions.push(building.local_position(positions[source]));
-                        if colors.is_some() {
-                            source_normals.push(building.local_normal(part.normals[index]));
-                        }
+                    }
+                    if colors.is_some() && (runtime_slot.is_some() || request.animated) {
+                        source_normals.push(building.as_ref()
+                            .map_or(part.normals[index], |b| b.local_normal(part.normals[index])));
                     }
                     if let Some(uvs) = secondary_uvs {
                         let position = building
@@ -707,6 +709,13 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                         .or_default()
                         .push([x, y, z, r, g, b, u, v]);
                 }
+            }
+            if request.animated && !source_normals.is_empty() {
+                lighting_spans.push(CityLightingSpan {
+                    key, draw: usize::MAX, start,
+                    inputs: CityLightingInputs::Normals(source_normals.clone()),
+                    runtime: runtime_slot.map(|slot| (slot, runtime_poses[ordinal])),
+                });
             }
             if let Some(slot) = runtime_slot && !source_positions.is_empty() {
                 runtime_spans.push(RuntimeSpan {
@@ -1027,6 +1036,8 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                         return Err("city mesh texture index out of bounds".into());
                     }
                     let family = first_family + usize::from(part.texture);
+                    let start = batches.get(&(family, 0)).map_or(0, Vec::len);
+                    let mut source_normals = Vec::new();
                     for index in part.vertex_indices() {
                         let [x, y, z] = positions[index];
                         let [u, v] = uvs[index];
@@ -1043,6 +1054,13 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                             }
                             unpack(tint)
                         } else if let Some(colors) = &colors {
+                            if request.animated {
+                                let at = index * 12;
+                                let bytes = mesh.normal_bytes.get(at..at + 12)
+                                    .ok_or("retained scenery normal missing")?;
+                                source_normals.push(std::array::from_fn(|i|
+                                    f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())));
+                            }
                             specular_batches
                                 .entry((family, 0))
                                 .or_default()
@@ -1067,6 +1085,19 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                                 u,
                                 v,
                             ]);
+                    }
+                    if request.animated && colors.is_some() {
+                        let count = batches.get(&(family, 0)).map_or(0, Vec::len) - start;
+                        if count != 0 {
+                            lighting_spans.push(CityLightingSpan {
+                                key: (family, 0), draw: usize::MAX, start, runtime: None,
+                                inputs: if tint != 0xffffffff {
+                                    CityLightingInputs::Constant { color: tint, count }
+                                } else {
+                                    CityLightingInputs::Normals(source_normals)
+                                },
+                            });
+                        }
                     }
                 }
             }
@@ -1528,8 +1559,13 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             end,
         }
     });
+    let mut images = BTreeMap::<(usize, usize), Arc<[u8]>>::new();
+    let mut own_image = |bytes: &[u8]| {
+        images.entry((bytes.as_ptr() as usize, bytes.len()))
+            .or_insert_with(|| Arc::from(bytes)).clone()
+    };
     let animation = if request.animated {
-        let facades = draws
+        let facades: Vec<_> = draws
             .iter()
             .enumerate()
             .filter_map(|(draw_index, draw)| {
@@ -1543,6 +1579,23 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                     .map(|inputs| (draw_index, inputs))
             })
             .collect();
+        // Both are real BuildingTextures owners, with the same representations
+        // as initial submission: cached row 0, loader-converted row 26.
+        let facade_images = if facades.is_empty() { None } else {
+            let day = cached_daylight_secondary.as_ref()
+                .ok_or("retained day facade image missing")?;
+            let night = sets.get(2).and_then(|set| set.textures.get(26))
+                .ok_or("retained night facade image missing")?;
+            Some([day, night].map(|image| FacadeImage {
+                width: image.width, height: image.height, rgba: own_image(image.texels),
+            }))
+        };
+        for span in &mut lighting_spans {
+            let vertices = batches.get(&span.key).ok_or("retained lighting batch missing")?;
+            span.draw = draws.iter()
+                .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
+                .ok_or("retained lighting draw missing")?;
+        }
         let sky = if let Some(bytes) = request.suncols {
             let daylight = crate::water::Daylight::from_suncols(bytes)?;
             let phase = saved_phase.unwrap();
@@ -1567,6 +1620,8 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             height: height_pixels,
             facades,
             facade_material,
+            facade_images,
+            lighting: lighting_spans,
             water_meshes,
             water: crate::water::WaterPhase {
                 previous_tick: u32::MAX,
@@ -1579,13 +1634,6 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         })
     } else {
         None
-    };
-    let mut images = BTreeMap::<(usize, usize), Arc<[u8]>>::new();
-    let mut own_image = |bytes: &[u8]| {
-        images
-            .entry((bytes.as_ptr() as usize, bytes.len()))
-            .or_insert_with(|| Arc::from(bytes))
-            .clone()
     };
     let ground_colors = match (&palette, &light) {
         (Some(palette), Some(light)) => palette.shade_static([0., 1., 0.], light.direction)?,
@@ -1651,12 +1699,121 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
 
 type FacadeInputs = Vec<([f32; 3], [f32; 2])>;
 
+// Only the assembler's ordinary normal/constant producers opt into this list.
+// Precolored and other pipeline owners keep their own colors and are not inferred
+// from a draw's mode, which may combine several objects in one material batch.
+#[derive(Clone)]
+enum CityLightingInputs {
+    Normals(Vec<[f32; 3]>),
+    Constant { color: u32, count: usize },
+}
+#[derive(Clone)]
+struct CityLightingSpan {
+    key: (usize, usize),
+    draw: usize,
+    start: usize,
+    inputs: CityLightingInputs,
+    runtime: Option<(usize, BuildingPose)>,
+}
+#[derive(Clone)]
+struct FacadeImage {
+    width: u32,
+    height: u32,
+    rgba: Arc<[u8]>,
+}
+
+fn relight_city(draws: &mut [OwnedDraw], spans: &[CityLightingSpan],
+    palette: &crate::lighting::Palette, sun: [f32; 3],
+) -> Result<Vec<usize>, String> {
+    let unpack = |color: u32| [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.);
+    // Compute and validate every affected span before changing any city colors.
+    let mut pending = Vec::new();
+    for span in spans {
+        let draw = draws.get(span.draw).ok_or("retained lighting draw missing")?;
+        if !matches!(draw.mode, SurfaceMode::StaticLit | SurfaceMode::StaticOpaque
+            | SurfaceMode::FacadeBlend) {
+            return Err("retained lighting leaves ordinary city material".into());
+        }
+        let count = match &span.inputs {
+            CityLightingInputs::Normals(normals) => normals.len(),
+            CityLightingInputs::Constant { color, count } => {
+                // Preserve the source-selected constant branch, including its
+                // sentinel distinction; no normal or material is fabricated.
+                if *color == 0xffffffff { return Err("invalid retained constant color".into()); }
+                *count
+            }
+        };
+        let end = span.start.checked_add(count).ok_or("retained lighting span overflow")?;
+        draw.vertices.get(span.start..end).ok_or("retained lighting span leaves draw")?;
+        let specular = draw.specular.as_ref().ok_or("retained lighting specular missing")?;
+        specular.get(span.start..end).ok_or("retained lighting specular span leaves draw")?;
+        let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
+        let direction = span.runtime.map_or(sun, |(_, pose)| pose.sunlight(sun));
+        let colors = normals.iter().map(|&normal| palette.shade_static(normal, direction))
+            .collect::<Result<Vec<_>, _>>()?;
+        pending.push((span.draw, span.start, colors));
+    }
+    let mut changed = Vec::new();
+    for (index, start, colors) in pending {
+        let draw = &mut draws[index];
+        let specular = draw.specular.as_mut().unwrap();
+        for (offset, [diffuse, shine]) in colors.into_iter().enumerate() {
+            draw.vertices[start + offset][3..6].copy_from_slice(&unpack(diffuse));
+            specular[start + offset] = unpack(shine);
+        }
+        changed.push(index);
+    }
+    changed.sort_unstable();
+    changed.dedup();
+    Ok(changed)
+}
+
+fn relight_facades(draws: &mut [OwnedDraw], state: &mut Animation,
+    diffuse: u32, camera: &[f32; 12],
+) -> Result<Vec<usize>, String> {
+    if state.facades.is_empty() { return Ok(Vec::new()); }
+    // Preserve b53's explicit enabled day/night route. Device capability
+    // selection is a separate input contract, not inferred from modern support.
+    let material = FacadeMaterial::select(diffuse, true, true)
+        .ok_or("retained facade selector has no enabled material")?;
+    let variant = match (material.texture, material.camera_coordinates) {
+        (0, true) => 0,
+        (26, false) => 1,
+        _ => return Err("unsupported retained facade selection".into()),
+    };
+    let image = &state.facade_images.as_ref().ok_or("retained facade images missing")?[variant];
+    for (index, inputs) in &state.facades {
+        let draw = draws.get(*index).ok_or("retained facade draw missing")?;
+        let secondary = draw.secondary.as_ref().ok_or("retained facade secondary missing")?;
+        if draw.mode != SurfaceMode::FacadeBlend || inputs.len() != draw.vertices.len()
+            || secondary.uv.len() != inputs.len() {
+            return Err("retained facade topology changed".into());
+        }
+    }
+    let mut changed = Vec::new();
+    for (index, inputs) in &state.facades {
+        let secondary = draws[*index].secondary.as_mut().unwrap();
+        secondary.width = image.width;
+        secondary.height = image.height;
+        secondary.rgba = image.rgba.clone();
+        secondary.diffuse_alpha = material.diffuse_alpha;
+        for (uv, &(position, original)) in secondary.uv.iter_mut().zip(inputs) {
+            *uv = material.coordinates(camera, position, original);
+        }
+        changed.push(*index);
+    }
+    state.facade_material = Some(material);
+    Ok(changed)
+}
+
 #[derive(Clone)]
 struct Animation {
     width: u32,
     height: u32,
     facades: Vec<(usize, FacadeInputs)>,
     facade_material: Option<FacadeMaterial>,
+    facade_images: Option<[FacadeImage; 2]>,
+    lighting: Vec<CityLightingSpan>,
     water_meshes: Vec<(Vec<[f32; 3]>, Vec<u16>)>,
     water: crate::water::WaterPhase,
     sky: Option<([f32; 3], f32, u32)>,
@@ -1756,6 +1913,13 @@ impl Scene {
                 }
                 changed_draws.push(span.draw);
             }
+            if let Some(state) = &mut self.animation {
+                for span in &mut state.lighting {
+                    if span.runtime.is_some_and(|(owner, _)| owner == slot) {
+                        span.runtime = Some((slot, pose));
+                    }
+                }
+            }
         }
         changed_draws.sort_unstable();
         changed_draws.dedup();
@@ -1771,17 +1935,26 @@ impl Scene {
     }
 
     /// Recompute original daylight at the retained hour and within-hour counter.
-    /// Static building palettes use the existing hourly snapshot boundary.
+    /// Ordinary city colors retain their original inputs, not an hourly bake.
     pub fn advance_daylight(&mut self, phase: u32, counter: u32,
         camera: crate::flyby::CameraSample) -> Result<Vec<usize>, String> {
         let state = self.animation.as_mut().ok_or("scene was not prepared for animation")?;
         if state.daylight_time == Some((phase, counter)) { return Ok(Vec::new()); }
-        let colors = state.suncolors.as_ref().ok_or("animated scene has no sun colors")?;
+        let colors = state.suncolors.clone().ok_or("animated scene has no sun colors")?;
         let light = colors.sample(phase, counter)?;
         let sun = light.direction;
-        self.ground_colors = crate::lighting::Palette::new(
+        let palette = crate::lighting::Palette::new(
             light.diffuse, light.ambient, light.diffuse, 0, light.scale,
-        ).shade_static([0., 1., 0.], sun)?;
+        );
+        let mut changed = relight_city(&mut self.draws, &state.lighting, &palette, sun)?;
+        let scene_view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
+        changed.extend(relight_facades(&mut self.draws, state, light.diffuse, &scene_view)?);
+        self.ground_colors = palette.shade_static([0., 1., 0.], sun)?;
+        // A later pose-only patch must shade with this same temporal sample.
+        if let Some(patches) = &mut self.runtime_patches {
+            patches.sunlight = sun;
+            patches.palette = Some(palette);
+        }
         state.sky = Some((sun, colors.daylight.phase_angle(phase, counter), light.diffuse));
         state.daylight_time = Some((phase, counter));
         let [start, end] = light.fog.distances();
@@ -1792,7 +1965,6 @@ impl Scene {
         let view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
         let quads = crate::sky::celestial_quads(camera.eye, view,
             colors.daylight.phase_angle(phase, counter), sun, light.diffuse);
-        let mut changed = Vec::new();
         let mut celestial = 0;
         for (index, draw) in self.draws.iter_mut().enumerate() {
             match draw.mode {
@@ -1852,6 +2024,8 @@ impl Scene {
                 _ => (),
             }
         }
+        changed.sort_unstable();
+        changed.dedup();
         Ok(changed)
     }
     /// Advance original 822d40-driven water and cloud coordinates. Reframing
@@ -2650,5 +2824,242 @@ mod tests {
             assert_eq!(daytime.draws[stars].active_vertices, Some(0));
         }
 
+    }
+}
+
+#[cfg(test)]
+mod temporal_city_lighting_regressions {
+    use super::*;
+
+    fn read(key: &str) -> Vec<u8> {
+        std::fs::read(std::env::var(key).expect(key)).unwrap()
+    }
+    fn word(bytes: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+    }
+    fn rgb(color: u32) -> [f32; 3] {
+        [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.)
+    }
+    fn camera() -> crate::flyby::CameraSample {
+        crate::flyby::CameraSample {
+            eye: [600., 400., 600.], target: [0., 0., 0.],
+            up: [0., 1., 0.], vertical_fov: 45.,
+        }
+    }
+
+    // Expected colors come from retained ORIGINAL 4f2580 output words, never
+    // a second modern assembly or modern Palette/shade_static calculation.
+    fn assert_native_normal_colors(scene: &Scene, observations: &[u8], row: usize, owner: Option<usize>) -> usize {
+        let count = word(observations, 12) as usize;
+        let start = 16 + row * (12 + count * 20) + 12;
+        let mut matched = 0;
+        for span in &scene.animation.as_ref().unwrap().lighting {
+            if owner.is_some_and(|owner| !span.runtime.is_some_and(|(slot, _)| slot == owner)) { continue; }
+            if span.runtime.is_some_and(|(_, pose)| pose.scale != [1.; 3]) { continue; }
+            let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
+            for (offset, &normal) in normals.iter().enumerate() {
+                for i in 0..count {
+                    let at = start + i * 20;
+                    let source = std::array::from_fn::<_, 3, _>(|axis|
+                        f32::from_bits(word(observations, at + axis * 4)));
+                    if source != normal { continue; }
+                    let draw = &scene.draws[span.draw];
+                    assert_eq!(&draw.vertices[span.start + offset][3..6],
+                        &rgb(word(observations, at + 12)), "row {row}, draw {}", span.draw);
+                    assert_eq!(draw.specular.as_ref().unwrap()[span.start + offset],
+                        rgb(word(observations, at + 16)), "row {row}, draw {}", span.draw);
+                    matched += 1;
+                }
+            }
+        }
+        assert!(matched > 0, "fixture must contain actual city normals covered by original output");
+        matched
+    }
+
+    #[test]
+    #[ignore = "requires supplied original city inputs and retained native-lighting fixtures"]
+    fn retained_city_colors_follow_original_within_hour_observations() {
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build_file = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let map = read("OPENMT2001_INTRO_MAP");
+        let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+        let native = std::fs::read(&native_path).unwrap();
+        let vertices = std::fs::read(std::path::Path::new(&native_path)
+            .with_extension("vertices.bin")).unwrap();
+        assert_eq!(&native[..8], b"MTLIGHT3");
+        assert_eq!(&vertices[..8], b"MTLITV01");
+        assert_eq!(word(&native, 8), word(&vertices, 8));
+        let camera = camera();
+        let mut scene = assemble(Request {
+            build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
+            original: Some(OriginalAssets { executable: &executable,
+                directory: &directory, archive: &archive }),
+            suncols: Some(&suncols), phase: Some(20), camera: Some(camera),
+            width: 1280, height: 960, animated: true,
+        }).unwrap();
+        // A separately owned precolored surface can share StaticOpaque mode;
+        // selection by pipeline alone would incorrectly recolor this sentinel.
+        let mut precolored = OwnedDraw::texture_page(SurfaceMode::StaticOpaque, 1, 1,
+            Arc::from([255u8; 4].as_slice()));
+        precolored.vertices.push([1., 2., 3., 0.1, 0.2, 0.3, 0.4, 0.5]);
+        precolored.specular.as_mut().unwrap().push([0.; 3]);
+        let precolored_index = scene.draws.len();
+        scene.draws.push(precolored.clone());
+        let original_draws = scene.draws.clone();
+        assert!(scene.animation.as_ref().unwrap().lighting.iter().any(|span|
+            matches!(span.inputs, CityLightingInputs::Constant { count, .. } if count != 0)),
+            "fixture must contain actual constant-color pavement");
+        let mut previous = None;
+        let mut within_hour_changes = 0;
+        for row in 0..word(&native, 8) as usize {
+            let at = 12 + row * (60 + 768 * 4);
+            let time = (word(&native, at), word(&native, at + 4));
+            let changed = scene.advance_daylight(time.0, time.1, camera).unwrap();
+            assert_native_normal_colors(&scene, &vertices, row, None);
+            if previous.is_some_and(|(phase, _)| phase == time.0) {
+                within_hour_changes += 1;
+            }
+            previous = Some(time);
+            let state = scene.animation.as_ref().unwrap();
+            assert!(!state.facades.is_empty(), "fixture must exercise facade material ownership");
+            for span in &state.lighting {
+                let draw = &scene.draws[span.draw];
+                match &span.inputs {
+                    CityLightingInputs::Normals(_) => assert!(changed.contains(&span.draw)),
+                    CityLightingInputs::Constant { count, .. } => {
+                        let end = span.start + *count;
+                        assert_eq!(&draw.vertices[span.start..end],
+                            &original_draws[span.draw].vertices[span.start..end]);
+                        assert_eq!(&draw.specular.as_ref().unwrap()[span.start..end],
+                            &original_draws[span.draw].specular.as_ref().unwrap()[span.start..end]);
+                    }
+                }
+            }
+            // Independent original selector instructions 4b7d9f..4b7e3b:
+            // low-byte*2, threshold127, night26/255-factor, day0/factor/6.
+            let factor = (word(&native, at + 8) & 255) * 2;
+            let daytime = factor >= 127;
+            let expected = &state.facade_images.as_ref().unwrap()[if daytime { 0 } else { 1 }];
+            for (index, inputs) in &state.facades {
+                let secondary = scene.draws[*index].secondary.as_ref().unwrap();
+                assert_eq!(secondary.rgba, expected.rgba);
+                assert_eq!((secondary.width, secondary.height), (expected.width, expected.height));
+                assert_eq!(secondary.diffuse_alpha,
+                    if daytime { (factor / 6) as u8 } else { (255 - factor) as u8 });
+                if !daytime {
+                    assert_eq!(secondary.uv, inputs.iter().map(|(_, uv)| *uv).collect::<Vec<_>>());
+                }
+            }
+            assert_eq!(scene.draws[precolored_index].vertices, precolored.vertices);
+            assert_eq!(scene.draws[precolored_index].specular, precolored.specular);
+            assert!(!changed.contains(&precolored_index));
+            for (index, draw) in scene.draws.iter().enumerate() {
+                if !matches!(draw.mode, SurfaceMode::StaticOpaque | SurfaceMode::StaticLit
+                    | SurfaceMode::FacadeBlend) { continue; }
+                assert_eq!(draw.vertices.len(), original_draws[index].vertices.len());
+                for (after, before) in draw.vertices.iter().zip(&original_draws[index].vertices) {
+                    assert_eq!(&after[..3], &before[..3]);
+                    assert_eq!(&after[6..], &before[6..]);
+                }
+                assert!(Arc::ptr_eq(&draw.rgba, &original_draws[index].rgba));
+            }
+            assert!(scene.advance_daylight(time.0, time.1, camera).unwrap().is_empty());
+        }
+        assert!(within_hour_changes > 0, "must cover real same-phase 0/197 native pairs");
+    }
+
+    #[test]
+    #[ignore = "requires supplied original save/assets and retained native-lighting fixtures"]
+    fn temporal_palette_and_pose_owner_remain_coherent_in_both_orders() {
+        let executable = read("OPENMT2001_EXE");
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let build_file = read("OPENMT2001_BUILD_FILE");
+        let suncols = read("OPENMT2001_SUNCOLS");
+        let save_bytes = read("OPENMT2001_SAVE_ONE");
+        let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+        let native = std::fs::read(&native_path).unwrap();
+        let observations = std::fs::read(std::path::Path::new(&native_path)
+            .with_extension("vertices.bin")).unwrap();
+        let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
+        let board = Board::from_v14(&PeImage::parse(&executable).unwrap()).unwrap();
+        let file = BuildFile::parse(&build_file).unwrap();
+        let mut records = vec![[0u8; 0x394]; 600];
+        for saved in save.buildings().unwrap() {
+            let building = SceneBuilding::from_saved(&saved, &board, &file).unwrap();
+            let record = &mut records[saved.slot];
+            record[..0x40].copy_from_slice(saved.bytes);
+            record[0x14..0x18].copy_from_slice(&3u32.to_le_bytes());
+            let category = crate::building_geometry::V14_CATEGORY_BASE + saved.category as u32 * 0x17c;
+            record[0x40..0x44].copy_from_slice(&category.to_le_bytes());
+            record[0x170..0x174].copy_from_slice(&1u32.to_le_bytes());
+            for (axis, value) in [building.center[0], 0.5, building.center[1]].into_iter().enumerate() {
+                record[0x58 + axis * 4..0x5c + axis * 4].copy_from_slice(&value.to_le_bytes());
+                record[0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&1f32.to_le_bytes());
+            }
+        }
+        let mut scene = assemble(Request {
+            build_file: &build_file, source: Source::RuntimeBuildings {
+                records: &records, category_base: crate::building_geometry::V14_CATEGORY_BASE },
+            original: Some(OriginalAssets { executable: &executable, directory: &directory, archive: &archive }),
+            suncols: Some(&suncols), phase: Some(20), camera: Some(camera()),
+            width: 1280, height: 960, animated: true,
+        }).unwrap();
+        let slot = records.iter().position(|row| row[0x3f] != 0).unwrap();
+        let row_for = |phase, counter| (0..word(&native, 8) as usize).find(|&row| {
+            let at = 12 + row * (60 + 768 * 4);
+            (word(&native, at), word(&native, at + 4)) == (phase, counter)
+        }).unwrap();
+        scene.advance_daylight(6, 197, camera()).unwrap();
+        let mut moved = records.clone();
+        moved[slot][0x58..0x5c].copy_from_slice(&700f32.to_le_bytes());
+        let changed = scene.patch_runtime_poses(&records, &moved).unwrap().unwrap();
+        assert!(!changed.is_empty());
+        assert_native_normal_colors(&scene, &observations, row_for(6, 197), Some(slot));
+        // A scale update must be retained for the NEXT temporal relight too.
+        let mut shrunk = moved.clone();
+        for axis in 0..3 {
+            shrunk[slot][0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&0.5f32.to_le_bytes());
+        }
+        scene.patch_runtime_poses(&moved, &shrunk).unwrap().unwrap();
+        for span in &scene.animation.as_ref().unwrap().lighting {
+            if let Some((owner, pose)) = span.runtime && owner == slot { assert_eq!(pose.scale, [0.5; 3]); }
+        }
+        scene.advance_daylight(7, 0, camera()).unwrap();
+        // Use the retained ORIGINAL palette words and direction, plus the
+        // independently traced 4f2390/4f2580 scalar protocol. No modern palette
+        // construction or shade_static call supplies these scaled expectations.
+        let palette_at = 12 + row_for(7, 0) * (60 + 768 * 4);
+        let original_sun: [f32; 3] = std::array::from_fn(|axis|
+            f32::from_bits(word(&native, palette_at + 28 + axis * 4)));
+        let mut scaled_vertices = 0;
+        for span in &scene.animation.as_ref().unwrap().lighting {
+            let Some((owner, pose)) = span.runtime else { continue; };
+            if owner != slot { continue; }
+            let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
+            let mut vector: [f32; 3] = std::array::from_fn(|axis|
+                (f64::from(original_sun[axis]) * f64::from(pose.scale[axis])) as f32);
+            vector[2] = -vector[2];
+            vector = vector.map(|value| (f64::from(value) * 127.) as f32);
+            for (offset, normal) in normals.iter().enumerate() {
+                let dot = (f64::from(vector[0]) * f64::from(normal[0])
+                    + f64::from(vector[1]) * f64::from(normal[1]))
+                    + f64::from(vector[2]) * f64::from(normal[2]);
+                let index = (dot.round_ties_even() as i32 + 127) as usize;
+                let primary = word(&native, palette_at + 60 + index * 4);
+                let secondary_index = ((primary as i32 >> 24) + 127) as usize;
+                let shine = word(&native, palette_at + 60 + 256 * 4 + secondary_index * 4);
+                let draw = &scene.draws[span.draw];
+                assert_eq!(&draw.vertices[span.start + offset][3..6], &rgb(primary));
+                assert_eq!(draw.specular.as_ref().unwrap()[span.start + offset], rgb(shine));
+                scaled_vertices += 1;
+            }
+        }
+        assert!(scaled_vertices > 0);
+        scene.patch_runtime_poses(&shrunk, &moved).unwrap().unwrap();
+        assert_native_normal_colors(&scene, &observations, row_for(7, 0), Some(slot));
     }
 }
