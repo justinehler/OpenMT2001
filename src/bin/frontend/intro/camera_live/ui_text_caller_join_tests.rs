@@ -119,6 +119,7 @@ fn inspection(assets: &Assets) -> Inspection {
         tutorial_message: Default::default(),
         event_list: Default::default(),
         stats_panel: Default::default(),
+        market_share_panel: Default::default(),
         stats_requested: Default::default(),
         tutorial_camera_seen: Default::default(),
         auction_notice: Default::default(),

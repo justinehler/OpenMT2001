@@ -943,6 +943,7 @@ enum FreshRequest {
     Card(crate::fresh_city::cards::Action),
     AuctionButton(u32),
     Stats(crate::live_host::StatsAction),
+    DismissMarketShare,
     HumanDialog(
         crate::human_dialog::Reply,
         mpsc::Sender<Vec<crate::prompt::Request>>,
@@ -1785,6 +1786,7 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                                 last_tick = Instant::now();
                             }
+                            FreshRequest::DismissMarketShare => host.dismiss_market_share(),
                             FreshRequest::ToggleSpeed => host.toggle_speed(),
                             FreshRequest::Stats(action) => {
                                 if let Err(error) = host.stats_action(&mut session, action) {
@@ -3250,6 +3252,7 @@ struct Inspection {
     tutorial_message: crate::prompt::State,
     event_list: crate::event_list::View,
     stats_panel: crate::stats_panel::View,
+    market_share_panel: crate::market_share_panel::View,
     stats_requested: bool,
     tutorial_camera_seen: usize,
     auction_notice: crate::auction_notice::State,
@@ -5143,6 +5146,10 @@ impl Intro {
                     status.tutorial_controls.camera_disabled
                         || status.tutorial_controls.all_disabled
                 })
+                && !view
+                    .live_status
+                    .as_ref()
+                    .is_some_and(|s| s.market_share.is_some())
                 && view.mouse_buttons[1]
                 && self.process_frontend.is_none()
                 && let Some(previous) = view.cursor
@@ -5155,7 +5162,11 @@ impl Intro {
             }
             view.cursor = Some(position);
             view.pointer = internal_pointer(position, size);
-            let time_input = !view.stats_requested
+            let time_input = !view
+                .live_status
+                .as_ref()
+                .is_some_and(|s| s.market_share.is_some())
+                && !view.stats_requested
                 && !view
                     .live_status
                     .as_ref()
@@ -5402,6 +5413,36 @@ impl Intro {
     }
     fn inspection_mouse_inner(&mut self, button: winit::event::MouseButton, pressed: bool) {
         if let Some(view) = &mut self.inspection {
+            if view
+                .live_status
+                .as_ref()
+                .is_some_and(|s| s.market_share.is_some())
+                && view.prompts.request().is_none()
+                && let Some(menu) = &self.menu
+            {
+                if button == winit::event::MouseButton::Left {
+                    if view.market_share_panel.pointer(
+                        menu.market_share_assets(),
+                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        pressed,
+                    ) && let Some(sender) = &view._fresh_session
+                    {
+                        let _ = sender.send(FreshRequest::DismissMarketShare);
+                        view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
+                    }
+                    view.mouse_buttons[0] = pressed;
+                }
+                if button == winit::event::MouseButton::Right {
+                    view.mouse_buttons[1] = pressed;
+                    view.toolbar_right_held = pressed;
+                    view.toolbar_input.cancel();
+                }
+                view.time_panel.cancel_input();
+                view.time_pressed = None;
+                view.auction_panel.cancel_press();
+                view.drag = [0; 2];
+                return;
+            }
             if view.ui_graph.is_some() && button == winit::event::MouseButton::Left {
                 //Read the SAME staged GUI owner; physical/display state
                 //cannot overwrite old current/prior GUI cells before poll.
@@ -8009,6 +8050,7 @@ impl Intro {
                         tutorial_message: crate::prompt::State::default(),
                         event_list: crate::event_list::View::default(),
                         stats_panel: crate::stats_panel::View::default(),
+                        market_share_panel: crate::market_share_panel::View::default(),
                         stats_requested: false,
                         tutorial_camera_seen: 0,
                         auction_notice: crate::auction_notice::State::default(),
@@ -8232,6 +8274,8 @@ impl Intro {
                                     std::mem::take(&mut previous.tutorial_message);
                                 view.event_list = std::mem::take(&mut previous.event_list);
                                 view.stats_panel = std::mem::take(&mut previous.stats_panel);
+                                view.market_share_panel =
+                                    std::mem::take(&mut previous.market_share_panel);
                                 view.stats_requested = previous.stats_requested;
                                 view.auction_notice = std::mem::take(&mut previous.auction_notice);
                                 view.prompt_reply = previous.prompt_reply.take();
@@ -9346,6 +9390,19 @@ impl Intro {
                         .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
+            if let Some(menu) = &self.menu {
+                view.market_share_panel.update(
+                    menu.market_share_assets(),
+                    &self.renderer,
+                    view.live_status
+                        .as_ref()
+                        .and_then(|s| s.market_share.as_ref()),
+                )?;
+                if let Some(panel) = &view.market_share_panel.prepared {
+                    self.renderer
+                        .draw_overlay(&self.color_view, &self.depth_view, panel);
+                }
+            }
             if view.prompts.request().is_some()
                 && let Some(menu) = &self.menu
             {
@@ -10150,6 +10207,19 @@ impl Intro {
                             .and_then(|status| status.stats.as_ref()),
                     )?;
                     if let Some(panel) = &view.stats_panel.prepared {
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, panel);
+                    }
+                }
+                if let Some(menu) = &self.menu {
+                    view.market_share_panel.update(
+                        menu.market_share_assets(),
+                        &self.renderer,
+                        view.live_status
+                            .as_ref()
+                            .and_then(|s| s.market_share.as_ref()),
+                    )?;
+                    if let Some(panel) = &view.market_share_panel.prepared {
                         self.renderer
                             .draw_overlay(&self.color_view, &self.depth_view, panel);
                     }
