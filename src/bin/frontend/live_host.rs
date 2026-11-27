@@ -25,6 +25,7 @@ pub struct Status {
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
+    pub comparison: Option<crate::comparison::Snapshot>,
     pub result_request: Option<ResultRequest>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
@@ -211,6 +212,7 @@ pub struct Host {
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
     stats: Option<crate::stats_panel::State>,
+    comparison: Option<crate::comparison::Runtime>,
     cash_arrow: crate::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<crate::card_panel::Panel>,
@@ -425,6 +427,7 @@ impl Host {
             presentation_started: false,
             game_active: false,
             stats: None,
+            comparison: None,
             cash_arrow: crate::cash_arrow::State::default(),
             player_panels: [true; 2],
             card: None,
@@ -1142,6 +1145,47 @@ impl Host {
             self.failure = Some(error);
         }
     }
+    fn comparison_data(
+        session: &Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+    ) -> Result<crate::comparison::Data, String> {
+        let players = crate::player_info::Snapshot::from_runtime(
+            &session.roster.manager,
+            &session.world.ledgers.players,
+            session.roster.status.current_player,
+        )?;
+        crate::comparison::Data::from_runtime(
+            &session.world,
+            &players.records,
+            assets.image,
+            0x591318,
+        )
+    }
+    fn refresh_comparison(
+        &mut self,
+        session: &Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+    ) -> Result<(), String> {
+        let data = Self::comparison_data(session, assets)?;
+        if let Some(runtime) = &mut self.comparison {
+            runtime.refresh(data);
+        } else {
+            self.comparison = Some(crate::comparison::Runtime::new(data));
+        }
+        Ok(())
+    }
+    pub fn select_comparison(
+        &mut self,
+        session: &Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        mode: usize,
+    ) -> Result<(), String> {
+        if self.comparison.is_none() {
+            self.refresh_comparison(session, assets)?;
+        }
+        let data = Self::comparison_data(session, assets)?;
+        self.comparison.as_mut().unwrap().select(mode, data)
+    }
     pub fn status(&mut self, session: &Session<'_>) -> Status {
         self.collect_script_prompts(session);
         let prompts = std::mem::take(&mut self.pending_prompts);
@@ -1238,6 +1282,7 @@ impl Host {
             pulse_lights: session.pulse_lights.clone(),
             demolition_points: session.demolition_points.clone(),
             stats,
+            comparison: self.comparison.as_ref().map(|state| state.snapshot.clone()),
             result_request: self.result_request,
             player_panels: self.player_panels,
             financial,
@@ -3027,8 +3072,8 @@ impl Host {
         }
         result
     }
-    /// Dispatch actual registered50Hz interface and25Hz logic tasks in native
-    /// registration order. Publish both records around each callback so script
+    /// Dispatch registered activity, interface and logic tasks in native
+    /// registration order. Publish records around each callback so script
     /// pause/group changes affect this same dispatch, including the next task.
     pub fn frame(
         &mut self,
@@ -3072,6 +3117,12 @@ impl Host {
         if self.stop_retired_camera() || self.failure.is_some() {
             return;
         }
+        if self.comparison.is_none()
+            && let Err(error) = self.refresh_comparison(session, assets)
+        {
+            self.fail(error);
+            return;
+        }
         let indices: Vec<_> = session
             .hooks
             .timers
@@ -3080,13 +3131,13 @@ impl Host {
             .filter_map(|(index, task)| {
                 matches!(
                     u32::from_le_bytes(task[16..20].try_into().unwrap()),
-                    0x4ba580 | 0x481680
+                    0x4baa10 | 0x4ba580 | 0x481680
                 )
                 .then_some(index)
             })
             .collect();
-        if indices.len() != 2
-            || [0x4ba580, 0x481680].into_iter().any(|address| {
+        if indices.len() != 3
+            || [0x4baa10, 0x4ba580, 0x481680].into_iter().any(|address| {
                 indices
                     .iter()
                     .filter(|i| {
@@ -3097,11 +3148,11 @@ impl Host {
                     != 1
             })
         {
-            self.fail("Missing unique original interface/logic timer registration".into());
+            self.fail("Missing unique original activity/interface/logic timer registration".into());
             return;
         }
-        // The omitted activity/presentation rows do not accumulate or dispatch
-        // here. Keep original indices/order and stop on unsupported structural
+        // The omitted presentation row does not accumulate or dispatch here.
+        // Keep original indices/order and stop on unsupported structural
         // edits rather than silently dropping/reidentifying task registrations.
         let identities: Vec<[u8; 4]> = session
             .hooks
@@ -3117,7 +3168,7 @@ impl Host {
             .filter(|index| {
                 self.running
                     || u32::from_le_bytes(session.hooks.timers[*index][16..20].try_into().unwrap())
-                        == 0x4ba580
+                        != 0x481680
             })
             .collect();
         let central = indices
@@ -3144,6 +3195,11 @@ impl Host {
                 Err(camera_bridge::RequestError::Retired)
             } else {
                 match address {
+                    // 4baa10 delivers event11 every two seconds, independent
+                    // of logic speed, rendering, and asynchronous status polls.
+                    0x4baa10 => self
+                        .refresh_comparison(session, assets)
+                        .map_err(camera_bridge::RequestError::Failed),
                     // All successful UI early returns converge here. One tail
                     // per actual central callback, never scheduler.iterations.
                     0x4ba580 => self
@@ -3175,8 +3231,7 @@ impl Host {
             {
                 structural_error = true;
                 return Err(
-                    "Live two-timer scope cannot remove/reorder/replace/append registrations"
-                        .into(),
+                    "Live timer scope cannot remove/reorder/replace/append registrations".into(),
                 );
             }
             for (i, index) in indices.iter().enumerate() {
