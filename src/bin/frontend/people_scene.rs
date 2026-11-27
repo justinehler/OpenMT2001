@@ -97,6 +97,13 @@ pub(crate) fn sunlight(matrix: [[f32; 3]; 4], sun: [f32; 3]) -> [f32; 3] {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Policy {
+    pub(crate) distances: DrawingDistances,
+}
+
+/// Shared visibility and LOD calculation; each submission layer supplies its
+/// own distance setup before entering 004e0d00/004e0b50.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DrawingDistances {
     pub lod_distance: f32,
     pub far_distance: f32,
 }
@@ -108,8 +115,10 @@ impl Policy {
         let threshold =
             |scale: f64, offset: f64| ((f64::from(factor) * scale + offset) as f32).trunc();
         Ok(Self {
-            lod_distance: threshold(100., 50.),
-            far_distance: threshold(300., 80.),
+            distances: DrawingDistances {
+                lod_distance: threshold(100., 50.),
+                far_distance: threshold(300., 80.),
+            },
         })
     }
 
@@ -126,7 +135,9 @@ impl Policy {
         }
         Ok(factor)
     }
+}
 
+impl DrawingDistances {
     /// 004e0d00 enable gate and004e0b50 visibility/LOD. The caller supplies the
     /// normal model's original116-byte definition and current CPU view.
     pub fn initial_pose(
@@ -207,7 +218,7 @@ pub fn initial_requests(
     detail: u32,
     size: [u32; 2],
 ) -> Result<Vec<DrawRequest>, String> {
-    let policy = Policy::from_detail(detail)?;
+    let policy = Policy::from_detail(detail)?.distances;
     let view = camera::scene_view_with_up(camera.eye, camera.target, camera.up);
     let [near, _] = camera::city_clip(camera.eye[1])?;
     if near >= policy.far_distance {
@@ -580,7 +591,7 @@ impl Layer {
         sample: openmt2001::flyby::CameraSample,
         detail: u32,
     ) -> Result<std::ops::Range<usize>, String> {
-        let policy = Policy::from_detail(detail)?;
+        let policy = Policy::from_detail(detail)?.distances;
         let time = scene
             .daylight_time()
             .ok_or("resident layer needs original scene daylight")?;
@@ -639,6 +650,14 @@ pub fn initial_draws(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resident_drawing_distances_are_unchanged() {
+        for (detail, expected) in [(0, [50., 80.]), (50, [100., 230.]), (100, [200., 530.])] {
+            let distances = Policy::from_detail(detail).unwrap().distances;
+            assert_eq!([distances.lod_distance, distances.far_distance], expected);
+        }
+    }
+
     #[test]
     fn matches_v14_mixed_object_matrix() {
         // Three mixed cases from six isolated 004e0be4 observations,
@@ -768,7 +787,7 @@ mod tests {
         }
         for (index, case) in bytes[12..].chunks_exact(308).enumerate() {
             let detail = u32::from_le_bytes(case[..4].try_into().unwrap());
-            let policy = Policy::from_detail(detail).unwrap();
+            let policy = Policy::from_detail(detail).unwrap().distances;
             let f = |at| f32::from_le_bytes(case[at..at + 4].try_into().unwrap());
             assert_eq!([policy.lod_distance, policy.far_distance], [f(16), f(20)]);
             let mut auxiliary: [u8; 284] = case[24..].try_into().unwrap();

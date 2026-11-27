@@ -1,7 +1,63 @@
 //! Train, aircraft and scene-effect submission from the retained 44f0b0 frame.
-use crate::object_scene::Model;
+use crate::{object_scene::Model, people_scene::DrawingDistances};
 use openmt2001::{camera, picking::QueryProjection, render_scene::OwnedDraw};
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
+
+struct Policy {
+    distances: DrawingDistances,
+}
+
+impl Policy {
+    /// Constant setup 004524b0 immediately precedes transport pass 0044f0b0.
+    const fn new() -> Self {
+        Self {
+            distances: DrawingDistances {
+                lod_distance: 999_999.,
+                far_distance: 999_999.,
+            },
+        }
+    }
+
+    fn projection(
+        &self,
+        sample: openmt2001::flyby::CameraSample,
+    ) -> Result<Option<QueryProjection>, String> {
+        let [near, _] = camera::city_clip(sample.eye[1])?;
+        if near >= self.distances.far_distance {
+            return Ok(None);
+        }
+        QueryProjection::new(
+            1280.,
+            960.,
+            sample.vertical_fov,
+            near,
+            self.distances.far_distance,
+        )
+        .map(Some)
+    }
+
+    fn pose(
+        &self,
+        auxiliary: &[u8; 284],
+        view: [f32; 12],
+        projection: &QueryProjection,
+    ) -> Result<Option<[[f32; 3]; 4]>, String> {
+        if auxiliary[0xb8] & 8 != 0 {
+            return Err("transport callback lacks producer matrix".into());
+        }
+        let definition: [u8; 116] = auxiliary[0x44..0xb8].try_into().unwrap();
+        let matrix = std::array::from_fn(|row| {
+            std::array::from_fn(|axis| {
+                let at = 0xbc + row * 12 + axis * 4;
+                f32::from_le_bytes(auxiliary[at..at + 4].try_into().unwrap())
+            })
+        });
+        Ok(self
+            .distances
+            .pose_with_matrix(auxiliary, &definition, view, projection, matrix)?
+            .map(|_| matrix))
+    }
+}
 
 pub struct Resources {
     surfaces: Vec<OwnedDraw>,
@@ -131,7 +187,7 @@ impl Layer {
         &self,
         scene: &mut openmt2001::render_scene::Scene,
         sample: openmt2001::flyby::CameraSample,
-        detail: u32,
+        _detail: u32,
     ) -> Result<Range<usize>, String> {
         let time = scene
             .daylight_time()
@@ -152,37 +208,21 @@ impl Layer {
             draw.vertices.clear();
             draw.specular.as_mut().unwrap().clear();
         }
-        let policy = crate::people_scene::Policy::from_detail(detail)?;
+        let policy = Policy::new();
         let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
-        let [near, _] = camera::city_clip(sample.eye[1])?;
-        if near >= policy.far_distance {
+        let Some(projection) = policy.projection(sample)? else {
             return Ok(self.range.clone());
-        }
-        let projection =
-            QueryProjection::new(1280., 960., sample.vertical_fov, near, policy.far_distance)?;
+        };
         let color = |value: u32| [16, 8, 0].map(|shift| ((value >> shift) & 255) as f32 / 255.);
         for auxiliary in &self.auxiliaries {
-            if auxiliary[0xb8] & 8 != 0 {
-                return Err("transport callback lacks producer matrix".into());
-            }
             let reference = u32::from_le_bytes(auxiliary[..4].try_into().unwrap());
             let model = self
                 .models
                 .get(&reference)
                 .ok_or_else(|| format!("transport model {reference:08x} absent from group 10"))?;
-            let definition: [u8; 116] = auxiliary[0x44..0xb8].try_into().unwrap();
-            let matrix = std::array::from_fn(|row| {
-                std::array::from_fn(|axis| {
-                    let at = 0xbc + row * 12 + axis * 4;
-                    f32::from_le_bytes(auxiliary[at..at + 4].try_into().unwrap())
-                })
-            });
-            if policy
-                .pose_with_matrix(auxiliary, &definition, view, &projection, matrix)?
-                .is_none()
-            {
+            let Some(matrix) = policy.pose(auxiliary, view, &projection)? else {
                 continue;
-            }
+            };
             let transform = crate::people_scene::transform_from_matrix(matrix);
             let light = crate::people_scene::sunlight(matrix, light.direction);
             for part in &model.parts {
@@ -222,6 +262,118 @@ impl Layer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn descriptor(reference: u32, position: [f32; 3]) -> [u8; 284] {
+        let mut auxiliary = [0_u8; 284];
+        auxiliary[..4].copy_from_slice(&reference.to_le_bytes());
+        auxiliary[0xb8] = 1;
+        // Unit cube definition with its center at the local origin.
+        for corner in 0..8 {
+            for axis in 0..3 {
+                let value = if corner & (1 << axis) == 0 {
+                    -1_f32
+                } else {
+                    1.
+                };
+                let at = 0x44 + corner * 12 + axis * 4;
+                auxiliary[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        auxiliary[0x44 + 112..0x44 + 116].copy_from_slice(&2_f32.to_le_bytes());
+        for axis in 0..3 {
+            let at = 0xbc + axis * 12 + axis * 4;
+            auxiliary[at..at + 4].copy_from_slice(&1_f32.to_le_bytes());
+            let at = 0xbc + 36 + axis * 4;
+            auxiliary[at..at + 4].copy_from_slice(&position[axis].to_le_bytes());
+        }
+        auxiliary
+    }
+
+    fn sample() -> openmt2001::flyby::CameraSample {
+        openmt2001::flyby::CameraSample {
+            eye: [0., 6000., 0.],
+            target: [0., 6000., 1.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
+        }
+    }
+
+    #[test]
+    fn transport_beyond_resident_distance_uses_constant_setup() {
+        let sample = sample();
+        let policy = Policy::new();
+        assert_eq!(
+            [policy.distances.lod_distance, policy.distances.far_distance],
+            [999_999.; 2]
+        );
+        let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
+        let projection = policy.projection(sample).unwrap().unwrap();
+        for detail in [0, 100] {
+            let resident = crate::people_scene::Policy::from_detail(detail)
+                .unwrap()
+                .distances;
+            // This camera's near plane also exceeds the resident far distance.
+            assert!(camera::city_clip(sample.eye[1]).unwrap()[0] >= resident.far_distance);
+            for reference in [0x6887e0, 0x688880] {
+                // Aircraft and train.
+                assert!(submitted_model(reference));
+                let auxiliary = descriptor(reference, [0., 6000., 1000.]);
+                assert!(
+                    resident
+                        .pose_with_matrix(
+                            &auxiliary,
+                            &auxiliary[0x44..0xb8].try_into().unwrap(),
+                            view,
+                            &projection,
+                            [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [0., 6000., 1000.]],
+                        )
+                        .unwrap()
+                        .is_none()
+                );
+                let matrix = policy.pose(&auxiliary, view, &projection).unwrap().unwrap();
+                assert_eq!(matrix[3], [0., 6000., 1000.]);
+            }
+        }
+    }
+
+    #[test]
+    fn transport_retains_visibility_enable_and_matrix_gates() {
+        let sample = sample();
+        let policy = Policy::new();
+        let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
+        let projection = policy.projection(sample).unwrap().unwrap();
+        for position in [
+            [0., 6000., -1000.],
+            [0., 6000., 100.],
+            [10000., 6000., 1000.],
+            [0., 6000., 999_999.],
+        ] {
+            assert!(
+                policy
+                    .pose(&descriptor(0x6887e0, position), view, &projection)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let mut auxiliary = descriptor(0x6887e0, [0., 6000., 1000.]);
+        auxiliary[0xb8] = 0;
+        assert!(
+            policy
+                .pose(&auxiliary, view, &projection)
+                .unwrap()
+                .is_none()
+        );
+        auxiliary[0xb8] = 9;
+        assert!(
+            policy
+                .pose(&auxiliary, view, &projection)
+                .unwrap_err()
+                .contains("producer matrix")
+        );
+        auxiliary[0xb8] = 1;
+        auxiliary[0xbc..0xc0].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(policy.pose(&auxiliary, view, &projection).is_err());
+    }
 
     #[test]
     #[ignore = "requires original v1.4 executable and archive"]

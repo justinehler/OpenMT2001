@@ -1,7 +1,33 @@
 //! Road vehicles from the retained 44d340 projection and group-4 model catalogue.
-use crate::object_scene::Model;
+use crate::{object_scene::Model, people_scene::DrawingDistances};
 use openmt2001::{camera, picking::QueryProjection, render_scene::OwnedDraw};
 use std::{ops::Range, sync::Arc};
+
+struct Policy {
+    distances: DrawingDistances,
+}
+
+impl Policy {
+    /// Road-vehicle setup 00452630, separate from the resident distances.
+    fn from_detail(detail: u32) -> Result<Self, String> {
+        let factor = f64::from(crate::people_scene::Policy::distance_factor(detail)?);
+        // Both arguments are stored as f32 before 004e0b20 converts them.
+        // The far expression uses the first store before its integer conversion.
+        let first = (200. * factor + 200.) as f32;
+        let far = (500. * factor + f64::from(first) + 300.) as f32;
+        Ok(Self {
+            distances: DrawingDistances {
+                lod_distance: first.trunc(),
+                far_distance: far.trunc(),
+            },
+        })
+    }
+}
+
+/// 0044d4b0 requires height + 2 to be strictly positive; NaN is excluded.
+fn visible_height(height: f32) -> bool {
+    f64::from(height) + 2. > 0.
+}
 
 /// One session's original vehicle textures and both catalogue LODs.
 pub struct Resources {
@@ -78,7 +104,7 @@ impl Layer {
         self.auxiliaries.iter().find_map(|auxiliary| {
             let index = u32::from_le_bytes(auxiliary[0x38..0x3c].try_into().unwrap()) as usize;
             let y = f32::from_le_bytes(auxiliary[8..12].try_into().unwrap());
-            (self.records[index][0x14] != 0 && y + 2. >= 0. && auxiliary[0xb8] & 1 != 0).then(
+            (self.records[index][0x14] != 0 && visible_height(y) && auxiliary[0xb8] & 1 != 0).then(
                 || {
                     std::array::from_fn(|axis| {
                         f32::from_le_bytes(
@@ -158,7 +184,7 @@ impl Layer {
             draw.vertices.clear();
             draw.specular.as_mut().unwrap().clear();
         }
-        let policy = crate::people_scene::Policy::from_detail(detail)?;
+        let policy = Policy::from_detail(detail)?.distances;
         let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
         let [near, _] = camera::city_clip(sample.eye[1])?;
         if near >= policy.far_distance {
@@ -178,7 +204,7 @@ impl Layer {
                 continue;
             }
             let y = f32::from_le_bytes(auxiliary[8..12].try_into().unwrap());
-            if y + 2. < 0. {
+            if !visible_height(y) {
                 continue;
             }
             let handle = u32::from_le_bytes(auxiliary[..4].try_into().unwrap());
@@ -215,5 +241,37 @@ impl Layer {
             }
         }
         Ok(self.range.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn road_vehicle_drawing_distances() {
+        for (detail, expected) in [(0, [200., 500.]), (50, [300., 850.]), (100, [500., 1550.])] {
+            let distances = Policy::from_detail(detail).unwrap().distances;
+            assert_eq!([distances.lod_distance, distances.far_distance], expected);
+        }
+    }
+
+    #[test]
+    fn road_vehicle_distances_store_floats_before_conversion() {
+        // At 1%, truncating the extended expressions before their f32 stores
+        // would produce 201 and 506 rather than 202 and 507.
+        let distances = Policy::from_detail(1).unwrap().distances;
+        assert_eq!(
+            [distances.lod_distance, distances.far_distance],
+            [202., 507.]
+        );
+    }
+
+    #[test]
+    fn hidden_height_boundary_is_strict() {
+        assert!(!visible_height(f32::from_bits((-2_f32).to_bits() + 1)));
+        assert!(!visible_height(-2.));
+        assert!(visible_height(f32::from_bits((-2_f32).to_bits() - 1)));
+        assert!(!visible_height(f32::NAN));
     }
 }
