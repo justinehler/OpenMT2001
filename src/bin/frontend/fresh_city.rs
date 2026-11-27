@@ -6772,12 +6772,26 @@ mod tests {
             }
             assert_eq!(word(&session.world.auction.controller.record,0x150),3,"actual presenter prior interface");
             assert_eq!(word(&session.world.auction.controller.record,0x154),0,"actual presenter prior transition");
-            assert!(host.status(&session).auction.unwrap().visible);
+            let started = host.status(&session).auction.unwrap();
+            assert!(started.visible);
+            assert_eq!(started.participants.len(), session.roster.manager.players.len());
+            for (slot, participant) in started.participants.iter().enumerate() {
+                let player = &session.roster.manager.players[slot];
+                let end = player.bytes[0x158..0x1b8].iter().position(|&b| b == 0).unwrap();
+                assert_eq!(participant.name, player.bytes[0x158..0x158 + end]);
+                assert!(!participant.name.is_empty());
+                assert_eq!(participant.label.cash, session.world.ledgers.players[slot].cash.trunc() as i32);
+            }
+            use crate::auction_labels::Text;
+            let current = word(&session.world.auction.controller.record, 0x58) as usize;
+            assert_eq!(started.participants[current].label.status, Text::Language(1558));
+            assert_eq!(started.participants[initiator].label.status, Text::Money(100));
             use openmt2001::ai_messages::offers::auction::Command;
             for _ in 0..6 {
                 let participant=word(&session.world.auction.controller.record,0x58);
                 if participant==u32::from(local){break;}
                 host.apply_auction_action(&mut session,&assets,Command{action:2,participant,amount:0}).unwrap();
+                assert_eq!(host.status(&session).auction.unwrap().participants[participant as usize].label.status, Text::Language(1555));
             }
             frame(&mut host,&mut session);
             assert_eq!(host.status(&session).auction.unwrap().controls.buttons_enabled,31);
@@ -6785,7 +6799,30 @@ mod tests {
             let ledger=session.world.ledgers.players[usize::from(local)].ledger(0).unwrap();
             host.auction_button(&mut session,&assets,1).unwrap();
             assert_eq!(word(&session.world.auction.controller.record,0x6c),price+100);
-            assert_eq!(host.status(&session).auction.unwrap().controls.buttons_enabled,0);
+            let bid = host.status(&session).auction.unwrap();
+            assert_eq!(bid.controls.buttons_enabled, 0);
+            assert_eq!(bid.participants[usize::from(local)].label.status, Text::Money((price + 100) as i32));
+            let next = word(&session.world.auction.controller.record, 0x58);
+            assert_eq!(bid.participants[next as usize].label.status, Text::Language(1558));
+            #[cfg(feature = "capture")]
+            if let Ok(path) = std::env::var("OPENMT2001_LIVE_AUCTION_LABEL_CAPTURE") {
+                let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa/tycoon");
+                let packed = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language).unwrap();
+                let panel_assets = crate::auction_panel::Assets::load(&index, &archive,
+                    installer.parent().unwrap().parent().unwrap(), &packed.rows(), &executable).unwrap();
+                let renderer = pollster::block_on(openmt2001::render::Renderer::new(wgpu::InstanceDescriptor::new_without_display_handle())).unwrap();
+                let characters = bid.participants.iter().map(|p| p.character).collect::<Vec<_>>();
+                let scene = crate::auction_scene::Assets::load(&image, &index, &archive).unwrap().prepare(&renderer, &characters).unwrap();
+                let mut view = crate::auction_panel::View::default();
+                view.prepare(&panel_assets, &renderer, Some(&bid), None).unwrap();
+                crate::capture_test::capture_overlay(&renderer, &scene, view.prepared.as_ref().unwrap(), &path);
+            }
+            host.apply_auction_action(&mut session, &assets, Command { action: 1, participant: next, amount: 0 }).unwrap();
+            let passed = host.status(&session).auction.unwrap();
+            assert_eq!(passed.participants[next as usize].label.status, Text::Language(1556));
+            assert_eq!(passed.participants[usize::from(local)].label.status, Text::Language(1552));
+            assert!(passed.participants[usize::from(local)].winner);
             for _ in 0..6 {
                 if word(&session.world.auction.controller.record,0x60)!=u32::MAX{break;}
                 let participant=word(&session.world.auction.controller.record,0x58);
