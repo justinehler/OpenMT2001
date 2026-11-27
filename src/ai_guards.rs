@@ -95,8 +95,8 @@ mod tests {
     #[test]
     #[ignore = "requires original47b870/47b8f0 observations"]
     fn matches_native_guards() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_GUARDS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_GUARDS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAGRD01");

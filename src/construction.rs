@@ -310,8 +310,7 @@ mod tests {
     #[test]
     #[ignore = "requires original48a6d0 observations"]
     fn matches_native_affordability() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILD_ADMISSION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_BUILD_ADMISSION")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTBUILD1");
         assert_eq!(r.word(), 1);
@@ -357,8 +356,7 @@ mod tests {
     #[test]
     #[ignore = "requires original48ac20 producer observations"]
     fn matches_native_producer() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CONSTRUCTION_PRODUCER").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CONSTRUCTION_PRODUCER")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTCONP02");
         assert_eq!(r.word(), 2);
@@ -471,10 +469,9 @@ mod tests {
                 Ok(self.height)
             }
         }
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CONSTRUCTION_COMMAND").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CONSTRUCTION_COMMAND")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTCONS02");
         assert_eq!(r.word(), 2);

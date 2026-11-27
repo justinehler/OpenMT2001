@@ -127,7 +127,7 @@ mod tests {
     #[test]
     #[ignore = "requires original edge placement observations"]
     fn matches_native_placement() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PLACEMENT").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_PLACEMENT")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIPLC1");
         assert_eq!(r.word(), 0x37f);

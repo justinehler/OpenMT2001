@@ -329,8 +329,8 @@ mod tests {
     #[test]
     #[ignore = "requires OPENMT2001_ARCHIVE_DIR and OPENMT2001_ARCHIVE_BIN"]
     fn original_archive_lookup_matches_legacy_normalization() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let length = std::fs::metadata(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap())
+        let directory = std::fs::read(crate::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let length = std::fs::metadata(crate::fixtures::path("ARCHIVE_BIN"))
             .unwrap()
             .len();
         let index = ArchiveIndex::parse(&directory, length).unwrap();
@@ -469,10 +469,8 @@ mod tests {
     #[test]
     #[ignore = "requires OPENMT2001_ARCHIVE_DIR and OPENMT2001_ARCHIVE_BIN"]
     fn parses_original_index_when_path_is_supplied() {
-        let path = std::env::var("OPENMT2001_ARCHIVE_DIR")
-            .expect("OPENMT2001_ARCHIVE_DIR must point to original archive.DIR");
-        let payload_path = std::env::var("OPENMT2001_ARCHIVE_BIN")
-            .expect("OPENMT2001_ARCHIVE_BIN must point to original archive.bin");
+        let path = crate::fixtures::path("ARCHIVE_DIR");
+        let payload_path = crate::fixtures::path("ARCHIVE_BIN");
         let bytes = std::fs::read(path).expect("read OPENMT2001_ARCHIVE_DIR");
         let payload_len = std::fs::metadata(payload_path)
             .expect("stat OPENMT2001_ARCHIVE_BIN")

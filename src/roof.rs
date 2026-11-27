@@ -295,7 +295,7 @@ mod tests {
     #[test]
     #[ignore = "requires private original BuildFile and native roof observations"]
     fn matches_native_roof_positions() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let data = read("OPENMT2001_BUILD_FILE");
         for (fixture, surface) in [
             ("OPENMT2001_NATIVE_ROOFS", None),

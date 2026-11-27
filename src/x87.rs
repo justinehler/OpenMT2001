@@ -476,7 +476,7 @@ mod tests {
     #[test]
     #[ignore = "requires original PC64 vector length and normalization observations"]
     fn matches_native_vector_norm() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_X87_NORM").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_X87_NORM")).unwrap();
         assert_eq!(&data[..8], b"MTX87NRM");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     #[ignore = "requires PC64 binary64 load/add and original FTOL oracle"]
     fn matches_pc64_binary64_operands() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_X87_F64").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_X87_F64")).unwrap();
         assert_eq!(&data[..8], b"MTX87F64");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -558,8 +558,7 @@ mod tests {
     #[test]
     #[ignore = "requires PC64 arithmetic and original FTOL oracle"]
     fn matches_pc64_arithmetic() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_X87_ARITHMETIC").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_X87_ARITHMETIC")).unwrap();
         assert_eq!(&data[..8], b"MTX87MUL");
         let mut words = data[8..]
             .chunks_exact(4)
@@ -598,7 +597,7 @@ mod tests {
     #[test]
     #[ignore = "requires original PC64 property/business value oracle"]
     fn matches_native_value_products() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_X87_PRODUCTS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_X87_PRODUCTS")).unwrap();
         assert_eq!(&data[..8], b"MTX87PRD");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(16)), (1, 0x037f));
@@ -648,7 +647,7 @@ mod tests {
     #[test]
     #[ignore = "requires PC64 CPU arithmetic oracle"]
     fn matches_pc64_additions() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_X87_ADD").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_X87_ADD")).unwrap();
         assert_eq!(&data[..8], b"MTX87ADD");
         let mut words = data[8..]
             .chunks_exact(4)

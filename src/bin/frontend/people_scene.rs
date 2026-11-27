@@ -1025,7 +1025,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident pose fixture"]
     fn matches_native_moving_resident_pose() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PEOPLE_POSE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PEOPLE_POSE")).unwrap();
         assert_eq!(&bytes[..8], b"MTPPOSE1");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 12 + count * 452);
@@ -1061,8 +1061,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident visibility fixture"]
     fn matches_native_resident_visibility() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PEOPLE_VISIBILITY").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PEOPLE_VISIBILITY")).unwrap();
         assert_eq!(&bytes[..8], b"MTPEVIS1");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 12 + count * 308);

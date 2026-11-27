@@ -340,10 +340,9 @@ mod tests {
     #[test]
     #[ignore = "requires private BuildFile and native entrance fixture"]
     fn matches_native_housing_entrance_emission_and_bound_registration() {
-        let build = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
-        let native =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_POSITIONS").unwrap()).unwrap();
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let build = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_POSITIONS")).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let file = BuildFile::parse(&build).unwrap();
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();

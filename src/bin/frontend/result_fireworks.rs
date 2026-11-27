@@ -593,7 +593,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable and 200-frame result particle fixture"]
     fn original_result_sound_producers() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         // Original 455260 LCG produces kind3 from seed2 on the first spawn.
         let mut whistle = Fireworks::new(&image, 0, 2).unwrap();
@@ -605,8 +605,7 @@ mod tests {
         // Its existing position/RNG test verifies the same 200 native frames;
         // this gate checks the concrete cues reached within that bounded span.
         let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_PARTICLE_FULL").unwrap())
-                .unwrap();
+            std::fs::read(openmt2001::fixtures::path("NATIVE_RESULT_PARTICLE_FULL")).unwrap();
         assert_eq!(&fixture[..8], b"MTRSFP01");
         assert_eq!(u32::from_le_bytes(fixture[8..12].try_into().unwrap()), 0);
         assert_eq!(
@@ -653,9 +652,9 @@ mod tests {
     }
 
     fn compare_fixture(fixture_key: &str, tolerance: f32) {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let fixture = std::fs::read(std::env::var(fixture_key).unwrap()).unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path(fixture_key)).unwrap();
         assert_eq!(&fixture[..8], b"MTRSFP01");
         let mut at = 8;
         let mut word = || {

@@ -135,8 +135,7 @@ fn targeted_family_consumes_factor_only_at_creation() {
 #[test]
 #[ignore = "requires independently supplied q60 command/gain TSV"]
 fn ledger_independent_original_fixture_through_actual_owner_pcm() {
-    let fixture = std::env::var_os("OPENMT2001_LEDGER_GAIN_ORACLE")
-        .expect("independent oracle path is mandatory; no generated fallback");
+    let fixture = openmt2001::fixtures::path("LEDGER_GAIN_ORACLE");
     let rows = std::fs::read_to_string(fixture).unwrap();
     let mut seen = std::collections::BTreeSet::new();
     for line in rows.lines().filter(|line| !line.trim().is_empty() && !line.starts_with('#')) {

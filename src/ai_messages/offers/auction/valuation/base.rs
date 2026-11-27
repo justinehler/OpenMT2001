@@ -245,9 +245,8 @@ fn matches_native_base() {
         *data = b;
         a
     }
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_VALUATION_BASE").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_VALUATION_BASE")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let mut data = &bytes[..];
     assert_eq!(take(&mut data, 8), b"MTAVBAS1");

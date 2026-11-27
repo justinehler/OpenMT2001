@@ -4526,8 +4526,7 @@ mod tests {
     #[test]
     #[ignore = "requires original packed category-counter fixture"]
     fn matches_native_category_counter_invalidation() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_COUNTER").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_COUNTER")).unwrap();
         assert_eq!(&data[..8], b"MT45CB70");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -4554,7 +4553,7 @@ mod tests {
     #[test]
     #[ignore = "requires original saved-resident load movement observations"]
     fn matches_native_saved_movement_fixup() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let board =
             crate::board::Board::from_v14(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
@@ -4644,7 +4643,7 @@ mod tests {
         } else {
             "OPENMT2001_NATIVE_SHOPPING_TRIP"
         };
-        let data = std::fs::read(std::env::var(variable).unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path(variable)).unwrap();
         assert_eq!(
             &data[..8],
             if population {
@@ -4718,7 +4717,7 @@ mod tests {
                 }
             }
             let mut pool = super::ResidentAnimationPool::from_records(pool_records).unwrap();
-            let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+            let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
             let settings = super::ResidentAnimationSettings::from_image(
                 &crate::pe::PeImage::parse(&exe).unwrap(),
             )
@@ -4957,8 +4956,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident animation observations"]
     fn matches_native_resident_animation() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ANIMATION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ANIMATION")).unwrap();
         assert_eq!(&data[..8], b"MTRANIM2");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5026,8 +5024,7 @@ mod tests {
     #[test]
     #[ignore = "requires original traffic crossing observations"]
     fn matches_native_crossing_traffic() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CROSSING_TRAFFIC").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CROSSING_TRAFFIC")).unwrap();
         assert_eq!(&data[..8], b"MTCROSS1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5067,8 +5064,7 @@ mod tests {
     #[test]
     #[ignore = "requires original complete category trips"]
     fn matches_native_category_trip() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_TRIP").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_TRIP")).unwrap();
         assert_eq!(&data[..8], b"MTCATRP5");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5234,8 +5230,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category traversal observations"]
     fn matches_native_category_travel() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_TRAVEL").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_TRAVEL")).unwrap();
         assert_eq!(&data[..8], b"MTCATTR1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5310,8 +5305,7 @@ mod tests {
     #[test]
     #[ignore = "requires original complete local purchase trips"]
     fn matches_native_local_purchase_trip() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LOCAL_PURCHASE_TRIP").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_LOCAL_PURCHASE_TRIP")).unwrap();
         assert_eq!(&data[..8], b"MTTRIP01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5408,8 +5402,7 @@ mod tests {
     #[test]
     #[ignore = "requires original entrance approach observations"]
     fn matches_native_entrance_approach() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_ENTRANCE_APPROACH").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_ENTRANCE_APPROACH")).unwrap();
         assert_eq!(&data[..8], b"MTAPPR01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5452,8 +5445,7 @@ mod tests {
     #[test]
     #[ignore = "requires original repeated movement observations"]
     fn matches_native_resident_movement() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_MOVEMENT").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_MOVEMENT")).unwrap();
         assert_eq!(&data[..8], b"MTMOTION");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5509,7 +5501,7 @@ mod tests {
     #[test]
     #[ignore = "requires original local target observations"]
     fn matches_native_local_target() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_LOCAL_TARGET").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_LOCAL_TARGET")).unwrap();
         assert_eq!(&data[..8], b"MTLOCAL2");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5555,8 +5547,7 @@ mod tests {
     #[test]
     #[ignore = "requires original selected transaction observations"]
     fn matches_native_selected_transaction() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_SELECTED_TRANSACTION").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_SELECTED_TRANSACTION")).unwrap();
         assert_eq!(&data[..8], b"MTSELBUY");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5658,8 +5649,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business selection observations"]
     fn matches_native_purchase_business() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_BUSINESS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_BUSINESS")).unwrap();
         assert_eq!(&data[..8], b"MTPBUS01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let double = |at| f64::from_le_bytes(data[at..at + 8].try_into().unwrap());
@@ -5790,8 +5780,7 @@ mod tests {
     #[ignore = "requires composed original purchase chooser observations"]
     fn matches_native_purchase_business_composed() {
         let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_BUSINESS_COMPOSED").unwrap())
-                .unwrap();
+            std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_BUSINESS_COMPOSED")).unwrap();
         assert_eq!(&data[..8], b"MTPBOTH2");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -5975,8 +5964,7 @@ mod tests {
     #[test]
     #[ignore = "requires composed original purchase chooser observations"]
     fn matches_native_purchase_composed() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_COMPOSED").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_COMPOSED")).unwrap();
         assert_eq!(&data[..8], b"MTPCOMP1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6159,8 +6147,7 @@ mod tests {
     #[test]
     #[ignore = "requires original distance adjustment observations"]
     fn matches_native_purchase_distance() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_DISTANCE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_DISTANCE")).unwrap();
         assert_eq!(&data[..8], b"MTDIST01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6226,8 +6213,7 @@ mod tests {
     #[test]
     #[ignore = "requires original purchase score observations"]
     fn matches_native_purchase_candidate() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_CANDIDATE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_CANDIDATE")).unwrap();
         assert_eq!(&data[..8], b"MTPCAND1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let double = |at| f64::from_le_bytes(data[at..at + 8].try_into().unwrap());
@@ -6307,8 +6293,7 @@ mod tests {
     #[test]
     #[ignore = "requires original purchase score observations"]
     fn matches_native_purchase_score() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_SCORE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_SCORE")).unwrap();
         assert_eq!(&data[..8], b"MTPSCOR1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let double = |at| f64::from_le_bytes(data[at..at + 8].try_into().unwrap());
@@ -6387,8 +6372,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category selection observations"]
     fn matches_native_purchase_category() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_CATEGORY").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_CATEGORY")).unwrap();
         assert_eq!(&data[..8], b"MTCHOIC1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6464,8 +6448,7 @@ mod tests {
     #[test]
     #[ignore = "requires original buyer/seller transaction observations"]
     fn matches_native_resident_transaction() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_TRANSACTION").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_TRANSACTION")).unwrap();
         assert_eq!(&data[..8], b"MTBUYER1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6576,8 +6559,7 @@ mod tests {
     #[test]
     #[ignore = "requires original purchase action observations"]
     fn matches_native_purchase_action() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PURCHASE_ACTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PURCHASE_ACTION")).unwrap();
         assert_eq!(&data[..8], b"MTPUR001");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6641,8 +6623,7 @@ mod tests {
     #[test]
     #[ignore = "requires original home-action observations"]
     fn matches_native_home_action() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_HOME").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_HOME")).unwrap();
         assert_eq!(&data[..8], b"MTHOME01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
@@ -6698,8 +6679,7 @@ mod tests {
     #[test]
     #[ignore = "requires original local roaming observations"]
     fn matches_native_local_roaming() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ROAMING").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ROAMING")).unwrap();
         assert_eq!(&data[..8], b"MTROBIN1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
@@ -6759,8 +6739,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident action12 observations"]
     fn matches_native_roaming_action() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ACTION12").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ACTION12")).unwrap();
         assert_eq!(&data[..8], b"MTA12BIN");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(16), word(20)), (1, 844, 3));
@@ -6802,8 +6781,7 @@ mod tests {
     #[test]
     #[ignore = "requires original housing action observations"]
     fn matches_native_housing_action_transitions() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_ACTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_ACTION")).unwrap();
         assert_eq!(&data[..8], b"MTHACT01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
@@ -6854,8 +6832,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident action observations"]
     fn matches_native_resident_action() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ACTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ACTION")).unwrap();
         assert_eq!(&data[..8], b"MTACT001");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -6924,14 +6901,11 @@ mod tests {
     }
 
     fn check_native_resident_tick(population: bool) {
-        let data = std::fs::read(
-            std::env::var(if population {
-                "OPENMT2001_NATIVE_POPULATION_TICK"
-            } else {
-                "OPENMT2001_NATIVE_RESIDENT_TICK"
-            })
-            .unwrap(),
-        )
+        let data = std::fs::read(crate::fixtures::path(if population {
+            "OPENMT2001_NATIVE_POPULATION_TICK"
+        } else {
+            "OPENMT2001_NATIVE_RESIDENT_TICK"
+        }))
         .unwrap();
         assert_eq!(
             &data[..8],
@@ -7054,33 +7028,28 @@ mod tests {
             ResidentAccounts, ResidentCreationError, ResidentCreationInputs, ResidentCreationState,
             ResidentModelBinding,
         };
-        let bytes = std::fs::read(
-            std::env::var(if load {
-                "OPENMT2001_NATIVE_RESIDENT_LOAD"
-            } else {
-                "OPENMT2001_NATIVE_RESIDENT_CREATION"
-            })
-            .unwrap(),
-        )
+        let bytes = std::fs::read(crate::fixtures::path(if load {
+            "OPENMT2001_NATIVE_RESIDENT_LOAD"
+        } else {
+            "OPENMT2001_NATIVE_RESIDENT_CREATION"
+        }))
         .unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], if load { b"MTLOADR1" } else { b"MTCREATE" });
         assert_eq!(word(8), if load { 4 } else { 8 });
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let preferences = super::Preferences::from_v14_defaults(&source, &image).unwrap();
         let groups = super::PreferenceGroups::from_v14_defaults(&source).unwrap();
-        let parameters =
-            std::fs::read_to_string(std::env::var("OPENMT2001_PARAMETERS").unwrap()).unwrap();
+        let parameters = std::fs::read_to_string(crate::fixtures::path("PARAMETERS")).unwrap();
         let movement = super::MovementSettings::from_parameters(&parameters, &image).unwrap();
         assert_eq!(
             movement.speed_by_age.map(f32::to_bits),
             std::array::from_fn(|i| word(12 + i * 4))
         );
         assert_eq!(movement.variation.to_bits(), word(32));
-        let saved_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let saved_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&saved_bytes).unwrap();
         let commodities = save.economy().unwrap().resident_commodities();
         let objectives = super::DailyObjectives {
@@ -7281,8 +7250,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident model selection/binding observations"]
     fn matches_native_resident_model() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_MODEL").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_MODEL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRMODEL");
         assert_eq!((word(8), word(12)), (10000, 9));
@@ -7320,9 +7288,7 @@ mod tests {
     #[test]
     #[ignore = "requires original auxiliary pool allocation observations"]
     fn matches_native_resident_auxiliary_pool() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_AUXILIARY_POOL").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_AUXILIARY_POOL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAUXPOL");
         assert_eq!(word(8), 6);
@@ -7366,8 +7332,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident auxiliary template observations"]
     fn matches_native_resident_auxiliary() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_AUXILIARY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_AUXILIARY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRAUX01");
         assert_eq!(word(8), 15);
@@ -7391,21 +7356,18 @@ mod tests {
     #[test]
     #[ignore = "requires original complete resident constructor observations"]
     fn matches_native_resident_constructor() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_CONSTRUCTOR").unwrap())
-            .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_CONSTRUCTOR")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRCTOR2");
         assert_eq!(word(8), 60);
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let preferences = super::Preferences::from_v14_defaults(&source, &image).unwrap();
-        let saved_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let saved_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&saved_bytes).unwrap();
         let commodities = save.economy().unwrap().resident_commodities();
-        let parameters =
-            std::fs::read_to_string(std::env::var("OPENMT2001_PARAMETERS").unwrap()).unwrap();
+        let parameters = std::fs::read_to_string(crate::fixtures::path("PARAMETERS")).unwrap();
         let movement = super::MovementSettings::from_parameters(&parameters, &image).unwrap();
         assert_eq!(
             movement.speed_by_age.map(f32::to_bits),
@@ -7479,8 +7441,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident personal-field observations"]
     fn matches_native_resident_personal() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_PERSONAL").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_PERSONAL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRPERS1");
         assert_eq!(word(8), 60);
@@ -7514,8 +7475,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident initial placement observations"]
     fn matches_native_resident_placement() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_PLACEMENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_PLACEMENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRPLACE");
         assert_eq!(word(8), 256);
@@ -7610,8 +7570,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident runtime reset observations"]
     fn matches_native_resident_reset() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_RESET").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_RESET")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRRESET");
         assert_eq!(word(8), 12);
@@ -7650,11 +7609,9 @@ mod tests {
     #[test]
     #[ignore = "requires original resident identity observations and DEFAULT"]
     fn matches_native_resident_identity() {
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
         let groups = super::PreferenceGroups::from_v14_defaults(&source).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_IDENTITY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_IDENTITY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTIDENT1");
         assert_eq!((word(8), word(12)), (35, 120));
@@ -7697,7 +7654,7 @@ mod tests {
     #[test]
     #[ignore = "requires original saves and complete native daily-loop observations"]
     fn matches_native_resident_daily_update() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let bytes = read("OPENMT2001_NATIVE_RESIDENT_DAILY");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTDAILY1");
@@ -7764,11 +7721,9 @@ mod tests {
     #[test]
     #[ignore = "requires original timetable and native objective binding observations"]
     fn matches_native_daily_objective_rows() {
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_TIMETABLE").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("TIMETABLE")).unwrap();
         let rows = DailyObjectives::from_timetable(&source).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_DAILY_OBJECTIVES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_DAILY_OBJECTIVES")).unwrap();
         let word = |at| i32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTDOBJ01");
         assert_eq!((word(8), word(12), word(16)), (6, 33, 0x027f));
@@ -7790,10 +7745,9 @@ mod tests {
     #[test]
     #[ignore = "requires original timetable and native timetable binding observations"]
     fn matches_native_timetable_rows() {
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_TIMETABLE").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("TIMETABLE")).unwrap();
         let rows = Timetables::from_timetable(&source).unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_TIMETABLE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_TIMETABLE")).unwrap();
         let word = |at| i32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"TTBL01\0\0");
         assert_eq!(
@@ -7818,8 +7772,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction resident dispatch fixture"]
     fn matches_native_resident_dispatch() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_DISPATCH").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_DISPATCH")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRDSP01");
         assert_eq!((word(8), word(12)), (600, 0x14a));
@@ -7848,12 +7801,10 @@ mod tests {
     #[test]
     #[ignore = "requires original commodity settings and native membership fixture"]
     fn matches_native_commodity_memberships() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_COMMODITY_SETTINGS").unwrap())
-                .unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_MEMBERSHIP").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("COMMODITY_SETTINGS")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_MEMBERSHIP")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCMEM01");
         assert_eq!((word(8), word(12), bytes.len()), (2, 32, 96));
@@ -7870,8 +7821,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction housing category fixture"]
     fn matches_native_housing_score() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_SCORE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_SCORE")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"MTHSCO01");
@@ -7956,8 +7906,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction housing selection fixture"]
     fn matches_native_housing_selection() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_SELECTION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_SELECTION")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"MTHSEL01");
@@ -8000,17 +7949,15 @@ mod tests {
     #[test]
     #[ignore = "requires both original saves and hour-5 financial observations"]
     fn matches_native_resident_daily_finances() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_FINANCES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_FINANCES")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTNH5PFX");
         assert_eq!(
             (word(8), word(12), word(16), word(20), word(24)),
             (2, 2, 2000, 0x90, 0x14a)
         );
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let preferences = Preferences::from_v14_defaults(&source, &image).unwrap();
         let welfare = Welfare::from_v14_defaults(&source).unwrap();
@@ -8019,7 +7966,7 @@ mod tests {
             .iter()
             .enumerate()
         {
-            let saved_bytes = std::fs::read(std::env::var(variable).unwrap()).unwrap();
+            let saved_bytes = std::fs::read(crate::fixtures::path(variable)).unwrap();
             let save = crate::save::SaveFile::parse(&saved_bytes).unwrap();
             let saved = save.residents().unwrap();
             let mut residents = crate::economy::ResidentAccounts::from_saved(&saved);
@@ -8082,17 +8029,14 @@ mod tests {
     #[test]
     #[ignore = "requires original resident redistribution observations"]
     fn matches_native_resident_redistribution() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_REDISTRIBUTION").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_REDISTRIBUTION")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
         let defaults = Preferences::from_v14_defaults(&source, &image).unwrap();
-        let save_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let save_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let commodities = save.economy().unwrap().resident_commodities();
         assert_eq!(&bytes[..8], b"MTNRD2\0\0");
@@ -8139,17 +8083,15 @@ mod tests {
     #[test]
     #[ignore = "requires original resident allocation observations"]
     fn matches_native_resident_allocations() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ALLOCATIONS").unwrap())
-            .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ALLOCATIONS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let short = |at| u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
         let defaults = Preferences::from_v14_defaults(&source, &image).unwrap();
-        let save_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let save_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let commodities = save.economy().unwrap().resident_commodities();
         assert_eq!(&bytes[..8], b"MTNROWF2");

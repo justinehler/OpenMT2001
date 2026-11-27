@@ -812,8 +812,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Profile slider fixture"]
     fn profile_scrollbar_matches_original_constructor() {
-        let path = std::env::var("OPENMT2001_NATIVE_PROFILE_SCROLLBAR")
-            .expect("set OPENMT2001_NATIVE_PROFILE_SCROLLBAR to the original fixture");
+        let path = openmt2001::fixtures::path("NATIVE_PROFILE_SCROLLBAR");
         let bytes = std::fs::read(path).unwrap();
         assert_eq!(&bytes[..8], b"MTPRSL01");
         let mut at = 8;
@@ -849,19 +848,19 @@ mod tests {
             render::Renderer,
             render_scene::{self, OriginalAssets, Request, Source},
         };
-        let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .join("US/language/usa");
-        let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()

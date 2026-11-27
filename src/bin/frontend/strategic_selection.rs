@@ -35,8 +35,7 @@ mod tests {
     #[test]
     #[ignore = "private original strategic selection fixture"]
     fn matches_native_strategic_selection() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_STRATEGIC_SELECTION").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_STRATEGIC_SELECTION")).unwrap();
         assert_eq!(&b[..8], b"MTSELBR1");
         let mut at = 8;
         let word = |at: &mut usize| {

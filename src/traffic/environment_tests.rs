@@ -61,8 +61,7 @@ mod tests {
     #[test]
     #[ignore = "requires original0044ec50 environment observations"]
     fn matches_native_transport_environment() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_TRANSPORT_ENVIRONMENT").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_TRANSPORT_ENVIRONMENT")).unwrap();
         let mut reader = Reader(&data);
         assert_eq!(reader.take(8), b"MTENV44\0");
         assert_eq!(reader.word(), 1);

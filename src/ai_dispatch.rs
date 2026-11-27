@@ -70,7 +70,7 @@ mod tests {
     #[test]
     #[ignore = "requires original AI decision-dispatch observations"]
     fn matches_native_dispatch() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_DISPATCH").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_DISPATCH")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAID468");
         assert_eq!(word(8), 1);

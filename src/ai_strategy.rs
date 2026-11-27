@@ -329,9 +329,8 @@ mod tests {
     #[test]
     #[ignore = "requires original467690 continuation observations"]
     fn matches_native_continuation() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CONTINUATION").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CONTINUATION")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTCONT01");
@@ -420,8 +419,8 @@ mod tests {
     #[test]
     #[ignore = "requires original47b240/47b3e0 strategy observations"]
     fn matches_native_strategy() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_STRATEGY").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_STRATEGY")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTASTR02");

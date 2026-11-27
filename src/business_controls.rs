@@ -259,9 +259,8 @@ pub fn activate(
 #[test]
 #[ignore = "requires whole original building-panel action observations"]
 fn matches_native_controls() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_CONTROLS").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_CONTROLS")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     assert_eq!(&data[..8], b"MTBCTRL1");
     assert_eq!(word(&data, 8), 0x37f);

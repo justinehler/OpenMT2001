@@ -204,7 +204,7 @@ fn banner_refuses_unclaimed_or_out_of_domain_refresh_instead_of_guessing() {
 #[ignore = "requires supplied v1.4 PE, SAVE_ONE, BuildFile and archive; no GPU"]
 fn supplied_grocery_banner_uses_owner_and_business_pages_through_restored_registry() {
     use openmt2001::{board::Board, build_file::BuildFile, save::SaveFile};
-    let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
     let exe = read("OPENMT2001_EXE");
     let image = PeImage::parse(&exe).unwrap();
     let save_bytes = read("OPENMT2001_SAVE_ONE");

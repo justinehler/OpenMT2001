@@ -216,8 +216,7 @@ pub fn uploaded_page_flags(flags: u32) -> u32 {
 #[test]
 #[ignore = "requires original texture page upload observations"]
 fn matches_native_uploaded_page_flags() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_PAGE_UPLOAD_FLAGS").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_PAGE_UPLOAD_FLAGS")).unwrap();
     assert_eq!(&data[..8], b"MTUPFL01");
     assert_eq!(data.len(), 8 + 32 * 8);
     for row in data[8..].chunks_exact(8) {
@@ -838,8 +837,7 @@ mod tests {
     #[test]
     #[ignore = "requires original texture loader observations"]
     fn matches_native_texture_loader() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_TEXTURE_LOADER").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_TEXTURE_LOADER")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTLOAD01");
         assert_eq!((word(8), word(12)), (3, 0x027f));
@@ -885,7 +883,7 @@ mod tests {
     #[test]
     #[ignore = "requires original atlas-copy observations"]
     fn matches_native_atlas_copy() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_ATLAS_COPY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_ATLAS_COPY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTATLAS1");
         assert_eq!((word(8), word(12)), (7, 0x027f));
@@ -928,7 +926,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction mip fixture"]
     fn matches_native_page_mipmaps() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_MIPMAPS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_MIPMAPS")).unwrap();
         assert_eq!(&bytes[..8], b"MTMIP001");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
         assert_eq!(count, 520);
@@ -1114,10 +1112,8 @@ mod tests {
     #[test]
     #[ignore = "requires OPENMT2001_ARCHIVE_DIR and OPENMT2001_ARCHIVE_BIN"]
     fn parses_all_original_gtd_and_tt_entries_when_paths_are_supplied() {
-        let dir_path = std::env::var("OPENMT2001_ARCHIVE_DIR")
-            .expect("OPENMT2001_ARCHIVE_DIR must point to original archive.DIR");
-        let bin_path = std::env::var("OPENMT2001_ARCHIVE_BIN")
-            .expect("OPENMT2001_ARCHIVE_BIN must point to original archive.bin");
+        let dir_path = crate::fixtures::path("ARCHIVE_DIR");
+        let bin_path = crate::fixtures::path("ARCHIVE_BIN");
         let dir = std::fs::read(dir_path).expect("read original archive.DIR");
         let payload = std::fs::read(bin_path).expect("read original archive.bin");
         let index = crate::archive::ArchiveIndex::parse(&dir, payload.len() as u64)

@@ -353,7 +353,7 @@ fn saved_pending_queue_restore_preserves_packet_and_deadline() {
 #[test]
 #[ignore = "requires original PE for the real AI inbox consumer context"]
 fn rejected_build_message30_reaches_real_count_removal_consumer() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = crate::pe::PeImage::parse(&bytes).unwrap();
     let mut categories = [[0; 380]; 52];
     categories[3][0x9c + 2] = 9;

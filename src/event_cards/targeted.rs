@@ -310,9 +310,8 @@ mod tests {
     #[test]
     #[ignore = "requires original41bdf0 targeted effect observations"]
     fn matches_native_targeted_effects() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_TARGETED").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_EVENT_TARGETED")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECTG01");

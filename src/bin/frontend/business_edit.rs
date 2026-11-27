@@ -144,8 +144,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business adjustment arrow fixture"]
     fn matches_native_monetary_arrows() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_EDIT").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_BUSINESS_EDIT")).unwrap();
         assert_eq!(&bytes[..8], b"MTBEDT01");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 12 + count * 1092);

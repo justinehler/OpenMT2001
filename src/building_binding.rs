@@ -301,8 +301,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4610d0 PC64 observations"]
     fn matches_native_initial_stock() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_INITIAL_STOCK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_INITIAL_STOCK")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTISTK01");
         assert_eq!(word(8), 0x37f);
@@ -356,10 +355,9 @@ mod tests {
     #[test]
     #[ignore = "requires original445720 construction-cost observations"]
     fn matches_native_construction_cost() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_COST").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_COST")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTBCOST2");
         assert_eq!(word(8), 2);
@@ -413,11 +411,9 @@ mod tests {
     #[test]
     #[ignore = "requires original463560 rent instructions and supplied image"]
     fn matches_native_initial_rent() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_INITIAL_BUSINESS_RENT").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_INITIAL_BUSINESS_RENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTBRENT1");
         assert_eq!(word(8), 1);

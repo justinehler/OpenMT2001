@@ -304,8 +304,7 @@ mod tests {
     #[test]
     #[ignore = "requires original472520 category count observations"]
     fn matches_native_category_counts() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CATEGORY_COUNTS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CATEGORY_COUNTS")).unwrap();
         let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(&data[..8], b"MTAICCAT");
         assert_eq!(word(8), 1);
@@ -360,7 +359,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business cost-estimate observations"]
     fn matches_native_cost_estimate() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_COST").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_COST")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAICST1");
         let mut at = 12;
@@ -420,7 +419,7 @@ mod tests {
     #[test]
     #[ignore = "requires original AI retail decision and submission observations"]
     fn matches_native_retail_decisions() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUSINESS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_BUSINESS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIBUS2");
         assert_eq!(word(12), 0x037f);
@@ -550,11 +549,9 @@ mod tests {
     #[ignore = "requires original v1.4 Scenario 3 saved retail decision observations"]
     fn matches_native_saved_retail_follow_through() {
         let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SAVED_BUSINESS_SETTINGS").unwrap())
-                .unwrap();
-        let save = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
-        let catalog_oracle =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATALOG").unwrap()).unwrap();
+            std::fs::read(crate::fixtures::path("NATIVE_AI_SAVED_BUSINESS_SETTINGS")).unwrap();
+        let save = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
+        let catalog_oracle = std::fs::read(crate::fixtures::path("NATIVE_CATALOG")).unwrap();
         let word =
             |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 0;

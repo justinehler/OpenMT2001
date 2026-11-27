@@ -451,8 +451,8 @@ mod tests {
     #[test]
     #[ignore = "requires complete original neighbor-selection observations"]
     fn matches_native_neighbors() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_NEIGHBORS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_NEIGHBORS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTNEIG01");
@@ -519,9 +519,8 @@ mod tests {
     #[test]
     #[ignore = "requires original board neighbor cache"]
     fn matches_native_board_neighbors() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_NEIGHBOR_BOARD").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_NEIGHBOR_BOARD")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTNEIB01");
@@ -574,8 +573,7 @@ mod metric_tests {
     #[test]
     #[ignore = "requires original whole group metric captures"]
     fn matches_native_group_metrics() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_GROUP_METRICS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_GROUP_METRICS")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIGRP1");
         assert_eq!(r.word(), 0x37f);

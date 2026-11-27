@@ -401,8 +401,7 @@ mod tests {
     #[test]
     #[ignore = "requires original469bf0 offer-execution observations"]
     fn matches_native_execution() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_OFFER_EXECUTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_OFFER_EXECUTION")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAOEX01");
         assert_eq!(r.word(), 2);
@@ -533,9 +532,8 @@ mod tests {
     #[test]
     #[ignore = "requires original4477e0/445ef0 observations"]
     fn matches_native_world_queries() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_OFFER_WORLD").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_OFFER_WORLD")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAOWR01");

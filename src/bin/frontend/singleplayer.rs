@@ -186,11 +186,7 @@ mod tutorial_title_tests {
     #[test]
     #[ignore = "requires original v1.4 Tutorial title fixture and archive"]
     fn tutorial_title_matches_original_painter_and_mesh() {
-        let fixture = std::fs::read(
-            std::env::var("OPENMT2001_NATIVE_TUTORIAL_TITLE")
-                .expect("set OPENMT2001_NATIVE_TUTORIAL_TITLE"),
-        )
-        .unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path("NATIVE_TUTORIAL_TITLE")).unwrap();
         assert_eq!(&fixture[..8], b"MTTUTL01");
         let mut at = 40;
         let mut word = || {
@@ -205,8 +201,8 @@ mod tutorial_title_tests {
         assert_eq!(colors, TUTORIAL_TITLE_COLORS);
         assert_eq!(f32::from_bits(word()), 0.5);
         assert_eq!(at, fixture.len());
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (_, regions) = ui::panel_base(
             &index,
@@ -227,12 +223,12 @@ mod tutorial_title_tests {
             render::Renderer,
             render_scene::{self, OriginalAssets, Request, Source},
         };
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let executable = openmt2001::fixtures::path("EXE");
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
@@ -263,7 +259,7 @@ mod tutorial_title_tests {
         // Open the original registration catalog with a fresh V2 profile.
         // This exercises the same progression filter as the visible menu.
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
-        let map_path = std::path::PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+        let map_path = openmt2001::fixtures::path("MAP");
         let scripts = map_path.parent().unwrap().parent().unwrap();
         let mut catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
         let fresh = std::path::PathBuf::from("work/frontend/capture-fresh-profile-missing.lua");
@@ -468,7 +464,7 @@ mod character_biography_tests {
         let dog = &fixture[at..at + length];
         assert_eq!(at + length, fixture.len());
 
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
@@ -484,8 +480,8 @@ mod character_biography_tests {
         assert_eq!(lines[10], ascii("shows true compassion for."));
         assert!(lines.len() as f32 * line_height as f32 <= bounds[3] - bounds[1]);
 
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (_, regions) = ui::panel_base(
             &index,
@@ -1981,20 +1977,20 @@ mod preferred_flow_tests {
     #[test]
     #[ignore = "requires supplied original assets; source-only candidate"]
     fn ordinary_arrows_persist_active_name_and_reopen_isolated() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
-        let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .to_owned();
-        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -2014,7 +2010,7 @@ mod preferred_flow_tests {
             .collect::<Vec<_>>();
         let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
         let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+        let map = openmt2001::fixtures::path("MAP");
         let scripts = map.parent().unwrap().parent().unwrap();
         let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
         let mut panel = SinglePlayer::new(&index, &archive, &installer, &refs, &exe).unwrap();
@@ -2080,15 +2076,15 @@ mod participant_biography_contract_tests {
     #[test]
     #[ignore = "requires original assets/scripts, populated Custom level and owned OPENMT2001_BIOGRAPHY_TEST_ROOT; no game window"]
     fn supplied_participant_press_child_priority_identity_launch_and_first_line() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let scripts = PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
-        let parent = PathBuf::from(std::env::var("OPENMT2001_BIOGRAPHY_TEST_ROOT").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
+        let exe = openmt2001::fixtures::path("EXE");
+        let scripts = openmt2001::fixtures::path("SCRIPTS");
+        let parent = openmt2001::fixtures::scratch("BIOGRAPHY_TEST_ROOT");
         assert!(parent.is_dir());
         let root = parent.join(format!(
             "participant-biography-{}-{}",
@@ -2555,7 +2551,7 @@ mod campaign_description_tests {
     }
     impl Supplied {
         fn read() -> Self {
-            let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            let installer = openmt2001::fixtures::path("PARAMETERS")
                 .parent()
                 .unwrap()
                 .parent()
@@ -2567,7 +2563,7 @@ mod campaign_description_tests {
             );
             // Explicit patched language directory: the old installer row1961
             // is different. Reject it instead of blessing an unrelated string.
-            let language = PathBuf::from(std::env::var("OPENMT2001_SCENARIO_LANGUAGE").unwrap());
+            let language = openmt2001::fixtures::path("SCENARIO_LANGUAGE");
             let off = guarded(
                 &language.join("tycoon.off"),
                 "54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d",
@@ -2589,11 +2585,11 @@ mod campaign_description_tests {
                 .collect::<Vec<_>>();
             assert_eq!(at, bin.len());
             let executable = guarded(
-                &PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap()),
+                &openmt2001::fixtures::path("EXE"),
                 "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
             );
-            let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-            let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+            let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+            let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
             let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
             for (name, hash) in [
                 (

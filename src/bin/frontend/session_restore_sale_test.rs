@@ -35,8 +35,8 @@ fn matches_native_saved_sale_zero_appearance() {
 }
 fn compare_sale_fixture(variable: &str, magic: &[u8; 8]) {
     let bytes =
-        std::fs::read(std::env::var(variable).unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        std::fs::read(openmt2001::fixtures::path(variable)).unwrap();
+    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
     let mut r = Reader {
         bytes: &bytes,
@@ -221,7 +221,7 @@ fn presents_native_takeover_cash_streams() {
 #[ignore = "requires original sale through positive appearance stage"]
 fn matches_native_sale_at_positive_appearance_boundary() {
     let bytes = std::fs::read("work/save/native-sale-positive-appearance.bin").unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
     let mut r = Reader { bytes: &bytes, at: 0 };
     assert_eq!(r.take(8), b"MTSLAPP2");

@@ -212,7 +212,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4d77c0 multiplier observations"]
     fn matches_native_base_multiplier() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SCORES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_SCORES")).unwrap();
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAISCR1");
         assert_eq!(word(8), 1);
@@ -236,8 +236,7 @@ mod tests {
     #[test]
     #[ignore = "requires original profile reset observations"]
     fn matches_native_profile_reset() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PROFILE_INIT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PROFILE_INIT")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIPRF2");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(16), word(20)), (1, 10, 0x650));
@@ -259,8 +258,7 @@ mod tests {
     #[test]
     #[ignore = "requires original SetBuildTimes observations"]
     fn matches_native_build_times() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUILD_TIMES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_BUILD_TIMES")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIBT01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -290,7 +288,7 @@ mod tests {
     #[test]
     #[ignore = "requires original prestige and strategy setter observations"]
     fn matches_native_biases() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BIASES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_BIASES")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIBIA1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -328,8 +326,7 @@ mod tests {
     #[test]
     #[ignore = "requires original preference setter and area helper observations"]
     fn matches_native_preferences() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PREFERENCES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PREFERENCES")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIPRF1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -377,8 +374,7 @@ mod tests {
     #[test]
     #[ignore = "requires original difficulty setter and rent getter observations"]
     fn matches_native_parameters() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PARAMETERS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PARAMETERS")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIPAR1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 12;

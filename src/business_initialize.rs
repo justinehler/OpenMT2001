@@ -186,10 +186,9 @@ mod tests {
     #[test]
     #[ignore = "requires original business initialization fixture and executable"]
     fn matches_native_initial_business_state() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_INITIALIZE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_INITIALIZE")).unwrap();
         let mut reader = Reader { data: &data, at: 0 };
         assert_eq!(reader.bytes::<8>(), *b"MTBINIT2");
         assert_eq!(reader.word(), 2);

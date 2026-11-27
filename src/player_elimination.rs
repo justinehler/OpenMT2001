@@ -167,8 +167,7 @@ mod tests {
     #[test]
     #[ignore = "requires original48ca40/48af20 pool observations"]
     fn matches_native_elimination() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_ELIMINATION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_ELIMINATION")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTELIM01");
         let count = r.word();

@@ -128,7 +128,7 @@ fn compare(source: &Session<'_>, resumed: &Session<'_>) {
 #[ignore = "requires original assets and legal_rental_eviction_rehousing_and_next_income V3 provenance"]
 fn modern_overdue_terms_resume_real_tenants() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -139,10 +139,10 @@ fn modern_overdue_terms_resume_real_tenants() {
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let scripts = exe.parent().unwrap().join("scripts");
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
-        let styles = load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
+        let styles = load_era_styles(std::path::Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
         let inputs = || Inputs {
             tree_locators: None,
             image: &image, board: &board, file: &file,

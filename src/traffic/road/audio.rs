@@ -78,8 +78,7 @@ mod tests {
     #[test]
     #[ignore = "requires original vehicle proximity corpus"]
     fn matches_original_proximity() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_AUDIO").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_AUDIO")).unwrap();
         assert_eq!(&data[..8], b"MTVAUD01");
         let mut at = 16;
         for _ in 0..word(&data, 12) {

@@ -61,7 +61,7 @@ mod tests {
     #[test]
     #[ignore = "private original eight-era style registration oracle"]
     fn original_era_styles() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILD_STYLES").unwrap()).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_BUILD_STYLES")).unwrap();
         assert_eq!(&b[..8], b"MTBLSTYL");
         let word = |at: &mut usize| {
             let v = u32::from_le_bytes(b[*at..*at + 4].try_into().unwrap());

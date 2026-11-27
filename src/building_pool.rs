@@ -581,8 +581,7 @@ mod tests {
     #[test]
     #[ignore = "requires original445fb0 wrapper and447a90 bounds observations"]
     fn matches_native_category_binding() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_BINDING").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_BINDING")).unwrap();
         let word = |at: &mut usize| {
             let value = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());
             *at += 4;
@@ -715,9 +714,7 @@ mod tests {
     #[test]
     #[ignore = "requires original445f50 category/building link observations"]
     fn matches_native_category_append() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_BUILDING_LINK").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_BUILDING_LINK")).unwrap();
         let word = |at: &mut usize| {
             let result = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());
             *at += 4;
@@ -768,8 +765,7 @@ mod tests {
     #[test]
     #[ignore = "requires original445d10 removal observations"]
     fn matches_native_building_removal() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_REMOVE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_REMOVE")).unwrap();
         let word = |at: &mut usize| {
             let value = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());
             *at += 4;
@@ -988,9 +984,7 @@ mod tests {
     #[test]
     #[ignore = "requires original0047e450 cleanup observations"]
     fn matches_native_auxiliary_cleanup() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_REMOVE_CLEANUP").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_REMOVE_CLEANUP")).unwrap();
         let word = |at: &mut usize| {
             let value = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());
             *at += 4;
@@ -1108,10 +1102,9 @@ mod tests {
     #[test]
     #[ignore = "requires original4450e0 constructor observations"]
     fn matches_native_building_constructor() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_CONSTRUCTOR").unwrap())
-            .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_CONSTRUCTOR")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTBCONS1");
         assert_eq!(word(8), 1);
@@ -1144,8 +1137,7 @@ mod tests {
     #[test]
     #[ignore = "requires original building-pool helper observations"]
     fn matches_native_building_pool() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_POOL").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_POOL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTBPOOL1");
         assert_eq!(word(8), 1);

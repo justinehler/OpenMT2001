@@ -153,9 +153,7 @@ fn actual_host_session_and_ui_assets_service_fresh_reads_before_late_fault() {
         fs,
         path::{Path, PathBuf},
     };
-    let path = |key: &str| {
-        PathBuf::from(std::env::var_os(key).unwrap_or_else(|| panic!("required {key}")))
-    };
+    let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
     let read = |key: &str| fs::read(path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -210,7 +208,7 @@ fn actual_host_session_and_ui_assets_service_fresh_reads_before_late_fault() {
     let mut host = Host::new([0.; 3]);
     host.camera_bridge = Some(worker);
     let ui = thread::spawn(move || {
-        let path = |key: &str| PathBuf::from(std::env::var_os(key).unwrap());
+        let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
         let mut assets = crate::intro::Assets::load(crate::intro::Paths {
             compatibility: crate::compatibility::Mode::StrictV14,
             installer: path("OPENMT2001_INSTALLER"),

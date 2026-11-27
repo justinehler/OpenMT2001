@@ -3,8 +3,7 @@ use super::*;
 #[test]
 #[ignore = "private original property report fixture"]
 fn matches_native_property_reports() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_REPORTS").unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PROPERTY_REPORTS")).unwrap();
     let mut at = 8;
     assert_eq!(&bytes[..8], b"MTPRPT01");
     fn word(bytes: &[u8], at: &mut usize) -> u32 {
@@ -30,7 +29,7 @@ fn matches_native_property_reports() {
     let businesses = records(&bytes, &mut at, 600);
     let info = records(&bytes, &mut at, 45);
     let products = std::array::from_fn(|_| std::array::from_fn(|i| [i as u32, 0]));
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let report = Report::from_saved_indices(
         &SavedInputs {

@@ -1251,8 +1251,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Lua numeric hash observations"]
     fn matches_native_numeric_table_helpers() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LUA_NUMBER_HASH").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_LUA_NUMBER_HASH")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let double = |at| f64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTLUNUM2");
@@ -1281,8 +1280,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied DEFAULT/ai.lua"]
     fn executes_supplied_housekeeping_function_through_native_checked_bindings() {
-        let source =
-            std::fs::read_to_string(std::env::var("OPENMT2001_AI_SCRIPT").unwrap()).unwrap();
+        let source = std::fs::read_to_string(crate::fixtures::path("AI_SCRIPT")).unwrap();
         // Isolate this complete supplied function for the VM/binding boundary
         // check. This is not a production script loader or scenario bootstrap.
         let start = source

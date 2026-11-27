@@ -92,7 +92,7 @@ mod tests {
     #[test]
     #[ignore = "requires original loader/registration/camera fixture"]
     fn matches_native_flyby_samples() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_FLYBY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FLYBY")).unwrap();
         assert_eq!(&bytes[..8], b"MTFLY001");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 12;

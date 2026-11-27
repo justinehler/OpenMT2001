@@ -214,8 +214,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business graph axis drawing capture"]
     fn matches_native_axes() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_GRAPH_AXES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_GRAPH_AXES")).unwrap();
         let mut at = 0;
         fn word(b: &[u8], at: &mut usize) -> u32 {
             let v = u32::from_le_bytes(b[*at..*at + 4].try_into().unwrap());

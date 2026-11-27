@@ -240,8 +240,8 @@ mod tests {
         value
     }
     fn original_regions() -> Vec<(String, [f32; 4])> {
-        let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
             .find("gamedata2/brand_new_panels/day_tutor_panel.tm")
@@ -343,13 +343,13 @@ mod tests {
     #[test]
     #[ignore = "original EventList parent input and opening/settled GPU resources"]
     fn original_event_list_input_and_capture() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()

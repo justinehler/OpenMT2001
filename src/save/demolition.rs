@@ -137,7 +137,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 particle constants"]
     fn live_and_retired_dust_codec_continues_original_updates() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut uninterrupted = Manager::new(0x12345678);
         let index = uninterrupted

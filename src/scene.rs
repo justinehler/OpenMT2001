@@ -372,10 +372,10 @@ mod tests {
     #[test]
     #[ignore = "requires original BuildFile/PE and native488230 count observations"]
     fn original_model_variant_counts() {
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
         let native = std::fs::read("work/economy/native-build-variant-count.bin").unwrap();
         assert_eq!(&native[..8], b"MTBVAR01");
@@ -433,10 +433,9 @@ mod tests {
     #[test]
     #[ignore = "requires original BuildFile and native entrance emission/placement fixture"]
     fn matches_native_housing_positions() {
-        let data = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&data).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_POSITIONS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_POSITIONS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"MTHPOS01");
@@ -495,7 +494,7 @@ mod tests {
     #[test]
     #[ignore = "requires original map, executable, BuildFile and native mesh transforms"]
     fn matches_native_mesh_transforms() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let data = read("OPENMT2001_BUILD_FILE");
         let native = read("OPENMT2001_NATIVE_TRANSFORMS");
@@ -541,7 +540,7 @@ mod tests {
     #[test]
     #[ignore = "requires original static map, executable, BuildFile and native selection observations"]
     fn matches_native_map_selection() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let data = read("OPENMT2001_BUILD_FILE");
         let native = read("OPENMT2001_NATIVE_PLACEMENTS");
@@ -581,7 +580,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied save, original assets and native saved-building selection observations"]
     fn saved_buildings_match_native_selection() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let data = read("OPENMT2001_BUILD_FILE");
         let bytes = read("OPENMT2001_SAVE_ONE");

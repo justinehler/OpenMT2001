@@ -174,8 +174,7 @@ mod tests {
     #[test]
     #[ignore = "requires original atlas layout observations"]
     fn matches_native_atlas_layout() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_ATLAS_LAYOUT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_ATLAS_LAYOUT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTALAY01");
         assert_eq!((word(8), word(12)), (6, 0x027f));

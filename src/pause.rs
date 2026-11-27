@@ -113,7 +113,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pause counter fixture"]
     fn matches_original_pause_counters() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_PAUSE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PAUSE")).unwrap();
         assert_eq!(&data[..8], b"MTPAUSE2");
         let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
         assert_eq!(data.len(), 12 + count * 262);

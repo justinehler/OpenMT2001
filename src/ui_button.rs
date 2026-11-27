@@ -106,7 +106,7 @@ mod tests {
     #[test]
     #[ignore = "requires original UI button fixture"]
     fn matches_native_button_primitives() {
-        let raw = std::fs::read(std::env::var("OPENMT2001_NATIVE_UI_BUTTON").unwrap()).unwrap();
+        let raw = std::fs::read(crate::fixtures::path("NATIVE_UI_BUTTON")).unwrap();
         assert_eq!(&raw[..8], b"MTBUT001");
         let mut offset = 8;
         fn word(raw: &[u8], offset: &mut usize) -> u32 {

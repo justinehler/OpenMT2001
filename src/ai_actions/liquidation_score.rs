@@ -222,8 +222,7 @@ mod tests {
     #[test]
     #[ignore = "requires original whole liquidation scoring observations"]
     fn matches_native_liquidation_score() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LIQUIDATION_SCORE").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_LIQUIDATION_SCORE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTALSC02");
         assert_eq!(r.word(), 0x37f);

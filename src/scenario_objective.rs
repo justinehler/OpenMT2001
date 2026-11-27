@@ -84,7 +84,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4dac40 observations"]
     fn matches_original_objective_stores() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_OBJECTIVE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_OBJECTIVE")).unwrap();
         assert_eq!(&bytes[..8], b"MTOBJ001");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 12 + count * 38);

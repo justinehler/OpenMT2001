@@ -38,9 +38,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 native producer capture"]
     fn matches_native_property_producers() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PROPERTY_PRODUCERS").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PROPERTY_PRODUCERS")).unwrap();
         assert_eq!(&bytes[..8], b"MTAOPR01");
         let mut words = bytes[8..]
             .chunks_exact(4)

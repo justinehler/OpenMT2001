@@ -7,9 +7,7 @@ use crate::intro::camera_live::{
 };
 use std::{fs, path::PathBuf};
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 struct Supplied {
     exe: Vec<u8>,

@@ -334,8 +334,8 @@ mod tests {
     #[test]
     #[ignore = "requires original469210 message observations"]
     fn matches_native_messages() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_MESSAGES").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_MESSAGES")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTAMSG01");
@@ -431,8 +431,7 @@ mod tests {
     #[test]
     #[ignore = "requires whole original ownership/count inbox executions"]
     fn matches_native_business_inbox() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUSINESS_INBOX").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_BUSINESS_INBOX")).unwrap();
         let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);

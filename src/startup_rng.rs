@@ -82,7 +82,7 @@ mod tests {
     #[test]
     #[ignore = "requires original static registry reseed observations"]
     fn matches_original_static_registry() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_STATIC_RNG").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_STATIC_RNG")).unwrap();
         assert_eq!(&bytes[..8], b"MTSTRNG2");
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), REFERENCES.len() as u32);

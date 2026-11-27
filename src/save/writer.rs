@@ -258,8 +258,8 @@ mod tests {
     #[test]
     #[ignore = "requires complete original save-writer observations"]
     fn matches_native_complete_save_writer() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_WRITER").unwrap()).unwrap();
-        let image_bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_WRITER")).unwrap();
+        let image_bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&image_bytes).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSAVE01");

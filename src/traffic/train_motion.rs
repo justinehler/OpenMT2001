@@ -175,8 +175,7 @@ mod tests {
     #[test]
     #[ignore = "requires original0044e230 train motion observations"]
     fn matches_native_train_motion() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_TRAIN_MOTION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_TRAIN_MOTION")).unwrap();
         let mut reader = Reader(&bytes);
         assert_eq!(reader.take(8), b"MTTRN44\0");
         assert_eq!(reader.word(), 1);

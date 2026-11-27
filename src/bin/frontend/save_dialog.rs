@@ -1092,12 +1092,12 @@ mod tests {
     #[test]
     #[ignore = "original v1.4 Save Game mesh/button fixture"]
     fn original_save_panel_bounds_and_buttons() {
-        let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -1181,7 +1181,7 @@ mod tests {
                 descriptor.backends = wgpu::Backends::DX12;
             }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let build_file = read("OPENMT2001_BUILD_FILE");
             let suncols = read("OPENMT2001_SUNCOLS");
             let map = read("OPENMT2001_INTRO_MAP");

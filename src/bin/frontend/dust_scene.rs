@@ -177,7 +177,7 @@ mod tests {
     #[test]
     #[ignore = "requires original billboard texture, native dust manager and GPU"]
     fn original_dust_growth_and_retirement_capture() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");

@@ -76,8 +76,7 @@ mod tests {
     #[test]
     #[ignore = "private original ownership fixture"]
     fn matches_native_city_ownership() {
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_OWNERSHIP").unwrap()).unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path("NATIVE_CITY_OWNERSHIP")).unwrap();
         assert_eq!(&fixture[..8], b"MTCOWN01");
         let mut at = 8;
         let read = |at: &mut usize| {
@@ -91,7 +90,7 @@ mod tests {
             "OPENMT2001_SAVE_TWO",
             "OPENMT2001_OWNERSHIP_SYNTHETIC",
         ] {
-            let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
             let report = Ownership::from_save(&SaveFile::parse(&bytes).unwrap()).unwrap();
             at += 32;
             assert_eq!(read(&mut at), report.groups.len());

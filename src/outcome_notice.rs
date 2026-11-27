@@ -318,9 +318,9 @@ fn matches_native_outcomes() {
             word(self.take(4), 0)
         }
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_OUTCOME_LIVE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_OUTCOME_LIVE")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTOUTL02");
     assert_eq!(r.word(), 0x37f);

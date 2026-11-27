@@ -241,7 +241,7 @@ fn run_scenario_eleven(probe_shops: usize) {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let archive = read("OPENMT2001_ARCHIVE_BIN");
             let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -256,7 +256,7 @@ fn run_scenario_eleven(probe_shops: usize) {
                 archive.len() as u64,
             )
             .unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
             let scripts = exe.parent().unwrap().join("scripts");
             let names = character_names(
                 &image,
@@ -303,7 +303,7 @@ fn run_scenario_eleven(probe_shops: usize) {
                     scripts: &scripts,
                     parameters: std::str::from_utf8(&parameters).unwrap(),
                     era_styles: load_era_styles(
-                        Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                        Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                             .parent()
                             .unwrap(),
                     )
@@ -338,9 +338,9 @@ fn run_scenario_eleven(probe_shops: usize) {
             let (sender, receiver) = std::sync::mpsc::channel::<crate::auction_bridge::Request>();
             host.auction_renderer = Some(sender);
             let presenter = std::thread::spawn(move || {
-                let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-                let dir = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-                let bin = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+                let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+                let dir = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+                let bin = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
                 let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
                 if cfg!(windows) {
                     descriptor.backends = wgpu::Backends::DX12;

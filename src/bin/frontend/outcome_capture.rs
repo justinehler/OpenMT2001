@@ -9,16 +9,16 @@ pub fn capture(
     };
     let directory = std::path::PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
-    let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let index = openmt2001::archive::ArchiveIndex::parse(
         &read("OPENMT2001_ARCHIVE_DIR"),
         archive.len() as u64,
     )
     .unwrap();
-    let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameters = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameters.parent().unwrap().parent().unwrap();
-    let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe = openmt2001::fixtures::path("EXE");
     let language = exe
         .parent()
         .unwrap()

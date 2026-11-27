@@ -135,7 +135,7 @@ mod tests {
     #[test]
     #[ignore = "requires original landscape placement observations"]
     fn matches_native_landscape() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LANDSCAPE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_LANDSCAPE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAILND1");
         assert_eq!(r.word(), 0x37f);

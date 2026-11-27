@@ -6,10 +6,10 @@ use super::*;
 #[ignore = "requires supplied original saves/Stats assets and GPU; saved-preview composition"]
 fn capture_saved_preview_manager_stats() {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(|| {
-        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+        let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable=read("OPENMT2001_EXE");
-        let exe_path=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let parameter=PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let exe_path=openmt2001::fixtures::path("EXE");
+        let parameter=openmt2001::fixtures::path("PARAMETERS");
         let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let inputs=SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
@@ -17,7 +17,7 @@ fn capture_saved_preview_manager_stats() {
             profile_root:PathBuf::from("work/frontend/stats-capture-profile"),
             character_names:crate::fresh_city::character_names(&openmt2001::pe::PeImage::parse(&executable).unwrap(),&language).unwrap(),
             installer:parameter.parent().unwrap().parent().unwrap().to_path_buf(),language,
-            maps:PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap()).parent().unwrap().to_path_buf(),
+            maps:openmt2001::fixtures::path("MAP").parent().unwrap().to_path_buf(),
             executable,build_file:read("OPENMT2001_BUILD_FILE"),directory:read("OPENMT2001_ARCHIVE_DIR"),archive:read("OPENMT2001_ARCHIVE_BIN"),suncols:read("OPENMT2001_SUNCOLS")};
         let index=openmt2001::archive::ArchiveIndex::parse(&inputs.directory,inputs.archive.len() as u64).unwrap();
         let navigation=crate::navigation::Navigation::load(&index,&inputs.archive,&inputs.executable).unwrap();
@@ -28,7 +28,7 @@ fn capture_saved_preview_manager_stats() {
         let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();if cfg!(windows){descriptor.backends=wgpu::Backends::DX12;}
         let renderer=pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
         for (key,suffix) in [("OPENMT2001_SAVE_ONE","one"),("OPENMT2001_SAVE_TWO","two")] {
-            let (_,mut session)=inputs.saved_preview(std::path::Path::new(&std::env::var(key).unwrap()),navigation.camera,&mut SnapshotCache::default()).unwrap();
+            let (_,mut session)=inputs.saved_preview(std::path::Path::new(&openmt2001::fixtures::path(key)),navigation.camera,&mut SnapshotCache::default()).unwrap();
             let mut host=crate::live_host::Host::new(navigation.camera.eye);host.begin_presentation(&session).unwrap();
             let original_pause=session.world.pause.bytes;
             host.stats_action(&mut session,crate::live_host::StatsAction::Open).unwrap();
@@ -61,10 +61,10 @@ fn capture_saved_preview_manager_stats() {
 #[ignore = "requires supplied original save/assets and GPU"]
 fn capture_saved_preview_strategic_composition() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let inputs = SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
@@ -76,7 +76,7 @@ fn capture_saved_preview_strategic_composition() {
                 &openmt2001::pe::PeImage::parse(&executable).unwrap(), &language).unwrap(),
             installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
             language,
-            maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+            maps: openmt2001::fixtures::path("MAP")
                 .parent().unwrap().to_path_buf(),
             executable, build_file: read("OPENMT2001_BUILD_FILE"),
             directory: read("OPENMT2001_ARCHIVE_DIR"),
@@ -123,7 +123,7 @@ fn capture_saved_preview_strategic_composition() {
         let compass = navigation.prepare(&renderer).unwrap();
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
             let (mut loaded, session) = inputs.saved_preview(
-                std::path::Path::new(&std::env::var(key).unwrap()), navigation.camera,
+                std::path::Path::new(&openmt2001::fixtures::path(key)), navigation.camera,
                 &mut SnapshotCache::default()).unwrap();
             let direct = crate::city_people::Report::from_world(
                 &session.world, &image, &session.roster.manager);

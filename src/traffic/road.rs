@@ -788,8 +788,7 @@ mod tests {
     #[test]
     #[ignore = "requires original queue release and road geometry observations"]
     fn matches_native_release_and_geometry() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_MOTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_MOTION")).unwrap();
         assert_eq!(&data[..8], b"MTVMOTN1");
         assert_eq!(word(&data, 8), 2);
         let mut at = 16;
@@ -927,11 +926,10 @@ mod tests {
     #[test]
     #[ignore = "requires original vehicle controller observations"]
     fn matches_native_controller() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let settings = ControllerSettings::from_v14(&image).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_CONTROLLER").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_CONTROLLER")).unwrap();
         assert_eq!(&data[..8], b"MTVCTRL1");
         assert_eq!(word(&data, 8), 3);
         let mut at = 16;

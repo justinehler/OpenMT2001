@@ -51,9 +51,8 @@ pub fn request(arguments: [u32; 8], mut prior: [u8; 52]) -> [u8; 52] {
 #[test]
 #[ignore = "requires original offer negotiation captures"]
 fn matches_native_negotiation() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_OFFER_NEGOTIATION").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_OFFER_NEGOTIATION")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = crate::pe::PeImage::parse(&exe).unwrap();
     assert_eq!(&bytes[..8], b"MTAONEG1");
     assert_eq!(word(&bytes, 8), 0x37f);

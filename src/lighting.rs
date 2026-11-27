@@ -197,9 +197,8 @@ mod tests {
     #[ignore = "requires original sun-color image and lighting observations"]
     fn matches_native_lighting() {
         let sun =
-            SunColors::parse(&std::fs::read(std::env::var("OPENMT2001_SUNCOLS").unwrap()).unwrap())
-                .unwrap();
-        let path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+            SunColors::parse(&std::fs::read(crate::fixtures::path("SUNCOLS")).unwrap()).unwrap();
+        let path = crate::fixtures::path("NATIVE_LIGHTING");
         let bytes = std::fs::read(&path).unwrap();
         let vertices =
             std::fs::read(std::path::Path::new(&path).with_extension("vertices.bin")).unwrap();

@@ -38,7 +38,7 @@ mod tests {
     #[test]
     #[ignore = "private original prestige sprite fixture"]
     fn matches_native_prestige_stars() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_PRESTIGE_STARS").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_PRESTIGE_STARS")).unwrap();
         assert_eq!(&b[..8], b"MTPSTAR1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -47,7 +47,7 @@ mod tests {
             v
         };
         let count = word(&mut at);
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let bias = f64::from_le_bytes(image.at(0x525050, 8).unwrap().try_into().unwrap());
         for case in 0..count {

@@ -355,7 +355,7 @@ mod reset_tests {
     #[test]
     #[ignore = "requires original whole metric reset fixture"]
     fn matches_native_reset() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_METRIC_RESET").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_METRIC_RESET")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTMETRS1");
         assert_eq!(r.word(), 0x37f);

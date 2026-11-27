@@ -100,7 +100,7 @@ fn submit_controlled_ai_bakery(session: &mut Session<'_>, assets: &CommandAssets
 }
 
 fn run(controlled_retail: bool) {
-    let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+    let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -111,12 +111,12 @@ fn run(controlled_retail: bool) {
     let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
     let parameters = read("OPENMT2001_PARAMETERS");
     let timetable = read("OPENMT2001_TIMETABLE");
-    let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+    let scripts = openmt2001::fixtures::path("EXE")
         .parent()
         .unwrap()
         .join("scripts");
     let era_styles = load_era_styles(
-        Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        Path::new(&openmt2001::fixtures::path("PARAMETERS"))
             .parent()
             .unwrap(),
     )

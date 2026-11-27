@@ -33,7 +33,7 @@ pub fn late_pricing(
 #[test]
 #[ignore = "requires whole original4683f0 observations"]
 fn matches_native_late_pricing() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LATE_PRICING").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AI_LATE_PRICING")).unwrap();
     assert_eq!(&data[..8], b"MTALPR01");
     assert_eq!(word(&data, 8), 0x37f);
     let mut at = 16;
@@ -381,9 +381,9 @@ fn matches_native_maintenance() {
     fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
         b.chunks_exact(N).map(|r| r.try_into().unwrap()).collect()
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_MAINTENANCE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AI_MAINTENANCE")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTMAINT2");
     assert_eq!(r.word(), 0x37f);

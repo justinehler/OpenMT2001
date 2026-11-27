@@ -17,9 +17,7 @@ use crate::intro::{Assets, Inspection, Paths};
 use std::{collections::BTreeMap, path::PathBuf};
 
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 fn assets() -> Assets {
     Assets::load(Paths {

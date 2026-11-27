@@ -481,9 +481,8 @@ mod tests {
     #[test]
     #[ignore = "requires private native building graph fixture"]
     fn matches_native_graph() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_GRAPH").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_GRAPH")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         assert_eq!(&bytes[..8], b"MTBGRP02");
         assert_eq!(word(&bytes, 8), 0x37f);
@@ -531,9 +530,8 @@ mod tests {
     #[test]
     #[ignore = "requires private native building rent-age fixture"]
     fn matches_native_rent_age() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_RENT_AGE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_RENT_AGE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         assert_eq!(&bytes[..8], b"MTBRAG01");
         assert_eq!(bytes.len(), 12 + word(&bytes, 8) as usize * 72);
@@ -562,9 +560,9 @@ mod tests {
     #[test]
     #[ignore = "requires private whole native business report fixture"]
     fn matches_native_business_reports() {
-        let path = std::env::var("OPENMT2001_NATIVE_BUSINESS_REPORT").unwrap();
+        let path = crate::fixtures::path("NATIVE_BUSINESS_REPORT");
         let bytes = std::fs::read(path).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut at = 0;
         fn take<const N: usize>(b: &[u8], at: &mut usize) -> [u8; N] {

@@ -1635,14 +1635,14 @@ impl Assets {
 
 #[cfg(test)]
 pub fn verify_live_panels(scene: &Scene) {
-    let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+    let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -2135,8 +2135,8 @@ mod tests {
     }
     fn check_numeric_controls(apartment: bool) {
         use crate::business_edit::Action;
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
@@ -2214,7 +2214,7 @@ mod tests {
         check_palette("OPENMT2001_NATIVE_APARTMENT_STYLE", true);
     }
     fn check_palette(key: &str, apartment: bool) {
-        let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         assert_eq!(&bytes[..8], b"MTBAPCLR");
         let mut at = 8;
         fn word(bytes: &[u8], at: &mut usize) -> u32 {
@@ -2251,7 +2251,7 @@ mod tests {
         check_navigation("OPENMT2001_NATIVE_RETAIL_NAVIGATION", 0);
     }
     fn check_navigation(env: &str, kind: u8) {
-        let bytes = std::fs::read(std::env::var(env).unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path(env)).unwrap();
         assert_eq!(&bytes[..8], b"MTAPNAV2");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> usize {
@@ -2300,7 +2300,7 @@ mod tests {
         check_apartment_fixture("OPENMT2001_NATIVE_INITIALIZED_APARTMENT_ADJUSTMENT");
     }
     fn check_apartment_fixture(key: &str) {
-        let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         assert_eq!(&bytes[..8], b"MTAPAR02");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> u32 {
@@ -2354,7 +2354,7 @@ mod tests {
     #[ignore = "private original Business Adjustment row fixture"]
     fn matches_native_business_adjustment() {
         let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_ADJUSTMENT").unwrap()).unwrap();
+            std::fs::read(openmt2001::fixtures::path("NATIVE_BUSINESS_ADJUSTMENT")).unwrap();
         assert_eq!(&bytes[..8], b"MTBAPR01");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> u32 {

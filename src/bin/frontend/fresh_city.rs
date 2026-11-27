@@ -5185,7 +5185,7 @@ mod tests {
     #[ignore = "requires original level scripts, people meshes and rendering assets"]
     fn original_construction_lifecycle() {
         use openmt2001::{building_pool, construction, live_commands, scene};
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -5197,10 +5197,9 @@ mod tests {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default_path = openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default_path.parent().unwrap().parent().unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -5229,7 +5228,7 @@ mod tests {
                 scripts,
                 parameters: std::str::from_utf8(&parameters).unwrap(),
                 era_styles: load_era_styles(
-                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                    Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                         .parent()
                         .unwrap(),
                 )
@@ -6268,7 +6267,7 @@ mod tests {
     ) {
         let competitive = competitive_limit != 0;
         std::thread::Builder::new().stack_size(16*1024*1024).spawn(move || {
-            let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+            let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable=read("OPENMT2001_EXE");let directory=read("OPENMT2001_ARCHIVE_DIR");
             let archive=read("OPENMT2001_ARCHIVE_BIN");let build=read("OPENMT2001_BUILD_FILE");
             let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
@@ -6276,12 +6275,11 @@ mod tests {
             let board=openmt2001::board::Board::from_v14(&image).unwrap();
             let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-            let settings=std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
-            let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let settings=openmt2001::fixtures::path("DEFAULT_SETTINGS");
+            let exe_path=openmt2001::fixtures::path("EXE");
             let names=character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let scripts=settings.parent().unwrap().parent().unwrap();
-            let natural_win_source=std::env::var_os("OPENMT2001_NATURAL_WIN_PROFILE")
-                .map(std::path::PathBuf::from).unwrap_or_else(||std::path::PathBuf::from(
+            let natural_win_source=openmt2001::fixtures::optional("NATURAL_WIN_PROFILE").unwrap_or_else(||std::path::PathBuf::from(
                     "work/validation/natural-win-profile-10204-1790118387224499700/campaign/4e61747572616c2057696e2056616c69646174696f6e.lua"));
             let profile_path=(capacity_mode>=3).then(|| {
                 let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -6335,7 +6333,7 @@ mod tests {
                 transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),
                 road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts,
                 parameters:std::str::from_utf8(&parameters).unwrap(),
-                era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),timetable:std::str::from_utf8(&timetable).unwrap(),
+                era_styles:load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),timetable:std::str::from_utf8(&timetable).unwrap(),
                 scenario,difficulty:0,selected_character:4,profile_name:b"AI frontier",character_names:&names,
             };
             let policy=Policy{seed:0x12345678,auxiliary_prior_bytes:[0;0x11c]};
@@ -6703,7 +6701,7 @@ mod tests {
     #[ignore = "requires original data and GPU; real Host auction controls/settlement"]
     fn original_live_auction_host() {
         std::thread::Builder::new().stack_size(16*1024*1024).spawn(|| {
-            let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+            let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable=read("OPENMT2001_EXE");let directory=read("OPENMT2001_ARCHIVE_DIR");
             let archive=read("OPENMT2001_ARCHIVE_BIN");let build=read("OPENMT2001_BUILD_FILE");
             let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
@@ -6711,8 +6709,8 @@ mod tests {
             let board=openmt2001::board::Board::from_v14(&image).unwrap();
             let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-            let settings=std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
-            let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let settings=openmt2001::fixtures::path("DEFAULT_SETTINGS");
+            let exe_path=openmt2001::fixtures::path("EXE");
             let names=character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let mut session=Session::initialize(Inputs{
                 tree_locators: None,
@@ -6722,7 +6720,7 @@ mod tests {
                 transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),
                 road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts:settings.parent().unwrap().parent().unwrap(),
                 parameters:std::str::from_utf8(&parameters).unwrap(),
-                era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),timetable:std::str::from_utf8(&timetable).unwrap(),
+                era_styles:load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),timetable:std::str::from_utf8(&timetable).unwrap(),
                 scenario:"SCENARIO1",difficulty:0,selected_character:4,profile_name:b"Auction host",character_names:&names,
             },Policy{seed:0x12345678,auxiliary_prior_bytes:[0;0x11c]}).unwrap();
             let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
@@ -6890,7 +6888,7 @@ mod tests {
     #[test]
     #[ignore = "requires original level scripts, people meshes and rendering assets"]
     fn original_fresh_city_renders_live_records() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -6903,10 +6901,9 @@ mod tests {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default_path = openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default_path.parent().unwrap().parent().unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -6929,8 +6926,7 @@ mod tests {
                 b"Thimble"
             ]
         );
-        let native_names =
-            fs::read(std::env::var("OPENMT2001_NATIVE_CHARACTER_NAMES").unwrap()).unwrap();
+        let native_names = fs::read(openmt2001::fixtures::path("NATIVE_CHARACTER_NAMES")).unwrap();
         assert_eq!(
             names
                 .iter()
@@ -6949,7 +6945,7 @@ mod tests {
                 t
             })
             .collect::<Vec<_>>();
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+        let installer = openmt2001::fixtures::path("SUNCOLS");
         let adjustment = crate::business_adjustment::Assets::load(
             &index,
             &archive,
@@ -6984,14 +6980,12 @@ mod tests {
                             &image, &index, &archive,
                         )
                         .unwrap(),
-                        road_routes: std::fs::read(
-                            std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
-                        )
-                        .unwrap(),
+                        road_routes: std::fs::read(openmt2001::fixtures::path("ROAD_ROUTE_TABLE"))
+                            .unwrap(),
                         scripts,
                         parameters: std::str::from_utf8(&parameters).unwrap(),
                         era_styles: load_era_styles(
-                            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                            Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                                 .parent()
                                 .unwrap(),
                         )
@@ -7474,7 +7468,7 @@ mod skirmish_session_acceptance {
     #[test]
     #[ignore = "requires supplied original assets; fresh offline Skirmish kernel"]
     fn original_net1_skirmish_session() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -7487,10 +7481,9 @@ mod skirmish_session_acceptance {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default_path = openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default_path.parent().unwrap().parent().unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -7539,12 +7532,11 @@ mod skirmish_session_acceptance {
                     &image, &index, &archive,
                 )
                 .unwrap(),
-                road_routes: std::fs::read(std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap())
-                    .unwrap(),
+                road_routes: std::fs::read(openmt2001::fixtures::path("ROAD_ROUTE_TABLE")).unwrap(),
                 scripts,
                 parameters: std::str::from_utf8(&parameters).unwrap(),
                 era_styles: load_era_styles(
-                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                    Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                         .parent()
                         .unwrap(),
                 )
@@ -7746,7 +7738,7 @@ mod skirmish_session_acceptance {
         let started = std::time::Instant::now();
         std::thread::Builder::new().stack_size(64*1024*1024).spawn(move || {
             let budget = std::time::Duration::from_secs(120);
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let directory = read("OPENMT2001_ARCHIVE_DIR");
             let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -7758,15 +7750,15 @@ mod skirmish_session_acceptance {
             let board = openmt2001::board::Board::from_v14(&image).unwrap();
             let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-            let default_path = std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+            let default_path = openmt2001::fixtures::path("DEFAULT_SETTINGS");
             let scripts = default_path.parent().unwrap().parent().unwrap();
-            let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+            let language = openmt2001::fixtures::path("EXE")
                 .parent().unwrap().parent().unwrap().join("US/language/usa");
             let names = character_names(&image, &language).unwrap();
             assert_eq!(names[0].as_slice(), b"Racecar");
             assert_eq!(names[1].as_slice(), b"Wheelbarrow");
             let era_styles = load_era_styles(
-                Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
+                Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
             let maps = crate::skirmish_maps::Catalog::discover(scripts).unwrap();
             assert_eq!(maps.names().len(), 25, "requires actual supplied25-map catalog");
             let mut seen = std::collections::BTreeSet::new();
@@ -7863,7 +7855,7 @@ mod skirmish_session_acceptance {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(move || {
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let executable = read("OPENMT2001_EXE");
                 let directory = read("OPENMT2001_ARCHIVE_DIR");
                 let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -7877,10 +7869,9 @@ mod skirmish_session_acceptance {
                 let index =
                     openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
                         .unwrap();
-                let default_path =
-                    std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let default_path = openmt2001::fixtures::path("DEFAULT_SETTINGS");
                 let scripts = default_path.parent().unwrap().parent().unwrap();
-                let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+                let language = openmt2001::fixtures::path("EXE")
                     .parent()
                     .unwrap()
                     .parent()
@@ -7958,14 +7949,12 @@ mod skirmish_session_acceptance {
                         &image, &index, &archive,
                     )
                     .unwrap(),
-                    road_routes: std::fs::read(
-                        std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
-                    )
-                    .unwrap(),
+                    road_routes: std::fs::read(openmt2001::fixtures::path("ROAD_ROUTE_TABLE"))
+                        .unwrap(),
                     scripts,
                     parameters: std::str::from_utf8(&parameters).unwrap(),
                     era_styles: load_era_styles(
-                        Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                        Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                             .parent()
                             .unwrap(),
                     )

@@ -48,7 +48,7 @@ pub fn budget(player: &mut crate::player_manager::Player, auction: &[u8; 128]) -
 #[test]
 #[ignore = "requires original auction budget capture"]
 fn matches_native_budget() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_BUDGET").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_BUDGET")).unwrap();
     assert_eq!(&data[..8], b"MTAOBD01");
     assert_eq!(word(&data, 8), 0x037f);
     let count = word(&data, 12);

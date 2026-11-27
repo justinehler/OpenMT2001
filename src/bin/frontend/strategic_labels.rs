@@ -40,10 +40,9 @@ mod tests {
     #[test]
     #[ignore = "private original strategic label fixture"]
     fn matches_native_strategic_labels() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_STRATEGIC_LABELS").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_STRATEGIC_LABELS")).unwrap();
         assert_eq!(&b[..8], b"MTSTLBL1");
         let mut at = 8;
         let word = |at: &mut usize| {

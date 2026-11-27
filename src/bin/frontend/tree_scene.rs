@@ -534,7 +534,7 @@ mod tests {
     #[test]
     #[ignore = "requires player-supplied original files"]
     fn original_ambient_tree_scene_lod_daylight_and_retention() {
-        let read = |key| std::fs::read(std::env::var_os(key).expect(key)).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");

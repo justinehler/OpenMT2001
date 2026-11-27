@@ -736,7 +736,7 @@ mod tests {
     #[test]
     #[ignore = "requires original AI timetable script"]
     fn original_timetable_triggers_use_native_event_prefix() {
-        let source = std::fs::read(std::env::var("OPENMT2001_AI_SCRIPT").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("AI_SCRIPT")).unwrap();
         let mut script = AiScript::new().unwrap();
         let mut profiles = vec![[0; 0x650]; 10];
         script
@@ -762,8 +762,7 @@ mod tests {
     #[test]
     #[ignore = "requires original score property dispatch observations"]
     fn matches_native_score_properties_through_lua() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SCORE_PROPERTIES").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_SCORE_PROPERTIES")).unwrap();
         let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(&data[..8], b"MTAISCP3");
         assert_eq!(word(8), 1);
@@ -825,9 +824,8 @@ mod tests {
     #[test]
     #[ignore = "requires supplied DEFAULT script and native preference observations"]
     fn loads_complete_default_and_runs_recovered_events() {
-        let source = std::fs::read(std::env::var("OPENMT2001_AI_SCRIPT").unwrap()).unwrap();
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PREFERENCES").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("AI_SCRIPT")).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_AI_PREFERENCES")).unwrap();
         assert_eq!(&fixture[..8], b"MTAIPRF1");
         let mut pattern = std::array::from_fn(|i| (i as u8).wrapping_mul(17).wrapping_add(3));
         pattern[4] = 0;

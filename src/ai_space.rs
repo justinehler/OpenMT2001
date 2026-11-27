@@ -77,7 +77,7 @@ mod tests {
     #[test]
     #[ignore = "requires original471d90 footprint range observations"]
     fn matches_native_ranges() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SPACE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_SPACE")).unwrap();
         assert_eq!(&data[..8], b"MTAISPC1");
         let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
         assert_eq!(data.len(), 12 + count * (380 + 8));

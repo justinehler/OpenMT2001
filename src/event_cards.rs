@@ -176,9 +176,8 @@ mod tests {
     #[test]
     #[ignore = "requires original card broadcast observations"]
     fn matches_native_broadcast() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_BROADCAST").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_EVENT_BROADCAST")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTECBR01");
@@ -227,8 +226,8 @@ mod tests {
     #[test]
     #[ignore = "requires original event-card observations"]
     fn matches_native_deck() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_CARDS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_EVENT_CARDS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTECARD1");

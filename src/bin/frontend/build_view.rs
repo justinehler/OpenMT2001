@@ -1876,7 +1876,7 @@ pub fn verify_live_context(
     #[cfg(not(feature = "capture"))]
     let _ = &mut placement;
     let mut inspect = inspect;
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -1897,9 +1897,9 @@ pub fn verify_live_context(
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -1937,10 +1937,10 @@ pub fn verify_live_context(
         "native current-of-total caption stays localized"
     );
     let mut state = assets.open(context).unwrap();
-    if let Ok(path) = std::env::var("OPENMT2001_NATIVE_PLANNER_LIST_COLOR") {
+    if let Some(path) = openmt2001::fixtures::optional("NATIVE_PLANNER_LIST_COLOR") {
         verify_native_list_color(&assets, &std::fs::read(path).unwrap());
     }
-    if let Ok(path) = std::env::var("OPENMT2001_NATIVE_PLANNER_ROWS") {
+    if let Some(path) = openmt2001::fixtures::optional("NATIVE_PLANNER_ROWS") {
         verify_native_retail_rows(&state, &std::fs::read(path).unwrap());
     }
     assert_eq!(state.type_businesses[1], [42, 43]);
@@ -2888,8 +2888,7 @@ mod slider_tests {
     #[test]
     #[ignore = "requires original construction list/slider fixture"]
     fn construction_list_and_slider_background_match_original() {
-        let source =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_BUILDER_SLIDERS").unwrap());
+        let source = openmt2001::fixtures::path("NATIVE_BUILDER_SLIDERS");
         let font = std::fs::read(source.with_file_name("native-construction-font.bin")).unwrap();
         assert_eq!(&font[..8], b"MTCFONT1");
         let fw = |at| u32::from_le_bytes(font[at..at + 4].try_into().unwrap());
@@ -2963,8 +2962,7 @@ mod slider_tests {
     #[test]
     #[ignore = "requires original slider constructor/input fixture"]
     fn matches_native_builder_slider_geometry_and_input() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDER_SLIDERS").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_BUILDER_SLIDERS")).unwrap();
         assert_eq!(&bytes[..8], b"MTSLDR01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x037f);
@@ -3026,9 +3024,8 @@ mod slider_tests {
             );
         }
         assert_eq!(bytes.len(), at + count * 12);
-        let path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_BUILDER_SLIDERS").unwrap())
-                .with_file_name("native-builder-slider-arrows.bin");
+        let path = openmt2001::fixtures::path("NATIVE_BUILDER_SLIDERS")
+            .with_file_name("native-builder-slider-arrows.bin");
         let arrows = std::fs::read(path).unwrap();
         assert_eq!(&arrows[..8], b"MTSLARR1");
         for row in arrows[16..].chunks_exact(24) {
@@ -3120,7 +3117,7 @@ mod mesh_facing_tests {
         ));
     }
     fn supplied() -> Assets {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         guard(
             &directory,
@@ -3162,7 +3159,7 @@ mod mesh_facing_tests {
             &executable,
             "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
         );
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         guard(
             &fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(),

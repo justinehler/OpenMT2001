@@ -85,7 +85,7 @@ mod tests {
     #[test]
     #[ignore = "private original builder mesh and native input fixture"]
     fn matches_native_builder_parent_input() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let bytes = read("OPENMT2001_NATIVE_BUILDER_INPUT");
         assert_eq!(&bytes[..8], b"MTBINP01");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     #[ignore = "requires original main-menu bounds fixture"]
     fn matches_native_main_menu_bounds() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_UI_MESH").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_UI_MESH")).unwrap();
         assert_eq!(&bytes[..8], b"MTUIM001");
         let length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         let count = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;

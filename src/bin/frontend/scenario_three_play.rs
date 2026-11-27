@@ -165,7 +165,7 @@ fn check_sales(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>) -> i3
 #[ignore = "requires original assets; natural100-sales Scenario3 Win and profile reload"]
 fn legal_scenario_three_sales_win_and_profile_reload() {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(||{
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let archive = read("OPENMT2001_ARCHIVE_BIN");
             let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -176,7 +176,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
             let board = openmt2001::board::Board::from_v14(&image).unwrap();
             let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
             let scripts = exe.parent().unwrap().join("scripts");
             let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -196,7 +196,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
                 transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
                 road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
                 parameters: std::str::from_utf8(&parameters).unwrap(),
-                era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
                 timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO3", difficulty: 0,
                 selected_character: 4, profile_name: b"Scenario3 Legal Sales", character_names: &names,
             }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] },catalog,profile.clone()).unwrap();
@@ -252,7 +252,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
         assert_eq!(host.result_sequence(),Some(openmt2001::outcome_notice::Sequence::Win));
         assert!(host.complete_result_sequence(&mut session).is_err());assert!(!profile.exists());
         let state=session.result_presentation().unwrap().clone();
-        let installer=Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap().parent().unwrap().to_path_buf();
+        let installer=Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap().parent().unwrap().to_path_buf();
         let flyby=state.flyby.as_ref().unwrap();let name=flyby.rsplit('/').next().unwrap();
         let camera_bytes=fs::read(installer.join("Standard/Cut_scenes").join(name)).unwrap();
         let camera=openmt2001::flyby::Flyby::parse(&camera_bytes).unwrap();
@@ -429,7 +429,7 @@ fn campaign_continuation(
     roster: usize,
 ) {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -440,7 +440,7 @@ fn campaign_continuation(
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let scripts = exe.parent().unwrap().join("scripts");
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let profile = PathBuf::from(fs::read_to_string("work/economy/scenario3-natural-win-profile-path.txt").unwrap());
@@ -459,7 +459,7 @@ fn campaign_continuation(
             transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
             road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
             parameters: std::str::from_utf8(&parameters).unwrap(),
-            era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+            era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
             timetable: std::str::from_utf8(&timetable).unwrap(), scenario, difficulty: 0,
             selected_character: 4, profile_name: b"Scenario3 Legal Sales", character_names: &names,
         }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }, catalog, profile.clone()).unwrap();
@@ -473,9 +473,9 @@ fn campaign_continuation(
             let (sender, receiver) = std::sync::mpsc::channel::<crate::auction_bridge::Request>();
             host.auction_renderer = Some(sender);
             Some(std::thread::spawn(move || {
-                let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-                let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-                let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+                let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+                let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+                let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
                 let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
                 if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
                 let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
@@ -1065,7 +1065,7 @@ fn finish_original_win(
     assert!(host.complete_result_sequence(session).is_err());
     assert_eq!(fs::read(profile).unwrap(), before);
     let state = session.result_presentation().unwrap().clone();
-    let installer = Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+    let installer = Path::new(&openmt2001::fixtures::path("PARAMETERS"))
         .parent()
         .unwrap()
         .parent()

@@ -892,9 +892,7 @@ mod registration_tests {
             lua4::Value,
             player_manager::{put, word},
         };
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_FORCED_AUCTION_BINDINGS").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FORCED_AUCTION_BINDINGS")).unwrap();
         assert_eq!(&bytes[..8], b"MTFORA01");
         assert_eq!(word(&bytes, 8), 0x037f);
         assert_eq!(bytes.len(), 16 + word(&bytes, 12) as usize * 40);
@@ -950,7 +948,7 @@ mod registration_tests {
     #[test]
     #[ignore = "requires original business and commodity settings"]
     fn complete_registration_preserves_business_settings() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         let mut vm = crate::lua4::Runtime::new().unwrap();
@@ -1210,7 +1208,7 @@ mod calendar_binding_tests {
     #[test]
     #[ignore = "requires OPENMT2001_EXE original binding constants; registration only"]
     fn full_registration_attaches_calendar_frequency_without_property_dispatch() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&bytes).unwrap();
         let mut vm = Runtime::new().unwrap();
         // register executes all initialization chunks with an error-only host.

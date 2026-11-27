@@ -65,8 +65,7 @@ mod tests {
     #[test]
     #[ignore = "requires native48ac20 constructor observations"]
     fn matches_native_construction() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CONSTRUCTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CONSTRUCTION")).unwrap();
         assert_eq!(&data[..8], b"MTAICON1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x37f);

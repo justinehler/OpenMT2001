@@ -119,10 +119,10 @@ fn original_navigation_backing() {
     assert_eq!(&data[..8], b"MTBHUD01");
     let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
     let at = 20 + word(12) as usize;
-    let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-    let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+    let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+    let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let navigation = Navigation::load(&index, &archive, &executable).unwrap();
     assert_eq!(navigation.surfaces.len(), 1);
     let actual = &navigation.surfaces[0];
@@ -147,8 +147,8 @@ fn original_navigation_backing() {
 #[test]
 #[ignore = "requires original GenericTextures640 and GPU"]
 fn capture_native_nav_control_textures() {
-    let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-    let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+    let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+    let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
     let entry = index
         .find("gamedata2/GenericTextures640/textures.gtd")
@@ -614,8 +614,7 @@ mod tests {
     #[test]
     #[ignore = "requires original both-button camera oracle"]
     fn matches_native_camera_pan() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMERA_PAN").expect("fixture")).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_CAMERA_PAN")).unwrap();
         assert_eq!(&b[..8], b"MTCPAN01");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let f = |at| f32::from_bits(w(at));
@@ -655,8 +654,7 @@ mod tests {
     #[test]
     #[ignore = "requires original main-panel toggle oracle"]
     fn matches_native_panel_toggle() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_PANEL_TOGGLE").expect("fixture"))
-            .unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_PANEL_TOGGLE")).unwrap();
         assert_eq!(&b[..8], b"MTTOGL01");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let length = w(8) as usize;
@@ -724,9 +722,7 @@ mod tests {
     #[test]
     #[ignore = "requires original building-camera oracle"]
     fn matches_native_building_camera() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_CAMERA").expect("fixture"))
-                .unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_BUILDING_CAMERA")).unwrap();
         assert_eq!(&bytes[..8], b"MTBLDC01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let cases = word(8) as usize;
@@ -811,8 +807,7 @@ mod tests {
     #[test]
     #[ignore = "requires original strategic-entry oracle fixture"]
     fn matches_native_strategic_block_entry() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_STRATEGIC_ENTRY").expect("fixture"))
-            .unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_STRATEGIC_ENTRY")).unwrap();
         assert_eq!(&b[..8], b"MTDBL001");
         assert_eq!(u32::from_le_bytes(b[8..12].try_into().unwrap()), 3);
         let mut at = 12;
@@ -843,10 +838,8 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and strategic camera oracle"]
     fn matches_native_strategic_camera() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_STRATEGIC_CAMERA").expect("fixture"))
-                .unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").expect("executable")).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_STRATEGIC_CAMERA")).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         assert_eq!(&b[..8], b"MTSTRAT1");
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let pose = super::strategic_camera(image.f32_at(0x52508c).unwrap());

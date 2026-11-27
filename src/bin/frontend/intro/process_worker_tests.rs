@@ -7,8 +7,7 @@ use std::time::Duration;
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let root =
-            PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").expect("owned disk scratch"));
+        let root = openmt2001::fixtures::scratch("TEST_SCRATCH");
         assert!(root.is_absolute());
         fs::create_dir_all(&root).unwrap();
         let path = root.join(format!(
@@ -223,7 +222,7 @@ fn all_three_start_routes_full_join_and_warm_settings_keep_process_ownership() {
             ],
         },
     };
-    let save = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+    let save = openmt2001::fixtures::path("SAVE_ONE");
     let mut route = Some(focus::Route::default());
     for start in [
         WorkerStart::Fresh(setup),
@@ -541,7 +540,7 @@ fn joined_cancelled_loading_returns_actual_custody_after_full_join() {
 fn original_save_releases_one_startup_hold_and_advances_after_ready_focus() {
     let scratch = Scratch::new();
     let (inputs, owner) = inputs(scratch.0.join("profiles"));
-    let save = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+    let save = openmt2001::fixtures::path("SAVE_ONE");
     let mut run = Running::start(
         inputs.clone(),
         owner.clone(),

@@ -242,7 +242,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 BuildFile"]
     fn native_static_pointer_and_double_sign_dispatch_classes() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
         let static_model = model_identity(
             &file,
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 BuildFile"]
     fn native_double_backed_text_registry_class() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
         let identity = model_identity(
             &file,
@@ -313,7 +313,7 @@ mod tests {
     }
 
     fn compare_positive_refresh(binding: bool) {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let file_bytes = read("OPENMT2001_BUILD_FILE");
         let file = BuildFile::parse(&file_bytes).unwrap();
         let exe = read("OPENMT2001_EXE");
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 supplied-save renderer registry fixture"]
     fn supplied_save_renderer_templates_match_native_registry() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let file_bytes = read("OPENMT2001_BUILD_FILE");
         let file = BuildFile::parse(&file_bytes).unwrap();
         let exe = read("OPENMT2001_EXE");
@@ -553,17 +553,15 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 BuildFile and native supplied-save appearance fixture"]
     fn supplied_save_renderer_candidates_match_native() {
-        let file_bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let file_bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&file_bytes).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
-        let save_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let save_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let saved = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let buildings = saved.buildings().unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_APPEARANCE_COUNTS").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_APPEARANCE_COUNTS")).unwrap();
         assert_eq!(&bytes[..8], b"MTAPCNT1");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
         let hash: Vec<u8> = pinned

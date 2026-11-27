@@ -190,7 +190,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original executable and archive"]
     fn original_transport_registrations_load() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =

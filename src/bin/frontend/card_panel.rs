@@ -522,9 +522,9 @@ mod tests {
     #[test]
     #[ignore = "original card presentation fixtures"]
     fn original_card_presentation() {
-        let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let bytes = fs::read(std::env::var("OPENMT2001_NATIVE_CARD_PANEL").unwrap()).unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_CARD_PANEL")).unwrap();
         assert_eq!(&bytes[..8], b"MTCARD01");
         assert_eq!(word(&bytes, 8), 0x37f);
         let mut at = 20;
@@ -577,15 +577,15 @@ mod tests {
     #[test]
     #[ignore = "original card panel resources and GPU"]
     fn original_card_resources() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
         let image = PeImage::parse(&executable).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let language = exe
             .parent()
             .unwrap()

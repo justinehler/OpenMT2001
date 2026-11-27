@@ -6,9 +6,7 @@ use super::super::{
 };
 use super::*;
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 struct Inputs {
     exe: Vec<u8>,

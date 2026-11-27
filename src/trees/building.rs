@@ -390,7 +390,7 @@ mod tests {
     #[test]
     #[ignore = "requires player-supplied original BuildFile"]
     fn original_ordered_descriptors_and_local_pose() {
-        let bytes = std::fs::read(std::env::var_os("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
         let mut bearing = 0;
         let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());

@@ -53,8 +53,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4806b0 transition observations"]
     fn matches_native_transition() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_ERA_TRANSITION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_ERA_TRANSITION")).unwrap();
         assert_eq!(&bytes[..8], b"MTERAT01");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -119,9 +118,9 @@ mod tests {
     #[ignore = "requires original era Lua source and executable"]
     fn original_delayed_business_introductions() {
         use crate::lua4::{Runtime, Value};
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let path = std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let path = crate::fixtures::path("DEFAULT_SETTINGS");
         let general = std::fs::read(path.parent().unwrap().join("general.lua")).unwrap();
         let mut vm = Runtime::new().unwrap();
         vm.register_event_triggers(1).unwrap();

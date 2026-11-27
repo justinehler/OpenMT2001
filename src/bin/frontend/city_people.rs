@@ -168,10 +168,10 @@ mod tests {
     #[test]
     #[ignore = "requires original People report observations"]
     fn matches_native_city_people() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_PEOPLE").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_CITY_PEOPLE")).unwrap();
         assert_eq!(&b[..8], b"MTCPOP01");
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         assert_eq!(
             image.f32_at(0x5250e0).unwrap().to_bits(),

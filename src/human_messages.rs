@@ -254,8 +254,8 @@ pub fn consume(
 #[test]
 #[ignore = "requires whole original48bc70 human observations"]
 fn matches_native_messages() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_HUMAN_MESSAGES").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_HUMAN_MESSAGES")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     assert_eq!(&data[..8], b"MTHUMAN1");
     assert_eq!(word(&data, 8), 0x37f);

@@ -113,8 +113,8 @@ mod tests {
     #[test]
     #[ignore = "requires original route table and road-choice observations"]
     fn matches_original_routes() {
-        let table = std::fs::read(std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let table = std::fs::read(crate::fixtures::path("ROAD_ROUTE_TABLE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
         let (city_roads, _) = board.traffic_roads().unwrap();
@@ -122,7 +122,7 @@ mod tests {
             ("OPENMT2001_NATIVE_ROAD_ROUTE_CHOICE", false),
             ("OPENMT2001_NATIVE_ROAD_ROUTE_CITY", true),
         ] {
-            let data = std::fs::read(std::env::var(env).unwrap()).unwrap();
+            let data = std::fs::read(crate::fixtures::path(env)).unwrap();
             assert_eq!(&data[..8], b"MTRCHOI1");
             assert_eq!(word(&data, 8), 1);
             let mut roads = vec![[0; 44]; word(&data, 20) as usize];

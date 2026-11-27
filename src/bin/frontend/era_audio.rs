@@ -488,8 +488,8 @@ mod tests {
     #[test]
     fn original_era_registration_and_sources() {
         let (Some(exe), Some(suncols)) = (
-            std::env::var_os("OPENMT2001_EXE"),
-            std::env::var_os("OPENMT2001_SUNCOLS"),
+            openmt2001::fixtures::optional("EXE"),
+            openmt2001::fixtures::optional("SUNCOLS"),
         ) else {
             return;
         };

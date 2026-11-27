@@ -45,7 +45,7 @@ pub fn advance(
 #[test]
 #[ignore = "requires complete original470af0 daily observations"]
 fn matches_native_daily() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_DAILY").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AI_DAILY")).unwrap();
     assert_eq!(&data[..8], b"MTAIDAY1");
     assert_eq!(word(&data, 8), 0x37f);
     let mut at = 16;

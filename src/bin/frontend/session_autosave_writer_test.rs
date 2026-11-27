@@ -3,8 +3,7 @@ use super::*;
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from)
+        let base = Some(openmt2001::fixtures::scratch("TEST_SCRATCH"))
             .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
         fs::create_dir_all(&base).unwrap();
         // macOS clocks can return the same nanosecond value for back-to-back

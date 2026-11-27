@@ -125,9 +125,7 @@ mod tests {
     #[test]
     #[ignore = "requires original continuation query observations"]
     fn matches_native_queries() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CONTINUATION_QUERIES").unwrap())
-                .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CONTINUATION_QUERIES")).unwrap();
         assert_eq!(&data[..8], b"MTACNQ01");
         let w = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         assert_eq!(w(&data, 8), 0x37f);

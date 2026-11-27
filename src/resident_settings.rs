@@ -78,8 +78,7 @@ mod tests {
     #[test]
     #[ignore = "requires original preference registration tables"]
     fn matches_original_preference_writes() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_SETTINGS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_SETTINGS")).unwrap();
         assert_eq!(&data[..8], b"MTRPREF1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;

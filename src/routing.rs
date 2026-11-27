@@ -156,7 +156,7 @@ mod tests {
     fn matches_native_board_adjacency() {
         // The render Board omits unused categories40/45. Routing retains all52
         // runtime records, including their original zero geometry.
-        let city = std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY").unwrap()).unwrap();
+        let city = std::fs::read(crate::fixtures::path("NATIVE_CITY")).unwrap();
         assert_eq!(&city[..8], b"MTCITY14");
         let start = 20 + u32::from_le_bytes(city[16..20].try_into().unwrap()) as usize * 44;
         let mut centers = [[0.; 2]; 52];
@@ -175,11 +175,10 @@ mod tests {
             }
         }
         let routes = super::CategoryRoutes::from_geometry(&centers, &sizes, 256);
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_ADJACENCY").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_ADJACENCY")).unwrap();
         assert_eq!(&data[..8], b"MTADJ001");
         assert_eq!(data.len(), 8 + 52 * 52);
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let board =
             crate::board::Board::from_v14(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
         let from_board = super::CategoryRoutes::from_board(&board, 256);
@@ -196,8 +195,7 @@ mod tests {
     #[test]
     #[ignore = "requires original route construction observations"]
     fn matches_native_category_routes() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_ROUTES").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_ROUTES")).unwrap();
         assert_eq!(&data[..8], b"MTROUTE1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;

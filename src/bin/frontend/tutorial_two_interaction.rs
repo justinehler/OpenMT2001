@@ -164,7 +164,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 mc.exe"]
     fn original_native_picked_3d_callback_codes() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&bytes).unwrap();
         assert_eq!(image.at(0x54cd98, 9).unwrap(), b"Picked3D\0");
         let table = |address: u32, count: usize| {

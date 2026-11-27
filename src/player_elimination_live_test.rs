@@ -21,7 +21,7 @@ fn word(b: &[u8], at: usize) -> u32 {
 #[test]
 #[ignore = "requires whole original elimination/accounting/auction-cleanup observations"]
 fn matches_native_live_elimination() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_ELIMINATION_LIVE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_ELIMINATION_LIVE")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTELIV01");
     assert_eq!(r.word(), 0x37f);

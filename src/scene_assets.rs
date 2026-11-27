@@ -548,7 +548,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original archive and v1.4 executable"]
     fn original_cached_scenery_materials_match_uncached_pages() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original archive and v1.4 executable"]
     fn original_startup_texture_prefixes_match_linear_registration() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(
@@ -711,7 +711,7 @@ mod tests {
     }
 
     fn check_mesh_uvs(people: bool, fixture: &str, count: u32) {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(
@@ -792,7 +792,7 @@ mod tests {
     }
 
     fn check_registration(people: bool, fixture: &str, expected: [u32; 3]) {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     #[ignore = "requires original startup registration fixture, image and archive"]
     fn matches_native_fallback_handle() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let dir = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");

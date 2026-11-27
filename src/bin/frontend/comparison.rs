@@ -830,7 +830,7 @@ mod tests {
     #[ignore = "requires supplied original Comparison mesh and UI assets"]
     fn original_comparison_background_materials() {
         use crate::ui::{self, Surface};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let dir = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -854,7 +854,7 @@ mod tests {
                     .eq_ignore_ascii_case("1NEW_MAYA_GREY_BORDER.TT")
             );
         }
-        let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+        let sun = openmt2001::fixtures::path("SUNCOLS");
         let assets = super::Assets::load(
             &index,
             &archive,
@@ -924,7 +924,7 @@ mod tests {
     #[test]
     #[ignore = "private original comparison draw fixture"]
     fn matches_native_background_palette() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_STATS_STYLE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_STYLE")).unwrap();
         assert_eq!(&bytes[..8], b"MTSTATCL");
         let mut at = 8;
         fn word(bytes: &[u8], at: &mut usize) -> u32 {
@@ -950,12 +950,11 @@ mod tests {
     #[test]
     #[ignore = "requires original saved comparison metrics"]
     fn matches_native_saved_comparison() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_COMPARISON").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_PLAYER_COMPARISON")).unwrap();
         assert_eq!(&b[..8], b"MTCOMP01");
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 3);
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let mut at = 12;
         for name in [
@@ -963,7 +962,7 @@ mod tests {
             "OPENMT2001_SAVE_TWO",
             "OPENMT2001_COMPARISON_SYNTHETIC",
         ] {
-            let bytes = std::fs::read(std::env::var(name).unwrap()).unwrap();
+            let bytes = std::fs::read(openmt2001::fixtures::path(name)).unwrap();
             let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
             at += 32;
             assert_eq!(word(at) as usize, save.players().unwrap().len());
@@ -997,14 +996,14 @@ mod tests {
             render::Renderer,
             render_scene::{OriginalAssets, Request, Source, assemble},
         };
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let build = read("OPENMT2001_BUILD_FILE");
         let image = PeImage::parse(&exe).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -1023,7 +1022,7 @@ mod tests {
                 text
             })
             .collect();
-        let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+        let sun = openmt2001::fixtures::path("SUNCOLS");
         let assets = Assets::load(
             &index,
             &archive,
@@ -1116,9 +1115,10 @@ mod tests {
     #[test]
     #[ignore = "requires original comparison control observations"]
     fn matches_native_comparison_controls() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_COMPARISON_CONTROLS").unwrap())
-                .unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path(
+            "NATIVE_PLAYER_COMPARISON_CONTROLS",
+        ))
+        .unwrap();
         assert_eq!(&b[..8], b"MTCMCTL1");
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let mut at = 12;

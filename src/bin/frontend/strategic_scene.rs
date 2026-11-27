@@ -225,7 +225,7 @@ mod tests {
     #[test]
     #[ignore = "requires original strategic controller/geometry and UV fixtures"]
     fn original_strategic_map_geometry_and_materials() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = PeImage::parse(&executable).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     #[ignore = "requires original strategic map assets and GPU"]
     fn capture_original_strategic_city_map() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = PeImage::parse(&executable).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");

@@ -251,8 +251,7 @@ mod tests {
     #[test]
     #[ignore = "requires original scalar property observations"]
     fn matches_original_scalar_setters() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_STARTUP_SETTINGS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_STARTUP_SETTINGS")).unwrap();
         assert_eq!(&data[..8], b"MTSTART1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 31);

@@ -19,8 +19,8 @@ impl<'a> Reader<'a> {
 #[test]
 #[ignore = "requires original complete transport frame fixture"]
 fn matches_native_transport_frame() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_TRANSPORT_FRAME").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_TRANSPORT_FRAME")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = crate::pe::PeImage::parse(&exe).unwrap();
     let mut reader = Reader(&data);
     assert_eq!(reader.take(8), b"MTFRAME1");

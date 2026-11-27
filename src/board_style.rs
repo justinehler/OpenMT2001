@@ -122,11 +122,11 @@ mod tests {
     #[test]
     #[ignore = "requires original PE and native24 board-style command observations"]
     fn original_board_style_commands() {
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();
         let mut style = Style::from_v14(&image).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = crate::fixtures::path("PARAMETERS");
         let source = std::fs::read_to_string(
             parameters
                 .parent()

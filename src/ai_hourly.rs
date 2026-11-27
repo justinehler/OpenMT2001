@@ -193,7 +193,7 @@ mod tests {
     #[test]
     #[ignore = "requires original00470b80 hourly AI observations"]
     fn matches_native_hourly_ai_pass() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_HOURLY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_HOURLY")).unwrap();
         let mut reader = Reader(&bytes);
         assert_eq!(reader.take(8), b"MTAIH470");
         assert_eq!(reader.word(), 1);
@@ -304,9 +304,8 @@ mod tests {
     #[test]
     #[ignore = "requires original46f020 auxiliary state observations"]
     fn matches_native_hourly_update() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_HOURLY_UPDATE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_HOURLY_UPDATE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTAIU602");

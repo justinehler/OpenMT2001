@@ -590,8 +590,7 @@ mod tests {
     #[test]
     #[ignore = "requires original binding utility observations"]
     fn matches_native_binding_utilities() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BINDING_UTILITIES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BINDING_UTILITIES")).unwrap();
         assert_eq!(&bytes[..8], b"MTBUTIL1");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
         let mut at = 12;
@@ -665,10 +664,9 @@ mod tests {
     #[test]
     #[ignore = "requires original live business binding fixture and executable"]
     fn matches_native_live_business_binding() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_BINDING_LIVE").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_BINDING_LIVE")).unwrap();
         let mut reader = Reader { data: &data, at: 0 };
         assert_eq!(reader.bytes::<8>(), *b"MTBINDL1");
         assert_eq!(reader.word(), 1);
@@ -799,10 +797,9 @@ mod tests {
     #[test]
     #[ignore = "requires original business binding fixture and executable"]
     fn matches_native_business_building_binding() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_BINDING").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_BINDING")).unwrap();
         let mut reader = Reader { data: &data, at: 0 };
         assert_eq!(reader.bytes::<8>(), *b"MTBIND01");
         assert_eq!(reader.word(), 1);
@@ -896,8 +893,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category catalog fixture"]
     fn matches_native_category_catalog_traversal() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_CATALOG").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_CATALOG")).unwrap();
         let mut reader = Reader { data: &data, at: 0 };
         assert_eq!(reader.bytes::<8>(), *b"MTCCAT01");
         assert_eq!(reader.word(), 1);

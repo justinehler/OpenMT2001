@@ -90,7 +90,7 @@ fn matches_native_property_rights() {
             word(self.take(4), 0)
         }
     }
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_RIGHTS").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_RIGHTS")).unwrap();
     let mut r = R(&bytes);
     assert_eq!(r.take(8), b"MTRGHT01");
     assert_eq!(r.word(), 0x37f);

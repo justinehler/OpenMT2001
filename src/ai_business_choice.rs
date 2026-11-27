@@ -99,8 +99,7 @@ fn matches_native_business_choice() {
             self.take(n)
         }
     }
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUSINESS_CHOICE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_BUSINESS_CHOICE")).unwrap();
     let mut r = Reader(&bytes);
     assert_eq!(r.take(8), b"MTBCHO01");
     assert_eq!(r.word(), 0x37f);

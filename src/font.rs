@@ -146,7 +146,7 @@ mod tests {
     #[test]
     #[ignore = "requires original font layout fixture"]
     fn matches_native_glyph_layout() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_FONT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FONT")).unwrap();
         assert_eq!(&bytes[..8], b"MTFNT001");
         let mut at = 8;
         fn word(bytes: &[u8], at: &mut usize) -> u32 {

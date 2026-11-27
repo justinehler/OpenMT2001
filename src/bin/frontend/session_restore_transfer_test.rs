@@ -25,12 +25,12 @@ fn matches_native_saved_property_priced_self_transfer_stream() {
     );
 }
 fn compare_native_saved_stream(env: &str, magic: &[u8; 8]) {
-    let bytes = std::fs::read(std::env::var(env).unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path(env)).unwrap();
     let mut r = Reader::new(&bytes);
     assert_eq!(r.take(8), magic);
     assert_eq!(r.u32(), 0x037f);
     let count = r.u32();
-    let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     const SIZE: usize = 3 * 548 + 380 * 52 + 3 * 916 + 3 * 544;
     for case in 0..count {

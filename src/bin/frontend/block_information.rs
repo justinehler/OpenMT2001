@@ -341,8 +341,7 @@ mod tests {
     #[test]
     #[ignore = "private original block information oracle"]
     fn matches_native_block_information() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BLOCK_INFORMATION").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_BLOCK_INFORMATION")).unwrap();
         assert_eq!(&b[..8], b"MTBLKINF");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -372,7 +371,7 @@ mod tests {
             }
             assert_eq!(actual, expected, "{prestige} {mode} {owner}");
         }
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let special = image
             .at(0x541eac, 32)

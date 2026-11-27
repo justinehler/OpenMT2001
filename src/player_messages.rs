@@ -375,8 +375,7 @@ mod tests {
         }
     }
     fn check_native_inbox(split: Option<usize>) {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_MESSAGES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_MESSAGES")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTINBOX1");
         let count = r.word();

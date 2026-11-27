@@ -1207,13 +1207,13 @@ pub(crate) fn capture_auction_status(status: &crate::live_host::Status, label: &
         status.time_display.visible,
         "{label}: native phase-two widget group must show the selected Time instance"
     );
-    let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-    let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+    let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+    let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let executable_path = openmt2001::fixtures::path("EXE");
     let language = executable_path
         .parent()
         .unwrap()
@@ -1287,7 +1287,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Time button vtable and sound string"]
     fn original_time_press_audio() {
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         // 43ed20 constructs each Time child as a textured button; its final
         // vtable routes input through443360, which pushes the original cue.
@@ -1413,14 +1413,14 @@ mod tests {
     #[test]
     #[ignore = "requires original Time assets and offscreen GPU"]
     fn retained_time_surfaces_match_fresh_gpu_across_clock_and_controls() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -1545,8 +1545,8 @@ mod tests {
         assert_eq!(&data[..8], b"MTBHST01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x37f, 16));
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
@@ -1610,7 +1610,7 @@ mod tests {
             assert_eq!(super::options_texture(hover, pressed) as u32, word(at + 12));
         }
         assert_eq!(data.len(), 80);
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         // Native phase-two setter shows the five members in this order;
         // V2 visible-cache restoration reconstructs the Time member only.
@@ -1653,11 +1653,7 @@ mod tests {
     #[test]
     #[ignore = "requires original complete analog-clock draw oracle"]
     fn original_clock_hand_draw() {
-        let data = std::fs::read(
-            std::env::var("OPENMT2001_NATIVE_TIME_PANEL")
-                .unwrap_or_else(|_| "work/frontend/native-time-panel.bin".into()),
-        )
-        .unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_PANEL")).unwrap();
         assert_eq!(&data[..8], b"MTTIME01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
@@ -1709,7 +1705,7 @@ mod tests {
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(word(12), 0x37f);
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let tab = std::fs::read(installer.join("Standard/fonts/tahoma11noantip.tab")).unwrap();
         let mut at = 16;
@@ -1979,7 +1975,7 @@ mod tests {
         assert_eq!(word(8), 0x37f);
         let length = word(12) as usize;
         let bounds = std::array::from_fn(|i| f32::from_bits(word(16 + i * 4)));
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let tab = std::fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap();
         let quads =
@@ -2013,13 +2009,13 @@ mod tests {
         assert_eq!(&data[..8], b"MTTCUR01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 2);
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let executable = std::fs::read(&exe_path).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let language = exe_path
             .parent()
@@ -2048,8 +2044,8 @@ mod tests {
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x37f);
         assert_eq!(word(16), 2);
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
@@ -2076,7 +2072,7 @@ mod tests {
             assert_eq!(word(at + i * 4), value.to_bits());
         }
         assert_eq!(word(at + 16), 0.5f32.to_bits());
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let color = u32::from_le_bytes(image.at(0x5362c0, 4).unwrap().try_into().unwrap());
         for i in 0..4 {
@@ -2110,7 +2106,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable"]
     fn original_bottom_navigation_dispatch() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         // Native 425490 dispatches group 12 option 0 to the compass,
         // option 1 to 1x/4x, and option 2 to the middle graph widget.
@@ -2141,8 +2137,8 @@ mod tests {
         let raw_length = word(12) as usize;
         let count = word(16) as usize;
         assert_eq!((count, word(20)), (88, 3));
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index.find(super::PANEL).unwrap();
@@ -2216,8 +2212,8 @@ mod tests {
     #[test]
     #[ignore = "requires original top-right panel mesh"]
     fn inspect_original_regions() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
@@ -2253,8 +2249,8 @@ mod tests {
     #[test]
     #[ignore = "requires original top-right panel mesh and GPU"]
     fn capture_original_mesh_parts() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (surfaces, _) = crate::ui::panel_base(
@@ -2284,10 +2280,10 @@ mod tests {
             &prepared,
             "work/frontend/time-panel-all-parts.png",
         );
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()

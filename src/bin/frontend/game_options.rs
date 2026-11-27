@@ -505,15 +505,15 @@ mod mesh_culling_tests {
     }
     impl Supplied {
         fn read() -> Self {
-            let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-            let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-            let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+            let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+            let installer = openmt2001::fixtures::path("PARAMETERS")
                 .parent()
                 .unwrap()
                 .parent()
                 .unwrap()
                 .to_path_buf();
-            let language = PathBuf::from(std::env::var("OPENMT2001_OPTIONS_LANGUAGE").unwrap());
+            let language = openmt2001::fixtures::path("OPTIONS_LANGUAGE");
             guarded(
                 &installer.join("Standard/fonts/coppgoth23p.tab"),
                 "5e5ac4756550b3b22058510de5fafa31114709b10735fdfb41823b7d283ac300",

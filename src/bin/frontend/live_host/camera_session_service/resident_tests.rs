@@ -193,9 +193,7 @@ fn actual_session_world_capture_handler_and_replacement_are_live() {
         fs,
         path::{Path, PathBuf},
     };
-    let path = |key: &str| {
-        PathBuf::from(std::env::var_os(key).unwrap_or_else(|| panic!("required {key}")))
-    };
+    let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
     let read = |key: &str| fs::read(path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");

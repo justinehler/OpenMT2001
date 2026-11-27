@@ -120,11 +120,11 @@ fn matches_native_live_leases() {
             word(self.take(4), 0)
         }
     }
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_LEASE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_LEASE")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTLEASE1");
     assert_eq!(r.word(), 0x37f);
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     for case in 0..r.word() {
         let h: [u32; 9] = std::array::from_fn(|_| r.word());

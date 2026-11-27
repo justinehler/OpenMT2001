@@ -165,7 +165,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 auction capture"]
     fn matches_native_auction() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_AUCTION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_AUCTION")).unwrap();
         assert_eq!(&bytes[..8], b"MTAOAU01");
         let mut data = &bytes[8..];
         fn take<'a>(data: &mut &'a [u8], n: usize) -> &'a [u8] {
@@ -301,8 +301,7 @@ pub fn action_descriptor(
 #[test]
 #[ignore = "requires original auction action producer capture"]
 fn matches_native_action_producers() {
-    let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_ACTION_PRODUCERS").unwrap())
-        .unwrap();
+    let b = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_ACTION_PRODUCERS")).unwrap();
     assert_eq!(&b[..8], b"MTAUAP01");
     assert_eq!(word(&b, 8), 0x037f);
     assert_eq!(b.len(), 16 + word(&b, 12) as usize * 44);

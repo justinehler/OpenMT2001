@@ -34,7 +34,7 @@ pub fn integer_money(value: i32, symbol: &[u8], suffix: bool) -> Vec<u8> {
 #[test]
 #[ignore = "requires original integer currency observations"]
 fn matches_native_integer_currency() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_INTEGER_CURRENCY").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_INTEGER_CURRENCY")).unwrap();
     assert_eq!(&data[..8], b"MTICUR01");
     let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
     let mut at = 12;
@@ -127,7 +127,7 @@ pub fn formatted_float_money(value: f32, symbol: &[u8], suffix: bool) -> Result<
 #[test]
 #[ignore = "requires original currency fixture"]
 fn matches_native_currency() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CURRENCY").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_CURRENCY")).unwrap();
     assert_eq!(&data[..8], b"MTCUR001");
     let mut at = 8;
     let word = |at: &mut usize| {
@@ -153,7 +153,7 @@ fn matches_native_currency() {
 #[test]
 #[ignore = "requires original 43a950 symbol and side fixture"]
 fn matches_native_float_money() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_FLOAT_MONEY").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_FLOAT_MONEY")).unwrap();
     assert_eq!(&data[..8], b"MTFMON01");
     let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
     let count = word(8) as usize;
@@ -1346,7 +1346,7 @@ mod tests {
     #[test]
     #[ignore = "requires original MPP layout fixture"]
     fn mpp_mode_layout_matches_original() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_MPP_LAYOUT").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_MPP_LAYOUT")).unwrap();
         assert_eq!(&bytes[..8], b"MTMPPLAY");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -1376,7 +1376,7 @@ mod tests {
     #[test]
     #[ignore = "requires original MPP palette fixture"]
     fn mpp_runtime_palettes_match_original() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_MPP_STYLE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_MPP_STYLE")).unwrap();
         assert_eq!(&bytes[..8], b"MTMPP001");
         let mut at = 8;
         let word = |at: &mut usize| {

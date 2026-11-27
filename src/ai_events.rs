@@ -495,8 +495,7 @@ mod tests {
                 self.take(n)
             }
         }
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LIVE_EVENTS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_LIVE_EVENTS")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTAILIV1");
         for _ in 0..r.word() {
@@ -564,8 +563,7 @@ mod tests {
     #[test]
     #[ignore = "requires original secondary event consumption observations"]
     fn matches_native_secondary_consumption() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SECONDARY_EVENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_SECONDARY_EVENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAISEC1");
         assert_eq!(word(8), 1);
@@ -670,8 +668,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pending-event queue-check observations"]
     fn matches_native_queue_poll() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_QUEUE_CHECK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_QUEUE_CHECK")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIQCK1");
         assert_eq!(word(8), 1);
@@ -764,7 +761,7 @@ mod tests {
     #[test]
     #[ignore = "requires original AI event consumption observations"]
     fn matches_native_event_consumption() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_EVENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_EVENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIEVT1");
         assert_eq!(word(8), 1);
@@ -835,8 +832,7 @@ mod tests {
     #[test]
     #[ignore = "requires original primary AI queue observations"]
     fn matches_native_primary_queue() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PRIMARY_QUEUE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PRIMARY_QUEUE")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIQ478");
         assert_eq!(word(8), 1);
@@ -889,8 +885,7 @@ mod tests {
     #[test]
     #[ignore = "requires native Lua timetable setter observations"]
     fn matches_native_timetable_configuration() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_TIMETABLE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_TIMETABLE")).unwrap();
         assert_eq!(&bytes[..8], b"MTAITBL1");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
         let mut at = 12;

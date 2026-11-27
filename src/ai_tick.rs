@@ -193,8 +193,8 @@ mod tests {
     #[test]
     #[ignore = "requires original466ca0 controller observations"]
     fn matches_native_ai_tick() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_TICK").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_TICK")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIT466");

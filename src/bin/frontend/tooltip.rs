@@ -290,12 +290,12 @@ mod tests {
     #[test]
     #[ignore = "supplied original panel descriptors/language/fonts and GPU"]
     fn original_ordinary_toolbar_tooltip_ids_render_with_existing_families() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let exe = std::fs::read(&exe_path).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let titles = image.at(0x533238, 12).unwrap();
@@ -303,7 +303,7 @@ mod tests {
             u32::from_le_bytes(titles[n * 4..n * 4 + 4].try_into().unwrap())
         });
         assert_eq!(ids, [29, 50, 52]);
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
+        let installer = openmt2001::fixtures::path("INSTALLER");
         let language = exe_path
             .parent()
             .unwrap()
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     #[ignore = "original v1.4 PE and localized language inputs"]
     fn strategic_icon_descriptors_and_localized_lines() {
-        let path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let path = openmt2001::fixtures::path("EXE");
         let exe = std::fs::read(&path).unwrap();
         let pe = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let table = pe.at(0x533738, 4 * 20).unwrap();
@@ -353,7 +353,7 @@ mod tests {
             });
             assert_eq!(&words, expected);
         }
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
+        let installer = openmt2001::fixtures::path("INSTALLER");
         let language = installer.join("US/language/usa");
         let off = std::fs::read(language.join("tycoon.off")).unwrap();
         let bin = std::fs::read(language.join("tycoon.bin")).unwrap();
@@ -375,11 +375,11 @@ mod tests {
     #[test]
     #[ignore = "original archive and GPU"]
     fn capture_strategic_icon_tooltip() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
+        let installer = openmt2001::fixtures::path("INSTALLER");
         let language = installer.join("US/language/usa");
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         if cfg!(windows) {
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     #[ignore = "requires original tooltip oracle"]
     fn matches_native_tooltip() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_TOOLTIP").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_TOOLTIP")).unwrap();
         assert_eq!(&b[..8], b"MTTIP001");
         let w = |a| u32::from_le_bytes(b[a..a + 4].try_into().unwrap());
         let f = |a| f32::from_bits(w(a));

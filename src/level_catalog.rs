@@ -315,8 +315,7 @@ mod tests {
     #[test]
     #[ignore = "requires original level catalog/progression fixture"]
     fn matches_native_catalog() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LEVEL_CATALOG").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_LEVEL_CATALOG")).unwrap();
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(&data[..8], b"MTLVL002");
         assert_eq!(word(8), 0x37f);

@@ -5,9 +5,9 @@ use super::*;
 #[test]
 #[ignore = "requires generated natural auction saves and original graphics assets"]
 fn saved_auction_worker_rebuilds_and_saves() {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-    let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-    let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+    let exe_path = openmt2001::fixtures::path("EXE");
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let executable = read("OPENMT2001_EXE");
     let inputs = Arc::new(SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
@@ -32,7 +32,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
             .parent()
             .unwrap()
             .join("US/language/usa"),
-        maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+        maps: openmt2001::fixtures::path("MAP")
             .parent()
             .unwrap()
             .to_path_buf(),

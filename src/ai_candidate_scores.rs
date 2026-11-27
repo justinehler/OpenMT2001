@@ -163,9 +163,8 @@ mod tests {
     #[test]
     #[ignore = "requires complete original existing-candidate score observations"]
     fn matches_native_candidate_scores() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CANDIDATE_SCORES").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_CANDIDATE_SCORES")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTCPSC01");

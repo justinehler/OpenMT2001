@@ -199,9 +199,8 @@ mod tests {
     #[test]
     #[ignore = "requires original strategic world-query captures"]
     fn matches_native_queries() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_STRATEGY_QUERIES").unwrap()).unwrap();
-        let original = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_STRATEGY_QUERIES")).unwrap();
+        let original = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(7), b"MTQRY01");
         for _ in 0..r.word() {

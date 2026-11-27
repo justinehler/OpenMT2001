@@ -38,10 +38,7 @@ const LIMIT: usize = 12_000;
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(
-            std::env::var_os("OPENMT2001_TEST_SCRATCH")
-                .expect("explicit disk scratch parent required"),
-        );
+        let parent = PathBuf::from(openmt2001::fixtures::scratch("TEST_SCRATCH"));
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
         let path = parent.join(format!(
@@ -480,17 +477,17 @@ fn rejected_busy_auction_producer_saves_live_message_allocator_not_stale_session
 fn run(retirement: bool) {
     thread::Builder::new().stack_size(32*1024*1024).spawn(move || {
         let started=Instant::now(); let scratch=Scratch::new();
-        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
+        let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe=Arc::new(read("OPENMT2001_EXE")); let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
         let board=openmt2001::board::Board::from_v14(&image).unwrap();
         let build=read("OPENMT2001_BUILD_FILE"); let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let directory=Arc::new(read("OPENMT2001_ARCHIVE_DIR")); let archive=Arc::new(read("OPENMT2001_ARCHIVE_BIN"));
         let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
         let parameters=read("OPENMT2001_PARAMETERS"); let timetable=read("OPENMT2001_TIMETABLE");
-        let default=PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default=openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts=default.parent().unwrap().parent().unwrap();
-        let styles=crate::fresh_city::load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
-        let exe_path=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let styles=crate::fresh_city::load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
+        let exe_path=openmt2001::fixtures::path("EXE");
         let names=crate::fresh_city::character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let inputs=crate::fresh_city::Inputs { tree_locators:None,image:&image,board:&board,file:&file,
             people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),

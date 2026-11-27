@@ -375,8 +375,7 @@ mod tests {
     #[test]
     #[ignore = "requires original PE and native reset fixture"]
     fn matches_native_business_pool_reset() {
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_RESET").unwrap()).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_RESET")).unwrap();
         assert_eq!(&fixture[..8], b"MTBRST01");
         let u32_at = |at: &mut usize| {
             let value = u32::from_le_bytes(fixture[*at..*at + 4].try_into().unwrap());
@@ -445,11 +444,10 @@ mod tests {
     #[test]
     #[ignore = "requires original PE and native allocator fixture"]
     fn matches_native_business_allocator() {
-        let image_bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image_bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&image_bytes).unwrap();
         let catalog = BusinessCatalog::from_pe(&image).unwrap();
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_ALLOCATOR").unwrap()).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_ALLOCATOR")).unwrap();
         assert_eq!(&fixture[..8], b"MTBIZ01\0");
         let u32_at = |at: &mut usize| {
             let value = u32::from_le_bytes(fixture[*at..*at + 4].try_into().unwrap());

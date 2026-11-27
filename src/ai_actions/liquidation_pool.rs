@@ -144,8 +144,7 @@ mod tests {
     #[test]
     #[ignore = "requires original allocation lifecycle observations"]
     fn matches_native_liquidation_pool() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LIQUIDATION_POOL").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_LIQUIDATION_POOL")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAILPL1");
         assert_eq!(r.word(), 0x37f);

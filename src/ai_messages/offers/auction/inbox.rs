@@ -279,8 +279,8 @@ pub fn activate(
 #[test]
 #[ignore = "requires original auction inbox captures"]
 fn matches_native_inbox() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_INBOX").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_INBOX")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     assert_eq!(&data[..8], b"MTAOIN01");
     assert_eq!(word(&data, 8), 0x37f);

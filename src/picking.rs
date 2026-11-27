@@ -437,7 +437,7 @@ mod tests {
     #[test]
     #[ignore = "requires original normal hover branch observations"]
     fn matches_native_hover_precedence() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_HOVER").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOVER")).unwrap();
         assert_eq!(&bytes[..8], b"MTHOVER1");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let projection = super::QueryProjection::new(640., 480., 45., 4., 3000.).unwrap();
@@ -489,8 +489,7 @@ mod tests {
     #[test]
     #[ignore = "requires original individual building query observations"]
     fn matches_native_building_queries() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_PICK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_PICK")).unwrap();
         assert_eq!(&bytes[..8], b"MTBQUERY");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let projection = super::QueryProjection::new(640., 480., 45., 4., 3000.).unwrap();
@@ -526,8 +525,7 @@ mod tests {
     #[test]
     #[ignore = "requires original composed category query observations"]
     fn matches_native_category_queries() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_PICK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_PICK")).unwrap();
         assert_eq!(&bytes[..8], b"MTCQUERY");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -559,8 +557,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category bounds observations"]
     fn matches_native_category_bounds() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_BOUNDS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_BOUNDS")).unwrap();
         assert_eq!(&bytes[..8], b"MTCBND01");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -581,8 +578,7 @@ mod tests {
     #[test]
     #[ignore = "requires original selection-marker emissions"]
     fn matches_native_selection_markers() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SELECTION_MARKER").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SELECTION_MARKER")).unwrap();
         assert_eq!(&bytes[..8], b"MTMARK01");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -625,8 +621,7 @@ mod tests {
     #[test]
     #[ignore = "requires native projected-box observations"]
     fn matches_native_projected_pick() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PROJECTED_PICK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROJECTED_PICK")).unwrap();
         assert_eq!(&bytes[..8], b"MTPICK01");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let count = word(8) as usize;

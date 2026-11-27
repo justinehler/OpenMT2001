@@ -3,7 +3,7 @@
 #[ignore = "requires original resident pool reset fixture"]
 fn matches_native_preload_resident_pool_reset() {
     let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_POOL_RESET").unwrap()).unwrap();
+        std::fs::read(openmt2001::fixtures::path("NATIVE_RESIDENT_POOL_RESET")).unwrap();
     let mut at = 0;
     let mut take = |n: usize| {
         let start = at;

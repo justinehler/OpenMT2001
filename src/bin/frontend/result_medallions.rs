@@ -161,7 +161,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn original_assets() -> (Vec<u8>, Vec<u8>, Vec<u8>, ArchiveIndex) {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -174,8 +174,7 @@ mod tests {
     fn matches_native_corner_quads() {
         let (exe, _, archive, index) = original_assets();
         let assets = Assets::load(&PeImage::parse(&exe).unwrap(), &index, &archive).unwrap();
-        let fixture =
-            fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_MEDALLIONS").unwrap()).unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_RESULT_MEDALLIONS")).unwrap();
         assert_eq!(&fixture[..8], b"MTRESMD1");
         let word = |at| u32::from_le_bytes(fixture[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 4);
@@ -257,9 +256,9 @@ mod tests {
             up: [0., 1., 0.],
             vertical_fov: 45.,
         };
-        let build_file = fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
-        let map = fs::read(std::env::var("OPENMT2001_MAP").unwrap()).unwrap();
-        let suncols = fs::read(std::env::var("OPENMT2001_SUNCOLS").unwrap()).unwrap();
+        let build_file = fs::read(openmt2001::fixtures::path("BUILD_FILE")).unwrap();
+        let map = fs::read(openmt2001::fixtures::path("MAP")).unwrap();
+        let suncols = fs::read(openmt2001::fixtures::path("SUNCOLS")).unwrap();
         let mut scene = render_scene::assemble(Request {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),

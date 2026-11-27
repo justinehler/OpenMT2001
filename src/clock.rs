@@ -152,7 +152,7 @@ mod tests {
     #[test]
     #[ignore = "requires original simulation-clock observations"]
     fn matches_native_clock() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CLOCK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CLOCK")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let read_clock = |at| Clock {
             calendar: std::array::from_fn(|i| word(at + i * 4)),

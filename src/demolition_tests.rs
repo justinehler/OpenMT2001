@@ -72,8 +72,7 @@ fn read_pair<const N: usize>(reader: &mut Reader<'_>) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn read_fixture() -> Vec<NativeCase> {
-    let path = std::env::var("OPENMT2001_NATIVE_DEMOLITION_COMMAND")
-        .expect("set OPENMT2001_NATIVE_DEMOLITION_COMMAND to MTDEM01 v3 fixture");
+    let path = crate::fixtures::path("NATIVE_DEMOLITION_COMMAND");
     let bytes = std::fs::read(path).expect("read MTDEM01 v3 fixture");
     let mut reader = Reader {
         bytes: &bytes,

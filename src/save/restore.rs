@@ -282,8 +282,7 @@ mod tests {
     #[test]
     #[ignore = "requires original immediate command18 no-callback fixture"]
     fn native_immediate_terms_without_tenant_callbacks_match_business_row() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_TERMS_APPLY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_TERMS_APPLY")).unwrap();
         assert_eq!(&bytes[..8], b"MTTERMS1");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
         let count = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
@@ -313,8 +312,7 @@ mod tests {
     #[ignore = "requires original 4bbd20/4450a0 list-walk fixture"]
     fn matches_native_post_load_appearance_walk() {
         const BASE: u32 = 0x591318;
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_LIST_WALK").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_LIST_WALK")).unwrap();
         let mut at = 0usize;
         let mut take = |len: usize| {
             let part = &bytes[at..at + len];
@@ -533,9 +531,7 @@ mod tests {
     #[test]
     #[ignore = "requires original complete saved-building reconstruction observations"]
     fn matches_native_saved_building_reconstruction() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_RESTORE_BUILDINGS").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_RESTORE_BUILDINGS")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTBLDL01");
         assert_eq!(r.word(), 0x37f);
@@ -607,9 +603,8 @@ mod tests {
     #[test]
     #[ignore = "requires complete original saved-player reconstruction observations"]
     fn matches_native_saved_player_reconstruction() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_RESTORE_PLAYERS").unwrap())
-            .unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVE_RESTORE_PLAYERS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTPLDL01");

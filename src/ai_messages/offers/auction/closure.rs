@@ -135,7 +135,7 @@ pub fn finish(
 #[test]
 #[ignore = "requires original auction settlement capture"]
 fn matches_native_closure() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_CLOSURE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_CLOSURE")).unwrap();
     struct Reader<'a>(&'a [u8]);
     impl<'a> Reader<'a> {
         fn take(&mut self, n: usize) -> &'a [u8] {

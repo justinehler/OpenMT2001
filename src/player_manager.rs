@@ -518,8 +518,7 @@ mod tests {
     #[test]
     #[ignore = "requires original midnight cash-status observations"]
     fn matches_native_cash_status() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOURLY_CASH_STATUS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_HOURLY_CASH_STATUS")).unwrap();
         assert_eq!(&data[..8], b"MTHCASH2");
         assert_eq!(word(&data, 8), 2);
         let size = word(&data, 16) as usize;
@@ -624,8 +623,7 @@ mod tests {
     #[test]
     #[ignore = "requires original hourly player-account observations"]
     fn matches_native_hourly_account() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_CONTROLLER").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_CONTROLLER")).unwrap();
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(&data[..8], b"MTPCTRL1");
         let mut at = 12;
@@ -669,7 +667,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4e5580 observations"]
     fn matches_native_registry_reseed() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RNG_RESEED").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RNG_RESEED")).unwrap();
         assert_eq!(&bytes[..8], b"MTRNGS01");
         assert_eq!(word(&bytes, 8), 1);
         let mut at = 16;
@@ -724,8 +722,7 @@ mod tests {
     #[test]
     #[ignore = "requires original47d5f0 observations"]
     fn matches_native_initial_count() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_INITIAL_COUNT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_INITIAL_COUNT")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIIC47");
         assert_eq!(word(&bytes, 8), 1);
         let mut at = 20;
@@ -769,8 +766,7 @@ mod tests {
     #[test]
     #[ignore = "requires original ten-profile initialization loop observations"]
     fn matches_native_ai_initialization() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PROFILE_EVENTS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_PROFILE_EVENTS")).unwrap();
         assert_eq!(&bytes[..8], b"MTAIPRFE");
         assert_eq!(
             (word(&bytes, 8), word(&bytes, 16), word(&bytes, 20)),
@@ -853,9 +849,8 @@ mod tests {
     #[test]
     #[ignore = "requires original48a1c0 constructor observations and v1.4 executable"]
     fn matches_native_common_constructor() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_CONSTRUCTOR").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_CONSTRUCTOR")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let name = image.at(0x541c80, 32).unwrap();
         assert_eq!(&bytes[..8], b"MTP48A1D");
@@ -968,9 +963,8 @@ mod tests {
     #[test]
     #[ignore = "requires original player creation observations and v1.4 executable"]
     fn matches_native_creation() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_CREATION").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_CREATION")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let cash = Manager::initial_cash(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTPCRT01");
         assert_eq!(word(&bytes, 8), 1);
