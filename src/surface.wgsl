@@ -121,3 +121,12 @@ fn tree_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     return apply_fog(color, in.eye_depth);
 }
+
+@fragment
+fn water_multitexture_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Modes 16/15: stage 0 TEXTURE * DIFFUSE, stage 1 TEXTURE * CURRENT,
+    // for both RGB and alpha. Both stages use zero mip bias.
+    let first = textureSample(surface_texture, surface_sampler, in.uv);
+    let second = textureSample(secondary_texture, surface_sampler, in.secondary_uv);
+    return apply_fog(first * second * vec4(in.color, in.diffuse_alpha), in.eye_depth);
+}

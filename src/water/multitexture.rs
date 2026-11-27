@@ -1,43 +1,30 @@
-//! Isolated v1.4 water modes 15/16. No live scene selects this path implicitly.
-//! Callers must supply original enable/ValidateDevice/Detail facts and provenance.
+//! Original v1.4 water modes 15/16, used by the live city renderer.
 use super::{WaterPhase, WaterVertex};
 use crate::x87::Sum;
 use std::cmp::Ordering;
 
-/// One correlated original state observation, not a query of modern GPU support.
+/// Settings and device validation used by the original water dispatcher.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RouteFacts<'a> {
+pub struct RouteFacts {
     pub enabled: bool,
     pub valid15: bool,
     pub valid16: bool,
     pub detail: i32,
-    provenance: &'a str,
 }
 
-impl<'a> RouteFacts<'a> {
-    /// The reference must identify the source of all four facts. A nonempty
-    /// identifier records custody; it does not authenticate the observation.
-    pub fn new(
-        enabled: bool,
-        valid15: bool,
-        valid16: bool,
-        detail: i32,
-        provenance: &'a str,
-    ) -> Result<Self, &'static str> {
-        if provenance.trim().is_empty() {
-            return Err("water route requires explicit original-state provenance");
-        }
-        Ok(Self {
+impl RouteFacts {
+    pub fn new(enabled: bool, valid15: bool, valid16: bool, detail: i32) -> Self {
+        Self {
             enabled,
             valid15,
             valid16,
             detail,
-            provenance,
-        })
+        }
     }
 
-    pub fn provenance(self) -> &'a str {
-        self.provenance
+    /// Modern render devices support both two-texture materials.
+    pub fn modern(enabled: bool, detail: i32) -> Self {
+        Self::new(enabled, true, true, detail)
     }
 
     /// 004c5370: base mode9 is submitted separately before this route.
@@ -160,15 +147,14 @@ impl Phases {
 
     /// Prepare both original models for the explicitly chosen route. Fallback
     /// carries no new batches: the existing mode20 owner must handle that route.
-    /// This has no renderer/settings caller and changes no live default.
-    pub fn prepare<'a>(
+    pub fn prepare(
         &mut self,
-        facts: RouteFacts<'a>,
+        facts: RouteFacts,
         models: [&[[f32; 3]]; 2],
         camera: [f32; 3],
         sun: [f32; 3],
         tick: u32,
-    ) -> Result<Prepared<'a>, &'static str> {
+    ) -> Result<Prepared, &'static str> {
         let route = facts.route();
         let mut pending = *self;
         let mut batches = Vec::new();
@@ -196,8 +182,8 @@ impl Phases {
     }
 }
 
-pub struct Prepared<'a> {
-    pub facts: RouteFacts<'a>,
+pub struct Prepared {
+    pub facts: RouteFacts,
     /// Original first pair followed by optional quality pair; no mode9 base.
     pub batches: Vec<Batch>,
 }
@@ -394,4 +380,26 @@ pub fn vertices(
     }
     *state = pending;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_route_uses_effects_and_detail_settings() {
+        for (enabled, detail, modes) in [
+            (false, 0, &[20][..]),
+            (false, 2, &[20][..]),
+            (true, 0, &[16][..]),
+            (true, 2, &[16, 15][..]),
+        ] {
+            assert_eq!(RouteFacts::modern(enabled, detail).route().modes(), modes);
+        }
+        assert_eq!(
+            RouteFacts::new(true, true, false, 2).route(),
+            Route::Fallback
+        );
+        assert_eq!(RouteFacts::new(true, false, true, 2).route(), Route::First);
+    }
 }

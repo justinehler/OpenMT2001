@@ -77,6 +77,20 @@ fn normal_city_scene_updates(
     Ok(changed)
 }
 
+fn sync_water_options(
+    scene: &mut Scene,
+    renderer: &Renderer,
+    prepared: &mut PreparedScene,
+    graphics: crate::settings_menu::GraphicsLevels,
+) -> Result<(), String> {
+    let changed = scene.apply_water_options(graphics.water_effects, graphics.detail)?;
+    let updates = changed
+        .into_iter()
+        .map(|i| (i, scene.draws[i].borrowed()))
+        .collect::<Vec<_>>();
+    renderer.update_dynamic_vertices_batch(prepared, &updates)
+}
+
 fn city_snapshot_interval(construction_active: bool) -> std::time::Duration {
     if construction_active {
         // Pending-world grows the model every 25 Hz logic tick. Four visible
@@ -7560,6 +7574,24 @@ impl Intro {
     }
 
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
+        if let Some(view) = &mut self.inspection {
+            sync_water_options(
+                &mut view.scene,
+                &self.renderer,
+                &mut view.prepared,
+                view.settings_menu.graphics,
+            )?;
+        }
+        let graphics = self
+            .menu
+            .as_ref()
+            .map_or(self.graphics_levels, |menu| menu.settings.graphics);
+        sync_water_options(
+            &mut self.assets.scene,
+            &self.renderer,
+            &mut self.prepared,
+            graphics,
+        )?;
         // App serviced focus and fed admitted physical samples at redraw entry.
         self.service_camera_turns();
         if let Some(worker) = &mut self.camera_worker {
@@ -7775,6 +7807,7 @@ impl Intro {
                     let star_detail = self.inspection.as_ref().map_or(Some(graphics_levels.detail),
                         Inspection::normal_star_detail);
                     let mut scene = loaded.scene;
+                    scene.apply_water_options(graphics_levels.water_effects, graphics_levels.detail)?;
                     let mut detail_visibility = loaded.detail_visibility;
                     if refreshing && let Some(previous) = &self.inspection {
                         scene.retain_environment(&previous.scene)?;

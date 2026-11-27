@@ -10,6 +10,7 @@ use crate::{
     roof,
     scene::{self, SceneBuilding},
     texture::TextureSet,
+    water::multitexture::{self, Pass, Phases, Route, RouteFacts},
 };
 use glam::{Mat4, Vec3};
 use std::{collections::BTreeMap, sync::Arc};
@@ -1239,6 +1240,7 @@ fn assemble_with_style_internal(
     let sky_view = crate::camera::view_with_up([0.; 3], sky_direction, camera_up);
     let sky_camera = Mat4::from_cols_array(&projection) * Mat4::from_cols_array(&sky_view);
     let mut fallback_family = None;
+    let mut water_batches = Vec::new();
     if let Some(suncols) = request.suncols {
         let daylight = crate::water::Daylight::from_suncols(suncols)?;
         // This is a fresh capture at the selected phase boundary. The original
@@ -1401,9 +1403,41 @@ fn assemble_with_style_internal(
             }
         }
         vertex_count += batch.len();
+        // 004c5370 submits river then sea for each effect pass, after mode 9.
+        let mut phases = Phases::fresh();
+        for pass in [Pass::First, Pass::Quality] {
+            let phase = match pass {
+                Pass::First => &mut phases.first,
+                Pass::Quality => &mut phases.quality,
+            };
+            let mut vertices = Vec::new();
+            let mut secondary = Vec::new();
+            let mut alpha = Vec::new();
+            for (positions, indices) in &water_meshes {
+                let samples = multitexture::vertices(
+                    phase,
+                    pass,
+                    positions,
+                    camera_position.to_array(),
+                    sun,
+                    0,
+                )?;
+                for &index in indices {
+                    let i = usize::from(index);
+                    let [x, y, z] = positions[i];
+                    let sample = samples[i];
+                    let rgb = [16, 8, 0].map(|shift| ((sample.color >> shift) & 255) as f32 / 255.);
+                    vertices.push([x, y, -z, rgb[0], rgb[1], rgb[2], sample.uv[0], sample.uv[1]]);
+                    secondary.push(sample.secondary_uv);
+                    alpha.push((sample.color >> 24) as u8);
+                }
+            }
+            vertex_count += vertices.len();
+            water_batches.push((pass, vertices, secondary, alpha));
+        }
         fallback_family = Some(family);
         diagnostics.push(format!(
-            "Fallback water: selected phase {}, phase-boundary sun {:?}, animation phase0",
+            "Default water: modes 16/15, selected phase {}, phase-boundary sun {:?}, animation phase0",
             saved_phase.unwrap(),
             sun
         ));
@@ -1587,6 +1621,41 @@ fn assemble_with_style_internal(
             secondary: None,
         });
     }
+    for (pass, vertices, uv, alpha) in &water_batches {
+        let (first_family, first_index, second_family, second_index, mode) = match pass {
+            // Native 00685ba8 is WaterTextures[0]; 00689690/0068968c
+            // are BuildingTextures[28]/[27], also used by the cloud material.
+            Pass::First => (
+                fallback_family.unwrap() - 1,
+                0,
+                fallback_family.unwrap() - 1,
+                0,
+                SurfaceMode::WaterFirst,
+            ),
+            Pass::Quality => (2, 28, 2, 27, SurfaceMode::WaterQuality),
+        };
+        let first = &sets[first_family].textures[first_index];
+        let second = &sets[second_family].textures[second_index];
+        draws.push(TexturedDraw {
+            view_projection: None,
+            vertices,
+            specular: None,
+            diffuse_alpha: Some(alpha),
+            mode,
+            width: first.width,
+            height: first.height,
+            rgba: first.texels,
+            mipmaps: true,
+            secondary: Some(SecondaryTexture {
+                uv,
+                diffuse_alpha: 255,
+                width: second.width,
+                height: second.height,
+                rgba: second.texels,
+                mipmaps: true,
+            }),
+        });
+    }
     // Normal view004b3870 submits sky, then water, then city scenery.
     draws.sort_by_key(|draw| match draw.mode {
         SurfaceMode::Sky => 0,
@@ -1594,13 +1663,14 @@ fn assemble_with_style_internal(
         SurfaceMode::Stars => 2,
         SurfaceMode::Celestial => 3,
         SurfaceMode::WaterBase => 4,
-        SurfaceMode::WaterFallback => 5,
-        SurfaceMode::Diagnostic | SurfaceMode::StaticOpaque => 6,
-        SurfaceMode::StaticLit => 7,
-        SurfaceMode::FacadeBlend => 8,
-        SurfaceMode::TreeFoliage => 9,
-        SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks => 9,
-        SurfaceMode::Overlay | SurfaceMode::UiDepth => 9,
+        SurfaceMode::WaterFallback | SurfaceMode::WaterFirst => 5,
+        SurfaceMode::WaterQuality => 6,
+        SurfaceMode::Diagnostic | SurfaceMode::StaticOpaque => 7,
+        SurfaceMode::StaticLit => 8,
+        SurfaceMode::FacadeBlend => 9,
+        SurfaceMode::TreeFoliage => 10,
+        SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks => 10,
+        SurfaceMode::Overlay | SurfaceMode::UiDepth => 10,
     });
     // Reproduce the original FOGTABLE + WFOG device path. Camera pose remains
     // diagnostic; colors/distances come from the original SUNCOLS update.
@@ -1694,6 +1764,9 @@ fn assemble_with_style_internal(
             facade_images,
             lighting: lighting_spans,
             water_meshes,
+            multitexture: Phases::fresh(),
+            camera: camera_position.to_array(),
+            environment_tick: 0,
             water: crate::water::WaterPhase {
                 previous_tick: u32::MAX,
                 phase: 0.,
@@ -1731,7 +1804,7 @@ fn assemble_with_style_internal(
     let draws = draws
         .into_iter()
         .map(|draw| OwnedDraw {
-            active_vertices: None,
+            active_vertices: (draw.mode == SurfaceMode::WaterFallback).then_some(0),
             view_projection: draw.view_projection,
             vertices: draw.vertices.to_vec(),
             specular: draw.specular.map(<[_]>::to_vec),
@@ -1925,6 +1998,9 @@ struct Animation {
     lighting: Vec<CityLightingSpan>,
     water_meshes: Vec<(Vec<[f32; 3]>, Vec<u16>)>,
     water: crate::water::WaterPhase,
+    multitexture: Phases,
+    camera: [f32; 3],
+    environment_tick: u32,
     sky: Option<([f32; 3], f32, u32)>,
     suncolors: Option<Arc<crate::lighting::SunColors>>,
     daylight_time: Option<(u32, u32)>,
@@ -1932,6 +2008,32 @@ struct Animation {
 }
 
 impl Scene {
+    /// 004c5370: modern devices validate both original water materials.
+    /// Keep the alternate draws resident so option changes need only vertex uploads.
+    pub fn apply_water_options(&mut self, enabled: bool, detail: u8) -> Result<Vec<usize>, String> {
+        let route = RouteFacts::modern(enabled, i32::from(detail)).route();
+        let mut changed = Vec::new();
+        for (index, draw) in self.draws.iter_mut().enumerate() {
+            let visible = match draw.mode {
+                SurfaceMode::WaterFallback => route == Route::Fallback,
+                SurfaceMode::WaterFirst => route != Route::Fallback,
+                SurfaceMode::WaterQuality => route == Route::FirstAndQuality,
+                _ => continue,
+            };
+            let count = if visible { draw.vertices.len() } else { 0 };
+            if draw.active_vertices.unwrap_or(draw.vertices.len()) != count {
+                draw.active_vertices = Some(count);
+                if visible && let Some(state) = &mut self.animation {
+                    let tick = state.environment_tick;
+                    // Rendering resumes this pass at the current environment tick.
+                    let camera = state.camera;
+                    update_water(draw, state, camera, tick)?;
+                }
+                changed.push(index);
+            }
+        }
+        Ok(changed)
+    }
     ///452780/4c4970: final per-draw policy for normal menu/city owners only.
     /// Keep full retained geometry; generic reframe/daylight/result callers
     /// remain policy-free and owners reapply this after their updates.
@@ -2189,13 +2291,11 @@ impl Scene {
                         changed.push(index);
                     }
                 }
-                SurfaceMode::WaterFallback => {
-                    let tick = if state.water.previous_tick == u32::MAX {
-                        0
-                    } else {
-                        state.water.previous_tick
-                    };
-                    update_fallback_water(draw, state, camera.eye, tick)?;
+                SurfaceMode::WaterFallback
+                | SurfaceMode::WaterFirst
+                | SurfaceMode::WaterQuality => {
+                    let tick = state.environment_tick;
+                    update_water(draw, state, camera.eye, tick)?;
                     changed.push(index);
                 }
                 _ => (),
@@ -2217,6 +2317,8 @@ impl Scene {
             .animation
             .as_mut()
             .ok_or("scene was not prepared for animation")?;
+        state.environment_tick = tick;
+        state.camera = camera;
         let mut changed = Vec::new();
         if let Some((index, motion, coordinates)) = &mut state.clouds
             && motion.previous_tick != tick
@@ -2242,8 +2344,11 @@ impl Scene {
             changed.push(*index);
         }
         for (index, draw) in self.draws.iter_mut().enumerate() {
-            if draw.mode == SurfaceMode::WaterFallback {
-                update_fallback_water(draw, state, camera, tick)?;
+            if matches!(
+                draw.mode,
+                SurfaceMode::WaterFallback | SurfaceMode::WaterFirst | SurfaceMode::WaterQuality
+            ) {
+                update_water(draw, state, camera, tick)?;
                 changed.push(index);
             }
         }
@@ -2257,6 +2362,8 @@ impl Scene {
             return Ok(());
         };
         state.water = prior.water;
+        state.multitexture = prior.multitexture;
+        state.environment_tick = prior.environment_tick;
         if let (Some((index, motion, coordinates)), Some((_, old_motion, old_coordinates))) =
             (&mut state.clouds, &prior.clouds)
         {
@@ -2331,11 +2438,7 @@ impl Scene {
         let quads = state.sky.map(|(sun, angle, color)| {
             crate::sky::celestial_quads(sample.eye, scene_view, angle, sun, color)
         });
-        let tick = if state.water.previous_tick == u32::MAX {
-            0
-        } else {
-            state.water.previous_tick
-        };
+        let tick = state.environment_tick;
         let mut celestial = 0;
         for (index, draw) in self.draws.iter_mut().enumerate() {
             match draw.mode {
@@ -2367,8 +2470,10 @@ impl Scene {
                         changed.push(index);
                     }
                 }
-                SurfaceMode::WaterFallback => {
-                    update_fallback_water(draw, state, sample.eye, tick)?;
+                SurfaceMode::WaterFallback
+                | SurfaceMode::WaterFirst
+                | SurfaceMode::WaterQuality => {
+                    update_water(draw, state, sample.eye, tick)?;
                     changed.push(index);
                 }
                 _ => (),
@@ -2378,33 +2483,61 @@ impl Scene {
     }
 }
 
-fn update_fallback_water(
+fn update_water(
     draw: &mut OwnedDraw,
     state: &mut Animation,
     camera: [f32; 3],
     tick: u32,
 ) -> Result<(), String> {
+    if draw.active_vertices == Some(0) {
+        return Ok(());
+    }
+    state.camera = camera;
     let Some((sun, _, _)) = state.sky else {
         return Ok(());
     };
     let mut cursor = 0;
     for (positions, indices) in &state.water_meshes {
-        let samples = state.water.fallback_vertices(positions, camera, sun, tick);
+        let samples = match draw.mode {
+            SurfaceMode::WaterFirst => multitexture::vertices(
+                &mut state.multitexture.first,
+                Pass::First,
+                positions,
+                camera,
+                sun,
+                tick,
+            )?,
+            SurfaceMode::WaterQuality => multitexture::vertices(
+                &mut state.multitexture.quality,
+                Pass::Quality,
+                positions,
+                camera,
+                sun,
+                tick,
+            )?,
+            _ => state.water.fallback_vertices(positions, camera, sun, tick),
+        };
         for &i in indices {
             let sample = samples[usize::from(i)];
             let vertex = draw
                 .vertices
                 .get_mut(cursor)
-                .ok_or("retained fallback water vertex topology changed")?;
+                .ok_or("retained water vertex topology changed")?;
             for (component, shift) in [16, 8, 0].into_iter().enumerate() {
                 vertex[3 + component] = ((sample.color >> shift) & 255) as f32 / 255.;
             }
             vertex[6..8].copy_from_slice(&sample.uv);
+            if let Some(secondary) = &mut draw.secondary {
+                secondary.uv[cursor] = sample.secondary_uv;
+            }
+            if let Some(alpha) = &mut draw.diffuse_alpha {
+                alpha[cursor] = (sample.color >> 24) as u8;
+            }
             cursor += 1;
         }
     }
     if cursor != draw.vertices.len() {
-        return Err("retained fallback water vertex count changed".into());
+        return Err("retained water vertex count changed".into());
     }
     Ok(())
 }
@@ -3003,7 +3136,7 @@ mod tests {
         let water_draw = scene
             .draws
             .iter()
-            .position(|draw| draw.mode == SurfaceMode::WaterFallback)
+            .position(|draw| draw.mode == SurfaceMode::WaterFirst)
             .unwrap();
         let sky_draw = scene
             .draws
@@ -3022,7 +3155,7 @@ mod tests {
             .collect::<Vec<_>>();
         let first_uv = scene.draws[cloud].vertices[0][6..8].to_vec();
         let first_water_uv = scene.draws[water_draw].vertices[0][6..8].to_vec();
-        // Original cold image starts cloud previous_tick at zero and fallback
+        // Original cold image starts cloud previous_tick at zero and effect
         // water previous_tick at FFFFFFFF. A restored clock is already loaded
         // before the first original world draw.
         let saved_tick = 12_345;
@@ -3031,7 +3164,7 @@ mod tests {
         let morning_sky = scene.draws[sky_draw].vertices[384][3..6].to_vec();
         let morning_sun = scene.draws[celestial].vertices[0][..3].to_vec();
         let morning_fog = scene.fog.unwrap();
-        let initial_water = scene.animation.as_ref().unwrap().water;
+        let initial_water = scene.animation.as_ref().unwrap().multitexture.first;
         assert_eq!(initial_water.previous_tick, saved_tick);
         assert_eq!(initial_water.phase.to_bits(), 0f32.to_bits());
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
@@ -3125,11 +3258,18 @@ mod tests {
         assert_ne!(scene.draws[water_draw].vertices[0][6..8], first_water_uv);
         let motion = scene.animation.as_ref().unwrap().clouds.as_ref().unwrap().1;
         assert_eq!(motion.previous_tick, saved_tick + 100);
-        let water = scene.animation.as_ref().unwrap().water;
+        let water = scene.animation.as_ref().unwrap().multitexture.first;
         assert_eq!(water.previous_tick, saved_tick + 100);
         scene.reframe(track.sample(1000).unwrap()).unwrap();
         assert_eq!(
-            scene.animation.as_ref().unwrap().water.phase.to_bits(),
+            scene
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .first
+                .phase
+                .to_bits(),
             water.phase.to_bits()
         );
         let mut refreshed = make(20);
@@ -3144,7 +3284,14 @@ mod tests {
             scene.draws[cloud].diffuse_alpha
         );
         assert_eq!(
-            refreshed.animation.as_ref().unwrap().water.phase.to_bits(),
+            refreshed
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .first
+                .phase
+                .to_bits(),
             water.phase.to_bits()
         );
         assert_eq!(
@@ -3162,12 +3309,96 @@ mod tests {
             .advance_environment(saved_tick + 125, sample.eye)
             .unwrap();
         assert_eq!(
-            refreshed.animation.as_ref().unwrap().water.previous_tick,
+            refreshed
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .first
+                .previous_tick,
             saved_tick + 125
         );
         assert_ne!(
-            refreshed.animation.as_ref().unwrap().water.phase.to_bits(),
+            refreshed
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .first
+                .phase
+                .to_bits(),
             water.phase.to_bits()
+        );
+        // Retained GPU surfaces can switch all effects/detail combinations
+        // without rebuilding the city or changing the fixed pass order.
+        for (enabled, detail, expected) in [
+            (false, 0, &[SurfaceMode::WaterFallback][..]),
+            (false, 2, &[SurfaceMode::WaterFallback][..]),
+            (true, 0, &[SurfaceMode::WaterFirst][..]),
+            (
+                true,
+                1,
+                &[SurfaceMode::WaterFirst, SurfaceMode::WaterQuality][..],
+            ),
+            (
+                true,
+                2,
+                &[SurfaceMode::WaterFirst, SurfaceMode::WaterQuality][..],
+            ),
+        ] {
+            let changed = scene.apply_water_options(enabled, detail).unwrap();
+            let active = scene
+                .draws
+                .iter()
+                .filter(|draw| {
+                    matches!(
+                        draw.mode,
+                        SurfaceMode::WaterFallback
+                            | SurfaceMode::WaterFirst
+                            | SurfaceMode::WaterQuality
+                    ) && !draw.borrowed().vertices.is_empty()
+                })
+                .map(|draw| draw.mode)
+                .collect::<Vec<_>>();
+            assert_eq!(active, expected);
+            let updates = changed
+                .into_iter()
+                .map(|i| (i, scene.draws[i].borrowed()))
+                .collect::<Vec<_>>();
+            renderer
+                .update_dynamic_vertices_batch(&mut prepared, &updates)
+                .unwrap();
+            assert!(
+                scene
+                    .apply_water_options(enabled, detail)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let quality_draw = scene
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::WaterQuality)
+            .unwrap();
+        let uv = scene.draws[quality_draw]
+            .secondary
+            .as_ref()
+            .unwrap()
+            .uv
+            .clone();
+        scene
+            .advance_environment(saved_tick + 150, sample.eye)
+            .unwrap();
+        assert_ne!(scene.draws[quality_draw].secondary.as_ref().unwrap().uv, uv);
+        assert_eq!(
+            scene
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .quality
+                .previous_tick,
+            saved_tick + 150
         );
         let mut daytime = make(12);
         let stars = daytime
@@ -3206,7 +3437,14 @@ mod tests {
         let capacity = daytime.draws[stars].vertices.len();
         assert!(capacity > 0);
         let original_stars = daytime.draws[stars].vertices.clone();
-        let water_before = daytime.animation.as_ref().unwrap().water.phase.to_bits();
+        let water_before = daytime
+            .animation
+            .as_ref()
+            .unwrap()
+            .multitexture
+            .first
+            .phase
+            .to_bits();
         for detail in [0, 2, 1, 2, 255, 2] {
             // Match the menu owner: generic camera update, then policy, then
             // one retained upload. A masked count must not destroy capacity.
@@ -3234,7 +3472,14 @@ mod tests {
             );
         }
         assert_eq!(
-            daytime.animation.as_ref().unwrap().water.phase.to_bits(),
+            daytime
+                .animation
+                .as_ref()
+                .unwrap()
+                .multitexture
+                .first
+                .phase
+                .to_bits(),
             water_before
         );
         // Animated assembly reserves the complete catalog even when no sky
@@ -3319,7 +3564,8 @@ mod tests {
                 .animation
                 .as_ref()
                 .unwrap()
-                .water
+                .multitexture
+                .first
                 .phase
                 .to_bits(),
             water_before
