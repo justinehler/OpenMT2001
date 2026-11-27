@@ -25,6 +25,7 @@ pub struct Status {
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
+    pub market_share: Option<crate::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
@@ -213,6 +214,7 @@ pub struct Host {
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
     stats: Option<crate::stats_panel::State>,
+    market_share: crate::market_share_panel::State,
     cash_arrow: crate::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<crate::card_panel::Panel>,
@@ -430,6 +432,7 @@ impl Host {
             presentation_started: false,
             game_active: false,
             stats: None,
+            market_share: Default::default(),
             cash_arrow: crate::cash_arrow::State::default(),
             player_panels: [true; 2],
             card: None,
@@ -1183,6 +1186,9 @@ impl Host {
         }
         Ok(())
     }
+    pub fn dismiss_market_share(&mut self) {
+        self.market_share.dismiss();
+    }
     pub fn fail(&mut self, error: String) {
         self.running = false;
         let _ = crate::transport_audio::submit(
@@ -1294,6 +1300,7 @@ impl Host {
             pulse_lights: session.pulse_lights.clone(),
             demolition_points: session.demolition_points.clone(),
             stats,
+            market_share: self.market_share.snapshot.clone(),
             result_request: self.result_request,
             player_panels: self.player_panels,
             financial,
@@ -1983,6 +1990,8 @@ impl Host {
         let gameplay_sound = self.gameplay_sound.clone();
         let day_night_flags = &mut self.day_night_flags;
         let player_panels = &mut self.player_panels;
+        let market_share = &mut self.market_share;
+        let objective_kind = session.world.objective.kind;
         let prompts = &mut self.pending_prompts;
         let auction_seconds = &mut self.auction_seconds;
         let auction_renderer = &self.auction_renderer;
@@ -2181,32 +2190,11 @@ impl Host {
                     }
                     Ok(0)
                 }
-                Event::MarketShare(openmt2001::player_share::Call::Refresh) => {
-                    // 43be20 refreshes the live manager widget. The explicit
-                    // Objective branch owns its modal text and button sequence.
-                    omitted.insert(0x43be20);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::Kind1ProfileSelect { index }) => {
-                    // 42c430/42c470 format the selected name in the share
-                    // panel. They do not write the city or player records.
-                    if players.get(index as usize).is_none() {
-                        return Err("market-share profile player leaves roster".into());
-                    }
-                    omitted.insert(0x42c430);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::ProfileSelect { index }) => {
-                    if players.get(index as usize).is_none() {
-                        return Err("market-share profile player leaves roster".into());
-                    }
-                    omitted.insert(0x42c470);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::PlayerShare { .. }) => {
-                    // Native 42c4b0 updates the manager's visual share bars and
-                    // numeric labels. The accounting records are already live.
-                    omitted.insert(0x42c4b0);
+                Event::MarketShare(call @ (openmt2001::player_share::Call::Refresh
+                    | openmt2001::player_share::Call::Kind1ProfileSelect { .. }
+                    | openmt2001::player_share::Call::ProfileSelect { .. }
+                    | openmt2001::player_share::Call::PlayerShare { .. })) => {
+                    market_share.apply(call, objective_kind, &players)?;
                     Ok(0)
                 }
                 Event::Calendar(openmt2001::level_runtime::CalendarEvent::Clock(
@@ -2865,6 +2853,7 @@ impl Host {
         //receive428dc0, and their Chance caches survive subsequent city loads.
         for _ in 0..self.policy.scheduler.iterations {
             self.notices.tick();
+            self.market_share.interface_tick();
         }
         let p = session
             .roster

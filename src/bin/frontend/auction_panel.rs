@@ -720,6 +720,7 @@ impl Assets {
         }
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     fn prepare_with_info(
         &self,
         renderer: &Renderer,

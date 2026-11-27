@@ -53,6 +53,8 @@ mod live_host;
 mod load;
 #[path = "frontend/locator.rs"]
 mod locator;
+#[path = "frontend/market_share_panel.rs"]
+pub mod market_share_panel;
 #[path = "frontend/menu.rs"]
 mod menu;
 #[path = "frontend/navigation.rs"]
