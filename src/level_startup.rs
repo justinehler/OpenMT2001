@@ -546,6 +546,7 @@ impl Roster {
             &mut self.manager,
             &mut self.profiles,
             controls,
+            &mut self.scripts,
             image,
             &mut world,
             |call, player, profiles, _| callback(call, player, profiles),
