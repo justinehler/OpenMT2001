@@ -525,6 +525,7 @@ impl Assets {
                 x >= l && x <= r && y >= t && y <= b
             })
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &self,
         renderer: &openmt2001::render::Renderer,
