@@ -4,7 +4,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 #[derive(Default)]
 pub(super) struct Input {
-    held: [bool; 3],
+    held: [bool; 2],
 }
 #[derive(Default, Clone, Copy)]
 pub(super) struct Gates {
@@ -22,15 +22,13 @@ impl Input {
     ) -> Result<(), String> {
         let PhysicalSample::Key { key, down, repeat } = sample else {
             if matches!(sample, PhysicalSample::Unfocus) {
-                self.held = [false; 3];
+                self.held = [false; 2];
             }
             return Ok(());
         };
         let index = match key {
             PhysicalKey::Code(KeyCode::F1) => 0,
             PhysicalKey::Code(KeyCode::KeyP) => 1,
-            // Retain the existing host convenience binding through the same owner.
-            PhysicalKey::Code(KeyCode::Space) => 2,
             _ => return Ok(()),
         };
         let edge = down && !self.held[index] && !repeat;

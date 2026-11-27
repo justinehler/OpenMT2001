@@ -88,7 +88,7 @@ pub struct TutorialControls {
 pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
     if previous.is_none() {
         eprintln!(
-            "[controls] F1/P (or Space) pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
+            "[controls] F1/P pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
         );
     }
     if !status.pending_presentation.is_empty()

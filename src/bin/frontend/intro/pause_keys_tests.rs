@@ -163,7 +163,7 @@ fn active() -> Gates {
 
 #[test]
 fn pause_keys_toggle_once_per_press_and_resume_audio_and_timers() {
-    for code in [KeyCode::F1, KeyCode::KeyP, KeyCode::Space] {
+    for code in [KeyCode::F1, KeyCode::KeyP] {
         let mut h = Harness::new(false, None);
         h.key(code, true, false, active());
         let paused = h.finish(true);

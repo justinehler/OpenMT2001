@@ -4816,9 +4816,7 @@ impl Intro {
             sample,
             process_frontend::PhysicalSample::Key {
                 key: winit::keyboard::PhysicalKey::Code(
-                    winit::keyboard::KeyCode::F1
-                        | winit::keyboard::KeyCode::KeyP
-                        | winit::keyboard::KeyCode::Space
+                    winit::keyboard::KeyCode::F1 | winit::keyboard::KeyCode::KeyP
                 ),
                 down: true,
                 repeat: false,
