@@ -1,9 +1,11 @@
 //! Connect the original normal controller to retained financial and inbox state.
 //! Unrecovered decision operations remain synchronous, explicit dependencies.
+#[cfg(feature = "lua4")]
+use crate::player_manager::Manager;
 use crate::{
     ai_messages, ai_tick,
     pe::PeImage,
-    player_manager::{Manager, Player, word},
+    player_manager::{Player, word},
 };
 
 pub struct World<'a> {
@@ -1313,6 +1315,7 @@ fn dispatch(
 
 /// Invoke the roster's AI VM while retaining access to every linked player.
 /// Script writes are immediately visible to the controller and later accounts.
+#[cfg(feature = "lua4")]
 #[allow(clippy::too_many_arguments)]
 fn script_event(
     scripts: &mut crate::ai_script::AiScript,
@@ -1334,6 +1337,7 @@ fn script_event(
     Ok(0)
 }
 
+#[cfg(feature = "lua4")]
 #[allow(clippy::too_many_arguments)]
 pub fn advance(
     slot: usize,
