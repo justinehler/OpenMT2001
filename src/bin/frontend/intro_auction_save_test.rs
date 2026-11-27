@@ -54,7 +54,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
                 .unwrap();
         if prior == 3 {
             paths
-                .push_str(&fs::read_to_string(openmt2001::fixtures::path("NORMAL_STRATEGIC_VIEW_PATH")).unwrap());
+                .push_str(&fs::read_to_string("work/save/normal-strategic-view-path.txt").unwrap());
             paths.push('\n');
         }
         for (phase, path) in paths.lines().enumerate() {
