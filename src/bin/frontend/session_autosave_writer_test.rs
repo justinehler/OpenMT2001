@@ -7,13 +7,17 @@ impl Scratch {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
         fs::create_dir_all(&base).unwrap();
+        // macOS clocks can return the same nanosecond value for back-to-back
+        // calls, so a per-process counter keeps parallel tests apart.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = base.join(format!(
-            "autosave-{}-{}",
+            "autosave-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
         Self(path)
