@@ -32,6 +32,7 @@ pub enum Event<'a> {
     ),
     Tick(scheduler::Event),
     Calendar(CalendarEvent),
+    AccountPosted(economy::AccountPosting),
     Autosave(&'a mut dyn crate::session_save::AutosaveRequest),
     Command(live_commands::Event),
     Pending(live_commands::PendingCall, Option<&'a mut [u8; 0x394]>),
@@ -293,6 +294,9 @@ impl Session<'_> {
                                 &mut context,
                                 |event, clock, city, population, context| {
                                     match event {
+                                        CalendarEvent::AccountPosted(posting) => {
+                                            boundary(Event::AccountPosted(posting), clock)?;
+                                        }
                                         //48dbf0 returns the retained level object's+85c byte.
                                         CalendarEvent::Hourly(hourly::Event::Query) | CalendarEvent::Clock(openmt2001::clock::Event::RolloverQuery) => {
                                             return Ok(self.tutorial_state != 0);

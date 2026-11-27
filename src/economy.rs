@@ -19,6 +19,14 @@ pub fn script_money(cash: f32, argument: f64, operation: ScriptMoneyOperation) -
     }
 }
 
+/// Presentation notification for an account mutation that has already happened.
+/// `player` is a zero-based player slot; observers must not apply the amount again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AccountPosting {
+    pub player: usize,
+    pub amount: f32,
+}
+
 /// Cash and the two native 38-category ledger periods at player +0x14.
 /// Host UI/sound effects from 0048a5a0 are handled separately.
 #[derive(Clone, Debug)]
@@ -578,6 +586,7 @@ impl BusinessDayInputs<'_> {
 
 /// 00463d40: visit the original business table in source order, performing
 /// income/replenishment, common rent, then utilities for each active record.
+/// Returns every cash posting, including zero amounts, in execution order.
 /// Player resets and aggregate owner payouts belong to the later caller.
 pub fn update_daily_businesses(
     records: &mut [[u8; 0x220]],
@@ -585,10 +594,11 @@ pub fn update_daily_businesses(
     residents: &mut ResidentAccounts,
     players: &mut [PlayerAccount],
     utilities: &mut Utilities,
-) -> Result<(), String> {
+) -> Result<Vec<AccountPosting>, String> {
     if records.len() != 600 || parameters.len() != records.len() {
         return Err("daily business update requires the original 600-slot table".into());
     }
+    let mut postings = Vec::new();
     for (record, parameters) in records.iter_mut().zip(parameters) {
         if record[0x21c] == 0 {
             continue;
@@ -609,7 +619,7 @@ pub fn update_daily_businesses(
         };
         match u32::from_le_bytes(record[..4].try_into().unwrap()) {
             0 => {
-                replenish_business_record(
+                let result = replenish_business_record(
                     record,
                     &parameters.prices,
                     parameters.capacity,
@@ -617,9 +627,21 @@ pub fn update_daily_businesses(
                     false,
                     account,
                 )?;
+                if owner != 0 {
+                    postings.push(AccountPosting {
+                        player: usize::from(owner) - 1,
+                        amount: (-result.cost) as f32,
+                    });
+                }
             }
             1 => {
-                residents.collect_housing_income(record, account)?;
+                let amount = residents.collect_housing_income(record, account)?;
+                if owner != 0 {
+                    postings.push(AccountPosting {
+                        player: usize::from(owner) - 1,
+                        amount,
+                    });
+                }
             }
             _ => {}
         }
@@ -632,7 +654,13 @@ pub fn update_daily_businesses(
         let rent = u16::from_le_bytes(record[0x18..0x1a].try_into().unwrap());
         let expense_offsets = [0x44, 0x38, 0x40, 0x3c];
         let mut expenses = expense_offsets.map(float);
-        business.settle_rent(&mut rent_balance, rent, owner, parameters.landlord, players)?;
+        postings.extend(business.settle_rent(
+            &mut rent_balance,
+            rent,
+            owner,
+            parameters.landlord,
+            players,
+        )?);
         let amounts = utilities.assess(parameters.utility_scalar, parameters.utility_rates, owner);
         let account = if owner == 0 {
             None
@@ -640,13 +668,19 @@ pub fn update_daily_businesses(
             players.get_mut(usize::from(owner) - 1)
         };
         business.charge_utilities(&mut expenses, amounts, true, account)?;
+        if owner != 0 {
+            postings.extend(amounts.map(|amount| AccountPosting {
+                player: usize::from(owner) - 1,
+                amount: -amount,
+            }));
+        }
         record[0x28..0x2c].copy_from_slice(&rent_balance.to_le_bytes());
         record[0x1c..0x20].copy_from_slice(&business.balance.to_le_bytes());
         for (at, value) in expense_offsets.into_iter().zip(expenses) {
             record[at..at + 4].copy_from_slice(&value.to_le_bytes());
         }
     }
-    Ok(())
+    Ok(postings)
 }
 
 impl ResidentAccounts {
@@ -1305,25 +1339,34 @@ impl BusinessAccount {
         tenant: u8,
         landlord: u8,
         players: &mut [PlayerAccount],
-    ) -> Result<(), String> {
+    ) -> Result<Vec<AccountPosting>, String> {
         for owner in [tenant, landlord] {
             if owner > 6 || usize::from(owner) > players.len() {
                 return Err("rent owner does not resolve to a native player".into());
             }
         }
+        let mut postings = Vec::new();
         if tenant == landlord {
-            return Ok(());
+            return Ok(postings);
         }
         let debit = -f32::from(rent);
         *rent_balance = (f64::from(*rent_balance) + f64::from(debit)) as f32;
         self.balance = (f64::from(self.balance) + f64::from(debit)) as f32;
         if tenant != 0 {
-            players[usize::from(tenant) - 1].post(debit, 0x0e)?;
+            let player = usize::from(tenant) - 1;
+            players[player].post(debit, 0x0e)?;
+            postings.push(AccountPosting {
+                player,
+                amount: debit,
+            });
         }
         if landlord != 0 {
-            players[usize::from(landlord) - 1].post(f32::from(rent), 0x22)?;
+            let player = usize::from(landlord) - 1;
+            let amount = f32::from(rent);
+            players[player].post(amount, 0x22)?;
+            postings.push(AccountPosting { player, amount });
         }
-        Ok(())
+        Ok(postings)
     }
 
     /// Apply 00462070's four rounded amounts in original store/cash order.
@@ -2475,6 +2518,202 @@ mod tests {
     }
 
     use super::*;
+
+    fn daily_test_players() -> Vec<PlayerAccount> {
+        (0..2)
+            .map(|_| {
+                let mut player = PlayerAccount::from_prefix(&[0; 0x1b4]).unwrap();
+                player.cash = 1000.;
+                player
+            })
+            .collect()
+    }
+
+    fn daily_test_residents() -> ResidentAccounts {
+        ResidentAccounts {
+            active_count: 0,
+            nodes: Vec::new(),
+            accounts: Vec::new(),
+        }
+    }
+
+    fn daily_rent_record(owner: u8, rent: u16) -> [u8; 0x220] {
+        let mut record = [0; 0x220];
+        record[..4].copy_from_slice(&2u32.to_le_bytes());
+        record[10] = owner;
+        record[0x18..0x1a].copy_from_slice(&rent.to_le_bytes());
+        record[0x21c] = 1;
+        record
+    }
+
+    fn daily_test_parameters(landlord: u8) -> BusinessDayParameters {
+        BusinessDayParameters {
+            capacity: 100,
+            catalog_mask: 0,
+            prices: Vec::new(),
+            utility_scalar: 1,
+            utility_rates: [0.; 4],
+            landlord,
+        }
+    }
+
+    #[test]
+    fn daily_rent_postings_keep_payments_separate_and_do_not_post_twice() {
+        let mut records = vec![[0; 0x220]; 600];
+        let mut parameters: Vec<_> = (0..600).map(|_| None).collect();
+        for (slot, owner, landlord, rent) in [(2, 1, 2, 75), (7, 2, 1, 125), (20, 1, 2, 50)] {
+            records[slot] = daily_rent_record(owner, rent);
+            parameters[slot] = Some(daily_test_parameters(landlord));
+        }
+        let mut players = daily_test_players();
+        let postings = update_daily_businesses(
+            &mut records,
+            &parameters,
+            &mut daily_test_residents(),
+            &mut players,
+            &mut Utilities::new([0; 4]),
+        )
+        .unwrap();
+        let expected: Vec<_> = [
+            (0, -75.),
+            (1, 75.),
+            (0, -0.),
+            (0, -0.),
+            (0, -0.),
+            (0, -0.),
+            (1, -125.),
+            (0, 125.),
+            (1, -0.),
+            (1, -0.),
+            (1, -0.),
+            (1, -0.),
+            (0, -50.),
+            (1, 50.),
+            (0, -0.),
+            (0, -0.),
+            (0, -0.),
+            (0, -0.),
+        ]
+        .map(|(player, amount)| AccountPosting { player, amount })
+        .into();
+        assert_eq!(postings, expected);
+        // Main's accounting pays 75+50 and receives 125 for player 0;
+        // player 1 does the reverse. Notifications must never reapply cash.
+        assert_eq!(
+            players.iter().map(|p| p.cash).collect::<Vec<_>>(),
+            [1000., 1000.]
+        );
+        assert_eq!(players[0].ledger(0x0e), Some(-125.));
+        assert_eq!(players[0].ledger(0x22), Some(125.));
+        assert_eq!(players[1].ledger(0x0e), Some(-125.));
+        assert_eq!(players[1].ledger(0x22), Some(125.));
+        for slot in [2, 7, 20] {
+            let rent = f32::from(u16::from_le_bytes(
+                records[slot][0x18..0x1a].try_into().unwrap(),
+            ));
+            for at in [0x1c, 0x28] {
+                assert_eq!(
+                    f32::from_le_bytes(records[slot][at..at + 4].try_into().unwrap()),
+                    -rent
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn daily_rent_same_owner_zero_and_unowned_accounts() {
+        for (tenant, landlord, rent, expected_rent, expected_cash) in [
+            (1, 1, 90, vec![], [1000., 1000.]),
+            (1, 2, 0, vec![(0, -0.), (1, 0.)], [1000., 1000.]),
+            (0, 1, 20, vec![(0, 20.)], [1020., 1000.]),
+            (2, 0, 30, vec![(1, -30.)], [1000., 970.]),
+            (0, 0, 99, vec![], [1000., 1000.]),
+        ] {
+            let mut records = vec![[0; 0x220]; 600];
+            records[10] = daily_rent_record(tenant, rent);
+            // Inactive entries must never post, even with nonzero rent.
+            records[0] = daily_rent_record(1, 500);
+            records[0][0x21c] = 0;
+            let mut parameters: Vec<_> = (0..600).map(|_| None).collect();
+            parameters[10] = Some(daily_test_parameters(landlord));
+            let mut players = daily_test_players();
+            let postings = update_daily_businesses(
+                &mut records,
+                &parameters,
+                &mut daily_test_residents(),
+                &mut players,
+                &mut Utilities::new([0; 4]),
+            )
+            .unwrap();
+            let mut expected: Vec<_> = expected_rent
+                .into_iter()
+                .map(|(player, amount)| AccountPosting { player, amount })
+                .collect();
+            if tenant != 0 {
+                expected.extend(
+                    [AccountPosting {
+                        player: usize::from(tenant) - 1,
+                        amount: -0.,
+                    }; 4],
+                );
+            }
+            assert_eq!(postings, expected, "tenant={tenant}, landlord={landlord}");
+            assert_eq!(
+                players.iter().map(|p| p.cash).collect::<Vec<_>>(),
+                expected_cash
+            );
+        }
+    }
+
+    #[test]
+    fn daily_postings_include_restock_housing_and_utilities_in_order() {
+        let mut records = vec![[0; 0x220]; 600];
+        let mut parameters: Vec<_> = (0..600).map(|_| None).collect();
+        records[0] = daily_rent_record(1, 75);
+        records[0][..4].copy_from_slice(&0u32.to_le_bytes());
+        records[0][0x80..0x82].copy_from_slice(&10u16.to_le_bytes());
+        records[0][0x1b8..0x1ba].copy_from_slice(&20i16.to_le_bytes());
+        let mut retail = daily_test_parameters(2);
+        retail.prices = vec![2.];
+        retail.utility_rates = [1., 2., 3., 4.];
+        parameters[0] = Some(retail);
+        records[1] = daily_rent_record(2, 0);
+        records[1][..4].copy_from_slice(&1u32.to_le_bytes());
+        records[1][0x20c..0x210].copy_from_slice(&(-1i32).to_le_bytes());
+        parameters[1] = Some(daily_test_parameters(2));
+        let mut players = daily_test_players();
+        let postings = update_daily_businesses(
+            &mut records,
+            &parameters,
+            &mut daily_test_residents(),
+            &mut players,
+            &mut Utilities::new([0; 4]),
+        )
+        .unwrap();
+        let expected: Vec<_> = [
+            (0, -30.),
+            (0, -75.),
+            (1, 75.),
+            (0, -1.),
+            (0, -2.),
+            (0, -3.),
+            (0, -4.),
+            (1, 0.),
+            (1, -0.),
+            (1, -0.),
+            (1, -0.),
+            (1, -0.),
+        ]
+        .map(|(player, amount)| AccountPosting { player, amount })
+        .into();
+        assert_eq!(postings, expected);
+        assert_eq!(
+            players.iter().map(|p| p.cash).collect::<Vec<_>>(),
+            [885., 1075.]
+        );
+        // Retail turnover is a ledger-only record, never a cash notification.
+        assert_eq!(players[0].ledger(0x13), Some(-10.));
+    }
 
     #[test]
     #[ignore = "requires original-instruction retail fixture"]
