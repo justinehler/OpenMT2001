@@ -507,38 +507,70 @@ mod tests {
         // so secondary skips all source slots and admission consumes no RNG.
         let fixture = |count: usize| {
             let mut next_id = 0;
-            let particle = |id: usize| Particle { active: 1, life: 77, decrement: 3,
-                position: [id as f32, 2., -10.], velocity: [0.;3], size: 2.,
-                rgb: [id as u8, (id >> 8) as u8, 0x3d], alpha_table: (id & 1) as u8 };
+            let particle = |id: usize| Particle {
+                active: 1,
+                life: 77,
+                decrement: 3,
+                position: [id as f32, 2., -10.],
+                velocity: [0.; 3],
+                size: 2.,
+                rgb: [id as u8, (id >> 8) as u8, 0x3d],
+                alpha_table: (id & 1) as u8,
+            };
             let mut remaining = count - 20;
             let mut emitters = vec![None; EMITTER_LIMIT];
             for target in emitters.iter_mut().take(20) {
-                let launch = particle(next_id); next_id += 1;
+                let launch = particle(next_id);
+                next_id += 1;
                 let mut emitter = Emitter::new(0, 6., launch);
                 emitter.phase = 2;
                 let take = remaining.min(90);
                 for slot in 0..take {
-                    emitter.burst[slot] = Some(particle(next_id)); next_id += 1;
+                    emitter.burst[slot] = Some(particle(next_id));
+                    next_id += 1;
                 }
                 remaining -= take;
                 *target = Some(emitter);
             }
             assert_eq!((next_id, remaining), (count, 0));
-            Fireworks { emitter_count: 20, spawn_width: [80.,9.], origin: [-170.,0.,-100.],
-                rng: 0x12345678, emitters,
-                alpha: [std::array::from_fn(|i| i as u8), std::array::from_fn(|i| 255-i as u8)],
-                burst_countdown: -1, tick: 0, submitted_count: 0, points: Vec::new(), sounds: Vec::new() }
+            Fireworks {
+                emitter_count: 20,
+                spawn_width: [80., 9.],
+                origin: [-170., 0., -100.],
+                rng: 0x12345678,
+                emitters,
+                alpha: [
+                    std::array::from_fn(|i| i as u8),
+                    std::array::from_fn(|i| 255 - i as u8),
+                ],
+                burst_countdown: -1,
+                tick: 0,
+                submitted_count: 0,
+                points: Vec::new(),
+                sounds: Vec::new(),
+            }
         };
         for count in [511, 512, 513, 749, 750, 751, 1820] {
             let mut effect = fixture(count);
             let points = effect.tick().unwrap().to_vec();
-            assert_eq!(effect.submitted_count(), count, "root count is not collector-clamped");
+            assert_eq!(
+                effect.submitted_count(),
+                count,
+                "root count is not collector-clamped"
+            );
             assert_eq!(points.len(), count.min(750));
             for (id, point) in points.iter().enumerate() {
-                assert_eq!(point.position, [id as f32, 2., -10.], "ordered root prefix {id}");
+                assert_eq!(
+                    point.position,
+                    [id as f32, 2., -10.],
+                    "ordered root prefix {id}"
+                );
                 let alpha = if id & 1 == 0 { 77u32 } else { 178 };
-                assert_eq!(point.argb, alpha << 24 | (id as u8 as u32) << 16
-                    | ((id >> 8) as u8 as u32) << 8 | 0x3d, "prior-life ARGB {id}");
+                assert_eq!(
+                    point.argb,
+                    alpha << 24 | (id as u8 as u32) << 16 | ((id >> 8) as u8 as u32) << 8 | 0x3d,
+                    "prior-life ARGB {id}"
+                );
                 assert_eq!(point.size, 2.);
             }
             // Collector refusal must never stop manager stepping. This checks
@@ -572,10 +604,15 @@ mod tests {
         // The captured full-lifecycle fixture starts setting0 from seed13289.
         // Its existing position/RNG test verifies the same 200 native frames;
         // this gate checks the concrete cues reached within that bounded span.
-        let fixture = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_PARTICLE_FULL").unwrap()).unwrap();
+        let fixture =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_PARTICLE_FULL").unwrap())
+                .unwrap();
         assert_eq!(&fixture[..8], b"MTRSFP01");
         assert_eq!(u32::from_le_bytes(fixture[8..12].try_into().unwrap()), 0);
-        assert_eq!(u32::from_le_bytes(fixture[12..16].try_into().unwrap()), 13289);
+        assert_eq!(
+            u32::from_le_bytes(fixture[12..16].try_into().unwrap()),
+            13289
+        );
         assert_eq!(u32::from_le_bytes(fixture[16..20].try_into().unwrap()), 200);
         let mut effect = Fireworks::new(&image, 0, 13289).unwrap();
         let mut seen = [false; 5];
@@ -591,7 +628,10 @@ mod tests {
                 }] = true;
             }
         }
-        assert!(seen[3] && seen[4], "captured 200-frame lifecycle reaches an echo burst and kind-3 whistle");
+        assert!(
+            seen[3] && seen[4],
+            "captured 200-frame lifecycle reaches an echo burst and kind-3 whistle"
+        );
         for (kind, expected) in [
             (0, Cue::Launch2),
             (1, Cue::EchoCrackle),
@@ -604,7 +644,11 @@ mod tests {
             let launch = effect.initial_launch(kind, [0.; 3]);
             let mut emitter = Emitter::new(kind, 6., launch);
             effect.burst(&mut emitter);
-            assert_eq!(effect.take_sounds(), vec![expected], "native 453c30 burst kind {kind}");
+            assert_eq!(
+                effect.take_sounds(),
+                vec![expected],
+                "native 453c30 burst kind {kind}"
+            );
         }
     }
 

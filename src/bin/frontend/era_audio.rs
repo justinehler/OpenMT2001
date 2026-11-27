@@ -177,8 +177,13 @@ impl Player {
     }
 
     /// Bind before Select/creation. Warm transfers retain this same Player.
-    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) -> Result<(), String> {
-        if self.audio.same_owner(&audio) { return Ok(()); }
+    pub fn bind_audio(
+        &mut self,
+        audio: crate::audio_bus::focus::SharedAudio,
+    ) -> Result<(), String> {
+        if self.audio.same_owner(&audio) {
+            return Ok(());
+        }
         if self.song.is_some() || self.pending.is_some() {
             return Err("Cannot replace an active era music owner".into());
         }
@@ -190,14 +195,22 @@ impl Player {
         self.audio.set_effects(effects);
     }
 
-    fn start_song(&mut self, source: rodio::buffer::SamplesBuffer, repeat: bool,
-        token: crate::audio_bus::focus::MusicToken) -> Result<(), String>
-    {
-        if !token.is_current() { return Err("Stale era decode generation".into()); }
+    fn start_song(
+        &mut self,
+        source: rodio::buffer::SamplesBuffer,
+        repeat: bool,
+        token: crate::audio_bus::focus::MusicToken,
+    ) -> Result<(), String> {
+        if !token.is_current() {
+            return Err("Stale era decode generation".into());
+        }
         if let Some(mixer) = self.music_bus.combined_mixer() {
             let sink = self.audio.music_sink(mixer, token)?;
-            if repeat { sink.append(source.repeat_infinite())?; }
-            else { sink.append(source)?; }
+            if repeat {
+                sink.append(source.repeat_infinite())?;
+            } else {
+                sink.append(source)?;
+            }
             self.song = Some(sink);
         }
         Ok(())
@@ -213,8 +226,13 @@ impl Player {
         match receiver.try_recv() {
             Ok(result) => {
                 let (repeat, _) = self.pending.take().unwrap();
-                let token = self.pending_token.take().ok_or("Era decode has no generation token")?;
-                if !token.is_current() { return Err("Stale era decode generation".into()); }
+                let token = self
+                    .pending_token
+                    .take()
+                    .ok_or("Era decode has no generation token")?;
+                if !token.is_current() {
+                    return Err("Stale era decode generation".into());
+                }
                 let samples = result?;
                 let source = rodio::buffer::SamplesBuffer::new(2, 44_100, samples);
                 self.start_song(source, repeat, token)?;
@@ -352,31 +370,56 @@ mod tests {
             assert!(player.song.is_none());
             let pending_silence: Vec<_> = rendered.by_ref().take(4096).collect();
             assert_eq!(pending_silence.len(), 4096);
-            assert!(pending_silence.iter().all(|sample| *sample == 0.),
-                "no decoded source exists during the pending master prime");
+            assert!(
+                pending_silence.iter().all(|sample| *sample == 0.),
+                "no decoded source exists during the pending master prime"
+            );
             sender.send(Ok(vec![0.5; 65_536])).unwrap();
             player.poll().unwrap();
             assert!(player.pending.is_none());
             let first: Vec<_> = rendered.by_ref().take(4096).collect();
             assert_eq!(first.len(), 4096);
-            eprintln!("era startup initial={initial}: first_nonzero={:?}, last_gain_mismatch={:?}",
+            eprintln!(
+                "era startup initial={initial}: first_nonzero={:?}, last_gain_mismatch={:?}",
                 first.iter().position(|sample| *sample != 0.),
-                first.iter().rposition(|sample| (*sample - expected).abs() >= 1e-6));
+                first
+                    .iter()
+                    .rposition(|sample| (*sample - expected).abs() >= 1e-6)
+            );
             // Allow queued startup silence, but no samples at the old linear
             // or default full gain before the intended gain takes effect.
-            assert!(first.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
-            assert!(first[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(
+                first
+                    .iter()
+                    .all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6)
+            );
+            assert!(
+                first[2048..]
+                    .iter()
+                    .all(|sample| (*sample - expected).abs() < 1e-6)
+            );
             for (level, expected) in [
-                (0, 0.), (25, 0.017336843), (50, 0.0638955), (100, 0.5), (255, 0.5),
+                (0, 0.),
+                (25, 0.017336843),
+                (50, 0.0638955),
+                (100, 0.5),
+                (255, 0.5),
             ] {
                 let position = player.song.as_ref().unwrap().get_pos();
                 player.set_levels(level, 100);
                 let changed: Vec<_> = rendered.by_ref().take(4096).collect();
                 assert_eq!(changed.len(), 4096);
-                assert!(changed[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6),
-                    "music percentage {level}, initial {initial}");
+                assert!(
+                    changed[2048..]
+                        .iter()
+                        .all(|sample| (*sample - expected).abs() < 1e-6),
+                    "music percentage {level}, initial {initial}"
+                );
                 let song = player.song.as_ref().unwrap();
-                assert!(song.get_pos() > position, "gain changes keep the same source advancing");
+                assert!(
+                    song.get_pos() > position,
+                    "gain changes keep the same source advancing"
+                );
                 assert_eq!(song.len(), 1, "gain changes do not queue replacement songs");
             }
             player.apply(Operation::Stop).unwrap();
@@ -402,7 +445,11 @@ mod tests {
         assert_ne!(handle, 0);
         let samples: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(samples.len(), 4096);
-        assert!(samples[2048..].iter().all(|sample| (*sample - 0.017336842).abs() < 1e-6));
+        assert!(
+            samples[2048..]
+                .iter()
+                .all(|sample| (*sample - 0.017336842).abs() < 1e-6)
+        );
         player.apply(Operation::BeforeSixRelease(handle)).unwrap();
     }
 
@@ -485,41 +532,71 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod cold_gain_tests {
     use super::*;
     #[test]
     fn cold_nested_music_start_has_only_silence_then_intended_gain() {
-        for (level,expected) in [(0,0.),(25,0.017336843),(50,0.0638955)] {
-            let assets=Assets{songs:std::array::from_fn(|_|PathBuf::new()),before_six:Vec::new(),ffmpeg:PathBuf::new()};
-            let mut player=Player::new(assets);player.set_levels(level,100);
-            let (output,mut rendered)=rodio::mixer::mixer(2,44_100);
-            player.music_bus.connect_test_output(&output,2,44_100);
-            let (sender,receiver)=mpsc::channel();player.pending=Some((false,receiver));
+        for (level, expected) in [(0, 0.), (25, 0.017336843), (50, 0.0638955)] {
+            let assets = Assets {
+                songs: std::array::from_fn(|_| PathBuf::new()),
+                before_six: Vec::new(),
+                ffmpeg: PathBuf::new(),
+            };
+            let mut player = Player::new(assets);
+            player.set_levels(level, 100);
+            let (output, mut rendered) = rodio::mixer::mixer(2, 44_100);
+            player.music_bus.connect_test_output(&output, 2, 44_100);
+            let (sender, receiver) = mpsc::channel();
+            player.pending = Some((false, receiver));
             player.pending_token = Some(player.music_owner.token().unwrap());
-            sender.send(Ok(vec![0.5;65_536])).unwrap();player.poll().unwrap();
+            sender.send(Ok(vec![0.5; 65_536])).unwrap();
+            player.poll().unwrap();
             assert!(player.pending.is_none());
             // Both newly connected queues begin with their own silent/conversion
             // spans. The decoded source may start later than the primed-master
             // case; every nonzero sample must already have the intended gain.
-            let samples=rendered.by_ref().take(8192).collect::<Vec<_>>();
-            assert_eq!(samples.len(),8192);
-            assert!(samples.iter().all(|s|*s==0.||(*s-expected).abs()<1e-6));
-            assert!(samples[4096..].iter().all(|s|(*s-expected).abs()<1e-6),"cold music level {level}");
-            if level!=0 {assert!(samples[..4096].iter().any(|s|*s!=0.),"cold source must start within the fixed window");}
-            let song=player.song.as_ref().unwrap();assert!(song.get_pos()>std::time::Duration::ZERO);assert_eq!(song.len(),1);
+            let samples = rendered.by_ref().take(8192).collect::<Vec<_>>();
+            assert_eq!(samples.len(), 8192);
+            assert!(
+                samples
+                    .iter()
+                    .all(|s| *s == 0. || (*s - expected).abs() < 1e-6)
+            );
+            assert!(
+                samples[4096..].iter().all(|s| (*s - expected).abs() < 1e-6),
+                "cold music level {level}"
+            );
+            if level != 0 {
+                assert!(
+                    samples[..4096].iter().any(|s| *s != 0.),
+                    "cold source must start within the fixed window"
+                );
+            }
+            let song = player.song.as_ref().unwrap();
+            assert!(song.get_pos() > std::time::Duration::ZERO);
+            assert_eq!(song.len(), 1);
         }
     }
 }
 
 #[cfg(test)]
 impl Player {
-    pub(crate) fn composition_pending_pcm(&mut self,audio:crate::audio_bus::focus::SharedAudio,mixer:&rodio::mixer::Mixer)->mpsc::Sender<Result<Vec<f32>,String>>{
+    pub(crate) fn composition_pending_pcm(
+        &mut self,
+        audio: crate::audio_bus::focus::SharedAudio,
+        mixer: &rodio::mixer::Mixer,
+    ) -> mpsc::Sender<Result<Vec<f32>, String>> {
         self.bind_audio(audio).unwrap();
-        self.music_bus.connect_test_output(mixer,2,44100);
-        self.pending_token=Some(self.music_owner.token().unwrap());
-        let (sender,receiver)=mpsc::channel();self.pending=Some((true,receiver));sender
+        self.music_bus.connect_test_output(mixer, 2, 44100);
+        self.pending_token = Some(self.music_owner.token().unwrap());
+        let (sender, receiver) = mpsc::channel();
+        self.pending = Some((true, receiver));
+        sender
     }
-    pub(crate) fn composition_song_state(&self)->Option<(bool,f32)>{self.song.as_ref().map(|song|(song.is_paused(),song.volume()))}
+    pub(crate) fn composition_song_state(&self) -> Option<(bool, f32)> {
+        self.song
+            .as_ref()
+            .map(|song| (song.is_paused(), song.volume()))
+    }
 }

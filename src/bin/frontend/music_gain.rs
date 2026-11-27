@@ -45,8 +45,7 @@ pub(crate) fn normalized_amplitude(normalized: f32) -> f32 {
 /// Existing audio callers supply small signed source words (-2..100), so both
 /// products are exact in f64 before that store. This is not a raw32/x87 API.
 pub(crate) fn source_normalized(factor: f32, source_level: i32) -> f32 {
-    (f64::from(factor) * (f64::from(source_level)
-        * f64::from(f32::from_bits(0x3c23_d70a)))) as f32
+    (f64::from(factor) * (f64::from(source_level) * f64::from(f32::from_bits(0x3c23_d70a)))) as f32
 }
 pub(crate) fn source_amplitude(factor: f32, source_level: i32) -> f32 {
     normalized_amplitude(source_normalized(factor, source_level))
@@ -89,8 +88,10 @@ mod tests {
             (255, 0, 1., 0.),
         ] {
             assert_eq!(command(level), word, "music percentage {level}");
-            assert!((amplitude(level) - gain).abs() <= tolerance,
-                "music percentage {level}");
+            assert!(
+                (amplitude(level) - gain).abs() <= tolerance,
+                "music percentage {level}"
+            );
         }
         // The positive branch does not converge smoothly to the zero mute.
         assert!((0.007..0.008).contains(&amplitude(1)));

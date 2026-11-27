@@ -116,7 +116,7 @@ pub fn consume_player(
     profiles: &mut [[u8; 0x650]],
     clock: i32,
     secondary: bool,
-    category_locks: &[u8;52],
+    category_locks: &[u8; 52],
     mut log: impl FnMut(
         i32,
         &mut crate::player_manager::Player,
@@ -518,7 +518,7 @@ mod tests {
                         &mut profiles,
                         clock,
                         step == 1,
-                        &categories.map(|c|c[0x6c]),
+                        &categories.map(|c| c[0x6c]),
                         |code, p, _| {
                             trace.push(code as u32);
                             if mutate {

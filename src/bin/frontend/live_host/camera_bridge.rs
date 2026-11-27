@@ -8,42 +8,58 @@ use std::sync::{
     mpsc,
 };
 
-#[path="camera_bridge/resident_source.rs"]
+#[path = "camera_bridge/resident_source.rs"]
 mod resident_source;
-pub use resident_source::{ResidentSource,ResidentRead};
+pub use resident_source::{ResidentRead, ResidentSource};
 
 pub type Generation = u64;
 pub type Sequence = u64;
 ///Opaque identity of the next CentralTail on this serial Worker. Constructed
 ///from the same checked generation/sequence that the request exchange uses.
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub struct CentralIdentity { generation:Generation,sequence:Sequence }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CentralIdentity {
+    generation: Generation,
+    sequence: Sequence,
+}
 impl CentralIdentity {
     #[cfg(test)]
-    pub(crate) fn synthetic(generation:Generation,sequence:Sequence)->Self{Self{generation,sequence}}
+    pub(crate) fn synthetic(generation: Generation, sequence: Sequence) -> Self {
+        Self {
+            generation,
+            sequence,
+        }
+    }
 }
-
 
 /// Synthetic identities exist ONLY in binary test fixtures. Production values
 /// can be obtained only from World::fresh's checked topology writer.
-#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyEpoch {
     World(openmt2001::level_startup::SourceEpoch),
     #[cfg(test)]
     Synthetic(u64),
 }
 impl PropertyEpoch {
-    pub fn serial(self)->u64{match self{
-        Self::World(epoch)=>epoch.serial(),
-        #[cfg(test)] Self::Synthetic(value)=>value,
-    }}
-    pub fn follows(self,old:Self)->bool{match(self,old){
-        (Self::World(a),Self::World(b))=>a>b,
-        #[cfg(test)] (Self::Synthetic(a),Self::Synthetic(b))=>a>b,
-        #[cfg(test)] _=>false,
-    }}
+    pub fn serial(self) -> u64 {
+        match self {
+            Self::World(epoch) => epoch.serial(),
+            #[cfg(test)]
+            Self::Synthetic(value) => value,
+        }
+    }
+    pub fn follows(self, old: Self) -> bool {
+        match (self, old) {
+            (Self::World(a), Self::World(b)) => a > b,
+            #[cfg(test)]
+            (Self::Synthetic(a), Self::Synthetic(b)) => a > b,
+            #[cfg(test)]
+            _ => false,
+        }
+    }
     #[cfg(test)]
-    pub fn synthetic(value:u64)->Self{Self::Synthetic(value)}
+    pub fn synthetic(value: u64) -> Self {
+        Self::Synthetic(value)
+    }
 }
 
 /// An immutable install-only copy of the completed Session's actual World.
@@ -52,35 +68,77 @@ impl PropertyEpoch {
 /// production ordering: native topology/44fe60/44f8b0/44faf0 precedes later
 /// startup/load writers. Kind13/removal/renderer and that exact source stage
 /// remain gated; no full native callback is acknowledged by this payload.
-#[derive(Clone,Debug,PartialEq,Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PropertySource {
-    resident:Option<ResidentSource>,
-    epoch:PropertyEpoch,
-    resource:crate::selection::pavement_resource::LocalPavementHandle,
-    rows:[[u8;380];52],
-    count:i32,
+    resident: Option<ResidentSource>,
+    epoch: PropertyEpoch,
+    resource: crate::selection::pavement_resource::LocalPavementHandle,
+    rows: [[u8; 380]; 52],
+    count: i32,
 }
 impl PropertySource {
-    pub fn capture(session:&crate::fresh_city::Session<'_>,resource:crate::selection::pavement_resource::LocalPavementHandle)->Self{
-        Self{resident:Some(ResidentSource::capture(session)),epoch:PropertyEpoch::World(session.world.topology.epoch()),resource,
-            rows:session.world.categories,count:session.world.topology.count617624()}
+    pub fn capture(
+        session: &crate::fresh_city::Session<'_>,
+        resource: crate::selection::pavement_resource::LocalPavementHandle,
+    ) -> Self {
+        Self {
+            resident: Some(ResidentSource::capture(session)),
+            epoch: PropertyEpoch::World(session.world.topology.epoch()),
+            resource,
+            rows: session.world.categories,
+            count: session.world.topology.count617624(),
+        }
     }
-    pub fn resident(&self)->Result<&ResidentSource,String>{self.resident.as_ref().ok_or_else(||"actual Session resident source absent".into())}
+    pub fn resident(&self) -> Result<&ResidentSource, String> {
+        self.resident
+            .as_ref()
+            .ok_or_else(|| "actual Session resident source absent".into())
+    }
     /// Only explicit cfg(test) property-only fixtures may omit resident authority.
-    pub fn resident_for_install(&self)->Result<Option<&ResidentSource>,String>{
-        if let Some(source)=&self.resident{return Ok(Some(source));}
-        #[cfg(test)] {Ok(None)}
-        #[cfg(not(test))] {Err("actual completed Session resident source absent".into())}
+    pub fn resident_for_install(&self) -> Result<Option<&ResidentSource>, String> {
+        if let Some(source) = &self.resident {
+            return Ok(Some(source));
+        }
+        #[cfg(test)]
+        {
+            Ok(None)
+        }
+        #[cfg(not(test))]
+        {
+            Err("actual completed Session resident source absent".into())
+        }
     }
     #[cfg(test)]
-    pub(crate) fn test_with_resident(mut self,source:ResidentSource)->Self{self.resident=Some(source);self}
-    pub fn epoch(&self)->PropertyEpoch{self.epoch}
-    pub fn resource(&self)->crate::selection::pavement_resource::LocalPavementHandle{self.resource}
-    pub fn rows(&self)->&[[u8;380];52]{&self.rows}
-    pub fn count(&self)->i32{self.count}
+    pub(crate) fn test_with_resident(mut self, source: ResidentSource) -> Self {
+        self.resident = Some(source);
+        self
+    }
+    pub fn epoch(&self) -> PropertyEpoch {
+        self.epoch
+    }
+    pub fn resource(&self) -> crate::selection::pavement_resource::LocalPavementHandle {
+        self.resource
+    }
+    pub fn rows(&self) -> &[[u8; 380]; 52] {
+        &self.rows
+    }
+    pub fn count(&self) -> i32 {
+        self.count
+    }
     #[cfg(test)]
-    pub fn synthetic(epoch:u64,rows:[[u8;380];52],count:i32,assets:&crate::selection::Assets)->Self{
-        Self{resident:None,epoch:PropertyEpoch::synthetic(epoch),resource:assets.pavement_resource().binding().unwrap().handle(),rows,count}
+    pub fn synthetic(
+        epoch: u64,
+        rows: [[u8; 380]; 52],
+        count: i32,
+        assets: &crate::selection::Assets,
+    ) -> Self {
+        Self {
+            resident: None,
+            epoch: PropertyEpoch::synthetic(epoch),
+            resource: assets.pavement_resource().binding().unwrap().handle(),
+            rows,
+            count,
+        }
     }
 }
 
@@ -120,8 +178,8 @@ pub struct Pose {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Admission {
-    pub upper:Option<std::sync::Arc<crate::navigator::upper::Inputs>>,
-    pub strategic:Option<std::sync::Arc<crate::locator::strategic::Inputs>>,
+    pub upper: Option<std::sync::Arc<crate::navigator::upper::Inputs>>,
+    pub strategic: Option<std::sync::Arc<crate::locator::strategic::Inputs>>,
     pub tutorial_session: bool,
     pub all_disabled: bool,
     pub camera_disabled: bool,
@@ -200,17 +258,17 @@ pub enum TaskEffect {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveCapture {
-    pub cameras:Capture,
+    pub cameras: Capture,
     /// UI-owned view, captured without running inputs or providers.
-    pub interface_mode:Result<u32,String>,
+    pub interface_mode: Result<u32, String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
-    pub raw_capture:Option<SaveCapture>,
+    pub raw_capture: Option<SaveCapture>,
     /// Core boundary completed; Host must apply TaskEffects before surfacing
     /// this real fatal error. No save success was published for this boundary.
-    pub finalization_fault:Option<String>,
-    pub strategic_writeback:Option<crate::locator::strategic::Writeback>,
+    pub finalization_fault: Option<String>,
+    pub strategic_writeback: Option<crate::locator::strategic::Writeback>,
     pub current: Pose,
     /// Present exactly on Sample, from the completed primary sample and stored
     /// up. Save captures the bank separately without requesting another sample.
@@ -234,23 +292,51 @@ struct Request {
 /// Only source-established Session primitives are admitted. These are NOT an
 /// implementation of the larger43e5f0/UI/menu/script callback families.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PauseByte { Latch8b22d8, SignedReason3_8b22d3 }
+pub enum PauseByte {
+    Latch8b22d8,
+    SignedReason3_8b22d3,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PauseReason { Script0, Action3 }
+pub enum PauseReason {
+    Script0,
+    Action3,
+}
 impl PauseReason {
-    pub fn index(self)->usize { match self { Self::Script0=>0, Self::Action3=>3 } }
+    pub fn index(self) -> usize {
+        match self {
+            Self::Script0 => 0,
+            Self::Action3 => 3,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MissingFamily {
-    ProcessControls, ActivityWords, Participant336And6899a0,
-    Media, Sequence, Graph, Menu, Pause43e5f0, DebugCommand,
-    Participant481a50, Screenshot, Selection, Action, Script,
+    ProcessControls,
+    ActivityWords,
+    Participant336And6899a0,
+    Media,
+    Sequence,
+    Graph,
+    Menu,
+    Pause43e5f0,
+    DebugCommand,
+    Participant481a50,
+    Screenshot,
+    Selection,
+    Action,
+    Script,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCall {
-    Resident { source:ResidentSource, read:ResidentRead },
+    Resident {
+        source: ResidentSource,
+        read: ResidentRead,
+    },
     /// Protected Install-only actual current World categories.
-    PrimaryCategory { source:ResidentSource, row:Option<u8> },
+    PrimaryCategory {
+        source: ResidentSource,
+        row: Option<u8>,
+    },
     ProcessByte(super::process_runtime::Byte),
     Performance8b26cc,
     Count822d38,
@@ -268,39 +354,99 @@ pub enum SessionCall {
     Missing(MissingFamily),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionReply { PrimaryCategory(Option<[u32;3]>), Byte(u8), Word(u32), Signed(i32), ResidentBinding(openmt2001::resident::AuxiliaryBinding), Completed }
+pub enum SessionReply {
+    PrimaryCategory(Option<[u32; 3]>),
+    Byte(u8),
+    Word(u32),
+    Signed(i32),
+    ResidentBinding(openmt2001::resident::AuxiliaryBinding),
+    Completed,
+}
 impl SessionCall {
-    fn admitted_on(&self,boundary:Boundary)->bool{
-        if matches!(self,Self::PrimaryCategory{..}){boundary==Boundary::Install}
-        else{boundary==Boundary::CentralTail}
+    fn admitted_on(&self, boundary: Boundary) -> bool {
+        if matches!(self, Self::PrimaryCategory { .. }) {
+            boundary == Boundary::Install
+        } else {
+            boundary == Boundary::CentralTail
+        }
     }
-    fn accepts(&self,reply:&SessionReply)->bool {
-        matches!((self,reply),
-            (Self::PrimaryCategory{row:None,..},SessionReply::PrimaryCategory(None)) |
-            (Self::PrimaryCategory{row:Some(_),..},SessionReply::PrimaryCategory(Some(_))) |
-            (Self::Resident{read:ResidentRead::Count7a18ec|ResidentRead::Kind30(_)|ResidentRead::Index38(_),..},SessionReply::Word(_)) |
-            (Self::Resident{read:ResidentRead::Flags336(_),..},SessionReply::Byte(_)) |
-            (Self::Resident{read:ResidentRead::Lookup6899a0(_),..},SessionReply::ResidentBinding(_)) |
-            (Self::Resident{read:ResidentRead::Validate(_)|ResidentRead::Participant481a50(_),..},SessionReply::Completed) |
-            (Self::PauseByte(_)|Self::Busy48dbf0|Self::ProcessByte(_),SessionReply::Byte(_)) |
-            (Self::Performance8b26cc,SessionReply::Signed(_)) |
-            (Self::Count822d38|Self::Scene822d30,SessionReply::Word(_)) |
-            (Self::IncrementCount4ba580|Self::Quit93442c|Self::Media4b9210|Self::Sequence4b1980,SessionReply::Completed) |
-            (Self::Pause4bac90(_)|Self::Unpause4bacc0(_),SessionReply::Completed))
+    fn accepts(&self, reply: &SessionReply) -> bool {
+        matches!(
+            (self, reply),
+            (
+                Self::PrimaryCategory { row: None, .. },
+                SessionReply::PrimaryCategory(None)
+            ) | (
+                Self::PrimaryCategory { row: Some(_), .. },
+                SessionReply::PrimaryCategory(Some(_))
+            ) | (
+                Self::Resident {
+                    read: ResidentRead::Count7a18ec
+                        | ResidentRead::Kind30(_)
+                        | ResidentRead::Index38(_),
+                    ..
+                },
+                SessionReply::Word(_)
+            ) | (
+                Self::Resident {
+                    read: ResidentRead::Flags336(_),
+                    ..
+                },
+                SessionReply::Byte(_)
+            ) | (
+                Self::Resident {
+                    read: ResidentRead::Lookup6899a0(_),
+                    ..
+                },
+                SessionReply::ResidentBinding(_)
+            ) | (
+                Self::Resident {
+                    read: ResidentRead::Validate(_) | ResidentRead::Participant481a50(_),
+                    ..
+                },
+                SessionReply::Completed
+            ) | (
+                Self::PauseByte(_) | Self::Busy48dbf0 | Self::ProcessByte(_),
+                SessionReply::Byte(_)
+            ) | (Self::Performance8b26cc, SessionReply::Signed(_))
+                | (Self::Count822d38 | Self::Scene822d30, SessionReply::Word(_))
+                | (
+                    Self::IncrementCount4ba580
+                        | Self::Quit93442c
+                        | Self::Media4b9210
+                        | Self::Sequence4b1980,
+                    SessionReply::Completed
+                )
+                | (
+                    Self::Pause4bac90(_) | Self::Unpause4bacc0(_),
+                    SessionReply::Completed
+                )
+        )
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CallId { generation:Generation, sequence:Sequence, boundary:Boundary, subcall:u64 }
-#[derive(Debug)]
-struct SessionRequest {
-    id:CallId,
-    call:SessionCall,
-    reply:mpsc::Sender<SessionResponse>,
+struct CallId {
+    generation: Generation,
+    sequence: Sequence,
+    boundary: Boundary,
+    subcall: u64,
 }
 #[derive(Debug)]
-struct SessionResponse { id:CallId, result:Result<SessionReply,RequestError> }
+struct SessionRequest {
+    id: CallId,
+    call: SessionCall,
+    reply: mpsc::Sender<SessionResponse>,
+}
 #[derive(Debug)]
-enum Reply { Complete(Result<Ack,RequestError>), Session(SessionRequest) }
+struct SessionResponse {
+    id: CallId,
+    result: Result<SessionReply, RequestError>,
+}
+#[derive(Debug)]
+enum Reply {
+    Complete(Result<Ack, RequestError>),
+    Session(SessionRequest),
+}
 
 /// Stack-borrowed, non-Clone port lent ONLY during Inbox's actual operation.
 /// call() suspends the UI closure until the waiting Host has finished this
@@ -308,67 +454,110 @@ enum Reply { Complete(Result<Ack,RequestError>), Session(SessionRequest) }
 /// async effect success, callback replay, or post-ack port can exist here.
 /// &mut self serializes subcalls and prevents safe same-port reentrancy.
 pub struct SessionServices<'a> {
-    id:CallId,
-    next:u64,
-    sender:&'a mpsc::Sender<Reply>,
-    retired:&'a AtomicBool,
-    failure:Option<RequestError>,
+    id: CallId,
+    next: u64,
+    sender: &'a mpsc::Sender<Reply>,
+    retired: &'a AtomicBool,
+    failure: Option<RequestError>,
 }
 impl SessionServices<'_> {
-    pub fn generation(&self)->Generation{self.id.generation}
+    pub fn generation(&self) -> Generation {
+        self.id.generation
+    }
     /// Check before entering the next UI phase or publishing an operation.
     /// Previously committed Host effects are never revoked by this check.
-    pub fn check(&mut self)->Result<(),RequestError> {
-        if let Some(error)=&self.failure { return Err(error.clone()); }
+    pub fn check(&mut self) -> Result<(), RequestError> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
         if self.retired.load(Ordering::Acquire) {
-            self.failure=Some(RequestError::Retired);return Err(RequestError::Retired);
+            self.failure = Some(RequestError::Retired);
+            return Err(RequestError::Retired);
         }
         Ok(())
     }
-    pub fn call(&mut self,call:SessionCall)->Result<SessionReply,RequestError> {
-        if let Some(error)=&self.failure { return Err(error.clone()); }
-        let result=self.exchange(call);
-        if let Err(error)=&result { self.failure=Some(error.clone()); }
+    pub fn call(&mut self, call: SessionCall) -> Result<SessionReply, RequestError> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        let result = self.exchange(call);
+        if let Err(error) = &result {
+            self.failure = Some(error.clone());
+        }
         result
     }
-    fn disconnected(&self,message:&str)->RequestError {
-        if self.retired.load(Ordering::Acquire) { RequestError::Retired }
-        else { RequestError::Failed(message.into()) }
+    fn disconnected(&self, message: &str) -> RequestError {
+        if self.retired.load(Ordering::Acquire) {
+            RequestError::Retired
+        } else {
+            RequestError::Failed(message.into())
+        }
     }
-    fn exchange(&mut self,call:SessionCall)->Result<SessionReply,RequestError> {
-        if self.retired.load(Ordering::Acquire) { return Err(RequestError::Retired); }
+    fn exchange(&mut self, call: SessionCall) -> Result<SessionReply, RequestError> {
+        if self.retired.load(Ordering::Acquire) {
+            return Err(RequestError::Retired);
+        }
         if !call.admitted_on(self.id.boundary) {
             return Err("Session callback outside admitted central operation".into());
         }
-        let next=self.next.checked_add(1).ok_or("Session subcall sequence exhausted")?;
-        let id=CallId{subcall:self.next,..self.id};
-        let (reply,response)=mpsc::channel();
-        self.sender.send(Reply::Session(SessionRequest{id,call:call.clone(),reply}))
-            .map_err(|_|self.disconnected("Host dropped operation reply stream"))?;
-        let response=response.recv().map_err(|_|self.disconnected("Host dropped Session callback reply"))?;
+        let next = self
+            .next
+            .checked_add(1)
+            .ok_or("Session subcall sequence exhausted")?;
+        let id = CallId {
+            subcall: self.next,
+            ..self.id
+        };
+        let (reply, response) = mpsc::channel();
+        self.sender
+            .send(Reply::Session(SessionRequest {
+                id,
+                call: call.clone(),
+                reply,
+            }))
+            .map_err(|_| self.disconnected("Host dropped operation reply stream"))?;
+        let response = response
+            .recv()
+            .map_err(|_| self.disconnected("Host dropped Session callback reply"))?;
         // Validate even when a retirement races receipt. No stale/cross-op
         // result, including an error, is allowed to authorize continuation.
-        if response.id!=id { return Err("Session callback reply generation/sequence/boundary/subcall mismatch".into()); }
-        let value=match response.result {
-            Err(RequestError::Retired) if !self.retired.load(Ordering::Acquire)=>
-                return Err("Session reply claimed retirement without explicit generation retirement".into()),
-            result=>result?,
+        if response.id != id {
+            return Err(
+                "Session callback reply generation/sequence/boundary/subcall mismatch".into(),
+            );
+        }
+        let value = match response.result {
+            Err(RequestError::Retired) if !self.retired.load(Ordering::Acquire) => {
+                return Err(
+                    "Session reply claimed retirement without explicit generation retirement"
+                        .into(),
+                );
+            }
+            result => result?,
         };
-        if !call.accepts(&value) { return Err("Session callback reply type mismatch".into()); }
-        self.next=next;
+        if !call.accepts(&value) {
+            return Err("Session callback reply type mismatch".into());
+        }
+        self.next = next;
         Ok(value)
     }
-    pub fn pause_byte(&mut self,byte:PauseByte)->Result<u8,RequestError> {
-        match self.call(SessionCall::PauseByte(byte))? { SessionReply::Byte(v)=>Ok(v), _=>unreachable!() }
+    pub fn pause_byte(&mut self, byte: PauseByte) -> Result<u8, RequestError> {
+        match self.call(SessionCall::PauseByte(byte))? {
+            SessionReply::Byte(v) => Ok(v),
+            _ => unreachable!(),
+        }
     }
-    pub fn busy48dbf0(&mut self)->Result<u8,RequestError> {
-        match self.call(SessionCall::Busy48dbf0)? { SessionReply::Byte(v)=>Ok(v), _=>unreachable!() }
+    pub fn busy48dbf0(&mut self) -> Result<u8, RequestError> {
+        match self.call(SessionCall::Busy48dbf0)? {
+            SessionReply::Byte(v) => Ok(v),
+            _ => unreachable!(),
+        }
     }
-    pub fn pause4bac90(&mut self,reason:PauseReason)->Result<(),RequestError> {
-        self.call(SessionCall::Pause4bac90(reason)).map(|_|())
+    pub fn pause4bac90(&mut self, reason: PauseReason) -> Result<(), RequestError> {
+        self.call(SessionCall::Pause4bac90(reason)).map(|_| ())
     }
-    pub fn unpause4bacc0(&mut self,reason:PauseReason)->Result<(),RequestError> {
-        self.call(SessionCall::Unpause4bacc0(reason)).map(|_|())
+    pub fn unpause4bacc0(&mut self, reason: PauseReason) -> Result<(), RequestError> {
+        self.call(SessionCall::Unpause4bacc0(reason)).map(|_| ())
     }
 }
 /// Deliberately not Clone: one serial requester owns the sequence and observes
@@ -381,7 +570,7 @@ pub struct Worker {
     sender: mpsc::Sender<Request>,
     retired: Arc<AtomicBool>,
     #[cfg(test)]
-    enqueued: Option<(Option<Boundary>,mpsc::Sender<()>)>,
+    enqueued: Option<(Option<Boundary>, mpsc::Sender<()>)>,
 }
 /// Move this together with the same bank on Inspection refresh. A true session
 /// replacement gets a new generation/channel and an explicit Install instead.
@@ -425,14 +614,21 @@ pub fn channel(generation: Generation) -> (Worker, Inbox) {
 }
 
 fn validate_observation(boundary: Boundary, observation: &Observation) -> Result<(), String> {
-    if observation.raw_capture.is_some() != matches!(boundary,Boundary::RawCapture) {
+    if observation.raw_capture.is_some() != matches!(boundary, Boundary::RawCapture) {
         return Err("Camera raw capture reply does not match boundary".into());
     }
-    if observation.finalization_fault.is_some() &&
-        (!matches!(boundary,Boundary::Install|Boundary::CentralTail)||observation.strategic_writeback.is_some()){
-        return Err("Camera finalization fault outside protected completion or with unfinalized writeback".into());
+    if observation.finalization_fault.is_some()
+        && (!matches!(boundary, Boundary::Install | Boundary::CentralTail)
+            || observation.strategic_writeback.is_some())
+    {
+        return Err(
+            "Camera finalization fault outside protected completion or with unfinalized writeback"
+                .into(),
+        );
     }
-    if observation.strategic_writeback.is_some() && !matches!(boundary,Boundary::Install|Boundary::CentralTail){
+    if observation.strategic_writeback.is_some()
+        && !matches!(boundary, Boundary::Install | Boundary::CentralTail)
+    {
         return Err("C writeback outside actual protected Install/CentralTail boundary".into());
     }
 
@@ -448,21 +644,34 @@ fn validate_observation(boundary: Boundary, observation: &Observation) -> Result
 impl Worker {
     /// Read-only observer of the actual retirement flag, not a mirror state.
     #[cfg(test)]
-    pub(crate) fn test_retirement_flag(&self)->Arc<AtomicBool>{Arc::clone(&self.retired)}
+    pub(crate) fn test_retirement_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.retired)
+    }
     /// One-shot notification after the actual successful request enqueue.
     #[cfg(test)]
-    pub(crate) fn test_notify_next_enqueue(&mut self,sender:mpsc::Sender<()>){self.enqueued=Some((None,sender));}
+    pub(crate) fn test_notify_next_enqueue(&mut self, sender: mpsc::Sender<()>) {
+        self.enqueued = Some((None, sender));
+    }
     /// Same actual-enqueue witness, filtered so CurrentPose does not consume a
     /// RawCapture retirement observer. This changes no non-test transport code.
     #[cfg(test)]
-    fn test_notify_enqueue_at(&mut self,boundary:Boundary,sender:mpsc::Sender<()>){
-        self.enqueued=Some((Some(boundary),sender));
+    fn test_notify_enqueue_at(&mut self, boundary: Boundary, sender: mpsc::Sender<()>) {
+        self.enqueued = Some((Some(boundary), sender));
     }
-    pub(crate) fn central_identity(&self)->Result<CentralIdentity,RequestError>{
-        if let Some(error)=&self.failure{return Err(RequestError::Failed(error.clone()))}
-        if self.retired(){return Err(RequestError::Retired)}
-        if !self.installed{return Err("Central identity requires completed Install".into())}
-        Ok(CentralIdentity{generation:self.generation,sequence:self.next})
+    pub(crate) fn central_identity(&self) -> Result<CentralIdentity, RequestError> {
+        if let Some(error) = &self.failure {
+            return Err(RequestError::Failed(error.clone()));
+        }
+        if self.retired() {
+            return Err(RequestError::Retired);
+        }
+        if !self.installed {
+            return Err("Central identity requires completed Install".into());
+        }
+        Ok(CentralIdentity {
+            generation: self.generation,
+            sequence: self.next,
+        })
     }
     pub fn generation(&self) -> Generation {
         self.generation
@@ -485,34 +694,41 @@ impl Worker {
     /// A validated ack already received is committed even if retirement races
     /// its receipt: in particular its live task effects must not be discarded.
     pub fn request(&mut self, operation: Operation) -> Result<Observation, RequestError> {
-        self.request_with_handler(operation, |_|Err("Session callback handler absent on camera-only request".into()))
+        self.request_with_handler(operation, |_| {
+            Err("Session callback handler absent on camera-only request".into())
+        })
     }
     /// The caller keeps the real Session on THIS Host stack. Each admitted
     /// callback runs once here before its reply permits the UI's next read.
     /// A callback failure is sticky even if UI ignores it and returns an ack.
     pub fn request_with_handler(
-        &mut self, operation:Operation,
-        mut handle:impl FnMut(SessionCall)->Result<SessionReply,RequestError>,
-    )->Result<Observation,RequestError> {
+        &mut self,
+        operation: Operation,
+        mut handle: impl FnMut(SessionCall) -> Result<SessionReply, RequestError>,
+    ) -> Result<Observation, RequestError> {
         if let Some(error) = &self.failure {
             return Err(RequestError::Failed(error.clone()));
         }
         if self.retired() {
             return Err(RequestError::Retired);
         }
-        let result = self.exchange(operation,&mut handle);
+        let result = self.exchange(operation, &mut handle);
         match &result {
-            Err(RequestError::Failed(error))=>self.failure=Some(error.clone()),
-            Ok(observation)=>if let Some(error)=&observation.finalization_fault{
-                // Return THIS completed ack intact, then reject further work.
-                self.failure=Some(error.clone());
-            },
-            _=>{},
+            Err(RequestError::Failed(error)) => self.failure = Some(error.clone()),
+            Ok(observation) => {
+                if let Some(error) = &observation.finalization_fault {
+                    // Return THIS completed ack intact, then reject further work.
+                    self.failure = Some(error.clone());
+                }
+            }
+            _ => {}
         }
         result
     }
-    fn exchange(&mut self, operation: Operation,
-        handle:&mut impl FnMut(SessionCall)->Result<SessionReply,RequestError>,
+    fn exchange(
+        &mut self,
+        operation: Operation,
+        handle: &mut impl FnMut(SessionCall) -> Result<SessionReply, RequestError>,
     ) -> Result<Observation, RequestError> {
         let boundary = operation.boundary();
         if self.installed == matches!(boundary, Boundary::Install) {
@@ -532,38 +748,62 @@ impl Worker {
             })
             .map_err(|_| self.disconnected("Camera event-thread inbox disconnected"))?;
         #[cfg(test)]
-        if self.enqueued.as_ref().is_some_and(|(expected,_)|expected.is_none_or(|at|at==boundary)){
-            let (_,enqueued)=self.enqueued.take().unwrap();
-            enqueued.send(()).expect("request enqueue observer disconnected");
+        if self
+            .enqueued
+            .as_ref()
+            .is_some_and(|(expected, _)| expected.is_none_or(|at| at == boundary))
+        {
+            let (_, enqueued) = self.enqueued.take().unwrap();
+            enqueued
+                .send(())
+                .expect("request enqueue observer disconnected");
         }
-        let mut subcalls=0u64;
-        let mut callback_failure:Option<RequestError>=None;
-        let ack=loop {
-            let frame=response.recv().map_err(|_|callback_failure.clone()
-                .unwrap_or_else(||self.disconnected("Camera event thread dropped acknowledgement")))?;
+        let mut subcalls = 0u64;
+        let mut callback_failure: Option<RequestError> = None;
+        let ack = loop {
+            let frame = response.recv().map_err(|_| {
+                callback_failure.clone().unwrap_or_else(|| {
+                    self.disconnected("Camera event thread dropped acknowledgement")
+                })
+            })?;
             match frame {
-                Reply::Complete(result)=>{
-                    if let Some(error)=callback_failure { return Err(error); }
+                Reply::Complete(result) => {
+                    if let Some(error) = callback_failure {
+                        return Err(error);
+                    }
                     let ack=match result {
                         Err(RequestError::Retired) if !self.retired()=>
                             return Err("Camera completion claimed retirement without explicit generation retirement".into()),
                         result=>result?,
                     };
-                    if ack.generation!=self.generation || ack.sequence!=self.next || ack.boundary!=boundary
-                        || ack.subcalls!=subcalls {
-                        return Err("Camera acknowledgement generation/sequence/boundary/subcall mismatch".into());
+                    if ack.generation != self.generation
+                        || ack.sequence != self.next
+                        || ack.boundary != boundary
+                        || ack.subcalls != subcalls
+                    {
+                        return Err(
+                            "Camera acknowledgement generation/sequence/boundary/subcall mismatch"
+                                .into(),
+                        );
                     }
                     break ack;
                 }
-                Reply::Session(request)=>{
-                    let expected=CallId{generation:self.generation,sequence:self.next,boundary,subcall:subcalls};
+                Reply::Session(request) => {
+                    let expected = CallId {
+                        generation: self.generation,
+                        sequence: self.next,
+                        boundary,
+                        subcall: subcalls,
+                    };
                     // An identity error takes priority over cancellation; forged
                     // messages never invoke even an otherwise admitted handler.
-                    let result=if request.id!=expected || !request.call.admitted_on(boundary) {
+                    let result = if request.id != expected || !request.call.admitted_on(boundary) {
                         Err(RequestError::Failed("Session callback request generation/sequence/boundary/subcall mismatch".into()))
-                    }else if let Some(error)=&callback_failure { Err(error.clone()) }
-                    else if self.retired() { Err(RequestError::Retired) }
-                    else if let Some(next)=subcalls.checked_add(1) {
+                    } else if let Some(error) = &callback_failure {
+                        Err(error.clone())
+                    } else if self.retired() {
+                        Err(RequestError::Retired)
+                    } else if let Some(next) = subcalls.checked_add(1) {
                         match handle(request.call.clone()) {
                             Ok(value) if request.call.accepts(&value)=>{subcalls=next;Ok(value)},
                             Ok(_)=>Err("Session handler reply type mismatch".into()),
@@ -571,13 +811,25 @@ impl Worker {
                                 Err("Session handler claimed retirement without explicit generation retirement".into()),
                             Err(error)=>Err(error),
                         }
-                    }else { Err("Session subcall sequence exhausted".into()) };
-                    if let Err(error)=&result {
-                        if callback_failure.is_none() { callback_failure=Some(error.clone()); }
+                    } else {
+                        Err("Session subcall sequence exhausted".into())
+                    };
+                    if let Err(error) = &result {
+                        if callback_failure.is_none() {
+                            callback_failure = Some(error.clone());
+                        }
                     }
-                    request.reply.send(SessionResponse{id:request.id,result})
-                        .map_err(|_|callback_failure.clone()
-                            .unwrap_or_else(||self.disconnected("UI dropped Session callback receiver")))?;
+                    request
+                        .reply
+                        .send(SessionResponse {
+                            id: request.id,
+                            result,
+                        })
+                        .map_err(|_| {
+                            callback_failure.clone().unwrap_or_else(|| {
+                                self.disconnected("UI dropped Session callback receiver")
+                            })
+                        })?;
                 }
             }
         };
@@ -611,7 +863,7 @@ impl Inbox {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = self.service_inner(None, |operation,_services|apply(operation));
+        let result = self.service_inner(None, |operation, _services| apply(operation));
         if let Err(error) = &result {
             self.failure = Some(error.clone());
         }
@@ -628,7 +880,7 @@ impl Inbox {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = self.service_inner(Some(timeout), |operation,_services|apply(operation));
+        let result = self.service_inner(Some(timeout), |operation, _services| apply(operation));
         if let Err(error) = &result {
             self.failure = Some(error.clone());
         }
@@ -638,25 +890,36 @@ impl Inbox {
     /// ordinary mutable Assets/commonFonts loans; only typed owned arguments
     /// cross this stream, never Assets, Owner, Lua or Session itself.
     pub fn try_service_with_handler(
-        &mut self,apply:impl FnOnce(Operation,&mut SessionServices<'_>)->Result<Observation,String>,
-    )->Result<Service,String> { self.service_with_handler(None,apply) }
+        &mut self,
+        apply: impl FnOnce(Operation, &mut SessionServices<'_>) -> Result<Observation, String>,
+    ) -> Result<Service, String> {
+        self.service_with_handler(None, apply)
+    }
     pub fn wait_service_with_handler(
-        &mut self,timeout:std::time::Duration,
-        apply:impl FnOnce(Operation,&mut SessionServices<'_>)->Result<Observation,String>,
-    )->Result<Service,String> { self.service_with_handler(Some(timeout),apply) }
+        &mut self,
+        timeout: std::time::Duration,
+        apply: impl FnOnce(Operation, &mut SessionServices<'_>) -> Result<Observation, String>,
+    ) -> Result<Service, String> {
+        self.service_with_handler(Some(timeout), apply)
+    }
     fn service_with_handler(
-        &mut self,wait:Option<std::time::Duration>,
-        apply:impl FnOnce(Operation,&mut SessionServices<'_>)->Result<Observation,String>,
-    )->Result<Service,String> {
-        if let Some(error)=&self.failure { return Err(error.clone()); }
-        let result=self.service_inner(wait,apply);
-        if let Err(error)=&result { self.failure=Some(error.clone()); }
+        &mut self,
+        wait: Option<std::time::Duration>,
+        apply: impl FnOnce(Operation, &mut SessionServices<'_>) -> Result<Observation, String>,
+    ) -> Result<Service, String> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        let result = self.service_inner(wait, apply);
+        if let Err(error) = &result {
+            self.failure = Some(error.clone());
+        }
         result
     }
     fn service_inner(
         &mut self,
         wait: Option<std::time::Duration>,
-        apply: impl FnOnce(Operation,&mut SessionServices<'_>) -> Result<Observation, String>,
+        apply: impl FnOnce(Operation, &mut SessionServices<'_>) -> Result<Observation, String>,
     ) -> Result<Service, String> {
         let request = if let Some(timeout) = wait {
             match self.receiver.recv_timeout(timeout) {
@@ -676,8 +939,8 @@ impl Inbox {
             }
         };
         let boundary = request.operation.boundary();
-        let mut service_error=None;
-        let result: Result<Ack,String> = (|| {
+        let mut service_error = None;
+        let result: Result<Ack, String> = (|| {
             if request.generation != self.generation || request.sequence != self.next {
                 return Err("Camera request generation/sequence mismatch".into());
             }
@@ -688,18 +951,27 @@ impl Inbox {
                 .next
                 .checked_add(1)
                 .ok_or("Camera sequence exhausted")?;
-            let mut services=SessionServices{
-                id:CallId{generation:self.generation,sequence:request.sequence,boundary,subcall:0},
-                next:0,sender:&request.reply,retired:&self.retired,failure:None,
+            let mut services = SessionServices {
+                id: CallId {
+                    generation: self.generation,
+                    sequence: request.sequence,
+                    boundary,
+                    subcall: 0,
+                },
+                next: 0,
+                sender: &request.reply,
+                retired: &self.retired,
+                failure: None,
             };
-            let applied=apply(request.operation,&mut services);
+            let applied = apply(request.operation, &mut services);
             // Ignore-and-success cannot turn a failed service into a completed
             // camera operation or publish its TaskEffects. Prior Host writes stay.
-            if let Some(error)=services.failure {
-                service_error=Some(error.clone());return Err(error.to_string());
+            if let Some(error) = services.failure {
+                service_error = Some(error.clone());
+                return Err(error.to_string());
             }
-            let observation=applied?;
-            let subcalls=services.next;
+            let observation = applied?;
+            let subcalls = services.next;
             validate_observation(boundary, &observation)?;
             self.next = following;
             self.installed = true;
@@ -712,12 +984,14 @@ impl Inbox {
             })
         })();
         let failure = match &result {
-            Err(error)=>Some(error.clone()),
-            Ok(ack)=>ack.observation.finalization_fault.clone(),
+            Err(error) => Some(error.clone()),
+            Ok(ack) => ack.observation.finalization_fault.clone(),
         };
         request
             .reply
-            .send(Reply::Complete(result.map_err(|error|service_error.unwrap_or_else(||error.into()))))
+            .send(Reply::Complete(result.map_err(|error| {
+                service_error.unwrap_or_else(|| error.into())
+            })))
             .map_err(|_| "Camera worker dropped direct reply receiver")?;
         if let Some(error) = failure {
             return Err(error);

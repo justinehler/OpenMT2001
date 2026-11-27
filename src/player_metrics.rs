@@ -19,27 +19,29 @@ impl BusinessCounts {
         }
         if self.age > 10 {
             self.age = 0;
-            self.refresh(players,businesses)?;
+            self.refresh(players, businesses)?;
         }
         Ok(self.values[slot])
     }
     ///47ff80 refreshes values without changing the lazy age byte.
-    pub fn refresh(&mut self,players:usize,businesses:&[[u8;544]])->Result<(),String>{
-        if players>6{return Err("business-count roster exceeds six slots".into());}
-            self.values[..players].fill(0);
-            if businesses.len() != 600 {
-                return Err("business-count pool must have 600 records".into());
+    pub fn refresh(&mut self, players: usize, businesses: &[[u8; 544]]) -> Result<(), String> {
+        if players > 6 {
+            return Err("business-count roster exceeds six slots".into());
+        }
+        self.values[..players].fill(0);
+        if businesses.len() != 600 {
+            return Err("business-count pool must have 600 records".into());
+        }
+        for business in businesses {
+            let owner = i32::from(business[0xa] as i8) - 1;
+            if business[0x21c] != 0
+                && owner >= 0
+                && (owner as usize) < players
+                && i32::from_le_bytes(business[..4].try_into().unwrap()) != 2
+            {
+                self.values[owner as usize] = self.values[owner as usize].wrapping_add(1);
             }
-            for business in businesses {
-                let owner = i32::from(business[0xa] as i8) - 1;
-                if business[0x21c] != 0
-                    && owner >= 0
-                    && (owner as usize) < players
-                    && i32::from_le_bytes(business[..4].try_into().unwrap()) != 2
-                {
-                    self.values[owner as usize] = self.values[owner as usize].wrapping_add(1);
-                }
-            }
+        }
         Ok(())
     }
 }
@@ -47,27 +49,27 @@ impl BusinessCounts {
 /// Retained portions of47f8e0, called at fresh-start4ba148 before demand setup.
 #[allow(clippy::too_many_arguments)]
 pub fn reset(
-    neighbors:&mut crate::ai_neighbors::Cache,
-    ownership_age:&mut u8,
-    counts:&mut BusinessCounts,
-    market:&mut crate::market::Cache,
-    players:&[&crate::player_manager::Player],
-    categories:&[[u8;380];52],
-    businesses:&[[u8;544]],
-    residents:&crate::economy::ResidentAccounts,
-    image:&crate::pe::PeImage<'_>,
-)->Result<(),String>{
-    *ownership_age=100;
-    counts.age=100;
-    market.dirty=true;
+    neighbors: &mut crate::ai_neighbors::Cache,
+    ownership_age: &mut u8,
+    counts: &mut BusinessCounts,
+    market: &mut crate::market::Cache,
+    players: &[&crate::player_manager::Player],
+    categories: &[[u8; 380]; 52],
+    businesses: &[[u8; 544]],
+    residents: &crate::economy::ResidentAccounts,
+    image: &crate::pe::PeImage<'_>,
+) -> Result<(), String> {
+    *ownership_age = 100;
+    counts.age = 100;
+    market.dirty = true;
     neighbors.owned_properties.fill(0);
     neighbors.completed_groups.fill(0);
     counts.values.fill(0);
     market.prices.fill(0.);
     // Native reset does not overwrite the cached rent at object+168.
     neighbors.refresh_population(residents)?;
-    neighbors.refresh_owned(players,categories,residents,image)?;
-    counts.refresh(players.len(),businesses)
+    neighbors.refresh_owned(players, categories, residents, image)?;
+    counts.refresh(players.len(), businesses)
 }
 
 #[cfg(feature = "lua4")]
@@ -272,8 +274,8 @@ pub fn current_income(p: &[u8; 440]) -> Result<crate::x87::Sum, String> {
     // Native 0047fcf6 loads the first field before the 16 ordered adds.
     // Seeding with +0 instead loses an all-negative-zero ledger's sign.
     let first = offsets[0] - 4 + bank * 152;
-    let mut result = crate::x87::Sum::from_f32(
-        f32::from_le_bytes(p[first..first + 4].try_into().unwrap()))?;
+    let mut result =
+        crate::x87::Sum::from_f32(f32::from_le_bytes(p[first..first + 4].try_into().unwrap()))?;
     for offset in &offsets[1..] {
         let at = offset - 4 + bank * 152;
         result.add_f32(f32::from_le_bytes(p[at..at + 4].try_into().unwrap()))?;
@@ -331,49 +333,121 @@ pub fn runtime_metric(
 #[cfg(test)]
 mod reset_tests {
     use super::*;
-    use crate::player_manager::{Player,word};
+    use crate::player_manager::{Player, word};
     struct Reader<'a>(&'a [u8]);
-    impl<'a> Reader<'a>{
-        fn take(&mut self,n:usize)->&'a [u8]{let(a,b)=self.0.split_at(n);self.0=b;a}
-        fn word(&mut self)->u32{u32::from_le_bytes(self.take(4).try_into().unwrap())}
-        fn blob(&mut self)->&'a [u8]{let n=self.word() as usize;self.take(n)}
+    impl<'a> Reader<'a> {
+        fn take(&mut self, n: usize) -> &'a [u8] {
+            let (a, b) = self.0.split_at(n);
+            self.0 = b;
+            a
+        }
+        fn word(&mut self) -> u32 {
+            u32::from_le_bytes(self.take(4).try_into().unwrap())
+        }
+        fn blob(&mut self) -> &'a [u8] {
+            let n = self.word() as usize;
+            self.take(n)
+        }
     }
-    fn rows<const N:usize>(b:&[u8])->Vec<[u8;N]>{b.chunks_exact(N).map(|v|v.try_into().unwrap()).collect()}
+    fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
+        b.chunks_exact(N).map(|v| v.try_into().unwrap()).collect()
+    }
     #[test]
-    #[ignore="requires original whole metric reset fixture"]
-    fn matches_native_reset(){
-        let data=std::fs::read(std::env::var("OPENMT2001_NATIVE_METRIC_RESET").unwrap()).unwrap();
-        let mut r=Reader(&data);assert_eq!(r.take(8),b"MTMETRS1");assert_eq!(r.word(),0x37f);
-        let exe=std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();let image=crate::pe::PeImage::parse(&exe).unwrap();
-        for case in 0..r.word(){
-            let count=r.word() as usize;let _entry=r.word();let active_count=r.word();assert_eq!(r.word(),0);
-            let b:Vec<_>=(0..6).map(|_|r.blob()).collect();let expected=r.blob();let expected_rows=r.blob();
-            let mut neighbors=crate::ai_neighbors::Cache{rows:rows(b[1]).try_into().unwrap(),
-                owned_properties:std::array::from_fn(|i|word(b[0],0x8c+i*16) as i32),
-                completed_groups:std::array::from_fn(|i|word(b[0],0x94+i*16) as i32)};
-            let mut age=b[0][6];let mut counts=BusinessCounts{age:b[0][3],values:std::array::from_fn(|i|word(b[0],0x90+i*16) as i32)};
-            let mut market=crate::market::Cache{dirty:b[0][7]!=0,prices:std::array::from_fn(|i|f32::from_bits(word(b[0],0xe8+i*4))),rent:f32::from_bits(word(b[0],0x168))};
-            let players:Vec<_>=b[3].chunks_exact(0x1e50).enumerate().map(|(i,b)|Player{reference:0x10010000+i as u32*0x1e50,bytes:b.to_vec(),auxiliaries:vec![]}).collect();
-            let players:Vec<_>=players[..count].iter().collect();
-            let residents=crate::economy::ResidentAccounts{active_count,nodes:b[4].chunks_exact(336).map(|b|crate::resident::Resident::from_bytes(b[..330].try_into().unwrap())).collect(),accounts:vec![]};
-            reset(&mut neighbors,&mut age,&mut counts,&mut market,&players,&rows(b[2]).try_into().unwrap(),&rows(b[5]),&residents,&image).unwrap();
-            assert_eq!(age,expected[6],"case{case} ownership age");assert_eq!(counts.age,expected[3]);assert_eq!(market.dirty,expected[7]!=0);
-            assert_eq!(neighbors.rows.as_flattened(),expected_rows,"case{case} rows");
-            for i in 0..6{assert_eq!(neighbors.owned_properties[i] as u32,word(expected,0x8c+i*16));assert_eq!(neighbors.completed_groups[i] as u32,word(expected,0x94+i*16));assert_eq!(counts.values[i] as u32,word(expected,0x90+i*16));}
-            for i in 0..32{assert_eq!(market.prices[i].to_bits(),word(expected,0xe8+i*4));}
-            assert_eq!(market.rent.to_bits(),word(expected,0x168));
+    #[ignore = "requires original whole metric reset fixture"]
+    fn matches_native_reset() {
+        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_METRIC_RESET").unwrap()).unwrap();
+        let mut r = Reader(&data);
+        assert_eq!(r.take(8), b"MTMETRS1");
+        assert_eq!(r.word(), 0x37f);
+        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
+        for case in 0..r.word() {
+            let count = r.word() as usize;
+            let _entry = r.word();
+            let active_count = r.word();
+            assert_eq!(r.word(), 0);
+            let b: Vec<_> = (0..6).map(|_| r.blob()).collect();
+            let expected = r.blob();
+            let expected_rows = r.blob();
+            let mut neighbors = crate::ai_neighbors::Cache {
+                rows: rows(b[1]).try_into().unwrap(),
+                owned_properties: std::array::from_fn(|i| word(b[0], 0x8c + i * 16) as i32),
+                completed_groups: std::array::from_fn(|i| word(b[0], 0x94 + i * 16) as i32),
+            };
+            let mut age = b[0][6];
+            let mut counts = BusinessCounts {
+                age: b[0][3],
+                values: std::array::from_fn(|i| word(b[0], 0x90 + i * 16) as i32),
+            };
+            let mut market = crate::market::Cache {
+                dirty: b[0][7] != 0,
+                prices: std::array::from_fn(|i| f32::from_bits(word(b[0], 0xe8 + i * 4))),
+                rent: f32::from_bits(word(b[0], 0x168)),
+            };
+            let players: Vec<_> = b[3]
+                .chunks_exact(0x1e50)
+                .enumerate()
+                .map(|(i, b)| Player {
+                    reference: 0x10010000 + i as u32 * 0x1e50,
+                    bytes: b.to_vec(),
+                    auxiliaries: vec![],
+                })
+                .collect();
+            let players: Vec<_> = players[..count].iter().collect();
+            let residents = crate::economy::ResidentAccounts {
+                active_count,
+                nodes: b[4]
+                    .chunks_exact(336)
+                    .map(|b| crate::resident::Resident::from_bytes(b[..330].try_into().unwrap()))
+                    .collect(),
+                accounts: vec![],
+            };
+            reset(
+                &mut neighbors,
+                &mut age,
+                &mut counts,
+                &mut market,
+                &players,
+                &rows(b[2]).try_into().unwrap(),
+                &rows(b[5]),
+                &residents,
+                &image,
+            )
+            .unwrap();
+            assert_eq!(age, expected[6], "case{case} ownership age");
+            assert_eq!(counts.age, expected[3]);
+            assert_eq!(market.dirty, expected[7] != 0);
+            assert_eq!(
+                neighbors.rows.as_flattened(),
+                expected_rows,
+                "case{case} rows"
+            );
+            for i in 0..6 {
+                assert_eq!(
+                    neighbors.owned_properties[i] as u32,
+                    word(expected, 0x8c + i * 16)
+                );
+                assert_eq!(
+                    neighbors.completed_groups[i] as u32,
+                    word(expected, 0x94 + i * 16)
+                );
+                assert_eq!(counts.values[i] as u32, word(expected, 0x90 + i * 16));
+            }
+            for i in 0..32 {
+                assert_eq!(market.prices[i].to_bits(), word(expected, 0xe8 + i * 4));
+            }
+            assert_eq!(market.rent.to_bits(), word(expected, 0x168));
         }
         assert!(r.0.is_empty());
     }
 }
 
-
 #[cfg(test)]
 mod income_tests {
     use super::current_income;
     const OFFSETS: [usize; 17] = [
-        0x98, 0x9c, 0x78, 0x7c, 0x80, 0x84, 0x88, 0x8c, 0x90,
-        0x94, 0xa0, 0x4c, 0x24, 0x28, 0x2c, 0x30, 0x58,
+        0x98, 0x9c, 0x78, 0x7c, 0x80, 0x84, 0x88, 0x8c, 0x90, 0x94, 0xa0, 0x4c, 0x24, 0x28, 0x2c,
+        0x30, 0x58,
     ];
 
     #[test]
@@ -385,12 +459,18 @@ mod income_tests {
                 let at = offset - 4 + usize::from(bank) * 152;
                 player[at..at + 4].copy_from_slice(&(-0.0f32).to_le_bytes());
             }
-            assert_eq!(current_income(&player).unwrap().to_f32().to_bits(),
-                (-0.0f32).to_bits(), "bank {bank}");
+            assert_eq!(
+                current_income(&player).unwrap().to_f32().to_bits(),
+                (-0.0f32).to_bits(),
+                "bank {bank}"
+            );
             let at = OFFSETS[8] - 4 + usize::from(bank) * 152;
             player[at..at + 4].copy_from_slice(&0.0f32.to_le_bytes());
-            assert_eq!(current_income(&player).unwrap().to_f32().to_bits(), 0,
-                "mixed zero signs, bank {bank}");
+            assert_eq!(
+                current_income(&player).unwrap().to_f32().to_bits(),
+                0,
+                "mixed zero signs, bank {bank}"
+            );
         }
     }
 
@@ -402,12 +482,17 @@ mod income_tests {
             // Large cancellation makes reordering observable even at PC64.
             for (offset, value) in OFFSETS.into_iter().zip(
                 [2.0f32.powi(100), -2.0f32.powi(100), 1.25]
-                    .into_iter().chain(std::iter::repeat(0.0))) {
+                    .into_iter()
+                    .chain(std::iter::repeat(0.0)),
+            ) {
                 let at = offset - 4 + usize::from(bank) * 152;
                 player[at..at + 4].copy_from_slice(&value.to_le_bytes());
             }
-            assert_eq!(current_income(&player).unwrap().to_f32().to_bits(),
-                1.25f32.to_bits(), "bank {bank}");
+            assert_eq!(
+                current_income(&player).unwrap().to_f32().to_bits(),
+                1.25f32.to_bits(),
+                "bank {bank}"
+            );
         }
     }
 }

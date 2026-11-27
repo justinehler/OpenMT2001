@@ -2,145 +2,347 @@
 //! Natural gameplay only: no assignment to clocks, economy, ownership, RNG,
 //! pause, success state, queues, card pools, hourly gates or mode.
 use super::*;
-use crate::{fresh_city::{Session,CommandAssets},live_host::{Host,camera_bridge as bridge},
-    session_save::natural_observer as probe};
-use camera_live::{endpoint::{Context,Endpoint,PropertyInstall},owner::{Owner,Input,Pose}};
-use openmt2001::camera::{bank::{Bank,Capture},primary::CursorRequest};
-use std::{path::Path,sync::{Mutex,atomic::{AtomicBool,Ordering}},thread::{self,JoinHandle},time::Duration};
-const FRAMES:usize=30_000;
-const WALL:Duration=Duration::from_secs(240);
-fn word(b:&[u8],at:usize)->u32{u32::from_le_bytes(b[at..at+4].try_into().unwrap())}
-struct Budget {start:Instant,used:usize}
+use crate::{
+    fresh_city::{CommandAssets, Session},
+    live_host::{Host, camera_bridge as bridge},
+    session_save::natural_observer as probe,
+};
+use camera_live::{
+    endpoint::{Context, Endpoint, PropertyInstall},
+    owner::{Input, Owner, Pose},
+};
+use openmt2001::camera::{
+    bank::{Bank, Capture},
+    primary::CursorRequest,
+};
+use std::{
+    path::Path,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+const FRAMES: usize = 30_000;
+const WALL: Duration = Duration::from_secs(240);
+fn word(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+}
+struct Budget {
+    start: Instant,
+    used: usize,
+}
 impl Budget {
-    fn tick(&mut self,h:&mut Host,s:&mut Session<'_>,a:&CommandAssets<'_,'_>){
-        assert!(self.used<FRAMES && self.start.elapsed()<WALL,"single30k/240s budget exhausted at {} {:?}",self.used,s.world.clock);
-        self.used+=1;assert_eq!(h.policy.scheduler.iterations,1);
-        assert!(!h.policy.hourly.suppressed);assert!(!s.world.pause.has_reason(),"unexpected real pause");
-        h.tick(s,a);assert!(h.failure.is_none(),"actual Host failure: {:?}",h.failure);
+    fn tick(&mut self, h: &mut Host, s: &mut Session<'_>, a: &CommandAssets<'_, '_>) {
+        assert!(
+            self.used < FRAMES && self.start.elapsed() < WALL,
+            "single30k/240s budget exhausted at {} {:?}",
+            self.used,
+            s.world.clock
+        );
+        self.used += 1;
+        assert_eq!(h.policy.scheduler.iterations, 1);
+        assert!(!h.policy.hourly.suppressed);
+        assert!(!s.world.pause.has_reason(), "unexpected real pause");
+        h.tick(s, a);
+        assert!(h.failure.is_none(), "actual Host failure: {:?}", h.failure);
         assert!(h.running && !h.camera_retired());
     }
 }
 struct Scratch(PathBuf);
 impl Scratch {
-    fn new()->Self{
-        let parent=PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").expect("explicit disk scratch parent required"));
-        assert!(parent.is_absolute());fs::create_dir_all(&parent).unwrap();
-        let root=parent.join(format!("autosave-natural-host-v1-{}-{}",std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        fs::create_dir(&root).unwrap();Self(root)
+    fn new() -> Self {
+        let parent = PathBuf::from(
+            std::env::var_os("OPENMT2001_TEST_SCRATCH")
+                .expect("explicit disk scratch parent required"),
+        );
+        assert!(parent.is_absolute());
+        fs::create_dir_all(&parent).unwrap();
+        let root = parent.join(format!(
+            "autosave-natural-host-v1-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        Self(root)
     }
 }
-impl Drop for Scratch {fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
-#[derive(Default,Debug)]
-struct Audit {install:usize,current:usize,raw:usize,mode_reads:usize,
-    pairs:Vec<[[u8;196];2]>,dirty:Vec<u8>}
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+#[derive(Default, Debug)]
+struct Audit {
+    install: usize,
+    current: usize,
+    raw: usize,
+    mode_reads: usize,
+    pairs: Vec<[[u8; 196]; 2]>,
+    dirty: Vec<u8>,
+}
 /// Finite capture-only context. Install stores no UI input/provider state;
 /// admission and final writeback validate the real graph-absent contract.
 /// Its view comes from genuine restored metadata, not a constant normal view.
-struct ReadOnlyContext {mode:u32,installing:bool,audit:Arc<Mutex<Audit>>}
-fn unsupported<T>(name:&str)->Result<T,String>{Err(format!("capture-only context cannot service {name}"))}
+struct ReadOnlyContext {
+    mode: u32,
+    installing: bool,
+    audit: Arc<Mutex<Audit>>,
+}
+fn unsupported<T>(name: &str) -> Result<T, String> {
+    Err(format!("capture-only context cannot service {name}"))
+}
 impl Context for ReadOnlyContext {
-    fn primary_construction(&mut self)->Option<(&mut camera_live::deferred_primary::DeferredPrimary,
-        &mut camera_live::primitive_factory::Primitives,&mut camera_live::ui_text_resources::UiTextResources,
-        &camera_live::process_images::Images)>{None}
-    fn save_interface_mode(&self)->Result<u32,String>{
-        self.audit.lock().unwrap().mode_reads+=1;Ok(self.mode)
+    fn primary_construction(
+        &mut self,
+    ) -> Option<(
+        &mut camera_live::deferred_primary::DeferredPrimary,
+        &mut camera_live::primitive_factory::Primitives,
+        &mut camera_live::ui_text_resources::UiTextResources,
+        &camera_live::process_images::Images,
+    )> {
+        None
     }
-    fn validate(&self,op:&bridge::Operation,_:&Owner)->Result<(),String>{
-        let mut audit=self.audit.lock().unwrap();
-        match op {bridge::Operation::Install{..}=>audit.install+=1,
-            bridge::Operation::CurrentPose=>audit.current+=1,
-            bridge::Operation::RawCapture=>audit.raw+=1,
-            other=>return unsupported(&format!("{other:?}"))};Ok(())
+    fn save_interface_mode(&self) -> Result<u32, String> {
+        self.audit.lock().unwrap().mode_reads += 1;
+        Ok(self.mode)
     }
-    fn admission(&mut self,a:&bridge::Admission)->Result<(),String>{
-        if self.installing || a.upper.is_some() || a.strategic.is_some(){return unsupported("noninitial/graph admission");}
-        self.installing=true;Ok(())
+    fn validate(&self, op: &bridge::Operation, _: &Owner) -> Result<(), String> {
+        let mut audit = self.audit.lock().unwrap();
+        match op {
+            bridge::Operation::Install { .. } => audit.install += 1,
+            bridge::Operation::CurrentPose => audit.current += 1,
+            bridge::Operation::RawCapture => audit.raw += 1,
+            other => return unsupported(&format!("{other:?}")),
+        };
+        Ok(())
     }
-    fn take_strategic_writeback(&mut self)->Result<Option<crate::locator::strategic::Writeback>,String>{
-        if !self.installing{return unsupported("noninstall writeback");}self.installing=false;Ok(None)
+    fn admission(&mut self, a: &bridge::Admission) -> Result<(), String> {
+        if self.installing || a.upper.is_some() || a.strategic.is_some() {
+            return unsupported("noninitial/graph admission");
+        }
+        self.installing = true;
+        Ok(())
     }
-    fn pre_camera(&mut self,_:&mut Owner,_:&bridge::Admission)->Result<(),String>{unsupported("pre_camera")}
-    fn input(&mut self,_:&bridge::Admission)->Result<Input,String>{unsupported("input")}
-    fn consumed_input(&mut self){panic!("capture-only consumed_input")}
-    fn cursor(&mut self,_:Vec<CursorRequest>)->Result<(),String>{unsupported("cursor")}
-    fn navigate(&mut self,_:&mut Owner)->Result<(),String>{unsupported("navigate")}
-    fn tutorial(&mut self,_:bridge::NativeOperation,_:&mut Owner)->Result<(),String>{unsupported("tutorial")}
-    fn pending_sound(&mut self,_:Pose)->Result<(),String>{unsupported("pending_sound")}
-    fn present(&mut self,_:Pose)->Result<(),String>{unsupported("present")}
-    fn take_task_effects(&mut self)->Vec<bridge::TaskEffect>{panic!("capture-only task effects")}
-    fn publish_save_captures(&mut self){panic!("capture-only manual-save publication")}
-    fn discard_task_effects(&mut self){panic!("unsupported endpoint operation; no successful cleanup substitute")}
+    fn take_strategic_writeback(
+        &mut self,
+    ) -> Result<Option<crate::locator::strategic::Writeback>, String> {
+        if !self.installing {
+            return unsupported("noninstall writeback");
+        }
+        self.installing = false;
+        Ok(None)
+    }
+    fn pre_camera(&mut self, _: &mut Owner, _: &bridge::Admission) -> Result<(), String> {
+        unsupported("pre_camera")
+    }
+    fn input(&mut self, _: &bridge::Admission) -> Result<Input, String> {
+        unsupported("input")
+    }
+    fn consumed_input(&mut self) {
+        panic!("capture-only consumed_input")
+    }
+    fn cursor(&mut self, _: Vec<CursorRequest>) -> Result<(), String> {
+        unsupported("cursor")
+    }
+    fn navigate(&mut self, _: &mut Owner) -> Result<(), String> {
+        unsupported("navigate")
+    }
+    fn tutorial(&mut self, _: bridge::NativeOperation, _: &mut Owner) -> Result<(), String> {
+        unsupported("tutorial")
+    }
+    fn pending_sound(&mut self, _: Pose) -> Result<(), String> {
+        unsupported("pending_sound")
+    }
+    fn present(&mut self, _: Pose) -> Result<(), String> {
+        unsupported("present")
+    }
+    fn take_task_effects(&mut self) -> Vec<bridge::TaskEffect> {
+        panic!("capture-only task effects")
+    }
+    fn publish_save_captures(&mut self) {
+        panic!("capture-only manual-save publication")
+    }
+    fn discard_task_effects(&mut self) {
+        panic!("unsupported endpoint operation; no successful cleanup substitute")
+    }
 }
-struct CameraThread {stop:Arc<AtomicBool>,join:Option<JoinHandle<Result<(),String>>>,audit:Arc<Mutex<Audit>>}
+struct CameraThread {
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<Result<(), String>>>,
+    audit: Arc<Mutex<Audit>>,
+}
 impl CameraThread {
-    fn start(inbox:bridge::Inbox,install:PropertyInstall,mode:u32)->Self{
-        let stop=Arc::new(AtomicBool::new(false));let stopped=stop.clone();
-        let audit=Arc::new(Mutex::new(Audit::default()));let observed=audit.clone();
-        let join=thread::Builder::new().stack_size(32*1024*1024).spawn(move||{
-            let owner=Owner::new(Bank::loader_zero_storage(),1);
-            let mut endpoint=Endpoint::with_property_install(owner,inbox,install);
-            let mut context=ReadOnlyContext{mode,installing:false,audit:observed.clone()};
-            let started=Instant::now();let mut error=None;
-            while !stopped.load(Ordering::Acquire) && started.elapsed()<WALL {
-                let raw_before=observed.lock().unwrap().raw;let before=endpoint.capture();
-                let dirty=endpoint.owner().kind_dirty();
-                match endpoint.wait_service(&mut context,Duration::from_millis(20)) {
-                    Ok(bridge::Service::Idle)=>{},Ok(bridge::Service::Completed)=>{
-                        if observed.lock().unwrap().install==1 {
-                            assert_eq!(endpoint.owner().property_descriptors().unwrap().count().unwrap(),52);
-                            assert!(endpoint.owner().resident_descriptors().is_ok());
+    fn start(inbox: bridge::Inbox, install: PropertyInstall, mode: u32) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let audit = Arc::new(Mutex::new(Audit::default()));
+        let observed = audit.clone();
+        let join = thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let owner = Owner::new(Bank::loader_zero_storage(), 1);
+                let mut endpoint = Endpoint::with_property_install(owner, inbox, install);
+                let mut context = ReadOnlyContext {
+                    mode,
+                    installing: false,
+                    audit: observed.clone(),
+                };
+                let started = Instant::now();
+                let mut error = None;
+                while !stopped.load(Ordering::Acquire) && started.elapsed() < WALL {
+                    let raw_before = observed.lock().unwrap().raw;
+                    let before = endpoint.capture();
+                    let dirty = endpoint.owner().kind_dirty();
+                    match endpoint.wait_service(&mut context, Duration::from_millis(20)) {
+                        Ok(bridge::Service::Idle) => {}
+                        Ok(bridge::Service::Completed) => {
+                            if observed.lock().unwrap().install == 1 {
+                                assert_eq!(
+                                    endpoint
+                                        .owner()
+                                        .property_descriptors()
+                                        .unwrap()
+                                        .count()
+                                        .unwrap(),
+                                    52
+                                );
+                                assert!(endpoint.owner().resident_descriptors().is_ok());
+                            }
+                            if observed.lock().unwrap().raw != raw_before {
+                                assert_eq!(endpoint.capture(), before);
+                                assert_eq!(endpoint.owner().kind_dirty(), dirty);
+                                let mut audit = observed.lock().unwrap();
+                                audit.pairs.push(before.into_records());
+                                audit.dirty.push(dirty);
+                            }
                         }
-                        if observed.lock().unwrap().raw!=raw_before {
-                            assert_eq!(endpoint.capture(),before);assert_eq!(endpoint.owner().kind_dirty(),dirty);
-                            let mut audit=observed.lock().unwrap();audit.pairs.push(before.into_records());audit.dirty.push(dirty);
+                        Err(e) => {
+                            error = Some(e);
+                            break;
                         }
-                    },Err(e)=>{error=Some(e);break;}
+                    }
                 }
-            }
-            let owner=endpoint.into_owner();assert!(owner.property_lifecycle_error().is_none());
-            error.map_or(Ok(()),Err)
-        }).unwrap();Self{stop,join:Some(join),audit}
+                let owner = endpoint.into_owner();
+                assert!(owner.property_lifecycle_error().is_none());
+                error.map_or(Ok(()), Err)
+            })
+            .unwrap();
+        Self {
+            stop,
+            join: Some(join),
+            audit,
+        }
     }
-    fn finish(mut self){self.stop.store(true,Ordering::Release);self.join.take().unwrap().join().unwrap().unwrap();}
+    fn finish(mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.join.take().unwrap().join().unwrap().unwrap();
+    }
 }
-impl Drop for CameraThread {fn drop(&mut self){self.stop.store(true,Ordering::Release);if let Some(join)=self.join.take(){let _=join.join();}}}
+impl Drop for CameraThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
 
-fn install_host(s:&mut Session<'_>,loaded:&mut LoadedInspection,root:&Path,
-    selection:&crate::selection::Assets,image:&openmt2001::pe::PeImage<'_>)->(Host,CameraThread,[[u8;196];2]) {
-    let capture=loaded.imported_cameras.expect("actual imported pair required");
-    assert!(matches!(loaded.saved_prior_mode,None|Some(0|3)));
+fn install_host(
+    s: &mut Session<'_>,
+    loaded: &mut LoadedInspection,
+    root: &Path,
+    selection: &crate::selection::Assets,
+    image: &openmt2001::pe::PeImage<'_>,
+) -> (Host, CameraThread, [[u8; 196]; 2]) {
+    let capture = loaded
+        .imported_cameras
+        .expect("actual imported pair required");
+    assert!(matches!(loaded.saved_prior_mode, None | Some(0 | 3)));
     // Exact Inspection constructor policy (intro.rs5599): absent normal-view
     // extension is the saved normal view; Some(3) is strategic.
-    let mode=if loaded.saved_prior_mode==Some(3){3}else{0};
-    let eye=loaded.saved_viewpoint.expect("genuine saved viewpoint required").0.eye;
-    let (worker,inbox)=bridge::channel(s.world.topology.epoch().serial());
-    let camera=CameraThread::start(inbox,PropertyInstall::capture(selection,image).unwrap(),mode);
-    let mut h=Host::new(eye);h.autosave_profile_root=Some(root.to_path_buf());
-    h.install_camera_bridge(s,image,crate::live_host::CameraSupplierPolicy::CameraOnly,worker,capture,
-        selection.pavement_resource().binding().unwrap().handle()).unwrap();
-    assert!(h.camera_bridge_installed());h.begin_presentation(s).unwrap();h.set_running(true);
-    h.apply_restored_presentation(std::mem::take(&mut loaded.restored_presentation)).unwrap();
+    let mode = if loaded.saved_prior_mode == Some(3) {
+        3
+    } else {
+        0
+    };
+    let eye = loaded
+        .saved_viewpoint
+        .expect("genuine saved viewpoint required")
+        .0
+        .eye;
+    let (worker, inbox) = bridge::channel(s.world.topology.epoch().serial());
+    let camera = CameraThread::start(
+        inbox,
+        PropertyInstall::capture(selection, image).unwrap(),
+        mode,
+    );
+    let mut h = Host::new(eye);
+    h.autosave_profile_root = Some(root.to_path_buf());
+    h.install_camera_bridge(
+        s,
+        image,
+        crate::live_host::CameraSupplierPolicy::CameraOnly,
+        worker,
+        capture,
+        selection.pavement_resource().binding().unwrap().handle(),
+    )
+    .unwrap();
+    assert!(h.camera_bridge_installed());
+    h.begin_presentation(s).unwrap();
+    h.set_running(true);
+    h.apply_restored_presentation(std::mem::take(&mut loaded.restored_presentation))
+        .unwrap();
     // Unopposed Sandbox cannot require a successful fake auction renderer.
-    assert_eq!(s.roster.manager.players.len(),1,"supply genuine UnopposedSandbox; do not remove opponents");
-    assert_eq!(s.catalog.selected_level().unwrap().id(),400002);
-    assert!(loaded.saved_auction.is_none());assert_eq!(s.world.auction.controller.reference,0);
-    assert_eq!(camera.audit.lock().unwrap().install,1);
-    (h,camera,capture.into_records())
+    assert_eq!(
+        s.roster.manager.players.len(),
+        1,
+        "supply genuine UnopposedSandbox; do not remove opponents"
+    );
+    assert_eq!(s.catalog.selected_level().unwrap().id(), 400002);
+    assert!(loaded.saved_auction.is_none());
+    assert_eq!(s.world.auction.controller.reference, 0);
+    assert_eq!(camera.audit.lock().unwrap().install, 1);
+    (h, camera, capture.into_records())
 }
-fn accounts(s:&Session<'_>)->Vec<Vec<u8>> {s.world.ledgers.players.iter().map(|a|{
-    let mut row=vec![0;0x1b8];a.write_runtime(&mut row).unwrap();row}).collect()}
-fn pending_card(s:&Session<'_>)->usize{s.live_commands.snapshot().unwrap().iter().filter(|(_,_,_,_,c)|
-    matches!(c,openmt2001::live_commands::Command::EventCard(c) if c.card==1 && c.player==0)).count()}
-fn no_prompt(h:&mut Host,s:&Session<'_>){assert!(h.take_prompts(s).is_empty(),"unexpected real prompt: inspect; never clear pause or omit it");}
+fn accounts(s: &Session<'_>) -> Vec<Vec<u8>> {
+    s.world
+        .ledgers
+        .players
+        .iter()
+        .map(|a| {
+            let mut row = vec![0; 0x1b8];
+            a.write_runtime(&mut row).unwrap();
+            row
+        })
+        .collect()
+}
+fn pending_card(s: &Session<'_>) -> usize {
+    s.live_commands.snapshot().unwrap().iter().filter(|(_,_,_,_,c)|
+    matches!(c,openmt2001::live_commands::Command::EventCard(c) if c.card==1 && c.player==0)).count()
+}
+fn no_prompt(h: &mut Host, s: &Session<'_>) {
+    assert!(
+        h.take_prompts(s).is_empty(),
+        "unexpected real prompt: inspect; never clear pause or omit it"
+    );
+}
 
 #[test]
-#[ignore="supplied genuine ordinary UnopposedSandbox; natural CPU Host/protocol only"]
-fn natural_host_two_fixed_slots_and_future_human_card(){run("OPENMT2001_AUTOSAVE_NATURAL_SAVE",false);}
+#[ignore = "supplied genuine ordinary UnopposedSandbox; natural CPU Host/protocol only"]
+fn natural_host_two_fixed_slots_and_future_human_card() {
+    run("OPENMT2001_AUTOSAVE_NATURAL_SAVE", false);
+}
 #[test]
-#[ignore="supplied genuine late-era UnopposedSandbox; natural CPU Host/protocol only"]
-fn natural_host_era_queue_replaced_once_and_future_human_card(){run("OPENMT2001_AUTOSAVE_ERA_SAVE",true);}
-fn run(fixture_key:&'static str,expect_era:bool){
+#[ignore = "supplied genuine late-era UnopposedSandbox; natural CPU Host/protocol only"]
+fn natural_host_era_queue_replaced_once_and_future_human_card() {
+    run("OPENMT2001_AUTOSAVE_ERA_SAVE", true);
+}
+fn run(fixture_key: &'static str, expect_era: bool) {
     thread::Builder::new().stack_size(32*1024*1024).spawn(move||{
         let budget=Instant::now();let scratch=Scratch::new();let observer=probe::Observe::start();
         let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();

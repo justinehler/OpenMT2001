@@ -39,7 +39,11 @@ pub struct Controls {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Call {
-    NativeUiCall { address: u32, args: [u32; 6], argument_count: u8 },
+    NativeUiCall {
+        address: u32,
+        args: [u32; 6],
+        argument_count: u8,
+    },
     BuildingAppearance(usize),
     Message([i32; 8]),
     RefreshInterface,
@@ -264,12 +268,23 @@ pub fn apply(
 
 // Native48a5a0 presents each posting immediately. A same-player takeover has
 // two postings; the Host pulse latch decides whether its second pulse starts.
-fn notify_post(value: f32, w: &mut World<'_>, image: &PeImage<'_>,
-    callback: &mut impl FnMut(Call, &mut World<'_>) -> Result<(), String>) -> Result<(), String> {
+fn notify_post(
+    value: f32,
+    w: &mut World<'_>,
+    image: &PeImage<'_>,
+    callback: &mut impl FnMut(Call, &mut World<'_>) -> Result<(), String>,
+) -> Result<(), String> {
     let threshold = image.f32_at(0x525040)?;
-    let sound = |asset| Call::NativeUiCall { address: 0x4ad760,
-        args: [asset, 0, 0, 0, 1, 0x3c], argument_count: 6 };
-    let pulse = |address| Call::NativeUiCall { address, args: [0; 6], argument_count: 0 };
+    let sound = |asset| Call::NativeUiCall {
+        address: 0x4ad760,
+        args: [asset, 0, 0, 0, 1, 0x3c],
+        argument_count: 6,
+    };
+    let pulse = |address| Call::NativeUiCall {
+        address,
+        args: [0; 6],
+        argument_count: 0,
+    };
     if value > threshold {
         callback(sound(0x541cc8), w)?;
         callback(pulse(0x4c6290), w)?;
@@ -334,32 +349,69 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
     }
     let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data =
-        std::fs::read(std::env::var(variable).unwrap()).unwrap();
+    let data = std::fs::read(std::env::var(variable).unwrap()).unwrap();
     let mut r = R(&data);
-    assert_eq!(r.take(8), if stream { b"MTSTAK15" } else if cash { b"MTTAUI01" } else { b"MTBTAKE1" });
+    assert_eq!(
+        r.take(8),
+        if stream {
+            b"MTSTAK15"
+        } else if cash {
+            b"MTTAUI01"
+        } else {
+            b"MTBTAKE1"
+        }
+    );
     assert_eq!(r.word(), 0x37f);
     let mut cash_cases = 0;
     let mut both_posts = 0;
     let mut future_copies = 0;
     for case in 0..r.word() {
-        let raw: Vec<_> = (0..if stream { 14 } else if cash { 9 } else { 7 }).map(|_| r.word()).collect();
-        let h = [raw[0], raw[1], raw[2], raw[3], raw[4],
-            raw[if cash { 7 } else { 5 }], raw[if cash { 8 } else { 6 }]];
+        let raw: Vec<_> = (0..if stream {
+            14
+        } else if cash {
+            9
+        } else {
+            7
+        })
+            .map(|_| r.word())
+            .collect();
+        let h = [
+            raw[0],
+            raw[1],
+            raw[2],
+            raw[3],
+            raw[4],
+            raw[if cash { 7 } else { 5 }],
+            raw[if cash { 8 } else { 6 }],
+        ];
         let current = cash.then_some(raw[5] as usize);
         let readmitted = if stream {
             r.take(48); // Original queue's reconstructed host node references.
             Some(r.take(24))
-        } else { None };
-        let mut prior = if cash { [0; 48] } else { r.blob().try_into().unwrap() };
+        } else {
+            None
+        };
+        let mut prior = if cash {
+            [0; 48]
+        } else {
+            r.blob().try_into().unwrap()
+        };
         let b: Vec<_> = if cash {
             assert_eq!(raw[6], 6);
-            let regions: Vec<_> = (0..6).map(|_| {
-                let n = r.word() as usize;
-                (r.take(n), r.take(n))
-            }).collect();
-            regions.iter().map(|v| v.0).chain(regions.iter().map(|v| v.1)).collect()
-        } else { (0..12).map(|_| r.blob()).collect() };
+            let regions: Vec<_> = (0..6)
+                .map(|_| {
+                    let n = r.word() as usize;
+                    (r.take(n), r.take(n))
+                })
+                .collect();
+            regions
+                .iter()
+                .map(|v| v.0)
+                .chain(regions.iter().map(|v| v.1))
+                .collect()
+        } else {
+            (0..12).map(|_| r.blob()).collect()
+        };
         let mut trace = vec![];
         for _ in 0..h[5] {
             let address = r.word();
@@ -369,7 +421,9 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
         let sounds = trace.iter().filter(|call| call.0 == 0x4ad760).count();
         cash_cases += usize::from(sounds != 0);
         both_posts += usize::from(sounds == 2);
-        if cash { prior = r.take(48).try_into().unwrap(); }
+        if cash {
+            prior = r.take(48).try_into().unwrap();
+        }
         let nodes: Vec<_> = (0..h[6])
             .map(|_| {
                 let address = r.word();
@@ -378,30 +432,38 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
             .collect();
         if stream {
             let variant = raw[9];
-            assert_eq!(raw[10],1200+raw[0]);
-            assert_eq!(raw[13],u32::from(variant==2));
-            assert_eq!(raw[11],match variant {
-                1=>u32::MAX,2=>raw[1].saturating_sub(1),_=>raw[10],
-            });
+            assert_eq!(raw[10], 1200 + raw[0]);
+            assert_eq!(raw[13], u32::from(variant == 2));
+            assert_eq!(
+                raw[11],
+                match variant {
+                    1 => u32::MAX,
+                    2 => raw[1].saturating_sub(1),
+                    _ => raw[10],
+                }
+            );
             let packet = readmitted.unwrap();
-            if variant==3 {
-                assert_eq!(raw[12],raw[10]+25);
-                assert_eq!(trace.len(),1);
-                assert_eq!(trace[0].0,0x480900);
-                assert_eq!(&trace[0].1[..3],&[0,raw[12],0]);
-                assert_eq!(trace[0].1.len(),4);
-                let mut expected = [0;24];
-                Command {building:0}.write_packet(&mut expected);
-                put(&mut expected,8,24); put(&mut expected,12,raw[12]);
-                assert_eq!(packet,expected);
-                for region in 0..6 {assert_eq!(b[region],b[region+6]);}
+            if variant == 3 {
+                assert_eq!(raw[12], raw[10] + 25);
+                assert_eq!(trace.len(), 1);
+                assert_eq!(trace[0].0, 0x480900);
+                assert_eq!(&trace[0].1[..3], &[0, raw[12], 0]);
+                assert_eq!(trace[0].1.len(), 4);
+                let mut expected = [0; 24];
+                Command { building: 0 }.write_packet(&mut expected);
+                put(&mut expected, 8, 24);
+                put(&mut expected, 12, raw[12]);
+                assert_eq!(packet, expected);
+                for region in 0..6 {
+                    assert_eq!(b[region], b[region + 6]);
+                }
                 assert!(nodes.is_empty());
-                assert_eq!(h[4],raw[0].wrapping_mul(17) as u8 as u32);
-                future_copies+=1;
+                assert_eq!(h[4], raw[0].wrapping_mul(17) as u8 as u32);
+                future_copies += 1;
                 continue;
             }
-            assert_eq!(raw[12],raw[10]);
-            assert_eq!(packet,[0;24]);
+            assert_eq!(raw[12], raw[10]);
+            assert_eq!(packet, [0; 24]);
         }
         let categories: Box<[[u8; 380]; 52]> =
             rows::<380>(b[0]).into_boxed_slice().try_into().unwrap();
@@ -457,8 +519,11 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
             &image,
             |call, w| {
                 actual.push(match call {
-                    Call::NativeUiCall { address, args, argument_count } =>
-                        (address, args[..usize::from(argument_count)].to_vec()),
+                    Call::NativeUiCall {
+                        address,
+                        args,
+                        argument_count,
+                    } => (address, args[..usize::from(argument_count)].to_vec()),
                     Call::BuildingAppearance(id) => (0x485520, vec![0x591318 + id as u32 * 916]),
                     Call::RefreshInterface => (0x41f410, vec![]),
                     Call::BuildingPanel(id) => (0x407660, vec![id as u32]),
@@ -504,7 +569,12 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
     }
     assert!(r.0.is_empty());
     if cash {
-        assert_eq!((cash_cases, both_posts), if stream {(39,9)} else {(29,6)});
+        assert_eq!(
+            (cash_cases, both_posts),
+            if stream { (39, 9) } else { (29, 6) }
+        );
     }
-    if stream {assert_eq!(future_copies,48);}
+    if stream {
+        assert_eq!(future_copies, 48);
+    }
 }

@@ -400,13 +400,40 @@ pub struct Assets {
     backing_color: u32,
 }
 impl Assets {
-    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8]) -> Result<Self, String> {
+    pub fn load(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+        executable: &[u8],
+    ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, executable, None)
     }
-    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8], shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
-        Self::load_impl(index, archive, installer, language, executable, Some(shared))
+    pub(crate) fn load_shared(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+        executable: &[u8],
+        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+    ) -> Result<Self, String> {
+        Self::load_impl(
+            index,
+            archive,
+            installer,
+            language,
+            executable,
+            Some(shared),
+        )
     }
-    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, executable: &[u8], shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
+    fn load_impl(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+        executable: &[u8],
+        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+    ) -> Result<Self, String> {
         let entry = index
             .find(PANEL)
             .ok_or("Original top-right panel missing")?;
@@ -481,33 +508,63 @@ impl Assets {
                 .get(82)
                 .ok_or("Original Options button texture missing")?,
         );
-        let (font_pages,tab,button_pages,button_tab) = if let Some(shared)=shared {
-            (shared.surfaces(2)?,shared.table(2)?.to_vec(),shared.surfaces(3)?,shared.table(3)?.to_vec())
+        let (font_pages, tab, button_pages, button_tab) = if let Some(shared) = shared {
+            (
+                shared.surfaces(2)?,
+                shared.table(2)?.to_vec(),
+                shared.surfaces(3)?,
+                shared.table(3)?.to_vec(),
+            )
         } else {
-        let font_entry = index
-            .find("gamedata2/font640/textures.gtd")
-            .ok_or("Original UI font texture missing")?;
-        let font = TextureSet::parse(
-            archive
-                .get(font_entry.offset as usize..(font_entry.offset + font_entry.length) as usize)
-                .ok_or("Original UI font texture outside archive")?,
-        )
-        .map_err(|e| e.to_string())?;
-        let tab = fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
+            let font_entry = index
+                .find("gamedata2/font640/textures.gtd")
+                .ok_or("Original UI font texture missing")?;
+            let font = TextureSet::parse(
+                archive
+                    .get(
+                        font_entry.offset as usize
+                            ..(font_entry.offset + font_entry.length) as usize,
+                    )
+                    .ok_or("Original UI font texture outside archive")?,
+            )
             .map_err(|e| e.to_string())?;
-        let button_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
-            .map_err(|e| e.to_string())?;
-            (font.textures.get(4..6).ok_or("shared font2 pages missing")?.iter().map(Surface::new).collect(),tab,
-                font.textures.get(6..8).ok_or("shared font3 pages missing")?.iter().map(Surface::new).collect(),button_tab)
+            let tab = fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
+                .map_err(|e| e.to_string())?;
+            let button_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
+                .map_err(|e| e.to_string())?;
+            (
+                font.textures
+                    .get(4..6)
+                    .ok_or("shared font2 pages missing")?
+                    .iter()
+                    .map(Surface::new)
+                    .collect(),
+                tab,
+                font.textures
+                    .get(6..8)
+                    .ok_or("shared font3 pages missing")?
+                    .iter()
+                    .map(Surface::new)
+                    .collect(),
+                button_tab,
+            )
         };
         let loaded;
         let packed = match shared {
             Some(text) => &text.fonts().language,
-            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+            None => {
+                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
+                    &language.join("tycoon"),
+                )?;
+                &loaded
+            }
         };
         let rows = packed.rows();
-        let localized = if shared.is_some() { rows.iter().map(|s|s.to_vec()).collect() }
-            else { crate::tooltip::localized_strings(installer, &rows)? };
+        let localized = if shared.is_some() {
+            rows.iter().map(|s| s.to_vec()).collect()
+        } else {
+            crate::tooltip::localized_strings(installer, &rows)?
+        };
         let row = |i| {
             localized
                 .get(i)
@@ -589,35 +646,67 @@ impl Assets {
         pressed: Option<Button>,
     ) -> Result<PreparedScene, String> {
         let surfaces = self.surfaces_with_controls(display, normal, hover, pressed)?;
-        renderer.prepare(&surfaces.iter().map(Surface::draw).collect::<Vec<_>>(), VIEW, None)
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            VIEW,
+            None,
+        )
     }
     #[cfg(test)]
     pub(crate) fn refresh_for_test(
-        &self, renderer: &Renderer, prepared: &mut PreparedScene, display: Display<'_>,
+        &self,
+        renderer: &Renderer,
+        prepared: &mut PreparedScene,
+        display: Display<'_>,
     ) -> Result<(), String> {
         let surfaces = self.surfaces_with_controls(display, true, None, None)?;
-        renderer.refresh_prepared(prepared,
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(), VIEW, None)
+        renderer.refresh_prepared(
+            prepared,
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            VIEW,
+            None,
+        )
     }
-    fn split_surfaces(&self,display:Display<'_>,normal:bool,hover:Option<Button>,
-        pressed:Option<Button>)->Result<(Vec<Surface>,Vec<Surface>),String>{
-        let speed=display.speed;
-        let clock=self.surfaces_with_controls(display,false,hover,pressed)?;
-        let mut bottom=Vec::new();
+    fn split_surfaces(
+        &self,
+        display: Display<'_>,
+        normal: bool,
+        hover: Option<Button>,
+        pressed: Option<Button>,
+    ) -> Result<(Vec<Surface>, Vec<Surface>), String> {
+        let speed = display.speed;
+        let clock = self.surfaces_with_controls(display, false, hover, pressed)?;
+        let mut bottom = Vec::new();
         if normal {
-            for (texture,bounds) in bottom_controls_with_state(self.manager_bounds,self.speed_bounds,
-                speed==4,hover,pressed){
-                let mut surface=self.generic.get(texture).ok_or("Bottom texture missing")?.clone();
-                let [l,t,r,b]=bounds;
-                surface.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+            for (texture, bounds) in bottom_controls_with_state(
+                self.manager_bounds,
+                self.speed_bounds,
+                speed == 4,
+                hover,
+                pressed,
+            ) {
+                let mut surface = self
+                    .generic
+                    .get(texture)
+                    .ok_or("Bottom texture missing")?
+                    .clone();
+                let [l, t, r, b] = bounds;
+                surface.quad(
+                    [[l, t], [l, b], [r, b], [r, t]],
+                    [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                    [0xffffffff; 4],
+                );
                 bottom.push(surface);
             }
         }
-        Ok((clock,bottom))
+        Ok((clock, bottom))
     }
     fn surfaces_with_controls(
-        &self, display: Display<'_>, normal: bool,
-        hover: Option<Button>, pressed: Option<Button>,
+        &self,
+        display: Display<'_>,
+        normal: bool,
+        hover: Option<Button>,
+        pressed: Option<Button>,
     ) -> Result<Vec<Surface>, String> {
         let Display {
             year,
@@ -788,11 +877,18 @@ pub struct ClockSample {
 }
 impl ClockSample {
     fn from_status(status: &crate::live_host::Status) -> Self {
-        Self { interface_ticks: status.interface_ticks, ticks: status.ticks,
-            year: status.year, hour: status.hour, fraction: status.hour_fraction,
-            speed: status.speed }
+        Self {
+            interface_ticks: status.interface_ticks,
+            ticks: status.ticks,
+            year: status.year,
+            hour: status.hour,
+            fraction: status.hour_fraction,
+            speed: status.speed,
+        }
     }
-    fn stamp(self) -> (u64, u32) { (self.interface_ticks, self.ticks) }
+    fn stamp(self) -> (u64, u32) {
+        (self.interface_ticks, self.ticks)
+    }
 }
 #[derive(Default)]
 struct ClockState {
@@ -804,8 +900,10 @@ impl ClockState {
         // A lightweight reply wins equal stamps: speed can change between
         // commands while paused at the same logic/interface tick. An older
         // full Status must not restore the clock already sampled afterward.
-        if self.latest.is_none_or(|old| sample.stamp() > old.stamp()
-            || (lightweight || !self.lightweight) && sample.stamp() == old.stamp()) {
+        if self.latest.is_none_or(|old| {
+            sample.stamp() > old.stamp()
+                || (lightweight || !self.lightweight) && sample.stamp() == old.stamp()
+        }) {
             self.latest = Some(sample);
             self.lightweight = lightweight;
         }
@@ -817,11 +915,11 @@ pub struct View {
     key: Option<ViewKey>,
     clock: ClockState,
     pub prepared: Option<PreparedScene>,
-    pub(crate) bottom_prepared:Option<PreparedScene>,
-    graph_bottom_visible:bool,
-    graph_clock_visible:bool,
-    graph_speed_disabled:bool,
-    graph_speed_blink:u8,
+    pub(crate) bottom_prepared: Option<PreparedScene>,
+    graph_bottom_visible: bool,
+    graph_clock_visible: bool,
+    graph_speed_disabled: bool,
+    graph_speed_blink: u8,
     hover: Option<Button>,
     pressed: Option<Button>,
     click_latched: Option<Button>,
@@ -833,32 +931,55 @@ impl View {
         self.key.as_ref().map(|key| key.4.as_str())
     }
     ///Actual generic child phase3: clear hover and one-shot, retain down334.
-    pub(crate) fn leave_child(&mut self,button:Button) {
-        if self.hover==Some(button){self.hover=None;self.key=None;}
-        if self.click_latched==Some(button){self.click_latched=None;self.key=None;}
+    pub(crate) fn leave_child(&mut self, button: Button) {
+        if self.hover == Some(button) {
+            self.hover = None;
+            self.key = None;
+        }
+        if self.click_latched == Some(button) {
+            self.click_latched = None;
+            self.key = None;
+        }
     }
     pub fn cancel_input(&mut self) {
-        if self.hover.take().is_some() || self.pressed.take().is_some()
-            || self.click_latched.take().is_some() {
+        if self.hover.take().is_some()
+            || self.pressed.take().is_some()
+            || self.click_latched.take().is_some()
+        {
             self.key = None;
         }
         self.pressed = None;
         self.click_latched = None;
     }
     ///Clock Options is57e77c; Speed/Manager are E57e764.
-    pub(crate) fn graph_button(&self,assets:&Assets,point:[f32;2],auction:bool)->Option<Button>{
-        assets.button_in_mode(point,auction).filter(|button| match button {
-            Button::Options=>self.graph_clock_visible,
-            Button::Speed=>self.graph_bottom_visible&&!self.graph_speed_disabled,
-            Button::Manager=>self.graph_bottom_visible,
-        })
+    pub(crate) fn graph_button(
+        &self,
+        assets: &Assets,
+        point: [f32; 2],
+        auction: bool,
+    ) -> Option<Button> {
+        assets
+            .button_in_mode(point, auction)
+            .filter(|button| match button {
+                Button::Options => self.graph_clock_visible,
+                Button::Speed => self.graph_bottom_visible && !self.graph_speed_disabled,
+                Button::Manager => self.graph_bottom_visible,
+            })
     }
-    pub(crate) fn graph_cursor(&mut self,hit:Option<Button>,held:bool)->Option<Button>{
-        self.hover_held(hit,held)
+    pub(crate) fn graph_cursor(&mut self, hit: Option<Button>, held: bool) -> Option<Button> {
+        self.hover_held(hit, held)
     }
-    pub(crate) fn graph_gates(&mut self,clock:bool,bottom:bool,speed_disabled:bool,blink:u8){
-        self.graph_clock_visible=clock;self.graph_bottom_visible=bottom;
-        self.graph_speed_disabled=speed_disabled;self.graph_speed_blink=blink;
+    pub(crate) fn graph_gates(
+        &mut self,
+        clock: bool,
+        bottom: bool,
+        speed_disabled: bool,
+        blink: u8,
+    ) {
+        self.graph_clock_visible = clock;
+        self.graph_bottom_visible = bottom;
+        self.graph_speed_disabled = speed_disabled;
+        self.graph_speed_blink = blink;
     }
     pub fn cursor(&mut self, assets: &Assets, point: Option<[f32; 2]>, auction: bool) {
         let hit = point.and_then(|point| assets.button_in_mode(point, auction));
@@ -942,32 +1063,81 @@ impl View {
         );
         self.render_key(assets, renderer, key)
     }
-    pub fn update_clock(&mut self, assets: &Assets, renderer: &Renderer,
-        sample: ClockSample) -> Result<(), String> {
+    pub fn update_clock(
+        &mut self,
+        assets: &Assets,
+        renderer: &Renderer,
+        sample: ClockSample,
+    ) -> Result<(), String> {
         let clock = self.clock.observe(sample, true);
         // Visibility, mode, identity and cash still come from full Status.
         // A hidden Time panel is not made visible by lightweight polling.
-        let Some(current) = &self.key else { return Ok(()); };
+        let Some(current) = &self.key else {
+            return Ok(());
+        };
         if (current.0, current.1, current.2, current.3)
-            == (clock.year, clock.hour, clock.fraction, clock.speed) {
+            == (clock.year, clock.hour, clock.fraction, clock.speed)
+        {
             return Ok(());
         }
         let mut key = current.clone();
-        key.0 = clock.year; key.1 = clock.hour;
-        key.2 = clock.fraction; key.3 = clock.speed;
+        key.0 = clock.year;
+        key.1 = clock.hour;
+        key.2 = clock.fraction;
+        key.3 = clock.speed;
         self.render_key(assets, renderer, key)
     }
-    pub(crate) fn prepare_graph(&mut self,assets:&Assets,renderer:&Renderer)->Result<(),String>{
-        let Some(key)=self.key.as_ref()else{self.prepared=None;self.bottom_prepared=None;return Ok(());};
-        let (clock,bottom)=assets.split_surfaces(Display{year:key.0,hour:key.1,fraction:key.2,
-            speed:key.3,name:&key.4,cash:key.5.map(f32::from_bits),character:key.6,cash_icon_phase:key.7},
-            self.normal,self.hover,self.pressed.filter(|button|self.hover==Some(*button)))?;
-        self.prepared=if self.graph_clock_visible{Some(renderer.prepare(&clock.iter().map(Surface::draw).collect::<Vec<_>>(),VIEW,None)?)}else{None};
-        self.bottom_prepared=if self.graph_bottom_visible{Some(renderer.prepare(&bottom.iter().map(Surface::draw).collect::<Vec<_>>(),VIEW,None)?)}else{None};
+    pub(crate) fn prepare_graph(
+        &mut self,
+        assets: &Assets,
+        renderer: &Renderer,
+    ) -> Result<(), String> {
+        let Some(key) = self.key.as_ref() else {
+            self.prepared = None;
+            self.bottom_prepared = None;
+            return Ok(());
+        };
+        let (clock, bottom) = assets.split_surfaces(
+            Display {
+                year: key.0,
+                hour: key.1,
+                fraction: key.2,
+                speed: key.3,
+                name: &key.4,
+                cash: key.5.map(f32::from_bits),
+                character: key.6,
+                cash_icon_phase: key.7,
+            },
+            self.normal,
+            self.hover,
+            self.pressed.filter(|button| self.hover == Some(*button)),
+        )?;
+        self.prepared = if self.graph_clock_visible {
+            Some(renderer.prepare(
+                &clock.iter().map(Surface::draw).collect::<Vec<_>>(),
+                VIEW,
+                None,
+            )?)
+        } else {
+            None
+        };
+        self.bottom_prepared = if self.graph_bottom_visible {
+            Some(renderer.prepare(
+                &bottom.iter().map(Surface::draw).collect::<Vec<_>>(),
+                VIEW,
+                None,
+            )?)
+        } else {
+            None
+        };
         Ok(())
     }
-    fn render_key(&mut self, assets: &Assets, renderer: &Renderer,
-        key: ViewKey) -> Result<(), String> {
+    fn render_key(
+        &mut self,
+        assets: &Assets,
+        renderer: &Renderer,
+        key: ViewKey,
+    ) -> Result<(), String> {
         if self.key.as_ref() != Some(&key) {
             let surfaces = assets.surfaces_with_controls(
                 Display {
@@ -1069,18 +1239,33 @@ mod tests {
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         // 43ed20 constructs each Time child as a textured button; its final
         // vtable routes input through443360, which pushes the original cue.
-        assert_eq!(image.at(0x43edc7, 6).unwrap(),
-            &[0xc7, 0x06, 0xa4, 0x59, 0x52, 0x00]);
-        assert_eq!(u32::from_le_bytes(image.at(0x5259a4 + 24, 4).unwrap()
-            .try_into().unwrap()), 0x443360);
-        assert_eq!(image.at(0x4433df, 2).unwrap(), &[0x6a, 0x64],
-            "native button press requests 100-point playback");
-        assert_eq!(image.at(0x4433e8, 5).unwrap(),
-            &[0x68, 0x70, 0x58, 0x53, 0x00]);
-        assert_eq!(image.at(0x535870, 27).unwrap(),
-            b"spot_any_ui_lightclick.wav\0");
+        assert_eq!(
+            image.at(0x43edc7, 6).unwrap(),
+            &[0xc7, 0x06, 0xa4, 0x59, 0x52, 0x00]
+        );
+        assert_eq!(
+            u32::from_le_bytes(image.at(0x5259a4 + 24, 4).unwrap().try_into().unwrap()),
+            0x443360
+        );
+        assert_eq!(
+            image.at(0x4433df, 2).unwrap(),
+            &[0x6a, 0x64],
+            "native button press requests 100-point playback"
+        );
+        assert_eq!(
+            image.at(0x4433e8, 5).unwrap(),
+            &[0x68, 0x70, 0x58, 0x53, 0x00]
+        );
+        assert_eq!(
+            image.at(0x535870, 27).unwrap(),
+            b"spot_any_ui_lightclick.wav\0"
+        );
         let mut view = super::View::default();
-        for button in [super::Button::Options, super::Button::Speed, super::Button::Manager] {
+        for button in [
+            super::Button::Options,
+            super::Button::Speed,
+            super::Button::Manager,
+        ] {
             view.hover = Some(button);
             assert_eq!(view.mouse(true), Some(button));
             assert_eq!(view.mouse(true), None, "held button is silent");
@@ -1091,13 +1276,22 @@ mod tests {
         view.mouse(false);
         view.hover_held(Some(super::Button::Options), false);
         assert_eq!(view.mouse(true), Some(super::Button::Options));
-        assert_eq!(view.hover_held(Some(super::Button::Options), true), None,
-            "held movement within the child stays silent");
+        assert_eq!(
+            view.hover_held(Some(super::Button::Options), true),
+            None,
+            "held movement within the child stays silent"
+        );
         assert_eq!(view.hover_held(None, true), None);
-        assert_eq!(view.pressed, Some(super::Button::Options),
-            "native event3 clears its click latch, not its pressed appearance");
-        assert_eq!(view.hover_held(Some(super::Button::Options), true),
-            Some(super::Button::Options), "held re-entry gets native event5");
+        assert_eq!(
+            view.pressed,
+            Some(super::Button::Options),
+            "native event3 clears its click latch, not its pressed appearance"
+        );
+        assert_eq!(
+            view.hover_held(Some(super::Button::Options), true),
+            Some(super::Button::Options),
+            "held re-entry gets native event5"
+        );
         assert_eq!(view.hover_held(Some(super::Button::Options), true), None);
         assert_eq!(view.mouse(false), None);
     }
@@ -1106,8 +1300,14 @@ mod tests {
     fn clock_samples_preserve_1x_4x_pause_and_reject_stale_status() {
         use super::{ClockSample, ClockState};
         let mut state = ClockState::default();
-        let mut clock = ClockSample { interface_ticks: 0, ticks: 0,
-            year: 1930, hour: 9, fraction: 0, speed: 1 };
+        let mut clock = ClockSample {
+            interface_ticks: 0,
+            ticks: 0,
+            year: 1930,
+            hour: 9,
+            fraction: 0,
+            speed: 1,
+        };
         for speed in [1, 4] {
             clock.speed = speed;
             // Feed the native scheduler's authoritative values: one logic
@@ -1118,8 +1318,11 @@ mod tests {
                 clock.ticks += speed;
                 clock.fraction += speed;
                 assert_eq!(state.observe(clock, true), clock);
-                assert_eq!(state.observe(delayed_status, false), clock,
-                    "250ms Status delivery cannot regress a newer40ms sample");
+                assert_eq!(
+                    state.observe(delayed_status, false),
+                    clock,
+                    "250ms Status delivery cannot regress a newer40ms sample"
+                );
             }
         }
         assert_eq!(clock.ticks, 125);
@@ -1127,18 +1330,29 @@ mod tests {
         let paused = clock;
         for _ in 0..50 {
             clock.interface_ticks += 1;
-            assert_eq!(state.observe(clock, true).fraction, paused.fraction,
-                "Options or script pause cannot create predicted clock ticks");
+            assert_eq!(
+                state.observe(clock, true).fraction,
+                paused.fraction,
+                "Options or script pause cannot create predicted clock ticks"
+            );
         }
         let old_speed = clock;
         clock.speed = 1;
         assert_eq!(state.observe(clock, true), clock);
-        assert_eq!(state.observe(old_speed, false), clock,
-            "paused same-stamp Status must not undo a sampled speed change");
+        assert_eq!(
+            state.observe(old_speed, false),
+            clock,
+            "paused same-stamp Status must not undo a sampled speed change"
+        );
         for (fraction, minute) in [(0, 0), (10, 0), (11, 1), (20, 1), (21, 2), (624, 59)] {
             let encoded = super::clock_text(9, fraction, 1930, b"AM", b"PM");
-            assert_eq!(&encoded[..4], format!("9:{minute:02}").bytes()
-                .map(|b| b - 32).collect::<Vec<_>>());
+            assert_eq!(
+                &encoded[..4],
+                format!("9:{minute:02}")
+                    .bytes()
+                    .map(|b| b - 32)
+                    .collect::<Vec<_>>()
+            );
         }
     }
     #[cfg(feature = "capture")]
@@ -1155,10 +1369,16 @@ mod tests {
         let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         let installer = parameters.parent().unwrap().parent().unwrap();
         let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
-            .parent().unwrap().parent().unwrap().join("US/language/usa");
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
         let assets = Assets::load(&index, &archive, installer, &language, &executable).unwrap();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let mut retained = None;
         for case in 0..6 {
@@ -1166,40 +1386,105 @@ mod tests {
             let hover = (case == 1 || case == 2).then_some(Button::Options);
             let pressed = (case == 2).then_some(Button::Options);
             let display = Display {
-                year: 1930 + case, hour: 9 + case, fraction: case * 103, speed: if case == 3 { 4 } else { 1 },
-                name: if case == 3 { "JUSTIN TEST LONG NAME" } else { "JUSTIN" },
-                cash: if case == 4 { None } else { Some(15000. + case as f32 * 12001.) },
+                year: 1930 + case,
+                hour: 9 + case,
+                fraction: case * 103,
+                speed: if case == 3 { 4 } else { 1 },
+                name: if case == 3 {
+                    "JUSTIN TEST LONG NAME"
+                } else {
+                    "JUSTIN"
+                },
+                cash: if case == 4 {
+                    None
+                } else {
+                    Some(15000. + case as f32 * 12001.)
+                },
                 character: if case == 5 { None } else { Some(4) },
                 cash_icon_phase: if case == 3 { 17 } else { 0 },
             };
-            let surfaces = assets.surfaces_with_controls(display, normal, hover, pressed).unwrap();
+            let surfaces = assets
+                .surfaces_with_controls(display, normal, hover, pressed)
+                .unwrap();
             let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
             let fresh = renderer.prepare(&draws, VIEW, None).unwrap();
             if let Some(prepared) = &mut retained {
-                renderer.refresh_prepared(prepared, &draws, VIEW, None).unwrap();
-            } else { retained = Some(renderer.prepare(&draws, VIEW, None).unwrap()); }
+                renderer
+                    .refresh_prepared(prepared, &draws, VIEW, None)
+                    .unwrap();
+            } else {
+                retained = Some(renderer.prepare(&draws, VIEW, None).unwrap());
+            }
             let reference = format!("work/frontend/time-retained-{case}-fresh.png");
             let actual = format!("work/frontend/time-retained-{case}-updated.png");
             crate::capture_test::capture_standalone(&renderer, &fresh, &reference);
             crate::capture_test::capture_standalone(&renderer, retained.as_ref().unwrap(), &actual);
-            assert!(fs::read(reference).unwrap() == fs::read(actual).unwrap(), "Time GPU pixels differ for case{case}");
+            assert!(
+                fs::read(reference).unwrap() == fs::read(actual).unwrap(),
+                "Time GPU pixels differ for case{case}"
+            );
         }
-        let mut view = View { normal: true, ..Default::default() };
-        view.render_key(&assets, &renderer, (1930, 9, 0, 1, "JUSTIN".into(),
-            Some(15000f32.to_bits()), Some(4), 0)).unwrap();
-        view.update_clock(&assets, &renderer, ClockSample { interface_ticks: 800,
-            ticks: 125, year: 1930, hour: 9, fraction: 125, speed: 4 }).unwrap();
+        let mut view = View {
+            normal: true,
+            ..Default::default()
+        };
+        view.render_key(
+            &assets,
+            &renderer,
+            (
+                1930,
+                9,
+                0,
+                1,
+                "JUSTIN".into(),
+                Some(15000f32.to_bits()),
+                Some(4),
+                0,
+            ),
+        )
+        .unwrap();
+        view.update_clock(
+            &assets,
+            &renderer,
+            ClockSample {
+                interface_ticks: 800,
+                ticks: 125,
+                year: 1930,
+                hour: 9,
+                fraction: 125,
+                speed: 4,
+            },
+        )
+        .unwrap();
         assert_eq!(view.key.as_ref().unwrap().4, "JUSTIN");
         assert_eq!(view.key.as_ref().unwrap().5, Some(15000f32.to_bits()));
-        let fresh = assets.prepare_with_controls(&renderer, Display { year: 1930, hour: 9,
-            fraction: 125, speed: 4, name: "JUSTIN", cash: Some(15000.),
-            character: Some(4), cash_icon_phase: 0 }, true, None, None).unwrap();
+        let fresh = assets
+            .prepare_with_controls(
+                &renderer,
+                Display {
+                    year: 1930,
+                    hour: 9,
+                    fraction: 125,
+                    speed: 4,
+                    name: "JUSTIN",
+                    cash: Some(15000.),
+                    character: Some(4),
+                    cash_icon_phase: 0,
+                },
+                true,
+                None,
+                None,
+            )
+            .unwrap();
         let reference = "work/frontend/time-lightweight-fresh.png";
         let actual = "work/frontend/time-lightweight-updated.png";
         crate::capture_test::capture_standalone(&renderer, &fresh, reference);
         crate::capture_test::capture_standalone(&renderer, view.prepared.as_ref().unwrap(), actual);
-        assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap(),
-            "authoritative lightweight clock must retain identity/cash and match full HUD pixels");
+        assert_eq!(
+            fs::read(reference).unwrap(),
+            fs::read(actual).unwrap(),
+            "authoritative lightweight clock must retain identity/cash and match full HUD pixels"
+        );
     }
     #[test]
     #[ignore = "requires original full textured-widget state streams"]

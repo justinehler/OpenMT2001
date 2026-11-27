@@ -9,9 +9,9 @@ const PATHS: [u32; 14] = [
     0x546bc0, 0x546b9c, 0x546b74, 0x546b48, 0x546b18,
 ];
 const RESULT_PATHS: [u32; 21] = [
-    0x546aec, 0x546abc, 0x546a90, 0x546a64, 0x546a38, 0x546a08, 0x5469d8,
-    0x5469a8, 0x546978, 0x546948, 0x54691c, 0x5468ec, 0x5468c0, 0x546894,
-    0x546868, 0x546838, 0x54680c, 0x5467e0, 0x5467b4, 0x546784, 0x5474fc,
+    0x546aec, 0x546abc, 0x546a90, 0x546a64, 0x546a38, 0x546a08, 0x5469d8, 0x5469a8, 0x546978,
+    0x546948, 0x54691c, 0x5468ec, 0x5468c0, 0x546894, 0x546868, 0x546838, 0x54680c, 0x5467e0,
+    0x5467b4, 0x546784, 0x5474fc,
 ];
 
 #[derive(Clone, Debug)]
@@ -79,15 +79,27 @@ pub fn result_layout(characters: (u32, u32)) -> Result<Vec<Pose>, String> {
         return Err("Result actor character outside original roster".into());
     }
     let mut poses = vec![Pose {
-        model: if characters.0 == 10 { 20 } else { characters.0 as usize },
-        position: [f32::from_bits(0xc256f7cf), f32::from_bits(0x407fbe77), f32::from_bits(0x423f9db2)],
-        yaw: 0., frame: 0, flags: 8,
+        model: if characters.0 == 10 {
+            20
+        } else {
+            characters.0 as usize
+        },
+        position: [
+            f32::from_bits(0xc256f7cf),
+            f32::from_bits(0x407fbe77),
+            f32::from_bits(0x423f9db2),
+        ],
+        yaw: 0.,
+        frame: 0,
+        flags: 8,
     }];
     if characters.1 != 10 {
         poses.push(Pose {
             model: 10 + characters.1 as usize,
             position: [f32::from_bits(0xc256020c), 4., f32::from_bits(0x42338a3d)],
-            yaw: 0., frame: 0, flags: 8,
+            yaw: 0.,
+            frame: 0,
+            flags: 8,
         });
     }
     Ok(poses)
@@ -105,9 +117,19 @@ pub struct Assets {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActorCue {
-    Bid { participant: u32, character: u32, suppressed: bool },
-    Withdraw { participant: u32, character: u32, suppressed: bool },
-    Win { character: u32 },
+    Bid {
+        participant: u32,
+        character: u32,
+        suppressed: bool,
+    },
+    Withdraw {
+        participant: u32,
+        character: u32,
+        suppressed: bool,
+    },
+    Win {
+        character: u32,
+    },
     Applause,
 }
 
@@ -136,7 +158,11 @@ pub struct Actors {
 }
 
 impl Actors {
-    pub fn from_original(image: &PeImage<'_>, assets: &Assets, characters: &[u32]) -> Result<Self, String> {
+    pub fn from_original(
+        image: &PeImage<'_>,
+        assets: &Assets,
+        characters: &[u32],
+    ) -> Result<Self, String> {
         let poses = initial_layout(characters)?;
         let mut rows = Vec::with_capacity(characters.len());
         for &character in characters {
@@ -147,14 +173,28 @@ impl Actors {
             // 4659f4/465a37/465b7f pass these exact start/end table words
             // to 4ecde0. The end is exclusive in the 4ece30 comparison.
             let ranges = [
-                FrameRange { start: read(0x53c55c)?, end: read(0x53c584)? },
-                FrameRange { start: read(0x53c5ac)?, end: read(0x53c5d4)? },
-                FrameRange { start: read(0x53c5fc)?, end: read(0x53c624)? },
+                FrameRange {
+                    start: read(0x53c55c)?,
+                    end: read(0x53c584)?,
+                },
+                FrameRange {
+                    start: read(0x53c5ac)?,
+                    end: read(0x53c5d4)?,
+                },
+                FrameRange {
+                    start: read(0x53c5fc)?,
+                    end: read(0x53c624)?,
+                },
             ];
-            let model = assets.models.get(4 + character as usize).ok_or("Auction actor model")?;
+            let model = assets
+                .models
+                .get(4 + character as usize)
+                .ok_or("Auction actor model")?;
             for range in ranges {
                 if range.start >= range.end || usize::from(range.end) > model.frames.len() {
-                    return Err(format!("Auction character {character} has invalid original frame range"));
+                    return Err(format!(
+                        "Auction character {character} has invalid original frame range"
+                    ));
                 }
             }
             rows.push(Actor {
@@ -165,7 +205,11 @@ impl Actors {
                 pending: 1,
             });
         }
-        Ok(Self { poses, rows, bid_voice_suppressed: false })
+        Ok(Self {
+            poses,
+            rows,
+            bid_voice_suppressed: false,
+        })
     }
 
     pub fn set_bid_voice_suppressed(&mut self, suppressed: bool) {
@@ -175,10 +219,15 @@ impl Actors {
     /// 464769 plays the third character voice immediately after the auction
     /// rotation reports no winner; it does not wait for an actor animation.
     pub fn withdraw(&self, participant: u32) -> Result<ActorCue, String> {
-        let row = self.rows.get(participant as usize)
+        let row = self
+            .rows
+            .get(participant as usize)
             .ok_or("Auction withdraw participant outside prepared scene")?;
-        Ok(ActorCue::Withdraw { participant, character: row.character,
-            suppressed: self.bid_voice_suppressed })
+        Ok(ActorCue::Withdraw {
+            participant,
+            character: row.character,
+            suppressed: self.bid_voice_suppressed,
+        })
     }
 
     /// Incoming kind 2/5 only changes the stored state at 7f92bc. It does not
@@ -187,7 +236,9 @@ impl Actors {
         if !(1..=5).contains(&kind) {
             return Err(format!("Unsupported auction actor effect {kind}"));
         }
-        let row = self.rows.get_mut(participant as usize)
+        let row = self
+            .rows
+            .get_mut(participant as usize)
             .ok_or("Auction actor participant outside prepared scene")?;
         row.pending = kind;
         Ok(())
@@ -201,14 +252,19 @@ impl Actors {
                 let (range, next) = match row.pending {
                     1 => (row.ranges[0], 1),
                     2 => {
-                        cues.push(ActorCue::Bid { participant: participant as u32,
-                            character: row.character, suppressed: self.bid_voice_suppressed });
+                        cues.push(ActorCue::Bid {
+                            participant: participant as u32,
+                            character: row.character,
+                            suppressed: self.bid_voice_suppressed,
+                        });
                         (row.ranges[1], 1)
                     }
                     3 => (row.ranges[0], 4),
                     4 => (row.ranges[0], 5),
                     5 => {
-                        cues.push(ActorCue::Win { character: row.character });
+                        cues.push(ActorCue::Win {
+                            character: row.character,
+                        });
                         cues.push(ActorCue::Applause);
                         (row.ranges[2], 1)
                     }
@@ -272,12 +328,25 @@ impl Assets {
     pub fn load(image: &PeImage<'_>, index: &ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
         Self::load_paths(image, index, archive, &PATHS, false)
     }
-    pub fn load_result(image: &PeImage<'_>, index: &ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
+    pub fn load_result(
+        image: &PeImage<'_>,
+        index: &ArchiveIndex,
+        archive: &[u8],
+    ) -> Result<Self, String> {
         Self::load_paths(image, index, archive, &RESULT_PATHS, true)
     }
-    fn load_paths(image: &PeImage<'_>, index: &ArchiveIndex, archive: &[u8], paths: &[u32], result: bool) -> Result<Self, String> {
-        let textures = if result { scene_assets::result_textures(image, index, archive, 1280)? }
-            else { scene_assets::auction_textures(image, index, archive, 1280)? };
+    fn load_paths(
+        image: &PeImage<'_>,
+        index: &ArchiveIndex,
+        archive: &[u8],
+        paths: &[u32],
+        result: bool,
+    ) -> Result<Self, String> {
+        let textures = if result {
+            scene_assets::result_textures(image, index, archive, 1280)?
+        } else {
+            scene_assets::auction_textures(image, index, archive, 1280)?
+        };
         let (pages, regions) = scene_assets::scenery_pages(&textures)?;
         let surfaces = pages
             .into_iter()
@@ -330,7 +399,8 @@ impl Assets {
                             // these non-file material names miss registration.
                             (key.eq_ignore_ascii_case("standing_poses_phong3")
                                 || key.eq_ignore_ascii_case("maya_models_white4by4.tt"))
-                                .then(|| regions.first()).flatten()
+                            .then(|| regions.first())
+                            .flatten()
                         })
                         .ok_or_else(|| format!("Unresolved auction texture {key}"))
                 })
@@ -499,49 +569,109 @@ mod tests {
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let assets = Assets::load(&image, &index, &archive).unwrap();
         let mut actors = Actors::from_original(&image, &assets, &[0]).unwrap();
-        assert_eq!((actors.rows[0].ranges[0].start, actors.rows[0].ranges[0].end), (1, 20));
-        assert_eq!((actors.rows[0].ranges[2].start, actors.rows[0].ranges[2].end), (71, 170));
-        for _ in 0..5 { assert!(actors.advance().is_empty()); }
+        assert_eq!(
+            (actors.rows[0].ranges[0].start, actors.rows[0].ranges[0].end),
+            (1, 20)
+        );
+        assert_eq!(
+            (actors.rows[0].ranges[2].start, actors.rows[0].ranges[2].end),
+            (71, 170)
+        );
+        for _ in 0..5 {
+            assert!(actors.advance().is_empty());
+        }
         let mut state = [0u8; 128];
         state[0x60..0x64].copy_from_slice(&0u32.to_le_bytes());
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut host_auction = Some(crate::live_host::Auction::default());
         let mut omitted = std::collections::BTreeSet::new();
-        auction::apply(Command { action: 4, participant: 3, amount: 0 },
-            &mut state, 1, true, |call, _| {
-                crate::live_host::auction_action(call, &mut host_auction, &mut omitted, 0,
-                    &Some(sender.clone()), &std::cell::Cell::new(false)).map(|_| ())
-            }).unwrap();
+        auction::apply(
+            Command {
+                action: 4,
+                participant: 3,
+                amount: 0,
+            },
+            &mut state,
+            1,
+            true,
+            |call, _| {
+                crate::live_host::auction_action(
+                    call,
+                    &mut host_auction,
+                    &mut omitted,
+                    0,
+                    &Some(sender.clone()),
+                    &std::cell::Cell::new(false),
+                )
+                .map(|_| ())
+            },
+        )
+        .unwrap();
         assert!(!omitted.contains(&0x465980));
         let effects = receiver.try_iter().collect::<Vec<_>>();
-        assert_eq!(effects, vec![crate::auction_bridge::ActorEvent::Effect { participant: 0, kind: 5 }]);
+        assert_eq!(
+            effects,
+            vec![crate::auction_bridge::ActorEvent::Effect {
+                participant: 0,
+                kind: 5
+            }]
+        );
         for effect in effects {
             if let crate::auction_bridge::ActorEvent::Effect { participant, kind } = effect {
                 actors.effect(participant, kind).unwrap();
             }
         }
-        assert_eq!(actors.poses[7].frame, 6, "kind5 cannot jump to the win pose");
-        for _ in 0..13 { assert!(actors.advance().is_empty()); }
+        assert_eq!(
+            actors.poses[7].frame, 6,
+            "kind5 cannot jump to the win pose"
+        );
+        for _ in 0..13 {
+            assert!(actors.advance().is_empty());
+        }
         assert_eq!(actors.poses[7].frame, 19);
-        assert_eq!(actors.advance(), vec![ActorCue::Win { character: 0 }, ActorCue::Applause]);
+        assert_eq!(
+            actors.advance(),
+            vec![ActorCue::Win { character: 0 }, ActorCue::Applause]
+        );
         assert_eq!(actors.poses[7].frame, 71);
-        for _ in 0..98 { assert!(actors.advance().is_empty()); }
+        for _ in 0..98 {
+            assert!(actors.advance().is_empty());
+        }
         assert_eq!(actors.poses[7].frame, 169);
         assert!(actors.advance().is_empty());
         assert_eq!(actors.poses[7].frame, 1);
         actors.effect(0, 2).unwrap();
         actors.set_bid_voice_suppressed(true);
-        for _ in 0..18 { assert!(actors.advance().is_empty()); }
-        assert_eq!(actors.advance(), vec![ActorCue::Bid {
-            participant: 0, character: 0, suppressed: true,
-        }]);
+        for _ in 0..18 {
+            assert!(actors.advance().is_empty());
+        }
+        assert_eq!(
+            actors.advance(),
+            vec![ActorCue::Bid {
+                participant: 0,
+                character: 0,
+                suppressed: true,
+            }]
+        );
         assert_eq!(actors.poses[7].frame, 21);
         let gate = std::cell::Cell::new(true);
-        crate::live_host::auction_action(auction::Call::ShowPanel(0x565b9c),
-            &mut host_auction, &mut omitted, 0, &Some(sender), &gate).unwrap();
-        assert!(!gate.get(), "original 4140b0 reopen must reset the bid-voice/AI gate");
-        assert_eq!(receiver.try_recv().unwrap(),
-            crate::auction_bridge::ActorEvent::BidVoiceGate(false));
+        crate::live_host::auction_action(
+            auction::Call::ShowPanel(0x565b9c),
+            &mut host_auction,
+            &mut omitted,
+            0,
+            &Some(sender),
+            &gate,
+        )
+        .unwrap();
+        assert!(
+            !gate.get(),
+            "original 4140b0 reopen must reset the bid-voice/AI gate"
+        );
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            crate::auction_bridge::ActorEvent::BidVoiceGate(false)
+        );
     }
 
     #[test]
@@ -559,12 +689,24 @@ mod tests {
 
         // 464769 selects the third character pointer, 4647a5 releases the
         // retained handle, then 4647bc tests the panel's +858 sound gate.
-        assert_eq!(image.at(0x46477d, 7).unwrap(), &[0x8b, 0x04, 0x95, 0xa0, 0xc2, 0x53, 0x00]);
-        assert_eq!(image.at(0x4647bc, 10).unwrap(), &[0x8a, 0x82, 0x58, 0x08, 0, 0, 0x84, 0xc0, 0x75, 0x32]);
-        assert_eq!(image.at(0x4647c6, 8).unwrap(), &[0x6a, 100, 0x6a, 1, 0x6a, 0, 0x6a, 0]);
+        assert_eq!(
+            image.at(0x46477d, 7).unwrap(),
+            &[0x8b, 0x04, 0x95, 0xa0, 0xc2, 0x53, 0x00]
+        );
+        assert_eq!(
+            image.at(0x4647bc, 10).unwrap(),
+            &[0x8a, 0x82, 0x58, 0x08, 0, 0, 0x84, 0xc0, 0x75, 0x32]
+        );
+        assert_eq!(
+            image.at(0x4647c6, 8).unwrap(),
+            &[0x6a, 100, 0x6a, 1, 0x6a, 0, 0x6a, 0]
+        );
         let call = image.at(0x4647da, 5).unwrap();
         assert_eq!(call[0], 0xe8);
-        assert_eq!((0x4647dfu32).wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())), 0x4ad760);
+        assert_eq!(
+            (0x4647dfu32).wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())),
+            0x4ad760
+        );
 
         let mut state = [0u8; 128];
         state[8] = 1;
@@ -574,21 +716,53 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut host_auction = Some(crate::live_host::Auction::default());
         let mut omitted = std::collections::BTreeSet::new();
-        auction::apply(Command { action: 2, participant: 0, amount: 0 },
-            &mut state, 2, true, |call, _| {
-                crate::live_host::auction_action(call, &mut host_auction, &mut omitted, 0,
-                    &Some(sender.clone()), &std::cell::Cell::new(false)).map(|_| ())
-            }).unwrap();
-        assert_eq!(receiver.try_iter().collect::<Vec<_>>(),
-            vec![crate::auction_bridge::ActorEvent::WithdrawNotice(0)]);
-        assert_eq!(actors.withdraw(0).unwrap(), ActorCue::Withdraw {
-            participant: 0, character: 0, suppressed: false,
-        });
+        auction::apply(
+            Command {
+                action: 2,
+                participant: 0,
+                amount: 0,
+            },
+            &mut state,
+            2,
+            true,
+            |call, _| {
+                crate::live_host::auction_action(
+                    call,
+                    &mut host_auction,
+                    &mut omitted,
+                    0,
+                    &Some(sender.clone()),
+                    &std::cell::Cell::new(false),
+                )
+                .map(|_| ())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            vec![crate::auction_bridge::ActorEvent::WithdrawNotice(0)]
+        );
+        assert_eq!(
+            actors.withdraw(0).unwrap(),
+            ActorCue::Withdraw {
+                participant: 0,
+                character: 0,
+                suppressed: false,
+            }
+        );
         actors.set_bid_voice_suppressed(true);
-        assert_eq!(actors.withdraw(0).unwrap(), ActorCue::Withdraw {
-            participant: 0, character: 0, suppressed: true,
-        });
-        assert_eq!(actors.poses[7].frame, 1, "withdrawal has no actor-animation delay");
+        assert_eq!(
+            actors.withdraw(0).unwrap(),
+            ActorCue::Withdraw {
+                participant: 0,
+                character: 0,
+                suppressed: true,
+            }
+        );
+        assert_eq!(
+            actors.poses[7].frame, 1,
+            "withdrawal has no actor-animation delay"
+        );
         assert!(!omitted.contains(&0x464769));
     }
     #[test]
@@ -612,8 +786,8 @@ mod tests {
     #[test]
     #[ignore = "requires original result meshes, camera track and GPU"]
     fn capture_original_result_actors_on_flyby() {
-        let output = std::env::var("OPENMT2001_RESULT_ACTOR_CAPTURE")
-            .expect("capture output directory");
+        let output =
+            std::env::var("OPENMT2001_RESULT_ACTOR_CAPTURE").expect("capture output directory");
         let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -622,29 +796,54 @@ mod tests {
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let actors = Assets::load_result(&image, &index, &archive).unwrap();
         let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
-            .parent().unwrap().parent().unwrap().to_path_buf();
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let track = std::fs::read(installer.join("Standard/Cut_scenes/win_cam.tm")).unwrap();
         let flyby = openmt2001::flyby::Flyby::parse(&track).unwrap();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
         std::fs::create_dir_all(&output).unwrap();
         for (winner, loser) in [(0, 1), (9, 8)] {
-            let draws = actors.draws(&result_layout((winner, loser)).unwrap()).unwrap();
+            let draws = actors
+                .draws(&result_layout((winner, loser)).unwrap())
+                .unwrap();
             for fraction in [1, 2, 3] {
                 let frame = (flyby.frame_count() * fraction / 4).clamp(1, flyby.frame_count() - 1);
                 let sample = flyby.sample(frame).unwrap();
                 let [near, far] = openmt2001::camera::city_clip(sample.eye[1]).unwrap();
                 let projection = openmt2001::camera::projection(
-                    sample.vertical_fov, near, far, 1280, 960, [0., 1., 0., 1.]).unwrap();
+                    sample.vertical_fov,
+                    near,
+                    far,
+                    1280,
+                    960,
+                    [0., 1., 0., 1.],
+                )
+                .unwrap();
                 let view = openmt2001::camera::view_with_up(sample.eye, sample.target, sample.up);
                 let matrix = (glam::Mat4::from_cols_array(&projection)
-                    * glam::Mat4::from_cols_array(&view)).to_cols_array();
-                let prepared = renderer.prepare(
-                    &draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(), matrix, None).unwrap();
+                    * glam::Mat4::from_cols_array(&view))
+                .to_cols_array();
+                let prepared = renderer
+                    .prepare(
+                        &draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(),
+                        matrix,
+                        None,
+                    )
+                    .unwrap();
                 let path = std::path::Path::new(&output)
                     .join(format!("result-actors-{winner}-{loser}-{fraction}.png"));
-                crate::capture_test::capture_standalone(&renderer, &prepared, &path.to_string_lossy());
+                crate::capture_test::capture_standalone(
+                    &renderer,
+                    &prepared,
+                    &path.to_string_lossy(),
+                );
             }
         }
     }

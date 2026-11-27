@@ -131,9 +131,13 @@ impl Arena {
 pub enum Route {
     Broadcast,
     ///451732:405260(category,1), before any recipient routing.
-    PropertyRefresh { category: u32 },
+    PropertyRefresh {
+        category: u32,
+    },
     NetworkSend,
-    NetworkRecipient { slot: usize },
+    NetworkRecipient {
+        slot: usize,
+    },
 }
 /// Original48cab0 ->450490 ->451720 admission and player routing.
 pub fn produce(
@@ -179,8 +183,12 @@ impl Players for Vec<Player> {
     }
 }
 impl Players for &mut [Player] {
-    fn get(&self,slot:usize)->Option<&Player>{(**self).get(slot)}
-    fn get_mut(&mut self,slot:usize)->Option<&mut Player>{(**self).get_mut(slot)}
+    fn get(&self, slot: usize) -> Option<&Player> {
+        (**self).get(slot)
+    }
+    fn get_mut(&mut self, slot: usize) -> Option<&mut Player> {
+        (**self).get_mut(slot)
+    }
 }
 impl Players for SplitPlayers<'_> {
     fn get(&self, slot: usize) -> Option<&Player> {
@@ -250,11 +258,18 @@ pub fn produce_in(
         args[1]
     };
     let packet = descriptor(args, context, prior);
-    route(&packet, players, arena, current_player, network, |r,p,_|external(r,p))
+    route(
+        &packet,
+        players,
+        arena,
+        current_player,
+        network,
+        |r, p, _| external(r, p),
+    )
 }
 
 ///450490/451720 routing after a producer has checked recipient admission.
-fn route<P:Players>(
+fn route<P: Players>(
     packet: &Packet,
     players: &mut P,
     arena: &mut Arena,
@@ -270,7 +285,13 @@ fn route<P:Players>(
         return Err("player inbox producer requires a player-message kind".into());
     }
     if word(packet, 4) == 0x26 {
-        external(Route::PropertyRefresh { category: word(packet,0x18) }, packet, players)?;
+        external(
+            Route::PropertyRefresh {
+                category: word(packet, 0x18),
+            },
+            packet,
+            players,
+        )?;
     }
     if packet[0x15] == 0xff {
         external(Route::Broadcast, packet, players)?;
@@ -447,7 +468,9 @@ mod tests {
                             calls.borrow_mut().push(call);
                             Ok(())
                         };
-                        let result = if opcode == 2 && let Some(split) = split {
+                        let result = if opcode == 2
+                            && let Some(split) = split
+                        {
                             let enabled = word(&manager.bytes, 12);
                             let (before, rest) = manager.players.split_at_mut(split);
                             let (current, after) = rest.split_first_mut().unwrap();
@@ -528,43 +551,59 @@ mod tests {
 }
 
 /// Original48cb70 routing with either the full roster or a borrowed split.
-pub fn reply_in(source:&Packet,kind:u32,args:[u32;4],players:&mut impl Players,
-    arena:&mut Arena,routing:Routing,mut external:impl FnMut(Route,&Packet)->Result<(),String>)->Result<bool,String>{
-    reply_with_players(source,kind,args,players,arena,routing,|r,p,_|external(r,p))
+pub fn reply_in(
+    source: &Packet,
+    kind: u32,
+    args: [u32; 4],
+    players: &mut impl Players,
+    arena: &mut Arena,
+    routing: Routing,
+    mut external: impl FnMut(Route, &Packet) -> Result<(), String>,
+) -> Result<bool, String> {
+    reply_with_players(source, kind, args, players, arena, routing, |r, p, _| {
+        external(r, p)
+    })
 }
 /// Keep callbacks synchronous while a split roster owns the current controller.
-pub fn reply_with_players<P:Players>(source:&Packet,kind:u32,args:[u32;4],players:&mut P,
-    arena:&mut Arena,routing:Routing,external:impl FnMut(Route,&Packet,&mut P)->Result<(),String>)->Result<bool,String>{
-        let mut packet = routing.prior;
-        put(&mut packet, 0, 0x525dc0);
-        packet[4..0x11].copy_from_slice(&source[4..0x11]);
-        packet[0x18..0x30].copy_from_slice(&source[0x18..0x30]);
-        packet[0x14] = source[0x15];
-        packet[0x15] = source[0x14];
-        if packet[0x15] != 0xff {
-            let player = players
-                .get(packet[0x15] as i8 as usize)
-                .ok_or("reply recipient leaves roster")?;
-            if player.bytes[0x10] == 0 {
-                return Ok(false);
-            }
+pub fn reply_with_players<P: Players>(
+    source: &Packet,
+    kind: u32,
+    args: [u32; 4],
+    players: &mut P,
+    arena: &mut Arena,
+    routing: Routing,
+    external: impl FnMut(Route, &Packet, &mut P) -> Result<(), String>,
+) -> Result<bool, String> {
+    let mut packet = routing.prior;
+    put(&mut packet, 0, 0x525dc0);
+    packet[4..0x11].copy_from_slice(&source[4..0x11]);
+    packet[0x18..0x30].copy_from_slice(&source[0x18..0x30]);
+    packet[0x14] = source[0x15];
+    packet[0x15] = source[0x14];
+    if packet[0x15] != 0xff {
+        let player = players
+            .get(packet[0x15] as i8 as usize)
+            .ok_or("reply recipient leaves roster")?;
+        if player.bytes[0x10] == 0 {
+            return Ok(false);
         }
-        put(&mut packet, 4, kind);
-        for (index, value) in args.into_iter().enumerate() {
-            if value != 0x5f5e0ff {
-                put(&mut packet, 0x18 + index * 4, value);
-            }
+    }
+    put(&mut packet, 4, kind);
+    for (index, value) in args.into_iter().enumerate() {
+        if value != 0x5f5e0ff {
+            put(&mut packet, 0x18 + index * 4, value);
         }
-        //450490 overwrites the descriptor size through its virtual size query.
-        put(&mut packet, 8, 0x30);
-        route(
-            &packet,
-            players,
-            arena,
-            routing.current_player,
-            routing.network,
-            external,
-        )
+    }
+    //450490 overwrites the descriptor size through its virtual size query.
+    put(&mut packet, 8, 0x30);
+    route(
+        &packet,
+        players,
+        arena,
+        routing.current_player,
+        routing.network,
+        external,
+    )
 }
 
 /// Host allocation and explicit original stack-prior policy for one live session.
@@ -584,9 +623,19 @@ impl Context {
         manager: &mut crate::player_manager::Manager,
         external: impl FnMut(Route, &Packet) -> Result<(), String>,
     ) -> Result<bool, String> {
-        reply_in(source,kind,args,&mut manager.players,&mut self.arena,Routing {
-            current_player:self.current_player,network:self.network,prior:self.prior,
-        },external)
+        reply_in(
+            source,
+            kind,
+            args,
+            &mut manager.players,
+            &mut self.arena,
+            Routing {
+                current_player: self.current_player,
+                network: self.network,
+                prior: self.prior,
+            },
+            external,
+        )
     }
     pub fn produce(
         &mut self,

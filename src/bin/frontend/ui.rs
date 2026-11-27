@@ -107,11 +107,7 @@ pub fn decimal2(value: f32) -> Result<String, String> {
 /// Original 43a950: format an absolute f32 with the linked CRT, then place
 /// the localized currency symbol before or after it. The negative sign is
 /// always first, including when the symbol precedes the digits.
-pub fn formatted_float_money(
-    value: f32,
-    symbol: &[u8],
-    suffix: bool,
-) -> Result<Vec<u8>, String> {
+pub fn formatted_float_money(value: f32, symbol: &[u8], suffix: bool) -> Result<Vec<u8>, String> {
     let digits = decimal2(value.abs())?;
     let mut text = Vec::with_capacity(digits.len() + symbol.len() + 1);
     if value < 0. {
@@ -178,8 +174,11 @@ fn matches_native_float_money() {
             .map(|byte| byte - 32)
             .collect::<Vec<_>>();
         at += rendered_len;
-        assert_eq!(formatted_float_money(value, &symbol, suffix).unwrap(), expected,
-            "original 43a950 case {case}");
+        assert_eq!(
+            formatted_float_money(value, &symbol, suffix).unwrap(),
+            expected,
+            "original 43a950 case {case}"
+        );
     }
     assert_eq!(at, data.len());
 }
@@ -431,13 +430,23 @@ pub fn button(
     pressed: bool,
     disabled: bool,
 ) -> Result<(), String> {
-    button_state(surface, bounds, rgb, openmt2001::ui_button::State {
-        flag_330: pressed, flag_334: pressed,
-        flag_335: hover && !disabled, flag_333: disabled,
-    })
+    button_state(
+        surface,
+        bounds,
+        rgb,
+        openmt2001::ui_button::State {
+            flag_330: pressed,
+            flag_334: pressed,
+            flag_335: hover && !disabled,
+            flag_333: disabled,
+        },
+    )
 }
 /// Original colored backgrounds also distinguish held entry from press origin.
-pub fn button_state(surface: &mut Surface, bounds: [f32; 4], rgb: [u8; 3],
+pub fn button_state(
+    surface: &mut Surface,
+    bounds: [f32; 4],
+    rgb: [u8; 3],
     state: openmt2001::ui_button::State,
 ) -> Result<(), String> {
     use openmt2001::ui_button::{self, Primitive};
@@ -500,7 +509,16 @@ pub fn text_widget_style0(
     }
     let font = Font::parse(tab)?;
     let origin = [bounds[0].trunc() + 2., bounds[1].trunc()];
-    for quad in font.layout(encoded, Layout { origin, depth: 0.5, scale: 1., gap: -1, baseline: 0 })? {
+    for quad in font.layout(
+        encoded,
+        Layout {
+            origin,
+            depth: 0.5,
+            scale: 1.,
+            gap: -1,
+            baseline: 0,
+        },
+    )? {
         pages[quad.page].quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [color; 4]);
     }
     Ok(())
@@ -538,7 +556,16 @@ pub fn text_widget_style3(
         let end = range[1].saturating_sub(1).min(wrapped.len());
         let row = &wrapped[range[0].min(end)..end];
         let origin = [bounds[0].trunc() + 2., top + line as f32 * height as f32];
-        for quad in font.layout(row, Layout { origin, depth: 0.5, scale: 1., gap: -1, baseline: 0 })? {
+        for quad in font.layout(
+            row,
+            Layout {
+                origin,
+                depth: 0.5,
+                scale: 1.,
+                gap: -1,
+                baseline: 0,
+            },
+        )? {
             pages[quad.page].quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [color; 4]);
         }
     }
@@ -562,12 +589,15 @@ pub fn text_widget_style4(
             .try_into()
             .unwrap(),
     );
-    let span = [f64::from(bounds[2]) - f64::from(bounds[0]),
-        f64::from(bounds[3]) - f64::from(bounds[1])];
+    let span = [
+        f64::from(bounds[2]) - f64::from(bounds[0]),
+        f64::from(bounds[3]) - f64::from(bounds[1]),
+    ];
     if span.into_iter().any(|v| !v.is_finite() || v <= 0.) {
         return Err("invalid text widget bounds".into());
     }
-    let (offsets, wrapped) = crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
+    let (offsets, wrapped) =
+        crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
     let rows = offsets.windows(2).collect::<Vec<_>>();
     let top = bounds[1].trunc()
         + ((span[1] - rows.len().max(1) as f64 * f64::from(height)) * 0.5).trunc() as f32;
@@ -580,7 +610,16 @@ pub fn text_widget_style4(
             bounds[0].trunc() + ((span[0] - width) * 0.5 + 0.5).trunc() as f32,
             top + line as f32 * height as f32,
         ];
-        for quad in font.layout(row, Layout { origin, depth: 0.5, scale: 1., gap: -1, baseline: 0 })? {
+        for quad in font.layout(
+            row,
+            Layout {
+                origin,
+                depth: 0.5,
+                scale: 1.,
+                gap: -1,
+                baseline: 0,
+            },
+        )? {
             pages[quad.page].quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [color; 4]);
         }
     }
@@ -614,7 +653,16 @@ pub fn text_widget_style5(
         bounds[2].trunc() - width,
         bounds[1].trunc() + ((span - f64::from(height)) * 0.5).trunc() as f32,
     ];
-    for quad in font.layout(encoded, Layout { origin, depth: 0.5, scale: 1., gap: -1, baseline: 0 })? {
+    for quad in font.layout(
+        encoded,
+        Layout {
+            origin,
+            depth: 0.5,
+            scale: 1.,
+            gap: -1,
+            baseline: 0,
+        },
+    )? {
         pages[quad.page].quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [color; 4]);
     }
     Ok(())
@@ -631,34 +679,56 @@ pub fn text_widget_style9(
 ) -> Result<(), String> {
     use openmt2001::font::{Font, Layout};
     let font = Font::parse(tab)?;
-    let span = [f64::from(bounds[2]) - f64::from(bounds[0]),
-        f64::from(bounds[3]) - f64::from(bounds[1])];
+    let span = [
+        f64::from(bounds[2]) - f64::from(bounds[0]),
+        f64::from(bounds[3]) - f64::from(bounds[1]),
+    ];
     if span.into_iter().any(|v| !v.is_finite() || v <= 0.) {
         return Err("invalid text widget bounds".into());
     }
-    let (offsets, wrapped) = crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
-    let rows = offsets.windows(2).map(|range| {
-        let end = range[1].saturating_sub(1).min(wrapped.len());
-        &wrapped[range[0].min(end)..end]
-    }).collect::<Vec<_>>();
-    let heights = rows.iter().map(|row| {
-        row.iter().map(|&glyph| {
-            let record = 4 + usize::from(glyph) * 44;
-            let height = i32::from_le_bytes(tab[record + 36..record + 40].try_into().unwrap());
-            let offset = i32::from_le_bytes(tab[record + 40..record + 44].try_into().unwrap());
-            height + offset
-        }).max().unwrap_or(0)
-    }).collect::<Vec<_>>();
+    let (offsets, wrapped) =
+        crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
+    let rows = offsets
+        .windows(2)
+        .map(|range| {
+            let end = range[1].saturating_sub(1).min(wrapped.len());
+            &wrapped[range[0].min(end)..end]
+        })
+        .collect::<Vec<_>>();
+    let heights = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|&glyph| {
+                    let record = 4 + usize::from(glyph) * 44;
+                    let height =
+                        i32::from_le_bytes(tab[record + 36..record + 40].try_into().unwrap());
+                    let offset =
+                        i32::from_le_bytes(tab[record + 40..record + 44].try_into().unwrap());
+                    height + offset
+                })
+                .max()
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
     let total_height: i32 = heights.iter().sum();
     let w_at = 4 + usize::from(b'W' - 32) * 44 + 36;
     let line_advance = i32::from_le_bytes(tab[w_at..w_at + 4].try_into().unwrap());
-    let mut y = bounds[1].trunc()
-        + ((span[1] - f64::from(total_height)) * 0.5).trunc() as f32;
+    let mut y = bounds[1].trunc() + ((span[1] - f64::from(total_height)) * 0.5).trunc() as f32;
     for row in rows {
         let width = f64::from(text_width(tab, row, 1.)?);
         let x = bounds[0].trunc() + ((span[0] - width) * 0.5 + 0.5).trunc() as f32;
-        for quad in font.layout(row, Layout { origin:[x,y],depth:0.5,scale:1.,gap:-1,baseline:0 })? {
-            pages[quad.page].quad(quad.positions.map(|p| [p[0],p[1]]),quad.uv,[color;4]);
+        for quad in font.layout(
+            row,
+            Layout {
+                origin: [x, y],
+                depth: 0.5,
+                scale: 1.,
+                gap: -1,
+                baseline: 0,
+            },
+        )? {
+            pages[quad.page].quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [color; 4]);
         }
         y += line_advance as f32;
     }
@@ -916,14 +986,21 @@ pub struct Slider {
     pub pressed: Option<[f32; 2]>,
 }
 pub fn slider_background([l, t, r, b]: [f32; 4], vertical: bool, enabled: bool) -> ([f32; 4], u32) {
-    let bounds = if vertical { [l + 2., t - 7., r - 1., b + 7.] }
-        else { [l - 5., t + 1., r + 6., b - 1.] };
+    let bounds = if vertical {
+        [l + 2., t - 7., r - 1., b + 7.]
+    } else {
+        [l - 5., t + 1., r + 6., b - 1.]
+    };
     (bounds, if enabled { 0xcc183088 } else { 0xcc444444 })
 }
 impl Slider {
     /// Original432990 paints the track before432a80 paints its handle.
     fn background_with_extent(&self, extent: i32) -> ([f32; 4], u32) {
-        slider_background(slider_track(self.bounds, self.vertical), self.vertical, extent > 0)
+        slider_background(
+            slider_track(self.bounds, self.vertical),
+            self.vertical,
+            extent > 0,
+        )
     }
     pub fn paint_handle(&self, surface: &mut Surface) {
         self.paint_handle_with_extent(surface, (self.range[1] - self.range[0]) as i32);
@@ -950,13 +1027,22 @@ impl Slider {
     }
 
     pub fn paint(&self, surface: &mut Surface, controls: &mut Vec<Surface>, textures: &[Surface]) {
-        self.paint_with_extent(surface, controls, textures,
-            (self.range[1] - self.range[0]) as i32);
+        self.paint_with_extent(
+            surface,
+            controls,
+            textures,
+            (self.range[1] - self.range[0]) as i32,
+        );
     }
     /// Native 431ba0→4326d0 stores a paint extent on the slider separately
     /// from the list's scrollable offset. Keep input clamping in the caller.
-    pub fn paint_with_extent(&self, surface: &mut Surface, controls: &mut Vec<Surface>,
-        textures: &[Surface], extent: i32) {
+    pub fn paint_with_extent(
+        &self,
+        surface: &mut Surface,
+        controls: &mut Vec<Surface>,
+        textures: &[Surface],
+        extent: i32,
+    ) {
         let (bounds, color) = self.background_with_extent(extent);
         surface.rect(bounds, [color; 4]);
         self.paint_handle_with_extent(surface, extent);
@@ -986,138 +1072,178 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Graphics Options style9 fixture"]
     fn graphics_style9_matches_native_glyph_streams() {
-        assert_style9_fixture("work/frontend/native-graphics-style9.bin",
-            &[1587,1656,1588,1591,1594,1596,1129,1130]);
+        assert_style9_fixture(
+            "work/frontend/native-graphics-style9.bin",
+            &[1587, 1656, 1588, 1591, 1594, 1596, 1129, 1130],
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 Main Options style9 fixture"]
     fn main_options_style9_matches_native_glyph_streams() {
-        assert_style9_fixture("work/frontend/native-options-main-style9.bin",
-            &[1679,1607,1608,1609,1610,1770,1435,1139]);
+        assert_style9_fixture(
+            "work/frontend/native-options-main-style9.bin",
+            &[1679, 1607, 1608, 1609, 1610, 1770, 1435, 1139],
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 in-game Options style9 fixture"]
     fn game_options_style9_matches_native_glyph_streams() {
-        assert_style9_fixture("work/frontend/native-game-options-style9.bin",
-            &[1678,1680,1679,1682]);
+        assert_style9_fixture(
+            "work/frontend/native-game-options-style9.bin",
+            &[1678, 1680, 1679, 1682],
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 Tutorial caption fixture"]
     fn tutorial_captions_match_native_glyph_streams() {
-        assert_style9_fixture("work/frontend/native-tutorial-style9.bin", &[1667,1668]);
+        assert_style9_fixture("work/frontend/native-tutorial-style9.bin", &[1667, 1668]);
     }
     fn assert_style9_fixture(path: &str, ids: &[u32]) {
         let data = std::fs::read(path).unwrap();
         assert_eq!(&data[..8], b"MTG9TX01");
-        let mut at=8usize;
-        let word=|at:&mut usize| {
-            let value=u32::from_le_bytes(data[*at..*at+4].try_into().unwrap());
-            *at+=4;
+        let mut at = 8usize;
+        let word = |at: &mut usize| {
+            let value = u32::from_le_bytes(data[*at..*at + 4].try_into().unwrap());
+            *at += 4;
             value
         };
-        assert_eq!(word(&mut at),0x037f);
-        let mut fonts=std::collections::HashMap::new();
+        assert_eq!(word(&mut at), 0x037f);
+        let mut fonts = std::collections::HashMap::new();
         for _ in 0..word(&mut at) {
-            let id=word(&mut at);
-            let len=word(&mut at) as usize;
-            fonts.insert(id,&data[at..at+len]);
-            at+=len;
+            let id = word(&mut at);
+            let len = word(&mut at) as usize;
+            fonts.insert(id, &data[at..at + len]);
+            at += len;
         }
-        assert_eq!(word(&mut at) as usize,ids.len());
+        assert_eq!(word(&mut at) as usize, ids.len());
         for &expected_id in ids {
-            let id=word(&mut at);
-            assert_eq!(id,expected_id);
-            let font_id=word(&mut at);
-            let bounds=std::array::from_fn(|_| f32::from_bits(word(&mut at)));
-            let len=word(&mut at) as usize;
-            let encoded=&data[at..at+len];
-            at+=len;
-            let mut pages=[super::Surface::solid(),super::Surface::solid()];
-            super::text_widget_style9(&mut pages,fonts[&font_id],encoded,bounds,0xffffffff).unwrap();
-            for (page,actual) in pages.iter().enumerate() {
-                let count=word(&mut at) as usize;
-                assert_eq!(actual.vertices.len(),count*6,"caption {id} page {page} count");
+            let id = word(&mut at);
+            assert_eq!(id, expected_id);
+            let font_id = word(&mut at);
+            let bounds = std::array::from_fn(|_| f32::from_bits(word(&mut at)));
+            let len = word(&mut at) as usize;
+            let encoded = &data[at..at + len];
+            at += len;
+            let mut pages = [super::Surface::solid(), super::Surface::solid()];
+            super::text_widget_style9(&mut pages, fonts[&font_id], encoded, bounds, 0xffffffff)
+                .unwrap();
+            for (page, actual) in pages.iter().enumerate() {
+                let count = word(&mut at) as usize;
+                assert_eq!(
+                    actual.vertices.len(),
+                    count * 6,
+                    "caption {id} page {page} count"
+                );
                 for glyph in 0..count {
-                    for (vertex,index) in [0,1,2,5].into_iter().enumerate() {
-                        let got=actual.vertices[glyph*6+index];
-                        for (axis,value) in got[..3].iter().enumerate() {
-                            assert_eq!(value.to_bits(),word(&mut at),
-                                "caption {id} page {page} glyph {glyph} vertex {vertex}:{axis}");
+                    for (vertex, index) in [0, 1, 2, 5].into_iter().enumerate() {
+                        let got = actual.vertices[glyph * 6 + index];
+                        for (axis, value) in got[..3].iter().enumerate() {
+                            assert_eq!(
+                                value.to_bits(),
+                                word(&mut at),
+                                "caption {id} page {page} glyph {glyph} vertex {vertex}:{axis}"
+                            );
                         }
                     }
                 }
                 for glyph in 0..count {
-                    for (vertex,index) in [0,1,2,5].into_iter().enumerate() {
-                        let got=actual.vertices[glyph*6+index];
+                    for (vertex, index) in [0, 1, 2, 5].into_iter().enumerate() {
+                        let got = actual.vertices[glyph * 6 + index];
                         for axis in 0..2 {
-                            assert_eq!(got[6+axis].to_bits(),word(&mut at),
-                                "caption {id} page {page} glyph {glyph} UV {vertex}:{axis}");
+                            assert_eq!(
+                                got[6 + axis].to_bits(),
+                                word(&mut at),
+                                "caption {id} page {page} glyph {glyph} UV {vertex}:{axis}"
+                            );
                         }
                     }
                 }
             }
         }
-        assert_eq!(at,data.len());
+        assert_eq!(at, data.len());
     }
     #[test]
     #[ignore = "requires original v1.4 Gameplay Options caption fixture"]
     fn gameplay_captions_match_native_glyph_streams() {
         let data = std::fs::read("work/frontend/native-gameplay-caption.bin").unwrap();
         assert_eq!(&data[..8], b"MTGPTX01");
-        let mut at=8usize;
-        let word=|at:&mut usize| {
-            let value=u32::from_le_bytes(data[*at..*at+4].try_into().unwrap());
-            *at+=4;
+        let mut at = 8usize;
+        let word = |at: &mut usize| {
+            let value = u32::from_le_bytes(data[*at..*at + 4].try_into().unwrap());
+            *at += 4;
             value
         };
-        assert_eq!(word(&mut at),0x037f);
-        let mut fonts=std::collections::HashMap::new();
+        assert_eq!(word(&mut at), 0x037f);
+        let mut fonts = std::collections::HashMap::new();
         for _ in 0..word(&mut at) {
-            let id=word(&mut at);
-            let len=word(&mut at) as usize;
-            fonts.insert(id,&data[at..at+len]);
-            at+=len;
+            let id = word(&mut at);
+            let len = word(&mut at) as usize;
+            fonts.insert(id, &data[at..at + len]);
+            at += len;
         }
-        assert_eq!(word(&mut at),4);
-        for expected_id in [1571,1573,1575,1584] {
-            let id=word(&mut at);
-            assert_eq!(id,expected_id);
-            let font_id=word(&mut at);
-            let style=word(&mut at);
-            let bounds=std::array::from_fn(|_| f32::from_bits(word(&mut at)));
-            let len=word(&mut at) as usize;
-            let encoded=&data[at..at+len];
-            at+=len;
-            let mut pages=[super::Surface::solid(),super::Surface::solid()];
+        assert_eq!(word(&mut at), 4);
+        for expected_id in [1571, 1573, 1575, 1584] {
+            let id = word(&mut at);
+            assert_eq!(id, expected_id);
+            let font_id = word(&mut at);
+            let style = word(&mut at);
+            let bounds = std::array::from_fn(|_| f32::from_bits(word(&mut at)));
+            let len = word(&mut at) as usize;
+            let encoded = &data[at..at + len];
+            at += len;
+            let mut pages = [super::Surface::solid(), super::Surface::solid()];
             match style {
-                3=>super::text_widget_style3(&mut pages,fonts[&font_id],encoded,bounds,0xffffffff),
-                9=>super::text_widget_style9(&mut pages,fonts[&font_id],encoded,bounds,0xffffffff),
-                _=>panic!("unexpected Gameplay caption style {style}"),
-            }.unwrap();
-            for (page,actual) in pages.iter().enumerate() {
-                let count=word(&mut at) as usize;
-                assert_eq!(actual.vertices.len(),count*6,"caption {id} page {page} count");
+                3 => super::text_widget_style3(
+                    &mut pages,
+                    fonts[&font_id],
+                    encoded,
+                    bounds,
+                    0xffffffff,
+                ),
+                9 => super::text_widget_style9(
+                    &mut pages,
+                    fonts[&font_id],
+                    encoded,
+                    bounds,
+                    0xffffffff,
+                ),
+                _ => panic!("unexpected Gameplay caption style {style}"),
+            }
+            .unwrap();
+            for (page, actual) in pages.iter().enumerate() {
+                let count = word(&mut at) as usize;
+                assert_eq!(
+                    actual.vertices.len(),
+                    count * 6,
+                    "caption {id} page {page} count"
+                );
                 for glyph in 0..count {
-                    for (vertex,index) in [0,1,2,5].into_iter().enumerate() {
-                        let got=actual.vertices[glyph*6+index];
-                        for (axis,value) in got[..3].iter().enumerate() {
-                            assert_eq!(value.to_bits(),word(&mut at),
-                                "caption {id} page {page} glyph {glyph} vertex {vertex}:{axis}");
+                    for (vertex, index) in [0, 1, 2, 5].into_iter().enumerate() {
+                        let got = actual.vertices[glyph * 6 + index];
+                        for (axis, value) in got[..3].iter().enumerate() {
+                            assert_eq!(
+                                value.to_bits(),
+                                word(&mut at),
+                                "caption {id} page {page} glyph {glyph} vertex {vertex}:{axis}"
+                            );
                         }
                     }
                 }
                 for glyph in 0..count {
-                    for (vertex,index) in [0,1,2,5].into_iter().enumerate() {
-                        let got=actual.vertices[glyph*6+index];
+                    for (vertex, index) in [0, 1, 2, 5].into_iter().enumerate() {
+                        let got = actual.vertices[glyph * 6 + index];
                         for axis in 0..2 {
-                            assert_eq!(got[6+axis].to_bits(),word(&mut at),
-                                "caption {id} page {page} glyph {glyph} UV {vertex}:{axis}");
+                            assert_eq!(
+                                got[6 + axis].to_bits(),
+                                word(&mut at),
+                                "caption {id} page {page} glyph {glyph} UV {vertex}:{axis}"
+                            );
                         }
                     }
                 }
             }
         }
-        assert_eq!(at,data.len());
+        assert_eq!(at, data.len());
     }
     #[test]
     #[ignore = "requires original MPP layout fixture"]

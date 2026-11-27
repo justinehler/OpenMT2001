@@ -173,7 +173,12 @@ impl World<'_> {
     }
     fn rent_age(&self, building: usize, image: &PeImage<'_>) -> Result<i32, String> {
         crate::business_report::rent_age(
-            building, self.buildings, self.businesses, self.categories, self.tick, image,
+            building,
+            self.buildings,
+            self.businesses,
+            self.categories,
+            self.tick,
+            image,
         )
     }
 }
@@ -189,7 +194,9 @@ fn compare(a: [u32; 2], b: [u32; 2]) -> i32 {
         0
     }
 }
-fn sort(rows: &mut [[u32;2]]) {crate::native_sort::sort(rows,&compare);}
+fn sort(rows: &mut [[u32; 2]]) {
+    crate::native_sort::sort(rows, &compare);
+}
 
 fn finish(
     rows: &[[u32; 2]],
@@ -439,7 +446,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECSE01");
         assert_eq!(r.word(), 2);
-        assert_eq!(r.word(),0x037f);
+        assert_eq!(r.word(), 0x037f);
         for case in 0..r.word() {
             let [kind, hour, tick, unselected, enabled, target, score, count] =
                 std::array::from_fn::<_, 8, _>(|_| r.word());

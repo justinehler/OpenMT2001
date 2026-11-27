@@ -117,26 +117,93 @@ mod tests {
         business: u32,
         excluded: Option<i32>,
     ) -> i32 {
-        let info = session.world.catalog.info.row(business as usize).unwrap().to_vec();
+        let info = session
+            .world
+            .catalog
+            .info
+            .row(business as usize)
+            .unwrap()
+            .to_vec();
         let word = |at| i32::from_le_bytes(info[at..at + 4].try_into().unwrap());
         let kind = word(0xc) as u32;
         let height = word(if business == 42 { 0x44 } else { 0x48 });
-        let dimensions = if business == 42 { (1..=6).rev().collect::<Vec<_>>() } else { (1..=6).collect() };
+        let dimensions = if business == 42 {
+            (1..=6).rev().collect::<Vec<_>>()
+        } else {
+            (1..=6).collect()
+        };
         for category in 0..52 {
-            if excluded == Some(category) || !matches!(crate::build_panel::Context::from_session(session, category as usize).unwrap().entry(), crate::build_panel::Entry::Open) { continue; }
-            for &width in &dimensions { for &depth in &dimensions {
-                if width * depth < word(0x38) || width * depth > word(0x3c) || width.max(depth) > word(0x40) { continue; }
-                for x in 0..=7-width { for y in 0..=7-depth {
-                    let request = crate::build_panel::Request { category, origin: [x,y], size: [width,depth], height, packed_model: 0, kind, quality: 0, displayed_quote: 0., business };
-                    let inspected = session.inspect_build(&request, assets).unwrap();
-                    if !inspected.allowed() { continue; }
-                    let form = crate::build_panel::Form { category, rectangle: [x,y,x+width-1,y+depth-1], height, quality: 0, choices: [0;3], variants: vec![0], kind, business, displayed_quote: inspected.total };
-                    let request = form.request(inspected.category_locked, inspected.affordable, inspected.preview.is_some()).unwrap().unwrap();
-                    assert!(session.submit_build(&request, assets, |_| Err("build applied before native deadline".into())).unwrap().submitted);
-                    println!("legal human business{business} build: category{category} size{width}x{depth} height{height} quote{}", inspected.total);
-                    return category;
-                }}
-            }}
+            if excluded == Some(category)
+                || !matches!(
+                    crate::build_panel::Context::from_session(session, category as usize)
+                        .unwrap()
+                        .entry(),
+                    crate::build_panel::Entry::Open
+                )
+            {
+                continue;
+            }
+            for &width in &dimensions {
+                for &depth in &dimensions {
+                    if width * depth < word(0x38)
+                        || width * depth > word(0x3c)
+                        || width.max(depth) > word(0x40)
+                    {
+                        continue;
+                    }
+                    for x in 0..=7 - width {
+                        for y in 0..=7 - depth {
+                            let request = crate::build_panel::Request {
+                                category,
+                                origin: [x, y],
+                                size: [width, depth],
+                                height,
+                                packed_model: 0,
+                                kind,
+                                quality: 0,
+                                displayed_quote: 0.,
+                                business,
+                            };
+                            let inspected = session.inspect_build(&request, assets).unwrap();
+                            if !inspected.allowed() {
+                                continue;
+                            }
+                            let form = crate::build_panel::Form {
+                                category,
+                                rectangle: [x, y, x + width - 1, y + depth - 1],
+                                height,
+                                quality: 0,
+                                choices: [0; 3],
+                                variants: vec![0],
+                                kind,
+                                business,
+                                displayed_quote: inspected.total,
+                            };
+                            let request = form
+                                .request(
+                                    inspected.category_locked,
+                                    inspected.affordable,
+                                    inspected.preview.is_some(),
+                                )
+                                .unwrap()
+                                .unwrap();
+                            assert!(
+                                session
+                                    .submit_build(&request, assets, |_| Err(
+                                        "build applied before native deadline".into()
+                                    ))
+                                    .unwrap()
+                                    .submitted
+                            );
+                            println!(
+                                "legal human business{business} build: category{category} size{width}x{depth} height{height} quote{}",
+                                inspected.total
+                            );
+                            return category;
+                        }
+                    }
+                }
+            }
         }
         panic!("no legal business{business} build available");
     }

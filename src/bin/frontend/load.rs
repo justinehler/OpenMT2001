@@ -79,8 +79,12 @@ impl Load {
         let mut slider_textures = vec![Surface::solid(); 109];
         for first in [105, 93] {
             for state in 0..4 {
-                slider_textures[first + state] = Surface::new(generic.textures
-                    .get(first + state).ok_or("original Load scrollbar arrow missing")?);
+                slider_textures[first + state] = Surface::new(
+                    generic
+                        .textures
+                        .get(first + state)
+                        .ok_or("original Load scrollbar arrow missing")?,
+                );
             }
         }
         Ok(Self {
@@ -124,13 +128,22 @@ impl Load {
     /// Called when opening Load, since the selected profile can change after
     /// the menu assets were constructed.
     pub fn select_profile(&mut self, name: Option<&[u8]>) {
-        self.campaign_filename = name.map(|name| crate::campaign_store::profile_path(
-            &self.app_root, name).file_name().unwrap().to_string_lossy().into_owned());
+        self.campaign_filename = name.map(|name| {
+            crate::campaign_store::profile_path(&self.app_root, name)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        });
         self.profile_root = name.map_or_else(
             || self.app_root.join("profiles").join("_unselected"),
-            |name| crate::save_menu::selected_profile_root(&self.app_root, name));
-        self.directories = vec![self.profile_root.join("saves"),
-            self.app_root.join("saves"), self.import_directory.clone()];
+            |name| crate::save_menu::selected_profile_root(&self.app_root, name),
+        );
+        self.directories = vec![
+            self.profile_root.join("saves"),
+            self.app_root.join("saves"),
+            self.import_directory.clone(),
+        ];
     }
     pub fn open(&mut self) {
         self.visible = true;
@@ -145,12 +158,18 @@ impl Load {
             let mut seen = std::collections::BTreeSet::new();
             let writable_directory = self.profile_root.join("saves");
             let legacy_directory = self.app_root.join("saves");
-            let legacy_paths = self.campaign_filename.as_deref()
+            let legacy_paths = self
+                .campaign_filename
+                .as_deref()
                 .map(|filename| crate::save_menu::matching_legacy_paths(&self.app_root, filename))
-                .transpose()?.unwrap_or_default().into_iter()
+                .transpose()?
+                .unwrap_or_default()
+                .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
             let writable_ids = crate::save_menu::list_slots(&self.profile_root)?
-                .into_iter().map(|slot| slot.id).collect::<std::collections::BTreeSet<_>>();
+                .into_iter()
+                .map(|slot| slot.id)
+                .collect::<std::collections::BTreeSet<_>>();
             for directory in &self.directories {
                 let files = match fs::read_dir(directory) {
                     Ok(f) => f,
@@ -161,8 +180,10 @@ impl Load {
                     let file = file.map_err(|e| e.to_string())?;
                     let regular = file.file_type().map_err(|e| e.to_string())?.is_file();
                     let path = file.path();
-                    if directory == &legacy_directory && directory != &writable_directory
-                        && !legacy_paths.contains(&path) {
+                    if directory == &legacy_directory
+                        && directory != &writable_directory
+                        && !legacy_paths.contains(&path)
+                    {
                         continue;
                     }
                     if !path
@@ -177,7 +198,10 @@ impl Load {
                         continue;
                     }
                     let name = ascii(&path.file_stem().unwrap_or_default().to_string_lossy());
-                    let modified = file.metadata().ok().and_then(|metadata| metadata.modified().ok());
+                    let modified = file
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| metadata.modified().ok());
                     let writable_id = (directory == &writable_directory)
                         .then(|| file.file_name().to_str().map(str::to_owned))
                         .flatten()
@@ -216,14 +240,20 @@ impl Load {
         }
     }
     pub fn count(&self) -> usize {
-        if self.delete_confirmation.is_some() { 2 } else { 3 + self.entries.len() + 6 }
+        if self.delete_confirmation.is_some() {
+            2
+        } else {
+            3 + self.entries.len() + 6
+        }
     }
     /// The bottom generic buttons share this +0x333 disabled state.
     pub fn generic_button_enabled(&self, i: usize) -> bool {
         match i {
             0 => self.chosen.is_some() && !self.busy,
             1 => true,
-            2 => self.chosen.and_then(|row| self.entries.get(row))
+            2 => self
+                .chosen
+                .and_then(|row| self.entries.get(row))
                 .is_some_and(|entry| entry.writable_id.is_some()),
             _ => false,
         }
@@ -270,20 +300,29 @@ impl Load {
         }
     }
     fn info_rows(&self) -> usize {
-        self.chosen.and_then(|index| self.entries.get(index))
+        self.chosen
+            .and_then(|index| self.entries.get(index))
             .and_then(|entry| entry.metadata.as_ref().ok())
             .and_then(|words| self.level_text.description(words[0], &self.strings))
-            .and_then(|text| crate::prompt::wrap_with_gap(
-                &self.description_tab, text,
-                (self.bounds[21][2] - self.bounds[21][0] - 18.).trunc() as i32, -1,
-            ).ok())
+            .and_then(|text| {
+                crate::prompt::wrap_with_gap(
+                    &self.description_tab,
+                    text,
+                    (self.bounds[21][2] - self.bounds[21][0] - 18.).trunc() as i32,
+                    -1,
+                )
+                .ok()
+            })
             .map_or(0, |(offsets, _)| offsets.len().saturating_sub(1))
     }
     pub fn scroll(&mut self, delta: i32) {
-        if self.delete_confirmation.is_some() { return; }
+        if self.delete_confirmation.is_some() {
+            return;
+        }
         if self.over_description {
             self.description_first = (self.description_first as i32 + delta)
-                .clamp(0, self.info_rows().saturating_sub(9) as i32) as usize;
+                .clamp(0, self.info_rows().saturating_sub(9) as i32)
+                as usize;
             return;
         }
         self.first = (self.first as i32 + delta)
@@ -291,13 +330,17 @@ impl Load {
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
-        if self.delete_confirmation.is_some() { return; }
+        if self.delete_confirmation.is_some() {
+            return;
+        }
         let [l, t, r, b] = self.bounds[21];
         self.over_description = p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b;
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         let inside = |b: [f32; 4]| p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
-        if self.delete_confirmation.is_some() { return None; }
+        if self.delete_confirmation.is_some() {
+            return None;
+        }
         for (i, part) in [23, 24, 22].iter().enumerate() {
             // Native 443398 returns before generic hit/callback handling when
             // this child carries the +0x333 disabled state.
@@ -307,10 +350,15 @@ impl Load {
         }
         for (index, bounds) in [LIST_SCROLL, INFO_SCROLL].into_iter().enumerate() {
             let arrows = ui::slider_arrows(bounds, true);
-            let part = if inside(arrows[0]) { Some(0) }
-                else if inside(arrows[1]) { Some(1) }
-                else if inside(ui::slider_track(bounds, true)) { Some(2) }
-                else { None };
+            let part = if inside(arrows[0]) {
+                Some(0)
+            } else if inside(arrows[1]) {
+                Some(1)
+            } else if inside(ui::slider_track(bounds, true)) {
+                Some(2)
+            } else {
+                None
+            };
             if let Some(part) = part {
                 return Some(3 + self.entries.len() + index * 3 + part);
             }
@@ -340,7 +388,9 @@ impl Load {
         }
         // Keyboard activation uses the same disabled child state as pointer
         // input; it must not bypass the native generic-button guard.
-        if i < 3 && !self.generic_button_enabled(i) { return; }
+        if i < 3 && !self.generic_button_enabled(i) {
+            return;
+        }
         if self.busy && i != 1 {
             return;
         }
@@ -354,16 +404,28 @@ impl Load {
                 } else {
                     self.info_rows().saturating_sub(9)
                 };
-                let current = if index == 0 { self.first } else { self.description_first };
+                let current = if index == 0 {
+                    self.first
+                } else {
+                    self.description_first
+                };
                 let selected = match part {
                     0 => current.saturating_sub(1),
                     1 => current.saturating_add(1).min(maximum),
-                    _ => self.pointer_position.map_or(current, |point|
-                        ui::slider_selection(ui::slider_track(bounds, true),
-                            point[1], maximum as i32, true) as usize),
+                    _ => self.pointer_position.map_or(current, |point| {
+                        ui::slider_selection(
+                            ui::slider_track(bounds, true),
+                            point[1],
+                            maximum as i32,
+                            true,
+                        ) as usize
+                    }),
                 };
-                if index == 0 { self.first = selected; }
-                else { self.description_first = selected; }
+                if index == 0 {
+                    self.first = selected;
+                } else {
+                    self.description_first = selected;
+                }
             }
             return;
         }
@@ -459,17 +521,16 @@ impl Load {
                 shapes.rect(row, [0xff008ed0; 4]);
             }
             let (name, timestamp) = row_columns(row);
-            ui::text_fit(
-                &mut fonts,
-                &self.tab,
-                &e.name,
-                name,
-                false,
-                0xffffffff,
-            )?;
+            ui::text_fit(&mut fonts, &self.tab, &e.name, name, false, 0xffffffff)?;
             if let Some(modified) = crate::save_menu::format_modified_local(e.modified) {
-                ui::text_fit(&mut fonts, &self.tab, &ascii(&modified), timestamp,
-                    false, 0xff6ed1e1)?;
+                ui::text_fit(
+                    &mut fonts,
+                    &self.tab,
+                    &ascii(&modified),
+                    timestamp,
+                    false,
+                    0xff6ed1e1,
+                )?;
             }
         }
         for (part, id) in [(12, 1612), (14, 1615), (16, 1613), (18, 1619), (20, 1703)] {
@@ -511,7 +572,10 @@ impl Load {
                     0xffffffff,
                 )?;
                 let money = f32::from_bits(words[2]);
-                let symbol = self.strings.get(2243).ok_or("Load currency symbol missing")?;
+                let symbol = self
+                    .strings
+                    .get(2243)
+                    .ok_or("Load currency symbol missing")?;
                 let suffix = self.strings.get(2244).and_then(|row| row.first()) != Some(&0x4c);
                 let money_text = ui::formatted_float_money(money, symbol, suffix)?;
                 ui::text(
@@ -525,25 +589,44 @@ impl Load {
                 if let Some(description) = self.level_text.description(words[0], &self.strings) {
                     let info = self.bounds[21];
                     let (offsets, wrapped) = crate::prompt::wrap_with_gap(
-                        &self.description_tab, description,
-                        (info[2] - info[0] - 18.).trunc() as i32, -1,
+                        &self.description_tab,
+                        description,
+                        (info[2] - info[0] - 18.).trunc() as i32,
+                        -1,
                     )?;
-                    for (line, range) in offsets.windows(2)
-                        .skip(self.description_first).take(9).enumerate()
+                    for (line, range) in offsets
+                        .windows(2)
+                        .skip(self.description_first)
+                        .take(9)
+                        .enumerate()
                     {
                         let end = range[1].saturating_sub(1).min(wrapped.len());
                         let row = &wrapped[range[0].min(end)..end];
                         let top = info[1] + 2. + line as f32 * 10.;
-                        ui::text_widget_style0(&mut description_fonts,
-                            &self.description_tab, row,
-                            [info[0], top, info[2] - 18., top + 10.], 0xffffffff)?;
+                        ui::text_widget_style0(
+                            &mut description_fonts,
+                            &self.description_tab,
+                            row,
+                            [info[0], top, info[2] - 18., top + 10.],
+                            0xffffffff,
+                        )?;
                     }
                 }
             }
         }
         for (index, bounds, value, maximum) in [
-            (0, LIST_SCROLL, self.first, self.entries.len().saturating_sub(20)),
-            (1, INFO_SCROLL, self.description_first, self.info_rows().saturating_sub(9)),
+            (
+                0,
+                LIST_SCROLL,
+                self.first,
+                self.entries.len().saturating_sub(20),
+            ),
+            (
+                1,
+                INFO_SCROLL,
+                self.description_first,
+                self.info_rows().saturating_sub(9),
+            ),
         ] {
             let slider = ui::Slider {
                 bounds,
@@ -551,10 +634,13 @@ impl Load {
                 value: value as f32,
                 range: [0., maximum as f32],
                 pointer: self.pointer_position,
-                pressed: (pressed && selected.is_some_and(|i|
-                    i >= 3 + self.entries.len() + index * 3
-                    && i < 3 + self.entries.len() + index * 3 + 3))
-                    .then_some(self.pointer_position).flatten(),
+                pressed: (pressed
+                    && selected.is_some_and(|i| {
+                        i >= 3 + self.entries.len() + index * 3
+                            && i < 3 + self.entries.len() + index * 3 + 3
+                    }))
+                .then_some(self.pointer_position)
+                .flatten(),
             };
             if index == 1 {
                 // 431ba0→4326d0 keeps the selected information list's
@@ -563,8 +649,12 @@ impl Load {
                 // handle. The actual scroll limit remains `maximum` above.
                 let rows = self.info_rows();
                 let extent = if rows > 0 { rows.max(9) - 9 + 1 } else { 0 };
-                slider.paint_with_extent(&mut slider_shapes, &mut controls,
-                    &self.slider_textures, extent as i32);
+                slider.paint_with_extent(
+                    &mut slider_shapes,
+                    &mut controls,
+                    &self.slider_textures,
+                    extent as i32,
+                );
             } else {
                 slider.paint(&mut slider_shapes, &mut controls, &self.slider_textures);
             }
@@ -592,8 +682,13 @@ impl Load {
             )?;
         }
         if let Some(message) = &self.message {
-            wrapped(&mut fonts, &self.tab, &ascii(message),
-                [32., 438., 608., 458.], 0)?;
+            wrapped(
+                &mut fonts,
+                &self.tab,
+                &ascii(message),
+                [32., 438., 608., 458.],
+                0,
+            )?;
         }
         let mut surfaces = self.base.clone();
         surfaces.push(shapes);
@@ -645,8 +740,10 @@ pub(crate) fn ascii(s: &str) -> Vec<u8> {
 /// right of the name; the same original panel family uses these widths in
 /// the Save list. Selection highlights the entire row behind both fields.
 fn row_columns([left, top, right, bottom]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
-    ([left + 3., top, left + 151., bottom],
-     [left + 155., top, right - 16., bottom])
+    (
+        [left + 3., top, left + 151., bottom],
+        [left + 155., top, right - 16., bottom],
+    )
 }
 /// Owned glyph text only: no script runtime, filesystem, or borrowed catalog.
 /// First duplicate ID wins, matching Catalog::find.
@@ -659,31 +756,42 @@ impl LevelTextCatalog {
         use openmt2001::level_catalog::Labels;
         let mut result = Self::default();
         for level in &catalog.levels {
-            result.entries.entry(level.id()).or_insert_with(|| match level.labels() {
-                Labels::Localized { title, description } => (
-                    strings.get(title as usize).cloned(),
-                    strings.get(description as usize).cloned(),
-                ),
-                Labels::Literal { title, description } => {
-                    // Match the custom picker's byte-to-original-font conversion.
-                    let glyphs = |text: Vec<u8>| text.into_iter()
-                        .map(|b| if (32..=126).contains(&b) { b - 32 } else { 31 })
-                        .collect();
-                    (Some(glyphs(title)), Some(glyphs(description)))
-                }
-            });
+            result
+                .entries
+                .entry(level.id())
+                .or_insert_with(|| match level.labels() {
+                    Labels::Localized { title, description } => (
+                        strings.get(title as usize).cloned(),
+                        strings.get(description as usize).cloned(),
+                    ),
+                    Labels::Literal { title, description } => {
+                        // Match the custom picker's byte-to-original-font conversion.
+                        let glyphs = |text: Vec<u8>| {
+                            text.into_iter()
+                                .map(|b| if (32..=126).contains(&b) { b - 32 } else { 31 })
+                                .collect()
+                        };
+                        (Some(glyphs(title)), Some(glyphs(description)))
+                    }
+                });
         }
         result
     }
     pub(crate) fn title(&self, id: u32, strings: &[Vec<u8>]) -> Vec<u8> {
-        self.entries.get(&id).and_then(|text| text.0.as_ref())
+        self.entries
+            .get(&id)
+            .and_then(|text| text.0.as_ref())
             .or_else(|| level_labels(id).and_then(|(title, _)| strings.get(title)))
-            .cloned().unwrap_or_else(|| ascii(&format!("Level {id}")))
+            .cloned()
+            .unwrap_or_else(|| ascii(&format!("Level {id}")))
     }
     pub(crate) fn description<'a>(&'a self, id: u32, strings: &'a [Vec<u8>]) -> Option<&'a [u8]> {
-        self.entries.get(&id).and_then(|text| text.1.as_ref())
+        self.entries
+            .get(&id)
+            .and_then(|text| text.1.as_ref())
             .or_else(|| level_labels(id).and_then(|(_, description)| strings.get(description)))
-            .filter(|text| !text.is_empty()).map(Vec::as_slice)
+            .filter(|text| !text.is_empty())
+            .map(Vec::as_slice)
     }
 }
 // GAMESTART/hub.lua level IDs + original4dc80d numeric language registrations.
@@ -768,30 +876,60 @@ pub(crate) fn wrapped(
 mod tests {
     use super::*;
 
-    fn register_text(catalog: &mut openmt2001::level_catalog::Catalog, id: i32,
-        labels: openmt2001::level_catalog::Labels) {
-        catalog.register(openmt2001::level_catalog::Registration {
-            id, directory: b"CUSTOM/Example".to_vec(), labels, checksum: 0,
-        }, false, true).unwrap();
+    fn register_text(
+        catalog: &mut openmt2001::level_catalog::Catalog,
+        id: i32,
+        labels: openmt2001::level_catalog::Labels,
+    ) {
+        catalog
+            .register(
+                openmt2001::level_catalog::Registration {
+                    id,
+                    directory: b"CUSTOM/Example".to_vec(),
+                    labels,
+                    checksum: 0,
+                },
+                false,
+                true,
+            )
+            .unwrap();
     }
 
     #[test]
     fn registered_literal_text_retains_first_id_and_empty_description() {
         use openmt2001::level_catalog::{Catalog, Labels};
         let mut catalog = Catalog::default();
-        register_text(&mut catalog, 500000, Labels::Literal {
-            title: b"Custom title".to_vec(), description: b"Custom description".to_vec(),
-        });
-        register_text(&mut catalog, 500000, Labels::Literal {
-            title: b"Duplicate".to_vec(), description: vec![],
-        });
-        register_text(&mut catalog, 500001, Labels::Literal {
-            title: vec![0x80], description: vec![],
-        });
+        register_text(
+            &mut catalog,
+            500000,
+            Labels::Literal {
+                title: b"Custom title".to_vec(),
+                description: b"Custom description".to_vec(),
+            },
+        );
+        register_text(
+            &mut catalog,
+            500000,
+            Labels::Literal {
+                title: b"Duplicate".to_vec(),
+                description: vec![],
+            },
+        );
+        register_text(
+            &mut catalog,
+            500001,
+            Labels::Literal {
+                title: vec![0x80],
+                description: vec![],
+            },
+        );
         let text = LevelTextCatalog::new(&catalog, &[]);
         drop(catalog); // Panels own the text, independent of catalog lifetime.
         assert_eq!(text.title(500000, &[]), ascii("Custom title"));
-        assert_eq!(text.description(500000, &[]), Some(ascii("Custom description").as_slice()));
+        assert_eq!(
+            text.description(500000, &[]),
+            Some(ascii("Custom description").as_slice())
+        );
         assert_eq!(text.title(500001, &[]), vec![31]);
         assert_eq!(text.description(500001, &[]), None);
     }
@@ -800,12 +938,29 @@ mod tests {
     fn localized_text_preserves_language_glyphs_and_registered_empty_values() {
         use openmt2001::level_catalog::{Catalog, Labels};
         let mut catalog = Catalog::default();
-        register_text(&mut catalog, 500000, Labels::Localized { title: 0, description: 1 });
-        register_text(&mut catalog, 200001, Labels::Localized { title: 2, description: 2 });
+        register_text(
+            &mut catalog,
+            500000,
+            Labels::Localized {
+                title: 0,
+                description: 1,
+            },
+        );
+        register_text(
+            &mut catalog,
+            200001,
+            Labels::Localized {
+                title: 2,
+                description: 2,
+            },
+        );
         let strings = vec![vec![128, 201, 0], vec![199, 42], vec![]];
         let text = LevelTextCatalog::new(&catalog, &strings);
         assert_eq!(text.title(500000, &strings), strings[0]);
-        assert_eq!(text.description(500000, &strings), Some(strings[1].as_slice()));
+        assert_eq!(
+            text.description(500000, &strings),
+            Some(strings[1].as_slice())
+        );
         assert!(text.title(200001, &strings).is_empty());
         assert_eq!(text.description(200001, &strings), None);
     }
@@ -817,10 +972,18 @@ mod tests {
         strings[1956] = vec![81];
         strings[1957] = vec![82];
         let mut catalog = Catalog::default();
-        register_text(&mut catalog, 200001, Labels::Localized {
-            title: u32::MAX, description: u32::MAX,
-        });
-        for text in [LevelTextCatalog::default(), LevelTextCatalog::new(&catalog, &strings)] {
+        register_text(
+            &mut catalog,
+            200001,
+            Labels::Localized {
+                title: u32::MAX,
+                description: u32::MAX,
+            },
+        );
+        for text in [
+            LevelTextCatalog::default(),
+            LevelTextCatalog::new(&catalog, &strings),
+        ] {
             assert_eq!(text.title(200001, &strings), vec![81]);
             assert_eq!(text.description(200001, &strings), Some([82].as_slice()));
             for id in [0, 500099, u32::MAX] {
@@ -838,8 +1001,10 @@ mod tests {
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         // 4950f0 event12 index2 opens the generic delete question; index0
         // accepts through 494f30, while a nonzero answer returns untouched.
-        assert_eq!(image.at(0x4951b3, 9).unwrap(),
-            &[0x6a, 0, 0x68, 0x5e, 0x06, 0, 0, 0x6a, 0]);
+        assert_eq!(
+            image.at(0x4951b3, 9).unwrap(),
+            &[0x6a, 0, 0x68, 0x5e, 0x06, 0, 0, 0x6a, 0]
+        );
         assert_eq!(image.at(0x494f4c, 2).unwrap(), &[0x85, 0xc0]);
         assert_eq!(image.at(0x542b24, 14).unwrap(), b"%d:%02d%s %s\0\0");
         for call in [0x4945f3u32, 0x494710] {
@@ -851,8 +1016,13 @@ mod tests {
         let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let (_, bounds) = ui::panel_base(&index, &archive,
-            "gamedata2\\brand_new_panels\\load_menu_V2.tm", &[0, 1, 2, 3, 4, 5, 7]).unwrap();
+        let (_, bounds) = ui::panel_base(
+            &index,
+            &archive,
+            "gamedata2\\brand_new_panels\\load_menu_V2.tm",
+            &[0, 1, 2, 3, 4, 5, 7],
+        )
+        .unwrap();
         let native_slider = |parent: [f32; 4]| {
             let x = (parent[2] - 16.).trunc();
             let y = parent[1].trunc();
@@ -865,66 +1035,113 @@ mod tests {
         // the original Load information track with paint extent one. Its
         // input offset may still be clamped to zero by the list itself.
         let info_track = ui::slider_track(INFO_SCROLL, true);
-        assert_eq!(ui::slider_handle(info_track, 0, 1, true),
-            [593., 305., 599., 332.5]);
-        assert_eq!(ui::slider_handle(info_track, 1, 1, true),
-            [593., 332.5, 599., 360.]);
+        assert_eq!(
+            ui::slider_handle(info_track, 0, 1, true),
+            [593., 305., 599., 332.5]
+        );
+        assert_eq!(
+            ui::slider_handle(info_track, 1, 1, true),
+            [593., 332.5, 599., 360.]
+        );
         assert_eq!(ui::slider_background(info_track, true, true).1, 0xcc183088);
         let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
         let original_bytes = fs::read(&original).unwrap();
         let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("omt-v2-load-delete-{}-{stamp}",
-            std::process::id()));
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("omt-v2-load-delete-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
-        let slot = crate::save_menu::write_target(&root,
+        let slot = crate::save_menu::write_target(
+            &root,
             &crate::save_menu::Target::NewName("V2 Delete Gate".into()),
-            &original_bytes).unwrap();
+            &original_bytes,
+        )
+        .unwrap();
         let mut load = Load {
-            base: Vec::new(), bounds: vec![[0.; 4]; 25], fonts: Vec::new(),
-            tab: Vec::new(), description_fonts: Vec::new(),
-            description_tab: Vec::new(), slider_textures: Vec::new(),
-            title_fonts: Vec::new(), title_tab: Vec::new(),
+            base: Vec::new(),
+            bounds: vec![[0.; 4]; 25],
+            fonts: Vec::new(),
+            tab: Vec::new(),
+            description_fonts: Vec::new(),
+            description_tab: Vec::new(),
+            slider_textures: Vec::new(),
+            title_fonts: Vec::new(),
+            title_tab: Vec::new(),
             level_text: LevelTextCatalog::default(),
-            strings: Vec::new(), directories: vec![root.join("saves"),
-                original.parent().unwrap().to_path_buf()], app_root: root.clone(),
+            strings: Vec::new(),
+            directories: vec![root.join("saves"), original.parent().unwrap().to_path_buf()],
+            app_root: root.clone(),
             import_directory: original.parent().unwrap().to_path_buf(),
-            campaign_filename: None, profile_root: root.clone(),
-            entries: Vec::new(), chosen: None, first: 0, description_first: 0,
-            over_description: false, pointer_position: None,
-            visible: false, busy: false,
-            request: None, message: None, delete_confirmation: None,
+            campaign_filename: None,
+            profile_root: root.clone(),
+            entries: Vec::new(),
+            chosen: None,
+            first: 0,
+            description_first: 0,
+            over_description: false,
+            pointer_position: None,
+            visible: false,
+            busy: false,
+            request: None,
+            message: None,
+            delete_confirmation: None,
         };
         load.open();
-        assert_eq!(load.chosen, None, "native 494cec clears the initial selection");
-        for part in [22, 23, 24] { load.bounds[part] = bounds[part]; }
-        let center = |[left, top, right, bottom]: [f32; 4]| {
-            [(left + right) * 0.5, (top + bottom) * 0.5]
-        };
-        assert_eq!(load.hit(center(bounds[23])), None,
-            "disabled Load button must not admit a pointer event");
+        assert_eq!(
+            load.chosen, None,
+            "native 494cec clears the initial selection"
+        );
+        for part in [22, 23, 24] {
+            load.bounds[part] = bounds[part];
+        }
+        let center =
+            |[left, top, right, bottom]: [f32; 4]| [(left + right) * 0.5, (top + bottom) * 0.5];
+        assert_eq!(
+            load.hit(center(bounds[23])),
+            None,
+            "disabled Load button must not admit a pointer event"
+        );
         load.activate(0); // keyboard selection also cannot invoke disabled Load
         assert!(load.request.is_none() && !load.busy);
         let listed = load.entries.len();
         assert!(listed >= 2);
-        let original_row = load.entries.iter().position(|entry|
-            entry.path == original).unwrap();
-        assert_eq!(load.entries[original_row].modified,
-            fs::metadata(&original).unwrap().modified().ok());
+        let original_row = load
+            .entries
+            .iter()
+            .position(|entry| entry.path == original)
+            .unwrap();
+        assert_eq!(
+            load.entries[original_row].modified,
+            fs::metadata(&original).unwrap().modified().ok()
+        );
         load.chosen = Some(original_row);
-        assert_eq!(load.hit(center(bounds[22])), None,
-            "original-import Delete is a disabled generic button");
+        assert_eq!(
+            load.hit(center(bounds[22])),
+            None,
+            "original-import Delete is a disabled generic button"
+        );
         load.activate(2);
         assert!(load.delete_confirmation.is_none());
-        assert!(load.message.is_none(),
-            "keyboard activation cannot bypass disabled Delete");
-        let writable_row = load.entries.iter().position(|entry|
-            entry.writable_id.as_deref() == Some("V2 Delete Gate.sav")).unwrap();
-        assert_eq!(load.entries[writable_row].modified,
-            fs::metadata(&slot).unwrap().modified().ok());
+        assert!(
+            load.message.is_none(),
+            "keyboard activation cannot bypass disabled Delete"
+        );
+        let writable_row = load
+            .entries
+            .iter()
+            .position(|entry| entry.writable_id.as_deref() == Some("V2 Delete Gate.sav"))
+            .unwrap();
+        assert_eq!(
+            load.entries[writable_row].modified,
+            fs::metadata(&slot).unwrap().modified().ok()
+        );
         for row in [original_row, writable_row] {
-            assert!(crate::save_menu::format_modified_local(load.entries[row].modified)
-                .is_some_and(|text| text.contains(':') && text.contains(' ')));
+            assert!(
+                crate::save_menu::format_modified_local(load.entries[row].modified)
+                    .is_some_and(|text| text.contains(':') && text.contains(' '))
+            );
         }
         let (name, time) = row_columns([20., 40., 300., 54.]);
         assert_eq!(name, [23., 40., 171., 54.]);
@@ -937,7 +1154,8 @@ mod tests {
             load.entries.push(Entry {
                 path: root.join(format!("synthetic{i}.sav")),
                 name: ascii(&format!("synthetic{i}")),
-                metadata: Err("input-only row".into()), modified: None,
+                metadata: Err("input-only row".into()),
+                modified: None,
                 writable_id: None,
             });
         }
@@ -945,11 +1163,19 @@ mod tests {
         let list = bounds[8];
         let unpainted_strip = [(list[0] + list[2]) * 0.5, list[1] + 20. * 14. + 1.];
         assert!(unpainted_strip[1] < list[3]);
-        assert_eq!(load.hit(unpainted_strip), None,
-            "native 42f91d rejects row20 below the twenty painted rows");
+        assert_eq!(
+            load.hit(unpainted_strip),
+            None,
+            "native 42f91d rejects row20 below the twenty painted rows"
+        );
         load.pointer(unpainted_strip);
-        if let Some(index) = load.hit(unpainted_strip) { load.reveal(index); }
-        assert_eq!(load.first, 0, "hover below the painted rows must not auto-scroll");
+        if let Some(index) = load.hit(unpainted_strip) {
+            load.reveal(index);
+        }
+        assert_eq!(
+            load.first, 0,
+            "hover below the painted rows must not auto-scroll"
+        );
         let down = center(ui::slider_arrows(LIST_SCROLL, true)[1]);
         load.pointer(down);
         load.activate(load.hit(down).unwrap());
@@ -963,13 +1189,23 @@ mod tests {
         load.activate(2);
         assert_eq!(load.count(), 2);
         let dialog = load.generic_prompt().unwrap();
-        assert_eq!((dialog.title, dialog.body, dialog.buttons, dialog.button_count),
-            (0x65e, 0x660, [0x664, 0x665], 2));
+        assert_eq!(
+            (
+                dialog.title,
+                dialog.body,
+                dialog.buttons,
+                dialog.button_count
+            ),
+            (0x65e, 0x660, [0x664, 0x665], 2)
+        );
         assert!(matches!(dialog.arguments[0],
             crate::human_dialog::Argument::Name(name)
                 if name.starts_with(b"V2 Delete Gate")));
-        assert_eq!(load.hit([260., 250.]), None,
-            "only the shared generic prompt owns modal button hit testing");
+        assert_eq!(
+            load.hit([260., 250.]),
+            None,
+            "only the shared generic prompt owns modal button hit testing"
+        );
         load.activate(1); // No
         assert!(slot.exists());
         load.activate(2);
@@ -998,38 +1234,68 @@ mod tests {
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let language = executable.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let language = executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
         let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
-            .parent().unwrap().parent().unwrap().to_path_buf();
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let offsets = fs::read(language.join("tycoon.off")).unwrap();
         let glyphs = fs::read(language.join("tycoon.bin")).unwrap();
         let mut at = 0usize;
-        let rows = offsets.chunks_exact(2).map(|length| {
-            let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
-            let row = &glyphs[at..end];
-            at = end;
-            row
-        }).collect::<Vec<_>>();
+        let rows = offsets
+            .chunks_exact(2)
+            .map(|length| {
+                let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
+                let row = &glyphs[at..end];
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
         let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
         let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let prompt_assets = crate::prompt::Assets::load(&index, &archive,
-            &installer, &rows,
-            &openmt2001::pe::PeImage::parse(&fs::read(&executable).unwrap()).unwrap()).unwrap();
-        let stamp = SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .unwrap().as_nanos();
+        let prompt_assets = crate::prompt::Assets::load(
+            &index,
+            &archive,
+            &installer,
+            &rows,
+            &openmt2001::pe::PeImage::parse(&fs::read(&executable).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let stamp = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("omt-v2-load-capture-{stamp}"));
         fs::create_dir_all(&root).unwrap();
         let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
-        let mut load = Load::new(&index, &archive, &installer, &refs,
-            original.parent().unwrap().to_path_buf(), root.clone()).unwrap();
+        let mut load = Load::new(
+            &index,
+            &archive,
+            &installer,
+            &refs,
+            original.parent().unwrap().to_path_buf(),
+            root.clone(),
+        )
+        .unwrap();
         load.open();
         assert!(load.entries.len() >= 2);
         for (i, entry) in load.entries.iter_mut().enumerate() {
-            entry.modified = Some(std::time::UNIX_EPOCH
-                + std::time::Duration::from_secs(1_782_073_260 + i as u64 * 120));
+            entry.modified = Some(
+                std::time::UNIX_EPOCH
+                    + std::time::Duration::from_secs(1_782_073_260 + i as u64 * 120),
+            );
         }
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let build_file = read("OPENMT2001_BUILD_FILE");
         let suncols = read("OPENMT2001_SUNCOLS");
@@ -1039,38 +1305,64 @@ mod tests {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets {
-                executable: &exe, directory: &directory, archive: &archive,
+                executable: &exe,
+                directory: &directory,
+                archive: &archive,
             }),
-            suncols: Some(&suncols), phase: Some(12),
+            suncols: Some(&suncols),
+            phase: Some(12),
             camera: Some(CameraSample {
-                eye: [26., 586., -695.], target: [26., 463., -595.],
-                up: [0., 1., 0.], vertical_fov: 45.,
+                eye: [26., 586., -695.],
+                target: [26., 463., -595.],
+                up: [0., 1., 0.],
+                vertical_fov: 45.,
             }),
-            width: 1280, height: 960, animated: true,
-        }).unwrap();
+            width: 1280,
+            height: 960,
+            animated: true,
+        })
+        .unwrap();
         let panel = load.draw(&renderer, None, false).unwrap();
-        crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&panel],
-            "work/frontend/load-open-unselected-city.png");
+        crate::capture_test::capture_scene_overlays(
+            &renderer,
+            &scene,
+            &[&panel],
+            "work/frontend/load-open-unselected-city.png",
+        );
         load.chosen = load.entries.iter().position(|entry| entry.path == original);
         let panel = load.draw(&renderer, None, false).unwrap();
-        crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&panel],
-            "work/frontend/load-import-selected-city.png");
-        crate::save_menu::write_target(&root,
+        crate::capture_test::capture_scene_overlays(
+            &renderer,
+            &scene,
+            &[&panel],
+            "work/frontend/load-import-selected-city.png",
+        );
+        crate::save_menu::write_target(
+            &root,
             &crate::save_menu::Target::NewName("V2 Delete Capture".into()),
-            &read("OPENMT2001_SAVE_ONE")).unwrap();
+            &read("OPENMT2001_SAVE_ONE"),
+        )
+        .unwrap();
         load.open();
-        load.chosen = load.entries.iter().position(|entry|
-            entry.writable_id.as_deref() == Some("V2 Delete Capture.sav"));
+        load.chosen = load
+            .entries
+            .iter()
+            .position(|entry| entry.writable_id.as_deref() == Some("V2 Delete Capture.sav"));
         assert!(load.chosen.is_some());
         load.activate(2);
         assert!(load.delete_confirmation.is_some());
         let panel = load.draw(&renderer, None, false).unwrap();
-        let prompt = prompt_assets.prepare_dialog(&renderer,
-            load.generic_prompt().unwrap(), [-1.; 2], None).unwrap();
+        let prompt = prompt_assets
+            .prepare_dialog(&renderer, load.generic_prompt().unwrap(), [-1.; 2], None)
+            .unwrap();
         let yes = prompt_assets.dialog_buttons(2)[0];
         assert!(yes[2] > yes[0] && yes[3] > yes[1]);
-        crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&panel, &prompt],
-            "work/frontend/load-v2-delete-prompt-city.png");
+        crate::capture_test::capture_scene_overlays(
+            &renderer,
+            &scene,
+            &[&panel, &prompt],
+            "work/frontend/load-v2-delete-prompt-city.png",
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

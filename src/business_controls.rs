@@ -162,16 +162,25 @@ pub fn activate(
             w.buildings[id][0x3e] = 1;
         }
         Action::Demolish => {
-            let value =
-                crate::demolition::quote_with_parameters(&w.buildings[selected(w)?], w.categories, &w.building_parameters, w.image)?
-                    .to_f32();
+            let value = crate::demolition::quote_with_parameters(
+                &w.buildings[selected(w)?],
+                w.categories,
+                &w.building_parameters,
+                w.image,
+            )?
+            .to_f32();
             if !afford(value, w, &mut call)? {
                 return Ok(());
             }
             call(Call::Disable(action), w)?;
             let id = selected(w)?;
-            let amount =
-                crate::demolition::quote_with_parameters(&w.buildings[id], w.categories, &w.building_parameters, w.image)?.to_f32();
+            let amount = crate::demolition::quote_with_parameters(
+                &w.buildings[id],
+                w.categories,
+                &w.building_parameters,
+                w.image,
+            )?
+            .to_f32();
             call(
                 Call::Demolish {
                     category: w.selected_category,
@@ -314,7 +323,8 @@ fn matches_native_controls() {
         let mut panel = b[7].to_vec();
         let mut controls = b[8].to_vec();
         let mut world = World {
-            building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
+            building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
+                .unwrap(),
             image: &image,
             selected: (h[3] != 0).then_some(0),
             selected_category: h[4] as i32,

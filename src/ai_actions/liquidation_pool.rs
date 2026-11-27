@@ -1,5 +1,5 @@
 //! Original46a6f0/46a890 retained liquidation allocation lifecycle.
-use crate::player_manager::{put, word, Player};
+use crate::player_manager::{Player, put, word};
 use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Call {

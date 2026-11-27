@@ -134,10 +134,12 @@ pub fn scenery_mesh_uvs(
 /// dedicated image dimensions as free space for later images.
 /// Original archive cache-hit pages: source pixels and flags are already
 /// processed. This explicit path must not be used for uncached source images.
-pub fn cached_scenery_pages(records: &[SceneryTexture<'_>])
-    -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {
-    scenery_pages_with_material_loader(records, |record|
-        (std::sync::Arc::from(record.texels), record.header[0]))
+pub fn cached_scenery_pages(
+    records: &[SceneryTexture<'_>],
+) -> Result<(Vec<SceneryPage>, Vec<SceneryRegion>), String> {
+    scenery_pages_with_material_loader(records, |record| {
+        (std::sync::Arc::from(record.texels), record.header[0])
+    })
 }
 
 pub fn scenery_pages(
@@ -290,14 +292,20 @@ pub fn auction_textures<'a>(
 
 /// Result actors reuse the player group and Mr Monopoly from original group9.
 pub fn result_textures<'a>(
-    image: &PeImage<'_>, index: &ArchiveIndex, archive: &'a [u8], display_width: u32,
+    image: &PeImage<'_>,
+    index: &ArchiveIndex,
+    archive: &'a [u8],
+    display_width: u32,
 ) -> Result<Vec<SceneryTexture<'a>>, String> {
     startup_textures(image, index, archive, display_width, &[1, 2, 9])
 }
 
 /// Original tutor meshes are registered in startup group 8 at 4bd04e.
 pub fn tutor_textures<'a>(
-    image: &PeImage<'_>, index: &ArchiveIndex, archive: &'a [u8], display_width: u32,
+    image: &PeImage<'_>,
+    index: &ArchiveIndex,
+    archive: &'a [u8],
+    display_width: u32,
 ) -> Result<Vec<SceneryTexture<'a>>, String> {
     startup_textures(image, index, archive, display_width, &[8])
 }
@@ -307,9 +315,12 @@ pub fn tutor_textures<'a>(
 // whether any registered name starts with it; registration order stays intact.
 fn registered_texture_name(keys: &std::collections::BTreeSet<String>, query: &str) -> bool {
     let folded = query.to_ascii_lowercase();
-    keys.range::<str, _>((std::ops::Bound::Included(folded.as_str()), std::ops::Bound::Unbounded))
-        .next()
-        .is_some_and(|key| key.starts_with(folded.as_str()))
+    keys.range::<str, _>((
+        std::ops::Bound::Included(folded.as_str()),
+        std::ops::Bound::Unbounded,
+    ))
+    .next()
+    .is_some_and(|key| key.starts_with(folded.as_str()))
 }
 
 fn startup_textures<'a>(
@@ -321,8 +332,8 @@ fn startup_textures<'a>(
 ) -> Result<Vec<SceneryTexture<'a>>, String> {
     let panels = FontPanels::from_v14(image, index, archive, display_width)?;
     let keys = panels.cache_keys;
-    let mut registered_names: std::collections::BTreeSet<_> = keys.iter()
-        .map(|key| key.to_ascii_lowercase()).collect();
+    let mut registered_names: std::collections::BTreeSet<_> =
+        keys.iter().map(|key| key.to_ascii_lowercase()).collect();
     let panel_collection_count = panels.billboards.end;
     let mut result: Vec<_> = panels
         .textures
@@ -540,19 +551,28 @@ mod tests {
         let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let index = crate::archive::ArchiveIndex::parse(&read("OPENMT2001_ARCHIVE_DIR"), archive.len() as u64).unwrap();
+        let index = crate::archive::ArchiveIndex::parse(
+            &read("OPENMT2001_ARCHIVE_DIR"),
+            archive.len() as u64,
+        )
+        .unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let records = super::scenery_textures(&image, &index, &archive, 1280).unwrap();
         assert_eq!(records.len(), 246);
         let (expected_pages, expected_regions) = super::scenery_pages(&records).unwrap();
         let mut cache = crate::texture::LoaderCache::default();
         for _ in 0..3 {
-            let (pages, regions) = super::scenery_pages_with_material_loader(&records,
-                |record| cache.pixels_and_flags(record)).unwrap();
+            let (pages, regions) = super::scenery_pages_with_material_loader(&records, |record| {
+                cache.pixels_and_flags(record)
+            })
+            .unwrap();
             assert_eq!(pages.len(), expected_pages.len());
             assert_eq!(regions.len(), expected_regions.len());
             for (actual, expected) in pages.iter().zip(&expected_pages) {
-                assert_eq!((actual.side, actual.flags, actual.group), (expected.side, expected.flags, expected.group));
+                assert_eq!(
+                    (actual.side, actual.flags, actual.group),
+                    (expected.side, expected.flags, expected.group)
+                );
                 assert_eq!(actual.rgba, expected.rgba);
             }
             for (actual, expected) in regions.iter().zip(&expected_regions) {
@@ -566,25 +586,61 @@ mod tests {
     fn indexed_texture_prefixes_match_linear_registration() {
         let mut legacy = Vec::<String>::new();
         let mut indexed = std::collections::BTreeSet::new();
-        let mut queries: Vec<String> = ["AlphaLong.tt", "alpha", "AlphaSuffix.tt", "ALPHALONG.TT",
-            "foo12", "foo", "foo123", "foobar", "FOO12", "f", "f/", "a\\b", "a/b",
-            "Ångström.tt", "ÅNGSTRöM.TT", "ångström.tt", "İmage", "image", "ß", "SS", ""]
-            .into_iter().map(str::to_owned).collect();
+        let mut queries: Vec<String> = [
+            "AlphaLong.tt",
+            "alpha",
+            "AlphaSuffix.tt",
+            "ALPHALONG.TT",
+            "foo12",
+            "foo",
+            "foo123",
+            "foobar",
+            "FOO12",
+            "f",
+            "f/",
+            "a\\b",
+            "a/b",
+            "Ångström.tt",
+            "ÅNGSTRöM.TT",
+            "ångström.tt",
+            "İmage",
+            "image",
+            "ß",
+            "SS",
+            "",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
         for n in 0..256 {
-            queries.extend([format!("Texture{n:04}Long.tt"), format!("TEXTURE{n:04}"),
-                format!("texture{n:04}long.TT"), format!("texture{n:04}long.tt.extra")]);
+            queries.extend([
+                format!("Texture{n:04}Long.tt"),
+                format!("TEXTURE{n:04}"),
+                format!("texture{n:04}long.TT"),
+                format!("texture{n:04}long.tt.extra"),
+            ]);
         }
         for query in queries {
-            let expected = legacy.iter().any(|seen| seen.as_bytes().get(..query.len())
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(query.as_bytes())));
-            assert_eq!(super::registered_texture_name(&indexed, &query), expected, "{query:?}");
+            let expected = legacy.iter().any(|seen| {
+                seen.as_bytes()
+                    .get(..query.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(query.as_bytes()))
+            });
+            assert_eq!(
+                super::registered_texture_name(&indexed, &query),
+                expected,
+                "{query:?}"
+            );
             if !expected {
                 legacy.push(query.clone());
                 indexed.insert(query.to_ascii_lowercase());
             }
         }
         assert!(super::registered_texture_name(&indexed, ""));
-        assert!(!super::registered_texture_name(&std::collections::BTreeSet::new(), ""));
+        assert!(!super::registered_texture_name(
+            &std::collections::BTreeSet::new(),
+            ""
+        ));
     }
 
     #[test]
@@ -593,22 +649,41 @@ mod tests {
         let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let index = crate::archive::ArchiveIndex::parse(&read("OPENMT2001_ARCHIVE_DIR"), archive.len() as u64).unwrap();
+        let index = crate::archive::ArchiveIndex::parse(
+            &read("OPENMT2001_ARCHIVE_DIR"),
+            archive.len() as u64,
+        )
+        .unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let mut legacy = crate::panels::FontPanels::from_v14(&image, &index, &archive, 1280).unwrap().cache_keys;
-        let mut indexed: std::collections::BTreeSet<_> = legacy.iter().map(|key| key.to_ascii_lowercase()).collect();
+        let mut legacy = crate::panels::FontPanels::from_v14(&image, &index, &archive, 1280)
+            .unwrap()
+            .cache_keys;
+        let mut indexed: std::collections::BTreeSet<_> =
+            legacy.iter().map(|key| key.to_ascii_lowercase()).collect();
         let mut queries = 0;
         for &(_, _, paths) in super::SCENERY_STARTUP_MESHES {
             for &address in paths {
                 let path = image.at(address, 260).unwrap();
                 let end = path.iter().position(|&b| b == 0).unwrap();
-                let entry = index.find(std::str::from_utf8(&path[..end]).unwrap()).unwrap();
-                let mesh = crate::mesh::CachedMesh::parse(&archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+                let entry = index
+                    .find(std::str::from_utf8(&path[..end]).unwrap())
+                    .unwrap();
+                let mesh = crate::mesh::CachedMesh::parse(
+                    &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+                )
+                .unwrap();
                 for name in mesh.texture_names {
                     let key = name.rsplit('\\').next().unwrap();
-                    let expected = legacy.iter().any(|seen| seen.as_bytes().get(..key.len())
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes())));
-                    assert_eq!(super::registered_texture_name(&indexed, key), expected, "{key:?}");
+                    let expected = legacy.iter().any(|seen| {
+                        seen.as_bytes()
+                            .get(..key.len())
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes()))
+                    });
+                    assert_eq!(
+                        super::registered_texture_name(&indexed, key),
+                        expected,
+                        "{key:?}"
+                    );
                     if !expected && index.find(key).is_some() {
                         legacy.push(key.to_owned());
                         indexed.insert(key.to_ascii_lowercase());
@@ -618,7 +693,9 @@ mod tests {
             }
         }
         assert!(queries > 500);
-        eprintln!("Original startup prefix registry: {queries} query decisions matched the linear scan");
+        eprintln!(
+            "Original startup prefix registry: {queries} query decisions matched the linear scan"
+        );
     }
 
     #[test]

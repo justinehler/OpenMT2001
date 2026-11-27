@@ -162,7 +162,12 @@ impl Policy {
             return Ok(None);
         }
         let translation = matrix[3];
-        if !matrix.iter().flatten().chain(view.iter()).all(|v| v.is_finite()) {
+        if !matrix
+            .iter()
+            .flatten()
+            .chain(view.iter())
+            .all(|v| v.is_finite())
+        {
             return Err("non-finite moving-object pose".into());
         }
         let [x, y, z] = translation.map(f64::from);
@@ -509,7 +514,11 @@ impl Layer {
     ) -> Result<(), String> {
         let light = self.suncolors.sample(time.0, time.1)?;
         let palette = openmt2001::lighting::Palette::new(
-            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+            light.diffuse,
+            light.ambient,
+            light.diffuse,
+            0,
+            light.scale,
         );
         let color = |value: u32| [16, 8, 0].map(|shift| ((value >> shift) & 255) as f32 / 255.);
         for draw in draws.iter_mut() {
@@ -572,7 +581,8 @@ impl Layer {
         detail: u32,
     ) -> Result<std::ops::Range<usize>, String> {
         let policy = Policy::from_detail(detail)?;
-        let time = scene.daylight_time()
+        let time = scene
+            .daylight_time()
             .ok_or("resident layer needs original scene daylight")?;
         let view = camera::scene_view_with_up(sample.eye, sample.target, sample.up);
         let [near, _] = camera::city_clip(sample.eye[1])?;

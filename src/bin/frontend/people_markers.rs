@@ -123,8 +123,14 @@ pub fn from_world(
     image: &PeImage<'_>,
     players: &openmt2001::player_manager::Manager,
 ) -> Result<Vec<Marker>, String> {
-    from_runtime_pools(&world.ledgers.residents, &world.creation.auxiliary,
-        &world.buildings, &world.ledgers.businesses, image, players)
+    from_runtime_pools(
+        &world.ledgers.residents,
+        &world.creation.auxiliary,
+        &world.buildings,
+        &world.ledgers.businesses,
+        image,
+        players,
+    )
 }
 /// Original4b7407/4b7486/4b7665 pair each used auxiliary with the resident at
 /// the same ordinal, independent of active_count, +148 identity or +f0 reference.
@@ -138,13 +144,16 @@ fn from_runtime_pools(
     players: &openmt2001::player_manager::Manager,
 ) -> Result<Vec<Marker>, String> {
     let count = auxiliaries.used();
-    let nodes = residents.nodes.get(..count)
+    let nodes = residents
+        .nodes
+        .get(..count)
         .ok_or("People auxiliary iteration leaves resident pool")?;
     let mut palette = [0; 3];
     for (i, c) in palette.iter_mut().enumerate() {
         *c = u32::from_le_bytes(image.at(0x5336b0 + i as u32 * 4, 4)?.try_into().unwrap());
     }
-    nodes.iter()
+    nodes
+        .iter()
         .zip(&auxiliaries.slots()[..count])
         .map(|(resident, auxiliary)| {
             let node = resident.as_bytes();
@@ -182,20 +191,37 @@ fn runtime_shopping_color(
         .get(usize::try_from(building).map_err(|_| "fresh marker negative building")?)
         .ok_or("fresh marker building outside pool")?;
     let business = i32::from_le_bytes(row[0x1c..0x20].try_into().unwrap());
-    if business == -1 { return Ok(0xffffffff); }
+    if business == -1 {
+        return Ok(0xffffffff);
+    }
     let row = businesses
         .get(usize::try_from(business).map_err(|_| "fresh marker negative business")?)
         .ok_or("fresh marker business outside pool")?;
     let owner = row[10] as i8;
-    if owner == -1 { return Ok(0xffffffff); }
-    if owner == 0 { return Ok(0xff888888); }
-    let player = players.players
+    if owner == -1 {
+        return Ok(0xffffffff);
+    }
+    if owner == 0 {
+        return Ok(0xff888888);
+    }
+    let player = players
+        .players
         .get(usize::try_from(i16::from(owner) - 1).map_err(|_| "fresh marker negative owner")?)
         .ok_or("fresh marker owner outside roster")?;
-    let character = u32::from_le_bytes(player.bytes.get(0x150..0x154)
-        .ok_or("fresh marker player character missing")?.try_into().unwrap());
-    if character >= 10 { return Err("fresh marker character outside palette".into()); }
-    Ok(u32::from_le_bytes(image.at(0x541af0 + character * 40, 4)?.try_into().unwrap()))
+    let character = u32::from_le_bytes(
+        player
+            .bytes
+            .get(0x150..0x154)
+            .ok_or("fresh marker player character missing")?
+            .try_into()
+            .unwrap(),
+    );
+    if character >= 10 {
+        return Err("fresh marker character outside palette".into());
+    }
+    Ok(u32::from_le_bytes(
+        image.at(0x541af0 + character * 40, 4)?.try_into().unwrap(),
+    ))
 }
 pub fn quad(point: [f32; 2]) -> [[f32; 2]; 4] {
     let left = f64::from(point[0]) - 2.5;
@@ -220,15 +246,21 @@ mod tests {
     fn matches_native_positional_marker_iteration() {
         let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_ITERATION")
-            .unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_ITERATION").unwrap())
+                .unwrap();
         let mut offset = 0;
-        let mut take = |n: usize| { let start = offset; offset += n; &bytes[start..offset] };
+        let mut take = |n: usize| {
+            let start = offset;
+            offset += n;
+            &bytes[start..offset]
+        };
         assert_eq!(take(8), b"MTLVIT01");
         let count = u32::from_le_bytes(take(4).try_into().unwrap());
         assert_eq!(u32::from_le_bytes(take(4).try_into().unwrap()), 0x037f);
         let players = openmt2001::player_manager::Manager {
-            bytes: [0; 0x28], players: vec![],
+            bytes: [0; 0x28],
+            players: vec![],
         };
         for _ in 0..count {
             let mut residents = openmt2001::economy::ResidentAccounts::new_pool();
@@ -241,13 +273,22 @@ mod tests {
                 *node = openmt2001::resident::Resident::from_runtime_bytes(prefix, 1, reference);
                 auxiliaries.allocate(take(284).try_into().unwrap()).unwrap();
             }
-            let markers = from_runtime_pools(&residents, &auxiliaries, &[], &[], &image,
-                &players).unwrap();
+            let markers =
+                from_runtime_pools(&residents, &auxiliaries, &[], &[], &image, &players).unwrap();
             assert_eq!(markers.len(), used);
             // Native report4112a0 counts active residents separately from draw4b7380.
-            assert_eq!(crate::city_people::Report::from_nodes(
-                residents.nodes[..residents.active_count as usize].iter().map(|n| n.as_bytes()),
-                &image).unwrap().rows[0].value, residents.active_count as i32);
+            assert_eq!(
+                crate::city_people::Report::from_nodes(
+                    residents.nodes[..residents.active_count as usize]
+                        .iter()
+                        .map(|n| n.as_bytes()),
+                    &image
+                )
+                .unwrap()
+                .rows[0]
+                    .value,
+                residents.active_count as i32
+            );
             for (slot, marker) in markers.iter().enumerate() {
                 assert_eq!(marker.position, [10. + 100. * slot as f32, 2., 30.]);
             }
@@ -255,13 +296,25 @@ mod tests {
                 let mode = u32::from_le_bytes(take(4).try_into().unwrap());
                 assert_eq!(mode, expected_mode);
                 let drawn = u32::from_le_bytes(take(4).try_into().unwrap()) as usize;
-                let expected: Vec<_> = (0..drawn).map(|_| u32::from_le_bytes(
-                    take(4).try_into().unwrap())).collect();
-                let actual: Vec<_> = markers.iter().filter(|m| m.visible).map(|m| {
-                    if mode == 0 { 0xffff_ffff }
-                    else { m.colors[MODES.iter().position(|&m| m == mode).unwrap()] }
-                }).collect();
-                assert_eq!(actual, expected, "active{} aux{used} mode{mode}", residents.active_count);
+                let expected: Vec<_> = (0..drawn)
+                    .map(|_| u32::from_le_bytes(take(4).try_into().unwrap()))
+                    .collect();
+                let actual: Vec<_> = markers
+                    .iter()
+                    .filter(|m| m.visible)
+                    .map(|m| {
+                        if mode == 0 {
+                            0xffff_ffff
+                        } else {
+                            m.colors[MODES.iter().position(|&m| m == mode).unwrap()]
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    actual, expected,
+                    "active{} aux{used} mode{mode}",
+                    residents.active_count
+                );
             }
         }
         assert_eq!(offset, bytes.len());
@@ -271,8 +324,8 @@ mod tests {
     fn matches_native_live_shopping_markers() {
         let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let fixture = std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_MARKERS")
-            .unwrap()).unwrap();
+        let fixture =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_MARKERS").unwrap()).unwrap();
         assert_eq!(&fixture[..8], b"MTLVMK01");
         let word = |at| u32::from_le_bytes(fixture[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
@@ -281,25 +334,33 @@ mod tests {
         let mut businesses = vec![[0; 0x220]; 600];
         let mut players = openmt2001::player_manager::Manager {
             bytes: [0; 0x28],
-            players: (0..6).map(|slot| openmt2001::player_manager::Player {
-                reference: 0x100c0000 + slot * 0x300,
-                bytes: vec![0; 0x1e50], auxiliaries: vec![],
-            }).collect(),
+            players: (0..6)
+                .map(|slot| openmt2001::player_manager::Player {
+                    reference: 0x100c0000 + slot * 0x300,
+                    bytes: vec![0; 0x1e50],
+                    auxiliaries: vec![],
+                })
+                .collect(),
         };
         for at in (16..fixture.len()).step_by(16) {
             let owner = word(at) as i32;
             let character = word(at + 4);
             let business = word(at + 8) as i32;
             for (slot, player) in players.players.iter_mut().enumerate() {
-                let selected = if slot as i32 == owner - 1 { character }
-                    else { (character + 1) % 10 };
+                let selected = if slot as i32 == owner - 1 {
+                    character
+                } else {
+                    (character + 1) % 10
+                };
                 player.bytes[0x150..0x154].copy_from_slice(&selected.to_le_bytes());
             }
             buildings[17][0x1c..0x20].copy_from_slice(&business.to_le_bytes());
             businesses[23][10] = owner as u8;
-            assert_eq!(runtime_shopping_color(17, &buildings, &businesses, &players,
-                &image).unwrap(), word(at + 12),
-                "owner{owner} character{character} business{business}");
+            assert_eq!(
+                runtime_shopping_color(17, &buildings, &businesses, &players, &image).unwrap(),
+                word(at + 12),
+                "owner{owner} character{character} business{business}"
+            );
         }
     }
     #[test]

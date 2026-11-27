@@ -35,7 +35,11 @@ pub enum Command {
     ///4db690: normal appmode3 shows original day_tutor_panel instance57e76c.
     CreateEventList,
     ///4dba70/4dbab0/4dbae0; bid amount is an increment over live+6c.
-    ForcedAuction { producer: u32, participant: u32, amount: u32 },
+    ForcedAuction {
+        producer: u32,
+        participant: u32,
+        amount: u32,
+    },
     ///4daa60:4ad760(name,1,0,0,1,100), after Lua's last-argument string conversion.
     PlaySound,
     ResultFlyby,
@@ -75,11 +79,25 @@ fn tutorial_build_integer(arguments: &[Value]) -> Option<i32> {
     }
 }
 
-fn forced_auction(id:u32,arguments:&[Value])->Option<(u32,u32,u32)>{
-    let Value::Number(participant)=arguments.first()? else{return None};
-    let participant=crate::economy::ftol_low_word(*participant) as u32;
-    let amount=match arguments.get(1){Some(Value::Number(value))=>crate::economy::ftol_low_word(*value) as u32,_=>0};
-    Some((match id{738=>0x464530,739=>0x4644f0,740=>0x4644a0,_=>return None},participant,amount))
+fn forced_auction(id: u32, arguments: &[Value]) -> Option<(u32, u32, u32)> {
+    let Value::Number(participant) = arguments.first()? else {
+        return None;
+    };
+    let participant = crate::economy::ftol_low_word(*participant) as u32;
+    let amount = match arguments.get(1) {
+        Some(Value::Number(value)) => crate::economy::ftol_low_word(*value) as u32,
+        _ => 0,
+    };
+    Some((
+        match id {
+            738 => 0x464530,
+            739 => 0x4644f0,
+            740 => 0x4644a0,
+            _ => return None,
+        },
+        participant,
+        amount,
+    ))
 }
 
 /// Borrow authoritative records; no copied city topology or resident counters.
@@ -142,26 +160,43 @@ impl Context<'_, '_> {
 // 741 belongs to TutorialSetBuildUse. Calendar owns 744/745 (get/set).
 fn register_calendar(vm: &mut Runtime) -> Result<(), String> {
     vm.register_number_properties("Calendar", 744)?;
-    for (name, value) in [("GAME_MINUTE", 10), ("GAME_HOUR", 625),
-        ("GAME_YEAR", 15000), ("GAME_DECADE", 150000)] {
+    for (name, value) in [
+        ("GAME_MINUTE", 10),
+        ("GAME_HOUR", 625),
+        ("GAME_YEAR", 15000),
+        ("GAME_DECADE", 150000),
+    ] {
         vm.set_number(name, value as f64)?;
     }
-    for hour in 0..24 { vm.set_number(&format!("HOUR_{hour}"), hour as f64)?; }
-    for year in 0..10 { vm.set_number(&format!("YEAR_{year:02}"), year as f64)?; }
-    for era in 0..8 { vm.set_number(&format!("ERA_{}", 1930 + era * 10), era as f64)?; }
+    for hour in 0..24 {
+        vm.set_number(&format!("HOUR_{hour}"), hour as f64)?;
+    }
+    for year in 0..10 {
+        vm.set_number(&format!("YEAR_{year:02}"), year as f64)?;
+    }
+    for era in 0..8 {
+        vm.set_number(&format!("ERA_{}", 1930 + era * 10), era as f64)?;
+    }
     Ok(())
 }
 
-fn calendar_property(id: u32, arguments: &[Value], clock: &mut crate::clock::Clock)
-    -> Result<Option<f64>, String> {
+fn calendar_property(
+    id: u32,
+    arguments: &[Value],
+    clock: &mut crate::clock::Clock,
+) -> Result<Option<f64>, String> {
     let slot = match arguments.first() {
         Some(Value::Bytes(key)) => match key.as_slice() {
-            b"hour" => 0, b"year" => 1, b"era" => 2,
+            b"hour" => 0,
+            b"year" => 1,
+            b"era" => 2,
             _ => return Ok(None),
         },
         _ => return Ok(None),
     };
-    if id == 744 { return Ok(Some(clock.calendar[slot] as i32 as f64)); }
+    if id == 744 {
+        return Ok(Some(clock.calendar[slot] as i32 as f64));
+    }
     // host_property performs lua_tonumber in C, including numeric strings and nil.
     let Some(Value::Number(value)) = arguments.get(1) else {
         return Err("Calendar setter missing C-coerced number".into());
@@ -175,18 +210,27 @@ fn calendar_property(id: u32, arguments: &[Value], clock: &mut crate::clock::Clo
 fn register_game_performance(vm: &mut Runtime) -> Result<(), String> {
     vm.register_number_properties("Game", 747)?;
     //Original register_game.cpp: named intended bounds; storage is signed32.
-    for (name,value) in [("PERFORM_HIGH",2.),("PERFORM_MEDIUM",1.),("PERFORM_LOW",0.)] {
-        vm.set_number(name,value)?;
+    for (name, value) in [
+        ("PERFORM_HIGH", 2.),
+        ("PERFORM_MEDIUM", 1.),
+        ("PERFORM_LOW", 0.),
+    ] {
+        vm.set_number(name, value)?;
     }
     Ok(())
 }
-fn game_performance_property(id:u32, arguments:&[Value], hooks:&mut impl Hooks)
-    -> Result<Option<f64>,String> {
+fn game_performance_property(
+    id: u32,
+    arguments: &[Value],
+    hooks: &mut impl Hooks,
+) -> Result<Option<f64>, String> {
     if !matches!(arguments.first(),Some(Value::Bytes(key)) if key.as_slice()==b"performance") {
         return Err("unsupported Game numeric property".into());
     }
-    if id==747 {return hooks.performance8b26cc().map(|v|Some(f64::from(v)));}
-    let Some(Value::Number(value))=arguments.get(1) else {
+    if id == 747 {
+        return hooks.performance8b26cc().map(|v| Some(f64::from(v)));
+    }
+    let Some(Value::Number(value)) = arguments.get(1) else {
         return Err("Game.performance setter missing C-coerced number".into());
     };
     //004d6980 uses tonumber then _ftol/EAX: truncate signed64, retain low32.
@@ -218,11 +262,19 @@ impl Bindings {
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
         register_calendar(vm)?;
         let map = crate::map_script::Bindings::register(vm, 1, 2)?;
-        vm.execute("Business table", b"Business={}", &mut |_, _| Err("unexpected initialization callback".into()))?;
+        vm.execute("Business table", b"Business={}", &mut |_, _| {
+            Err("unexpected initialization callback".into())
+        })?;
         for index in 0..600 {
-            vm.execute("Business entry", b"openmt_business={}", &mut |_, _| Err("unexpected initialization callback".into()))?;
+            vm.execute("Business entry", b"openmt_business={}", &mut |_, _| {
+                Err("unexpected initialization callback".into())
+            })?;
             vm.register_indexed_method("openmt_business", "SetOwner", 734, index)?;
-            vm.execute("Business index", format!("Business[{index}]=openmt_business; openmt_business=nil").as_bytes(), &mut |_, _| Err("unexpected initialization callback".into()))?;
+            vm.execute(
+                "Business index",
+                format!("Business[{index}]=openmt_business; openmt_business=nil").as_bytes(),
+                &mut |_, _| Err("unexpected initialization callback".into()),
+            )?;
         }
         let commodities = crate::commodity_script::Bindings::register(vm, image, 100)?;
         let properties = crate::initial_conditions::Bindings::register(vm, 300)?;
@@ -232,7 +284,7 @@ impl Bindings {
         let businesses = crate::business_script::Bindings::register(vm, image, 200)?;
         let startup_settings = crate::startup_settings::Bindings::register(vm, 600)?;
         crate::population_script::register(vm, 6)?;
-        vm.register_number_method("People","NumberInCity",14,0)?;
+        vm.register_number_method("People", "NumberInCity", 14, 0)?;
         let resident_settings = crate::resident_settings::Bindings::register(vm, 500)?;
         vm.register_event_triggers(7)?;
         vm.register_coerced("C_PlaySound", 13, "S")?;
@@ -265,12 +317,14 @@ impl Bindings {
         ] {
             vm.set_number(name, value)?;
         }
-        crate::level_catalog::script::register_language(vm,image)?;
+        crate::level_catalog::script::register_language(vm, image)?;
         objective_selection::register_constants(vm, image)?;
         for (name, id) in [
             ("GetDifficulty", 3),
-            ("GetObjectiveTarget", objective_selection::GET_TARGET_CALLBACK),
-            
+            (
+                "GetObjectiveTarget",
+                objective_selection::GET_TARGET_CALLBACK,
+            ),
             ("Pause", 9),
             ("Unpause", 10),
             ("TutorialDisableAllControls", 720),
@@ -298,63 +352,132 @@ impl Bindings {
             ("TUT_MPP_INFOBUTTON_4", f64::from(image.f32_at(0x4dbd3f)?)),
             ("TUT_MPP_INFOBUTTON_5", f64::from(image.f32_at(0x4dbd53)?)),
             ("TUT_MPP_BLOCK_LANDRENT", f64::from(image.f32_at(0x4dc14c)?)),
-            ("TUT_MPP_BLOCK_LEFT_TOGGLE", f64::from(image.f32_at(0x4dc160)?)),
-            ("TUT_MPP_BLOCK_RIGHT_TOGGLE", f64::from(image.f32_at(0x4dc174)?)),
+            (
+                "TUT_MPP_BLOCK_LEFT_TOGGLE",
+                f64::from(image.f32_at(0x4dc160)?),
+            ),
+            (
+                "TUT_MPP_BLOCK_RIGHT_TOGGLE",
+                f64::from(image.f32_at(0x4dc174)?),
+            ),
             ("TUT_MPP_BLOCK_BUYBLOCK", f64::from(image.f32_at(0x4dc188)?)),
-            ("TUT_BUILD_RIGHTS_BUTTON", f64::from(image.f32_at(0x4dc19c)?)),
-            ("TUT_GAME_AUCTION_STARTTIMER", f64::from(image.f32_at(0x4dc1b0)?)),
-            ("TUT_AUCTION_TIMER_PANEL",f64::from(image.f32_at(0x4dc110)?)),
-            ("TUT_BEGINAUCTION",f64::from(image.f32_at(0x4dc23c)?)),
-            ("TUT_ENDAUCTION",f64::from(image.f32_at(0x4dc250)?)),
-            ("TUT_AUCTION_50",f64::from(image.f32_at(0x4dc264)?)),
-            ("TUT_AUCTION_100",f64::from(image.f32_at(0x4dc278)?)),
-            ("TUT_AUCTION_500",f64::from(image.f32_at(0x4dc28c)?)),
-            ("TUT_MYGO",f64::from(image.f32_at(0x4dc2c8)?)),
-            ("TUT_AUCTION_PASS",f64::from(image.f32_at(0x4dc2b4)?)),
-            ("TUT_AUCTION_PULLOUT",f64::from(image.f32_at(0x4dc2a0)?)),
-            ("TUT_MPP_BUILDING_LEFT_TOGGLE", f64::from(image.f32_at(0x4dc1d8)?)),
-            ("TUT_MPP_BUILDING_RIGHT_TOGGLE", f64::from(image.f32_at(0x4dc1ec)?)),
+            (
+                "TUT_BUILD_RIGHTS_BUTTON",
+                f64::from(image.f32_at(0x4dc19c)?),
+            ),
+            (
+                "TUT_GAME_AUCTION_STARTTIMER",
+                f64::from(image.f32_at(0x4dc1b0)?),
+            ),
+            (
+                "TUT_AUCTION_TIMER_PANEL",
+                f64::from(image.f32_at(0x4dc110)?),
+            ),
+            ("TUT_BEGINAUCTION", f64::from(image.f32_at(0x4dc23c)?)),
+            ("TUT_ENDAUCTION", f64::from(image.f32_at(0x4dc250)?)),
+            ("TUT_AUCTION_50", f64::from(image.f32_at(0x4dc264)?)),
+            ("TUT_AUCTION_100", f64::from(image.f32_at(0x4dc278)?)),
+            ("TUT_AUCTION_500", f64::from(image.f32_at(0x4dc28c)?)),
+            ("TUT_MYGO", f64::from(image.f32_at(0x4dc2c8)?)),
+            ("TUT_AUCTION_PASS", f64::from(image.f32_at(0x4dc2b4)?)),
+            ("TUT_AUCTION_PULLOUT", f64::from(image.f32_at(0x4dc2a0)?)),
+            (
+                "TUT_MPP_BUILDING_LEFT_TOGGLE",
+                f64::from(image.f32_at(0x4dc1d8)?),
+            ),
+            (
+                "TUT_MPP_BUILDING_RIGHT_TOGGLE",
+                f64::from(image.f32_at(0x4dc1ec)?),
+            ),
             ("TUT_HYPERLINK", f64::from(image.f32_at(0x4dc0fc)?)),
-            ("TUT_AERIAL_BUSINESS_LOCATOR", f64::from(image.f32_at(0x4dc124)?)),
-            ("TUT_AERIAL_LOCATOR_LISTMYBUSINESS", f64::from(image.f32_at(0x4dc138)?)),
+            (
+                "TUT_AERIAL_BUSINESS_LOCATOR",
+                f64::from(image.f32_at(0x4dc124)?),
+            ),
+            (
+                "TUT_AERIAL_LOCATOR_LISTMYBUSINESS",
+                f64::from(image.f32_at(0x4dc138)?),
+            ),
             // Native 4dbd75..4dbe20 exposes Strategic View tutorial controls.
             ("TUT_AERIAL_BUTTON_2", f64::from(image.f32_at(0x4dbd7b)?)),
             ("TUT_AERIAL_BUTTON_3", f64::from(image.f32_at(0x4dbd8f)?)),
             ("TUT_AERIAL_BUTTON_4", f64::from(image.f32_at(0x4dbda3)?)),
-            ("TUT_AERIAL_INFOBUTTON_1", f64::from(image.f32_at(0x4dbdb7)?)),
-            ("TUT_AERIAL_INFOBUTTON_2", f64::from(image.f32_at(0x4dbdcb)?)),
-            ("TUT_AERIAL_INFOBUTTON_3", f64::from(image.f32_at(0x4dbddf)?)),
-            ("TUT_AERIAL_INFOBUTTON_4", f64::from(image.f32_at(0x4dbdf3)?)),
-            ("TUT_AERIAL_INFOBUTTON_5", f64::from(image.f32_at(0x4dbe07)?)),
-            ("TUT_AERIAL_INFOBUTTON_6", f64::from(image.f32_at(0x4dbe1b)?)),
+            (
+                "TUT_AERIAL_INFOBUTTON_1",
+                f64::from(image.f32_at(0x4dbdb7)?),
+            ),
+            (
+                "TUT_AERIAL_INFOBUTTON_2",
+                f64::from(image.f32_at(0x4dbdcb)?),
+            ),
+            (
+                "TUT_AERIAL_INFOBUTTON_3",
+                f64::from(image.f32_at(0x4dbddf)?),
+            ),
+            (
+                "TUT_AERIAL_INFOBUTTON_4",
+                f64::from(image.f32_at(0x4dbdf3)?),
+            ),
+            (
+                "TUT_AERIAL_INFOBUTTON_5",
+                f64::from(image.f32_at(0x4dbe07)?),
+            ),
+            (
+                "TUT_AERIAL_INFOBUTTON_6",
+                f64::from(image.f32_at(0x4dbe1b)?),
+            ),
             ("TUT_PROMPT_1", 0.), // 4dbf6e uses PUSH imm8 zero.
             // Original4dbfa2..4dc0d4: actual builder widget registrations.
-            ("TUT_BUILD_SELECT_TYPE",f64::from(image.f32_at(0x4dbfa8)?)),
-            ("TUT_BUILD_SELECT_USE",f64::from(image.f32_at(0x4dbfbc)?)),
-            ("TUT_BUILD_SELECT_BACK_DRAG_BUTTON",f64::from(image.f32_at(0x4dbfd0)?)),
-            ("TUT_BUILD_SELECT_BACK_DRAG_TEXT",f64::from(image.f32_at(0x4dbfe4)?)),
-            ("TUT_BUILD_CHANGE_DESIGN",f64::from(image.f32_at(0x4dbff8)?)),
-            ("TUT_BUILD_CHANGE_FLOOR",f64::from(image.f32_at(0x4dc00c)?)),
-            ("TUT_BUILD_QUALITY_LOW",f64::from(image.f32_at(0x4dc020)?)),
-            ("TUT_BUILD_QUALITY_MED",f64::from(image.f32_at(0x4dc034)?)),
-            ("TUT_BUILD_QUALITY_HIGH",f64::from(image.f32_at(0x4dc048)?)),
-            ("TUT_BUILD_ACCEPT",f64::from(image.f32_at(0x4dc05c)?)),
-            ("TUT_BUILD_CANCEL",f64::from(image.f32_at(0x4dc070)?)),
-            ("TUT_BUILD_PANEL",f64::from(image.f32_at(0x4dc084)?)),
-            ("TUT_END_BUILD",f64::from(image.f32_at(0x4dc098)?)),
-            ("TUT_BUILD_BACKREGION0",f64::from(image.f32_at(0x4dc0ac)?)),
-            ("TUT_BUILD_BACKREGION1",f64::from(image.f32_at(0x4dc0c0)?)),
-            ("TUT_BUILD_BACKREGION2",f64::from(image.f32_at(0x4dc0d4)?)),
-            ("TUT_MPP_BUILDING_LEFT_TOGGLE",f64::from(image.f32_at(0x4dc1d8)?)),
-            ("TUT_MPP_BUILDING_RIGHT_TOGGLE",f64::from(image.f32_at(0x4dc1ec)?)),
-            ("TUT_MPP_BUILDING_REFURBISH",f64::from(image.f32_at(0x4dc200)?)),
-            ("TUT_MPP_BUILDING_DEMOLISH",f64::from(image.f32_at(0x4dc214)?)),
-            ("TUT_MPP_BUILDING_REFURBISH_LIST",f64::from(image.f32_at(0x4dc228)?)),
-            ("TUT_BAP_PLUS_BUTTON_1",f64::from(image.f32_at(0x4dc2dc)?)),
-            ("TUT_BAP_MINUS_BUTTON_1",f64::from(image.f32_at(0x4dc2f0)?)),
-            ("TUT_BAP_PLUS_BUTTON_2",f64::from(image.f32_at(0x4dc304)?)),
-            ("TUT_BAP_MINUS_BUTTON_2",f64::from(image.f32_at(0x4dc318)?)),
-            ("TUT_BAP_OK_BUTTON",f64::from(image.f32_at(0x4dc3cc)?)),
+            ("TUT_BUILD_SELECT_TYPE", f64::from(image.f32_at(0x4dbfa8)?)),
+            ("TUT_BUILD_SELECT_USE", f64::from(image.f32_at(0x4dbfbc)?)),
+            (
+                "TUT_BUILD_SELECT_BACK_DRAG_BUTTON",
+                f64::from(image.f32_at(0x4dbfd0)?),
+            ),
+            (
+                "TUT_BUILD_SELECT_BACK_DRAG_TEXT",
+                f64::from(image.f32_at(0x4dbfe4)?),
+            ),
+            (
+                "TUT_BUILD_CHANGE_DESIGN",
+                f64::from(image.f32_at(0x4dbff8)?),
+            ),
+            ("TUT_BUILD_CHANGE_FLOOR", f64::from(image.f32_at(0x4dc00c)?)),
+            ("TUT_BUILD_QUALITY_LOW", f64::from(image.f32_at(0x4dc020)?)),
+            ("TUT_BUILD_QUALITY_MED", f64::from(image.f32_at(0x4dc034)?)),
+            ("TUT_BUILD_QUALITY_HIGH", f64::from(image.f32_at(0x4dc048)?)),
+            ("TUT_BUILD_ACCEPT", f64::from(image.f32_at(0x4dc05c)?)),
+            ("TUT_BUILD_CANCEL", f64::from(image.f32_at(0x4dc070)?)),
+            ("TUT_BUILD_PANEL", f64::from(image.f32_at(0x4dc084)?)),
+            ("TUT_END_BUILD", f64::from(image.f32_at(0x4dc098)?)),
+            ("TUT_BUILD_BACKREGION0", f64::from(image.f32_at(0x4dc0ac)?)),
+            ("TUT_BUILD_BACKREGION1", f64::from(image.f32_at(0x4dc0c0)?)),
+            ("TUT_BUILD_BACKREGION2", f64::from(image.f32_at(0x4dc0d4)?)),
+            (
+                "TUT_MPP_BUILDING_LEFT_TOGGLE",
+                f64::from(image.f32_at(0x4dc1d8)?),
+            ),
+            (
+                "TUT_MPP_BUILDING_RIGHT_TOGGLE",
+                f64::from(image.f32_at(0x4dc1ec)?),
+            ),
+            (
+                "TUT_MPP_BUILDING_REFURBISH",
+                f64::from(image.f32_at(0x4dc200)?),
+            ),
+            (
+                "TUT_MPP_BUILDING_DEMOLISH",
+                f64::from(image.f32_at(0x4dc214)?),
+            ),
+            (
+                "TUT_MPP_BUILDING_REFURBISH_LIST",
+                f64::from(image.f32_at(0x4dc228)?),
+            ),
+            ("TUT_BAP_PLUS_BUTTON_1", f64::from(image.f32_at(0x4dc2dc)?)),
+            ("TUT_BAP_MINUS_BUTTON_1", f64::from(image.f32_at(0x4dc2f0)?)),
+            ("TUT_BAP_PLUS_BUTTON_2", f64::from(image.f32_at(0x4dc304)?)),
+            ("TUT_BAP_MINUS_BUTTON_2", f64::from(image.f32_at(0x4dc318)?)),
+            ("TUT_BAP_OK_BUTTON", f64::from(image.f32_at(0x4dc3cc)?)),
         ] {
             vm.set_number(name, value)?;
         }
@@ -393,7 +516,7 @@ impl Bindings {
         // Native 4dc4a7, 4dc5ec and 4dc605 bind the three Tutorial 2
         // position/picking methods to 4db740, 4db970 and 4db9e0.
         vm.register_coerced("TutorialPositionPrompt", 731, "NN")?;
-        vm.register("TutorialEnableAllPicking",746)?;
+        vm.register("TutorialEnableAllPicking", 746)?;
         vm.register_coerced("TutorialEnableBlockPicking", 732, "N")?;
         vm.register_coerced("TutorialEnableBuildingPicking", 733, "N")?;
         //4dac40: two tonumber arguments and a lua_isnumber-gated third.
@@ -402,19 +525,21 @@ impl Bindings {
         register_game_performance(vm)?;
         // Install actual closures through protected raw table access. Runtime
         // intentionally has no Lua base-library rawset global.
-        for (member,function) in [
-            ("GetObjectiveTarget","GetObjectiveTarget"),
-            ("GetDifficulty","GetDifficulty"),
-            ("SetObjective","SetObjective"),
-            ("Pause","Pause"),
-            ("Unpause","Unpause"),
-            ("StartFireworks","C_ResultFireworks"),
-            ("SetCutSceneIdentifier","C_ResultCutSceneIdentifier"),
-            ("EnableCutSceneBypass","C_ResultEnableBypass"),
-            ("DisableCutSceneBypass","C_ResultDisableBypass"),
-            ("SetCredits","C_ResultCredits"),
-            ("End","C_ResultEnd"),
-        ] { vm.alias_function("Game",member,function)?; }
+        for (member, function) in [
+            ("GetObjectiveTarget", "GetObjectiveTarget"),
+            ("GetDifficulty", "GetDifficulty"),
+            ("SetObjective", "SetObjective"),
+            ("Pause", "Pause"),
+            ("Unpause", "Unpause"),
+            ("StartFireworks", "C_ResultFireworks"),
+            ("SetCutSceneIdentifier", "C_ResultCutSceneIdentifier"),
+            ("EnableCutSceneBypass", "C_ResultEnableBypass"),
+            ("DisableCutSceneBypass", "C_ResultDisableBypass"),
+            ("SetCredits", "C_ResultCredits"),
+            ("End", "C_ResultEnd"),
+        ] {
+            vm.alias_function("Game", member, function)?;
+        }
         vm.execute(
             "Game bindings",
             b"Camera={SetFlybyMode=C_ResultFlyby,SetMode=C_ResultCameraMode}; Random={ZeroTo=C_RandomZeroTo}; Interface={ForcePlayerToBid=TutorialForceBid,ForcePlayerToPass=TutorialForcePass,ForcePlayerToPullOut=TutorialForcePullOut,CreatePrompt=CreatePrompt,CreateEventList=TutorialCreateEventList,CreateMessage=TutorialCreateMessage,DismissPrompt=TutorialDismissPrompt,AddArrow=TutorialAddArrow,DisableAllControls=TutorialDisableAllControls,DisableAll3DPicking=TutorialDisableAllPicking,EnableAll3DPicking=TutorialEnableAllPicking,DisableCameraControl=TutorialDisableCameraControl,EnableControl=TutorialEnableControl,EnableControlAndChildren=TutorialEnableControlAndChildren,DisableControl=TutorialDisableControl,PositionPrompt=TutorialPositionPrompt,EnableBlockPicking=TutorialEnableBlockPicking,EnableBuildingPicking=TutorialEnableBuildingPicking,SetTutorialType=TutorialSetBuildType,SetTutorialUse=TutorialSetBuildUse}",
@@ -448,8 +573,8 @@ impl Bindings {
         let mut live_context = *context;
         live_context.update_clock(state.clock);
         let context = &live_context;
-        if matches!(id,747|748) {
-            return game_performance_property(id,arguments,hooks);
+        if matches!(id, 747 | 748) {
+            return game_performance_property(id, arguments, hooks);
         }
         if matches!(id, 744 | 745) {
             return calendar_property(id, arguments, state.clock);
@@ -540,8 +665,15 @@ impl Bindings {
         }
         match id {
             738..=740 => {
-                if let Some((producer,participant,amount))=forced_auction(id,arguments){
-                    hooks.command(Command::ForcedAuction{producer,participant,amount},&[])?;
+                if let Some((producer, participant, amount)) = forced_auction(id, arguments) {
+                    hooks.command(
+                        Command::ForcedAuction {
+                            producer,
+                            participant,
+                            amount,
+                        },
+                        &[],
+                    )?;
                 }
                 Ok(None)
             }
@@ -553,14 +685,29 @@ impl Bindings {
                 let [Value::Number(index), Value::Number(owner)] = arguments else {
                     return Err("Business.SetOwner expects index and owner".into());
                 };
-                let index = usize::try_from(crate::economy::ftol_low_word(*index)).map_err(|_| "negative business index")?;
+                let index = usize::try_from(crate::economy::ftol_low_word(*index))
+                    .map_err(|_| "negative business index")?;
                 let owner = crate::economy::ftol_low_word(*owner) as u8;
-                let business = state.businesses.get_mut(index).ok_or("business index leaves pool")?;
-                let building = usize::try_from(i16::from_le_bytes(business[8..10].try_into().unwrap())).map_err(|_| "negative business building")?;
-                let record = state.buildings.get_mut(building).ok_or("business building leaves pool")?;
-                set_business_owner(business, record, owner, context.ownership_timestamp,
-                    context.accounting_enabled, state.player_accounts,
-                    |record| hooks.building_appearance(building, record))?;
+                let business = state
+                    .businesses
+                    .get_mut(index)
+                    .ok_or("business index leaves pool")?;
+                let building =
+                    usize::try_from(i16::from_le_bytes(business[8..10].try_into().unwrap()))
+                        .map_err(|_| "negative business building")?;
+                let record = state
+                    .buildings
+                    .get_mut(building)
+                    .ok_or("business building leaves pool")?;
+                set_business_owner(
+                    business,
+                    record,
+                    owner,
+                    context.ownership_timestamp,
+                    context.accounting_enabled,
+                    state.player_accounts,
+                    |record| hooks.building_appearance(building, record),
+                )?;
                 Ok(None)
             }
             735 => {
@@ -569,15 +716,19 @@ impl Bindings {
             }
             736 => {
                 if let Some(value) = tutorial_build_integer(arguments) {
-                    hooks.command(Command::TutorialBuildType,
-                        &[Value::Number(f64::from(value))])?;
+                    hooks.command(
+                        Command::TutorialBuildType,
+                        &[Value::Number(f64::from(value))],
+                    )?;
                 }
                 Ok(None)
             }
             741 => {
                 if let Some(value) = tutorial_build_integer(arguments) {
-                    hooks.command(Command::TutorialBuildUse,
-                        &[Value::Number(f64::from(value))])?;
+                    hooks.command(
+                        Command::TutorialBuildUse,
+                        &[Value::Number(f64::from(value))],
+                    )?;
                 }
                 Ok(None)
             }
@@ -638,7 +789,10 @@ impl Bindings {
                 Ok(None)
             }
             708 => Err("Random.ZeroTo requires its live result RNG owner".into()),
-            746=>{hooks.command(Command::TutorialEnableAllPicking,arguments)?;Ok(None)}
+            746 => {
+                hooks.command(Command::TutorialEnableAllPicking, arguments)?;
+                Ok(None)
+            }
             720..=733 => {
                 let command = match id {
                     720 => Command::TutorialDisableAllControls,
@@ -660,7 +814,9 @@ impl Bindings {
                 hooks.command(command, arguments)?;
                 Ok(None)
             }
-            14=>Ok(Some(crate::population_script::number_in_city(state.residents.active_count))),
+            14 => Ok(Some(crate::population_script::number_in_city(
+                state.residents.active_count,
+            ))),
             7 => Ok(Some(f64::from(context.total_clock))),
             8 => {
                 let [
@@ -729,25 +885,65 @@ impl Bindings {
 #[cfg(test)]
 mod registration_tests {
     #[test]
-    #[ignore="requires pinned original forced-auction Lua observations"]
-    fn matches_native_forced_auction_bindings(){
-        use crate::{lua4::Value,player_manager::{put,word},ai_messages::offers::auction};
-        let bytes=std::fs::read(std::env::var("OPENMT2001_NATIVE_FORCED_AUCTION_BINDINGS").unwrap()).unwrap();
-        assert_eq!(&bytes[..8],b"MTFORA01");assert_eq!(word(&bytes,8),0x037f);
-        assert_eq!(bytes.len(),16+word(&bytes,12) as usize*40);
-        for (case,row) in bytes[16..].chunks_exact(40).enumerate(){
-            let id=word(row,0);
-            let player=f64::from_le_bytes(row[4..12].try_into().unwrap());
-            let delta=f64::from_le_bytes(row[12..20].try_into().unwrap());
-            let args=if row[20]!=0{vec![Value::Number(player),Value::Number(delta)]}else{vec![Value::Nil]};
-            let actual=super::forced_auction(id,&args);
-            assert_eq!(actual.is_some(),word(row,28)!=0,"case{case} numeric gate");
-            if let Some((producer,participant,amount))=actual{
-                let mut state=[0;128];put(&mut state,0x6c,word(row,24));
-                let descriptor=auction::forced_action_descriptor(producer,participant,amount,&state,[0;32]).unwrap();
-                assert_eq!(word(&descriptor,24),word(row,32),"case{case} participant");
-                if id==738{assert_eq!(word(&descriptor,28),word(row,36),"case{case} current bid addition");}
-                assert_eq!(word(&descriptor,20),match id{738=>0,739=>2,_=>1});
+    #[ignore = "requires pinned original forced-auction Lua observations"]
+    fn matches_native_forced_auction_bindings() {
+        use crate::{
+            ai_messages::offers::auction,
+            lua4::Value,
+            player_manager::{put, word},
+        };
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_FORCED_AUCTION_BINDINGS").unwrap())
+                .unwrap();
+        assert_eq!(&bytes[..8], b"MTFORA01");
+        assert_eq!(word(&bytes, 8), 0x037f);
+        assert_eq!(bytes.len(), 16 + word(&bytes, 12) as usize * 40);
+        for (case, row) in bytes[16..].chunks_exact(40).enumerate() {
+            let id = word(row, 0);
+            let player = f64::from_le_bytes(row[4..12].try_into().unwrap());
+            let delta = f64::from_le_bytes(row[12..20].try_into().unwrap());
+            let args = if row[20] != 0 {
+                vec![Value::Number(player), Value::Number(delta)]
+            } else {
+                vec![Value::Nil]
+            };
+            let actual = super::forced_auction(id, &args);
+            assert_eq!(
+                actual.is_some(),
+                word(row, 28) != 0,
+                "case{case} numeric gate"
+            );
+            if let Some((producer, participant, amount)) = actual {
+                let mut state = [0; 128];
+                put(&mut state, 0x6c, word(row, 24));
+                let descriptor = auction::forced_action_descriptor(
+                    producer,
+                    participant,
+                    amount,
+                    &state,
+                    [0; 32],
+                )
+                .unwrap();
+                assert_eq!(
+                    word(&descriptor, 24),
+                    word(row, 32),
+                    "case{case} participant"
+                );
+                if id == 738 {
+                    assert_eq!(
+                        word(&descriptor, 28),
+                        word(row, 36),
+                        "case{case} current bid addition"
+                    );
+                }
+                assert_eq!(
+                    word(&descriptor, 20),
+                    match id {
+                        738 => 0,
+                        739 => 2,
+                        _ => 1,
+                    }
+                );
             }
         }
     }
@@ -813,19 +1009,32 @@ mod registration_tests {
 /// Original4d88f1 Business:SetOwner tail. Renderer effects are host callbacks;
 /// the accounting flag is the independent native8b22dc lifecycle gate.
 pub fn set_business_owner(
-    business: &mut [u8; 0x220], building: &mut [u8; 0x394], owner: u8,
-    ownership_timestamp: u32, accounting_enabled: bool,
+    business: &mut [u8; 0x220],
+    building: &mut [u8; 0x394],
+    owner: u8,
+    ownership_timestamp: u32,
+    accounting_enabled: bool,
     players: &mut [crate::economy::PlayerAccount],
     mut appearance: impl FnMut(&mut [u8; 0x394]) -> Result<(), String>,
 ) -> Result<(), String> {
     building[0x2d] = owner;
     building[0x30..0x34].copy_from_slice(&ownership_timestamp.to_le_bytes());
-    let refresh = building[0x4c..0x50] == 1u32.to_le_bytes() &&
-        (building[0x1c..0x20] == u32::MAX.to_le_bytes() ||
-        u32::from_le_bytes(building[0x24..0x28].try_into().unwrap()) <= 1);
-    if refresh { appearance(building)?; }
-    crate::economy::transfer_business_owner(business, building[..64].try_into().unwrap(), owner, accounting_enabled, players)?;
-    if refresh { appearance(building)?; }
+    let refresh = building[0x4c..0x50] == 1u32.to_le_bytes()
+        && (building[0x1c..0x20] == u32::MAX.to_le_bytes()
+            || u32::from_le_bytes(building[0x24..0x28].try_into().unwrap()) <= 1);
+    if refresh {
+        appearance(building)?;
+    }
+    crate::economy::transfer_business_owner(
+        business,
+        building[..64].try_into().unwrap(),
+        owner,
+        accounting_enabled,
+        players,
+    )?;
+    if refresh {
+        appearance(building)?;
+    }
     Ok(())
 }
 
@@ -834,25 +1043,41 @@ mod tutorial_owner_tests {
     #[test]
     #[ignore = "requires tools/native_tutorial_build_type.py original v1.4 fixture"]
     fn original_tutorial_build_type_numeric_binding() {
-        let bytes=std::fs::read("work/economy/native-tutorial-build-type.bin").unwrap();
-        assert_eq!(&bytes[..8],b"MTBTYP01");
-        assert_eq!(u16::from_le_bytes(bytes[8..10].try_into().unwrap()),0x037f);
-        let count=u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
-        assert_eq!(bytes.len(),12+count*13);
-        let mut runtime=crate::lua4::Runtime::new().unwrap();
-        runtime.register_coerced("ProbeBuildType",736,"N").unwrap();
-        for (index,case) in bytes[12..].chunks_exact(13).enumerate() {
-            let value=f64::from_le_bytes(case[..8].try_into().unwrap());
-            let numeric=case[8]!=0;
-            let expected=i32::from_le_bytes(case[9..13].try_into().unwrap());
-            let source=if numeric {format!("ProbeBuildType({value:.17})")}else{"ProbeBuildType(nil)".into()};
-            let mut observed=None;
-            runtime.execute("native build type binding",source.as_bytes(),&mut |id,args|{
-                assert_eq!(id,736);
-                observed=super::tutorial_build_integer(args);
-                Ok(None)
-            }).unwrap();
-            assert_eq!(observed,numeric.then_some(expected),"native SetTutorialType case{index}");
+        let bytes = std::fs::read("work/economy/native-tutorial-build-type.bin").unwrap();
+        assert_eq!(&bytes[..8], b"MTBTYP01");
+        assert_eq!(u16::from_le_bytes(bytes[8..10].try_into().unwrap()), 0x037f);
+        let count = u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
+        assert_eq!(bytes.len(), 12 + count * 13);
+        let mut runtime = crate::lua4::Runtime::new().unwrap();
+        runtime
+            .register_coerced("ProbeBuildType", 736, "N")
+            .unwrap();
+        for (index, case) in bytes[12..].chunks_exact(13).enumerate() {
+            let value = f64::from_le_bytes(case[..8].try_into().unwrap());
+            let numeric = case[8] != 0;
+            let expected = i32::from_le_bytes(case[9..13].try_into().unwrap());
+            let source = if numeric {
+                format!("ProbeBuildType({value:.17})")
+            } else {
+                "ProbeBuildType(nil)".into()
+            };
+            let mut observed = None;
+            runtime
+                .execute(
+                    "native build type binding",
+                    source.as_bytes(),
+                    &mut |id, args| {
+                        assert_eq!(id, 736);
+                        observed = super::tutorial_build_integer(args);
+                        Ok(None)
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                observed,
+                numeric.then_some(expected),
+                "native SetTutorialType case{index}"
+            );
         }
     }
     #[test]
@@ -861,23 +1086,56 @@ mod tutorial_owner_tests {
         let bytes = std::fs::read("work/economy/native-tutorial-owner.bin").unwrap();
         assert_eq!(&bytes[..8], b"MTUTOWN0");
         let mut at = 8;
-        let count = u32::from_le_bytes(bytes[at..at+4].try_into().unwrap()); at += 4;
+        let count = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        at += 4;
         assert_eq!(count, 40);
         for case in 0..count {
-            let flag = bytes[at]; let owner = bytes[at+1]; let calls = bytes[at+2]; at += 3;
-            let mut business: [u8; 0x220] = bytes[at..at+0x220].try_into().unwrap(); at += 0x220;
-            let mut building: [u8; 0x394] = bytes[at..at+0x394].try_into().unwrap(); at += 0x394;
-            let expected_business = &bytes[at..at+0x220]; at += 0x220;
-            let expected_building = &bytes[at..at+0x394]; at += 0x394;
-            let expected_counters = [i32::from_le_bytes(bytes[at..at+4].try_into().unwrap()), i32::from_le_bytes(bytes[at+4..at+8].try_into().unwrap())]; at += 8;
-            let mut players = vec![crate::economy::PlayerAccount::from_runtime(&[0; 0x1b8]).unwrap(); 2];
-            for (i,p) in players.iter_mut().enumerate() { p.housing_counter = (i as i32 + 1) * 100; }
+            let flag = bytes[at];
+            let owner = bytes[at + 1];
+            let calls = bytes[at + 2];
+            at += 3;
+            let mut business: [u8; 0x220] = bytes[at..at + 0x220].try_into().unwrap();
+            at += 0x220;
+            let mut building: [u8; 0x394] = bytes[at..at + 0x394].try_into().unwrap();
+            at += 0x394;
+            let expected_business = &bytes[at..at + 0x220];
+            at += 0x220;
+            let expected_building = &bytes[at..at + 0x394];
+            at += 0x394;
+            let expected_counters = [
+                i32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()),
+                i32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()),
+            ];
+            at += 8;
+            let mut players =
+                vec![crate::economy::PlayerAccount::from_runtime(&[0; 0x1b8]).unwrap(); 2];
+            for (i, p) in players.iter_mut().enumerate() {
+                p.housing_counter = (i as i32 + 1) * 100;
+            }
             let mut refreshes = 0;
-            super::set_business_owner(&mut business, &mut building, owner, 0x12345678, flag != 0,
-                &mut players, |_| { refreshes += 1; Ok(()) }).unwrap();
+            super::set_business_owner(
+                &mut business,
+                &mut building,
+                owner,
+                0x12345678,
+                flag != 0,
+                &mut players,
+                |_| {
+                    refreshes += 1;
+                    Ok(())
+                },
+            )
+            .unwrap();
             assert_eq!(business, expected_business, "case {case} business");
             assert_eq!(building, expected_building, "case {case} building");
-            assert_eq!(players.iter().map(|p|p.housing_counter).collect::<Vec<_>>(), expected_counters, "case {case} counters");
+            assert_eq!(
+                players
+                    .iter()
+                    .map(|p| p.housing_counter)
+                    .collect::<Vec<_>>(),
+                expected_counters,
+                "case {case} counters"
+            );
             assert_eq!(refreshes, calls, "case {case} appearance");
         }
         assert_eq!(at, bytes.len());
@@ -892,24 +1150,62 @@ mod calendar_binding_tests {
         let mut vm = Runtime::new().unwrap();
         register_calendar(&mut vm).unwrap();
         vm.register_script_loader("C_RunScript").unwrap();
-        vm.script_buffer("inner.lua", b"Calendar.era=ERA_1980; inner=Calendar.era").unwrap();
-        let mut clock = crate::clock::Clock {calendar:[13,7,3,0xabcdef,77],timing:[11,22,33,44,55,66]};
-        vm.execute("get", b"h=Calendar.hour; y=Calendar.year; e=Calendar.era", &mut |id,args| calendar_property(id,args,&mut clock)).unwrap();
-        assert_eq!(vm.number("h").unwrap(),Some(13.));
-        assert_eq!(vm.number("y").unwrap(),Some(7.));
-        assert_eq!(vm.number("e").unwrap(),Some(3.));
-        for (input,expected) in [("9.9",9),("-9.9",-9),("'12.7'",12),("'bad'",0),("nil",0),("{}",0),("function() end",0),("4294967301",5)] {
-            vm.execute("coerce",format!("Calendar.hour={input}; observed=Calendar.hour").as_bytes(),&mut |id,args|calendar_property(id,args,&mut clock)).unwrap();
-            assert_eq!(vm.number("observed").unwrap(),Some(expected as f64));
-            assert_eq!(&clock.calendar[1..], &[7,3,0xabcdef,77]);
-            assert_eq!(clock.timing,[11,22,33,44,55,66]);
+        vm.script_buffer("inner.lua", b"Calendar.era=ERA_1980; inner=Calendar.era")
+            .unwrap();
+        let mut clock = crate::clock::Clock {
+            calendar: [13, 7, 3, 0xabcdef, 77],
+            timing: [11, 22, 33, 44, 55, 66],
+        };
+        vm.execute(
+            "get",
+            b"h=Calendar.hour; y=Calendar.year; e=Calendar.era",
+            &mut |id, args| calendar_property(id, args, &mut clock),
+        )
+        .unwrap();
+        assert_eq!(vm.number("h").unwrap(), Some(13.));
+        assert_eq!(vm.number("y").unwrap(), Some(7.));
+        assert_eq!(vm.number("e").unwrap(), Some(3.));
+        for (input, expected) in [
+            ("9.9", 9),
+            ("-9.9", -9),
+            ("'12.7'", 12),
+            ("'bad'", 0),
+            ("nil", 0),
+            ("{}", 0),
+            ("function() end", 0),
+            ("4294967301", 5),
+        ] {
+            vm.execute(
+                "coerce",
+                format!("Calendar.hour={input}; observed=Calendar.hour").as_bytes(),
+                &mut |id, args| calendar_property(id, args, &mut clock),
+            )
+            .unwrap();
+            assert_eq!(vm.number("observed").unwrap(), Some(expected as f64));
+            assert_eq!(&clock.calendar[1..], &[7, 3, 0xabcdef, 77]);
+            assert_eq!(clock.timing, [11, 22, 33, 44, 55, 66]);
         }
-        clock.calendar[1]=u32::MAX;
+        clock.calendar[1] = u32::MAX;
         vm.execute("host change", b"signed=Calendar.year; Calendar.era=3; first=Calendar.era; C_RunScript('inner.lua'); second=Calendar.era; Calendar.era=7; third=Calendar.era", &mut |id,args|calendar_property(id,args,&mut clock)).unwrap();
-        for (key,value) in [("signed",-1.),("first",3.),("inner",5.),("second",5.),("third",7.)] {assert_eq!(vm.number(key).unwrap(),Some(value));}
-        assert!(vm.execute("partial error",b"Calendar.hour=21; missing_calendar_test_function()",&mut |id,args|calendar_property(id,args,&mut clock)).is_err());
-        assert_eq!(clock.calendar[0],21);
-        assert_eq!(&clock.calendar[3..],&[0xabcdef,77]);
+        for (key, value) in [
+            ("signed", -1.),
+            ("first", 3.),
+            ("inner", 5.),
+            ("second", 5.),
+            ("third", 7.),
+        ] {
+            assert_eq!(vm.number(key).unwrap(), Some(value));
+        }
+        assert!(
+            vm.execute(
+                "partial error",
+                b"Calendar.hour=21; missing_calendar_test_function()",
+                &mut |id, args| calendar_property(id, args, &mut clock)
+            )
+            .is_err()
+        );
+        assert_eq!(clock.calendar[0], 21);
+        assert_eq!(&clock.calendar[3..], &[0xabcdef, 77]);
     }
     #[test]
     #[ignore = "requires OPENMT2001_EXE original binding constants; registration only"]
@@ -921,23 +1217,41 @@ mod calendar_binding_tests {
         // Ordinary Calendar.SetFrequency assignment would invoke that host.
         let _bindings = Bindings::register(&mut vm, &image).unwrap();
         let mut calls = Vec::new();
-        vm.execute("frequency closure", b"Calendar.SetFrequency(99,'0.04')", &mut |id,args| {
-            calls.push((id,args.to_vec()));
-            match id {11=>Ok(Some(1.)),12=>Ok(None),_=>Err("frequency routed to property setter".into())}
-        }).unwrap();
-        assert_eq!(calls[0].0,11);
-        assert_eq!(calls[1],(12,vec![Value::Number(0.04)]));
-        for (name,value) in [("ERA_1960",3.),("ERA_1980",5.),("GAME_HOUR",625.),("YEAR_09",9.),("HOUR_23",23.)] {
-            assert_eq!(vm.number(name).unwrap(),Some(value));
+        vm.execute(
+            "frequency closure",
+            b"Calendar.SetFrequency(99,'0.04')",
+            &mut |id, args| {
+                calls.push((id, args.to_vec()));
+                match id {
+                    11 => Ok(Some(1.)),
+                    12 => Ok(None),
+                    _ => Err("frequency routed to property setter".into()),
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(calls[0].0, 11);
+        assert_eq!(calls[1], (12, vec![Value::Number(0.04)]));
+        for (name, value) in [
+            ("ERA_1960", 3.),
+            ("ERA_1980", 5.),
+            ("GAME_HOUR", 625.),
+            ("YEAR_09", 9.),
+            ("HOUR_23", 23.),
+        ] {
+            assert_eq!(vm.number(name).unwrap(), Some(value));
         }
     }
 
     #[test]
     fn era_callback_partial_error_and_clock_export_cold_readback() {
-        let mut vm=Runtime::new().unwrap();
+        let mut vm = Runtime::new().unwrap();
         register_calendar(&mut vm).unwrap();
-        let mut clock=crate::clock::Clock{calendar:[1,0,3,0x12345678,99],timing:[100,200,300,400,500,600]};
-        let mut saw_script=false;
+        let mut clock = crate::clock::Clock {
+            calendar: [1, 0, 3, 0x12345678, 99],
+            timing: [100, 200, 300, 400, 500, 600],
+        };
+        let mut saw_script = false;
         crate::era::advance(3,&mut clock,|call,clock| {
             if matches!(call,crate::era::Call::Script{..}) {
                 saw_script=true;
@@ -946,29 +1260,56 @@ mod calendar_binding_tests {
             Ok(())
         }).unwrap();
         assert!(saw_script);
-        for (name,value) in [("y1",2.),("y2",7.),("h1",4.),("h2",13.)] {assert_eq!(vm.number(name).unwrap(),Some(value));}
-        assert_eq!(clock.calendar,[13,7,3,0x12345678,99]);
+        for (name, value) in [("y1", 2.), ("y2", 7.), ("h1", 4.), ("h2", 13.)] {
+            assert_eq!(vm.number(name).unwrap(), Some(value));
+        }
+        assert_eq!(clock.calendar, [13, 7, 3, 0x12345678, 99]);
         // This is the real save writer/reader clock path, not a synthetic table.
-        let mut categories=[[0;380];52];
-        let mut saved=crate::save::writer::State {
-            compatibility:&[0;40],level:500002,difficulty:0,current_cash:0.,players:&[],
-            businesses:&[],buildings:&[],building_base:0,building_sentinel_next:0,
-            categories:&mut categories,residents:&[],cameras:&[[0;196];2],
-            calendar:clock.calendar,timing:clock.timing,pending:&[0;3588],resident_accounts:&[],
-            scheduled:&[],auction:None,objective:&[0;60],business_info:&[[0;116];45],
-            commodities:&[[0;28];32],history:&[0;0x10f44],game_mode:0,
+        let mut categories = [[0; 380]; 52];
+        let mut saved = crate::save::writer::State {
+            compatibility: &[0; 40],
+            level: 500002,
+            difficulty: 0,
+            current_cash: 0.,
+            players: &[],
+            businesses: &[],
+            buildings: &[],
+            building_base: 0,
+            building_sentinel_next: 0,
+            categories: &mut categories,
+            residents: &[],
+            cameras: &[[0; 196]; 2],
+            calendar: clock.calendar,
+            timing: clock.timing,
+            pending: &[0; 3588],
+            resident_accounts: &[],
+            scheduled: &[],
+            auction: None,
+            objective: &[0; 60],
+            business_info: &[[0; 116]; 45],
+            commodities: &[[0; 28]; 32],
+            history: &[0; 0x10f44],
+            game_mode: 0,
         };
-        let bytes=crate::save::writer::encode(&mut saved,0x600,[0;4]).unwrap();
-        let mut cold=crate::save::SaveFile::parse(&bytes).unwrap().clock().unwrap();
-        assert_eq!(cold,clock);
-        vm.execute("cold clock getter",b"cold_hour=Calendar.hour; Calendar.year=-2.9; cold_year=Calendar.year",&mut |id,args|calendar_property(id,args,&mut cold)).unwrap();
-        assert_eq!(vm.number("cold_hour").unwrap(),Some(13.));
-        assert_eq!(vm.number("cold_year").unwrap(),Some(-2.));
-        assert_eq!(cold.calendar[1],(-2i32) as u32);
-        assert_eq!(cold.timing,clock.timing);
+        let bytes = crate::save::writer::encode(&mut saved, 0x600, [0; 4]).unwrap();
+        let mut cold = crate::save::SaveFile::parse(&bytes)
+            .unwrap()
+            .clock()
+            .unwrap();
+        assert_eq!(cold, clock);
+        vm.execute(
+            "cold clock getter",
+            b"cold_hour=Calendar.hour; Calendar.year=-2.9; cold_year=Calendar.year",
+            &mut |id, args| calendar_property(id, args, &mut cold),
+        )
+        .unwrap();
+        assert_eq!(vm.number("cold_hour").unwrap(), Some(13.));
+        assert_eq!(vm.number("cold_year").unwrap(), Some(-2.));
+        assert_eq!(cold.calendar[1], (-2i32) as u32);
+        assert_eq!(cold.timing, clock.timing);
     }
-
 }
 
 #[cfg(test)]
-#[path="level_script/performance_tests.rs"] mod performance_tests;
+#[path = "level_script/performance_tests.rs"]
+mod performance_tests;

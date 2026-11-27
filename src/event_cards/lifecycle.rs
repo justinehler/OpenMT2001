@@ -274,7 +274,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECLF01");
         assert_eq!(r.word(), 2);
-        assert_eq!(r.word(),0x037f);
+        assert_eq!(r.word(), 0x037f);
         for _ in 0..r.word() {
             let name = std::str::from_utf8(r.blob()).unwrap();
             let [op, arg, mutation, expected_return] = std::array::from_fn::<_, 4, _>(|_| r.word());

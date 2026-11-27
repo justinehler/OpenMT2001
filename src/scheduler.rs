@@ -65,13 +65,23 @@ impl<T> Queue<T> {
     /// Visit retained nodes in native stream order (total list, normal list).
     /// Snapshotting during a callback would omit its temporarily owned payload.
     pub fn snapshot(&self) -> Result<Vec<(ClockDomain, u32, &T)>, String> {
-        if self.draining { return Err("cannot save a queue during dispatch".into()); }
+        if self.draining {
+            return Err("cannot save a queue during dispatch".into());
+        }
         let mut rows = Vec::new();
         for domain in [ClockDomain::Total, ClockDomain::Normal] {
             let mut next = self.heads[domain.index()];
             while let Some(index) = next {
-                let node = self.nodes[index].as_ref().ok_or("queue snapshot link missing")?;
-                rows.push((domain, node.due, node.payload.as_ref().ok_or("queue snapshot payload missing")?));
+                let node = self.nodes[index]
+                    .as_ref()
+                    .ok_or("queue snapshot link missing")?;
+                rows.push((
+                    domain,
+                    node.due,
+                    node.payload
+                        .as_ref()
+                        .ok_or("queue snapshot payload missing")?,
+                ));
                 next = node.next;
             }
         }

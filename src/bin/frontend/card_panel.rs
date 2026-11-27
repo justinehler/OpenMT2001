@@ -48,7 +48,10 @@ pub fn verify_host(
             crate::gameplay_sound::Operation::CardOpen { positive: true },
             "native card row {card} must choose Positivepluck",
         );
-        assert!(sound_receiver.try_recv().is_err(), "card open plays one cue");
+        assert!(
+            sound_receiver.try_recv().is_err(),
+            "card open plays one cue"
+        );
         host.gameplay_sound = prior_sound;
         let panel = host.status(session).card.unwrap();
         assert_eq!(panel.card, card);

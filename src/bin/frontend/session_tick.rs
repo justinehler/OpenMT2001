@@ -24,7 +24,12 @@ pub struct Policy {
 }
 #[derive(Debug)]
 pub enum Event<'a> {
-    ScriptCommands(&'a [(openmt2001::level_script::Command, Vec<openmt2001::lua4::Value>)]),
+    ScriptCommands(
+        &'a [(
+            openmt2001::level_script::Command,
+            Vec<openmt2001::lua4::Value>,
+        )],
+    ),
     Tick(scheduler::Event),
     Calendar(CalendarEvent),
     Autosave(&'a mut dyn crate::session_save::AutosaveRequest),
@@ -32,15 +37,27 @@ pub enum Event<'a> {
     Pending(live_commands::PendingCall, Option<&'a mut [u8; 0x394]>),
     Player(openmt2001::player_tick::Event),
     TransportSound(openmt2001::traffic::RouteSound),
-    EraMusic {era:u32,repeat:bool},
-    TransportEnvironment { call: openmt2001::traffic::scene::EnvironmentCall, position: [f32; 3] },
+    EraMusic {
+        era: u32,
+        repeat: bool,
+    },
+    TransportEnvironment {
+        call: openmt2001::traffic::scene::EnvironmentCall,
+        position: [f32; 3],
+    },
     MarketShare(openmt2001::player_share::Call),
-    HumanDialog { call:openmt2001::human_messages::Call, name:Option<[u8;96]> },
+    HumanDialog {
+        call: openmt2001::human_messages::Call,
+        name: Option<[u8; 96]>,
+    },
     Ai(openmt2001::ai_runtime::Call),
     Script {
         name: String,
         argument: i32,
-        commands: &'a [(openmt2001::level_script::Command, Vec<openmt2001::lua4::Value>)],
+        commands: &'a [(
+            openmt2001::level_script::Command,
+            Vec<openmt2001::lua4::Value>,
+        )],
     },
 }
 
@@ -50,17 +67,25 @@ impl Session<'_> {
     /// not suppress interface dispatch. Only retained8b22d8 gates the countdown.
     pub fn advance_interface_tick(
         &mut self,
-        iterations:u32,
-        suppressed:bool,
-        mut call:impl FnMut(openmt2001::ai_messages::offers::auction::announcement::Call)->Result<u32,String>,
-    )->Result<(),String>{
-        let exists=self.world.city.auction.controller.reference!=0;
-        let paused=self.world.city.pause.bytes[8]!=0;
-        if suppressed || self.world.city.pause.bytes[3] as i8 > 0 {return Ok(());}
+        iterations: u32,
+        suppressed: bool,
+        mut call: impl FnMut(
+            openmt2001::ai_messages::offers::auction::announcement::Call,
+        ) -> Result<u32, String>,
+    ) -> Result<(), String> {
+        let exists = self.world.city.auction.controller.reference != 0;
+        let paused = self.world.city.pause.bytes[8] != 0;
+        if suppressed || self.world.city.pause.bytes[3] as i8 > 0 {
+            return Ok(());
+        }
         for _ in 0..iterations {
             if self.world.city.auction.presentation.visible {
                 openmt2001::ai_messages::offers::auction::announcement::advance(
-                    &mut self.world.city.auction.presentation,exists,paused,|event,_|call(event))?;
+                    &mut self.world.city.auction.presentation,
+                    exists,
+                    paused,
+                    |event, _| call(event),
+                )?;
             }
         }
         Ok(())
@@ -134,12 +159,16 @@ impl Session<'_> {
             )
         })();
         self.models = std::mem::take(geometry.registrar_mut());
-        let refreshed = self.population.refresh_city(&self.world.city, assets.board)
-            .and_then(|()| self.population.refresh_bindings_if_changed(
-                &self.world.city,
-                &self.resident_models,
-                &self.people,
-            ));
+        let refreshed = self
+            .population
+            .refresh_city(&self.world.city, assets.board)
+            .and_then(|()| {
+                self.population.refresh_bindings_if_changed(
+                    &self.world.city,
+                    &self.resident_models,
+                    &self.people,
+                )
+            });
         result.and(refreshed)
     }
     /// Run the original normal logic ordering over the retained session. Host

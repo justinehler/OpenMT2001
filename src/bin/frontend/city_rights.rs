@@ -16,8 +16,13 @@ impl Rights {
         world: &openmt2001::level_startup::World,
         players: &crate::player_info::State,
     ) -> Result<Option<Self>, String> {
-        let Some(current) = players.current else { return Ok(None) };
-        let player = players.records.get(current).ok_or("rights current player leaves roster")?;
+        let Some(current) = players.current else {
+            return Ok(None);
+        };
+        let player = players
+            .records
+            .get(current)
+            .ok_or("rights current player leaves roster")?;
         let categories = std::array::from_fn(|i| {
             let row = &world.categories[i];
             Category {
@@ -26,15 +31,27 @@ impl Rights {
                 remaining: i32::from_le_bytes(row[0x80..0x84].try_into().unwrap()),
             }
         });
-        if categories.iter().any(|row| usize::from(row.owner) > players.records.len()) {
+        if categories
+            .iter()
+            .any(|row| usize::from(row.owner) > players.records.len())
+        {
             return Err("rights category owner outside live roster".into());
         }
         let bytes = &player[0x154..];
-        let end = bytes.iter().position(|&b| b == 0)
+        let end = bytes
+            .iter()
+            .position(|&b| b == 0)
             .ok_or("rights player name not terminated")?;
-        let player_name = bytes[..end].iter().map(|b| {
-            if (32..=126).contains(b) { b - 32 } else { b'?' - 32 }
-        }).collect();
+        let player_name = bytes[..end]
+            .iter()
+            .map(|b| {
+                if (32..=126).contains(b) {
+                    b - 32
+                } else {
+                    b'?' - 32
+                }
+            })
+            .collect();
         Ok(Some(Self {
             categories,
             owner_number: (current + 1) as u8,

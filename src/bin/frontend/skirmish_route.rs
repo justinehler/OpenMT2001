@@ -116,12 +116,16 @@ impl Route {
         let maps = crate::skirmish_maps::Catalog::discover(&self.scripts)?;
         let exe = &self.executable;
         let scripts = &self.scripts;
-        let mut setup = setup::State::open(
-            catalog, name, None, self.setup_panel.options(),
-            |l| objective(exe, scripts, l),
+        let mut setup = setup::State::open(catalog, name, None, self.setup_panel.options(), |l| {
+            objective(exe, scripts, l)
+        })?;
+        setup.set_maps(
+            maps.names()
+                .iter()
+                .map(|name| name.as_bytes().to_vec())
+                .collect(),
+            maps.default_index(),
         )?;
-        setup.set_maps(maps.names().iter().map(|name| name.as_bytes().to_vec()).collect(),
-            maps.default_index())?;
         self.setup = Some(setup);
         self.profile = name.to_vec();
         self.token = token;
@@ -167,9 +171,9 @@ impl Route {
         if self.busy {
             return;
         }
-        if let Some(PointerTarget::Setup(action @ (setup::Action::Scroll { part: 2, .. }
-            | setup::Action::MapScroll { part: 2 }))) =
-            self.press
+        if let Some(PointerTarget::Setup(
+            action @ (setup::Action::Scroll { part: 2, .. } | setup::Action::MapScroll { part: 2 }),
+        )) = self.press
         {
             if let Some(state) = self.setup.as_mut().filter(|s| s.visible) {
                 let exe = &self.executable;
@@ -211,8 +215,14 @@ impl Route {
         let target = p.and_then(|point| self.target(point));
         self.activate_target(target, p)
     }
-    fn activate_target(&mut self, target: Option<PointerTarget>, p: Option<[f32; 2]>) -> Result<(), String> {
-        if self.busy || self.error.is_some() { return Ok(()); }
+    fn activate_target(
+        &mut self,
+        target: Option<PointerTarget>,
+        p: Option<[f32; 2]>,
+    ) -> Result<(), String> {
+        if self.busy || self.error.is_some() {
+            return Ok(());
+        }
         if let Some(r) = self.roster.as_mut().filter(|r| r.visible) {
             if target == Some(PointerTarget::Name) {
                 r.focus_name();
@@ -262,8 +272,12 @@ impl Route {
                 let exe = &self.executable;
                 let scripts = &self.scripts;
                 let outcome = match p {
-                    Some(point) => self.setup_panel.activate(s, action, point, &mut |l| objective(exe, scripts, l))?,
-                    None => self.setup_panel.keyboard_activate(s, action, &mut |l| objective(exe, scripts, l))?,
+                    Some(point) => self
+                        .setup_panel
+                        .activate(s, action, point, &mut |l| objective(exe, scripts, l))?,
+                    None => self
+                        .setup_panel
+                        .keyboard_activate(s, action, &mut |l| objective(exe, scripts, l))?,
                 };
                 if let setup::Outcome::Roster(h) = outcome {
                     let level = s.catalog.selected_level().ok_or("selected level missing")?;
@@ -292,33 +306,59 @@ impl Route {
         Ok(())
     }
     pub fn is_editing(&self) -> bool {
-        !self.busy && self.error.is_none() && (
-            self.roster.as_ref().is_some_and(|r| r.visible && r.name_focused)
-            || (self.roster.as_ref().is_none_or(|r| !r.visible)
-                && self.setup.as_ref().is_some_and(|s| s.visible && s.name_focused)))
+        !self.busy
+            && self.error.is_none()
+            && (self
+                .roster
+                .as_ref()
+                .is_some_and(|r| r.visible && r.name_focused)
+                || (self.roster.as_ref().is_none_or(|r| !r.visible)
+                    && self
+                        .setup
+                        .as_ref()
+                        .is_some_and(|s| s.visible && s.name_focused)))
     }
     pub fn navigate(&mut self, delta: i32) {
-        if self.busy || self.error.is_some() { return; }
+        if self.busy || self.error.is_some() {
+            return;
+        }
         let actions = if let Some(r) = self.roster.as_ref().filter(|r| r.visible) {
             std::iter::once(PointerTarget::Name)
-                .chain((0..26).filter(|&id| r.enabled(id)).map(PointerTarget::Roster))
+                .chain(
+                    (0..26)
+                        .filter(|&id| r.enabled(id))
+                        .map(PointerTarget::Roster),
+                )
                 .collect::<Vec<_>>()
         } else if let Some(s) = self.setup.as_ref().filter(|s| s.visible) {
-            self.setup_panel.keyboard_actions(s).into_iter().map(PointerTarget::Setup).collect()
-        } else { return; };
+            self.setup_panel
+                .keyboard_actions(s)
+                .into_iter()
+                .map(PointerTarget::Setup)
+                .collect()
+        } else {
+            return;
+        };
         self.keyboard = next_target(&actions, self.keyboard, delta);
         self.press = None;
         if let Some(r) = self.roster.as_mut().filter(|r| r.visible) {
             r.name_focused = self.keyboard == Some(PointerTarget::Name);
         } else if let Some(s) = self.setup.as_mut().filter(|s| s.visible) {
             s.name_focused = self.keyboard == Some(PointerTarget::Setup(setup::Action::Name));
-            if matches!(self.keyboard, Some(PointerTarget::Setup(setup::Action::Row(_) | setup::Action::MapRow(_)))) {
+            if matches!(
+                self.keyboard,
+                Some(PointerTarget::Setup(
+                    setup::Action::Row(_) | setup::Action::MapRow(_)
+                ))
+            ) {
                 self.activate_keyboard();
             }
         }
     }
     pub fn activate_keyboard(&mut self) {
-        if let Err(e) = self.activate_target(self.keyboard, None) { self.error = Some(e); }
+        if let Err(e) = self.activate_target(self.keyboard, None) {
+            self.error = Some(e);
+        }
     }
     pub fn text(&mut self, text: &str) {
         if self.busy {
@@ -398,7 +438,10 @@ impl Route {
                 match self.keyboard {
                     Some(PointerTarget::Roster(id)) => Some(id),
                     Some(_) => None,
-                    None => p.map(|p| self.roster_panel.hit(r, p)).transpose()?.flatten(),
+                    None => p
+                        .map(|p| self.roster_panel.hit(r, p))
+                        .transpose()?
+                        .flatten(),
                 },
                 pressed,
                 [&self.metadata[0], &self.metadata[1]],
@@ -410,7 +453,10 @@ impl Route {
             renderer,
             p,
             pressed,
-            match self.keyboard { Some(PointerTarget::Setup(a)) => Some(a), _ => None },
+            match self.keyboard {
+                Some(PointerTarget::Setup(a)) => Some(a),
+                _ => None,
+            },
         )
     }
 }
@@ -530,9 +576,16 @@ mod text_tests {
     }
 }
 
-fn next_target(actions: &[PointerTarget], current: Option<PointerTarget>, delta: i32) -> Option<PointerTarget> {
-    if actions.is_empty() { return None; }
-    let at = current.and_then(|v| actions.iter().position(|a| *a == v))
+fn next_target(
+    actions: &[PointerTarget],
+    current: Option<PointerTarget>,
+    delta: i32,
+) -> Option<PointerTarget> {
+    if actions.is_empty() {
+        return None;
+    }
+    let at = current
+        .and_then(|v| actions.iter().position(|a| *a == v))
         .map_or(if delta > 0 { -1 } else { 0 }, |i| i as i64);
     Some(actions[(at + i64::from(delta)).rem_euclid(actions.len() as i64) as usize])
 }
@@ -548,20 +601,42 @@ mod keyboard_and_failure_tests {
         let scripts = PathBuf::from(std::env::var_os("OPENMT2001_SCRIPTS").expect("scripts"));
         let catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         let options = openmt2001::skirmish::Options::from_pe(&image).unwrap();
-        let state = setup::State::open(catalog, b"Justin", Some(b"empty.lua".to_vec()), &options, |_| Ok(6)).unwrap();
-        Route { press: None, keyboard: None, setup_panel: setup::SetupPanel::inert(options),
+        let state = setup::State::open(
+            catalog,
+            b"Justin",
+            Some(b"empty.lua".to_vec()),
+            &options,
+            |_| Ok(6),
+        )
+        .unwrap();
+        Route {
+            press: None,
+            keyboard: None,
+            setup_panel: setup::SetupPanel::inert(options),
             roster_panel: roster::RosterPanel::inert(vec![vec![255]; 1754]),
-            setup: Some(state), roster: None, executable: exe, scripts,
-            strings: vec![vec![]; 2300], map: (0..95).collect(), profile: b"Justin".to_vec(),
-            token: 4, save_root: PathBuf::new(), metadata: [vec![], vec![]],
-            request: None, busy: false, error: None }
+            setup: Some(state),
+            roster: None,
+            executable: exe,
+            scripts,
+            strings: vec![vec![]; 2300],
+            map: (0..95).collect(),
+            profile: b"Justin".to_vec(),
+            token: 4,
+            save_root: PathBuf::new(),
+            metadata: [vec![], vec![]],
+            request: None,
+            busy: false,
+            error: None,
+        }
     }
     fn name_focus(route: &mut Route) {
         // Backwards from no selection reaches Back, OK, modifiers, difficulty,
         // then Name without ever depending on any pointer location.
         for _ in 0..10 {
             route.navigate(-1);
-            if route.is_editing() { return; }
+            if route.is_editing() {
+                return;
+            }
         }
         panic!("keyboard name focus missing");
     }
@@ -577,7 +652,9 @@ mod keyboard_and_failure_tests {
         route.activate_keyboard();
         route.keyboard = Some(PointerTarget::Setup(setup::Action::Plus));
         route.activate_keyboard();
-        let setup::Outcome::Roster(before) = route.setup.as_mut().unwrap().confirm() else { panic!("handoff"); };
+        let setup::Outcome::Roster(before) = route.setup.as_mut().unwrap().confirm() else {
+            panic!("handoff");
+        };
         assert_eq!(before.session_name, b"Justin Smith");
         assert_eq!(before.difficulty, 2);
         route.keyboard = Some(PointerTarget::Setup(setup::Action::Ok));
@@ -586,10 +663,12 @@ mod keyboard_and_failure_tests {
         assert!(route.visible());
         assert!(route.roster.is_none());
         route.error = None; // modal dismissal
-        let setup::Outcome::Roster(after) = route.setup.as_mut().unwrap().confirm() else { panic!("retry"); };
+        let setup::Outcome::Roster(after) = route.setup.as_mut().unwrap().confirm() else {
+            panic!("retry");
+        };
         assert_eq!(before, after); // level, difficulty, target, map and name
         // Repair only the injected faulty resource and retry via Enter.
-        route.roster_panel = roster::RosterPanel::inert(vec![vec![1];1754]);
+        route.roster_panel = roster::RosterPanel::inert(vec![vec![1]; 1754]);
         route.activate_keyboard();
         assert!(route.error.is_none());
         assert!(!route.setup.as_ref().unwrap().visible);
@@ -598,10 +677,16 @@ mod keyboard_and_failure_tests {
         route.activate_keyboard();
         assert!(route.is_editing());
         route.text(" Smith");
-        assert_eq!(route.roster.as_ref().unwrap().roster.slots()[0].name, b"Justin Smith");
+        assert_eq!(
+            route.roster.as_ref().unwrap().roster.slots()[0].name,
+            b"Justin Smith"
+        );
         route.navigate(1); // human left selector, not the name nor pointer
         route.activate_keyboard();
-        assert_ne!(route.roster.as_ref().unwrap().roster.slots()[0].token, Some(4));
+        assert_ne!(
+            route.roster.as_ref().unwrap().roster.slots()[0].token,
+            Some(4)
+        );
         assert!(!route.is_editing());
         route.busy = true;
         route.roster.as_mut().unwrap().busy = true;
@@ -616,29 +701,48 @@ mod keyboard_and_failure_tests {
     }
 }
 
-
 #[cfg(test)]
 mod map_action_routing_tests {
     use super::*;
     #[test]
     fn map_actions_keep_row_identity_and_scroll_domain_distinct() {
-        let mut ids=std::collections::BTreeSet::new();
-        for a in [setup::Action::Ok,setup::Action::Back,setup::Action::Minus,
-            setup::Action::Plus,setup::Action::Name] {assert!(ids.insert(setup_action_id(a)));}
-        for d in 0..3 {assert!(ids.insert(setup_action_id(setup::Action::Difficulty(d))));}
+        let mut ids = std::collections::BTreeSet::new();
+        for a in [
+            setup::Action::Ok,
+            setup::Action::Back,
+            setup::Action::Minus,
+            setup::Action::Plus,
+            setup::Action::Name,
+        ] {
+            assert!(ids.insert(setup_action_id(a)));
+        }
+        for d in 0..3 {
+            assert!(ids.insert(setup_action_id(setup::Action::Difficulty(d))));
+        }
         for part in 0..3 {
-            for description in [false,true] {
-                assert!(ids.insert(setup_action_id(setup::Action::Scroll{description,part})));
+            for description in [false, true] {
+                assert!(ids.insert(setup_action_id(setup::Action::Scroll { description, part })));
             }
-            assert!(ids.insert(setup_action_id(setup::Action::MapScroll{part})));
+            assert!(ids.insert(setup_action_id(setup::Action::MapScroll { part })));
         }
         // Original map enumeration retains at most256 rows; this ID namespace
         // is distinct from the supplied seven condition rows and generic actions.
-        for row in 0..256 {assert!(ids.insert(setup_action_id(setup::Action::MapRow(row))));}
-        for row in 0..7 {assert!(ids.insert(setup_action_id(setup::Action::Row(row))));}
-        assert!(!matching_release(Some(PointerTarget::Setup(setup::Action::MapRow(0))),
-            Some(PointerTarget::Setup(setup::Action::MapRow(1)))));
-        assert!(!matching_release(Some(PointerTarget::Setup(setup::Action::MapScroll{part:2})),
-            Some(PointerTarget::Setup(setup::Action::Scroll{description:false,part:2}))));
+        for row in 0..256 {
+            assert!(ids.insert(setup_action_id(setup::Action::MapRow(row))));
+        }
+        for row in 0..7 {
+            assert!(ids.insert(setup_action_id(setup::Action::Row(row))));
+        }
+        assert!(!matching_release(
+            Some(PointerTarget::Setup(setup::Action::MapRow(0))),
+            Some(PointerTarget::Setup(setup::Action::MapRow(1)))
+        ));
+        assert!(!matching_release(
+            Some(PointerTarget::Setup(setup::Action::MapScroll { part: 2 })),
+            Some(PointerTarget::Setup(setup::Action::Scroll {
+                description: false,
+                part: 2
+            }))
+        ));
     }
 }

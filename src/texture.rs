@@ -8,7 +8,11 @@
 //! the borrowed texel slice.
 
 use core::fmt;
-use std::{collections::VecDeque, hash::{Hash, Hasher}, sync::Arc};
+use std::{
+    collections::VecDeque,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 /// Worker-owned immutable original texture conversion results. The renderer
 /// still receives exactly the original loader's bytes; only repeated CPU
@@ -37,7 +41,11 @@ impl LoaderCache {
     fn flags_for_pixels(&mut self, image: &TextureRecord<'_>, pixels: &Arc<[u8]>) -> u32 {
         // pixels() moves a hit or newly retained conversion to the back.
         // Oversized conversions are not retained and must classify directly.
-        if let Some(entry) = self.entries.back_mut().filter(|entry| Arc::ptr_eq(&entry.pixels, pixels)) {
+        if let Some(entry) = self
+            .entries
+            .back_mut()
+            .filter(|entry| Arc::ptr_eq(&entry.pixels, pixels))
+        {
             *entry.flags.get_or_insert_with(|| loader_flags(image))
         } else {
             loader_flags(image)
@@ -47,9 +55,11 @@ impl LoaderCache {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         image.texels.hash(&mut hash);
         let hash = hash.finish();
-        if let Some(index) = self.entries.iter().position(|entry|
-            entry.header == image.header && entry.hash == hash
-                && entry.source.as_ref() == image.texels) {
+        if let Some(index) = self.entries.iter().position(|entry| {
+            entry.header == image.header
+                && entry.hash == hash
+                && entry.source.as_ref() == image.texels
+        }) {
             let entry = self.entries.remove(index).unwrap();
             let pixels = entry.pixels.clone();
             self.entries.push_back(entry);
@@ -63,7 +73,11 @@ impl LoaderCache {
                 self.bytes -= removed.source.len() + removed.pixels.len();
             }
             self.entries.push_back(LoaderEntry {
-                header: image.header, hash, source: Arc::from(image.texels), pixels: pixels.clone(), flags: None,
+                header: image.header,
+                hash,
+                source: Arc::from(image.texels),
+                pixels: pixels.clone(),
+                flags: None,
             });
             self.bytes += bytes;
         }
@@ -75,14 +89,22 @@ impl LoaderCache {
 fn cached_original_loader_preserves_pixels_and_detects_changed_source() {
     let mut cache = LoaderCache::default();
     let source = [34, 67, 91, 255, 255, 0, 100, 17];
-    let record = TextureRecord { header: [0; RECORD_WORDS], width: 2, height: 1, texels: &source };
+    let record = TextureRecord {
+        header: [0; RECORD_WORDS],
+        width: 2,
+        height: 1,
+        texels: &source,
+    };
     let first = cache.pixels(&record);
     assert_eq!(first.as_ref(), loader_pixels(&record));
     let repeated = cache.pixels(&record);
     assert!(Arc::ptr_eq(&first, &repeated));
     let mut changed = source;
     changed[0] = 240;
-    let record = TextureRecord { texels: &changed, ..record };
+    let record = TextureRecord {
+        texels: &changed,
+        ..record
+    };
     let next = cache.pixels(&record);
     assert_eq!(next.as_ref(), loader_pixels(&record));
     assert!(!Arc::ptr_eq(&first, &next));
@@ -93,7 +115,12 @@ fn cached_original_loader_preserves_pixels_and_detects_changed_source() {
 fn cached_loader_flags_follow_source_and_header_changes() {
     let mut cache = LoaderCache::default();
     let source = [34, 67, 91, 255, 255, 0, 100, 255];
-    let image = TextureRecord { header: [0; RECORD_WORDS], width: 2, height: 1, texels: &source };
+    let image = TextureRecord {
+        header: [0; RECORD_WORDS],
+        width: 2,
+        height: 1,
+        texels: &source,
+    };
     let first = cache.pixels(&image);
     assert_eq!(cache.entries.back().unwrap().flags, None);
     let (pixels, flags) = cache.pixels_and_flags(&image);
@@ -106,14 +133,20 @@ fn cached_loader_flags_follow_source_and_header_changes() {
 
     let mut alpha = source;
     alpha[3] = 127;
-    let changed = TextureRecord { texels: &alpha, ..image.clone() };
+    let changed = TextureRecord {
+        texels: &alpha,
+        ..image.clone()
+    };
     let (pixels, changed_flags) = cache.pixels_and_flags(&changed);
     assert_eq!(pixels.as_ref(), loader_pixels(&changed));
     assert_eq!(changed_flags, loader_flags(&changed));
     assert_ne!(changed_flags, flags);
     let mut header = changed.header;
     header[0] = 0x10000002;
-    let changed_header = TextureRecord { header, ..changed.clone() };
+    let changed_header = TextureRecord {
+        header,
+        ..changed.clone()
+    };
     let (_, header_flags) = cache.pixels_and_flags(&changed_header);
     assert_eq!(header_flags, loader_flags(&changed_header));
     assert_ne!(header_flags, changed_flags);
@@ -121,7 +154,10 @@ fn cached_loader_flags_follow_source_and_header_changes() {
     // An output not retained in this cache must not borrow another entry's
     // flags. This also covers the path used by over-budget conversions.
     let unrelated: Arc<[u8]> = loader_pixels(&image).into();
-    assert_eq!(cache.flags_for_pixels(&image, &unrelated), loader_flags(&image));
+    assert_eq!(
+        cache.flags_for_pixels(&image, &unrelated),
+        loader_flags(&image)
+    );
     assert_eq!(cache.entries.back().unwrap().flags, Some(header_flags));
     assert_eq!(cache.pixels_and_flags(&image).1, flags);
 }
@@ -742,10 +778,17 @@ mod tests {
                         for flags in [0, 2] {
                             let mut header = [0; 14];
                             header[0] = flags;
-                            let image = super::TextureRecord { header, width, height, texels: &texels };
+                            let image = super::TextureRecord {
+                                header,
+                                width,
+                                height,
+                                texels: &texels,
+                            };
                             for origin in [[0, 0], [1, 1], [u32::from(padding); 2], [side / 2; 2]] {
                                 let mut page = vec![0xa5; side as usize * side as usize * 4];
-                                let actual = super::write_atlas_region(&image, &mut page, side, origin, padding);
+                                let actual = super::write_atlas_region(
+                                    &image, &mut page, side, origin, padding,
+                                );
                                 let Ok(uv) = actual else {
                                     assert!(page.iter().all(|&b| b == 0xa5));
                                     continue;
@@ -765,12 +808,23 @@ mod tests {
                                         let sx = col.saturating_sub(x).min(width - 1);
                                         let source = (sy * width + sx) as usize * 4;
                                         let target = (row * side + col) as usize * 4;
-                                        expected[target..target + 4].copy_from_slice(&texels[source..source + 4]);
+                                        expected[target..target + 4]
+                                            .copy_from_slice(&texels[source..source + 4]);
                                     }
                                 }
-                                assert_eq!(page, expected, "side {side}, {width}x{height}, padding {padding}, flags {flags}, origin {origin:?}");
-                                assert_eq!(uv, [width as f32 / side as f32, height as f32 / side as f32,
-                                    x as f32 / side as f32, y as f32 / side as f32]);
+                                assert_eq!(
+                                    page, expected,
+                                    "side {side}, {width}x{height}, padding {padding}, flags {flags}, origin {origin:?}"
+                                );
+                                assert_eq!(
+                                    uv,
+                                    [
+                                        width as f32 / side as f32,
+                                        height as f32 / side as f32,
+                                        x as f32 / side as f32,
+                                        y as f32 / side as f32
+                                    ]
+                                );
                                 checked += 1;
                             }
                         }

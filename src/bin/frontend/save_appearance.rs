@@ -36,22 +36,33 @@ impl Assets {
         let index = ArchiveIndex::parse(directory, archive.len() as u64)
             .map_err(|error| error.to_string())?;
         let load = |path| -> Result<Vec<TexturePage>, String> {
-            let entry = index.find(path).ok_or_else(|| format!("missing appearance texture {path}"))?;
-            let bytes = archive.get(entry.offset as usize..(entry.offset + entry.length) as usize)
+            let entry = index
+                .find(path)
+                .ok_or_else(|| format!("missing appearance texture {path}"))?;
+            let bytes = archive
+                .get(entry.offset as usize..(entry.offset + entry.length) as usize)
                 .ok_or("appearance texture exceeds archive")?;
             let set = TextureSet::parse(bytes).map_err(|error| error.to_string())?;
-            Ok(set.textures.iter().map(|texture| TexturePage {
-                width: texture.width,
-                height: texture.height,
-                rgba: Arc::from(loader_pixels(texture)),
-            }).collect())
+            Ok(set
+                .textures
+                .iter()
+                .map(|texture| TexturePage {
+                    width: texture.width,
+                    height: texture.height,
+                    rgba: Arc::from(loader_pixels(texture)),
+                })
+                .collect())
         };
         Ok(Self {
             generic: load("gamedata2/GenericTextures/textures.gtd")?,
             generic640: load("gamedata2/GenericTextures640/textures.gtd")?,
             building: load("gamedata2/BuildingTextures/textures.gtd")?,
             signs: load("gamedata2/SignTextures/textures.gtd")?,
-            font4: load("gamedata2/font640/textures.gtd")?.into_iter().skip(8).take(2).collect(),
+            font4: load("gamedata2/font640/textures.gtd")?
+                .into_iter()
+                .skip(8)
+                .take(2)
+                .collect(),
             font4_tab: Vec::new(),
             business_value: Vec::new(),
             language_rows: Vec::new(),
@@ -70,36 +81,70 @@ impl Assets {
         Ok(self)
     }
 
-    pub fn with_language(mut self, tab: &[u8], offsets: &[u8], text: &[u8])
-        -> Result<Self, String> {
-        if !offsets.len().is_multiple_of(2) { return Err("partial appearance language length".into()); }
+    pub fn with_language(
+        mut self,
+        tab: &[u8],
+        offsets: &[u8],
+        text: &[u8],
+    ) -> Result<Self, String> {
+        if !offsets.len().is_multiple_of(2) {
+            return Err("partial appearance language length".into());
+        }
         let mut at = 0usize;
         for row in offsets.chunks_exact(2) {
-            let end = at.checked_add(usize::from(u16::from_le_bytes(row.try_into().unwrap())))
+            let end = at
+                .checked_add(usize::from(u16::from_le_bytes(row.try_into().unwrap())))
                 .ok_or("appearance language length overflow")?;
-            self.language_rows.push(text.get(at..end)
-                .ok_or("appearance language row leaves text")?.to_vec());
+            self.language_rows.push(
+                text.get(at..end)
+                    .ok_or("appearance language row leaves text")?
+                    .to_vec(),
+            );
             at = end;
         }
-        if at != text.len() { return Err("appearance language lengths do not cover text".into()); }
-        let label = self.language_rows.get(0x45c).ok_or("appearance City label missing")?.clone();
+        if at != text.len() {
+            return Err("appearance language lengths do not cover text".into());
+        }
+        let label = self
+            .language_rows
+            .get(0x45c)
+            .ok_or("appearance City label missing")?
+            .clone();
         self.with_font4(tab, &label)
     }
 
     ///4e7690 maps direct C-string bytes through the first language row;
     ///4e8520 resolves a business name ID from the same original table.
-    pub fn refresh_labels(&self, owner_name: Option<&[u8]>, business_id: u32)
-        -> Result<RefreshLabels, String> {
+    pub fn refresh_labels(
+        &self,
+        owner_name: Option<&[u8]>,
+        business_id: u32,
+    ) -> Result<RefreshLabels, String> {
         let owner = if let Some(name) = owner_name {
-            let map = self.language_rows.first().ok_or("appearance character map missing")?;
-            name.iter().map(|&byte| byte.checked_sub(32)
-                .and_then(|index| map.get(usize::from(index)).copied())
-                .ok_or_else(|| "appearance owner character outside map".to_owned()))
+            let map = self
+                .language_rows
+                .first()
+                .ok_or("appearance character map missing")?;
+            name.iter()
+                .map(|&byte| {
+                    byte.checked_sub(32)
+                        .and_then(|index| map.get(usize::from(index)).copied())
+                        .ok_or_else(|| "appearance owner character outside map".to_owned())
+                })
                 .collect::<Result<Vec<_>, _>>()?
-        } else { self.business_value.clone() };
-        let business = self.language_rows.get(business_id as usize)
-            .ok_or("appearance business name ID outside language")?.clone();
-        Ok(RefreshLabels { owner, business, banner: None })
+        } else {
+            self.business_value.clone()
+        };
+        let business = self
+            .language_rows
+            .get(business_id as usize)
+            .ok_or("appearance business name ID outside language")?
+            .clone();
+        Ok(RefreshLabels {
+            owner,
+            business,
+            banner: None,
+        })
     }
 }
 
@@ -119,15 +164,22 @@ pub struct BannerSelection {
 }
 impl BannerSelection {
     //485368 passes selectors0/0 even while its ordinary texture class is10.
-    pub const INITIAL: Self = Self { owner_style: 0, business_page: Some(0) };
+    pub const INITIAL: Self = Self {
+        owner_style: 0,
+        business_page: Some(0),
+    };
 
     ///485520 supplies owner metadata (or10 for City), and business kind (or-1).
     pub fn refreshed(owner_style: u32, business_kind: i32) -> Result<Self, String> {
         if owner_style > 10 || !(-1..45).contains(&business_kind) {
-            return Err("appearance banner owner/business selector outside recovered domain".into());
+            return Err(
+                "appearance banner owner/business selector outside recovered domain".into(),
+            );
         }
-        Ok(Self { owner_style,
-            business_page: (business_kind >= 0).then_some(business_kind as usize) })
+        Ok(Self {
+            owner_style,
+            business_page: (business_kind >= 0).then_some(business_kind as usize),
+        })
     }
 }
 
@@ -135,16 +187,17 @@ impl BannerSelection {
 /// two PE DWORD tables, indexed by the 4846f0 appearance texture class.
 pub fn sign_material_indices(image: &PeImage<'_>, class: u32) -> Result<(usize, usize), String> {
     if class > 10 {
-        return Err(format!("appearance sign texture class {class} is unverified"));
+        return Err(format!(
+            "appearance sign texture class {class} is unverified"
+        ));
     }
-    let offset = class.checked_mul(4).ok_or("appearance class offset overflow")?;
+    let offset = class
+        .checked_mul(4)
+        .ok_or("appearance class offset overflow")?;
     let read = |address| -> Result<usize, String> {
         Ok(u32::from_le_bytes(image.at(address, 4)?.try_into().unwrap()) as usize)
     };
-    Ok((
-        read(0x53a228 + offset)?,
-        read(0x53a1d0 + offset)?,
-    ))
+    Ok((read(0x53a228 + offset)?, read(0x53a1d0 + offset)?))
 }
 
 /// Original 4575b0 chooses both curved-body and hanging-trim pages from
@@ -152,9 +205,13 @@ pub fn sign_material_indices(image: &PeImage<'_>, class: u32) -> Result<(usize, 
 /// the intervening classes use the same geometry and indexed PE tables.
 pub fn awning_material_indices(image: &PeImage<'_>, class: u32) -> Result<(usize, usize), String> {
     if class > 10 {
-        return Err(format!("appearance awning texture class {class} is unverified"));
+        return Err(format!(
+            "appearance awning texture class {class} is unverified"
+        ));
     }
-    let offset = class.checked_mul(4).ok_or("appearance class offset overflow")?;
+    let offset = class
+        .checked_mul(4)
+        .ok_or("appearance class offset overflow")?;
     let read = |address| -> Result<usize, String> {
         Ok(u32::from_le_bytes(image.at(address, 4)?.try_into().unwrap()) as usize)
     };
@@ -163,7 +220,9 @@ pub fn awning_material_indices(image: &PeImage<'_>, class: u32) -> Result<(usize
 
 ///457c60 selects an owner backing/portrait and an optional business lower pair.
 /// Modern640-family UI textures retain the original handle-bank indices.
-pub fn banner_material_indices(image: &PeImage<'_>, selection: BannerSelection,
+pub fn banner_material_indices(
+    image: &PeImage<'_>,
+    selection: BannerSelection,
 ) -> Result<(usize, usize, Option<usize>), String> {
     let read = |address| -> Result<usize, String> {
         Ok(u32::from_le_bytes(image.at(address, 4)?.try_into().unwrap()) as usize)
@@ -171,8 +230,14 @@ pub fn banner_material_indices(image: &PeImage<'_>, selection: BannerSelection,
     let portrait = if selection.owner_style == 10 {
         //68b2a0 is generic UI bank68ae28+286*4; no character record10 lookup.
         286
-    } else { read(0x541af8 + selection.owner_style * 40)? };
-    Ok((read(0x53a254 + selection.owner_style * 4)?, portrait, selection.business_page))
+    } else {
+        read(0x541af8 + selection.owner_style * 40)?
+    };
+    Ok((
+        read(0x53a254 + selection.owner_style * 4)?,
+        portrait,
+        selection.business_page,
+    ))
 }
 
 #[derive(Clone)]
@@ -195,7 +260,8 @@ pub fn sign_geometry(width: f32, height: f32) -> Result<SignGeometry, String> {
     let mut positions = [[0.; 3]; 8];
     for (layer, z) in [0.2f32, 0.1f32].into_iter().enumerate() {
         for (i, (x, y)) in [(left, bottom), (right, bottom), (left, top), (right, top)]
-            .into_iter().enumerate()
+            .into_iter()
+            .enumerate()
         {
             positions[layer * 4 + i] = [x, y, z];
         }
@@ -203,8 +269,14 @@ pub fn sign_geometry(width: f32, height: f32) -> Result<SignGeometry, String> {
     Ok(SignGeometry {
         positions,
         uv: [
-            [1., 1.], [0., 1.], [1., 0.], [0., 0.],
-            [0.45, 0.45], [0.55, 0.45], [0.45, 0.55], [0.55, 0.55],
+            [1., 1.],
+            [0., 1.],
+            [1., 0.],
+            [0., 0.],
+            [0.45, 0.45],
+            [0.55, 0.45],
+            [0.45, 0.55],
+            [0.55, 0.55],
         ],
         indices: [0, 1, 2, 1, 3, 2, 4, 5, 6, 5, 7, 6],
     })
@@ -213,8 +285,9 @@ pub fn sign_geometry(width: f32, height: f32) -> Result<SignGeometry, String> {
 /// Original 457490/457210 with its double-sided flag repeats the same two
 /// quads with opposite winding, retaining the original per-page grouping.
 pub fn double_sign_indices() -> [u16; 24] {
-    [0, 1, 2, 1, 3, 2, 1, 0, 2, 3, 1, 2,
-     4, 5, 6, 5, 7, 6, 5, 4, 6, 7, 5, 6]
+    [
+        0, 1, 2, 1, 3, 2, 1, 0, 2, 3, 1, 2, 4, 5, 6, 5, 7, 6, 5, 4, 6, 7, 5, 6,
+    ]
 }
 
 pub struct TextSignGeometry {
@@ -228,15 +301,26 @@ pub struct TextSignGeometry {
 /// Original 4574c0/456d40 renders font4 glyph quads, recenters their bounds,
 /// scales the text into 90% x 85% of the sign, and emits a backing quad.
 /// Input bytes are original glyph indices after 4e7690's character map.
-pub fn text_sign_geometry(tab: &[u8], glyphs: &[u8], width: f32, height: f32)
-    -> Result<TextSignGeometry, String> {
+pub fn text_sign_geometry(
+    tab: &[u8],
+    glyphs: &[u8],
+    width: f32,
+    height: f32,
+) -> Result<TextSignGeometry, String> {
     if glyphs.is_empty() || glyphs.len() > 100 {
         return Err("appearance text sign has invalid glyph count".into());
     }
     let backing = sign_geometry(width, height)?;
-    let quads = Font::parse(tab)?.layout(glyphs, Layout {
-        origin: [0., 0.], depth: 0., scale: 1., gap: -1, baseline: 0,
-    })?;
+    let quads = Font::parse(tab)?.layout(
+        glyphs,
+        Layout {
+            origin: [0., 0.],
+            depth: 0.,
+            scale: 1.,
+            gap: -1,
+            baseline: 0,
+        },
+    )?;
     let mut low = [f32::INFINITY; 2];
     let mut high = [f32::NEG_INFINITY; 2];
     for quad in &quads {
@@ -252,48 +336,78 @@ pub fn text_sign_geometry(tab: &[u8], glyphs: &[u8], width: f32, height: f32)
         return Err("appearance text sign has empty or nonfinite glyph bounds".into());
     }
     let center = [(low[0] + high[0]) * 0.5, (low[1] + high[1]) * 0.5];
-    let sx = ((f64::from(width) / f64::from(span[0]))
-        * f64::from(f32::from_bits(0x3f66_6666))) as f32;
-    let sy = ((f64::from(height) / f64::from(span[1]))
-        * f64::from(f32::from_bits(0x3f59_999a))) as f32;
+    let sx =
+        ((f64::from(width) / f64::from(span[0])) * f64::from(f32::from_bits(0x3f66_6666))) as f32;
+    let sy =
+        ((f64::from(height) / f64::from(span[1])) * f64::from(f32::from_bits(0x3f59_999a))) as f32;
     let mut positions = Vec::with_capacity(quads.len() * 4 + 4);
     let mut uv = Vec::with_capacity(quads.len() * 4 + 4);
     let mut colors = Vec::with_capacity(quads.len() * 4 + 4);
     let mut groups = [Vec::<u16>::new(), Vec::new()];
     for quad in quads {
-        let start = u16::try_from(positions.len()).map_err(|_| "appearance text vertex overflow")?;
+        let start =
+            u16::try_from(positions.len()).map_err(|_| "appearance text vertex overflow")?;
         for (point, tex) in quad.positions.into_iter().zip(quad.uv) {
-            positions.push([(point[0] - center[0]) * sx,
-                            (-point[1] - center[1]) * sy, 0.2]);
+            positions.push([
+                (point[0] - center[0]) * sx,
+                (-point[1] - center[1]) * sy,
+                0.2,
+            ]);
             uv.push(tex);
             colors.push(0xffff_ffff);
         }
         groups[quad.page].extend_from_slice(&[
-            start, start+1, start+2, start, start+2, start+3,
+            start,
+            start + 1,
+            start + 2,
+            start,
+            start + 2,
+            start + 3,
         ]);
     }
-    let backing_start = u16::try_from(positions.len()).map_err(|_| "appearance text backing overflow")?;
+    let backing_start =
+        u16::try_from(positions.len()).map_err(|_| "appearance text backing overflow")?;
     positions.extend_from_slice(&backing.positions[4..8]);
     uv.extend_from_slice(&backing.uv[4..8]);
     colors.extend_from_slice(&[0xffff_fffe; 4]);
     let font_page_indices = [groups[0].len(), groups[1].len()];
     let mut indices = groups.into_iter().flatten().collect::<Vec<_>>();
-    indices.extend_from_slice(&[backing_start, backing_start+1, backing_start+2,
-                                backing_start+1, backing_start+3, backing_start+2]);
-    Ok(TextSignGeometry { positions, uv, colors, indices, font_page_indices })
+    indices.extend_from_slice(&[
+        backing_start,
+        backing_start + 1,
+        backing_start + 2,
+        backing_start + 1,
+        backing_start + 3,
+        backing_start + 2,
+    ]);
+    Ok(TextSignGeometry {
+        positions,
+        uv,
+        colors,
+        indices,
+        font_page_indices,
+    })
 }
 
 /// Native 4574f0 uses the same 456d40 text geometry as 4574c0, then emits
 /// the back of the sign with opposite winding. The original v1.4 model311
 /// constructor confirms identical positions, UVs, colors and front indices.
 pub fn double_backed_text_sign_geometry(
-    tab: &[u8], glyphs: &[u8], width: f32, height: f32,
+    tab: &[u8],
+    glyphs: &[u8],
+    width: f32,
+    height: f32,
 ) -> Result<TextSignGeometry, String> {
     let mut geometry = text_sign_geometry(tab, glyphs, width, height)?;
     let start = u16::try_from(geometry.positions.len() - 4)
         .map_err(|_| "appearance text backing vertex overflow")?;
     geometry.indices.extend_from_slice(&[
-        start + 1, start, start + 2, start + 3, start + 1, start + 2,
+        start + 1,
+        start,
+        start + 2,
+        start + 3,
+        start + 1,
+        start + 2,
     ]);
     Ok(geometry)
 }
@@ -465,13 +579,17 @@ pub fn awning_geometry(width: f32, height: f32) -> Result<AwningGeometry, String
         let (y, z) = if segment == 0 {
             (height, 0.)
         } else if segment == 1 {
-            ((f64::from(step).cos() * f64::from(height)) as f32,
-             (f64::from(step).sin() * f64::from(height)) as f32)
+            (
+                (f64::from(step).cos() * f64::from(height)) as f32,
+                (f64::from(step).sin() * f64::from(height)) as f32,
+            )
         } else {
             let extended = f64::from(side_angle) + f64::from(step);
             side_angle = extended as f32;
-            ((f64::from(side_angle).cos() * f64::from(height)) as f32,
-             (extended.sin() * f64::from(height)) as f32)
+            (
+                (f64::from(side_angle).cos() * f64::from(height)) as f32,
+                (extended.sin() * f64::from(height)) as f32,
+            )
         };
         for (side, x) in [half, -half].into_iter().enumerate() {
             let index = segment * 2 + side;
@@ -493,9 +611,11 @@ pub fn awning_geometry(width: f32, height: f32) -> Result<AwningGeometry, String
         let mut angle = 0f64;
         for segment in 1..=8 {
             angle += f64::from(step);
-            positions[base + 1 + segment] = [x,
+            positions[base + 1 + segment] = [
+                x,
                 (angle.cos() * f64::from(height)) as f32,
-                (angle.sin() * f64::from(height)) as f32];
+                (angle.sin() * f64::from(height)) as f32,
+            ];
             uv[base + 1 + segment] = [0.5, 0.5];
         }
         for segment in 0..8 {
@@ -513,11 +633,18 @@ pub fn awning_geometry(width: f32, height: f32) -> Result<AwningGeometry, String
     positions[38] = last;
     positions[39] = positions[17];
     positions[40] = [last[0], last[1] - 0.5f32, last[2]];
-    positions[41] = [positions[39][0], positions[39][1] - 0.5f32, positions[39][2]];
-    uv[38..42].copy_from_slice(&[[0., 0.0625], [span, 0.0625],
-                                 [0., 0.9375], [span, 0.9375]]);
+    positions[41] = [
+        positions[39][0],
+        positions[39][1] - 0.5f32,
+        positions[39][2],
+    ];
+    uv[38..42].copy_from_slice(&[[0., 0.0625], [span, 0.0625], [0., 0.9375], [span, 0.9375]]);
     indices[96..].copy_from_slice(&[38, 39, 40, 39, 41, 40]);
-    Ok(AwningGeometry { positions, uv, indices })
+    Ok(AwningGeometry {
+        positions,
+        uv,
+        indices,
+    })
 }
 
 #[derive(Clone)]
@@ -542,41 +669,87 @@ pub fn banner_geometry(width: f32, height: f32) -> Result<BannerGeometry, String
     let mut quad = |part: usize, x0: f32, x1: f32, y0: f32, y1: f32, z: f32| {
         let at = part * 4;
         positions[at..at + 4].copy_from_slice(&[
-            [x0, y0, z], [x1, y0, z], [x0, y1, z], [x1, y1, z],
+            [x0, y0, z],
+            [x1, y0, z],
+            [x0, y1, z],
+            [x1, y1, z],
         ]);
-        uv[at..at + 4].copy_from_slice(&[
-            [0., 1.], [1., 1.], [0., 0.], [1., 0.],
-        ]);
+        uv[at..at + 4].copy_from_slice(&[[0., 1.], [1., 1.], [0., 0.], [1., 0.]]);
     };
-    quad(0, w * -0.45f32, w * 0.45f32,
-         base - h * 0.7f32, base + h * 0.45f32, 0.);
-    quad(1, w * -0.15f32, w * 0.15f32,
-         base - h * 0.1f32, base + h * 0.35f32, 0.1);
-    quad(2, w * 0.15f32, w * -0.15f32,
-         base - h * 0.1f32, base + h * 0.35f32, -0.1);
-    quad(3, w * -0.35f32, w * 0.35f32,
-         base - h * 0.6f32, base - h * 0.2f32, 0.1);
-    quad(4, w * 0.35f32, w * -0.35f32,
-         base - h * 0.6f32, base - h * 0.2f32, -0.1);
+    quad(
+        0,
+        w * -0.45f32,
+        w * 0.45f32,
+        base - h * 0.7f32,
+        base + h * 0.45f32,
+        0.,
+    );
+    quad(
+        1,
+        w * -0.15f32,
+        w * 0.15f32,
+        base - h * 0.1f32,
+        base + h * 0.35f32,
+        0.1,
+    );
+    quad(
+        2,
+        w * 0.15f32,
+        w * -0.15f32,
+        base - h * 0.1f32,
+        base + h * 0.35f32,
+        -0.1,
+    );
+    quad(
+        3,
+        w * -0.35f32,
+        w * 0.35f32,
+        base - h * 0.6f32,
+        base - h * 0.2f32,
+        0.1,
+    );
+    quad(
+        4,
+        w * 0.35f32,
+        w * -0.35f32,
+        base - h * 0.6f32,
+        base - h * 0.2f32,
+        -0.1,
+    );
     indices[..12].copy_from_slice(&double_sign_indices()[..12]);
     for part in 1..=4 {
         let at = 12 + (part - 1) * 6;
         let base = (part * 4) as u16;
         indices[at..at + 6].copy_from_slice(&[
-            base, base + 1, base + 2, base + 1, base + 3, base + 2,
+            base,
+            base + 1,
+            base + 2,
+            base + 1,
+            base + 3,
+            base + 2,
         ]);
     }
-    Ok(BannerGeometry { positions, uv, indices })
+    Ok(BannerGeometry {
+        positions,
+        uv,
+        indices,
+    })
 }
 
 /// 488230's post-485200 detail origin. Registry Z is the negative of raw
 /// model Z; the shared building transform bakes transpose/mirror/rotation,
 /// then the original scene translation adds center X/Y and flips local Z.
-pub fn saved_detail_origin(building: &SceneBuilding, row: &RendererTemplate) -> Result<[f32; 3], String> {
+pub fn saved_detail_origin(
+    building: &SceneBuilding,
+    row: &RendererTemplate,
+) -> Result<[f32; 3], String> {
     let component = |at| f32::from_le_bytes(row.row[at..at + 4].try_into().unwrap());
     let local = building.local_position([component(12), component(16), -component(20)]);
-    let world = [local[0] + building.center[0], local[1] + 0.5,
-                 building.center[1] - local[2]];
+    let world = [
+        local[0] + building.center[0],
+        local[1] + 0.5,
+        building.center[1] - local[2],
+    ];
     if !world.into_iter().all(f32::is_finite) {
         return Err("saved detail world origin is nonfinite".into());
     }
@@ -585,7 +758,10 @@ pub fn saved_detail_origin(building: &SceneBuilding, row: &RendererTemplate) -> 
 
 /// Original 488230 updates renderer row +0x24 after the building's optional
 /// mirror and rotation. The two f32 stores preserve its native update order.
-pub fn saved_detail_rotation_degrees(building: &SceneBuilding, row: &RendererTemplate) -> Result<f32, String> {
+pub fn saved_detail_rotation_degrees(
+    building: &SceneBuilding,
+    row: &RendererTemplate,
+) -> Result<f32, String> {
     let mut angle = f32::from_le_bytes(row.row[36..40].try_into().unwrap());
     if building.mirror {
         angle = 180.0f32 - angle;
@@ -662,15 +838,23 @@ impl Adapter {
         labels: Option<&RefreshLabels>,
     ) -> Result<u32, String> {
         if u32::from_le_bytes(template.row[..4].try_into().unwrap()) != 1 {
-            return Err(format!("appearance detail {:08x} has no draw constructor", template.descriptor));
+            return Err(format!(
+                "appearance detail {:08x} has no draw constructor",
+                template.descriptor
+            ));
         }
-        if !world_from_detail.to_cols_array().into_iter().all(f32::is_finite) {
+        if !world_from_detail
+            .to_cols_array()
+            .into_iter()
+            .all(f32::is_finite)
+        {
             return Err("appearance detail pose is nonfinite".into());
         }
         let word = |at| u32::from_le_bytes(template.row[at..at + 4].try_into().unwrap());
         let width = f32::from_bits(word(44));
         let height = f32::from_bits(word(48));
-        let (positions, uv, colors, indices, parts): PreparedDetail<'_> = match template.descriptor {
+        let (positions, uv, colors, indices, parts): PreparedDetail<'_> = match template.descriptor
+        {
             0x0104_0201 | 0x0104_0202 | 0x0104_0204 => {
                 let geometry = sign_geometry(width, height)?;
                 let (generic, building) = sign_material_indices(image, class)?;
@@ -679,35 +863,98 @@ impl Adapter {
                 } else {
                     (geometry.indices.to_vec(), 6)
                 };
-                (geometry.positions.to_vec(), geometry.uv.to_vec(), vec![0xffff_ffff; 8], indices,
-                 vec![(assets.generic.get(generic).ok_or("appearance generic texture leaves collection")?, 0..split),
-                      (assets.building.get(building).ok_or("appearance building texture leaves collection")?, split..split*2)])
+                (
+                    geometry.positions.to_vec(),
+                    geometry.uv.to_vec(),
+                    vec![0xffff_ffff; 8],
+                    indices,
+                    vec![
+                        (
+                            assets
+                                .generic
+                                .get(generic)
+                                .ok_or("appearance generic texture leaves collection")?,
+                            0..split,
+                        ),
+                        (
+                            assets
+                                .building
+                                .get(building)
+                                .ok_or("appearance building texture leaves collection")?,
+                            split..split * 2,
+                        ),
+                    ],
+                )
             }
             0x0200_0001 => {
                 let geometry = awning_geometry(width, height)?;
                 let (body, trim) = awning_material_indices(image, class)?;
-                (geometry.positions.to_vec(), geometry.uv.to_vec(), vec![0xffff_ffff; 42], geometry.indices.to_vec(),
-                 vec![(assets.building.get(body).ok_or("appearance awning body texture leaves collection")?, 0..96),
-                      (assets.building.get(trim).ok_or("appearance awning trim texture leaves collection")?, 96..102)])
+                (
+                    geometry.positions.to_vec(),
+                    geometry.uv.to_vec(),
+                    vec![0xffff_ffff; 42],
+                    geometry.indices.to_vec(),
+                    vec![
+                        (
+                            assets
+                                .building
+                                .get(body)
+                                .ok_or("appearance awning body texture leaves collection")?,
+                            0..96,
+                        ),
+                        (
+                            assets
+                                .building
+                                .get(trim)
+                                .ok_or("appearance awning trim texture leaves collection")?,
+                            96..102,
+                        ),
+                    ],
+                )
             }
             0x0108_0202 => {
                 let selection = match labels {
                     None => BannerSelection::INITIAL,
-                    Some(payload) => payload.banner.ok_or("appearance banner refresh selectors missing")?,
+                    Some(payload) => payload
+                        .banner
+                        .ok_or("appearance banner refresh selectors missing")?,
                 };
                 let geometry = banner_geometry(width, height)?;
                 let (outer, portrait, lower) = banner_material_indices(image, selection)?;
                 let mut parts = vec![
-                    (assets.signs.get(outer).ok_or("appearance banner backing texture leaves collection")?, 0..12),
-                    (assets.generic640.get(portrait).ok_or("appearance banner portrait texture leaves collection")?, 12..24),
+                    (
+                        assets
+                            .signs
+                            .get(outer)
+                            .ok_or("appearance banner backing texture leaves collection")?,
+                        0..12,
+                    ),
+                    (
+                        assets
+                            .generic640
+                            .get(portrait)
+                            .ok_or("appearance banner portrait texture leaves collection")?,
+                        12..24,
+                    ),
                 ];
                 if let Some(lower) = lower {
-                    parts.push((assets.signs.get(lower).ok_or("appearance banner lower texture leaves collection")?, 24..36));
+                    parts.push((
+                        assets
+                            .signs
+                            .get(lower)
+                            .ok_or("appearance banner lower texture leaves collection")?,
+                        24..36,
+                    ));
                 }
                 let vertices = if lower.is_some() { 20 } else { 12 };
                 let indices = if lower.is_some() { 36 } else { 24 };
-                (geometry.positions[..vertices].to_vec(), geometry.uv[..vertices].to_vec(),
-                 vec![0xffff_ffff; vertices], geometry.indices[..indices].to_vec(), parts)
+                (
+                    geometry.positions[..vertices].to_vec(),
+                    geometry.uv[..vertices].to_vec(),
+                    vec![0xffff_ffff; vertices],
+                    geometry.indices[..indices].to_vec(),
+                    parts,
+                )
             }
             0x0101_0201 | 0x0102_0201 | 0x0101_0204 | 0x0102_0204 => {
                 if assets.font4_tab.is_empty() {
@@ -715,7 +962,11 @@ impl Adapter {
                 }
                 let static_label = b"TO-LET".iter().map(|&byte| byte - 32).collect::<Vec<_>>();
                 let glyphs = if let Some(labels) = labels {
-                    if template.descriptor & 0x0002_0000 != 0 { &labels.business } else { &labels.owner }
+                    if template.descriptor & 0x0002_0000 != 0 {
+                        &labels.business
+                    } else {
+                        &labels.owner
+                    }
                 } else if matches!(template.descriptor, 0x0102_0201 | 0x0102_0204) {
                     &static_label
                 } else {
@@ -730,14 +981,37 @@ impl Adapter {
                 let [first, second] = geometry.font_page_indices;
                 let mut parts = Vec::new();
                 if first > 0 {
-                    parts.push((assets.font4.first().ok_or("appearance font4 first page missing")?, 0..first));
+                    parts.push((
+                        assets
+                            .font4
+                            .first()
+                            .ok_or("appearance font4 first page missing")?,
+                        0..first,
+                    ));
                 }
                 if second > 0 {
-                    parts.push((assets.font4.get(1).ok_or("appearance font4 second page missing")?, first..first+second));
+                    parts.push((
+                        assets
+                            .font4
+                            .get(1)
+                            .ok_or("appearance font4 second page missing")?,
+                        first..first + second,
+                    ));
                 }
-                parts.push((assets.building.get(backing).ok_or("appearance text backing texture leaves collection")?,
-                            first+second..geometry.indices.len()));
-                (geometry.positions, geometry.uv, geometry.colors, geometry.indices, parts)
+                parts.push((
+                    assets
+                        .building
+                        .get(backing)
+                        .ok_or("appearance text backing texture leaves collection")?,
+                    first + second..geometry.indices.len(),
+                ));
+                (
+                    geometry.positions,
+                    geometry.uv,
+                    geometry.colors,
+                    geometry.indices,
+                    parts,
+                )
             }
             0x0101_0101 | 0x0102_0101 | 0x0101_0102 | 0x0102_0102 | 0x0101_0104 => {
                 if assets.font4_tab.is_empty() {
@@ -752,7 +1026,11 @@ impl Adapter {
                 // text bit and static TO-LET for 0x20000 before 4846f0.
                 let static_label = b"TO-LET".iter().map(|&byte| byte - 32).collect::<Vec<_>>();
                 let glyphs = if let Some(labels) = labels {
-                    if template.descriptor & 0x0002_0000 != 0 { &labels.business } else { &labels.owner }
+                    if template.descriptor & 0x0002_0000 != 0 {
+                        &labels.business
+                    } else {
+                        &labels.owner
+                    }
                 } else if matches!(template.descriptor, 0x0102_0101 | 0x0102_0102) {
                     &static_label
                 } else {
@@ -803,37 +1081,55 @@ impl Adapter {
                     parts,
                 )
             }
-            _ => return Err(format!("appearance detail {:08x} has no draw constructor", template.descriptor)),
+            _ => {
+                return Err(format!(
+                    "appearance detail {:08x} has no draw constructor",
+                    template.descriptor
+                ));
+            }
         };
         let mut draws = Vec::with_capacity(parts.len());
         for (page, range) in parts {
             let mut draw = OwnedDraw::texture_page(
-                SurfaceMode::StaticLit, page.width, page.height, page.rgba.clone());
+                SurfaceMode::StaticLit,
+                page.width,
+                page.height,
+                page.rgba.clone(),
+            );
             draw.mipmaps = page.width.is_power_of_two()
                 && page.height.is_power_of_two()
-                && u64::from(page.width) * u64::from(page.height) * 4
-                    == page.rgba.len() as u64;
+                && u64::from(page.width) * u64::from(page.height) * 4 == page.rgba.len() as u64;
             draw.specular = None;
             for &index in &indices[range] {
                 let i = index as usize;
                 let p = world_from_detail.transform_point3(Vec3::from_array(positions[i]));
                 let tex = uv[i];
                 let color = colors[i];
-                draw.vertices.push([p.x, p.y, p.z,
+                draw.vertices.push([
+                    p.x,
+                    p.y,
+                    p.z,
                     f32::from((color >> 16) as u8) / 255.,
                     f32::from((color >> 8) as u8) / 255.,
-                    f32::from(color as u8) / 255., tex[0], tex[1]]);
+                    f32::from(color as u8) / 255.,
+                    tex[0],
+                    tex[1],
+                ]);
             }
             draws.push(draw);
         }
-        let handle = self.next.checked_add(1).ok_or("appearance draw handles exhausted")?;
+        let handle = self
+            .next
+            .checked_add(1)
+            .ok_or("appearance draw handles exhausted")?;
         self.next = handle;
         self.draws.insert(handle, draws);
         Ok(handle)
     }
 
     pub fn release(&mut self, handle: u32) -> Result<(), String> {
-        self.draws.remove(&handle)
+        self.draws
+            .remove(&handle)
             .ok_or_else(|| format!("appearance draw handle {handle} is not owned"))?;
         Ok(())
     }
@@ -854,16 +1150,19 @@ pub fn restored_draws(
     assets: &Assets,
     labels: &BTreeMap<usize, RefreshLabels>,
 ) -> Result<(Vec<OwnedDraw>, usize), String> {
-    let (draws, replacements, _) = restored_draws_with_spans(
-        buildings, callbacks, image, assets, labels)?;
+    let (draws, replacements, _) =
+        restored_draws_with_spans(buildings, callbacks, image, assets, labels)?;
     Ok((draws, replacements))
 }
 
 /// The original category renderer walks every descriptor row in slot order.
 /// Retain each materialized row's draw range and descriptor translation so
 /// its native distance scale can act around that row's own Y pivot.
-pub type RestoredDrawsWithSpans =
-    (Vec<OwnedDraw>, usize, Vec<(usize, std::ops::Range<usize>, f32)>);
+pub type RestoredDrawsWithSpans = (
+    Vec<OwnedDraw>,
+    usize,
+    Vec<(usize, std::ops::Range<usize>, f32)>,
+);
 
 pub fn restored_draws_with_spans(
     buildings: &BTreeMap<usize, (SceneBuilding, ModelIdentity, u32)>,
@@ -884,16 +1183,26 @@ pub fn restored_draws_with_spans(
     }
     let mut replacements = 0;
     for &slot in callbacks {
-        let (building, _, class) = buildings.get(&slot)
-            .ok_or_else(|| format!("saved appearance callback slot {slot} has no prepared model"))?;
+        let (building, _, class) = buildings.get(&slot).ok_or_else(|| {
+            format!("saved appearance callback slot {slot} has no prepared model")
+        })?;
         let registry = registries.get_mut(&slot).unwrap();
-        let text = labels.get(&slot).ok_or("appearance refresh text payload missing")?;
+        let text = labels
+            .get(&slot)
+            .ok_or("appearance refresh text payload missing")?;
         registry.refresh(
             |handle| adapter.borrow_mut().release(handle),
             |row| {
                 replacements += 1;
                 let pose = saved_detail_pose(building, row)?;
-                adapter.borrow_mut().construct_with_labels(row, *class, pose, image, assets, Some(text))
+                adapter.borrow_mut().construct_with_labels(
+                    row,
+                    *class,
+                    pose,
+                    image,
+                    assets,
+                    Some(text),
+                )
             },
         )?;
     }
@@ -901,11 +1210,17 @@ pub fn restored_draws_with_spans(
     let mut draws = Vec::new();
     let mut spans = Vec::new();
     for (&slot, registry) in &registries {
-        let building = &buildings.get(&slot).ok_or("appearance registry slot lost building")?.0;
+        let building = &buildings
+            .get(&slot)
+            .ok_or("appearance registry slot lost building")?
+            .0;
         for row in &registry.rows {
-            if u32::from_le_bytes(row.row[..4].try_into().unwrap()) != 1 { continue; }
+            if u32::from_le_bytes(row.row[..4].try_into().unwrap()) != 1 {
+                continue;
+            }
             let handle = u32::from_le_bytes(row.row[0x28..0x2c].try_into().unwrap());
-            let owned = adapter.draws(handle)
+            let owned = adapter
+                .draws(handle)
                 .ok_or_else(|| format!("saved appearance row lost V2 handle {handle}"))?;
             let start = draws.len();
             draws.extend_from_slice(owned);
@@ -944,8 +1259,13 @@ mod tests {
         let offsets = std::fs::read(language.join("tycoon.off")).unwrap();
         let text = std::fs::read(language.join("tycoon.bin")).unwrap();
         let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
-        let assets = Assets::from_original(&read("OPENMT2001_ARCHIVE_DIR"), &read("OPENMT2001_ARCHIVE_BIN"))
-            .unwrap().with_language(&tab, &offsets, &text).unwrap();
+        let assets = Assets::from_original(
+            &read("OPENMT2001_ARCHIVE_DIR"),
+            &read("OPENMT2001_ARCHIVE_BIN"),
+        )
+        .unwrap()
+        .with_language(&tab, &offsets, &text)
+        .unwrap();
         let mut at = 16;
         for case in 0..40 {
             let descriptor = word(at);
@@ -963,35 +1283,62 @@ mod tests {
                 assets.refresh_labels(Some(label), 0x36b).unwrap().owner
             } else {
                 let labels = assets.refresh_labels(None, id).unwrap();
-                assert_eq!(labels.business, label.iter().map(|byte| byte - 32).collect::<Vec<_>>());
+                assert_eq!(
+                    labels.business,
+                    label.iter().map(|byte| byte - 32).collect::<Vec<_>>()
+                );
                 labels.business
             };
             let actual = match descriptor & 0xffff {
                 0x0201 => text_sign_geometry(&tab, &glyphs, width, height).unwrap(),
                 0x0204 => double_backed_text_sign_geometry(&tab, &glyphs, width, height).unwrap(),
-                0x0101 => vertical_text_sign_geometry(&tab, &glyphs, width, height, false, false).unwrap(),
-                0x0102 => vertical_text_sign_geometry(&tab, &glyphs, width, height, true, true).unwrap(),
-                0x0104 => vertical_text_sign_geometry(&tab, &glyphs, width, height, true, false).unwrap(),
+                0x0101 => {
+                    vertical_text_sign_geometry(&tab, &glyphs, width, height, false, false).unwrap()
+                }
+                0x0102 => {
+                    vertical_text_sign_geometry(&tab, &glyphs, width, height, true, true).unwrap()
+                }
+                0x0104 => {
+                    vertical_text_sign_geometry(&tab, &glyphs, width, height, true, false).unwrap()
+                }
                 _ => panic!("unexpected original descriptor {descriptor:x}"),
             };
-            assert_eq!((actual.positions.len(), actual.indices.len()), (vertices, indices), "case {case}");
-            let native_groups = (0..groups).map(|i| word(at + i * 8) as usize).collect::<Vec<_>>();
+            assert_eq!(
+                (actual.positions.len(), actual.indices.len()),
+                (vertices, indices),
+                "case {case}"
+            );
+            let native_groups = (0..groups)
+                .map(|i| word(at + i * 8) as usize)
+                .collect::<Vec<_>>();
             assert_eq!(native_groups.iter().sum::<usize>(), indices);
-            let expected_groups = actual.font_page_indices.into_iter().filter(|&n| n != 0)
-                .chain(std::iter::once(indices - actual.font_page_indices.iter().sum::<usize>()))
+            let expected_groups = actual
+                .font_page_indices
+                .into_iter()
+                .filter(|&n| n != 0)
+                .chain(std::iter::once(
+                    indices - actual.font_page_indices.iter().sum::<usize>(),
+                ))
                 .collect::<Vec<_>>();
             assert_eq!(native_groups, expected_groups, "case {case} groups");
             at += groups * 8;
             for (i, point) in actual.positions.iter().enumerate() {
                 for (axis, &value) in point.iter().enumerate() {
                     let expected = f32::from_bits(word(at + i * 12 + axis * 4));
-                    assert!((value - expected).abs() <= 1e-5, "case {case} vertex {i}/{axis}: {value} vs {expected}");
+                    assert!(
+                        (value - expected).abs() <= 1e-5,
+                        "case {case} vertex {i}/{axis}: {value} vs {expected}"
+                    );
                 }
             }
             at += vertices * 12;
             for (i, uv) in actual.uv.iter().enumerate() {
                 for (axis, value) in uv.iter().enumerate() {
-                    assert_eq!(value.to_bits(), word(at + i * 8 + axis * 4), "case {case} UV {i}/{axis}");
+                    assert_eq!(
+                        value.to_bits(),
+                        word(at + i * 8 + axis * 4),
+                        "case {case} UV {i}/{axis}"
+                    );
                 }
             }
             at += vertices * 8;
@@ -1000,73 +1347,104 @@ mod tests {
             }
             at += vertices * 4;
             for (i, &index) in actual.indices.iter().enumerate() {
-                assert_eq!(index, u16::from_le_bytes(data[at + i * 2..at + i * 2 + 2].try_into().unwrap()), "case {case} index {i}");
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(data[at + i * 2..at + i * 2 + 2].try_into().unwrap()),
+                    "case {case} index {i}"
+                );
             }
             at += indices * 2;
         }
         assert_eq!(at, data.len());
     }
-    use openmt2001::{board::Board, build_file::BuildFile, save::{SaveFile, appearance}};
+    use openmt2001::{
+        board::Board,
+        build_file::BuildFile,
+        save::{SaveFile, appearance},
+    };
 
     #[test]
     #[ignore = "requires pinned v1.4 text constructor and original font4 metrics"]
     fn supplied_text_sign_geometry_matches_native_constructor() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_TEXT_GEOMETRY").unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_TEXT_GEOMETRY").unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTDTXT01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 4));
         let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let tab = std::fs::read(parameter.parent().unwrap().parent().unwrap()
-            .join("Standard/fonts/coppgoth23p.tab")).unwrap();
+        let tab = std::fs::read(
+            parameter
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("Standard/fonts/coppgoth23p.tab"),
+        )
+        .unwrap();
         let mut at = 48;
         for case in 0..4 {
             let len = word(at) as usize;
             at += 4;
-            let label = &bytes[at..at+len];
+            let label = &bytes[at..at + len];
             at += len;
             let width = f32::from_bits(word(at));
-            let height = f32::from_bits(word(at+4));
-            let vertex_count = word(at+8) as usize;
-            let index_count = word(at+12) as usize;
-            let group_count = word(at+16) as usize;
+            let height = f32::from_bits(word(at + 4));
+            let vertex_count = word(at + 8) as usize;
+            let index_count = word(at + 12) as usize;
+            let group_count = word(at + 16) as usize;
             at += 20;
             assert_eq!(group_count, 2);
-            let groups = [word(at) as usize, word(at+8) as usize];
-            assert_eq!((word(at+4), word(at+12)), (0x71110000, 0x72140000));
+            let groups = [word(at) as usize, word(at + 8) as usize];
+            assert_eq!((word(at + 4), word(at + 12)), (0x71110000, 0x72140000));
             at += 16;
-            let glyphs = label.iter().map(|byte| byte.checked_sub(32).unwrap())
+            let glyphs = label
+                .iter()
+                .map(|byte| byte.checked_sub(32).unwrap())
                 .collect::<Vec<_>>();
             let actual = text_sign_geometry(&tab, &glyphs, width, height).unwrap();
-            assert_eq!((actual.positions.len(), actual.indices.len()), (vertex_count, index_count));
+            assert_eq!(
+                (actual.positions.len(), actual.indices.len()),
+                (vertex_count, index_count)
+            );
             assert_eq!(actual.font_page_indices, [groups[0], 0]);
             assert_eq!(groups[1], 6);
             for (i, point) in actual.positions.iter().enumerate() {
                 for (axis, value) in point.iter().enumerate() {
-                    let expected = f32::from_bits(word(at+i*12+axis*4));
-                    assert!((*value-expected).abs() <= 1e-5,
-                            "case {case} vertex {i} axis {axis}: {value} vs {expected}");
+                    let expected = f32::from_bits(word(at + i * 12 + axis * 4));
+                    assert!(
+                        (*value - expected).abs() <= 1e-5,
+                        "case {case} vertex {i} axis {axis}: {value} vs {expected}"
+                    );
                 }
             }
             at += vertex_count * 12;
             for (i, tex) in actual.uv.iter().enumerate() {
                 for (axis, value) in tex.iter().enumerate() {
-                    assert_eq!(value.to_bits(), word(at+i*8+axis*4),
-                               "case {case} vertex {i} UV {axis}");
+                    assert_eq!(
+                        value.to_bits(),
+                        word(at + i * 8 + axis * 4),
+                        "case {case} vertex {i} UV {axis}"
+                    );
                 }
             }
             at += vertex_count * 8;
             for (i, &color) in actual.colors.iter().enumerate() {
-                assert_eq!(color, word(at+i*4), "case {case} vertex {i} color");
+                assert_eq!(color, word(at + i * 4), "case {case} vertex {i} color");
             }
             at += vertex_count * 4;
             for (i, &index) in actual.indices.iter().enumerate() {
-                assert_eq!(index, u16::from_le_bytes(bytes[at+i*2..at+i*2+2].try_into().unwrap()),
-                           "case {case} index {i}");
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(bytes[at + i * 2..at + i * 2 + 2].try_into().unwrap()),
+                    "case {case} index {i}"
+                );
             }
             at += index_count * 2;
         }
@@ -1076,61 +1454,82 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 retail text geometry and original font4 metrics"]
     fn original_double_backed_text_matches_native_constructor() {
-        let bytes = std::fs::read(
-            std::env::var("OPENMT2001_NATIVE_APPEARANCE_GAP").unwrap(),
-        ).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_APPEARANCE_GAP").unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTRETGE1");
-        let word = |at: usize| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 2));
-        assert_eq!((word(48), word(52), word(56), word(60)),
-            (311, 0, 0x0102_0204, 0x4574f0));
+        assert_eq!(
+            (word(48), word(52), word(56), word(60)),
+            (311, 0, 0x0102_0204, 0x4574f0)
+        );
         let width = f32::from_bits(word(64));
         let height = f32::from_bits(word(68));
         let label_len = word(72) as usize;
-        let label = &bytes[76..76+label_len];
+        let label = &bytes[76..76 + label_len];
         assert_eq!(label, b"TO-LET");
         let mut at = 76 + label_len;
         let vertex_count = word(at) as usize;
-        let index_count = word(at+4) as usize;
-        assert_eq!((vertex_count, index_count, word(at+8)), (28, 48, 2));
+        let index_count = word(at + 4) as usize;
+        assert_eq!((vertex_count, index_count, word(at + 8)), (28, 48, 2));
         at += 12;
-        let groups = [word(at) as usize, word(at+8) as usize];
+        let groups = [word(at) as usize, word(at + 8) as usize];
         assert_eq!(groups, [36, 12]);
         at += 16;
         let mut raw = Vec::new();
         for _ in 0..4 {
             let len = word(at) as usize;
             at += 4;
-            raw.push(&bytes[at..at+len]);
+            raw.push(&bytes[at..at + len]);
             at += len;
         }
         let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let tab = std::fs::read(parameter.parent().unwrap().parent().unwrap()
-            .join("Standard/fonts/coppgoth23p.tab")).unwrap();
+        let tab = std::fs::read(
+            parameter
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("Standard/fonts/coppgoth23p.tab"),
+        )
+        .unwrap();
         let glyphs = label.iter().map(|byte| byte - 32).collect::<Vec<_>>();
         let actual = double_backed_text_sign_geometry(&tab, &glyphs, width, height).unwrap();
-        assert_eq!((actual.positions.len(), actual.indices.len()), (vertex_count, index_count));
+        assert_eq!(
+            (actual.positions.len(), actual.indices.len()),
+            (vertex_count, index_count)
+        );
         assert_eq!(actual.font_page_indices, [groups[0], 0]);
         for (i, point) in actual.positions.iter().enumerate() {
             for (axis, value) in point.iter().enumerate() {
-                let offset = i*12 + axis*4;
-                let expected = f32::from_le_bytes(raw[0][offset..offset+4].try_into().unwrap());
-                assert!((*value - expected).abs() <= 1e-5,
-                    "double-backed text vertex {i} axis {axis}");
+                let offset = i * 12 + axis * 4;
+                let expected = f32::from_le_bytes(raw[0][offset..offset + 4].try_into().unwrap());
+                assert!(
+                    (*value - expected).abs() <= 1e-5,
+                    "double-backed text vertex {i} axis {axis}"
+                );
             }
         }
         for (i, tex) in actual.uv.iter().enumerate() {
             for (axis, value) in tex.iter().enumerate() {
-                let offset = i*8 + axis*4;
-                assert_eq!(value.to_bits(),
-                    u32::from_le_bytes(raw[1][offset..offset+4].try_into().unwrap()));
+                let offset = i * 8 + axis * 4;
+                assert_eq!(
+                    value.to_bits(),
+                    u32::from_le_bytes(raw[1][offset..offset + 4].try_into().unwrap())
+                );
             }
         }
         for (i, color) in actual.colors.iter().enumerate() {
-            assert_eq!(*color, u32::from_le_bytes(raw[2][i*4..i*4+4].try_into().unwrap()));
+            assert_eq!(
+                *color,
+                u32::from_le_bytes(raw[2][i * 4..i * 4 + 4].try_into().unwrap())
+            );
         }
         for (i, index) in actual.indices.iter().enumerate() {
-            assert_eq!(*index, u16::from_le_bytes(raw[3][i*2..i*2+2].try_into().unwrap()));
+            assert_eq!(
+                *index,
+                u16::from_le_bytes(raw[3][i * 2..i * 2 + 2].try_into().unwrap())
+            );
         }
     }
 
@@ -1155,10 +1554,7 @@ mod tests {
             .iter()
             .map(|byte| byte - 32)
             .collect::<Vec<_>>();
-        let to_let = b"TO-LET"
-            .iter()
-            .map(|byte| byte - 32)
-            .collect::<Vec<_>>();
+        let to_let = b"TO-LET".iter().map(|byte| byte - 32).collect::<Vec<_>>();
         let mut at = 48;
         let mut checked = 0;
         for _ in 0..word(44) {
@@ -1254,12 +1650,16 @@ mod tests {
         let language = installer.join("US/language/usa");
         let offsets = std::fs::read(language.join("tycoon.off")).unwrap();
         let bytes = std::fs::read(language.join("tycoon.bin")).unwrap();
-        let lengths = offsets.chunks_exact(2).map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()) as usize)
+        let lengths = offsets
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()) as usize)
             .collect::<Vec<_>>();
         let begin = lengths[..0x45c].iter().sum::<usize>();
-        let business_value = &bytes[begin..begin+lengths[0x45c]];
-        let assets = Assets::from_original(&directory, &archive).unwrap()
-            .with_font4(&tab, business_value).unwrap();
+        let business_value = &bytes[begin..begin + lengths[0x45c]];
+        let assets = Assets::from_original(&directory, &archive)
+            .unwrap()
+            .with_font4(&tab, business_value)
+            .unwrap();
         let file_bytes = read("OPENMT2001_BUILD_FILE");
         let file = BuildFile::parse(&file_bytes).unwrap();
         let board = Board::from_v14(&image).unwrap();
@@ -1268,7 +1668,8 @@ mod tests {
         let mut found = [false; 2];
         for source in save.buildings().unwrap() {
             let building = SceneBuilding::from_saved(&source, &board, &file).unwrap();
-            let identity = appearance::model_identity(&file, building.selected, source.height()).unwrap();
+            let identity =
+                appearance::model_identity(&file, building.selected, source.height()).unwrap();
             for row in &identity.renderer_templates {
                 let (slot, glyph_indices) = match row.descriptor {
                     0x0101_0201 => (0, 84),
@@ -1294,28 +1695,34 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 4e3380 matrix fixture"]
     fn saved_detail_basis_matches_native_matrix_after_scene_z_flip() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_DETAIL_MATRIX").unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_DETAIL_MATRIX").unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTDMAT01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 6));
         assert_eq!(bytes.len(), 48 + 6 * 52);
         for case in 0..6 {
             let at = 48 + case * 52;
             let degrees = f32::from_bits(word(at));
-            let native = (0..12).map(|i| f32::from_bits(word(at + 4 + i * 4)))
+            let native = (0..12)
+                .map(|i| f32::from_bits(word(at + 4 + i * 4)))
                 .collect::<Vec<_>>();
             let basis = saved_detail_basis(degrees).to_cols_array();
             for row in 0..3 {
                 for col in 0..3 {
                     let expected = native[col * 3 + row] * if row == 2 { -1. } else { 1. };
                     let actual = basis[col * 4 + row];
-                    assert!((actual - expected).abs() <= 1e-7,
-                            "angle {degrees} axis {row} basis {col}: {actual} vs {expected}");
+                    assert!(
+                        (actual - expected).abs() <= 1e-7,
+                        "angle {degrees} axis {row} basis {col}: {actual} vs {expected}"
+                    );
                 }
             }
         }
@@ -1330,21 +1737,23 @@ mod tests {
         let bytes = read("OPENMT2001_NATIVE_SAVE_DETAIL_GEOMETRY");
         assert_eq!(&bytes[..8], b"MTDTGEO1");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(40), 0x037f);
         assert_eq!(word(44), 4);
         let mut at = 48;
         for _ in 0..4 {
             let class = word(at);
-            let width = f32::from_bits(word(at+4));
-            let height = f32::from_bits(word(at+8));
+            let width = f32::from_bits(word(at + 4));
+            let height = f32::from_bits(word(at + 8));
             let indices = sign_material_indices(&image, class).unwrap();
-            assert_eq!(indices, (word(at+12) as usize, word(at+16) as usize));
-            assert_eq!((word(at+20), word(at+24)), (8, 12));
+            assert_eq!(indices, (word(at + 12) as usize, word(at + 16) as usize));
+            assert_eq!((word(at + 20), word(at + 24)), (8, 12));
             at += 28;
             let geometry = sign_geometry(width, height).unwrap();
             for position in &geometry.positions {
@@ -1364,7 +1773,10 @@ mod tests {
                 at += 4;
             }
             for index in geometry.indices {
-                assert_eq!(index, u16::from_le_bytes(bytes[at..at+2].try_into().unwrap()));
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+                );
                 at += 2;
             }
         }
@@ -1382,11 +1794,17 @@ mod tests {
         let saved = save.buildings().unwrap();
         let first = &saved[0];
         let selected = openmt2001::scene::SceneBuilding::from_saved(first, &board, &file).unwrap();
-        let identity = appearance::model_identity(&file, selected.selected, first.height()).unwrap();
-        let detail = identity.renderer_templates.iter()
-            .find(|row| row.descriptor == 0x0104_0201).unwrap();
+        let identity =
+            appearance::model_identity(&file, selected.selected, first.height()).unwrap();
+        let detail = identity
+            .renderer_templates
+            .iter()
+            .find(|row| row.descriptor == 0x0104_0201)
+            .unwrap();
         let mut adapter = Adapter::default();
-        let handle = adapter.construct(detail, 10, Mat4::IDENTITY, &image, &assets).unwrap();
+        let handle = adapter
+            .construct(detail, 10, Mat4::IDENTITY, &image, &assets)
+            .unwrap();
         let draws = adapter.draws(handle).unwrap();
         assert_eq!(draws.len(), 2);
         assert!(draws.iter().all(|draw| draw.vertices.len() == 6));
@@ -1394,7 +1812,9 @@ mod tests {
         assert_eq!(draws[1].height, assets.building[14].height);
         adapter.release(handle).unwrap();
         assert!(adapter.draws(handle).is_none());
-        let next = adapter.construct(detail, 10, Mat4::IDENTITY, &image, &assets).unwrap();
+        let next = adapter
+            .construct(detail, 10, Mat4::IDENTITY, &image, &assets)
+            .unwrap();
         assert!(next > handle);
     }
 
@@ -1407,20 +1827,24 @@ mod tests {
         let bytes = read("OPENMT2001_NATIVE_SAVE_DOUBLE_SIGN_GEOMETRY");
         assert_eq!(&bytes[..8], b"MTDSIGN2");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 4));
         let mut at = 48;
         for _ in 0..4 {
             let class = word(at);
-            let width = f32::from_bits(word(at+4));
-            let height = f32::from_bits(word(at+8));
-            assert_eq!(sign_material_indices(&image, class).unwrap(),
-                       (word(at+12) as usize, word(at+16) as usize));
-            assert_eq!((word(at+20), word(at+24)), (8, 24));
+            let width = f32::from_bits(word(at + 4));
+            let height = f32::from_bits(word(at + 8));
+            assert_eq!(
+                sign_material_indices(&image, class).unwrap(),
+                (word(at + 12) as usize, word(at + 16) as usize)
+            );
+            assert_eq!((word(at + 20), word(at + 24)), (8, 24));
             at += 28;
             let geometry = sign_geometry(width, height).unwrap();
             for position in &geometry.positions {
@@ -1440,7 +1864,10 @@ mod tests {
                 at += 4;
             }
             for index in double_sign_indices() {
-                assert_eq!(index, u16::from_le_bytes(bytes[at..at+2].try_into().unwrap()));
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+                );
                 at += 2;
             }
         }
@@ -1455,12 +1882,19 @@ mod tests {
         let save = SaveFile::parse(&save_bytes).unwrap();
         let mut tested = false;
         for building in save.buildings().unwrap() {
-            let selected = openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
-            let identity = appearance::model_identity(&file, selected.selected, building.height()).unwrap();
-            if let Some(detail) = identity.renderer_templates.iter()
-                .find(|row| row.descriptor == 0x0104_0202) {
+            let selected =
+                openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
+            let identity =
+                appearance::model_identity(&file, selected.selected, building.height()).unwrap();
+            if let Some(detail) = identity
+                .renderer_templates
+                .iter()
+                .find(|row| row.descriptor == 0x0104_0202)
+            {
                 let mut adapter = Adapter::default();
-                let handle = adapter.construct(detail, 10, Mat4::IDENTITY, &image, &assets).unwrap();
+                let handle = adapter
+                    .construct(detail, 10, Mat4::IDENTITY, &image, &assets)
+                    .unwrap();
                 let draws = adapter.draws(handle).unwrap();
                 assert_eq!(draws.len(), 2);
                 assert_eq!((draws[0].vertices.len(), draws[1].vertices.len()), (12, 12));
@@ -1481,28 +1915,34 @@ mod tests {
         let bytes = read("OPENMT2001_NATIVE_SAVE_POLE_GEOMETRY");
         assert_eq!(&bytes[..8], b"MTPOLE01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(40), 0x037f);
         assert_eq!(word(44), 3);
         let mut at = 48;
         for _ in 0..3 {
             let class = word(at);
-            let width = f32::from_bits(word(at+4));
-            let height = f32::from_bits(word(at+8));
-            assert_eq!(awning_material_indices(&image, class).unwrap(),
-                       (word(at+12) as usize, word(at+16) as usize));
-            assert_eq!((word(at+20), word(at+24), word(at+28)), (42, 102, 96));
+            let width = f32::from_bits(word(at + 4));
+            let height = f32::from_bits(word(at + 8));
+            assert_eq!(
+                awning_material_indices(&image, class).unwrap(),
+                (word(at + 12) as usize, word(at + 16) as usize)
+            );
+            assert_eq!((word(at + 20), word(at + 24), word(at + 28)), (42, 102, 96));
             at += 32;
             let geometry = awning_geometry(width, height).unwrap();
             for position in &geometry.positions {
                 for component in position {
                     let native = f32::from_bits(word(at));
-                    assert!((component - native).abs() <= 1e-6,
-                            "position at {at}: {component} versus {native}");
+                    assert!(
+                        (component - native).abs() <= 1e-6,
+                        "position at {at}: {component} versus {native}"
+                    );
                     at += 4;
                 }
             }
@@ -1517,7 +1957,10 @@ mod tests {
                 at += 4;
             }
             for index in geometry.indices {
-                assert_eq!(index, u16::from_le_bytes(bytes[at..at+2].try_into().unwrap()));
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+                );
                 at += 2;
             }
         }
@@ -1532,12 +1975,19 @@ mod tests {
         let save = SaveFile::parse(&save_bytes).unwrap();
         let mut tested = false;
         for building in save.buildings().unwrap() {
-            let selected = openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
-            let identity = appearance::model_identity(&file, selected.selected, building.height()).unwrap();
-            if let Some(detail) = identity.renderer_templates.iter()
-                .find(|row| row.descriptor == 0x0200_0001) {
+            let selected =
+                openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
+            let identity =
+                appearance::model_identity(&file, selected.selected, building.height()).unwrap();
+            if let Some(detail) = identity
+                .renderer_templates
+                .iter()
+                .find(|row| row.descriptor == 0x0200_0001)
+            {
                 let mut adapter = Adapter::default();
-                let handle = adapter.construct(detail, 10, Mat4::IDENTITY, &image, &assets).unwrap();
+                let handle = adapter
+                    .construct(detail, 10, Mat4::IDENTITY, &image, &assets)
+                    .unwrap();
                 let draws = adapter.draws(handle).unwrap();
                 assert_eq!(draws.len(), 2);
                 assert_eq!((draws[0].vertices.len(), draws[1].vertices.len()), (96, 6));
@@ -1560,27 +2010,37 @@ mod tests {
         let bytes = read("OPENMT2001_NATIVE_SAVE_BANNER_GEOMETRY");
         assert_eq!(&bytes[..8], b"MTBANR01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 2));
         let mut at = 48;
         for _ in 0..2 {
             let width = f32::from_bits(word(at));
-            let height = f32::from_bits(word(at+4));
-            assert_eq!(banner_material_indices(&image, BannerSelection::INITIAL).unwrap(),
-                       (word(at+8) as usize, word(at+12) as usize, Some(word(at+16) as usize)));
-            assert_eq!((word(at+20), word(at+24), word(at+28)), (20, 36, 3));
-            assert_eq!((word(at+32), word(at+36), word(at+40)), (12, 12, 12));
+            let height = f32::from_bits(word(at + 4));
+            assert_eq!(
+                banner_material_indices(&image, BannerSelection::INITIAL).unwrap(),
+                (
+                    word(at + 8) as usize,
+                    word(at + 12) as usize,
+                    Some(word(at + 16) as usize)
+                )
+            );
+            assert_eq!((word(at + 20), word(at + 24), word(at + 28)), (20, 36, 3));
+            assert_eq!((word(at + 32), word(at + 36), word(at + 40)), (12, 12, 12));
             at += 44;
             let geometry = banner_geometry(width, height).unwrap();
             for position in &geometry.positions {
                 for component in position {
                     let native = f32::from_bits(word(at));
-                    assert!((component - native).abs() <= 1e-6,
-                            "position at {at}: {component} versus {native}");
+                    assert!(
+                        (component - native).abs() <= 1e-6,
+                        "position at {at}: {component} versus {native}"
+                    );
                     at += 4;
                 }
             }
@@ -1595,7 +2055,10 @@ mod tests {
                 at += 4;
             }
             for index in geometry.indices {
-                assert_eq!(index, u16::from_le_bytes(bytes[at..at+2].try_into().unwrap()));
+                assert_eq!(
+                    index,
+                    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+                );
                 at += 2;
             }
         }
@@ -1610,15 +2073,25 @@ mod tests {
         let save = SaveFile::parse(&save_bytes).unwrap();
         let mut tested = false;
         for building in save.buildings().unwrap() {
-            let selected = openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
-            let identity = appearance::model_identity(&file, selected.selected, building.height()).unwrap();
-            if let Some(detail) = identity.renderer_templates.iter()
-                .find(|row| row.descriptor == 0x0108_0202) {
+            let selected =
+                openmt2001::scene::SceneBuilding::from_saved(&building, &board, &file).unwrap();
+            let identity =
+                appearance::model_identity(&file, selected.selected, building.height()).unwrap();
+            if let Some(detail) = identity
+                .renderer_templates
+                .iter()
+                .find(|row| row.descriptor == 0x0108_0202)
+            {
                 let mut adapter = Adapter::default();
-                let handle = adapter.construct(detail, 10, Mat4::IDENTITY, &image, &assets).unwrap();
+                let handle = adapter
+                    .construct(detail, 10, Mat4::IDENTITY, &image, &assets)
+                    .unwrap();
                 let draws = adapter.draws(handle).unwrap();
                 assert_eq!(draws.len(), 3);
-                assert_eq!(draws.iter().map(|d| d.vertices.len()).collect::<Vec<_>>(), [12, 12, 12]);
+                assert_eq!(
+                    draws.iter().map(|d| d.vertices.len()).collect::<Vec<_>>(),
+                    [12, 12, 12]
+                );
                 assert_eq!(draws[0].width, assets.signs[45].width);
                 assert_eq!(draws[1].height, assets.generic640[1].height);
                 assert_eq!(draws[2].width, assets.signs[0].width);
@@ -1639,11 +2112,13 @@ mod tests {
         let bytes = read("OPENMT2001_NATIVE_SAVE_DETAIL_POSE");
         assert_eq!(&bytes[..8], b"MTDPOS01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&bytes[8..40], sha);
-        let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 15));
         let file_bytes = read("OPENMT2001_BUILD_FILE");
         let file = BuildFile::parse(&file_bytes).unwrap();
@@ -1655,27 +2130,36 @@ mod tests {
         let mut checked = 0;
         for _ in 0..15 {
             let slot = word(at) as usize;
-            let count = word(at+4) as usize;
+            let count = word(at + 4) as usize;
             at += 8;
             let source = saved.iter().find(|building| building.slot == slot).unwrap();
             let building = SceneBuilding::from_saved(source, &board, &file).unwrap();
-            let identity = appearance::model_identity(&file, building.selected, source.height()).unwrap();
+            let identity =
+                appearance::model_identity(&file, building.selected, source.height()).unwrap();
             assert_eq!(identity.renderer_templates.len(), count);
             for row in &identity.renderer_templates {
                 let index = word(at);
                 assert!(index < 1000);
                 at += 4;
-                let native = &bytes[at..at+52];
+                let native = &bytes[at..at + 52];
                 let origin = saved_detail_origin(&building, row).unwrap();
                 for (axis, offset) in [12, 16, 20].into_iter().enumerate() {
-                    let expected = u32::from_le_bytes(native[offset..offset+4].try_into().unwrap());
-                    assert_eq!(origin[axis].to_bits(), expected,
-                               "slot {slot} detail {} axis {axis}", row.detail_slot);
+                    let expected =
+                        u32::from_le_bytes(native[offset..offset + 4].try_into().unwrap());
+                    assert_eq!(
+                        origin[axis].to_bits(),
+                        expected,
+                        "slot {slot} detail {} axis {axis}",
+                        row.detail_slot
+                    );
                 }
                 let rotation = saved_detail_rotation_degrees(&building, row).unwrap();
-                assert_eq!(rotation.to_bits(),
-                           u32::from_le_bytes(native[36..40].try_into().unwrap()),
-                           "slot {slot} detail {} rotation", row.detail_slot);
+                assert_eq!(
+                    rotation.to_bits(),
+                    u32::from_le_bytes(native[36..40].try_into().unwrap()),
+                    "slot {slot} detail {} rotation",
+                    row.detail_slot
+                );
                 at += 52;
                 checked += 1;
             }

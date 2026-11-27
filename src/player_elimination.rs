@@ -34,8 +34,12 @@ fn word(bytes: &[u8], at: usize) -> u32 {
 }
 ///450470 disables the optional5Hz450410 command/network task; it leaves the
 /// task allocated and preserves its retained identity.
-pub fn finish_local(task:Option<usize>,timers:&mut [crate::timers::Task])->Result<(),String> {
-    if let Some(index)=task {timers.get_mut(index).ok_or("local command timer outside manager")?[0]=0;}
+pub fn finish_local(task: Option<usize>, timers: &mut [crate::timers::Task]) -> Result<(), String> {
+    if let Some(index) = task {
+        timers
+            .get_mut(index)
+            .ok_or("local command timer outside manager")?[0] = 0;
+    }
     Ok(())
 }
 pub fn advance(

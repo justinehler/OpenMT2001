@@ -1,32 +1,47 @@
 //! Live resident service provenance, carried on the existing operation stream.
 //! No resident/auxiliary bytes or player roster are captured here.
 use super::PropertyEpoch;
-use openmt2001::resident::{AuxiliaryPool,AuxiliarySource,AuxiliaryBinding};
+use openmt2001::resident::{AuxiliaryBinding, AuxiliaryPool, AuxiliarySource};
 
-#[derive(Clone,Debug,PartialEq,Eq)]
-pub struct ResidentSource { epoch:PropertyEpoch, pool:AuxiliarySource }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentSource {
+    epoch: PropertyEpoch,
+    pool: AuxiliarySource,
+}
 impl ResidentSource {
-    pub fn capture(session:&crate::fresh_city::Session<'_>)->Self {
+    pub fn capture(session: &crate::fresh_city::Session<'_>) -> Self {
         Self::from_world(&session.world)
     }
-    pub fn from_world(world:&openmt2001::level_startup::World)->Self {
-        Self{epoch:PropertyEpoch::World(world.topology.epoch()),pool:world.creation.auxiliary.source()}
+    pub fn from_world(world: &openmt2001::level_startup::World) -> Self {
+        Self {
+            epoch: PropertyEpoch::World(world.topology.epoch()),
+            pool: world.creation.auxiliary.source(),
+        }
     }
-    pub fn epoch(&self)->PropertyEpoch {self.epoch}
-    pub fn validate_live(&self)->Result<(),String> {self.pool.validate_live()}
-    pub fn validate(&self,expected:PropertyEpoch,pool:&AuxiliaryPool)->Result<(),String> {
-        if self.epoch!=expected {return Err("resident service World source epoch mismatch".into());}
+    pub fn epoch(&self) -> PropertyEpoch {
+        self.epoch
+    }
+    pub fn validate_live(&self) -> Result<(), String> {
+        self.pool.validate_live()
+    }
+    pub fn validate(&self, expected: PropertyEpoch, pool: &AuxiliaryPool) -> Result<(), String> {
+        if self.epoch != expected {
+            return Err("resident service World source epoch mismatch".into());
+        }
         self.pool.validate_pool(pool)
     }
-    pub fn validate_binding(&self,binding:&AuxiliaryBinding)->Result<(),String> {
+    pub fn validate_binding(&self, binding: &AuxiliaryBinding) -> Result<(), String> {
         binding.validate_source(&self.pool)
     }
     #[cfg(test)]
-    pub(crate) fn synthetic(epoch:u64,pool:&AuxiliaryPool)->Self {
-        Self{epoch:PropertyEpoch::synthetic(epoch),pool:pool.source()}
+    pub(crate) fn synthetic(epoch: u64, pool: &AuxiliaryPool) -> Self {
+        Self {
+            epoch: PropertyEpoch::synthetic(epoch),
+            pool: pool.source(),
+        }
     }
 }
-#[derive(Clone,Debug,PartialEq,Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResidentRead {
     Count7a18ec,
     Flags336(i32),

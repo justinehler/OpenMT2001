@@ -1,9 +1,9 @@
 //! Original40f260 Locator business list and live report navigation.
 use crate::ui::{self, Surface};
+#[path = "locator/strategic.rs"]
+pub(crate) mod strategic;
 #[path = "toolbar_collapse.rs"]
 pub mod toolbar_collapse;
-#[path="locator/strategic.rs"]
-pub(crate) mod strategic;
 use openmt2001::{
     archive::ArchiveIndex,
     business_pool::BusinessCatalog,
@@ -260,13 +260,21 @@ impl Assets {
         let panel_mesh = openmt2001::mesh::CachedMesh::parse(payload(
             "gamedata2/brand_new_panels/main_panel_v2.tm",
         )?)?;
-        let (mut toolbar_closed_base, _) = ui::panel_frame_base(index, archive,
-            "gamedata2/brand_new_panels/main_panel_v2.tm", &(0..12).collect::<Vec<_>>(), 0)?;
+        let (mut toolbar_closed_base, _) = ui::panel_frame_base(
+            index,
+            archive,
+            "gamedata2/brand_new_panels/main_panel_v2.tm",
+            &(0..12).collect::<Vec<_>>(),
+            0,
+        )?;
         let closed_regions = openmt2001::ui_mesh::regions(&panel_mesh, 0)?;
-        let strip = closed_regions.iter().find(|r|r.name=="P_MAIN_VERTCAL_BAR_BACKING")
-            .ok_or("closed toolbar strip missing")?.bounds;
+        let strip = closed_regions
+            .iter()
+            .find(|r| r.name == "P_MAIN_VERTCAL_BAR_BACKING")
+            .ok_or("closed toolbar strip missing")?
+            .bounds;
         let mut strip_backing = Surface::solid();
-        strip_backing.rect(strip, [0xff777777,0x66777777,0x66777777,0xff777777]);
+        strip_backing.rect(strip, [0xff777777, 0x66777777, 0x66777777, 0xff777777]);
         toolbar_closed_base.push(strip_backing);
         let property_title_bounds = openmt2001::ui_mesh::regions(&panel_mesh, 9)?
             .into_iter()
@@ -275,8 +283,11 @@ impl Assets {
             .bounds;
         let title_regions = openmt2001::ui_mesh::regions(&panel_mesh, 9)?;
         let title_area = |name| -> Result<[f32; 4], String> {
-            title_regions.iter().find(|r| r.name == name)
-                .map(|r| r.bounds).ok_or_else(|| format!("property {name} missing"))
+            title_regions
+                .iter()
+                .find(|r| r.name == name)
+                .map(|r| r.bounds)
+                .ok_or_else(|| format!("property {name} missing"))
         };
         let mut property_title_text_bounds = title_area("P_MAIN_TITLE_AREA1")?;
         property_title_text_bounds[0] += 10.;
@@ -294,12 +305,22 @@ impl Assets {
             .map_err(|e| e.to_string())?;
         // Shared MPP mode1 icon, submitted by original 41edb0 at (35,5).
         let mut property_title_icon = Surface::new(&generic.textures[20]);
-        let title_icon_bounds = [35., 5., 35. + property_title_icon.width as f32,
-            5. + property_title_icon.height as f32];
+        let title_icon_bounds = [
+            35.,
+            5.,
+            35. + property_title_icon.width as f32,
+            5. + property_title_icon.height as f32,
+        ];
         property_title_icon.quad(
-            [[title_icon_bounds[0],title_icon_bounds[1]], [title_icon_bounds[0],title_icon_bounds[3]],
-             [title_icon_bounds[2],title_icon_bounds[3]], [title_icon_bounds[2],title_icon_bounds[1]]],
-            [[0.,0.],[0.,1.],[1.,1.],[1.,0.]], [0xffffffff;4]);
+            [
+                [title_icon_bounds[0], title_icon_bounds[1]],
+                [title_icon_bounds[0], title_icon_bounds[3]],
+                [title_icon_bounds[2], title_icon_bounds[3]],
+                [title_icon_bounds[2], title_icon_bounds[1]],
+            ],
+            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+            [0xffffffff; 4],
+        );
         // Original533764: P_MAIN_ICON4, texture198, tooltip1148(Locator), event22.
         let mut icon = Surface::new(&generic.textures[198]);
         let [l, t, r, b] = regions[16];
@@ -827,24 +848,36 @@ impl Assets {
             2
         }
     }
-    pub fn property_panel(&self, renderer: &Renderer, report: &crate::block_information::Report,
-        category: usize, state: &crate::utility_report::View,
-    ) -> Result<(PreparedScene,[f32;4]),String> {
-        self.property_panel_content(renderer,report,category,state,true)
+    pub fn property_panel(
+        &self,
+        renderer: &Renderer,
+        report: &crate::block_information::Report,
+        category: usize,
+        state: &crate::utility_report::View,
+    ) -> Result<(PreparedScene, [f32; 4]), String> {
+        self.property_panel_content(renderer, report, category, state, true)
     }
     /// Only ordinary selected-block mode opts into independent side presentation.
-    pub fn ordinary_property_body(&self, renderer:&Renderer, report:&crate::block_information::Report,
-        category:usize,state:&crate::utility_report::View,
-    )->Result<(PreparedScene,[f32;4]),String> {
+    pub fn ordinary_property_body(
+        &self,
+        renderer: &Renderer,
+        report: &crate::block_information::Report,
+        category: usize,
+        state: &crate::utility_report::View,
+    ) -> Result<(PreparedScene, [f32; 4]), String> {
         if !report.categories.get(category).is_some_and(Option::is_some) {
             return Err("ordinary toolbar body requires ordinary category".into());
         }
-        self.property_panel_content(renderer,report,category,state,false)
+        self.property_panel_content(renderer, report, category, state, false)
     }
     fn property_panel_content(
-        &self, renderer:&Renderer, report:&crate::block_information::Report,
-        category:usize,state:&crate::utility_report::View,include_sides:bool,
-    )->Result<(PreparedScene,[f32;4]),String> {
+        &self,
+        renderer: &Renderer,
+        report: &crate::block_information::Report,
+        category: usize,
+        state: &crate::utility_report::View,
+        include_sides: bool,
+    ) -> Result<(PreparedScene, [f32; 4]), String> {
         if let Some(utility) = report
             .utility_categories
             .iter()
@@ -869,7 +902,9 @@ impl Assets {
         let mut fonts = self.fonts.clone();
         let mut title_font = self.property_title_fonts.clone();
         let mut body = self.ownership_fonts.clone();
-        if include_sides { self.property_side_buttons(&mut surfaces, state, report, category); }
+        if include_sides {
+            self.property_side_buttons(&mut surfaces, state, report, category);
+        }
         if !state.property_offer_open() && !state.property_rights_open() {
             self.property_buttons(
                 &mut surfaces,
@@ -880,9 +915,13 @@ impl Assets {
         //405744..4057b3 uses font3 for both columns, palette0 for labels
         //and palette3 for right-aligned values. The list starts40 below the
         //main window top, with the text object's original10-pixel line step.
-        ui::text_widget_style4(&mut title_font, &self.property_title_tab,
-            &self.title_labels[category], self.property_title_text_bounds,
-            self.text_palette[0])?;
+        ui::text_widget_style4(
+            &mut title_font,
+            &self.property_title_tab,
+            &self.title_labels[category],
+            self.property_title_text_bounds,
+            self.text_palette[0],
+        )?;
         if !state.property_offer_open() && !state.property_rights_open() {
             let mut section = Surface::solid();
             section.rect(self.city_layout.header, [self.text_palette[17]; 4]);
@@ -1171,62 +1210,140 @@ impl Assets {
         );
         surfaces.push(surface);
     }
-    pub fn ordinary_toolbar_bounds(&self)->[[f32;4];3] { self.property_side_bounds }
-    pub fn ordinary_toolbar_policy(&self,report:&crate::block_information::Report,
-        category:usize,shown:bool,build_allowed:bool,tutorial_allowed:[bool;3],
-    )->toolbar_collapse::Policy {
-        toolbar_collapse::Policy { category,shown,
-            nonzero_kind:self.property_lease_available[category],
-            lease_available:report.lease_available[category],build_allowed,tutorial_allowed }
+    pub fn ordinary_toolbar_bounds(&self) -> [[f32; 4]; 3] {
+        self.property_side_bounds
+    }
+    pub fn ordinary_toolbar_policy(
+        &self,
+        report: &crate::block_information::Report,
+        category: usize,
+        shown: bool,
+        build_allowed: bool,
+        tutorial_allowed: [bool; 3],
+    ) -> toolbar_collapse::Policy {
+        toolbar_collapse::Policy {
+            category,
+            shown,
+            nonzero_kind: self.property_lease_available[category],
+            lease_available: report.lease_available[category],
+            build_allowed,
+            tutorial_allowed,
+        }
     }
     /// Remove only side-control admission. All existing BODY branches remain.
-    pub fn ordinary_body_pointer(&self,state:&mut crate::utility_report::View,
-        point:Option<[i32;2]>,report:&crate::block_information::Report,category:usize,
+    pub fn ordinary_body_pointer(
+        &self,
+        state: &mut crate::utility_report::View,
+        point: Option<[i32; 2]>,
+        report: &crate::block_information::Report,
+        category: usize,
     ) {
-        self.property_pointer(state,point,report,category);
-        if state.property_control_hover.is_some_and(|id|(9..=11).contains(&id)) {
+        self.property_pointer(state, point, report, category);
+        if state
+            .property_control_hover
+            .is_some_and(|id| (9..=11).contains(&id))
+        {
             state.property_control_pointer(None);
         }
     }
-    pub fn ordinary_body_tutorial_at(&self,state:&crate::utility_report::View,
-        point:Option<[i32;2]>,report:&crate::block_information::Report,category:usize,
-    )->Option<u32> {
-        self.property_tutorial_control_at(state,point,report,category)
-            .filter(|id|!(9..=11).contains(id))
+    pub fn ordinary_body_tutorial_at(
+        &self,
+        state: &crate::utility_report::View,
+        point: Option<[i32; 2]>,
+        report: &crate::block_information::Report,
+        category: usize,
+    ) -> Option<u32> {
+        self.property_tutorial_control_at(state, point, report, category)
+            .filter(|id| !(9..=11).contains(id))
     }
-    fn toolbar_surfaces(&self,policy:toolbar_collapse::Policy,input:&toolbar_collapse::Input,
-        state:&crate::utility_report::View,body_open:bool,
-    )->Vec<Surface> {
+    fn toolbar_surfaces(
+        &self,
+        policy: toolbar_collapse::Policy,
+        input: &toolbar_collapse::Input,
+        state: &crate::utility_report::View,
+        body_open: bool,
+    ) -> Vec<Surface> {
         use toolbar_collapse::Action;
-        if !policy.shown { return Vec::new(); }
-        let mut surfaces=if body_open {Vec::new()} else {self.toolbar_closed_base.clone()};
+        if !policy.shown {
+            return Vec::new();
+        }
+        let mut surfaces = if body_open {
+            Vec::new()
+        } else {
+            self.toolbar_closed_base.clone()
+        };
         for action in Action::ALL {
-            if !policy.visible(action) {continue;}
-            let i=action.index();
-            let selected=body_open && match action {
-                Action::Info=>!state.property_offer_open()&&!state.property_rights_open(),
-                Action::Lease=>state.property_offer_open(),Action::Build=>false,
+            if !policy.visible(action) {
+                continue;
+            }
+            let i = action.index();
+            let selected = body_open
+                && match action {
+                    Action::Info => !state.property_offer_open() && !state.property_rights_open(),
+                    Action::Lease => state.property_offer_open(),
+                    Action::Build => false,
+                };
+            let enabled = policy.enabled(action);
+            let mut backing = if !enabled {
+                self.toolbar_disabled.clone()
+            } else {
+                self.icon_backgrounds[if selected || input.pressed(policy.category, action) {
+                    1
+                } else if input.hover == Some(action) {
+                    2
+                } else {
+                    0
+                }]
+                .clone()
             };
-            let enabled=policy.enabled(action);
-            let mut backing=if !enabled {self.toolbar_disabled.clone()} else {
-                self.icon_backgrounds[if selected||input.pressed(policy.category,action){1}
-                    else if input.hover==Some(action){2}else{0}].clone()
-            };
-            let [l,t,r,b]=self.property_side_bounds[i];
-            backing.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+            let [l, t, r, b] = self.property_side_bounds[i];
+            backing.quad(
+                [[l, t], [l, b], [r, b], [r, t]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [0xffffffff; 4],
+            );
             surfaces.push(backing);
-            let mut icon=self.property_side_icons[i].clone();
-            icon.quad([[l,t],[l,b],[r,b],[r,t]],[[0.,0.],[0.,1.],[1.,1.],[1.,0.]],[0xffffffff;4]);
+            let mut icon = self.property_side_icons[i].clone();
+            icon.quad(
+                [[l, t], [l, b], [r, b], [r, t]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [0xffffffff; 4],
+            );
             surfaces.push(icon);
         }
         surfaces
     }
-    pub fn ordinary_toolbar_scene(&self,renderer:&Renderer,policy:toolbar_collapse::Policy,
-        input:&toolbar_collapse::Input,state:&crate::utility_report::View,body_open:bool,
-    )->Result<PreparedScene,String> {
-        let surfaces=self.toolbar_surfaces(policy,input,state,body_open);
-        renderer.prepare(&surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [2./640.,0.,0.,0.,0.,-2./480.,0.,0.,0.,0.,1.,0.,-1.,1.,0.,1.],None)
+    pub fn ordinary_toolbar_scene(
+        &self,
+        renderer: &Renderer,
+        policy: toolbar_collapse::Policy,
+        input: &toolbar_collapse::Input,
+        state: &crate::utility_report::View,
+        body_open: bool,
+    ) -> Result<PreparedScene, String> {
+        let surfaces = self.toolbar_surfaces(policy, input, state, body_open);
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
     }
     fn property_side_buttons(
         &self,
@@ -1618,9 +1735,13 @@ impl Assets {
         if !state.property_offer_open() && !state.property_rights_open() {
             self.property_buttons(&mut surfaces, &self.utility_tabs, state);
         }
-        ui::text_widget_style4(&mut title_font, &self.property_title_tab,
-            &self.title_labels[category], self.property_title_text_bounds,
-            self.text_palette[0])?;
+        ui::text_widget_style4(
+            &mut title_font,
+            &self.property_title_tab,
+            &self.title_labels[category],
+            self.property_title_text_bounds,
+            self.text_palette[0],
+        )?;
         if state.property_offer_open() {
             self.offer_rows(
                 &mut surfaces,
@@ -1919,7 +2040,7 @@ impl Assets {
     }
     pub fn people_state(&self) -> Result<Locator, String> {
         Ok(Locator {
-            strategic_state:None,
+            strategic_state: None,
             city_info: false,
             city_people: None,
             people_mode: 0,
@@ -1957,20 +2078,44 @@ impl Assets {
             prepared: None,
         })
     }
-    pub fn prepare(&self,renderer:&Renderer,state:&Locator,scene:&Scene)->Result<PreparedScene,String>{
-        {let mut counter=0;self.prepare_graph(renderer,state,scene,true,true,None,state.navigation_report_mode(),&mut counter)}
+    pub fn prepare(
+        &self,
+        renderer: &Renderer,
+        state: &Locator,
+        scene: &Scene,
+    ) -> Result<PreparedScene, String> {
+        {
+            let mut counter = 0;
+            self.prepare_graph(
+                renderer,
+                state,
+                scene,
+                true,
+                true,
+                None,
+                state.navigation_report_mode(),
+                &mut counter,
+            )
+        }
     }
     ///C body and D world/report producers have separate actual owners.
     ///Tint keys are original600-building slot identities, not render indices.
     pub(crate) fn prepare_graph(
-        &self,renderer:&Renderer,state:&Locator,scene:&Scene,c_body:bool,d_body:bool,
-        colors:Option<&[u32;600]>,report_mode:u32,message_counter:&mut u32,
-    )->Result<PreparedScene,String>{
-        let mut surfaces=Vec::new();
+        &self,
+        renderer: &Renderer,
+        state: &Locator,
+        scene: &Scene,
+        c_body: bool,
+        d_body: bool,
+        colors: Option<&[u32; 600]>,
+        report_mode: u32,
+        message_counter: &mut u32,
+    ) -> Result<PreparedScene, String> {
+        let mut surfaces = Vec::new();
         // Original42a710 submits residents after every city-info producer.
         // Non-People tabs reset global5336bc to zero (white marker mode).
         if d_body && state.body_open() && state.city_info {
-            let white_people = matches!(report_mode,2|3|4);
+            let white_people = matches!(report_mode, 2 | 3 | 4);
             let mut dots = self.people_dot.clone();
             if let Some(report) = &state.city_people {
                 let matrix = glam::Mat4::from_cols_array(&scene.camera);
@@ -1994,7 +2139,7 @@ impl Assets {
             }
             surfaces.insert(0, dots);
         }
-        if d_body && state.body_open() && state.city_info && report_mode==2 {
+        if d_body && state.body_open() && state.city_info && report_mode == 2 {
             let mut stars = self.prestige_star.clone();
             if let Some(report) = &state.prestige {
                 for &id in &report.overlay_categories {
@@ -2023,7 +2168,7 @@ impl Assets {
             }
             surfaces.insert(0, stars);
         }
-        if d_body && state.body_open() && state.city_info && report_mode==3 {
+        if d_body && state.body_open() && state.city_info && report_mode == 3 {
             let mut badges = Vec::new();
             if let (Some(report), Some(prestige)) = (&state.ownership, &state.prestige) {
                 for &id in &prestige.overlay_categories {
@@ -2093,7 +2238,7 @@ impl Assets {
             badges.append(&mut surfaces);
             surfaces = badges;
         }
-        if d_body && state.body_open() && state.city_info && report_mode==4 {
+        if d_body && state.body_open() && state.city_info && report_mode == 4 {
             let mut badges = Vec::new();
             if let (Some(rights), Some(prestige)) = (&state.rights, &state.prestige) {
                 for &id in &prestige.overlay_categories {
@@ -2204,7 +2349,7 @@ impl Assets {
             labels.append(&mut surfaces);
             surfaces = labels;
         }
-        if let Some(id) = state.poll_category.filter(|_|d_body)
+        if let Some(id) = state.poll_category.filter(|_| d_body)
             && state
                 .prestige
                 .as_ref()
@@ -2216,121 +2361,129 @@ impl Assets {
                 let point = [(clip.x / clip.w + 1.) * 320., (1. - clip.y / clip.w) * 240.];
                 //Actual42bff0 counter is owned by D, advanced at UI dispatch.
                 let bracket = crate::strategic_selection::brackets(point, *message_counter as i32);
-                *message_counter=bracket.counter as u32;
+                *message_counter = bracket.counter as u32;
                 let mut draw = Surface::solid();
                 for rect in bracket.rectangles {
                     draw.rect(rect, [bracket.color; 4]);
                 }
                 // Draw above map badges while retaining panel occlusion.
-                let before_panel =
-                    surfaces
-                        .len()
-                        .saturating_sub(if d_body && state.body_open() { self.base.len() } else { 0 });
+                let before_panel = surfaces
+                    .len()
+                    .saturating_sub(if d_body && state.body_open() {
+                        self.base.len()
+                    } else {
+                        0
+                    });
                 surfaces.insert(before_panel, draw);
             }
         }
-        let mut world_surfaces=std::mem::take(&mut surfaces);
+        let mut world_surfaces = std::mem::take(&mut surfaces);
         if c_body {
-        surfaces=if state.body_open(){self.base.clone()}else{Vec::new()};
-        if state.body_open()
-            && state.city_info
-            && !state.prestige_mode
-            && !state.ownership_mode
-            && !state.rights_mode
-        {
-            for right in [false, true] {
-                let action = Action::PeopleStep(right);
-                let mut arrow =
-                    self.people_arrows[usize::from(right)][if state.hover == Some(action) {
-                        if state.pressed == Some(action) { 1 } else { 2 }
-                    } else {
-                        0
-                    }]
-                    .clone();
-                let [l, t, r, b] = self.people_arrow_bounds(right);
-                arrow.quad(
+            surfaces = if state.body_open() {
+                self.base.clone()
+            } else {
+                Vec::new()
+            };
+            if state.body_open()
+                && state.city_info
+                && !state.prestige_mode
+                && !state.ownership_mode
+                && !state.rights_mode
+            {
+                for right in [false, true] {
+                    let action = Action::PeopleStep(right);
+                    let mut arrow =
+                        self.people_arrows[usize::from(right)][if state.hover == Some(action) {
+                            if state.pressed == Some(action) { 1 } else { 2 }
+                        } else {
+                            0
+                        }]
+                        .clone();
+                    let [l, t, r, b] = self.people_arrow_bounds(right);
+                    arrow.quad(
+                        [[l, t], [l, b], [r, b], [r, t]],
+                        [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                        [0xffffffff; 4],
+                    );
+                    surfaces.push(arrow);
+                }
+            }
+            for (action, bounds) in [
+                (Action::City, [5.6, 53.6, 28.8, 76.8]),
+                (Action::Player, [5.6, 77.6, 28.8, 100.8]),
+                (Action::Toggle, [5.6, 101.6, 28.8, 124.8]),
+                (Action::Poll, [5.6, 125.6, 28.8, 148.8]),
+            ] {
+                if (action == Action::Player && state.player.players.is_empty())
+                    || (action == Action::Toggle && !state.saved_panels)
+                {
+                    continue;
+                }
+                if action == Action::Poll && state.polls.is_none() {
+                    continue;
+                }
+                if action == Action::City && state.city_people.is_none() {
+                    continue;
+                }
+                let mut background = self.icon_backgrounds[if state.hover == Some(action) {
+                    if state.pressed == Some(action) { 1 } else { 2 }
+                } else {
+                    0
+                }]
+                .clone();
+                let [l, t, r, b] = bounds;
+                background.quad(
                     [[l, t], [l, b], [r, b], [r, t]],
                     [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
                     [0xffffffff; 4],
                 );
-                surfaces.push(arrow);
+                surfaces.push(background);
             }
-        }
-        for (action, bounds) in [
-            (Action::City, [5.6, 53.6, 28.8, 76.8]),
-            (Action::Player, [5.6, 77.6, 28.8, 100.8]),
-            (Action::Toggle, [5.6, 101.6, 28.8, 124.8]),
-            (Action::Poll, [5.6, 125.6, 28.8, 148.8]),
-        ] {
-            if (action == Action::Player && state.player.players.is_empty())
-                || (action == Action::Toggle && !state.saved_panels)
-            {
-                continue;
+            if state.polls.is_some() {
+                surfaces.push(self.poll_icon.clone());
             }
-            if action == Action::Poll && state.polls.is_none() {
-                continue;
+            if state.saved_panels {
+                surfaces.push(self.icon.clone());
             }
-            if action == Action::City && state.city_people.is_none() {
-                continue;
+            if !state.player.players.is_empty() {
+                surfaces.push(self.player_icon.clone());
             }
-            let mut background = self.icon_backgrounds[if state.hover == Some(action) {
-                if state.pressed == Some(action) { 1 } else { 2 }
-            } else {
-                0
-            }]
-            .clone();
-            let [l, t, r, b] = bounds;
-            background.quad(
-                [[l, t], [l, b], [r, b], [r, t]],
-                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                [0xffffffff; 4],
-            );
-            surfaces.push(background);
-        }
-        if state.polls.is_some() {
-            surfaces.push(self.poll_icon.clone());
-        }
-        if state.saved_panels {
-            surfaces.push(self.icon.clone());
-        }
-        if !state.player.players.is_empty() {
-            surfaces.push(self.player_icon.clone());
-        }
-        if state.city_people.is_some() {
-            surfaces.push(self.city_icon.clone());
-        }
-        let mut fonts = self.fonts.clone();
-        let mut solid = Surface::solid();
-        if state.body_open() && state.poll_info {
-            self.poll_report(state, scene, &mut fonts)?;
-        } else if state.body_open() && state.city_info {
-            solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
-            if state.rights_mode {
-                surfaces.extend(self.rights_report(state, &mut fonts)?);
-            } else if state.prestige_mode {
-                self.prestige_report(state, &mut fonts)?;
-            } else if state.ownership_mode {
-                self.ownership_report(state, &mut fonts)?;
-            } else {
-                self.people_report(state, &mut fonts, &mut solid)?;
+            if state.city_people.is_some() {
+                surfaces.push(self.city_icon.clone());
             }
-            if state.ownership.is_some() {
-                for i in 0..4 {
-                    if i == 2 && state.rights.is_none() {
-                        continue;
-                    }
-                    let action = Action::CityMode(i as u8);
-                    let selected = if state.rights_mode {
-                        i == 2
-                    } else if state.ownership_mode {
-                        i == 3
-                    } else if state.prestige_mode {
-                        i == 1
-                    } else {
-                        i == 0
-                    };
-                    let mut background =
-                        self.city_tab_backgrounds[if selected || state.pressed == Some(action) {
+            let mut fonts = self.fonts.clone();
+            let mut solid = Surface::solid();
+            if state.body_open() && state.poll_info {
+                self.poll_report(state, scene, &mut fonts)?;
+            } else if state.body_open() && state.city_info {
+                solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
+                if state.rights_mode {
+                    surfaces.extend(self.rights_report(state, &mut fonts)?);
+                } else if state.prestige_mode {
+                    self.prestige_report(state, &mut fonts)?;
+                } else if state.ownership_mode {
+                    self.ownership_report(state, &mut fonts)?;
+                } else {
+                    self.people_report(state, &mut fonts, &mut solid)?;
+                }
+                if state.ownership.is_some() {
+                    for i in 0..4 {
+                        if i == 2 && state.rights.is_none() {
+                            continue;
+                        }
+                        let action = Action::CityMode(i as u8);
+                        let selected = if state.rights_mode {
+                            i == 2
+                        } else if state.ownership_mode {
+                            i == 3
+                        } else if state.prestige_mode {
+                            i == 1
+                        } else {
+                            i == 0
+                        };
+                        let mut background = self.city_tab_backgrounds[if selected
+                            || state.pressed == Some(action)
+                        {
                             1
                         } else if state.hover == Some(action) {
                             2
@@ -2338,38 +2491,39 @@ impl Assets {
                             0
                         }]
                         .clone();
-                    let [l, t, r, b] = self.city_layout.buttons[i];
-                    background.quad(
-                        [[l, t], [l, b], [r, b], [r, t]],
-                        [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                        [0xffffffff; 4],
-                    );
-                    surfaces.push(background);
-                    surfaces.push(self.city_tabs[i].clone());
+                        let [l, t, r, b] = self.city_layout.buttons[i];
+                        background.quad(
+                            [[l, t], [l, b], [r, b], [r, t]],
+                            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                            [0xffffffff; 4],
+                        );
+                        surfaces.push(background);
+                        surfaces.push(self.city_tabs[i].clone());
+                    }
                 }
-            }
-        } else if state.body_open() && state.player_info {
-            surfaces.extend(self.player_report(state, &mut fonts)?);
-        } else if state.body_open() {
-            ui::text(
-                &mut fonts,
-                &self.tab,
-                &self.strings[1451],
-                [32., 7., 187., 21.],
-                false,
-                self.text_palette[0],
-            )?;
-            let mode = if state.my_business {
-                0
-            } else if state.commodity {
-                2
-            } else {
-                1
-            };
-            for index in 0..3 {
-                let action = Action::Mode(index);
-                let mut background =
-                    self.city_tab_backgrounds[if index == mode || state.pressed == Some(action) {
+            } else if state.body_open() && state.player_info {
+                surfaces.extend(self.player_report(state, &mut fonts)?);
+            } else if state.body_open() {
+                ui::text(
+                    &mut fonts,
+                    &self.tab,
+                    &self.strings[1451],
+                    [32., 7., 187., 21.],
+                    false,
+                    self.text_palette[0],
+                )?;
+                let mode = if state.my_business {
+                    0
+                } else if state.commodity {
+                    2
+                } else {
+                    1
+                };
+                for index in 0..3 {
+                    let action = Action::Mode(index);
+                    let mut background = self.city_tab_backgrounds[if index == mode
+                        || state.pressed == Some(action)
+                    {
                         1
                     } else if state.hover == Some(action) {
                         2
@@ -2377,133 +2531,15 @@ impl Assets {
                         0
                     }]
                     .clone();
-                let [l, t, r, b] = self.city_layout.buttons[index];
-                background.quad(
-                    [[l, t], [l, b], [r, b], [r, t]],
-                    [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                    [0xffffffff; 4],
-                );
-                surfaces.push(background);
-                let mut icon = self.locator_tabs[index].clone();
-                let [l, t, r, b] = self.city_layout.icons[index];
-                icon.quad(
-                    [[l, t], [l, b], [r, b], [r, t]],
-                    [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                    [0xffffffff; 4],
-                );
-                surfaces.push(icon);
-            }
-            solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
-            ui::text_fit(
-                &mut fonts,
-                &self.tab,
-                &self.strings[1447 + mode],
-                [
-                    32.,
-                    self.city_layout.header[1] + 1.,
-                    184.,
-                    self.city_layout.header[3],
-                ],
-                false,
-                self.text_palette[16],
-            )?;
-            if state.my_business {
-                let list = self.owned_list();
-                let mut owned_fonts = self.ownership_fonts.clone();
-                for (index, row) in state
-                    .owned_rows
-                    .iter()
-                    .skip(state.owned_scroll)
-                    .take(self.owned_visible())
-                    .enumerate()
-                {
-                    if row.label == u32::MAX {
-                        continue;
-                    }
-                    let label = if row.label & 0x8000_0000 != 0 {
-                        &self.block_labels[(row.label & 0x7fff_ffff) as usize]
-                    } else {
-                        self.strings
-                            .get(row.label as usize)
-                            .ok_or("owned-business Locator label outside language")?
-                    };
-                    let y = list[1] + 3. + index as f32 * 10.;
-                    let bounds = [
-                        list[0] + if row.building.is_some() { 2. } else { 0. },
-                        y,
-                        list[2],
-                        y + 10.,
-                    ];
-                    ui::text_fit(
-                        &mut owned_fonts,
-                        &self.ownership_tab,
-                        label,
-                        bounds,
-                        false,
-                        self.text_palette[if row.building.is_some() { 3 } else { 0 }],
-                    )?;
-                }
-                surfaces.extend(owned_fonts);
-            } else {
-                let mut type_fonts = self.ownership_fonts.clone();
-                let mut type_selection = Surface::solid();
-                for (n, row) in state
-                    .rows
-                    .iter()
-                    .skip(state.scroll)
-                    .take(self.visible())
-                    .enumerate()
-                {
-                    let y = self.list[1] + n as f32 * 10.;
-                    if state.selected == Some(row.kind) && row.kind != u32::MAX {
-                        type_selection.rect(type_selection_bounds(self.list, n), [0xff288be1; 4]);
-                    }
-                    if row.label != u32::MAX {
-                        let text = self
-                            .strings
-                            .get(row.label as usize)
-                            .ok_or("Locator label leaves language")?;
-                        ui::text(
-                            &mut type_fonts,
-                            &self.ownership_tab,
-                            text,
-                            [self.list[0] + 2., y + 3., self.list[2], self.list[3]],
-                            false,
-                            if row.kind == u32::MAX {
-                                self.text_palette[16]
-                            } else {
-                                self.text_palette[0]
-                            },
-                        )?;
-                    }
-                }
-                surfaces.push(type_selection);
-                surfaces.extend(type_fonts);
-                let maximum = state.rows.len().saturating_sub(self.visible()) as i32;
-                let enabled = maximum > 0;
-                ui::Slider {
-                    bounds: self.scrollbar,
-                    vertical: true,
-                    value: state.scroll as f32,
-                    range: [0., maximum as f32],
-                    pointer: None,
-                    pressed: None,
-                }
-                .paint_handle(&mut solid);
-                for (side, bounds) in ui::slider_arrows(self.scrollbar, true)
-                    .into_iter()
-                    .enumerate()
-                {
-                    let action = Action::Scroll(if side == 0 { -1 } else { 1 });
-                    let texture = ui::slider_arrow_texture(
-                        side,
-                        state.pressed == Some(action),
-                        state.hover == Some(action),
-                        enabled,
-                        true,
+                    let [l, t, r, b] = self.city_layout.buttons[index];
+                    background.quad(
+                        [[l, t], [l, b], [r, b], [r, t]],
+                        [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                        [0xffffffff; 4],
                     );
-                    let mut icon = self.scrollbar_textures[side][texture - [105, 93][side]].clone();
-                    let [l, t, r, b] = bounds;
+                    surfaces.push(background);
+                    let mut icon = self.locator_tabs[index].clone();
+                    let [l, t, r, b] = self.city_layout.icons[index];
                     icon.quad(
                         [[l, t], [l, b], [r, b], [r, t]],
                         [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
@@ -2511,14 +2547,138 @@ impl Assets {
                     );
                     surfaces.push(icon);
                 }
+                solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
+                ui::text_fit(
+                    &mut fonts,
+                    &self.tab,
+                    &self.strings[1447 + mode],
+                    [
+                        32.,
+                        self.city_layout.header[1] + 1.,
+                        184.,
+                        self.city_layout.header[3],
+                    ],
+                    false,
+                    self.text_palette[16],
+                )?;
+                if state.my_business {
+                    let list = self.owned_list();
+                    let mut owned_fonts = self.ownership_fonts.clone();
+                    for (index, row) in state
+                        .owned_rows
+                        .iter()
+                        .skip(state.owned_scroll)
+                        .take(self.owned_visible())
+                        .enumerate()
+                    {
+                        if row.label == u32::MAX {
+                            continue;
+                        }
+                        let label = if row.label & 0x8000_0000 != 0 {
+                            &self.block_labels[(row.label & 0x7fff_ffff) as usize]
+                        } else {
+                            self.strings
+                                .get(row.label as usize)
+                                .ok_or("owned-business Locator label outside language")?
+                        };
+                        let y = list[1] + 3. + index as f32 * 10.;
+                        let bounds = [
+                            list[0] + if row.building.is_some() { 2. } else { 0. },
+                            y,
+                            list[2],
+                            y + 10.,
+                        ];
+                        ui::text_fit(
+                            &mut owned_fonts,
+                            &self.ownership_tab,
+                            label,
+                            bounds,
+                            false,
+                            self.text_palette[if row.building.is_some() { 3 } else { 0 }],
+                        )?;
+                    }
+                    surfaces.extend(owned_fonts);
+                } else {
+                    let mut type_fonts = self.ownership_fonts.clone();
+                    let mut type_selection = Surface::solid();
+                    for (n, row) in state
+                        .rows
+                        .iter()
+                        .skip(state.scroll)
+                        .take(self.visible())
+                        .enumerate()
+                    {
+                        let y = self.list[1] + n as f32 * 10.;
+                        if state.selected == Some(row.kind) && row.kind != u32::MAX {
+                            type_selection
+                                .rect(type_selection_bounds(self.list, n), [0xff288be1; 4]);
+                        }
+                        if row.label != u32::MAX {
+                            let text = self
+                                .strings
+                                .get(row.label as usize)
+                                .ok_or("Locator label leaves language")?;
+                            ui::text(
+                                &mut type_fonts,
+                                &self.ownership_tab,
+                                text,
+                                [self.list[0] + 2., y + 3., self.list[2], self.list[3]],
+                                false,
+                                if row.kind == u32::MAX {
+                                    self.text_palette[16]
+                                } else {
+                                    self.text_palette[0]
+                                },
+                            )?;
+                        }
+                    }
+                    surfaces.push(type_selection);
+                    surfaces.extend(type_fonts);
+                    let maximum = state.rows.len().saturating_sub(self.visible()) as i32;
+                    let enabled = maximum > 0;
+                    ui::Slider {
+                        bounds: self.scrollbar,
+                        vertical: true,
+                        value: state.scroll as f32,
+                        range: [0., maximum as f32],
+                        pointer: None,
+                        pressed: None,
+                    }
+                    .paint_handle(&mut solid);
+                    for (side, bounds) in ui::slider_arrows(self.scrollbar, true)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let action = Action::Scroll(if side == 0 { -1 } else { 1 });
+                        let texture = ui::slider_arrow_texture(
+                            side,
+                            state.pressed == Some(action),
+                            state.hover == Some(action),
+                            enabled,
+                            true,
+                        );
+                        let mut icon =
+                            self.scrollbar_textures[side][texture - [105, 93][side]].clone();
+                        let [l, t, r, b] = bounds;
+                        icon.quad(
+                            [[l, t], [l, b], [r, b], [r, t]],
+                            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                            [0xffffffff; 4],
+                        );
+                        surfaces.push(icon);
+                    }
+                }
             }
-        }
-        surfaces.push(solid);
-        surfaces.extend(fonts);
+            surfaces.push(solid);
+            surfaces.extend(fonts);
         } //C body and child owners
         world_surfaces.extend(surfaces);
-        surfaces=world_surfaces;
-        let footprint = if d_body {self.footprints_graph(state,scene,colors)?}else{Surface::solid()};
+        surfaces = world_surfaces;
+        let footprint = if d_body {
+            self.footprints_graph(state, scene, colors)?
+        } else {
+            Surface::solid()
+        };
         let mut ground = footprint.draw();
         ground.view_projection = Some(scene.camera);
         let mut draws = vec![ground];
@@ -3133,30 +3293,50 @@ impl Assets {
             crate::player_info::period_layout(self.bounds, [texture.width, texture.height]);
         [left, right]
     }
-    fn footprints(&self,state:&Locator,scene:&Scene)->Result<Surface,String>{self.footprints_graph(state,scene,None)}
-    fn footprints_graph(&self,state:&Locator,scene:&Scene,colors:Option<&[u32;600]>)->Result<Surface,String>{
+    fn footprints(&self, state: &Locator, scene: &Scene) -> Result<Surface, String> {
+        self.footprints_graph(state, scene, None)
+    }
+    fn footprints_graph(
+        &self,
+        state: &Locator,
+        scene: &Scene,
+        colors: Option<&[u32; 600]>,
+    ) -> Result<Surface, String> {
         let mut surface = Surface::solid();
         if !state.body_open() || state.city_info || state.poll_info {
             return Ok(surface);
         }
-        let selected=state.world_selected()?;
+        let selected = state.world_selected()?;
         for building in &scene.inspection_buildings {
-            let base=if let Some(colors)=colors {
-                let slot=building.runtime_slot.or(building.saved_slot).ok_or("D footprint has no actual600-slot identity")?;
-                *colors.get(slot).ok_or("D footprint slot leaves600-record arena")?
-            }else{owner_color(&self.owner_palette,building.saved_owner_character)?};
+            let base = if let Some(colors) = colors {
+                let slot = building
+                    .runtime_slot
+                    .or(building.saved_slot)
+                    .ok_or("D footprint has no actual600-slot identity")?;
+                *colors
+                    .get(slot)
+                    .ok_or("D footprint slot leaves600-record arena")?
+            } else {
+                owner_color(&self.owner_palette, building.saved_owner_character)?
+            };
             let color = if let Some(business) = building.business() {
                 if state.commodity {
-                    let mask = if let Some(native)=&state.strategic_state{
-                        let row=native.input.catalog.rows().get(business.business_type as usize)
+                    let mask = if let Some(native) = &state.strategic_state {
+                        let row = native
+                            .input
+                            .catalog
+                            .rows()
+                            .get(business.business_type as usize)
                             .ok_or("C current footprint business type outside actual catalog")?;
                         u32::from_le_bytes(row[0x70..0x74].try_into().unwrap())
-                    }else{scene
-                        .saved_business_catalog
-                        .as_ref()
-                        .and_then(|c| c.rows().get(business.business_type as usize))
-                        .map(|r| u32::from_le_bytes(r[0x70..0x74].try_into().unwrap()))
-                        .unwrap_or(0)};
+                    } else {
+                        scene
+                            .saved_business_catalog
+                            .as_ref()
+                            .and_then(|c| c.rows().get(business.business_type as usize))
+                            .map(|r| u32::from_le_bytes(r[0x70..0x74].try_into().unwrap()))
+                            .unwrap_or(0)
+                    };
                     commodity_color(base, mask, selected, 0)
                 } else {
                     type_color(base, business.business_type, selected, 0)
@@ -3185,7 +3365,9 @@ impl Assets {
         }
         Ok(surface)
     }
-    pub(crate) fn refresh_extents(&self)->[usize;2]{[self.visible(),self.owned_visible()]}
+    pub(crate) fn refresh_extents(&self) -> [usize; 2] {
+        [self.visible(), self.owned_visible()]
+    }
     fn visible(&self) -> usize {
         ((self.list[3] - self.list[1]) / 10.) as usize
     }
@@ -3367,7 +3549,7 @@ fn tutorial_control(action: Action) -> Option<u32> {
     }
 }
 pub struct Locator {
-    strategic_state:Option<strategic::State>,
+    strategic_state: Option<strategic::State>,
     saved_panels: bool,
     catalog: Option<BusinessCatalog>,
     city_info: bool,
@@ -3405,56 +3587,122 @@ pub struct Locator {
     pub prepared: Option<PreparedScene>,
 }
 // An offset is meaningful only while its anchor identity still exists.
-fn remap_scroll<T, K: PartialEq>(old: &[T], offset: usize, new: &[T], visible: usize, key: impl Fn(&T) -> K) -> usize {
-    old.get(offset).and_then(|anchor| {
-        let mut matches = new.iter().enumerate().filter(|(_, r)| key(r) == key(anchor));
-        let first = matches.next()?.0;
-        matches.next().is_none().then_some(first)
-    })
-        .unwrap_or(0).min(new.len().saturating_sub(visible))
+fn remap_scroll<T, K: PartialEq>(
+    old: &[T],
+    offset: usize,
+    new: &[T],
+    visible: usize,
+    key: impl Fn(&T) -> K,
+) -> usize {
+    old.get(offset)
+        .and_then(|anchor| {
+            let mut matches = new
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| key(r) == key(anchor));
+            let first = matches.next()?.0;
+            matches.next().is_none().then_some(first)
+        })
+        .unwrap_or(0)
+        .min(new.len().saturating_sub(visible))
 }
 
 impl Locator {
-    pub(crate) fn navigation_report_mode(&self)->u32 {
-        if let Some(state)=&self.strategic_state{return state.report_mode;}
-        if self.poll_info{1}else if self.city_info {
-            if self.prestige_mode{2}else if self.rights_mode{4}else if self.ownership_mode{3}else{0}
-        }else{0}
+    pub(crate) fn navigation_report_mode(&self) -> u32 {
+        if let Some(state) = &self.strategic_state {
+            return state.report_mode;
+        }
+        if self.poll_info {
+            1
+        } else if self.city_info {
+            if self.prestige_mode {
+                2
+            } else if self.rights_mode {
+                4
+            } else if self.ownership_mode {
+                3
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     }
     /// Apply only presentation choices to a fully attached authoritative snapshot.
-    pub fn retain_ui_from(&mut self, old: &Self, assets: &Assets, old_scene: &Scene, scene: &Scene) -> Result<(), String> {
-        self.retain_refresh_ui_from(old, assets.refresh_extents(),
-            &old_scene.inspection_buildings, &scene.inspection_buildings)
+    pub fn retain_ui_from(
+        &mut self,
+        old: &Self,
+        assets: &Assets,
+        old_scene: &Scene,
+        scene: &Scene,
+    ) -> Result<(), String> {
+        self.retain_refresh_ui_from(
+            old,
+            assets.refresh_extents(),
+            &old_scene.inspection_buildings,
+            &scene.inspection_buildings,
+        )
     }
-    pub(crate) fn retain_refresh_ui_from(&mut self, old:&Self, extents:[usize;2],
-        old_scene:&[openmt2001::render_scene::InspectionBuilding],
-        scene:&[openmt2001::render_scene::InspectionBuilding])->Result<(),String>{
+    pub(crate) fn retain_refresh_ui_from(
+        &mut self,
+        old: &Self,
+        extents: [usize; 2],
+        old_scene: &[openmt2001::render_scene::InspectionBuilding],
+        scene: &[openmt2001::render_scene::InspectionBuilding],
+    ) -> Result<(), String> {
         // A building row is identified by its runtime slot, not its scene index.
-        let owned_key = |row: &OwnedRow, scene: &[openmt2001::render_scene::InspectionBuilding]| -> Option<(bool, usize)> {
+        let owned_key = |row: &OwnedRow,
+                         scene: &[openmt2001::render_scene::InspectionBuilding]|
+         -> Option<(bool, usize)> {
             match row.building {
-                Some(index) => scene.get(index)?.runtime_slot
-                    .map(|slot| (true, slot)),
+                Some(index) => scene.get(index)?.runtime_slot.map(|slot| (true, slot)),
                 None if row.label != u32::MAX => Some((false, row.label as usize)),
                 None => None,
             }
         };
-        let anchor = old.owned_rows.get(old.owned_scroll).and_then(|r| owned_key(r, old_scene));
-        let scroll = anchor.and_then(|key| self.owned_rows.iter().position(|r| owned_key(r, scene) == Some(key)))
-            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(extents[1]));
+        let anchor = old
+            .owned_rows
+            .get(old.owned_scroll)
+            .and_then(|r| owned_key(r, old_scene));
+        let scroll = anchor
+            .and_then(|key| {
+                self.owned_rows
+                    .iter()
+                    .position(|r| owned_key(r, scene) == Some(key))
+            })
+            .unwrap_or(0)
+            .min(self.owned_rows.len().saturating_sub(extents[1]));
         self.retain_ui_choices(old, extents[0], extents[1])?;
         self.owned_scroll = scroll;
         Ok(())
     }
 
-    fn retain_ui_choices(&mut self, old: &Self, visible: usize, owned_visible: usize) -> Result<(), String> {
+    fn retain_ui_choices(
+        &mut self,
+        old: &Self,
+        visible: usize,
+        owned_visible: usize,
+    ) -> Result<(), String> {
         // Resolve the financial roster slot, never the old roster position.
-        let selected = old.player.players.get(old.player.selected)
+        let selected = old
+            .player
+            .players
+            .get(old.player.selected)
             .and_then(|slot| self.player.players.iter().position(|p| p == slot))
-            .or_else(|| self.player.players.iter().position(|p| Some(*p) == self.player.current))
+            .or_else(|| {
+                self.player
+                    .players
+                    .iter()
+                    .position(|p| Some(*p) == self.player.current)
+            })
             .unwrap_or(0);
-        let rows = self.player.players.get(selected)
+        let rows = self
+            .player
+            .players
+            .get(selected)
             .map(|&slot| crate::player_info::report(&self.player.records[slot], old.player.today))
-            .transpose()?.unwrap_or_default();
+            .transpose()?
+            .unwrap_or_default();
         self.player.selected = selected;
         self.player.today = old.player.today;
         self.player.scroll = old.player.scroll.min(rows.len().saturating_sub(19));
@@ -3473,35 +3721,69 @@ impl Locator {
             std::mem::swap(&mut self.rows, &mut self.other_rows);
         }
         self.commodity = old.commodity;
-        self.selected = old.selected.filter(|id| self.rows.iter().any(|r| r.kind == *id));
-        self.other_selected = old.other_selected.filter(|id| self.other_rows.iter().any(|r| r.kind == *id));
+        self.selected = old
+            .selected
+            .filter(|id| self.rows.iter().any(|r| r.kind == *id));
+        self.other_selected = old
+            .other_selected
+            .filter(|id| self.other_rows.iter().any(|r| r.kind == *id));
         self.scroll = remap_scroll(&old.rows, old.scroll, &self.rows, visible, |r| r.kind);
-        self.other_scroll = remap_scroll(&old.other_rows, old.other_scroll, &self.other_rows, visible, |r| r.kind);
+        self.other_scroll = remap_scroll(
+            &old.other_rows,
+            old.other_scroll,
+            &self.other_rows,
+            visible,
+            |r| r.kind,
+        );
         // Owned building indices belong to different scenes. Anchor only to the
         // preceding category header; do not copy a building or its numeric index.
-        self.owned_scroll = old.owned_rows.iter().take(old.owned_scroll.saturating_add(1))
+        self.owned_scroll = old
+            .owned_rows
+            .iter()
+            .take(old.owned_scroll.saturating_add(1))
             .rposition(|r| r.label & 0x8000_0000 != 0 && r.label != u32::MAX)
-            .and_then(|i| self.owned_rows.iter().position(|r| r.label == old.owned_rows[i].label && r.building.is_none()))
-            .unwrap_or(0).min(self.owned_rows.len().saturating_sub(owned_visible));
+            .and_then(|i| {
+                self.owned_rows
+                    .iter()
+                    .position(|r| r.label == old.owned_rows[i].label && r.building.is_none())
+            })
+            .unwrap_or(0)
+            .min(self.owned_rows.len().saturating_sub(owned_visible));
         self.ownership_scroll = if self.prestige_mode {
             match (&old.prestige, &self.prestige) {
-                (Some(a), Some(b)) => remap_scroll(&a.rows, old.ownership_scroll, &b.rows, 17, Clone::clone),
+                (Some(a), Some(b)) => {
+                    remap_scroll(&a.rows, old.ownership_scroll, &b.rows, 17, Clone::clone)
+                }
                 _ => 0,
             }
         } else if self.ownership_mode {
             // Group header identity is roster slot; category identity is block ID.
             let keys = |report: &crate::city_ownership::Ownership| {
-                report.groups.iter().enumerate().flat_map(|(slot, group)| {
-                    std::iter::once((0, slot)).chain(if group.is_empty() {
-                        vec![(1, slot)]
-                    } else { group.iter().map(|&id| (2, id)).collect() }.into_iter())
-                }).collect::<Vec<_>>()
+                report
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(slot, group)| {
+                        std::iter::once((0, slot)).chain(
+                            if group.is_empty() {
+                                vec![(1, slot)]
+                            } else {
+                                group.iter().map(|&id| (2, id)).collect()
+                            }
+                            .into_iter(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
             };
             match (&old.ownership, &self.ownership) {
-                (Some(a), Some(b)) => remap_scroll(&keys(a), old.ownership_scroll, &keys(b), 17, |r| *r),
+                (Some(a), Some(b)) => {
+                    remap_scroll(&keys(a), old.ownership_scroll, &keys(b), 17, |r| *r)
+                }
                 _ => 0,
             }
-        } else { 0 };
+        } else {
+            0
+        };
         self.pending_category = None;
         self.poll_category = None; // Recomputed from the remapped Inspection hit.
         self.pressed = None;
@@ -3532,7 +3814,9 @@ impl Locator {
     /// Original4138b0 walks eligible blocks then their linked buildings, keeping
     /// only businesses owned by the current manager (462ae0).
     pub fn refresh_scene(&mut self, scene: &Scene) {
-        if self.strategic_state.is_some(){return;} //owned rows update in the synchronous native callback
+        if self.strategic_state.is_some() {
+            return;
+        } //owned rows update in the synchronous native callback
         let mut rows = Vec::new();
         if let Some(current) = self.player.current {
             for category in 0..52 {
@@ -5379,7 +5663,8 @@ mod tests {
                 assert_eq!(apartments, 9);
                 let mut prompt = crate::prompt::State::default();
                 for title in (1898..1916).step_by(2) {
-                    let request = crate::prompt::Request { script: None,
+                    let request = crate::prompt::Request {
+                        script: None,
                         dialog: None,
                         card: None,
                         title,
@@ -5486,7 +5771,7 @@ pub(crate) mod refresh_ui_tests {
     use super::*;
     pub(crate) fn fresh() -> Locator {
         Locator {
-            strategic_state:None,
+            strategic_state: None,
             city_info: false,
             city_people: None,
             people_mode: 0,
@@ -5525,9 +5810,24 @@ pub(crate) mod refresh_ui_tests {
         }
     }
     fn report(value: i32) -> crate::city_people::Report {
-        crate::city_people::Report { initialized: true, markers: vec![], rows: vec![crate::city_people::Row { style: 0, label: 1, value }] }
+        crate::city_people::Report {
+            initialized: true,
+            markers: vec![],
+            rows: vec![crate::city_people::Row {
+                style: 0,
+                label: 1,
+                value,
+            }],
+        }
     }
-    fn rows(ids: &[u32]) -> Vec<Row> { ids.iter().map(|&kind| Row { label: kind + 100, kind }).collect() }
+    fn rows(ids: &[u32]) -> Vec<Row> {
+        ids.iter()
+            .map(|&kind| Row {
+                label: kind + 100,
+                kind,
+            })
+            .collect()
+    }
     #[test]
     fn two_refreshes_keep_poll_choice_and_new_reports_cancel_input() {
         let mut old = fresh();
@@ -5542,7 +5842,10 @@ pub(crate) mod refresh_ui_tests {
         for value in [2, 3] {
             let mut new = fresh();
             new.attach_people(report(value));
-            new.attach_polls(Some(std::array::from_fn(|_| crate::consumer_polls::Poll { residents: value as u16, ..Default::default() })));
+            new.attach_polls(Some(std::array::from_fn(|_| crate::consumer_polls::Poll {
+                residents: value as u16,
+                ..Default::default()
+            })));
             new.retain_ui_choices(&old, 2, 2).unwrap();
             assert_eq!(new.open, old.open);
             assert!(new.poll_info && !new.city_info && !new.player_info);
@@ -5559,29 +5862,40 @@ pub(crate) mod refresh_ui_tests {
     fn commodity_orientation_and_stable_scroll_remap_then_removal() {
         let mut old = fresh();
         old.commodity = true;
-        old.rows = rows(&[5, 6, 7, 8]); old.other_rows = rows(&[10, 11, 12]);
-        old.selected = Some(6); old.other_selected = Some(11);
-        old.scroll = 1; old.other_scroll = 1;
+        old.rows = rows(&[5, 6, 7, 8]);
+        old.other_rows = rows(&[10, 11, 12]);
+        old.selected = Some(6);
+        old.other_selected = Some(11);
+        old.scroll = 1;
+        old.other_scroll = 1;
         let mut new = fresh();
-        new.rows = rows(&[11, 12, 13]); new.other_rows = rows(&[6, 7, 8]);
+        new.rows = rows(&[11, 12, 13]);
+        new.other_rows = rows(&[6, 7, 8]);
         new.retain_ui_choices(&old, 1, 1).unwrap();
         assert!(new.commodity);
         assert_eq!(new.rows, rows(&[6, 7, 8]));
         assert_eq!((new.selected, new.other_selected), (Some(6), Some(11)));
         assert_eq!((new.scroll, new.other_scroll), (0, 0));
         let mut shorter = fresh();
-        shorter.rows = rows(&[99]); shorter.other_rows = rows(&[1]);
+        shorter.rows = rows(&[99]);
+        shorter.other_rows = rows(&[1]);
         shorter.retain_ui_choices(&new, 19, 19).unwrap();
         assert_eq!((shorter.selected, shorter.other_selected), (None, None));
-        assert_eq!((shorter.scroll, shorter.other_scroll, shorter.owned_scroll), (0, 0, 0));
+        assert_eq!(
+            (shorter.scroll, shorter.other_scroll, shorter.owned_scroll),
+            (0, 0, 0)
+        );
     }
     #[test]
     fn financial_slot_and_period_use_new_records_with_fallback() {
-        let mut record = [0u8; 440]; record[0xc] = 1;
+        let mut record = [0u8; 440];
+        record[0xc] = 1;
         let mut old = fresh();
         old.player = crate::player_info::State::new(&[record, record, record]).unwrap();
-        old.player.players = vec![2, 0, 1]; old.player.selected = 0;
-        old.player.today = false; old.player.scroll = 999;
+        old.player.players = vec![2, 0, 1];
+        old.player.selected = 0;
+        old.player.today = false;
+        old.player.scroll = 999;
         old.player_info = true;
         let mut changed = record;
         changed[0xa0 - 4 + 152..0xa0 + 152].copy_from_slice(&42f32.to_le_bytes());
@@ -5591,7 +5905,10 @@ pub(crate) mod refresh_ui_tests {
         assert_eq!(new.player.players[new.player.selected], 2);
         assert!(!new.player.today);
         assert_eq!(new.player.records[2], changed);
-        assert_eq!(new.player.rows, crate::player_info::report(&changed, false).unwrap());
+        assert_eq!(
+            new.player.rows,
+            crate::player_info::report(&changed, false).unwrap()
+        );
         assert!(new.player.rows.iter().any(|r| r.amount == 42f32.to_bits()));
         assert_eq!(new.player.scroll, new.player.rows.len().saturating_sub(19));
         let mut missing = fresh();
@@ -5599,21 +5916,31 @@ pub(crate) mod refresh_ui_tests {
         missing.player.current = Some(1);
         missing.retain_ui_choices(&new, 19, 19).unwrap();
         assert_eq!(missing.player.players[missing.player.selected], 1);
-        let mut empty = fresh(); empty.retain_ui_choices(&missing, 19, 19).unwrap();
+        let mut empty = fresh();
+        empty.retain_ui_choices(&missing, 19, 19).unwrap();
         assert!(!empty.player_info && empty.player.rows.is_empty());
         assert_eq!((empty.player.selected, empty.player.scroll), (0, 0));
     }
     #[test]
     fn missing_categories_reset_scroll_and_page_capabilities() {
         use crate::city_prestige::{Prestige, Row as P};
-        let prestige = |rows| Prestige { rows, values: [0.; 52], overlay_categories: vec![] };
-        let mut old = fresh(); old.city_info = true; old.prestige_mode = true;
-        old.prestige = Some(prestige((0..25).map(P::Block).collect())); old.ownership_scroll = 5;
-        let mut new = fresh(); new.city_people = Some(report(2));
+        let prestige = |rows| Prestige {
+            rows,
+            values: [0.; 52],
+            overlay_categories: vec![],
+        };
+        let mut old = fresh();
+        old.city_info = true;
+        old.prestige_mode = true;
+        old.prestige = Some(prestige((0..25).map(P::Block).collect()));
+        old.ownership_scroll = 5;
+        let mut new = fresh();
+        new.city_people = Some(report(2));
         new.prestige = Some(prestige((5..25).map(P::Block).collect()));
         new.retain_ui_choices(&old, 19, 19).unwrap();
         assert_eq!(new.ownership_scroll, 0);
-        let mut gone = fresh(); gone.retain_ui_choices(&new, 19, 19).unwrap();
+        let mut gone = fresh();
+        gone.retain_ui_choices(&new, 19, 19).unwrap();
         assert!(!gone.city_info && !gone.prestige_mode);
         assert_eq!(gone.ownership_scroll, 0);
     }
@@ -5623,113 +5950,240 @@ pub(crate) mod refresh_ui_tests {
 mod ordinary_toolbar_assets_tests {
     use super::*;
     #[test]
-    #[ignore="requires supplied archive/installer/v1.4 language; optional capture feature and OPENMT2001_TOOLBAR_CAPTURE directory"]
+    #[ignore = "requires supplied archive/installer/v1.4 language; optional capture feature and OPENMT2001_TOOLBAR_CAPTURE directory"]
     fn closed_strip_keeps_disabled_lease_without_body_title_surfaces() {
-        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
-        let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");
-        let exe=read("OPENMT2001_EXE");
-        let index=ArchiveIndex::parse(&directory,archive.len()as u64).unwrap();
-        let param=std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let installer=param.parent().unwrap().parent().unwrap();
-        let path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let language=path.parent().unwrap().parent().unwrap().join("US/language/usa");
-        let bytes=fs::read(language.join("tycoon.bin")).unwrap();
-        let offsets=fs::read(language.join("tycoon.off")).unwrap();let mut at=0;
-        let strings=offsets.chunks_exact(2).map(|n|{
-            let end=at+u16::from_le_bytes(n.try_into().unwrap())as usize;
-            let row=&bytes[at..end];at=end;row
-        }).collect::<Vec<_>>();
-        let assets=Assets::load(&index,&archive,installer,&strings,&exe).unwrap();
-        let mut q=toolbar_collapse::Policy{category:33,shown:true,nonzero_kind:true,
-            lease_available:false,build_allowed:true,tutorial_allowed:[true;3]};
-        let input=toolbar_collapse::Input::default();
-        let state=crate::utility_report::View::default();
-        let base=assets.toolbar_closed_base.len();
-        let closed=assets.toolbar_surfaces(q,&input,&state,false);
-        assert_eq!(closed.len(),base+6,"all three visible buttons retain backing+icon");
-        assert_eq!(closed[base+2].pixels,assets.toolbar_disabled.pixels,
-            "unavailable lease uses native blocked-image fallback, not omission");
-        assert_eq!(closed[base+3].pixels,assets.property_side_icons[1].pixels);
-        let opened=assets.toolbar_surfaces(q,&input,&state,true);
-        assert_eq!(opened.len(),6,"open side overlay contains no second body/title/base");
-        assert_eq!(opened[0].vertices[0][0],5.599999904632568_f32);
-        assert_eq!(assets.property_side_bounds[1][1],77.5999984741211_f32);
-        q.nonzero_kind=false;
-        assert_eq!(assets.toolbar_surfaces(q,&input,&state,false).len(),base+2);
-        q.shown=false;
-        assert!(assets.toolbar_surfaces(q,&input,&state,false).is_empty());
-        #[cfg(feature="capture")]
-        if let Ok(out)=std::env::var("OPENMT2001_TOOLBAR_CAPTURE") {
-            let out=std::path::PathBuf::from(out);assert!(out.is_dir());
-            let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();
-            if cfg!(windows){descriptor.backends=wgpu::Backends::DX12;}
-            let renderer=pollster::block_on(Renderer::new(descriptor)).unwrap();
-            q.shown=true;q.nonzero_kind=true;
-            let panel=assets.ordinary_toolbar_scene(&renderer,q,&input,&state,false).unwrap();
-            crate::capture_test::capture_standalone(&renderer,&panel,
-                out.join("toolbar-closed-disabled-lease.png").to_str().unwrap());
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let exe = read("OPENMT2001_EXE");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let param = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer = param.parent().unwrap().parent().unwrap();
+        let path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let language = path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+        let bytes = fs::read(language.join("tycoon.bin")).unwrap();
+        let offsets = fs::read(language.join("tycoon.off")).unwrap();
+        let mut at = 0;
+        let strings = offsets
+            .chunks_exact(2)
+            .map(|n| {
+                let end = at + u16::from_le_bytes(n.try_into().unwrap()) as usize;
+                let row = &bytes[at..end];
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
+        let assets = Assets::load(&index, &archive, installer, &strings, &exe).unwrap();
+        let mut q = toolbar_collapse::Policy {
+            category: 33,
+            shown: true,
+            nonzero_kind: true,
+            lease_available: false,
+            build_allowed: true,
+            tutorial_allowed: [true; 3],
+        };
+        let input = toolbar_collapse::Input::default();
+        let state = crate::utility_report::View::default();
+        let base = assets.toolbar_closed_base.len();
+        let closed = assets.toolbar_surfaces(q, &input, &state, false);
+        assert_eq!(
+            closed.len(),
+            base + 6,
+            "all three visible buttons retain backing+icon"
+        );
+        assert_eq!(
+            closed[base + 2].pixels,
+            assets.toolbar_disabled.pixels,
+            "unavailable lease uses native blocked-image fallback, not omission"
+        );
+        assert_eq!(
+            closed[base + 3].pixels,
+            assets.property_side_icons[1].pixels
+        );
+        let opened = assets.toolbar_surfaces(q, &input, &state, true);
+        assert_eq!(
+            opened.len(),
+            6,
+            "open side overlay contains no second body/title/base"
+        );
+        assert_eq!(opened[0].vertices[0][0], 5.599999904632568_f32);
+        assert_eq!(assets.property_side_bounds[1][1], 77.5999984741211_f32);
+        q.nonzero_kind = false;
+        assert_eq!(
+            assets.toolbar_surfaces(q, &input, &state, false).len(),
+            base + 2
+        );
+        q.shown = false;
+        assert!(assets.toolbar_surfaces(q, &input, &state, false).is_empty());
+        #[cfg(feature = "capture")]
+        if let Ok(out) = std::env::var("OPENMT2001_TOOLBAR_CAPTURE") {
+            let out = std::path::PathBuf::from(out);
+            assert!(out.is_dir());
+            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows) {
+                descriptor.backends = wgpu::Backends::DX12;
+            }
+            let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+            q.shown = true;
+            q.nonzero_kind = true;
+            let panel = assets
+                .ordinary_toolbar_scene(&renderer, q, &input, &state, false)
+                .unwrap();
+            crate::capture_test::capture_standalone(
+                &renderer,
+                &panel,
+                out.join("toolbar-closed-disabled-lease.png")
+                    .to_str()
+                    .unwrap(),
+            );
         }
     }
 }
 
-
 #[cfg(test)]
 mod open_facing_fixture {
     use super::*;
-    use crate::business_view::facing_fixture::{Inputs,same};
+    use crate::business_view::facing_fixture::{Inputs, same};
     #[test]
-    #[ignore="SHA-pinned supplied mesh/PE/font/language and default commodity script; actual Assets::load, no city/GPU"]
+    #[ignore = "SHA-pinned supplied mesh/PE/font/language and default commodity script; actual Assets::load, no city/GPU"]
     fn supplied_locator_open_bases_and_unchanged_closed_toolbar() {
-        let f=Inputs::read();let index=f.index();let strings=f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let f = Inputs::read();
+        let index = f.index();
+        let strings = f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
         // Normal Locator constructor evaluates its existing commodity grouping
         // script. This fixture opens no Session, world, scene or gameplay loop.
-        let assets=Assets::load(&index,&f.archive,&f.installer,&strings,&f.executable).unwrap();
-        assert_eq!(assets.base.len(),10);assert_eq!(assets.property_base.len(),10);
-        let regions=f.open_borders(&assets.base[..9]);f.open_borders(&assets.property_base[..9]);
-        assert_eq!(assets.bounds,regions[9].bounds);
-        let mesh=openmt2001::mesh::CachedMesh::parse(f.payload("gamedata2/brand_new_panels/main_panel_v2.tm")).unwrap();
-        let image=PeImage::parse(&f.executable).unwrap();
-        same(&assets.base[9],&ui::mpp_background(&mesh,9,&image).unwrap());
-        same(&assets.property_base[9],&ui::mpp_background_title(&mesh,9,&image,Some([0;4])).unwrap());
-        assert_eq!(assets.property_title_bounds,regions[11].bounds);
-        for color in [0xff808080,0xff10b030] {
-            let actual=assets.property_background(color);assert_eq!(actual.len(),12);
-            for (a,b) in actual[..10].iter().zip(&assets.property_base){same(a,b);}
-            let faded=(color&0x00ff_ffff)|(((color>>24)/3)<<24);let mut title=Surface::solid();
-            title.rect(regions[11].bounds,[color,color,faded,faded]);same(&actual[10],&title);
-            same(&actual[11],&assets.property_title_icon);
+        let assets =
+            Assets::load(&index, &f.archive, &f.installer, &strings, &f.executable).unwrap();
+        assert_eq!(assets.base.len(), 10);
+        assert_eq!(assets.property_base.len(), 10);
+        let regions = f.open_borders(&assets.base[..9]);
+        f.open_borders(&assets.property_base[..9]);
+        assert_eq!(assets.bounds, regions[9].bounds);
+        let mesh = openmt2001::mesh::CachedMesh::parse(
+            f.payload("gamedata2/brand_new_panels/main_panel_v2.tm"),
+        )
+        .unwrap();
+        let image = PeImage::parse(&f.executable).unwrap();
+        same(
+            &assets.base[9],
+            &ui::mpp_background(&mesh, 9, &image).unwrap(),
+        );
+        same(
+            &assets.property_base[9],
+            &ui::mpp_background_title(&mesh, 9, &image, Some([0; 4])).unwrap(),
+        );
+        assert_eq!(assets.property_title_bounds, regions[11].bounds);
+        for color in [0xff808080, 0xff10b030] {
+            let actual = assets.property_background(color);
+            assert_eq!(actual.len(), 12);
+            for (a, b) in actual[..10].iter().zip(&assets.property_base) {
+                same(a, b);
+            }
+            let faded = (color & 0x00ff_ffff) | (((color >> 24) / 3) << 24);
+            let mut title = Surface::solid();
+            title.rect(regions[11].bounds, [color, color, faded, faded]);
+            same(&actual[10], &title);
+            same(&actual[11], &assets.property_title_icon);
         }
         // Frame0 remains the old complete explicit part list, not frame9's
         // new list. Compare every original vertex/UV/material and strip fill.
-        let (mut closed,closed_bounds)=ui::panel_frame_base(&index,&f.archive,
-            "gamedata2/brand_new_panels/main_panel_v2.tm",&(0..12).collect::<Vec<_>>(),0).unwrap();
-        assert_eq!(closed_bounds.len(),49);assert_eq!(closed.len(),12);
-        let closed_regions=openmt2001::ui_mesh::regions(&mesh,0).unwrap();
-        let strip=closed_regions.iter().find(|r|r.name=="P_MAIN_VERTCAL_BAR_BACKING").unwrap().bounds;
-        let mut fill=Surface::solid();fill.rect(strip,[0xff777777,0x66777777,0x66777777,0xff777777]);closed.push(fill);
-        assert_eq!(assets.toolbar_closed_base.len(),13);
-        for (a,b) in assets.toolbar_closed_base.iter().zip(&closed){same(a,b);}
-        let mut state=crate::utility_report::View::default();state.select(Some(33));
-        state.open_property_offer(33);state.details=true;state.scroll=3;
-        let before=(state.property_offer_open(),state.property_rights_open(),state.details,state.scroll);
-        let q=toolbar_collapse::Policy{category:33,shown:true,nonzero_kind:true,
-            lease_available:false,build_allowed:true,tutorial_allowed:[true;3]};
-        let input=toolbar_collapse::Input::default();
-        let collapsed=assets.toolbar_surfaces(q,&input,&state,false);
-        assert_eq!(collapsed.len(),19);
-        for (a,b) in collapsed[..13].iter().zip(&closed){same(a,b);}
-        let opened=assets.toolbar_surfaces(q,&input,&state,true);assert_eq!(opened.len(),6,
-            "open side overlay adds controls only, no second body/title/base");
-        for side in 0..3 {same(&opened[side*2+1],&collapsed[13+side*2+1]);}
-        assert_eq!(before,(state.property_offer_open(),state.property_rights_open(),state.details,state.scroll));
-        assert!(assets.toolbar_surfaces(toolbar_collapse::Policy{shown:false,..q},&input,&state,false).is_empty());
-        #[cfg(feature="capture")]
-        if let Ok(prefix)=std::env::var("OPENMT2001_FACING_CAPTURE_PREFIX") {
+        let (mut closed, closed_bounds) = ui::panel_frame_base(
+            &index,
+            &f.archive,
+            "gamedata2/brand_new_panels/main_panel_v2.tm",
+            &(0..12).collect::<Vec<_>>(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(closed_bounds.len(), 49);
+        assert_eq!(closed.len(), 12);
+        let closed_regions = openmt2001::ui_mesh::regions(&mesh, 0).unwrap();
+        let strip = closed_regions
+            .iter()
+            .find(|r| r.name == "P_MAIN_VERTCAL_BAR_BACKING")
+            .unwrap()
+            .bounds;
+        let mut fill = Surface::solid();
+        fill.rect(strip, [0xff777777, 0x66777777, 0x66777777, 0xff777777]);
+        closed.push(fill);
+        assert_eq!(assets.toolbar_closed_base.len(), 13);
+        for (a, b) in assets.toolbar_closed_base.iter().zip(&closed) {
+            same(a, b);
+        }
+        let mut state = crate::utility_report::View::default();
+        state.select(Some(33));
+        state.open_property_offer(33);
+        state.details = true;
+        state.scroll = 3;
+        let before = (
+            state.property_offer_open(),
+            state.property_rights_open(),
+            state.details,
+            state.scroll,
+        );
+        let q = toolbar_collapse::Policy {
+            category: 33,
+            shown: true,
+            nonzero_kind: true,
+            lease_available: false,
+            build_allowed: true,
+            tutorial_allowed: [true; 3],
+        };
+        let input = toolbar_collapse::Input::default();
+        let collapsed = assets.toolbar_surfaces(q, &input, &state, false);
+        assert_eq!(collapsed.len(), 19);
+        for (a, b) in collapsed[..13].iter().zip(&closed) {
+            same(a, b);
+        }
+        let opened = assets.toolbar_surfaces(q, &input, &state, true);
+        assert_eq!(
+            opened.len(),
+            6,
+            "open side overlay adds controls only, no second body/title/base"
+        );
+        for side in 0..3 {
+            same(&opened[side * 2 + 1], &collapsed[13 + side * 2 + 1]);
+        }
+        assert_eq!(
+            before,
+            (
+                state.property_offer_open(),
+                state.property_rights_open(),
+                state.details,
+                state.scroll
+            )
+        );
+        assert!(
+            assets
+                .toolbar_surfaces(
+                    toolbar_collapse::Policy { shown: false, ..q },
+                    &input,
+                    &state,
+                    false
+                )
+                .is_empty()
+        );
+        #[cfg(feature = "capture")]
+        if let Ok(prefix) = std::env::var("OPENMT2001_FACING_CAPTURE_PREFIX") {
             // Actual loaded base/palette component diagnostics, not full city,
             // report/control/retained Locator choices or native acceptance.
-            crate::business_view::facing_fixture::capture(&assets.base,&format!("{prefix}-locator-open-base.png"));
-            crate::business_view::facing_fixture::capture(&assets.property_background(0xff10b030),&format!("{prefix}-property-open-base.png"));
-            crate::business_view::facing_fixture::capture(&collapsed,&format!("{prefix}-toolbar-closed.png"));
+            crate::business_view::facing_fixture::capture(
+                &assets.base,
+                &format!("{prefix}-locator-open-base.png"),
+            );
+            crate::business_view::facing_fixture::capture(
+                &assets.property_background(0xff10b030),
+                &format!("{prefix}-property-open-base.png"),
+            );
+            crate::business_view::facing_fixture::capture(
+                &collapsed,
+                &format!("{prefix}-toolbar-closed.png"),
+            );
         }
     }
 }

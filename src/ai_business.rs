@@ -3,10 +3,18 @@
 use crate::economy::{BusinessDayInputs, ftol_low_word, stock_capacity};
 
 ///472620: signed-positive category/type counts decrement; zero and negatives remain.
-pub fn remove_category_count(counts:&mut[u32;52*45],category:u32,kind:u32)->Result<(),String>{
-    let index=category.wrapping_mul(45).wrapping_add(kind) as usize;
-    let count=counts.get_mut(index).ok_or("removed business count leaves table")?;
-    if (*count as i32)>0{*count-=1;}
+pub fn remove_category_count(
+    counts: &mut [u32; 52 * 45],
+    category: u32,
+    kind: u32,
+) -> Result<(), String> {
+    let index = category.wrapping_mul(45).wrapping_add(kind) as usize;
+    let count = counts
+        .get_mut(index)
+        .ok_or("removed business count leaves table")?;
+    if (*count as i32) > 0 {
+        *count -= 1;
+    }
     Ok(())
 }
 
@@ -541,16 +549,14 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Scenario 3 saved retail decision observations"]
     fn matches_native_saved_retail_follow_through() {
-        let data = std::fs::read(
-            std::env::var("OPENMT2001_NATIVE_AI_SAVED_BUSINESS_SETTINGS").unwrap(),
-        )
-        .unwrap();
+        let data =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SAVED_BUSINESS_SETTINGS").unwrap())
+                .unwrap();
         let save = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
         let catalog_oracle =
             std::fs::read(std::env::var("OPENMT2001_NATIVE_CATALOG").unwrap()).unwrap();
-        let word = |bytes: &[u8], at: usize| {
-            u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
-        };
+        let word =
+            |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 0;
         let take = |at: &mut usize, n: usize| {
             let result = &data[*at..*at + n];
@@ -616,7 +622,10 @@ mod tests {
         for kind in 0..45 {
             let count = word(&catalog_oracle, source_at) as usize;
             assert_eq!(count, usize::from(info_bytes[kind * 116 + 0x4c]));
-            assert_eq!(word(&catalog_oracle, source_at + 4), word(info_bytes, kind * 116 + 0x70));
+            assert_eq!(
+                word(&catalog_oracle, source_at + 4),
+                word(info_bytes, kind * 116 + 0x70)
+            );
             source_at += 8;
             for slot in 0..count {
                 assert_eq!(
@@ -629,11 +638,17 @@ mod tests {
         assert_eq!(source_at, catalog_oracle.len());
 
         let list = crate::ai_ownership::BusinessList {
-            entries: entries.chunks_exact(28).map(|raw| raw.try_into().unwrap()).collect(),
+            entries: entries
+                .chunks_exact(28)
+                .map(|raw| raw.try_into().unwrap())
+                .collect(),
             active_count: owned as u16,
         };
         assert_eq!(
-            list.entries.iter().map(|entry| word(entry, 4)).collect::<Vec<_>>(),
+            list.entries
+                .iter()
+                .map(|entry| word(entry, 4))
+                .collect::<Vec<_>>(),
             vec![9, 10, 11, 12, 13, 14],
         );
         let buildings: Vec<[u8; 64]> = building_prefixes
@@ -651,7 +666,10 @@ mod tests {
         for kind in 0..45 {
             for slot in 0..usize::from(info_bytes[kind * 116 + 0x4c]) {
                 catalogs.commodities[kind].push(word(product_bytes, kind * 48 + slot * 8));
-                catalogs.fractions[kind].push(f32::from_bits(word(product_bytes, kind * 48 + slot * 8 + 4)));
+                catalogs.fractions[kind].push(f32::from_bits(word(
+                    product_bytes,
+                    kind * 48 + slot * 8 + 4,
+                )));
             }
         }
         let prices = std::array::from_fn(|i| f32::from_bits(word(commodity_bytes, i * 28 + 0x14)));
@@ -687,7 +705,10 @@ mod tests {
             .map(|(at, (actual, expected))| (at / 544, at % 544, *actual, *expected))
             .take(20)
             .collect();
-        assert!(differences.is_empty(), "saved AI retail rows: {differences:?}");
+        assert!(
+            differences.is_empty(),
+            "saved AI retail rows: {differences:?}"
+        );
         let mut payloads = Vec::new();
         commands
             .drain(&mut [25; 2], |command| {
@@ -702,6 +723,9 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        assert_eq!(payloads, expected_payloads, "six original saved retail terms");
+        assert_eq!(
+            payloads, expected_payloads,
+            "six original saved retail terms"
+        );
     }
 }

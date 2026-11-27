@@ -404,7 +404,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECEF01");
         assert_eq!(r.word(), 3);
-        assert_eq!(r.word(),0x037f);
+        assert_eq!(r.word(), 0x037f);
         for _ in 0..r.word() {
             let [card, variant, current, ui] = std::array::from_fn::<_, 4, _>(|_| r.word());
             let mut players: Vec<Vec<u8>> =

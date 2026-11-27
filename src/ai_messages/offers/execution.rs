@@ -117,7 +117,10 @@ pub fn execute(
         0 | 9 | 12 => (),
         1 => {
             let category = word(&player.bytes, at + 0x14);
-            let owner = *world.category_owners.get(category as usize).ok_or("offer property outside pool")?;
+            let owner = *world
+                .category_owners
+                .get(category as usize)
+                .ok_or("offer property outside pool")?;
             let amount = f32::from_bits(word(&player.bytes, at + 0x60));
             let cash = f32::from_bits(word(&player.bytes, 4));
             let reserved = f32::from_bits(word(&player.bytes, 0x1430));
@@ -438,7 +441,7 @@ mod tests {
             let mut storage = crate::ai_ownership::Storage::default();
             storage.lists.insert(0x10016000, ownership);
             let mut world = World {
-                category_owners: categories.iter().map(|c|c[5] as i8).collect(),
+                category_owners: categories.iter().map(|c| c[5] as i8).collect(),
                 buildings: &buildings,
                 auction: Some(&mut a),
                 colors: Some(Colors {

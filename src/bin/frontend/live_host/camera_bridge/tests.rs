@@ -9,8 +9,10 @@ fn pose(mark: u32) -> Pose {
     }
 }
 fn observation(boundary: Boundary, mark: u32) -> Observation {
-    Observation {raw_capture:None,
-            strategic_writeback:None,finalization_fault:None,
+    Observation {
+        raw_capture: None,
+        strategic_writeback: None,
+        finalization_fault: None,
         current: pose(mark),
         sampled: matches!(boundary, Boundary::Sample(_)).then(|| pose(mark.wrapping_add(2))),
         task_effects: vec![],
@@ -22,7 +24,7 @@ fn install() -> Operation {
     let mut records = [[0xa5; 196], [0x5a; 196]];
     records[0][..4].copy_from_slice(&u32::MAX.to_le_bytes());
     Operation::Install {
-        property:None,
+        property: None,
         capture: Capture::from_records(records),
         admission: Admission::default(),
     }
@@ -44,9 +46,13 @@ fn inject(
             reply,
         })
         .unwrap();
-    (inbox.try_service(apply), match response.recv().unwrap(){
-        Reply::Complete(result)=>result.map_err(|error|error.to_string()), Reply::Session(_)=>panic!("unexpected callback in camera-only fixture"),
-    })
+    (
+        inbox.try_service(apply),
+        match response.recv().unwrap() {
+            Reply::Complete(result) => result.map_err(|error| error.to_string()),
+            Reply::Session(_) => panic!("unexpected callback in camera-only fixture"),
+        },
+    )
 }
 
 #[test]
@@ -241,7 +247,7 @@ fn forged_ack_identity_or_boundary_is_rejected() {
                 sequence: request.sequence,
                 boundary: Boundary::Install,
                 observation: observation(Boundary::Install, 1),
-                subcalls:0,
+                subcalls: 0,
             };
             match field {
                 0 => ack.generation += 1,
@@ -575,7 +581,7 @@ fn forged_ack_remains_failure_when_explicit_retirement_races_receipt() {
                 sequence: request.sequence,
                 boundary: Boundary::Install,
                 observation: observation(Boundary::Install, 0),
-                subcalls:0,
+                subcalls: 0,
             })))
             .unwrap();
         inbox.retire();
@@ -602,62 +608,115 @@ fn unexpected_drop_is_typed_failure_and_never_sets_retirement() {
 }
 
 #[test]
-fn completed_fault_direct_ack_survives_retirement_and_latches_real_failure(){
-    let (mut worker,mut inbox)=channel(802);
-    let client=std::thread::spawn(move||{
+fn completed_fault_direct_ack_survives_retirement_and_latches_real_failure() {
+    let (mut worker, mut inbox) = channel(802);
+    let client = std::thread::spawn(move || {
         worker.request(install()).unwrap();
-        let completed=worker.request(Operation::CentralTail{admission:Admission::default()}).unwrap();
-        assert_eq!(completed.task_effects,vec![TaskEffect::ClearElapsed]);
-        assert_eq!(completed.finalization_fault.as_deref(),Some("late extractor failed"));
-        assert_eq!(worker.request(Operation::CurrentPose),Err(RequestError::Failed("late extractor failed".into())));
+        let completed = worker
+            .request(Operation::CentralTail {
+                admission: Admission::default(),
+            })
+            .unwrap();
+        assert_eq!(completed.task_effects, vec![TaskEffect::ClearElapsed]);
+        assert_eq!(
+            completed.finalization_fault.as_deref(),
+            Some("late extractor failed")
+        );
+        assert_eq!(
+            worker.request(Operation::CurrentPose),
+            Err(RequestError::Failed("late extractor failed".into()))
+        );
     });
-    inbox.wait_service(std::time::Duration::from_secs(2),|_|Ok(observation(Boundary::Install,1))).unwrap();
-    let result=inbox.wait_service(std::time::Duration::from_secs(2),|_|{
-        let mut o=observation(Boundary::CentralTail,2);o.task_effects.push(TaskEffect::ClearElapsed);
-        o.finalization_fault=Some("late extractor failed".into());Ok(o)
+    inbox
+        .wait_service(std::time::Duration::from_secs(2), |_| {
+            Ok(observation(Boundary::Install, 1))
+        })
+        .unwrap();
+    let result = inbox.wait_service(std::time::Duration::from_secs(2), |_| {
+        let mut o = observation(Boundary::CentralTail, 2);
+        o.task_effects.push(TaskEffect::ClearElapsed);
+        o.finalization_fault = Some("late extractor failed".into());
+        Ok(o)
     });
-    assert_eq!(result,Err("late extractor failed".into()));inbox.retire();client.join().unwrap();
+    assert_eq!(result, Err("late extractor failed".into()));
+    inbox.retire();
+    client.join().unwrap();
 }
 #[test]
-fn completion_fault_is_rejected_outside_protected_completion(){
-    for boundary in [Boundary::Admission,Boundary::Apply,Boundary::CurrentPose,Boundary::Sample(0)]{
-        let mut o=observation(boundary,1);o.finalization_fault=Some("wrong boundary".into());
-        assert!(validate_observation(boundary,&o).is_err());
+fn completion_fault_is_rejected_outside_protected_completion() {
+    for boundary in [
+        Boundary::Admission,
+        Boundary::Apply,
+        Boundary::CurrentPose,
+        Boundary::Sample(0),
+    ] {
+        let mut o = observation(boundary, 1);
+        o.finalization_fault = Some("wrong boundary".into());
+        assert!(validate_observation(boundary, &o).is_err());
     }
 }
 
 // The operation uses existing envelope, type and retirement checks.
 #[test]
 fn raw_capture_reply_is_typed_and_read_only() {
-    let mut raw=observation(Boundary::CurrentPose,0);
-    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());
-    raw.raw_capture=Some(SaveCapture{cameras:Capture::from_records([[0xa5;196],[0x5a;196]]),interface_mode:Ok(3)});
-    assert!(validate_observation(Boundary::RawCapture,&raw).is_ok());
-    assert!(validate_observation(Boundary::CurrentPose,&raw).is_err());
+    let mut raw = observation(Boundary::CurrentPose, 0);
+    assert!(validate_observation(Boundary::RawCapture, &raw).is_err());
+    raw.raw_capture = Some(SaveCapture {
+        cameras: Capture::from_records([[0xa5; 196], [0x5a; 196]]),
+        interface_mode: Ok(3),
+    });
+    assert!(validate_observation(Boundary::RawCapture, &raw).is_ok());
+    assert!(validate_observation(Boundary::CurrentPose, &raw).is_err());
     raw.task_effects.push(TaskEffect::ClearElapsed);
-    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());raw.task_effects.clear();
-    raw.sampled=Some(pose(7));assert!(validate_observation(Boundary::RawCapture,&raw).is_err());raw.sampled=None;
-    raw.finalization_fault=Some("forged finalizer".into());
-    assert!(validate_observation(Boundary::RawCapture,&raw).is_err());
+    assert!(validate_observation(Boundary::RawCapture, &raw).is_err());
+    raw.task_effects.clear();
+    raw.sampled = Some(pose(7));
+    assert!(validate_observation(Boundary::RawCapture, &raw).is_err());
+    raw.sampled = None;
+    raw.finalization_fault = Some("forged finalizer".into());
+    assert!(validate_observation(Boundary::RawCapture, &raw).is_err());
 }
 #[test]
 fn raw_capture_rejects_bad_generation_and_sequence_before_capture() {
-    for (generation,sequence) in [(2,0),(1,1)] {
-        let (worker,mut inbox)=channel(1);
-        let (result,ack)=inject(&mut inbox,&worker.sender,generation,sequence,Operation::RawCapture,
-            |_|panic!("invalid envelope reached raw owner"));
+    for (generation, sequence) in [(2, 0), (1, 1)] {
+        let (worker, mut inbox) = channel(1);
+        let (result, ack) = inject(
+            &mut inbox,
+            &worker.sender,
+            generation,
+            sequence,
+            Operation::RawCapture,
+            |_| panic!("invalid envelope reached raw owner"),
+        );
         assert!(result.unwrap_err().contains("generation/sequence"));
         assert!(ack.unwrap_err().contains("generation/sequence"));
     }
 }
 #[test]
 fn raw_capture_retirement_is_not_a_successful_save_or_fatal_camera_error() {
-    let (mut worker,inbox)=channel(211);worker.installed=true;
-    let sender=worker.sender.clone();let (done,finished)=mpsc::channel();
-    let client=std::thread::spawn(move||{let result=worker.request(Operation::RawCapture);done.send((worker,result)).unwrap();});
-    let pending=inbox.receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-    sender.send(pending).unwrap();inbox.retire();
-    let (mut worker,result)=finished.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-    assert_eq!(result,Err(RequestError::Retired));assert_eq!(worker.next,0);assert!(worker.failure.is_none());
-    assert_eq!(worker.request(Operation::RawCapture),Err(RequestError::Retired));client.join().unwrap();
+    let (mut worker, inbox) = channel(211);
+    worker.installed = true;
+    let sender = worker.sender.clone();
+    let (done, finished) = mpsc::channel();
+    let client = std::thread::spawn(move || {
+        let result = worker.request(Operation::RawCapture);
+        done.send((worker, result)).unwrap();
+    });
+    let pending = inbox
+        .receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    sender.send(pending).unwrap();
+    inbox.retire();
+    let (mut worker, result) = finished
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(result, Err(RequestError::Retired));
+    assert_eq!(worker.next, 0);
+    assert!(worker.failure.is_none());
+    assert_eq!(
+        worker.request(Operation::RawCapture),
+        Err(RequestError::Retired)
+    );
+    client.join().unwrap();
 }

@@ -35,8 +35,8 @@ impl Model {
         untextured_page: Option<usize>,
         frame: usize,
     ) -> Result<Self, String> {
-        let untextured = source.texture_names.is_empty()
-            && source.parts.iter().all(|part| part.texture == 0);
+        let untextured =
+            source.texture_names.is_empty() && source.parts.iter().all(|part| part.texture == 0);
         if untextured && untextured_page.is_none() {
             return Err("moving-object mesh needs an untextured material page".into());
         }
@@ -62,19 +62,24 @@ impl Model {
             source.uvs()
         } else {
             scene_assets::scenery_mesh_uvs(
-            source,
-            &material_regions.iter().map(|r| r.uv).collect::<Vec<_>>(),
-        )
-        .map_err(|error| {
-            format!(
-                "{error}; {} names, part materials {:?}",
-                source.texture_names.len(),
-                source.parts.iter().map(|part| part.texture).collect::<Vec<_>>()
+                source,
+                &material_regions.iter().map(|r| r.uv).collect::<Vec<_>>(),
             )
-        })?
+            .map_err(|error| {
+                format!(
+                    "{error}; {} names, part materials {:?}",
+                    source.texture_names.len(),
+                    source
+                        .parts
+                        .iter()
+                        .map(|part| part.texture)
+                        .collect::<Vec<_>>()
+                )
+            })?
         };
         let prepared = openmt2001::people::prepare_mesh(source, source)?;
-        let positions = source.positions(frame)
+        let positions = source
+            .positions(frame)
             .map_err(|error| format!("moving-object model: {error}"))?;
         let mut parts = Vec::new();
         for part in prepared.parts {
@@ -84,7 +89,11 @@ impl Model {
             let page = material_regions
                 .get(material)
                 .map(|region| region.page)
-                .or_else(|| (untextured && material == 0).then_some(untextured_page).flatten())
+                .or_else(|| {
+                    (untextured && material == 0)
+                        .then_some(untextured_page)
+                        .flatten()
+                })
                 .ok_or("moving-object part material leaves registry")?;
             let mut vertices = Vec::with_capacity(part.triangles.len() * 3);
             let mut normals = Vec::with_capacity(part.triangles.len() * 3);

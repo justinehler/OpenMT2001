@@ -102,11 +102,8 @@ pub fn portfolio(player: &Player, w: &World<'_>) -> Result<i32, String> {
         } else {
             business(id, w)?
         };
-        let mut value = crate::ai_actions::liquidation_score::business_value(
-            row,
-            w.buildings,
-            w.image,
-        )?;
+        let mut value =
+            crate::ai_actions::liquidation_score::business_value(row, w.buildings, w.image)?;
         value.add_f32(total)?;
         total = value.to_f32();
     }
@@ -154,7 +151,12 @@ fn building<'a>(id: u32, w: &'a World<'_>) -> Result<&'a [u8; 916], String> {
 }
 ///445520, retaining PC64 until the caller's FST32 quote.
 pub fn demolition_quote(id: u32, w: &World<'_>) -> Result<Sum, String> {
-    crate::demolition::quote_with_parameters(building(id, w)?, w.categories, &w.building_parameters, w.image)
+    crate::demolition::quote_with_parameters(
+        building(id, w)?,
+        w.categories,
+        &w.building_parameters,
+        w.image,
+    )
 }
 ///4453b0 with the live scripted business catalog and original binary64 constants.
 pub fn conversion_quote(id: u32, kind: u32, w: &World<'_>) -> Result<Sum, String> {
@@ -407,7 +409,8 @@ fn matches_native_maintenance() {
         let mut counts = std::array::from_fn(|i| word(b[7], i * 4));
         let mut identity = 77;
         let mut w = World {
-            building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
+            building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
+                .unwrap(),
             image: &image,
             profiles: &profiles,
             categories: categories.as_slice().try_into().unwrap(),

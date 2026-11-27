@@ -24,19 +24,30 @@ fn filename(image: &PeImage<'_>, address: u32) -> Result<&'static str, String> {
 
 fn decode(ffmpeg: &Path, path: &Path) -> Result<Vec<f32>, String> {
     let mut command = Command::new(ffmpeg);
-    command.args(["-v", "error", "-nostdin", "-i"]).arg(path)
+    command
+        .args(["-v", "error", "-nostdin", "-i"])
+        .arg(path)
         .args(["-vn", "-ac", "2", "-ar", "44100", "-f", "f32le", "pipe:1"]);
-    #[cfg(windows)] {
+    #[cfg(windows)]
+    {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    let output = command.output().map_err(|error| format!("{}: {error}", path.display()))?;
+    let output = command
+        .output()
+        .map_err(|error| format!("{}: {error}", path.display()))?;
     if !output.status.success() || output.stdout.is_empty() || output.stdout.len() % 8 != 0 {
-        return Err(format!("{}: result music decode failed: {}", path.display(),
-            String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "{}: result music decode failed: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    Ok(output.stdout.chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap())).collect())
+    Ok(output
+        .stdout
+        .chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect())
 }
 
 impl Assets {
@@ -56,7 +67,11 @@ impl Assets {
         }
     }
 
-    pub fn play(&self, address: u32, music_level: u8) -> Result<(rodio::OutputStream, rodio::Sink), String> {
+    pub fn play(
+        &self,
+        address: u32,
+        music_level: u8,
+    ) -> Result<(rodio::OutputStream, rodio::Sink), String> {
         let samples = self.samples(address)?;
         let stream = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|error| format!("result audio device unavailable: {error}"))?;
@@ -66,9 +81,11 @@ impl Assets {
 
     /// Complete focus adapter route. The process keeps `audio` across views;
     /// result ownership keeps the existing stream and registered music Sink.
-    pub fn play_with_audio(&self, address: u32, audio: &crate::audio_bus::focus::SharedAudio)
-        -> Result<(rodio::OutputStream, crate::audio_bus::focus::Music), String>
-    {
+    pub fn play_with_audio(
+        &self,
+        address: u32,
+        audio: &crate::audio_bus::focus::SharedAudio,
+    ) -> Result<(rodio::OutputStream, crate::audio_bus::focus::Music), String> {
         let samples = self.samples(address)?;
         let stream = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|error| format!("result audio device unavailable: {error}"))?;
@@ -77,9 +94,11 @@ impl Assets {
     }
 }
 
-fn connect_managed(samples: &[f32], mixer: &rodio::mixer::Mixer,
-    audio: &crate::audio_bus::focus::SharedAudio) -> Result<crate::audio_bus::focus::Music, String>
-{
+fn connect_managed(
+    samples: &[f32],
+    mixer: &rodio::mixer::Mixer,
+    audio: &crate::audio_bus::focus::SharedAudio,
+) -> Result<crate::audio_bus::focus::Music, String> {
     let owner = crate::audio_bus::focus::MusicOwner::new();
     let sink = audio.music_sink(mixer, owner.token()?)?;
     sink.append(rodio::buffer::SamplesBuffer::new(2, 44100, samples.to_vec()).repeat_infinite())?;
@@ -92,7 +111,11 @@ mod focus_tests {
     use crate::audio_bus::focus::{Action, Guards, SharedAudio};
     #[test]
     fn result_music_uses_same_retained_focus_state_and_does_not_restart_or_revive() {
-        let guards = Guards { active: true, sound_enabled: true, music_enabled: true };
+        let guards = Guards {
+            active: true,
+            sound_enabled: true,
+            music_enabled: true,
+        };
         for sample in [0.5, 0.25] {
             let audio = SharedAudio::new(75, 25);
             audio.apply(Action::Suspend, guards);
@@ -105,18 +128,34 @@ mod focus_tests {
             assert_eq!(song.get_pos(), std::time::Duration::ZERO);
             let identity = &*song as *const rodio::Sink;
             audio.apply(Action::Resume, guards);
-            let expected = if sample == 0.5 { 0.192517415 } else { 0.09625871 };
+            let expected = if sample == 0.5 {
+                0.192517415
+            } else {
+                0.09625871
+            };
             let resumed: Vec<_> = output.by_ref().take(8192).collect();
-            assert!(resumed.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
-            assert!(resumed[4096..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(
+                resumed
+                    .iter()
+                    .all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6)
+            );
+            assert!(
+                resumed[4096..]
+                    .iter()
+                    .all(|sample| (*sample - expected).abs() < 1e-6)
+            );
             assert_eq!(&*song as *const rodio::Sink, identity);
             assert_eq!(song.len(), 1);
             let position = song.get_pos();
             audio.apply(Action::Suspend, guards);
-            for _ in 0..8192 { output.next(); }
+            for _ in 0..8192 {
+                output.next();
+            }
             let paused_position = song.get_pos();
             assert!(paused_position >= position);
-            for _ in 0..8192 { output.next(); }
+            for _ in 0..8192 {
+                output.next();
+            }
             assert_eq!(song.get_pos(), paused_position);
             drop(song);
             audio.apply(Action::Resume, guards);
@@ -145,8 +184,12 @@ mod tests {
     use super::*;
     #[test]
     fn original_result_music_pointers_and_files() {
-        let Some(exe) = std::env::var_os("OPENMT2001_EXE") else { return };
-        let Some(suncols) = std::env::var_os("OPENMT2001_SUNCOLS") else { return };
+        let Some(exe) = std::env::var_os("OPENMT2001_EXE") else {
+            return;
+        };
+        let Some(suncols) = std::env::var_os("OPENMT2001_SUNCOLS") else {
+            return;
+        };
         let exe = std::fs::read(exe).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let standard = Path::new(&suncols).parent().unwrap();
@@ -166,8 +209,9 @@ mod tests {
             let call_target = |address: u32| {
                 let code = image.at(address, 5).unwrap();
                 assert_eq!(code[0], 0xe8);
-                address.wrapping_add(5).wrapping_add_signed(
-                    i32::from_le_bytes(code[1..5].try_into().unwrap()))
+                address
+                    .wrapping_add(5)
+                    .wrapping_add_signed(i32::from_le_bytes(code[1..5].try_into().unwrap()))
             };
             assert_eq!(call_target(construct), 0x4b1800);
             assert_eq!(call_target(music), 0x4ad670);
@@ -182,8 +226,16 @@ mod tests {
             } else { "ffmpeg".into() });
         let assets = Assets::load(&image, installer, &ffmpeg).unwrap();
         let seconds = |samples: &[f32]| samples.len() as f64 / (44100. * 2.);
-        assert!((17.0..19.0).contains(&seconds(&assets.winner)), "winner: {}", seconds(&assets.winner));
-        assert!((11.0..13.0).contains(&seconds(&assets.loser)), "loser: {}", seconds(&assets.loser));
+        assert!(
+            (17.0..19.0).contains(&seconds(&assets.winner)),
+            "winner: {}",
+            seconds(&assets.winner)
+        );
+        assert!(
+            (11.0..13.0).contains(&seconds(&assets.loser)),
+            "loser: {}",
+            seconds(&assets.loser)
+        );
     }
 }
 
@@ -193,7 +245,10 @@ mod level_tests {
 
     #[test]
     fn both_results_apply_native_gain_before_first_queued_sample() {
-        let assets = Assets { winner: vec![0.5; 32768], loser: vec![0.25; 32768] };
+        let assets = Assets {
+            winner: vec![0.5; 32768],
+            loser: vec![0.25; 32768],
+        };
         // Original music25 -> -2920, music50 -> -1787 hundredths dB.
         // These fixed PCM expectations come from those commands and the
         // synthetic source amplitudes, not from production gain helpers.
@@ -207,15 +262,26 @@ mod level_tests {
             let sink = connect(assets.samples(address).unwrap(), &output, level);
             let first: Vec<_> = rendered.by_ref().take(4096).collect();
             assert_eq!(first.len(), 4096);
-            assert!(first.iter().all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6));
-            assert!(first[2048..].iter().all(|sample| (*sample - expected).abs() < 1e-6));
+            assert!(
+                first
+                    .iter()
+                    .all(|sample| *sample == 0. || (*sample - expected).abs() < 1e-6)
+            );
+            assert!(
+                first[2048..]
+                    .iter()
+                    .all(|sample| (*sample - expected).abs() < 1e-6)
+            );
             assert!(!sink.empty());
         }
     }
 
     #[test]
     fn muted_result_is_silent_from_first_sample_for_both_songs() {
-        let assets = Assets { winner: vec![0.5; 32768], loser: vec![0.25; 32768] };
+        let assets = Assets {
+            winner: vec![0.5; 32768],
+            loser: vec![0.25; 32768],
+        };
         for address in [0x541d0c, 0x541cdc] {
             let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
             let sink = connect(assets.samples(address).unwrap(), &output, 0);
@@ -235,34 +301,67 @@ mod level_tests {
         assert_eq!(first.len(), 4096);
         // rodio's connected Mixer can prebuffer silence while its queue is
         // still empty. Require bounded startup and the actual subsequent gain.
-        assert!(first.iter().all(|sample| *sample == 0. || (*sample - 0.5).abs() < 1e-6));
-        assert!(first[2048..].iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+        assert!(
+            first
+                .iter()
+                .all(|sample| *sample == 0. || (*sample - 0.5).abs() < 1e-6)
+        );
+        assert!(
+            first[2048..]
+                .iter()
+                .all(|sample| (*sample - 0.5).abs() < 1e-6)
+        );
         let first_position = sink.get_pos();
         set_level(&sink, 0);
         let muted: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(muted.len(), 4096);
         assert!(muted[2048..].iter().all(|sample| *sample == 0.));
-        assert!(sink.get_pos() > first_position, "muting advances the same queued source");
+        assert!(
+            sink.get_pos() > first_position,
+            "muting advances the same queued source"
+        );
         let muted_position = sink.get_pos();
         set_level(&sink, 25);
         let quieter: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(quieter.len(), 4096);
         // Original g25 -> command -2920 -> nominal gain 0.034673685.
-        assert!(quieter[2048..].iter().all(|sample| (*sample - 0.017336843).abs() < 1e-7));
-        assert!(sink.get_pos() > muted_position, "changing gain preserves forward playback");
+        assert!(
+            quieter[2048..]
+                .iter()
+                .all(|sample| (*sample - 0.017336843).abs() < 1e-7)
+        );
+        assert!(
+            sink.get_pos() > muted_position,
+            "changing gain preserves forward playback"
+        );
         let quieter_position = sink.get_pos();
         set_level(&sink, 50);
         let middle: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(middle.len(), 4096);
-        assert!(middle[2048..].iter().all(|sample| (*sample - 0.0638955).abs() < 1e-6));
-        assert!(sink.get_pos() > quieter_position, "interior gain changes preserve forward playback");
+        assert!(
+            middle[2048..]
+                .iter()
+                .all(|sample| (*sample - 0.0638955).abs() < 1e-6)
+        );
+        assert!(
+            sink.get_pos() > quieter_position,
+            "interior gain changes preserve forward playback"
+        );
         set_level(&sink, 255);
         let clamped: Vec<_> = rendered.by_ref().take(4096).collect();
         assert_eq!(clamped.len(), 4096);
-        assert!(clamped[2048..].iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+        assert!(
+            clamped[2048..]
+                .iter()
+                .all(|sample| (*sample - 0.5).abs() < 1e-6)
+        );
         sink.stop();
         let stopped: Vec<_> = rendered.by_ref().take(4096).collect();
-        assert!(stopped[stopped.len().min(2048)..].iter().all(|sample| *sample == 0.));
+        assert!(
+            stopped[stopped.len().min(2048)..]
+                .iter()
+                .all(|sample| *sample == 0.)
+        );
     }
 }
 
@@ -292,8 +391,10 @@ mod repeat_tests {
         for (index, actual) in pcm.iter().enumerate() {
             let position = (phase + index) % SONG_SAMPLES;
             let expected = halves[position / (SONG_SAMPLES / 2)][position % 2];
-            assert!(close(*actual, expected),
-                "sample {index}, phase {phase}: {actual} != {expected}");
+            assert!(
+                close(*actual, expected),
+                "sample {index}, phase {phase}: {actual} != {expected}"
+            );
         }
     }
 
@@ -302,10 +403,19 @@ mod repeat_tests {
     // This admits rodio's initial queue metadata conversion without choosing
     // a phase from production gain/source helpers or accepting filler silence.
     fn assert_repeat(pcm: &[f32], halves: [[f32; 2]; 2], after_boundary: usize) -> usize {
-        let boundary = (2..=SONG_SAMPLES).step_by(2).find(|&index| {
-            pcm[index - 2..index].iter().zip(halves[1]).all(|(a, b)| close(*a, b))
-                && pcm[index..index + 2].iter().zip(halves[0]).all(|(a, b)| close(*a, b))
-        }).expect("nonzero stereo song must wrap within one source length");
+        let boundary = (2..=SONG_SAMPLES)
+            .step_by(2)
+            .find(|&index| {
+                pcm[index - 2..index]
+                    .iter()
+                    .zip(halves[1])
+                    .all(|(a, b)| close(*a, b))
+                    && pcm[index..index + 2]
+                        .iter()
+                        .zip(halves[0])
+                        .all(|(a, b)| close(*a, b))
+            })
+            .expect("nonzero stereo song must wrap within one source length");
         assert!(pcm.len() >= boundary + after_boundary);
         let phase = (SONG_SAMPLES - boundary % SONG_SAMPLES) % SONG_SAMPLES;
         assert_phase(pcm, halves, phase);
@@ -314,7 +424,11 @@ mod repeat_tests {
 
     fn take(rendered: &mut rodio::mixer::MixerSource, count: usize) -> Vec<f32> {
         let pcm: Vec<_> = rendered.by_ref().take(count).collect();
-        assert_eq!(pcm.len(), count, "the retained playing queue must stay live");
+        assert_eq!(
+            pcm.len(),
+            count,
+            "the retained playing queue must stay live"
+        );
         pcm
     }
 
@@ -324,10 +438,16 @@ mod repeat_tests {
         // Literal expected PCM: g25 -> -2920 hundredths dB, nominal gain
         // 0.034673685; no call to the production gain function for the oracle.
         for (address, full, quiet) in [
-            (0x541d0c, [[0.5, -0.25], [-0.125, 0.375]],
-                [[0.017336843, -0.008668421], [-0.0043342105, 0.013002632]]),
-            (0x541cdc, [[0.25, -0.125], [-0.0625, 0.1875]],
-                [[0.008668421, -0.0043342105], [-0.0021671053, 0.006501316]]),
+            (
+                0x541d0c,
+                [[0.5, -0.25], [-0.125, 0.375]],
+                [[0.017336843, -0.008668421], [-0.0043342105, 0.013002632]],
+            ),
+            (
+                0x541cdc,
+                [[0.25, -0.125], [-0.0625, 0.1875]],
+                [[0.008668421, -0.0043342105], [-0.0021671053, 0.006501316]],
+            ),
         ] {
             let (output, mut rendered) = rodio::mixer::mixer(2, 44100);
             let sink = connect(assets.samples(address).unwrap(), &output, 25);
@@ -335,9 +455,18 @@ mod repeat_tests {
             assert!(close(sink.volume(), 0.034673685));
             assert_eq!(sink.len(), 1);
             let startup = take(&mut rendered, WINDOW);
-            let peak = quiet.iter().flatten().copied().map(f32::abs).fold(0.0_f32, f32::max);
-            assert!(startup.iter().all(|sample| sample.is_finite() && sample.abs() <= peak + 1e-6),
-                "gain must apply before append, including the interpolated metadata prefix");
+            let peak = quiet
+                .iter()
+                .flatten()
+                .copied()
+                .map(f32::abs)
+                .fold(0.0_f32, f32::max);
+            assert!(
+                startup
+                    .iter()
+                    .all(|sample| sample.is_finite() && sample.abs() <= peak + 1e-6),
+                "gain must apply before append, including the interpolated metadata prefix"
+            );
             // Three periods allow one period to locate a boundary and at
             // least two complete source traversals after it. Finite append
             // or keep-alive silence cannot satisfy the literal PCM oracle.
@@ -351,7 +480,10 @@ mod repeat_tests {
             assert_eq!(sink.len(), 1);
             let muted = take(&mut rendered, WINDOW);
             assert!(muted[SETTLED..].iter().all(|sample| *sample == 0.));
-            assert!(sink.get_pos() > position, "muted repeated source still advances");
+            assert!(
+                sink.get_pos() > position,
+                "muted repeated source still advances"
+            );
             let position = sink.get_pos();
             set_level(&sink, 100);
             assert_eq!(std::ptr::from_ref(&sink), owner);
@@ -369,8 +501,10 @@ mod repeat_tests {
             assert!(sink.empty());
             assert_eq!(sink.len(), 0);
             drop(sink);
-            assert!(rendered.by_ref().take(WINDOW).count() < WINDOW,
-                "dropping the stopped owner must terminate its mixer queue");
+            assert!(
+                rendered.by_ref().take(WINDOW).count() < WINDOW,
+                "dropping the stopped owner must terminate its mixer queue"
+            );
             assert_eq!(rendered.next(), None);
         }
     }
@@ -402,9 +536,20 @@ mod repeat_tests {
             // Drop an actively repeating owner, without calling stop first.
             drop(sink);
             let tail: Vec<_> = rendered.by_ref().take(WINDOW).collect();
-            assert!(tail.len() < WINDOW, "active owner drop must settle within the fixed window");
-            assert!(tail[tail.len().min(SETTLED)..].iter().all(|sample| *sample == 0.));
-            assert_eq!(rendered.next(), None, "no orphan repeat or silence queue survives");
+            assert!(
+                tail.len() < WINDOW,
+                "active owner drop must settle within the fixed window"
+            );
+            assert!(
+                tail[tail.len().min(SETTLED)..]
+                    .iter()
+                    .all(|sample| *sample == 0.)
+            );
+            assert_eq!(
+                rendered.next(),
+                None,
+                "no orphan repeat or silence queue survives"
+            );
         }
     }
 
@@ -419,8 +564,11 @@ mod repeat_tests {
 }
 
 #[cfg(test)]
-pub(crate) fn composition_result_pcm(mixer:&rodio::mixer::Mixer,audio:&crate::audio_bus::focus::SharedAudio)->crate::audio_bus::focus::Music{
+pub(crate) fn composition_result_pcm(
+    mixer: &rodio::mixer::Mixer,
+    audio: &crate::audio_bus::focus::SharedAudio,
+) -> crate::audio_bus::focus::Music {
     // The same managed attachment used by play_with_audio, with controlled
     //decoded PCM and neutral output so composition tests never open a device.
-    connect_managed(&[0.5;64],mixer,audio).unwrap()
+    connect_managed(&[0.5; 64], mixer, audio).unwrap()
 }

@@ -92,10 +92,29 @@ impl AiScript {
 
     /// Publish4d6ef0's one byte store to its linked runtime player.
     /// Requests are consumed once; the flag can subsequently change in native AI logic.
-    pub fn apply_twiddle_thumbs(&mut self, player: &mut crate::player_manager::Player) -> Result<(), String> {
-        let character = u32::from_le_bytes(player.bytes.get(0x150..0x154).ok_or("twiddle player truncated")?.try_into().unwrap()) as usize;
-        let pending = self.twiddle_thumbs.get_mut(character).ok_or("twiddle character leaves profile table")?;
-        if *pending { *player.bytes.get_mut(0x1403).ok_or("twiddle linked player is not AI storage")? = 1; *pending = false; }
+    pub fn apply_twiddle_thumbs(
+        &mut self,
+        player: &mut crate::player_manager::Player,
+    ) -> Result<(), String> {
+        let character = u32::from_le_bytes(
+            player
+                .bytes
+                .get(0x150..0x154)
+                .ok_or("twiddle player truncated")?
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let pending = self
+            .twiddle_thumbs
+            .get_mut(character)
+            .ok_or("twiddle character leaves profile table")?;
+        if *pending {
+            *player
+                .bytes
+                .get_mut(0x1403)
+                .ok_or("twiddle linked player is not AI storage")? = 1;
+            *pending = false;
+        }
         Ok(())
     }
 
@@ -109,7 +128,9 @@ impl AiScript {
         scenario: Option<(&str, &[u8])>,
     ) -> Result<(), String> {
         self.load(state.profiles, default, scenario, state.current_hour)?;
-        for player in &mut state.manager.players { self.apply_twiddle_thumbs(player)?; }
+        for player in &mut state.manager.players {
+            self.apply_twiddle_thumbs(player)?;
+        }
         self.initialize_players(
             state.profiles,
             state.current_hour,
@@ -117,7 +138,9 @@ impl AiScript {
             state.manager,
             state.count_tick,
         )?;
-        for player in &mut state.manager.players { self.apply_twiddle_thumbs(player)?; }
+        for player in &mut state.manager.players {
+            self.apply_twiddle_thumbs(player)?;
+        }
         crate::ai_business::rebuild_category_counts(
             state.category_counts,
             state.chains,
@@ -143,11 +166,25 @@ impl AiScript {
     ) -> Result<(), String> {
         self.runtime
             .execute("DEFAULT/ai.lua", default, &mut |id, args| {
-                dispatch(profiles, &mut self.scores, &mut self.twiddle_thumbs, id, args, current_hour)
+                dispatch(
+                    profiles,
+                    &mut self.scores,
+                    &mut self.twiddle_thumbs,
+                    id,
+                    args,
+                    current_hour,
+                )
             })?;
         if let Some((name, bytes)) = scenario {
             self.runtime.execute(name, bytes, &mut |id, args| {
-                dispatch(profiles, &mut self.scores, &mut self.twiddle_thumbs, id, args, current_hour)
+                dispatch(
+                    profiles,
+                    &mut self.scores,
+                    &mut self.twiddle_thumbs,
+                    id,
+                    args,
+                    current_hour,
+                )
             })?;
         }
         Ok(())
@@ -163,7 +200,14 @@ impl AiScript {
         current_hour: i32,
     ) -> Result<(), String> {
         self.runtime.call(event, arguments, &mut |id, args| {
-            dispatch(profiles, &mut self.scores, &mut self.twiddle_thumbs, id, args, current_hour)
+            dispatch(
+                profiles,
+                &mut self.scores,
+                &mut self.twiddle_thumbs,
+                id,
+                args,
+                current_hour,
+            )
         })
     }
 
@@ -182,7 +226,14 @@ impl AiScript {
             let result =
                 self.runtime
                     .call(&initializer, &[f64::from(argument)], &mut |id, args| {
-                        dispatch(profiles, &mut self.scores, &mut self.twiddle_thumbs, id, args, current_hour)
+                        dispatch(
+                            profiles,
+                            &mut self.scores,
+                            &mut self.twiddle_thumbs,
+                            id,
+                            args,
+                            current_hour,
+                        )
                     });
             let release = self.runtime.release_reference(reference);
             result?;
@@ -194,7 +245,14 @@ impl AiScript {
         let result = self
             .runtime
             .call_reference(reference, argument, &mut |id, args| {
-                dispatch(profiles, &mut self.scores, &mut self.twiddle_thumbs, id, args, current_hour)
+                dispatch(
+                    profiles,
+                    &mut self.scores,
+                    &mut self.twiddle_thumbs,
+                    id,
+                    args,
+                    current_hour,
+                )
             });
         let remaining = match result {
             Ok(Some(delay)) => crate::economy::ftol_low_word(delay) as u32,
@@ -343,14 +401,20 @@ mod tests {
     fn original_twiddle_changes_linked_player_once() {
         let bytes = std::fs::read("work/economy/native-tutorial-twiddle.bin").unwrap();
         assert_eq!(&bytes[..8], b"MTTWIDD0");
-        let mut player = crate::player_manager::Player { reference: 1,
-            bytes: bytes[8..8+0x2400].to_vec(), auxiliaries: vec![] };
+        let mut player = crate::player_manager::Player {
+            reference: 1,
+            bytes: bytes[8..8 + 0x2400].to_vec(),
+            auxiliaries: vec![],
+        };
         let mut script = AiScript::new().unwrap();
         let mut profiles = [[0; 0x650]; 10];
-        let original = std::fs::read("work/patch14/payload/Essential/scripts/TUTORIAL3/ai.lua").unwrap();
-        script.load(&mut profiles, b"", Some(("TUTORIAL3/ai.lua", &original)), 0).unwrap();
+        let original =
+            std::fs::read("work/patch14/payload/Essential/scripts/TUTORIAL3/ai.lua").unwrap();
+        script
+            .load(&mut profiles, b"", Some(("TUTORIAL3/ai.lua", &original)), 0)
+            .unwrap();
         script.apply_twiddle_thumbs(&mut player).unwrap();
-        assert_eq!(player.bytes, bytes[8+0x2400..]);
+        assert_eq!(player.bytes, bytes[8 + 0x2400..]);
         player.bytes[0x1403] = 0;
         script.apply_twiddle_thumbs(&mut player).unwrap();
         assert_eq!(player.bytes[0x1403], 0, "the request is consumed once");

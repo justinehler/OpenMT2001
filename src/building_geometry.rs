@@ -29,8 +29,8 @@ pub const MAX_ENTRANCES: usize = 8;
 /// auxiliary model must be present; linked structures above kind1 retain
 /// their initial485200 decoration instead of replacing it through485520.
 pub fn refresh_appearance_on_bind(record: &[u8; building_pool::RECORD_SIZE]) -> bool {
-    let word=|at|u32::from_le_bytes(record[at..at+4].try_into().unwrap());
-    word(0x4c)==1 && (word(0x1c)==u32::MAX || word(0x24)<=1)
+    let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
+    word(0x4c) == 1 && (word(0x1c) == u32::MAX || word(0x24) <= 1)
 }
 
 /// Result of registering one generated building model with the host.
@@ -85,7 +85,9 @@ pub trait ModelRegistrar {
         _building: &SceneBuilding,
         _file: &BuildFile<'_>,
         _record: &mut [u8; building_pool::RECORD_SIZE],
-    ) -> Result<(), String> { Ok(()) }
+    ) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Adapter state shared by fresh-map geometry binding and category linking.
@@ -286,7 +288,8 @@ impl<'a, R> BuildingGeometry<'a, R> {
         let registered = RegisteredModel::new(registered.handle, registered.max_y)?;
         self.write_scene(record, building, registered)?;
         self.registrar.finish_binding(building, record)?;
-        self.registrar.finish_tree_binding(building, self.file, record)
+        self.registrar
+            .finish_tree_binding(building, self.file, record)
     }
 }
 
@@ -312,18 +315,24 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original whole building appearance phase oracle"]
     fn matches_native_appearance_phase() {
-        let data=std::fs::read("work/frontend/native-building-appearance-phase.bin").unwrap();
-        assert_eq!(&data[..8],b"MTAPPH01");
-        let count=u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
-        assert_eq!(data.len(),12+count*20);
+        let data = std::fs::read("work/frontend/native-building-appearance-phase.bin").unwrap();
+        assert_eq!(&data[..8], b"MTAPPH01");
+        let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+        assert_eq!(data.len(), 12 + count * 20);
         for row in data[12..].chunks_exact(20) {
-            let words: [u32;5]=std::array::from_fn(|i|
-                u32::from_le_bytes(row[i*4..i*4+4].try_into().unwrap()));
-            let mut record=[0;building_pool::RECORD_SIZE];
-            for (at,value) in [(0x4c,words[1]),(0x1c,words[2]),(0x24,words[3])] {
-                record[at..at+4].copy_from_slice(&value.to_le_bytes());
+            let words: [u32; 5] = std::array::from_fn(|i| {
+                u32::from_le_bytes(row[i * 4..i * 4 + 4].try_into().unwrap())
+            });
+            let mut record = [0; building_pool::RECORD_SIZE];
+            for (at, value) in [(0x4c, words[1]), (0x1c, words[2]), (0x24, words[3])] {
+                record[at..at + 4].copy_from_slice(&value.to_le_bytes());
             }
-            assert_eq!(u32::from(refresh_appearance_on_bind(&record)),words[4],"native entry {:08x}",words[0]);
+            assert_eq!(
+                u32::from(refresh_appearance_on_bind(&record)),
+                words[4],
+                "native entry {:08x}",
+                words[0]
+            );
         }
     }
     use crate::build_file::ModelMatch;

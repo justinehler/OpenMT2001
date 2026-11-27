@@ -6,10 +6,16 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pick {
     /// A single block selection in Strategic View or on block pavement.
-    Block { category_id: u32 },
+    Block {
+        category_id: u32,
+    },
     /// A double-click that enters the selected block from Strategic View.
-    BlockEntry { category_id: u32 },
-    Building { slot: usize },
+    BlockEntry {
+        category_id: u32,
+    },
+    Building {
+        slot: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -161,30 +167,50 @@ mod tests {
         let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let image = openmt2001::pe::PeImage::parse(&bytes).unwrap();
         assert_eq!(image.at(0x54cd98, 9).unwrap(), b"Picked3D\0");
-        let table = |address: u32, count: usize| image.at(address, count * 4).unwrap()
-            .chunks_exact(4).map(|word| u32::from_le_bytes(word.try_into().unwrap()))
-            .collect::<Vec<_>>();
+        let table = |address: u32, count: usize| {
+            image
+                .at(address, count * 4)
+                .unwrap()
+                .chunks_exact(4)
+                .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
+                .collect::<Vec<_>>()
+        };
         // Native class4 categories select 4c391f on a single click and
         // 4c3bdd on a double click; each tests strategic interface mode3.
-        assert_eq!(table(0x4c39ac, 4),
-            vec![0x4c38f5, 0x4c38f5, 0x4c38f5, 0x4c391f]);
-        assert_eq!(table(0x4c3d28, 4),
-            vec![0x4c3bbd, 0x4c3bdd, 0x4c3d25, 0x4c3d25]);
+        assert_eq!(
+            table(0x4c39ac, 4),
+            vec![0x4c38f5, 0x4c38f5, 0x4c38f5, 0x4c391f]
+        );
+        assert_eq!(
+            table(0x4c3d28, 4),
+            vec![0x4c3bbd, 0x4c3bdd, 0x4c3d25, 0x4c3d25]
+        );
         assert_eq!(image.at(0x4c3d38, 9).unwrap(), &[0, 0, 3, 1, 3, 3, 3, 3, 2]);
         assert_eq!(image.at(0x4c3924, 3).unwrap(), &[0x83, 0xf8, 3]);
         assert_eq!(image.at(0x4c3be2, 3).unwrap(), &[0x83, 0xf8, 3]);
         // Verify the event name and invoker as well as the argument; adjacent
         // 41f290 panel-mode arguments are not Picked3D callback evidence.
-        for (address, code) in [(0x4c3929, 0), (0x4c3979, 0),
-            (0x4c3beb, 1), (0x4c3cf6, 1), (0x4c3958, 2), (0x4c3c82, 3)] {
+        for (address, code) in [
+            (0x4c3929, 0),
+            (0x4c3979, 0),
+            (0x4c3beb, 1),
+            (0x4c3cf6, 1),
+            (0x4c3958, 2),
+            (0x4c3c82, 3),
+        ] {
             assert_eq!(image.at(address, 2).unwrap(), &[0x6a, code]);
             assert_eq!(image.at(address + 2, 1).unwrap(), &[0x68]);
-            assert_eq!(u32::from_le_bytes(image.at(address + 3, 4).unwrap()
-                .try_into().unwrap()), 0x54cd98);
+            assert_eq!(
+                u32::from_le_bytes(image.at(address + 3, 4).unwrap().try_into().unwrap()),
+                0x54cd98
+            );
             assert_eq!(image.at(address + 12, 1).unwrap(), &[0xe8]);
-            let displacement = i32::from_le_bytes(image.at(address + 13, 4).unwrap()
-                .try_into().unwrap());
-            assert_eq!(address.wrapping_add(17).wrapping_add(displacement as u32), 0x4d5fb0);
+            let displacement =
+                i32::from_le_bytes(image.at(address + 13, 4).unwrap().try_into().unwrap());
+            assert_eq!(
+                address.wrapping_add(17).wrapping_add(displacement as u32),
+                0x4d5fb0
+            );
         }
     }
 }

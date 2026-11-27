@@ -712,7 +712,6 @@ fn write_then_ownership_error_leaves_only_incomplete_poll_prefix_and_device_writ
     assert_eq!(input.cells.device_event_count, 16);
 }
 
-
 #[test]
 fn split_keyboard_poll_retains_device_prefix_until_late_recording_finishes() {
     let mut input = owner();
@@ -757,9 +756,11 @@ fn unresolved_recording_keeps_prefix_without_advancing_keyboard_tick() {
     assert_eq!(input.cells.keyboard_current[255], 0x80);
     assert_eq!(input.cells.keyboard_current[254], 0x5a);
     device.unowned = true;
-    assert!(input
-        .poll1_live_before_recording(KeyboardMode::Unbuffered256, &mut device)
-        .is_err());
+    assert!(
+        input
+            .poll1_live_before_recording(KeyboardMode::Unbuffered256, &mut device)
+            .is_err()
+    );
     assert_eq!(input.cells.keyboard_poll_tick, 9);
 }
 
@@ -774,14 +775,19 @@ fn live_wrapper_preserves_buffered_and_unbuffered_poll_results_and_cells() {
             let fixture = || FixtureDevice {
                 mouse: [0; 16],
                 keyboard: [0x80; 256],
-                events: vec![KeyEvent { native_index: 255, data: 0x80 }],
+                events: vec![KeyEvent {
+                    native_index: 255,
+                    data: 0x80,
+                }],
                 hresult,
                 calls: vec![],
             };
             let mut complete_device = fixture();
             let mut split_device = fixture();
             let complete_report = complete.poll1_live(mode, &mut complete_device).unwrap();
-            let pending = split.poll1_live_before_recording(mode, &mut split_device).unwrap();
+            let pending = split
+                .poll1_live_before_recording(mode, &mut split_device)
+                .unwrap();
             assert_eq!(split.cells.keyboard_poll_tick, u32::MAX);
             let split_report = split.finish_poll1_after_recording(pending);
             assert_eq!(complete_report, split_report);

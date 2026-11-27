@@ -123,16 +123,27 @@ pub fn renderer_templates(
             .ok_or("saved appearance detail layer leaves expanded profile")?;
         let (active, subtype) = match candidate.descriptor {
             0x0104_0201 | 0x0200_0001 => (true, false),
-            0x0101_0101 | 0x0102_0101 | 0x0101_0102 | 0x0102_0102
-            | 0x0101_0104 | 0x0101_0201 | 0x0102_0201 | 0x0101_0204 | 0x0102_0204
-            | 0x0104_0202 | 0x0104_0204 | 0x0108_0202 => (true, true),
+            0x0101_0101 | 0x0102_0101 | 0x0101_0102 | 0x0102_0102 | 0x0101_0104 | 0x0101_0201
+            | 0x0102_0201 | 0x0101_0204 | 0x0102_0204 | 0x0104_0202 | 0x0104_0204 | 0x0108_0202 => {
+                (true, true)
+            }
             // Native 4846f0 copies one of its static 16-byte model pointers
             // and clears the active flag for these values. V2 currently keeps
             // their identity but does not materialize those separate meshes.
-            0x0200_0002 | 0x0200_0003 | 0x0200_0005..=0x0200_0018
-            | 0x0200_0026 | 0x0200_0037 | 0x0200_003b | 0x0200_003e
-            | 0x0200_003f | 0x0200_0041 | 0x0200_0042 | 0x0200_0044
-            | 0x0200_0049..=0x0200_004f | 0x44 | 0x49..=0x4f => (false, false),
+            0x0200_0002
+            | 0x0200_0003
+            | 0x0200_0005..=0x0200_0018
+            | 0x0200_0026
+            | 0x0200_0037
+            | 0x0200_003b
+            | 0x0200_003e
+            | 0x0200_003f
+            | 0x0200_0041
+            | 0x0200_0042
+            | 0x0200_0044
+            | 0x0200_0049..=0x0200_004f
+            | 0x44
+            | 0x49..=0x4f => (false, false),
             _ => {
                 return Err(format!(
                     "saved appearance descriptor {:08x} has no native 4846f0 class",
@@ -233,18 +244,38 @@ mod tests {
     fn native_static_pointer_and_double_sign_dispatch_classes() {
         let bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
-        let static_model = model_identity(&file, ModelMatch {
-            index: 1059, transposed: false,
-        }, 1).unwrap();
-        assert_eq!(static_model.renderer_templates.iter()
-            .map(|row| (row.descriptor, word(&row.row, 0)))
-            .collect::<Vec<_>>(),
-            [(0x0108_0202, 1), (0x0200_000f, 0)]);
-        let double_sign = model_identity(&file, ModelMatch {
-            index: 335, transposed: false,
-        }, 1).unwrap();
-        assert!(double_sign.renderer_templates.iter().any(|row|
-            row.descriptor == 0x0104_0204 && word(&row.row, 0) == 1));
+        let static_model = model_identity(
+            &file,
+            ModelMatch {
+                index: 1059,
+                transposed: false,
+            },
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            static_model
+                .renderer_templates
+                .iter()
+                .map(|row| (row.descriptor, word(&row.row, 0)))
+                .collect::<Vec<_>>(),
+            [(0x0108_0202, 1), (0x0200_000f, 0)]
+        );
+        let double_sign = model_identity(
+            &file,
+            ModelMatch {
+                index: 335,
+                transposed: false,
+            },
+            1,
+        )
+        .unwrap();
+        assert!(
+            double_sign
+                .renderer_templates
+                .iter()
+                .any(|row| row.descriptor == 0x0104_0204 && word(&row.row, 0) == 1)
+        );
     }
 
     #[test]
@@ -252,11 +283,21 @@ mod tests {
     fn native_double_backed_text_registry_class() {
         let bytes = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
-        let identity = model_identity(&file, ModelMatch {
-            index: 311, transposed: false,
-        }, 1).unwrap();
-        assert!(identity.renderer_templates.iter().any(|row|
-            row.descriptor == 0x0102_0204 && word(&row.row, 0) == 1));
+        let identity = model_identity(
+            &file,
+            ModelMatch {
+                index: 311,
+                transposed: false,
+            },
+            1,
+        )
+        .unwrap();
+        assert!(
+            identity
+                .renderer_templates
+                .iter()
+                .any(|row| row.descriptor == 0x0102_0204 && word(&row.row, 0) == 1)
+        );
     }
 
     #[test]
@@ -281,11 +322,19 @@ mod tests {
         let save_bytes = read("OPENMT2001_SAVE_ONE");
         let saved = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let buildings = saved.buildings().unwrap();
-        let fixture = read(if binding {"OPENMT2001_NATIVE_COMPLETED_BINDING_APPEARANCE"}
-            else {"OPENMT2001_NATIVE_SAVE_APPEARANCE_REPLACEMENTS"});
-        assert_eq!(&fixture[..8], if binding {b"MTCAPHC1"} else {b"MTAPREP1"});
+        let fixture = read(if binding {
+            "OPENMT2001_NATIVE_COMPLETED_BINDING_APPEARANCE"
+        } else {
+            "OPENMT2001_NATIVE_SAVE_APPEARANCE_REPLACEMENTS"
+        });
+        assert_eq!(
+            &fixture[..8],
+            if binding { b"MTCAPHC1" } else { b"MTAPREP1" }
+        );
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
-        let sha: Vec<_> = pinned.as_bytes().chunks_exact(2)
+        let sha: Vec<_> = pinned
+            .as_bytes()
+            .chunks_exact(2)
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(&fixture[8..40], sha);
@@ -298,8 +347,12 @@ mod tests {
             let descriptor = word(&fixture, at + 4);
             let count = word(&fixture, at + 8) as usize;
             at += 12;
-            let building = buildings.iter().find(|row| row.slot == slot as usize).unwrap();
-            let selected = crate::scene::SceneBuilding::from_saved(building, &board, &file).unwrap();
+            let building = buildings
+                .iter()
+                .find(|row| row.slot == slot as usize)
+                .unwrap();
+            let selected =
+                crate::scene::SceneBuilding::from_saved(building, &board, &file).unwrap();
             let identity = model_identity(&file, selected.selected, building.height()).unwrap();
             assert_eq!(identity.descriptor, descriptor);
             assert_eq!(identity.renderer_templates.len(), count);
@@ -312,70 +365,111 @@ mod tests {
                 expected.push((before, after));
                 at += 112;
             }
-            let native_calls=if binding {
-                let source: &[u8;916]=fixture[at..at+916].try_into().unwrap();at+=916;
-                assert_eq!(&source[..64],building.bytes);
-                assert_eq!(word(source,0x4c),1);
-                assert_eq!(word(source,0x50),identity.descriptor);
+            let native_calls = if binding {
+                let source: &[u8; 916] = fixture[at..at + 916].try_into().unwrap();
+                at += 916;
+                assert_eq!(&source[..64], building.bytes);
+                assert_eq!(word(source, 0x4c), 1);
+                assert_eq!(word(source, 0x50), identity.descriptor);
                 assert!(crate::building_geometry::refresh_appearance_on_bind(source));
-                let owner=word(&fixture,at);let business=word(&fixture,at+4) as usize;
-                let kind=word(&fixture,at+8);let name_id=word(&fixture,at+12);at+=16;
-                let metadata=&fixture[at..at+48];at+=48;
-                assert_eq!(owner,u32::from(source[0x2d]));
-                assert_eq!(business,word(source,0x1c) as usize);
-                assert_eq!(kind,saved.economy().unwrap().businesses().nth(business).unwrap().business_type());
-                assert_eq!(name_id,word(&saved.business_catalog().unwrap()[kind as usize],4));
-                if owner!=0 {assert_eq!(metadata,saved.players().unwrap()[owner as usize-1].metadata);}
-                let class=if owner==0 {10} else {word(metadata,0)};
-                let count=word(&fixture,at) as usize;at+=4;
-                let mut calls=Vec::new();
+                let owner = word(&fixture, at);
+                let business = word(&fixture, at + 4) as usize;
+                let kind = word(&fixture, at + 8);
+                let name_id = word(&fixture, at + 12);
+                at += 16;
+                let metadata = &fixture[at..at + 48];
+                at += 48;
+                assert_eq!(owner, u32::from(source[0x2d]));
+                assert_eq!(business, word(source, 0x1c) as usize);
+                assert_eq!(
+                    kind,
+                    saved
+                        .economy()
+                        .unwrap()
+                        .businesses()
+                        .nth(business)
+                        .unwrap()
+                        .business_type()
+                );
+                assert_eq!(
+                    name_id,
+                    word(&saved.business_catalog().unwrap()[kind as usize], 4)
+                );
+                if owner != 0 {
+                    assert_eq!(
+                        metadata,
+                        saved.players().unwrap()[owner as usize - 1].metadata
+                    );
+                }
+                let class = if owner == 0 { 10 } else { word(metadata, 0) };
+                let count = word(&fixture, at) as usize;
+                at += 4;
+                let mut calls = Vec::new();
                 for _ in 0..count {
-                    let old=word(&fixture,at);
-                    let args:[u32;10]=std::array::from_fn(|i|word(&fixture,at+4+i*4));at+=44;
-                    assert_eq!(args[3],class);assert_eq!(args[7],class);
-                    assert_eq!(args[6],kind);
-                    if args[2]&0x20000!=0 {assert_eq!(args[5],name_id);}
-                    else if args[2]&0x10000!=0 && owner!=0 {
-                        assert_eq!(args[4],0x86ce78+owner*48);
+                    let old = word(&fixture, at);
+                    let args: [u32; 10] = std::array::from_fn(|i| word(&fixture, at + 4 + i * 4));
+                    at += 44;
+                    assert_eq!(args[3], class);
+                    assert_eq!(args[7], class);
+                    assert_eq!(args[6], kind);
+                    if args[2] & 0x20000 != 0 {
+                        assert_eq!(args[5], name_id);
+                    } else if args[2] & 0x10000 != 0 && owner != 0 {
+                        assert_eq!(args[4], 0x86ce78 + owner * 48);
                     }
-                    calls.push((old,args[2]));
+                    calls.push((old, args[2]));
                 }
                 Some(calls)
-            }else{None};
+            } else {
+                None
+            };
             let mut prepared_index = 0;
             let mut created = 0;
             let mut registry = RendererRegistry::prepare(&identity, |row| {
-                while word(&expected[prepared_index].0, 0) != 1 { prepared_index += 1; }
+                while word(&expected[prepared_index].0, 0) != 1 {
+                    prepared_index += 1;
+                }
                 let before = &expected[prepared_index].0;
                 assert_eq!(word(before, 4), row.descriptor);
                 assert_eq!(before[8..40], row.row[8..40]);
                 prepared_index += 1;
                 created += 1;
                 Ok(word(before, 0x28))
-            }).unwrap();
+            })
+            .unwrap();
             assert_eq!(registry.rows.len(), count);
             for (row, (before, _)) in registry.rows.iter().zip(&expected) {
                 assert_eq!(&row.row, before);
             }
             let calls = std::cell::RefCell::new(Vec::new());
             let mut next = 0;
-            registry.refresh(
-                |old| { calls.borrow_mut().push((0u8, old)); Ok(()) },
-                |row| {
-                    calls.borrow_mut().push((1u8, row.descriptor));
-                    while word(&expected[next].0, 0) != 1 { next += 1; }
-                    let result = word(&expected[next].1, 0x28);
-                    next += 1;
-                    Ok(result)
-                },
-            ).unwrap();
-            let active = expected.iter().filter(|(before, _)| word(before, 0) == 1).count();
+            registry
+                .refresh(
+                    |old| {
+                        calls.borrow_mut().push((0u8, old));
+                        Ok(())
+                    },
+                    |row| {
+                        calls.borrow_mut().push((1u8, row.descriptor));
+                        while word(&expected[next].0, 0) != 1 {
+                            next += 1;
+                        }
+                        let result = word(&expected[next].1, 0x28);
+                        next += 1;
+                        Ok(result)
+                    },
+                )
+                .unwrap();
+            let active = expected
+                .iter()
+                .filter(|(before, _)| word(before, 0) == 1)
+                .count();
             if let Some(native) = native_calls {
-                assert_eq!(native.len(),active);
-                let actual=calls.borrow();
-                for (index,(old,descriptor)) in native.into_iter().enumerate() {
-                    assert_eq!(actual[index*2],(0,old));
-                    assert_eq!(actual[index*2+1],(1,descriptor));
+                assert_eq!(native.len(), active);
+                let actual = calls.borrow();
+                for (index, (old, descriptor)) in native.into_iter().enumerate() {
+                    assert_eq!(actual[index * 2], (0, old));
+                    assert_eq!(actual[index * 2 + 1], (1, descriptor));
                 }
             }
             assert_eq!(created, active);
@@ -386,7 +480,9 @@ mod tests {
             }
             let mut call_index = 0;
             for (template, (before, _)) in identity.renderer_templates.iter().zip(&expected) {
-                if word(before, 0) != 1 { continue; }
+                if word(before, 0) != 1 {
+                    continue;
+                }
                 assert_eq!(calls.borrow()[call_index], (0, word(before, 0x28)));
                 assert_eq!(calls.borrow()[call_index + 1], (1, template.descriptor));
                 call_index += 2;

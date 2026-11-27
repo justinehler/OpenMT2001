@@ -15,54 +15,96 @@ pub struct Tooltip {
     compass_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
-    pub fn load(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path) -> Result<Self, String> {
+    pub fn load(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+    ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, None)
     }
-    pub(crate) fn load_shared(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: &crate::intro::camera_live::ui_text_resources::UiTextResources) -> Result<Self, String> {
+    pub(crate) fn load_shared(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+    ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, Some(shared))
     }
-    fn load_impl(index: &ArchiveIndex, archive: &[u8], installer: &Path, language: &Path, shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>) -> Result<Self, String> {
-        let (pages,tab) = if let Some(shared)=shared {
-            (shared.surfaces(0)?,shared.table(0)?.to_vec())
+    fn load_impl(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        language: &Path,
+        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+    ) -> Result<Self, String> {
+        let (pages, tab) = if let Some(shared) = shared {
+            (shared.surfaces(0)?, shared.table(0)?.to_vec())
         } else {
-        let entry = index
-            .find("gamedata2/font640/textures.gtd")
-            .ok_or("tooltip font texture missing")?;
-        let textures = TextureSet::parse(
-            archive
-                .get(entry.offset as usize..(entry.offset + entry.length) as usize)
-                .ok_or("tooltip texture range")?,
-        )
-        .map_err(|e| e.to_string())?;
-        let pages = textures
-            .textures
-            .get(..2)
-            .ok_or("tooltip font pages missing")?
-            .iter()
-            .map(Surface::new)
-            .collect();
-        let tab =
-            fs::read(installer.join("Standard/fonts/cust640p.tab")).map_err(|e| e.to_string())?;
-        Font::parse(&tab)?;
-            (pages,tab)
+            let entry = index
+                .find("gamedata2/font640/textures.gtd")
+                .ok_or("tooltip font texture missing")?;
+            let textures = TextureSet::parse(
+                archive
+                    .get(entry.offset as usize..(entry.offset + entry.length) as usize)
+                    .ok_or("tooltip texture range")?,
+            )
+            .map_err(|e| e.to_string())?;
+            let pages = textures
+                .textures
+                .get(..2)
+                .ok_or("tooltip font pages missing")?
+                .iter()
+                .map(Surface::new)
+                .collect();
+            let tab = fs::read(installer.join("Standard/fonts/cust640p.tab"))
+                .map_err(|e| e.to_string())?;
+            Font::parse(&tab)?;
+            (pages, tab)
         };
         let names = board_strings(installer)?;
         let loaded;
         let packed = match shared {
             Some(text) => &text.fonts().language,
-            None => { loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language.join("tycoon"))?; &loaded }
+            None => {
+                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
+                    &language.join("tycoon"),
+                )?;
+                &loaded
+            }
         };
         let labels = packed.rows();
         //40d8f2's four five-word descriptors store these text IDs in child+34.
-        let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52].map(|id| labels.get(id)
-            .map(|s| s.to_vec()).ok_or("panel icon tooltip missing".to_owned()))
-            .into_iter().collect::<Result<Vec<_>, _>>()?.try_into()
+        let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52]
+            .map(|id| {
+                labels
+                    .get(id)
+                    .map(|s| s.to_vec())
+                    .ok_or("panel icon tooltip missing".to_owned())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
             .map_err(|_| "panel icon tooltip count")?;
-        let compass_labels = [1142, 1143].map(|id| labels.get(id)
-            .map(|s| s.to_vec()).ok_or("compass focus caption missing".to_owned()))
-            .into_iter().collect::<Result<Vec<_>, _>>()?.try_into()
+        let compass_labels = [1142, 1143]
+            .map(|id| {
+                labels
+                    .get(id)
+                    .map(|s| s.to_vec())
+                    .ok_or("compass focus caption missing".to_owned())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
             .map_err(|_| "compass focus caption count")?;
-        Ok(Self { pages, tab, names, icon_labels, compass_labels })
+        Ok(Self {
+            pages,
+            tab,
+            names,
+            icon_labels,
+            compass_labels,
+        })
     }
     fn focus_identifier(&self, text_id: u32) -> Result<&[u8], String> {
         let name = match text_id {
@@ -75,7 +117,9 @@ impl Tooltip {
             29 => &self.icon_labels[4],
             50 => &self.icon_labels[5],
             52 => &self.icon_labels[6],
-            id => self.names.get(id.checked_sub(2242).ok_or("tooltip text ID")? as usize + 1)
+            id => self
+                .names
+                .get(id.checked_sub(2242).ok_or("tooltip text ID")? as usize + 1)
                 .ok_or("tooltip category text range")?,
         };
         Ok(name)
@@ -145,10 +189,16 @@ impl Tooltip {
 ///43e310 clears the hovered widget timer; 43e3b0 increments each interface
 /// frame; 43e3c0 paints only when the timer exceeds 25.
 #[derive(Default)]
-pub struct IconDwell { target: Option<u32>, ticks: u32 }
+pub struct IconDwell {
+    target: Option<u32>,
+    ticks: u32,
+}
 impl IconDwell {
     pub fn advance(&mut self, target: Option<u32>) -> Option<u32> {
-        if self.target != target { self.target = target; self.ticks = 0; }
+        if self.target != target {
+            self.target = target;
+            self.ticks = 0;
+        }
         let id = target?;
         self.ticks = self.ticks.saturating_add(1);
         (self.ticks > 25).then_some(id)
@@ -202,7 +252,8 @@ pub(crate) fn board_strings(installer: &Path) -> Result<Vec<Vec<u8>>, String> {
     //4922e0 installs USA board strings at2242, skipping the source character map.
     //The current native inspection host uses the supplied USA board.
     let path = installer.join("Standard/fonts/board/usa");
-    let packed = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&path.join("tycoon"))?;
+    let packed =
+        crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&path.join("tycoon"))?;
     Ok(packed.rows().into_iter().map(<[u8]>::to_vec).collect())
 }
 
@@ -223,37 +274,55 @@ mod tests {
     #[test]
     fn strategic_icon_dwell_needs_26_frames_and_resets_on_exit() {
         let mut timer = super::IconDwell::default();
-        for _ in 0..25 { assert_eq!(timer.advance(Some(1146)), None); }
+        for _ in 0..25 {
+            assert_eq!(timer.advance(Some(1146)), None);
+        }
         assert_eq!(timer.advance(Some(1146)), Some(1146));
         assert_eq!(timer.advance(Some(1147)), None);
         assert_eq!(timer.advance(None), None);
-        for _ in 0..25 { assert_eq!(timer.advance(Some(1146)), None); }
+        for _ in 0..25 {
+            assert_eq!(timer.advance(Some(1146)), None);
+        }
         assert_eq!(timer.advance(Some(1146)), Some(1146));
     }
 
     #[test]
     #[ignore = "supplied original panel descriptors/language/fonts and GPU"]
     fn original_ordinary_toolbar_tooltip_ids_render_with_existing_families() {
-        let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
-        let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");
-        let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-        let exe_path=std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let exe=std::fs::read(&exe_path).unwrap();let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
-        let titles=image.at(0x533238,12).unwrap();
-        let ids:[u32;3]=std::array::from_fn(|n|u32::from_le_bytes(titles[n*4..n*4+4].try_into().unwrap()));
-        assert_eq!(ids,[29,50,52]);
-        let installer=std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
-        let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
-        let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows){descriptor.backends=wgpu::Backends::DX12;}
-        let renderer=pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
-        let assets=super::Tooltip::load(&index,&archive,&installer,&language).unwrap();
-        for id in ids.into_iter().chain([1146,1147,1148,12,2242]) {
-            let panel=assets.prepare(&renderer,id,[40,100]).unwrap();
-            #[cfg(feature="capture")]
-            if ids.contains(&id) && let Ok(out)=std::env::var("OPENMT2001_TOOLBAR_CAPTURE") {
-                let path=std::path::PathBuf::from(out).join(format!("toolbar-tooltip-{id}.png"));
-                crate::capture_test::capture_standalone(&renderer,&panel,path.to_str().unwrap());
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = std::fs::read(&exe_path).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let titles = image.at(0x533238, 12).unwrap();
+        let ids: [u32; 3] = std::array::from_fn(|n| {
+            u32::from_le_bytes(titles[n * 4..n * 4 + 4].try_into().unwrap())
+        });
+        assert_eq!(ids, [29, 50, 52]);
+        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
+        let language = exe_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
+        let assets = super::Tooltip::load(&index, &archive, &installer, &language).unwrap();
+        for id in ids.into_iter().chain([1146, 1147, 1148, 12, 2242]) {
+            let panel = assets.prepare(&renderer, id, [40, 100]).unwrap();
+            #[cfg(feature = "capture")]
+            if ids.contains(&id)
+                && let Ok(out) = std::env::var("OPENMT2001_TOOLBAR_CAPTURE")
+            {
+                let path = std::path::PathBuf::from(out).join(format!("toolbar-tooltip-{id}.png"));
+                crate::capture_test::capture_standalone(&renderer, &panel, path.to_str().unwrap());
             }
         }
     }
@@ -270,10 +339,17 @@ mod tests {
             [2, 0x5337fc, 68, 1147, 21],
             [3, 0x5337ec, 198, 1148, 22],
             [4, 0x5337dc, 26, 12, 23],
-        ].iter().enumerate() {
-            let words: [u32; 5] = std::array::from_fn(|n|
-                u32::from_le_bytes(table[row * 20 + n * 4..row * 20 + n * 4 + 4]
-                    .try_into().unwrap()));
+        ]
+        .iter()
+        .enumerate()
+        {
+            let words: [u32; 5] = std::array::from_fn(|n| {
+                u32::from_le_bytes(
+                    table[row * 20 + n * 4..row * 20 + n * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            });
             assert_eq!(&words, expected);
         }
         let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
@@ -285,8 +361,10 @@ mod tests {
         for (id, length) in off.chunks_exact(2).enumerate() {
             let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
             if [12, 1146, 1147, 1148].contains(&id) {
-                assert!(super::measure_with_gap(&tab, &bin[at..end], -1).unwrap() < 150,
-                    "tooltip id {id} exceeds original one-line width");
+                assert!(
+                    super::measure_with_gap(&tab, &bin[at..end], -1).unwrap() < 150,
+                    "tooltip id {id} exceeds original one-line width"
+                );
             }
             at = end;
         }
@@ -298,17 +376,22 @@ mod tests {
     fn capture_strategic_icon_tooltip() {
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
-            .unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_INSTALLER").unwrap());
         let language = installer.join("US/language/usa");
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
         let asset = super::Tooltip::load(&index, &archive, &installer, &language).unwrap();
         let label = asset.prepare(&renderer, 1146, [40, 100]).unwrap();
         crate::capture_test::capture_standalone(
-            &renderer, &label, "work/frontend/strategic-tooltip-locator.png");
+            &renderer,
+            &label,
+            "work/frontend/strategic-tooltip-locator.png",
+        );
     }
 
     #[test]

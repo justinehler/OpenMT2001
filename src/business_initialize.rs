@@ -73,7 +73,8 @@ pub fn initialize(
         let volume = (i32::from(building[7]) - i32::from(building[5]) + 1)
             .wrapping_mul(i32::from(building[6]) - i32::from(building[4]) + 1)
             .wrapping_mul(i32::from(building[8]));
-        let capacity = crate::building_binding::initial_stock_count(volume, float(input.info, 0x58))?;
+        let capacity =
+            crate::building_binding::initial_stock_count(volume, float(input.info, 0x58))?;
         let scale = if products.iter().all(|p| p.fraction.is_finite()) {
             let mut sum = crate::x87::Sum::default();
             for product in products {
@@ -91,7 +92,9 @@ pub fn initialize(
                 scale.to_f32()
             }
         } else {
-            let sum = products.iter().fold(0f64, |sum, p| sum + f64::from(p.fraction));
+            let sum = products
+                .iter()
+                .fold(0f64, |sum, p| sum + f64::from(p.fraction));
             (f64::from(capacity) * (1. / sum)) as f32
         };
         for (slot, product) in products.iter().enumerate() {

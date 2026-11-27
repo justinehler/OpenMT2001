@@ -58,7 +58,10 @@ pub fn select(
             let mut income =
                 Sum::from_f32(crate::ai_actions::liquidation_score::recent_income(row))?
                     .ftol_low_word();
-            let slot = w.buildings.iter().position(|row|std::ptr::eq(row,building))
+            let slot = w
+                .buildings
+                .iter()
+                .position(|row| std::ptr::eq(row, building))
                 .ok_or("takeover chain building outside pool")?;
             let price = quote(slot)?.ftol_low_word();
             let available = if owner > 0 {

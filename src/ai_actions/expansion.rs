@@ -1,7 +1,7 @@
 //! Original4687e0 clears an eligible large building when a group lacks room.
 use crate::{
     ai_maintenance, ai_strategy_queries,
-    player_manager::{word, Player},
+    player_manager::{Player, word},
 };
 ///475be0: every nonnegative category in the group has the same nonzero owner.
 pub fn complete_group(
@@ -190,7 +190,8 @@ mod tests {
                 .unwrap();
             let mut identity = 99;
             let mut w = ai_maintenance::World {
-                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
+                    .unwrap(),
                 image: &image,
                 profiles: &[],
                 categories: &categories,
@@ -553,7 +554,8 @@ mod build_tests {
                 std::array::from_fn(|i| [word(b[11], i * 8) as i32, word(b[11], i * 8 + 4) as i32]);
             let mut identity = 9;
             let mut world = super::super::retained::World {
-                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image).unwrap(),
+                building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
+                    .unwrap(),
                 categories: &categories,
                 buildings: &buildings,
                 catalog: &catalog,

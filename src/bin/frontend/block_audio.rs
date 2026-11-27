@@ -63,7 +63,9 @@ impl Source {
         (100. - rounded * scale * 100.).trunc().clamp(0., 100.) as i32
     }
     #[cfg(test)]
-    pub fn gain(self, camera: [f32; 3]) -> f32 { self.level(camera) as f32 / 100. }
+    pub fn gain(self, camera: [f32; 3]) -> f32 {
+        self.level(camera) as f32 / 100.
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

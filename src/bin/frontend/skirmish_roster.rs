@@ -162,8 +162,15 @@ fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
 impl RosterPanel {
     #[cfg(test)]
     pub(crate) fn inert(strings: Vec<Vec<u8>>) -> Self {
-        Self { base: vec![], regions: vec![], generic: vec![], fonts: vec![],
-            strings, characters: vec![], backing: 0 }
+        Self {
+            base: vec![],
+            regions: vec![],
+            generic: vec![],
+            fonts: vec![],
+            strings,
+            characters: vec![],
+            backing: 0,
+        }
     }
 
     pub fn new(

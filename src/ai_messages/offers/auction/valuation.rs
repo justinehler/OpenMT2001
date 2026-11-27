@@ -1,7 +1,7 @@
 //! Original46d7a0 valuation orchestration. World-query and scoring helpers stay
 //! explicit until their original implementations are bound.
-pub mod limits;
 pub mod base;
+pub mod limits;
 pub mod scoring;
 use crate::{
     player_manager::{Player, put, word},

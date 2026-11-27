@@ -27,23 +27,41 @@ pub struct World {
 /// No public/default constructor or independent host setter exists.
 /// Process-local World identity, minted only by actual topology initialization.
 /// Not a native address, serialized id, geometry id, filename or timestamp.
-#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord,Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceEpoch(u64);
 static NEXT_SOURCE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-fn mint_source_epoch(next:&std::sync::atomic::AtomicU64)->Result<SourceEpoch,String>{
-    next.fetch_update(std::sync::atomic::Ordering::Relaxed,std::sync::atomic::Ordering::Relaxed,
-        |value|value.checked_add(1)).map(SourceEpoch)
-        .map_err(|_|"World source epoch exhausted".into())
+fn mint_source_epoch(next: &std::sync::atomic::AtomicU64) -> Result<SourceEpoch, String> {
+    next.fetch_update(
+        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::Relaxed,
+        |value| value.checked_add(1),
+    )
+    .map(SourceEpoch)
+    .map_err(|_| "World source epoch exhausted".into())
 }
-impl SourceEpoch {pub fn serial(self)->u64{self.0}}
-#[derive(Debug)]
-pub struct Topology { count617624:i32, epoch:SourceEpoch }
-impl Topology {
-    fn after_v14_geometry()->Result<Self,String> {
-        Ok(Self{count617624:52,epoch:mint_source_epoch(&NEXT_SOURCE_EPOCH)?})
+impl SourceEpoch {
+    pub fn serial(self) -> u64 {
+        self.0
     }
-    pub fn epoch(&self)->SourceEpoch{self.epoch}
-    pub fn count617624(&self)->i32 {self.count617624}
+}
+#[derive(Debug)]
+pub struct Topology {
+    count617624: i32,
+    epoch: SourceEpoch,
+}
+impl Topology {
+    fn after_v14_geometry() -> Result<Self, String> {
+        Ok(Self {
+            count617624: 52,
+            epoch: mint_source_epoch(&NEXT_SOURCE_EPOCH)?,
+        })
+    }
+    pub fn epoch(&self) -> SourceEpoch {
+        self.epoch
+    }
+    pub fn count617624(&self) -> i32 {
+        self.count617624
+    }
 }
 pub struct City {
     /// Readonly projection for this Session's admitted parameter source.
@@ -120,7 +138,7 @@ impl World {
             &definitions.reset_values(),
         );
         crate::ai_neighbors::bind_geometry(&mut categories, board);
-        let topology=Topology::after_v14_geometry()?;
+        let topology = Topology::after_v14_geometry()?;
         let mut ai_neighbors = crate::ai_neighbors::Cache::default();
         ai_neighbors.refresh(&categories, image)?;
         let (roads, road_segment_count) = board.traffic_roads()?;
@@ -197,8 +215,10 @@ impl World {
     }
 }
 impl World {
-    pub fn script_state<'a>(&'a mut self,
-        players: &'a [Option<crate::business_binding::Player>]) -> level_script::State<'a> {
+    pub fn script_state<'a>(
+        &'a mut self,
+        players: &'a [Option<crate::business_binding::Player>],
+    ) -> level_script::State<'a> {
         self.city.script_state(&mut self.clock, players)
     }
 }
@@ -271,12 +291,20 @@ impl Scripts {
                     .handle(id, args, state, events, context, geometry, hooks)
             })
     }
-    pub fn tick_events_with_invocation(&mut self,
-        mut invoke:impl FnMut(&mut Runtime,&mut level_script::Bindings,crate::script_events::Event,
-            &mut crate::script_events::Events)->Result<Option<f64>,String>)->Result<(),String>{
-        let bindings=&mut self.bindings;
-        self.runtime.tick_events_with_invocation(&mut self.events,&mut |vm,event,events|
-            invoke(vm,bindings,event,events))
+    pub fn tick_events_with_invocation(
+        &mut self,
+        mut invoke: impl FnMut(
+            &mut Runtime,
+            &mut level_script::Bindings,
+            crate::script_events::Event,
+            &mut crate::script_events::Events,
+        ) -> Result<Option<f64>, String>,
+    ) -> Result<(), String> {
+        let bindings = &mut self.bindings;
+        self.runtime
+            .tick_events_with_invocation(&mut self.events, &mut |vm, event, events| {
+                invoke(vm, bindings, event, events)
+            })
     }
 
     /// Dispatch an optional synchronous CATCHEVENT handler in the retained VM.
@@ -290,23 +318,35 @@ impl Scripts {
         geometry: &mut impl crate::building_pool::GeometryBinding,
         hooks: &mut impl level_script::Hooks,
     ) -> Result<Option<f64>, String> {
-        Self::dispatch_catch_event_parts(&mut self.runtime,&mut self.bindings,&mut self.events,
-            event,state,context,geometry,hooks)
+        Self::dispatch_catch_event_parts(
+            &mut self.runtime,
+            &mut self.bindings,
+            &mut self.events,
+            event,
+            state,
+            context,
+            geometry,
+            hooks,
+        )
     }
     #[allow(clippy::too_many_arguments)]
     pub fn dispatch_catch_event_parts(
-        runtime:&mut Runtime,bindings:&mut level_script::Bindings,events:&mut crate::script_events::Events,
-        event:(&str,i32),state:&mut level_script::State<'_>,context:&level_script::Context<'_,'_>,
-        geometry:&mut impl crate::building_pool::GeometryBinding,hooks:&mut impl level_script::Hooks,
-    )->Result<Option<f64>,String>{
+        runtime: &mut Runtime,
+        bindings: &mut level_script::Bindings,
+        events: &mut crate::script_events::Events,
+        event: (&str, i32),
+        state: &mut level_script::State<'_>,
+        context: &level_script::Context<'_, '_>,
+        geometry: &mut impl crate::building_pool::GeometryBinding,
+        hooks: &mut impl level_script::Hooks,
+    ) -> Result<Option<f64>, String> {
         let name = format!("CATCHEVENT_{}", event.0);
         let Some(reference) = runtime.reference_function(&name)? else {
             return Ok(None);
         };
-        let result = runtime
-            .call_reference(reference, event.1, &mut |id, args| {
-                bindings.handle(id, args, state, events, context, geometry, hooks)
-            });
+        let result = runtime.call_reference(reference, event.1, &mut |id, args| {
+            bindings.handle(id, args, state, events, context, geometry, hooks)
+        });
         let release = runtime.release_reference(reference);
         let result = result?;
         release?;
@@ -315,15 +355,29 @@ impl Scripts {
 
     ///4d5d00 admission through the shared, native-verified Lua trigger binding.
     pub fn trigger_event(
-        &mut self,event:(&str,u32,i32),state:&mut level_script::State<'_>,
-        context:&level_script::Context<'_,'_>,geometry:&mut impl crate::building_pool::GeometryBinding,
-        hooks:&mut impl level_script::Hooks,
-    )->Result<(),String>{
-        if !event.0.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){return Err("native event name contains unsupported characters".into());}
-        let source=format!("C_TriggerEvent('{}',{}, {})",event.0,event.1,event.2);
-        self.runtime.execute("native event admission",source.as_bytes(),&mut |id,args|{
-            self.bindings.handle(id,args,state,&mut self.events,context,geometry,hooks)
-        })
+        &mut self,
+        event: (&str, u32, i32),
+        state: &mut level_script::State<'_>,
+        context: &level_script::Context<'_, '_>,
+        geometry: &mut impl crate::building_pool::GeometryBinding,
+        hooks: &mut impl level_script::Hooks,
+    ) -> Result<(), String> {
+        if !event
+            .0
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err("native event name contains unsupported characters".into());
+        }
+        let source = format!("C_TriggerEvent('{}',{}, {})", event.0, event.1, event.2);
+        self.runtime.execute(
+            "native event admission",
+            source.as_bytes(),
+            &mut |id, args| {
+                self.bindings
+                    .handle(id, args, state, &mut self.events, context, geometry, hooks)
+            },
+        )
     }
 
     /// Nested C_RunScript buffers must already be registered on this runtime.
@@ -370,9 +424,11 @@ impl Scripts {
         self.runtime
             .execute(sources.scenario_name, sources.scenario_hub, &mut handler)?;
         if active {
-            self.runtime.execute("Level entry", b"C_TriggerEvent('Level',0,0)", &mut handler)
+            self.runtime
+                .execute("Level entry", b"C_TriggerEvent('Level',0,0)", &mut handler)
         } else {
-            self.runtime.call("EVENTINITIALISE_Level", &[0.], &mut handler)
+            self.runtime
+                .call("EVENTINITIALISE_Level", &[0.], &mut handler)
         }
     }
 
@@ -393,7 +449,8 @@ impl Scripts {
         hooks: &mut impl level_script::Hooks,
     ) -> Result<(), String> {
         self.runtime.call("EVENT_Level", &[0.], &mut |id, args| {
-            self.bindings.handle(id, args, state, &mut self.events, context, geometry, hooks)
+            self.bindings
+                .handle(id, args, state, &mut self.events, context, geometry, hooks)
         })
     }
 }
@@ -405,7 +462,7 @@ pub struct Roster {
     pub profiles: Vec<[u8; 0x650]>,
     pub ai_ownership: crate::ai_ownership::Storage,
     pub category_counts: [u32; 52 * 45],
-    pub liquidation_targets: std::collections::BTreeMap<u32,[u8;12]>,
+    pub liquidation_targets: std::collections::BTreeMap<u32, [u8; 12]>,
     /// Original801df0: shared construction/transaction proposal sequence.
     pub proposal_identity: u32,
     pub scripts: crate::ai_script::AiScript,
@@ -451,15 +508,15 @@ impl Roster {
             liquidation_targets: &mut self.liquidation_targets,
             category_counts: &mut self.category_counts,
             ai_demand_rows: &city.ai_demand.rows,
-            active_player_count: crate::player_manager::word(&self.manager.bytes,12),
+            active_player_count: crate::player_manager::word(&self.manager.bytes, 12),
             construction_components: &mut city.construction_components,
-            construction_allowance: i32::from_le_bytes(image.at(0x541c7c,4)?.try_into().unwrap()),
+            construction_allowance: i32::from_le_bytes(image.at(0x541c7c, 4)?.try_into().unwrap()),
             construction_discount: image.f32_at(0x53be78)?,
             affordability_override: false,
             acquisition_checks: false, //4b91b1 startup default.
             proposal_identity: &mut self.proposal_identity,
             residents: &city.ledgers.residents,
-            commodity_active: city.commodities.resident_inputs().map(|c|c.active),
+            commodity_active: city.commodities.resident_inputs().map(|c| c.active),
             catalog: &city.catalog.info,
             products: &city.catalog.products,
             commodities: &city.commodities.rows,
@@ -956,19 +1013,25 @@ mod source_epoch_tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
     #[test]
-    fn topology_epoch_mint_is_checked_and_exhaustion_does_not_reuse_identity(){
+    fn topology_epoch_mint_is_checked_and_exhaustion_does_not_reuse_identity() {
         // Local counter exercises the SAME production mint operation without
         // consuming or racing the process's World identity domain.
-        let next=AtomicU64::new(u64::MAX-1);
-        assert_eq!(mint_source_epoch(&next).unwrap().serial(),u64::MAX-1);
-        assert_eq!(mint_source_epoch(&next).unwrap_err(),"World source epoch exhausted");
-        assert_eq!(mint_source_epoch(&next).unwrap_err(),"World source epoch exhausted");
+        let next = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(mint_source_epoch(&next).unwrap().serial(), u64::MAX - 1);
+        assert_eq!(
+            mint_source_epoch(&next).unwrap_err(),
+            "World source epoch exhausted"
+        );
+        assert_eq!(
+            mint_source_epoch(&next).unwrap_err(),
+            "World source epoch exhausted"
+        );
     }
     #[test]
-    fn topology_completion_retains_native_count_and_distinct_epoch(){
-        let first=Topology::after_v14_geometry().unwrap();
-        let second=Topology::after_v14_geometry().unwrap();
-        assert_eq!((first.count617624(),second.count617624()),(52,52));
-        assert!(second.epoch()>first.epoch());
+    fn topology_completion_retains_native_count_and_distinct_epoch() {
+        let first = Topology::after_v14_geometry().unwrap();
+        let second = Topology::after_v14_geometry().unwrap();
+        assert_eq!((first.count617624(), second.count617624()), (52, 52));
+        assert!(second.epoch() > first.epoch());
     }
 }

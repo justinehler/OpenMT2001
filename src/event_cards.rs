@@ -2,12 +2,12 @@
 //! RNG state is transferred from the startup registry, never reseeded here.
 use crate::{pe::PeImage, player_manager::word};
 
-pub mod effects;
 pub mod ai;
-pub mod lifecycle;
+pub mod effects;
 pub mod human;
-pub mod targeted;
+pub mod lifecycle;
 pub mod selection;
+pub mod targeted;
 
 pub const COUNT: usize = 83;
 pub struct Deck {
@@ -176,28 +176,51 @@ mod tests {
     #[test]
     #[ignore = "requires original card broadcast observations"]
     fn matches_native_broadcast() {
-        let bytes=std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_BROADCAST").unwrap()).unwrap();
-        let exe=std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let image=PeImage::parse(&exe).unwrap();let mut r=Reader(&bytes);
-        assert_eq!(r.take(8),b"MTECBR01");assert_eq!(r.word(),1);assert_eq!(r.word(),0x037f);
-        let read=|r:&mut Reader<'_>| {
-            let object=r.blob();let cards=r.blob();let flags=r.blob();
-            Deck {rng:std::array::from_fn(|i|word(object,i*4)),cards:std::array::from_fn(|i|word(cards,i*4)),
-                used:flags.try_into().unwrap(),remaining:word(object,0x20)}
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_BROADCAST").unwrap()).unwrap();
+        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = PeImage::parse(&exe).unwrap();
+        let mut r = Reader(&bytes);
+        assert_eq!(r.take(8), b"MTECBR01");
+        assert_eq!(r.word(), 1);
+        assert_eq!(r.word(), 0x037f);
+        let read = |r: &mut Reader<'_>| {
+            let object = r.blob();
+            let cards = r.blob();
+            let flags = r.blob();
+            Deck {
+                rng: std::array::from_fn(|i| word(object, i * 4)),
+                cards: std::array::from_fn(|i| word(cards, i * 4)),
+                used: flags.try_into().unwrap(),
+                remaining: word(object, 0x20),
+            }
         };
         for case in 0..r.word() {
-            let [_seed,kind,card,day,mutation]=std::array::from_fn::<_,5,_>(|_|r.word());
-            let mut deck=read(&mut r);let expected=read(&mut r);
-            let trace_expected:Vec<[u32;6]>=(0..r.word()).map(|_|std::array::from_fn(|_|r.word())).collect();
-            let mut packet=[0;48];crate::player_manager::put(&mut packet,4,kind);crate::player_manager::put(&mut packet,0x18,card);
-            let mut trace=vec![];
-            assert!(deck.broadcast(&packet,day,&image,|drawn,deck|{
-                trace.push([0x10012000,0x33,drawn,0x5f5e0ff,0x5f5e0ff,0x5f5e0ff]);
-                if mutation!=0 {deck.release(card)?;}Ok(())
-            }).unwrap());
-            assert_eq!(deck.rng,expected.rng,"rng {case}");assert_eq!(deck.cards,expected.cards,"cards {case}");
-            assert_eq!(deck.used,expected.used,"used {case}");assert_eq!(deck.remaining,expected.remaining,"remaining {case}");
-            assert_eq!(trace,trace_expected,"replies {case}");
+            let [_seed, kind, card, day, mutation] = std::array::from_fn::<_, 5, _>(|_| r.word());
+            let mut deck = read(&mut r);
+            let expected = read(&mut r);
+            let trace_expected: Vec<[u32; 6]> = (0..r.word())
+                .map(|_| std::array::from_fn(|_| r.word()))
+                .collect();
+            let mut packet = [0; 48];
+            crate::player_manager::put(&mut packet, 4, kind);
+            crate::player_manager::put(&mut packet, 0x18, card);
+            let mut trace = vec![];
+            assert!(
+                deck.broadcast(&packet, day, &image, |drawn, deck| {
+                    trace.push([0x10012000, 0x33, drawn, 0x5f5e0ff, 0x5f5e0ff, 0x5f5e0ff]);
+                    if mutation != 0 {
+                        deck.release(card)?;
+                    }
+                    Ok(())
+                })
+                .unwrap()
+            );
+            assert_eq!(deck.rng, expected.rng, "rng {case}");
+            assert_eq!(deck.cards, expected.cards, "cards {case}");
+            assert_eq!(deck.used, expected.used, "used {case}");
+            assert_eq!(deck.remaining, expected.remaining, "remaining {case}");
+            assert_eq!(trace, trace_expected, "replies {case}");
         }
         assert!(r.0.is_empty());
     }
@@ -251,4 +274,3 @@ mod tests {
         assert!(r.0.is_empty());
     }
 }
-

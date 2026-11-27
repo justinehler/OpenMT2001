@@ -491,22 +491,39 @@ impl Resources {
                     draw.specular.as_mut().unwrap().push(rgb(shades[1]));
                 }
                 if draw.vertices.len() > start {
-                    spans.push((building.block_id, part.page, start..draw.vertices.len(),
-                        pose.w_axis.y + crate::category_distance::PASS3_Y_OFFSET));
+                    spans.push((
+                        building.block_id,
+                        part.page,
+                        start..draw.vertices.len(),
+                        pose.w_axis.y + crate::category_distance::PASS3_Y_OFFSET,
+                    ));
                 }
             }
         }
-        let mut indexed = draws.into_iter().enumerate()
-            .filter(|(_, draw)| !draw.vertices.is_empty()).collect::<Vec<_>>();
+        let mut indexed = draws
+            .into_iter()
+            .enumerate()
+            .filter(|(_, draw)| !draw.vertices.is_empty())
+            .collect::<Vec<_>>();
         indexed.sort_by_key(|(_, draw)| u8::from(draw.mode != SurfaceMode::StaticOpaque));
-        let page_to_draw = indexed.iter().enumerate().map(|(draw, (page, _))| (*page, draw))
+        let page_to_draw = indexed
+            .iter()
+            .enumerate()
+            .map(|(draw, (page, _))| (*page, draw))
             .collect::<BTreeMap<_, _>>();
-        let spans = spans.into_iter().map(|(category, page, vertices, pivot_y)| Ok(DrawSpan {
-            category,
-            draw: *page_to_draw.get(&page).ok_or("static detail page has no draw")?,
-            vertices,
-            pivot_y,
-        })).collect::<Result<Vec<_>, String>>()?;
+        let spans = spans
+            .into_iter()
+            .map(|(category, page, vertices, pivot_y)| {
+                Ok(DrawSpan {
+                    category,
+                    draw: *page_to_draw
+                        .get(&page)
+                        .ok_or("static detail page has no draw")?,
+                    vertices,
+                    pivot_y,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         Ok((indexed.into_iter().map(|(_, draw)| draw).collect(), spans))
     }
 }

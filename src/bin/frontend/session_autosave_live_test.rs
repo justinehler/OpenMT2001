@@ -2,45 +2,80 @@
 //! Controlled clock/hourly controls isolate serialization, not natural-game or
 //! camera-provider acceptance. No fallback handler admits unknown simulation work.
 use super::*;
-use crate::fresh_city::{CommandAssets,Inputs,Policy};
-use std::{path::{Path,PathBuf},sync::Arc};
+use crate::fresh_city::{CommandAssets, Inputs, Policy};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 struct Scratch(PathBuf);
 impl Scratch {
-    fn new()->Self {
-        let parent=std::env::var_os("OPENMT2001_TEST_SCRATCH").map(PathBuf::from).unwrap_or_else(||PathBuf::from("work/test-scratch"));
+    fn new() -> Self {
+        let parent = std::env::var_os("OPENMT2001_TEST_SCRATCH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
         std::fs::create_dir_all(&parent).unwrap();
-        let root=parent.join(format!("autosave-live-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir(&root).unwrap();Self(root)
+        let root = parent.join(format!(
+            "autosave-live-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        Self(root)
     }
 }
-impl Drop for Scratch {fn drop(&mut self){std::fs::remove_dir_all(&self.0).unwrap();}}
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).unwrap();
+    }
+}
 
 use openmt2001::scheduler;
 
-fn presentation(event:crate::fresh_city::tick::Event<'_>)->Result<u32,String> {
+fn presentation(event: crate::fresh_city::tick::Event<'_>) -> Result<u32, String> {
     use crate::fresh_city::tick::Event;
     match event {
         // Existing Host's documented render-only boundaries. This CPU test
         // deliberately exercises no renderer/provider or original oracle.
-        Event::Tick(scheduler::Event::Helper(0x4805b0|0x450080|0x4eb5b0|0x4b5db0))
-        |Event::Script{..}|Event::ScriptCommands(_)|Event::EraMusic{..}
-        |Event::TransportSound(_)|Event::TransportEnvironment{..}=>Ok(0),
-        other=>Err(format!("Unsupported CPU regression boundary: {other:?}")),
+        Event::Tick(scheduler::Event::Helper(0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0))
+        | Event::Script { .. }
+        | Event::ScriptCommands(_)
+        | Event::EraMusic { .. }
+        | Event::TransportSound(_)
+        | Event::TransportEnvironment { .. } => Ok(0),
+        other => Err(format!("Unsupported CPU regression boundary: {other:?}")),
     }
 }
-fn intro(session:&mut Session<'_>)->Vec<(u32,i32)> {
-    session.scripts.events.pending().into_iter().filter_map(|event| {
-        let (name,_)=session.scripts.runtime.event_reference_identity(event.reference).unwrap().unwrap();
-        (name=="EVENT_BusinessIntro1940").then_some((event.remaining,event.argument))
-    }).collect()
+fn intro(session: &mut Session<'_>) -> Vec<(u32, i32)> {
+    session
+        .scripts
+        .events
+        .pending()
+        .into_iter()
+        .filter_map(|event| {
+            let (name, _) = session
+                .scripts
+                .runtime
+                .event_reference_identity(event.reference)
+                .unwrap()
+                .unwrap();
+            (name == "EVENT_BusinessIntro1940").then_some((event.remaining, event.argument))
+        })
+        .collect()
 }
 #[test]
-#[ignore="requires supplied original data; controlled real Session Autosave/modern load"]
-fn callback_bytes_preserve_transient_live_owners_and_exact_modern_era_queue() {run(true);}
+#[ignore = "requires supplied original data; controlled real Session Autosave/modern load"]
+fn callback_bytes_preserve_transient_live_owners_and_exact_modern_era_queue() {
+    run(true);
+}
 #[test]
-#[ignore="requires supplied original data; controlled real Session Autosave/modern load"]
-fn ordinary_midnight_does_not_manufacture_modern_era_introduction() {run(false);}
-fn run(era:bool) {
+#[ignore = "requires supplied original data; controlled real Session Autosave/modern load"]
+fn ordinary_midnight_does_not_manufacture_modern_era_introduction() {
+    run(false);
+}
+fn run(era: bool) {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(move|| {
         let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
         let exe = Arc::new(read("OPENMT2001_EXE"));

@@ -21,11 +21,12 @@ impl Ownership {
             let row = &world.categories[i];
             let owner = row[5] as i8;
             if owner != 0 {
-                let player = players.records
+                let player = players
+                    .records
                     .get(usize::try_from(owner - 1).map_err(|_| "negative category owner")?)
                     .ok_or("category owner leaves live roster")?;
-                let character = u32::from_le_bytes(player[0x14c..0x150].try_into().unwrap())
-                    as usize;
+                let character =
+                    u32::from_le_bytes(player[0x14c..0x150].try_into().unwrap()) as usize;
                 if character >= 10 {
                     return Err("ownership badge character leaves original table".into());
                 }
@@ -35,9 +36,15 @@ impl Ownership {
         }
         Ok(Self {
             badges,
-            groups: players.records.iter().map(|player|
-                (0..52).filter(|&i| world.categories[i][0x74] != 0
-                    && player[0x174 + i] != 0).collect()).collect(),
+            groups: players
+                .records
+                .iter()
+                .map(|player| {
+                    (0..52)
+                        .filter(|&i| world.categories[i][0x74] != 0 && player[0x174 + i] != 0)
+                        .collect()
+                })
+                .collect(),
         })
     }
     pub fn from_save(save: &SaveFile<'_>) -> Result<Self, String> {

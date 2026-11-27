@@ -148,11 +148,7 @@ fn original_auction_label_layout() {
             .collect::<Vec<[f32; 2]>>();
         let expected: [u32; 4] = std::array::from_fn(|_| words.next().unwrap());
         let marker = high_bidder_marker(points[0], viewport);
-        assert_eq!(
-            marker.map(f32::to_bits),
-            expected,
-            "marker{case}"
-        );
+        assert_eq!(marker.map(f32::to_bits), expected, "marker{case}");
         for slot in 0..count {
             let bounds = Bounds::from_projected(
                 points[slot + 1],

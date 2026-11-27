@@ -118,10 +118,7 @@ pub fn baked_normal([x, y, mut z]: [f32; 3], mirror: bool, angle: f32) -> [f32; 
 impl SceneBuilding {
     /// Count the original template choices as soon as a footprint is selected,
     /// before the asynchronous quote or preview is returned to the frontend.
-    pub fn model_variant_count(
-        spec: &BuildingSpec,
-        file: &BuildFile<'_>,
-    ) -> Result<usize, String> {
+    pub fn model_variant_count(spec: &BuildingSpec, file: &BuildFile<'_>) -> Result<usize, String> {
         Ok(file.search(model_selection(spec)?.query)?.len())
     }
 
@@ -382,7 +379,8 @@ mod tests {
         let file = BuildFile::parse(&bytes).unwrap();
         let native = std::fs::read("work/economy/native-build-variant-count.bin").unwrap();
         assert_eq!(&native[..8], b"MTBVAR01");
-        let mut words = native[8..].chunks_exact(4)
+        let mut words = native[8..]
+            .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()));
         assert_eq!(words.next(), Some(0x037f));
         assert_eq!(words.next(), Some(45));
@@ -392,22 +390,38 @@ mod tests {
             let spec = BuildingSpec {
                 block: board.blocks[0].name.clone(),
                 lot: std::array::from_fn(|i| input[i] as u8),
-                height: input[4] as u8, kind: input[5] as u8,
-                quality: input[6] as u8, variation: 0, businesses: Vec::new(),
+                height: input[4] as u8,
+                kind: input[5] as u8,
+                quality: input[6] as u8,
+                variation: 0,
+                businesses: Vec::new(),
             };
-            assert_eq!((input[14], input[15]), (20, 0), "native cap/random flag case{case}");
+            assert_eq!(
+                (input[14], input[15]),
+                (20, 0),
+                "native cap/random flag case{case}"
+            );
             // Exact search operands have their own original-query fixture;
             // this checks the count and oriented dimensions exported to UI.
-            assert_eq!(SceneBuilding::model_variant_count(&spec, &file).unwrap(),
-                input[7] as usize, "early native UI count case{case}");
+            assert_eq!(
+                SceneBuilding::model_variant_count(&spec, &file).unwrap(),
+                input[7] as usize,
+                "early native UI count case{case}"
+            );
             let resolved = SceneBuilding::resolve(spec, &board, &file);
             if input[7] == 0 {
                 assert!(resolved.is_err(), "native empty template case{case}");
             } else {
                 let resolved = resolved.unwrap();
-                assert_eq!(resolved.model_variants, input[7] as usize, "native count case{case}");
-                assert_eq!(resolved.canonical_size, [input[8] as u8, input[9] as u8],
-                    "native query dimensions case{case}");
+                assert_eq!(
+                    resolved.model_variants, input[7] as usize,
+                    "native count case{case}"
+                );
+                assert_eq!(
+                    resolved.canonical_size,
+                    [input[8] as u8, input[9] as u8],
+                    "native query dimensions case{case}"
+                );
                 populated += 1;
             }
         }

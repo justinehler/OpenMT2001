@@ -245,7 +245,8 @@ mod tests {
     #[test]
     #[ignore = "requires original strategy score observations"]
     fn matches_native_contributors() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_STRATEGY_SCORES").unwrap()).unwrap();
+        let data =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_STRATEGY_SCORES").unwrap()).unwrap();
         let original = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTSCOR02");

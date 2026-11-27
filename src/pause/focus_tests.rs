@@ -27,10 +27,12 @@ fn native_focus_signed_counter_word_and_latch_boundaries() {
         (true, 1, 1, [0, 0, 0, 0x80], false, 0, 1, None),
         (true, 1, 1, [0; 4], true, 1, 1, None),
     ];
-    for (index, (gain, count, latch, reasons, blocked, after, active, call))
-        in cases.into_iter().enumerate()
+    for (index, (gain, count, latch, reasons, blocked, after, active, call)) in
+        cases.into_iter().enumerate()
     {
-        let mut state = State { bytes: [0, 0, 0, 0, count, 0x91, 0xa2, 0xb3, latch] };
+        let mut state = State {
+            bytes: [0, 0, 0, 0, count, 0x91, 0xa2, 0xb3, latch],
+        };
         state.bytes[..4].copy_from_slice(&reasons);
         let mut expected = state.bytes;
         expected[4] = after;
@@ -43,8 +45,12 @@ fn native_focus_signed_counter_word_and_latch_boundaries() {
             calls.push(event);
             Ok(())
         };
-        if gain { state.focus_gained(blocked, callback) }
-        else { state.focus_lost(blocked, callback) }.unwrap();
+        if gain {
+            state.focus_gained(blocked, callback)
+        } else {
+            state.focus_lost(blocked, callback)
+        }
+        .unwrap();
         assert_eq!(state.bytes, expected, "case{index}");
         assert_eq!(calls, call.into_iter().collect::<Vec<_>>(), "case{index}");
     }
@@ -60,13 +66,23 @@ fn native_focus_changes_only_enabled_bytes_of_mask2_rows() {
     });
     let original = rows;
     let mut state = State::default();
-    state.focus_lost(false, |event, _| { event.apply(&mut rows); Ok(()) }).unwrap();
+    state
+        .focus_lost(false, |event, _| {
+            event.apply(&mut rows);
+            Ok(())
+        })
+        .unwrap();
     for (index, enabled) in [7, 7, 0, 0, 7, 0].into_iter().enumerate() {
         let mut expected = original[index];
         expected[0] = enabled;
         assert_eq!(rows[index], expected);
     }
-    state.focus_gained(false, |event, _| { event.apply(&mut rows); Ok(()) }).unwrap();
+    state
+        .focus_gained(false, |event, _| {
+            event.apply(&mut rows);
+            Ok(())
+        })
+        .unwrap();
     for (index, enabled) in [7, 7, 1, 1, 7, 1].into_iter().enumerate() {
         let mut expected = original[index];
         expected[0] = enabled;
@@ -77,18 +93,24 @@ fn native_focus_changes_only_enabled_bytes_of_mask2_rows() {
 #[test]
 fn focus_callback_failure_retains_reached_count_without_latch_store() {
     let mut state = State::default();
-    assert_eq!(state.focus_lost(false, |event, live| {
-        assert_eq!(event, Timers::Suspend);
-        assert_eq!(live.bytes, [0, 0, 0, 0, 1, 0, 0, 0, 0]);
+    assert_eq!(
+        state.focus_lost(false, |event, live| {
+            assert_eq!(event, Timers::Suspend);
+            assert_eq!(live.bytes, [0, 0, 0, 0, 1, 0, 0, 0, 0]);
+            Err("suspend failed".into())
+        }),
         Err("suspend failed".into())
-    }), Err("suspend failed".into()));
+    );
     assert_eq!(state.bytes, [0, 0, 0, 0, 1, 0, 0, 0, 0]);
     state.bytes[8] = 1;
-    assert_eq!(state.focus_gained(false, |event, live| {
-        assert_eq!(event, Timers::Resume);
-        assert_eq!(live.bytes, [0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(
+        state.focus_gained(false, |event, live| {
+            assert_eq!(event, Timers::Resume);
+            assert_eq!(live.bytes, [0, 0, 0, 0, 0, 0, 0, 0, 1]);
+            Err("resume failed".into())
+        }),
         Err("resume failed".into())
-    }), Err("resume failed".into()));
+    );
     assert_eq!(state.bytes, [0, 0, 0, 0, 0, 0, 0, 0, 1]);
 }
 
@@ -96,12 +118,26 @@ fn focus_callback_failure_retains_reached_count_without_latch_store() {
 fn native_ordinary_unpause_can_resume_while_focus_remains_lost() {
     let mut state = State::default();
     let mut calls = Vec::new();
-    state.pause(0, |event, _| { calls.push(event); Ok(()) }).unwrap();
-    state.focus_lost(false, |_, _| panic!("shared latch already set")).unwrap();
+    state
+        .pause(0, |event, _| {
+            calls.push(event);
+            Ok(())
+        })
+        .unwrap();
+    state
+        .focus_lost(false, |_, _| panic!("shared latch already set"))
+        .unwrap();
     assert_eq!(state.bytes, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-    state.unpause(0, |event, _| { calls.push(event); Ok(()) }).unwrap();
+    state
+        .unpause(0, |event, _| {
+            calls.push(event);
+            Ok(())
+        })
+        .unwrap();
     assert_eq!(state.bytes, [0, 0, 0, 0, 1, 0, 0, 0, 0]);
     assert_eq!(calls, [Timers::Suspend, Timers::Resume]);
-    state.focus_gained(false, |_, _| panic!("native latch already clear")).unwrap();
+    state
+        .focus_gained(false, |_, _| panic!("native latch already clear"))
+        .unwrap();
     assert_eq!(state.bytes, [0; 9]);
 }

@@ -347,7 +347,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!(&native[..8], b"MTCAT001");
-        assert_eq!(f32::from_le_bytes(state.info.row(2).unwrap()[0x58..0x5c].try_into().unwrap()),3.,"original DELI stockcapacity assignment");
+        assert_eq!(
+            f32::from_le_bytes(state.info.row(2).unwrap()[0x58..0x5c].try_into().unwrap()),
+            3.,
+            "original DELI stockcapacity assignment"
+        );
         let word = |at| u32::from_le_bytes(native[at..at + 4].try_into().unwrap());
         let mut at = 8;
         for (index, row) in state.info.rows().iter().enumerate() {

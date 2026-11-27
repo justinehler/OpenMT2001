@@ -260,7 +260,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECAI01");
         assert_eq!(r.word(), 2);
-        assert_eq!(r.word(),0x037f);
+        assert_eq!(r.word(), 0x037f);
         for _ in 0..r.word() {
             let [k, h, p, result] = std::array::from_fn::<_, 4, _>(|_| r.word());
             assert_eq!(

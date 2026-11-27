@@ -132,9 +132,12 @@ pub fn perimeter_preference(
         let owner = if id == -1 {
             0
         } else {
-            i32::from(businesses
-                .get(id as usize)
-                .ok_or("target perimeter business reference unresolved")?[0xa] as i8)
+            i32::from(
+                businesses
+                    .get(id as usize)
+                    .ok_or("target perimeter business reference unresolved")?[0xa]
+                    as i8,
+            )
         };
         if owner == i32::from(player.bytes[0x1bc])
             && (row[7] == 6 || row[6] == 6 || row[5] == 0 || row[4] == 0)
@@ -284,9 +287,24 @@ mod tests {
         // Direct v1.4 4776c0 oracle with this pending edge returns 4 for
         // player owner byte 0 and 0 for owner bytes 1 and 2 (fallback -1).
         for (owner, expected) in [(0, 4), (1, 0), (2, 0)] {
-            let mut player = Player { reference: 0, bytes: vec![0; 0x1e50], auxiliaries: vec![] };
+            let mut player = Player {
+                reference: 0,
+                bytes: vec![0; 0x1e50],
+                auxiliaries: vec![],
+            };
             player.bytes[0x1bc] = owner;
-            assert_eq!(perimeter_preference(&mut player, 0, &category, &buildings, &businesses, |_,_| Ok(-1)).unwrap(), expected);
+            assert_eq!(
+                perimeter_preference(
+                    &mut player,
+                    0,
+                    &category,
+                    &buildings,
+                    &businesses,
+                    |_, _| Ok(-1)
+                )
+                .unwrap(),
+                expected
+            );
         }
     }
     struct Reader<'a>(&'a [u8]);

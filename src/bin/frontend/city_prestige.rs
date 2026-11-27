@@ -36,8 +36,9 @@ impl Prestige {
     ) -> Result<Self, String> {
         Self::from_fields(
             std::array::from_fn(|i| world.categories[i][4]),
-            std::array::from_fn(|i| f32::from_le_bytes(
-                world.categories[i][0x84..0x88].try_into().unwrap())),
+            std::array::from_fn(|i| {
+                f32::from_le_bytes(world.categories[i][0x84..0x88].try_into().unwrap())
+            }),
             board,
         )
     }
@@ -89,10 +90,7 @@ impl Prestige {
             rows.push(Row::Block(i));
         }
         let overlay_categories = (0..52)
-            .filter(|&i| {
-                ((active[i] == 1 && flags[i] & 1 == 0) || i == 41)
-                    && names[i] <= 45
-            })
+            .filter(|&i| ((active[i] == 1 && flags[i] & 1 == 0) || i == 41) && names[i] <= 45)
             .collect();
         Ok(Self {
             rows,

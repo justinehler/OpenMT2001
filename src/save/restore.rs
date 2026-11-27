@@ -21,7 +21,9 @@ pub fn apply_business_terms_without_tenant_callback(
         .ok_or("saved immediate terms business leaves pool")?;
     let old_rent = f32::from_le_bytes(row[0x1dc..0x1e0].try_into().unwrap());
     if i32::from_le_bytes(row[0x20c..0x210].try_into().unwrap()) != -1
-        && old_rent.partial_cmp(&terms.rent).is_none_or(|order| order.is_lt())
+        && old_rent
+            .partial_cmp(&terms.rent)
+            .is_none_or(|order| order.is_lt())
     {
         return Err("saved immediate terms require synchronous tenant callbacks".into());
     }
@@ -302,10 +304,8 @@ mod tests {
                 }),
                 rent: f32::from_bits(u32::from_le_bytes(packet[60..64].try_into().unwrap())),
             };
-            apply_business_terms_without_tenant_callback(
-                std::slice::from_mut(&mut row), 0, &terms,
-            )
-            .unwrap();
+            apply_business_terms_without_tenant_callback(std::slice::from_mut(&mut row), 0, &terms)
+                .unwrap();
             assert_eq!(row.as_slice(), expected, "native 463f70 case {case}");
         }
     }

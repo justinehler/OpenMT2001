@@ -35,70 +35,125 @@ const BUILDING_TICK_OFFSET: usize = 0x30;
 const BUSINESS_BUILDING_OFFSET: usize = 0x08;
 
 ///451546 command19, followed by normal-clock scheduled kind1 at +15000.
-pub fn begin_wait(category:&mut [u8;CATEGORY_RECORD_BYTES],normal_tick:u32)->u32{
-    put_u32(category,0x78,1);category[0x6d]=0;put_u32(category,0x80,24);
+pub fn begin_wait(category: &mut [u8; CATEGORY_RECORD_BYTES], normal_tick: u32) -> u32 {
+    put_u32(category, 0x78, 1);
+    category[0x6d] = 0;
+    put_u32(category, 0x80, 24);
     normal_tick.wrapping_add(15000)
 }
 ///480ec0 scheduled kind1; it does not clear the other command19 fields.
-pub fn end_wait(category:&mut [u8;CATEGORY_RECORD_BYTES]){put_u32(category,0x78,2);}
+pub fn end_wait(category: &mut [u8; CATEGORY_RECORD_BYTES]) {
+    put_u32(category, 0x78, 2);
+}
 
 #[test]
 #[ignore = "requires pinned original saved category wait captures"]
 fn matches_native_saved_category_wait_admission() {
     use crate::player_manager::word;
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVED_CATEGORY_WAIT").unwrap()).unwrap();
+    let bytes =
+        std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVED_CATEGORY_WAIT").unwrap()).unwrap();
     assert_eq!(&bytes[..8], b"MTCSWAIT");
     assert_eq!(word(&bytes, 8), 0x37f);
     assert_eq!(word(&bytes, 12), 312);
     let mut cursor = 16;
     for case in 0..312 {
-        let mut take = |n| { let result = &bytes[cursor..cursor+n]; cursor += n; result };
+        let mut take = |n| {
+            let result = &bytes[cursor..cursor + n];
+            cursor += n;
+            result
+        };
         let config = take(20);
         let index = word(config, 0);
         let variant = word(config, 4);
         let normal = word(config, 12);
         let mut category: [u8; 380] = take(380).try_into().unwrap();
-        if variant == 4 { end_wait(&mut category); }
+        if variant == 4 {
+            end_wait(&mut category);
+        }
         let admission = if variant == 3 {
             [0, word(config, 16), 0, word(config, 16)]
         } else {
             [1, begin_wait(&mut category, normal), 1, index]
         };
-        if variant == 5 { end_wait(&mut category); }
-        assert_eq!(category.as_slice(), take(380), "native saved wait case {case}");
+        if variant == 5 {
+            end_wait(&mut category);
+        }
+        assert_eq!(
+            category.as_slice(),
+            take(380),
+            "native saved wait case {case}"
+        );
         assert_eq!(word(take(4), 0), 1);
         let original = take(16);
         for (i, expected) in admission.into_iter().enumerate() {
-            assert_eq!(word(original, i*4), expected, "case {case} scheduled argument {i}");
+            assert_eq!(
+                word(original, i * 4),
+                expected,
+                "case {case} scheduled argument {i}"
+            );
         }
     }
     assert_eq!(cursor, bytes.len());
 }
 
 #[test]
-#[ignore="requires original category wait lifecycle captures"]
-fn matches_native_category_wait(){
-    use crate::{player_manager::word,local_commands::{Queue,Schedule},ai_messages::offers::auction::inbox::wait_descriptor};
-    let bytes=std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_WAIT").unwrap()).unwrap();
-    assert_eq!(&bytes[..8],b"MTCWAIT1");assert_eq!(word(&bytes,8),0x37f);
-    let mut cursor=16;
-    for case in 0..word(&bytes,12){
-        let mut take=|n|{let b=&bytes[cursor..cursor+n];cursor+=n;b};
-        let config=take(12);let total=word(config,4);let normal=word(config,8);
-        let prior=take(24).try_into().unwrap();let mut category:[u8;380]=take(380).try_into().unwrap();
-        assert_eq!(wait_descriptor(&category,prior).as_slice(),take(24),"{case} descriptor");
-        let mut queue=Queue::default();queue.submit(false,total,true,|_|panic!("early local command")).unwrap();
-        for (step,mut clocks) in [[total,normal],[total+24,normal],[total+25,normal],[total+30000,normal+14999],[total+30000,normal+15000]].into_iter().enumerate(){
-            let normal=clocks[1];
-            queue.drain_scheduling(&mut clocks,|ready,enqueue|{
-                if *ready{end_wait(&mut category);Ok(())}else{
-                    let due=begin_wait(&mut category,normal);enqueue(true,Schedule::Normal{due})
-                }
-            }).unwrap();
-            assert_eq!(category.as_slice(),take(380),"{case} step{step}");
+#[ignore = "requires original category wait lifecycle captures"]
+fn matches_native_category_wait() {
+    use crate::{
+        ai_messages::offers::auction::inbox::wait_descriptor,
+        local_commands::{Queue, Schedule},
+        player_manager::word,
+    };
+    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_WAIT").unwrap()).unwrap();
+    assert_eq!(&bytes[..8], b"MTCWAIT1");
+    assert_eq!(word(&bytes, 8), 0x37f);
+    let mut cursor = 16;
+    for case in 0..word(&bytes, 12) {
+        let mut take = |n| {
+            let b = &bytes[cursor..cursor + n];
+            cursor += n;
+            b
+        };
+        let config = take(12);
+        let total = word(config, 4);
+        let normal = word(config, 8);
+        let prior = take(24).try_into().unwrap();
+        let mut category: [u8; 380] = take(380).try_into().unwrap();
+        assert_eq!(
+            wait_descriptor(&category, prior).as_slice(),
+            take(24),
+            "{case} descriptor"
+        );
+        let mut queue = Queue::default();
+        queue
+            .submit(false, total, true, |_| panic!("early local command"))
+            .unwrap();
+        for (step, mut clocks) in [
+            [total, normal],
+            [total + 24, normal],
+            [total + 25, normal],
+            [total + 30000, normal + 14999],
+            [total + 30000, normal + 15000],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let normal = clocks[1];
+            queue
+                .drain_scheduling(&mut clocks, |ready, enqueue| {
+                    if *ready {
+                        end_wait(&mut category);
+                        Ok(())
+                    } else {
+                        let due = begin_wait(&mut category, normal);
+                        enqueue(true, Schedule::Normal { due })
+                    }
+                })
+                .unwrap();
+            assert_eq!(category.as_slice(), take(380), "{case} step{step}");
         }
     }
-    assert_eq!(cursor,bytes.len());
+    assert_eq!(cursor, bytes.len());
 }
 
 /// Synchronous boundaries called while the original helper mutates state.
@@ -887,20 +942,28 @@ mod tests {
 }
 
 ///405260: announcement visibility gates both the category unlock and panel refresh.
-pub fn property_view(category:&mut [u8;380],announcement_visible:u8,force:u8)->bool {
-    if announcement_visible==1 && force==0{return false;}
-    category[0x6c]=0;true
+pub fn property_view(category: &mut [u8; 380], announcement_visible: u8, force: u8) -> bool {
+    if announcement_visible == 1 && force == 0 {
+        return false;
+    }
+    category[0x6c] = 0;
+    true
 }
 #[test]
-#[ignore="requires original property view fixture"]
-fn matches_native_property_view(){
-    let bytes=std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_VIEW").unwrap()).unwrap();
-    assert_eq!(&bytes[..8],b"MTPVIEW1");assert_eq!(word(&bytes,8),0x37f);
-    let count=word(&bytes,12) as usize;assert_eq!(bytes.len(),16+count*(16+760));
-    for row in bytes[16..].chunks_exact(776){
-        let mut category:[u8;380]=row[16..396].try_into().unwrap();
-        let refreshed=property_view(&mut category,row[0],row[4]);
-        assert_eq!(refreshed,u32::from_le_bytes(row[12..16].try_into().unwrap())!=0);
-        assert_eq!(category,row[396..]);
+#[ignore = "requires original property view fixture"]
+fn matches_native_property_view() {
+    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_VIEW").unwrap()).unwrap();
+    assert_eq!(&bytes[..8], b"MTPVIEW1");
+    assert_eq!(word(&bytes, 8), 0x37f);
+    let count = word(&bytes, 12) as usize;
+    assert_eq!(bytes.len(), 16 + count * (16 + 760));
+    for row in bytes[16..].chunks_exact(776) {
+        let mut category: [u8; 380] = row[16..396].try_into().unwrap();
+        let refreshed = property_view(&mut category, row[0], row[4]);
+        assert_eq!(
+            refreshed,
+            u32::from_le_bytes(row[12..16].try_into().unwrap()) != 0
+        );
+        assert_eq!(category, row[396..]);
     }
 }

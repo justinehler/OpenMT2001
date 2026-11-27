@@ -1,5 +1,5 @@
 //! Original Navigator category map,43d290/43dd90; paused inspection host.
-#[path="navigator_upper.rs"]
+#[path = "navigator_upper.rs"]
 pub(crate) mod upper;
 use crate::ui::{self, Surface};
 use openmt2001::{
@@ -10,10 +10,10 @@ use openmt2001::{
 pub struct Navigator {
     pub bounds: [f32; 4],
     surfaces: Vec<Surface>,
-    upper_shells:Vec<Vec<Surface>>,
-    upper_backing_color:u32,
+    upper_shells: Vec<Vec<Surface>>,
+    upper_backing_color: u32,
     ///Retained real primitive products; containing Primary graph stays closed.
-    native_primitives:crate::intro::camera_live::primitive_factory::Primitives,
+    native_primitives: crate::intro::camera_live::primitive_factory::Primitives,
     arrow: Surface,
     ownership: Surface,
     blocks: Vec<Block>,
@@ -32,19 +32,35 @@ pub fn runtime_owners(
     current_player: u32,
     image: &openmt2001::pe::PeImage<'_>,
 ) -> Result<Vec<Option<Owner>>, String> {
-    categories.iter().map(|row| {
-        let owner = row[5] as i8;
-        if row[4] == 0 || owner == 0 { return Ok(None); }
-        let player = players.players.get(usize::try_from(i16::from(owner) - 1)
-            .map_err(|_| "Navigator negative owner")?).ok_or("Navigator owner leaves roster")?;
-        let character = u32::from_le_bytes(player.bytes.get(0x150..0x154)
-            .ok_or("Navigator player character missing")?.try_into().unwrap()) as usize;
-        Ok(Some(Owner {
-            colour: crate::ownership_badges::style(image, Some(character))?.0,
-            remaining: i32::from_le_bytes(row[0x7c..0x80].try_into().unwrap()),
-            current: current_player == player.reference,
-        }))
-    }).collect()
+    categories
+        .iter()
+        .map(|row| {
+            let owner = row[5] as i8;
+            if row[4] == 0 || owner == 0 {
+                return Ok(None);
+            }
+            let player = players
+                .players
+                .get(
+                    usize::try_from(i16::from(owner) - 1)
+                        .map_err(|_| "Navigator negative owner")?,
+                )
+                .ok_or("Navigator owner leaves roster")?;
+            let character = u32::from_le_bytes(
+                player
+                    .bytes
+                    .get(0x150..0x154)
+                    .ok_or("Navigator player character missing")?
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            Ok(Some(Owner {
+                colour: crate::ownership_badges::style(image, Some(character))?.0,
+                remaining: i32::from_le_bytes(row[0x7c..0x80].try_into().unwrap()),
+                current: current_player == player.reference,
+            }))
+        })
+        .collect()
 }
 #[cfg(test)]
 pub fn saved_owners(
@@ -76,23 +92,47 @@ pub fn saved_owners(
         .collect()
 }
 impl Navigator {
-    pub(crate) fn process_primitives_mut(&mut self) -> &mut crate::intro::camera_live::primitive_factory::Primitives { &mut self.native_primitives }
+    pub(crate) fn process_primitives_mut(
+        &mut self,
+    ) -> &mut crate::intro::camera_live::primitive_factory::Primitives {
+        &mut self.native_primitives
+    }
 
     #[cfg(test)]
-    pub(crate) fn native_primitives(&self) -> &crate::intro::camera_live::primitive_factory::Primitives {
+    pub(crate) fn native_primitives(
+        &self,
+    ) -> &crate::intro::camera_live::primitive_factory::Primitives {
         &self.native_primitives
     }
     #[cfg(test)]
-    pub(crate) fn native_primitives_mut(&mut self) -> &mut crate::intro::camera_live::primitive_factory::Primitives {
+    pub(crate) fn native_primitives_mut(
+        &mut self,
+    ) -> &mut crate::intro::camera_live::primitive_factory::Primitives {
         &mut self.native_primitives
     }
-    pub fn load(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8])->Result<Self,String>{
-        Self::load_path(index,archive,blocks,executable,false)
+    pub fn load(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        blocks: &[Block],
+        executable: &[u8],
+    ) -> Result<Self, String> {
+        Self::load_path(index, archive, blocks, executable, false)
     }
-    pub(crate) fn load_deferred(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8])->Result<Self,String>{
-        Self::load_path(index,archive,blocks,executable,true)
+    pub(crate) fn load_deferred(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        blocks: &[Block],
+        executable: &[u8],
+    ) -> Result<Self, String> {
+        Self::load_path(index, archive, blocks, executable, true)
     }
-    fn load_path(index:&ArchiveIndex,archive:&[u8],blocks:&[Block],executable:&[u8],deferred:bool)->Result<Self,String>{
+    fn load_path(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        blocks: &[Block],
+        executable: &[u8],
+        deferred: bool,
+    ) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
@@ -102,21 +142,50 @@ impl Navigator {
         //43d010 resolves backing separately;43d0b0 fills it at depth0.5.
         // Part0 is that full rectangle, not border artwork. Keep only part1
         // textured; otherwise its opaque gray texture covers the palette fill.
-        let e=index.find("gamedata2/brand_new_panels/new_nav_top.tm").ok_or("F model absent")?;
-        let mesh=openmt2001::mesh::CachedMesh::parse(archive.get(e.offset as usize..(e.offset+e.length)as usize).ok_or("F model range")?)?;
-        if mesh.frames==0||mesh.frames>u16::MAX as usize{return Err("F supplied model frame count".into());}
-        let cpu_model=crate::intro::camera_live::panel_models::CpuModel::parsed(
-            crate::intro::camera_live::ui_graph::PanelId::F,e,&mesh)?;
-        let native_primitives=if deferred{
-            crate::intro::camera_live::primitive_factory::Primitives::deferred_allocation(executable,cpu_model)?
-        }else{crate::intro::camera_live::primitive_factory::Primitives::navigator(executable,cpu_model)?};
-        let upper_shells=(0..mesh.frames).map(|frame|
-            ui::panel_frame_base(index,archive,"gamedata2/brand_new_panels/new_nav_top.tm",&[1],frame).map(|v|v.0)
-        ).collect::<Result<Vec<_>,_>>()?;
+        let e = index
+            .find("gamedata2/brand_new_panels/new_nav_top.tm")
+            .ok_or("F model absent")?;
+        let mesh = openmt2001::mesh::CachedMesh::parse(
+            archive
+                .get(e.offset as usize..(e.offset + e.length) as usize)
+                .ok_or("F model range")?,
+        )?;
+        if mesh.frames == 0 || mesh.frames > u16::MAX as usize {
+            return Err("F supplied model frame count".into());
+        }
+        let cpu_model = crate::intro::camera_live::panel_models::CpuModel::parsed(
+            crate::intro::camera_live::ui_graph::PanelId::F,
+            e,
+            &mesh,
+        )?;
+        let native_primitives = if deferred {
+            crate::intro::camera_live::primitive_factory::Primitives::deferred_allocation(
+                executable, cpu_model,
+            )?
+        } else {
+            crate::intro::camera_live::primitive_factory::Primitives::navigator(
+                executable, cpu_model,
+            )?
+        };
+        let upper_shells = (0..mesh.frames)
+            .map(|frame| {
+                ui::panel_frame_base(
+                    index,
+                    archive,
+                    "gamedata2/brand_new_panels/new_nav_top.tm",
+                    &[1],
+                    frame,
+                )
+                .map(|v| v.0)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let image = openmt2001::pe::PeImage::parse(executable)?;
         let color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
         let mut backing = Surface::solid();
-        backing.rect(*regions.first().ok_or("Navigator backing missing")?, [color; 4]);
+        backing.rect(
+            *regions.first().ok_or("Navigator backing missing")?,
+            [color; 4],
+        );
         surfaces.insert(0, backing);
         let bounds = *regions.get(2).ok_or("Navigator main window missing")?;
         let origin = origin(bounds);
@@ -159,7 +228,10 @@ impl Navigator {
         );
         Ok(Self {
             bounds,
-            surfaces,upper_shells,upper_backing_color:color,native_primitives,
+            surfaces,
+            upper_shells,
+            upper_backing_color: color,
+            native_primitives,
             arrow,
             ownership: Surface::new(
                 textures
@@ -194,7 +266,8 @@ impl Navigator {
                     ownership_quad(origin(self.bounds), block.center, block.size)
                         .map(|p| [p[0], p[1]]),
                     [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                    [ownership_colour(block.id, owner.colour, owner.remaining, owner.current, tick); 4],
+                    [ownership_colour(block.id, owner.colour, owner.remaining, owner.current, tick);
+                        4],
                 );
             }
         }
@@ -238,11 +311,21 @@ impl Navigator {
         owners: &[Option<Owner>],
     ) -> Result<(), String> {
         let ownership = self.ownership_surface(owners, tick);
-        renderer.update_surface(scene, self.surfaces.len(), &ownership.draw(),
-            overlay_matrix(), None)?;
+        renderer.update_surface(
+            scene,
+            self.surfaces.len(),
+            &ownership.draw(),
+            overlay_matrix(),
+            None,
+        )?;
         let arrow = self.arrow_surface(eye, angle, tick);
-        renderer.update_surface(scene, self.surfaces.len() + 1, &arrow.draw(),
-            overlay_matrix(), None)
+        renderer.update_surface(
+            scene,
+            self.surfaces.len() + 1,
+            &arrow.draw(),
+            overlay_matrix(),
+            None,
+        )
     }
     /// Inspection picking uses1280x960; original UI geometry uses640x480.
     pub fn pick_inspection(&self, blocks: &[Block], point: [i32; 2]) -> Option<(usize, [i32; 2])> {
@@ -404,7 +487,8 @@ mod tests {
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
-        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap()
     }
     #[test]
@@ -412,55 +496,114 @@ mod tests {
     fn original_upper_navigator_regions() {
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let e = index.find("gamedata2/brand_new_panels/new_nav_top.tm").unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let e = index
+            .find("gamedata2/brand_new_panels/new_nav_top.tm")
+            .unwrap();
         let mesh = openmt2001::mesh::CachedMesh::parse(
-            &archive[e.offset as usize..(e.offset + e.length) as usize]).unwrap();
+            &archive[e.offset as usize..(e.offset + e.length) as usize],
+        )
+        .unwrap();
         let regions = openmt2001::ui_mesh::regions(&mesh, 0).unwrap();
-        assert_eq!(regions.iter().map(|r| (r.name.as_str(), r.part)).collect::<Vec<_>>(),
-            [("NAV_BACKING_MAIN", 0), ("NAV_BORDER01", 1), ("P_NAVIGATOR_MAINWINDOW", 2)]);
-        assert_eq!(regions[0].bounds, [530.3883666992188, 355.96807861328125,
-            637.0919189453125, 446.5613708496094]);
+        assert_eq!(
+            regions
+                .iter()
+                .map(|r| (r.name.as_str(), r.part))
+                .collect::<Vec<_>>(),
+            [
+                ("NAV_BACKING_MAIN", 0),
+                ("NAV_BORDER01", 1),
+                ("P_NAVIGATOR_MAINWINDOW", 2)
+            ]
+        );
+        assert_eq!(
+            regions[0].bounds,
+            [
+                530.3883666992188,
+                355.96807861328125,
+                637.0919189453125,
+                446.5613708496094
+            ]
+        );
         assert_eq!(mesh.parts[0].indices.len(), 12); // full backing: two triangles
         assert_eq!(mesh.parts[1].indices.len(), 48); // border: four edge quads
-        assert_eq!(mesh.texture_names[mesh.parts[1].texture as usize], "1NEW_MAYA_GREY_BORDER.TT");
+        assert_eq!(
+            mesh.texture_names[mesh.parts[1].texture as usize],
+            "1NEW_MAYA_GREY_BORDER.TT"
+        );
         let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         assert_eq!(image.at(0x5362c0, 4).unwrap(), &0xbb000a28u32.to_le_bytes());
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
-        let navigator = super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap();
-        assert_eq!(navigator.surfaces.len(), 3, "backing, border and map keep dynamic indices stable");
+        let navigator =
+            super::Navigator::load(&index, &archive, &board.blocks, &executable).unwrap();
+        assert_eq!(
+            navigator.surfaces.len(),
+            3,
+            "backing, border and map keep dynamic indices stable"
+        );
         // Real asset-load boundary: one retained source-owned F construction.
-        use crate::intro::camera_live::{primitive_factory::{DescriptorIdentity, Phase, Step}, ui_graph::PanelId};
+        use crate::intro::camera_live::{
+            primitive_factory::{DescriptorIdentity, Phase, Step},
+            ui_graph::PanelId,
+        };
         let primitive = &navigator.native_primitives;
         let panel = primitive.panels.get(&0x58cdb0).unwrap();
         assert_eq!(panel.phase, Phase::Bound);
-        assert_eq!(panel.descriptor, Some(DescriptorIdentity::Archive(PanelId::F)));
+        assert_eq!(
+            panel.descriptor,
+            Some(DescriptorIdentity::Archive(PanelId::F))
+        );
         assert_eq!(primitive.panels.len(), 1);
         assert_eq!(primitive.texts.len(), 1);
-        assert_eq!(primitive.steps.iter().filter(|s| **s == Step::NavigatorSuffix(0x58cdb0)).count(), 1);
+        assert_eq!(
+            primitive
+                .steps
+                .iter()
+                .filter(|s| **s == Step::NavigatorSuffix(0x58cdb0))
+                .count(),
+            1
+        );
         assert_eq!(primitive.cells().byte(0x58cdb0 + 0x184).unwrap(), 1);
         let model = primitive.resources.model(PanelId::F).unwrap();
         assert_eq!(model.source.path, e.path);
-        assert_eq!((model.source.offset, model.source.length), (e.offset, e.length));
+        assert_eq!(
+            (model.source.offset, model.source.length),
+            (e.offset, e.length)
+        );
         assert_eq!(model.frames.len(), mesh.frames);
-        assert_eq!(primitive.cells().word(0x58cdb0 + 0x180).unwrap(), mesh.frames as u32);
+        assert_eq!(
+            primitive.cells().word(0x58cdb0 + 0x180).unwrap(),
+            mesh.frames as u32
+        );
         assert!(primitive.require_process_graph().is_err());
         assert!(primitive.require_text_layout(panel.caption).is_err());
-        eprintln!("retained F construction frames={} panel_count={} caption_count={} phase={:?}",
-            model.frames.len(), primitive.panels.len(), primitive.texts.len(), panel.phase);
+        eprintln!(
+            "retained F construction frames={} panel_count={} caption_count={} phase={:?}",
+            model.frames.len(),
+            primitive.panels.len(),
+            primitive.texts.len(),
+            panel.phase
+        );
 
         let backing = &navigator.surfaces[0];
         assert_eq!((backing.width, backing.height), (1, 1));
         assert_eq!(backing.pixels, [255; 4]);
-        assert_eq!(backing.alpha, [187; 6], "original publish color alpha survives submission");
-        let [l,t,r,b] = regions[0].bounds;
-        let corners = [[l,t],[l,b],[r,b],[r,t]];
-        for (vertex, corner) in backing.vertices.iter().zip([0,1,2,0,2,3]) {
+        assert_eq!(
+            backing.alpha, [187; 6],
+            "original publish color alpha survives submission"
+        );
+        let [l, t, r, b] = regions[0].bounds;
+        let corners = [[l, t], [l, b], [r, b], [r, t]];
+        for (vertex, corner) in backing.vertices.iter().zip([0, 1, 2, 0, 2, 3]) {
             assert_eq!(vertex[..3], [corners[corner][0], corners[corner][1], 0.5]);
-            assert_eq!(vertex[3..6], [0., 10./255., 40./255.]);
+            assert_eq!(vertex[3..6], [0., 10. / 255., 40. / 255.]);
         }
-        assert_eq!(backing.draw().mode, openmt2001::render::SurfaceMode::Overlay);
+        assert_eq!(
+            backing.draw().mode,
+            openmt2001::render::SurfaceMode::Overlay
+        );
     }
     #[test]
     #[ignore = "private saved cities and GPU"]
@@ -543,14 +686,24 @@ mod tests {
                 }
                 for (category, owner) in synthetic.iter_mut().enumerate().skip(46) {
                     *owner = Some(super::Owner {
-                        colour: crate::ownership_badges::style(&image, Some(category % 10)).unwrap().0,
-                        remaining: 24, current: true,
+                        colour: crate::ownership_badges::style(&image, Some(category % 10))
+                            .unwrap()
+                            .0,
+                        remaining: 24,
+                        current: true,
                     });
                 }
                 let mut overlay = nav.prepare_with_ownership(&renderer, &synthetic).unwrap();
                 for tick in [0, 9, 15, 31] {
-                    nav.update_ownership_arrow(&renderer, &mut overlay, [-220., -30.1], -1.5,
-                        tick, &synthetic).unwrap();
+                    nav.update_ownership_arrow(
+                        &renderer,
+                        &mut overlay,
+                        [-220., -30.1],
+                        -1.5,
+                        tick,
+                        &synthetic,
+                    )
+                    .unwrap();
                 }
                 crate::capture_test::capture(
                     &renderer,
@@ -574,8 +727,13 @@ mod tests {
         let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
-        let colours: Vec<_> = (0..10).map(|character|
-            crate::ownership_badges::style(&image, Some(character)).unwrap().0).collect();
+        let colours: Vec<_> = (0..10)
+            .map(|character| {
+                crate::ownership_badges::style(&image, Some(character))
+                    .unwrap()
+                    .0
+            })
+            .collect();
         let mut at = 12;
         for case in 0..w(8) {
             let quad = super::ownership_quad(
@@ -597,32 +755,59 @@ mod tests {
             categories[category][4] = w(at + 28) as u8;
             categories[category][5] = w(at + 32) as u8;
             categories[category][0x7c..0x80].copy_from_slice(&w(at + 40).to_le_bytes());
-            let character = colours.iter().position(|&colour| colour == w(at + 36)).unwrap();
+            let character = colours
+                .iter()
+                .position(|&colour| colour == w(at + 36))
+                .unwrap();
             let mut player = openmt2001::player_manager::Player {
-                reference: 0x10040000, bytes: vec![0; 0x1e50], auxiliaries: vec![],
+                reference: 0x10040000,
+                bytes: vec![0; 0x1e50],
+                auxiliaries: vec![],
             };
             player.bytes[0x150..0x154].copy_from_slice(&(character as u32).to_le_bytes());
             let current = if w(at + 44) != 0 { player.reference } else { 0 };
-            let manager = openmt2001::player_manager::Manager { bytes: [0; 0x28], players: vec![player] };
+            let manager = openmt2001::player_manager::Manager {
+                bytes: [0; 0x28],
+                players: vec![player],
+            };
             let owners = super::runtime_owners(&categories, &manager, current, &image).unwrap();
-            assert_eq!(owners.iter().filter(|owner| owner.is_some()).count(), count as usize);
+            assert_eq!(
+                owners.iter().filter(|owner| owner.is_some()).count(),
+                count as usize
+            );
             let mut blocks = board.blocks.clone();
-            let target = blocks.iter_mut().find(|block| block.id == category).unwrap();
+            let target = blocks
+                .iter_mut()
+                .find(|block| block.id == category)
+                .unwrap();
             target.center = [f(at + 8), f(at + 12)];
             target.size = [f(at + 16), f(at + 20)];
             navigator.bounds = [f(at), f(at + 4), f(at), f(at + 4)];
             navigator.blocks = blocks;
             let surface = navigator.ownership_surface(&owners, w(at + 48));
-            assert_eq!(surface.vertices.len(), count as usize * 6, "production gate {case}");
+            assert_eq!(
+                surface.vertices.len(),
+                count as usize * 6,
+                "production gate {case}"
+            );
             if count != 0 {
                 for (vertex, index) in surface.vertices.iter().zip([0, 1, 2, 0, 2, 3]) {
                     let point = quad[index];
-                    assert_eq!(vertex[..2], point[..2], "production native-ID geometry {case}");
+                    assert_eq!(
+                        vertex[..2],
+                        point[..2],
+                        "production native-ID geometry {case}"
+                    );
                     assert_eq!(vertex[3], ((colour >> 16) & 255) as f32 / 255.);
                     assert_eq!(vertex[4], ((colour >> 8) & 255) as f32 / 255.);
                     assert_eq!(vertex[5], (colour & 255) as f32 / 255.);
                 }
-                assert!(surface.alpha.iter().all(|&alpha| alpha == (colour >> 24) as u8));
+                assert!(
+                    surface
+                        .alpha
+                        .iter()
+                        .all(|&alpha| alpha == (colour >> 24) as u8)
+                );
             }
             at += 56;
             if count != 0 {

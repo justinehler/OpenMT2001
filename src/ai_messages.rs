@@ -429,38 +429,126 @@ mod tests {
         assert!(r.0.is_empty());
     }
     #[test]
-    #[ignore="requires whole original ownership/count inbox executions"]
-    fn matches_native_business_inbox(){
-        let data=std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUSINESS_INBOX").unwrap()).unwrap();
-        let exe=std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();let image=PeImage::parse(&exe).unwrap();
-        let mut r=Reader(&data);assert_eq!(r.take(8),b"MTAIBIN1");assert_eq!(r.word(),0x37f);
-        for case in 0..r.word(){
-            let _kind=r.word();let b:Vec<_>=(0..9).map(|_|r.blob()).collect();let a:Vec<_>=(0..4).map(|_|r.blob()).collect();
-            let expected_alloc:Vec<_>=(0..r.word()).map(|_|r.word()).collect();let frees:Vec<_>=(0..r.word()).map(|_|r.word()).collect();assert_eq!(frees[0],0x10016000);
-            let mut player=Player{reference:0x10010000,bytes:b[0].to_vec(),auxiliaries:vec![
-                crate::player_manager::Auxiliary{reference:0x10015000,bytes:b[1].try_into().unwrap()},
-                crate::player_manager::Auxiliary{reference:0x10016000,bytes:b[2].try_into().unwrap()}]};
-            let mut storage=crate::ai_ownership::Storage::default();storage.lists.insert(0x10020000,b[3].chunks_exact(28).map(|v|v.try_into().unwrap()).collect());
-            let buildings:Vec<[u8;916]>=b[4].chunks_exact(916).map(|v|v.try_into().unwrap()).collect();let businesses:Vec<[u8;544]>=b[5].chunks_exact(544).map(|v|v.try_into().unwrap()).collect();
-            let mut categories=[[0;380];52];categories[0]=b[6].try_into().unwrap();
-            let catalog=crate::business_pool::BusinessCatalog::from_rows(b[7].chunks_exact(116).map(|v|v.try_into().unwrap()).collect::<Vec<_>>().try_into().unwrap());
-            let mut counts: [u32;52*45]=std::array::from_fn(|i|word(b[8],i*4));let mut profiles=[[0;0x650];10];let mut alloc=vec![];
-            let mut context=Context{image:&image,profiles:&mut profiles,buildings:&buildings,auction:None};
-            consume(&mut player,&mut context,|call,player,_|{
-                match call.address{
-                    0x46aa40=>storage.mutate(player,|size|{alloc.push(size as u32);Ok(0x10040000)},|state|state.insert(call.arguments[1] as usize,call.arguments[0] as i32,|id|crate::ai_ownership::live_entry_value_from_catalog(id,&businesses,&buildings,&categories,&catalog)))?,
-                    0x46ae20=>storage.mutate(player,|_|panic!("remove allocated"),|state|{state.lists[call.arguments[1] as usize].remove(call.arguments[0] as i32);Ok(())})?,
-                    0x472620=>crate::ai_business::remove_category_count(&mut counts,call.arguments[0],call.arguments[1])?,
-                    _=>panic!("unexpected native business inbox callback {call:?}"),
+    #[ignore = "requires whole original ownership/count inbox executions"]
+    fn matches_native_business_inbox() {
+        let data =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_BUSINESS_INBOX").unwrap()).unwrap();
+        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let image = PeImage::parse(&exe).unwrap();
+        let mut r = Reader(&data);
+        assert_eq!(r.take(8), b"MTAIBIN1");
+        assert_eq!(r.word(), 0x37f);
+        for case in 0..r.word() {
+            let _kind = r.word();
+            let b: Vec<_> = (0..9).map(|_| r.blob()).collect();
+            let a: Vec<_> = (0..4).map(|_| r.blob()).collect();
+            let expected_alloc: Vec<_> = (0..r.word()).map(|_| r.word()).collect();
+            let frees: Vec<_> = (0..r.word()).map(|_| r.word()).collect();
+            assert_eq!(frees[0], 0x10016000);
+            let mut player = Player {
+                reference: 0x10010000,
+                bytes: b[0].to_vec(),
+                auxiliaries: vec![
+                    crate::player_manager::Auxiliary {
+                        reference: 0x10015000,
+                        bytes: b[1].try_into().unwrap(),
+                    },
+                    crate::player_manager::Auxiliary {
+                        reference: 0x10016000,
+                        bytes: b[2].try_into().unwrap(),
+                    },
+                ],
+            };
+            let mut storage = crate::ai_ownership::Storage::default();
+            storage.lists.insert(
+                0x10020000,
+                b[3].chunks_exact(28)
+                    .map(|v| v.try_into().unwrap())
+                    .collect(),
+            );
+            let buildings: Vec<[u8; 916]> = b[4]
+                .chunks_exact(916)
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            let businesses: Vec<[u8; 544]> = b[5]
+                .chunks_exact(544)
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            let mut categories = [[0; 380]; 52];
+            categories[0] = b[6].try_into().unwrap();
+            let catalog = crate::business_pool::BusinessCatalog::from_rows(
+                b[7].chunks_exact(116)
+                    .map(|v| v.try_into().unwrap())
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            );
+            let mut counts: [u32; 52 * 45] = std::array::from_fn(|i| word(b[8], i * 4));
+            let mut profiles = [[0; 0x650]; 10];
+            let mut alloc = vec![];
+            let mut context = Context {
+                image: &image,
+                profiles: &mut profiles,
+                buildings: &buildings,
+                auction: None,
+            };
+            consume(&mut player, &mut context, |call, player, _| {
+                match call.address {
+                    0x46aa40 => storage.mutate(
+                        player,
+                        |size| {
+                            alloc.push(size as u32);
+                            Ok(0x10040000)
+                        },
+                        |state| {
+                            state.insert(
+                                call.arguments[1] as usize,
+                                call.arguments[0] as i32,
+                                |id| {
+                                    crate::ai_ownership::live_entry_value_from_catalog(
+                                        id,
+                                        &businesses,
+                                        &buildings,
+                                        &categories,
+                                        &catalog,
+                                    )
+                                },
+                            )
+                        },
+                    )?,
+                    0x46ae20 => storage.mutate(
+                        player,
+                        |_| panic!("remove allocated"),
+                        |state| {
+                            state.lists[call.arguments[1] as usize]
+                                .remove(call.arguments[0] as i32);
+                            Ok(())
+                        },
+                    )?,
+                    0x472620 => crate::ai_business::remove_category_count(
+                        &mut counts,
+                        call.arguments[0],
+                        call.arguments[1],
+                    )?,
+                    _ => panic!("unexpected native business inbox callback {call:?}"),
                 }
                 Ok(Reply::default())
-            }).unwrap();
-            assert_eq!(player.bytes,a[0],"case{case} player");assert_eq!(player.auxiliaries.len(),1);assert_eq!(player.auxiliaries[0].bytes,a[1],"case{case} scratch");
-            let state=storage.state(&player).unwrap();assert_eq!(state.lists[0].entries.as_flattened(),a[2],"case{case} ownership rows");
-            for(i,value)in counts.iter().enumerate(){assert_eq!(*value,word(a[3],i*4),"case{case} count{i}");}
-            assert_eq!(alloc,expected_alloc,"case{case} allocation");
+            })
+            .unwrap();
+            assert_eq!(player.bytes, a[0], "case{case} player");
+            assert_eq!(player.auxiliaries.len(), 1);
+            assert_eq!(player.auxiliaries[0].bytes, a[1], "case{case} scratch");
+            let state = storage.state(&player).unwrap();
+            assert_eq!(
+                state.lists[0].entries.as_flattened(),
+                a[2],
+                "case{case} ownership rows"
+            );
+            for (i, value) in counts.iter().enumerate() {
+                assert_eq!(*value, word(a[3], i * 4), "case{case} count{i}");
+            }
+            assert_eq!(alloc, expected_alloc, "case{case} allocation");
         }
         assert!(r.0.is_empty());
     }
-
 }

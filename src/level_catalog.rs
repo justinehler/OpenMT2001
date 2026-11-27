@@ -331,7 +331,9 @@ mod tests {
                     [args[9] as i32, args[10] as i32, args[11] as i32],
                 ),
                 7 => actual.finish(completed, won).unwrap(),
-                8 => {actual.select(args[1],false);},
+                8 => {
+                    actual.select(args[1], false);
+                }
                 _ => panic!("unknown catalog operation"),
             }
             assert_eq!(actual.selected, expected.selected, "case{case} selection");

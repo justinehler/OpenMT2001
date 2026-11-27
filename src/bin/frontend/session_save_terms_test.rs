@@ -1,46 +1,127 @@
 // Terms continuation from the legally generated 68-tenant V3 snapshot.
 use super::*;
-use crate::fresh_city::{character_names, load_era_styles, CommandAssets, Inputs, Policy, Session};
+use crate::fresh_city::{CommandAssets, Inputs, Policy, Session, character_names, load_era_styles};
 
 fn occupied(session: &Session<'_>, business: usize) -> u16 {
-    u16::from_le_bytes(session.world.ledgers.businesses[business][0x10..0x12].try_into().unwrap())
+    u16::from_le_bytes(
+        session.world.ledgers.businesses[business][0x10..0x12]
+            .try_into()
+            .unwrap(),
+    )
 }
 fn compare(source: &Session<'_>, resumed: &Session<'_>) {
     assert_eq!(source.world.clock, resumed.world.clock);
-    for (index, (a, b)) in source.world.ledgers.businesses.iter().zip(&resumed.world.ledgers.businesses).enumerate() {
+    for (index, (a, b)) in source
+        .world
+        .ledgers
+        .businesses
+        .iter()
+        .zip(&resumed.world.ledgers.businesses)
+        .enumerate()
+    {
         assert_eq!(a, b, "business{index}");
     }
     assert_eq!(source.world.available, resumed.world.available);
-    for (index, (a, b)) in source.world.ai_demand.rows.iter().zip(&resumed.world.ai_demand.rows).enumerate() {
+    for (index, (a, b)) in source
+        .world
+        .ai_demand
+        .rows
+        .iter()
+        .zip(&resumed.world.ai_demand.rows)
+        .enumerate()
+    {
         assert_eq!(a, b, "demand row{index}");
     }
     assert_eq!(source.world.ai_demand.ready, resumed.world.ai_demand.ready);
-    assert_eq!(source.world.ledgers.residents.active_count, resumed.world.ledgers.residents.active_count);
-    for (a, b) in source.world.ledgers.residents.nodes.iter().zip(&resumed.world.ledgers.residents.nodes) {
+    assert_eq!(
+        source.world.ledgers.residents.active_count,
+        resumed.world.ledgers.residents.active_count
+    );
+    for (a, b) in source
+        .world
+        .ledgers
+        .residents
+        .nodes
+        .iter()
+        .zip(&resumed.world.ledgers.residents.nodes)
+    {
         assert_eq!(a.as_bytes(), b.as_bytes());
         assert_eq!(a.active_byte(), b.active_byte());
         assert_eq!(a.auxiliary_reference(), b.auxiliary_reference());
     }
-    for (a, b) in source.world.ledgers.residents.accounts.iter().zip(&resumed.world.ledgers.residents.accounts) {
+    for (a, b) in source
+        .world
+        .ledgers
+        .residents
+        .accounts
+        .iter()
+        .zip(&resumed.world.ledgers.residents.accounts)
+    {
         assert_eq!(a.as_bytes(), b.as_bytes());
     }
-    for (a, b) in source.roster.manager.players.iter().zip(&resumed.roster.manager.players) {
+    for (a, b) in source
+        .roster
+        .manager
+        .players
+        .iter()
+        .zip(&resumed.roster.manager.players)
+    {
         assert_eq!(a.bytes, b.bytes);
     }
-    assert_eq!(source.world.creation.auxiliary.used(), resumed.world.creation.auxiliary.used());
-    for (index, (a, b)) in source.world.creation.auxiliary.slots().iter().zip(resumed.world.creation.auxiliary.slots()).enumerate() {
+    assert_eq!(
+        source.world.creation.auxiliary.used(),
+        resumed.world.creation.auxiliary.used()
+    );
+    for (index, (a, b)) in source
+        .world
+        .creation
+        .auxiliary
+        .slots()
+        .iter()
+        .zip(resumed.world.creation.auxiliary.slots())
+        .enumerate()
+    {
         assert_eq!(a, b, "resident auxiliary{index}");
     }
-    assert_eq!(source.world.creation.initialization_rng.constructor, resumed.world.creation.initialization_rng.constructor);
-    assert_eq!(source.world.creation.initialization_rng.movement, resumed.world.creation.initialization_rng.movement);
-    assert_eq!(source.world.creation.initialization_rng.objective, resumed.world.creation.initialization_rng.objective);
-    assert_eq!(source.road_traffic.admission.random, resumed.road_traffic.admission.random);
-    for (a, b) in source.world.categories.iter().zip(&resumed.world.categories) {
+    assert_eq!(
+        source.world.creation.initialization_rng.constructor,
+        resumed.world.creation.initialization_rng.constructor
+    );
+    assert_eq!(
+        source.world.creation.initialization_rng.movement,
+        resumed.world.creation.initialization_rng.movement
+    );
+    assert_eq!(
+        source.world.creation.initialization_rng.objective,
+        resumed.world.creation.initialization_rng.objective
+    );
+    assert_eq!(
+        source.road_traffic.admission.random,
+        resumed.road_traffic.admission.random
+    );
+    for (a, b) in source
+        .world
+        .categories
+        .iter()
+        .zip(&resumed.world.categories)
+    {
         assert_eq!(a[5], b[5]);
         assert_eq!(&a[0x6c..0x8c], &b[0x6c..0x8c]);
     }
-    assert_eq!(openmt2001::building_pool::category_chains(&source.world.categories, &source.world.buildings, 0x591318).unwrap(),
-        openmt2001::building_pool::category_chains(&resumed.world.categories, &resumed.world.buildings, 0x591318).unwrap());
+    assert_eq!(
+        openmt2001::building_pool::category_chains(
+            &source.world.categories,
+            &source.world.buildings,
+            0x591318
+        )
+        .unwrap(),
+        openmt2001::building_pool::category_chains(
+            &resumed.world.categories,
+            &resumed.world.buildings,
+            0x591318
+        )
+        .unwrap()
+    );
 }
 
 #[test]

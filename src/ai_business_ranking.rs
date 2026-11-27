@@ -388,7 +388,7 @@ pub fn rank(
     }
     crate::native_sort::sort(&mut primary, &|a, b| compare(a[0], b[0]));
     crate::native_sort::sort(&mut secondary[..32], &|a, b| compare(a[0], b[0]));
-    let factor = crate::ai_profiles::factor(w.image,0x47d360,word(&player.bytes,0x150))?;
+    let factor = crate::ai_profiles::factor(w.image, 0x47d360, word(&player.bytes, 0x150))?;
     if n > 0 {
         let threshold =
             primary[0][0].wrapping_mul(crate::economy::ftol_low_word(f64::from(factor))) / 100;
@@ -582,7 +582,13 @@ fn matches_native_business_ranking() {
         assert_eq!(player.bytes, after, "case{case} fullplayer");
         assert_eq!(cursor, trace.len(), "case{case} complete trace");
     }
-    assert_eq!(saved_population_cases, 12, "500-resident native decisions missing");
-    assert_eq!(supplied_resident_cases, 4, "supplied-resident native decisions missing");
+    assert_eq!(
+        saved_population_cases, 12,
+        "500-resident native decisions missing"
+    );
+    assert_eq!(
+        supplied_resident_cases, 4,
+        "supplied-resident native decisions missing"
+    );
     assert!(r.0.is_empty());
 }
