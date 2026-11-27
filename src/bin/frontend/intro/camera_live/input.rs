@@ -1,6 +1,9 @@
 //! Process physical events, captured before any menu/Inspection routing.
 //! No tutorial/Build/UI gate belongs in these event producers.
-use winit::{event::MouseButton, keyboard::{KeyCode, PhysicalKey}};
+use winit::{
+    event::MouseButton,
+    keyboard::{KeyCode, PhysicalKey},
+};
 
 #[derive(Default)]
 pub struct PhysicalInput {
@@ -60,16 +63,28 @@ impl PhysicalInput {
     }
 
     pub fn snapshot(&self) -> Result<([bool; 4], [bool; 2], [i32; 2]), String> {
-        if let Some(error) = &self.error { return Err(error.clone()); }
-        Ok((std::array::from_fn(|i| self.held[i] || self.taps[i]), self.buttons, self.delta))
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+        Ok((
+            std::array::from_fn(|i| self.held[i] || self.taps[i]),
+            self.buttons,
+            self.delta,
+        ))
     }
 
     /// Exactly one successful central consumes edges/delta, even mode4/6 or
     /// a disabled callback. Later catchup callbacks retain held input only.
-    pub fn consumed(&mut self) { self.taps = [false; 4]; self.delta = [0; 2]; }
+    pub fn consumed(&mut self) {
+        self.taps = [false; 4];
+        self.delta = [0; 2];
+    }
 
     pub fn unfocus(&mut self) {
-        self.held = [false; 4]; self.taps = [false; 4];
-        self.buttons = [false; 2]; self.delta = [0; 2]; self.pointer = None;
+        self.held = [false; 4];
+        self.taps = [false; 4];
+        self.buttons = [false; 2];
+        self.delta = [0; 2];
+        self.pointer = None;
     }
 }

@@ -656,28 +656,57 @@ mod tests {
         let path = "gamedata2/brand_new_panels/stats_panel.tm";
         let entry = index.find(path).unwrap();
         let mesh = openmt2001::mesh::CachedMesh::parse(
-            &archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
         let regions = openmt2001::ui_mesh::regions(&mesh, 9).unwrap();
         for (name, part) in [("P_STATS_MODE_BACKING1", 4), ("P_STATS_STATS_BACKING", 5)] {
             assert_eq!(regions.iter().find(|r| r.name == name).unwrap().part, part);
-            assert_eq!(mesh.parts[part].indices.len(), 12, "runtime fill covers a full placeholder quad");
-            assert!(mesh.texture_names[mesh.parts[part].texture as usize]
-                .eq_ignore_ascii_case("1NEW_MAYA_GREY_BORDER.TT"));
+            assert_eq!(
+                mesh.parts[part].indices.len(),
+                12,
+                "runtime fill covers a full placeholder quad"
+            );
+            assert!(
+                mesh.texture_names[mesh.parts[part].texture as usize]
+                    .eq_ignore_ascii_case("1NEW_MAYA_GREY_BORDER.TT")
+            );
         }
         let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
-        let assets = super::Assets::load(&index, &archive,
-            sun.parent().unwrap().parent().unwrap(), &[], &exe).unwrap();
-        let body = u32::from_le_bytes(openmt2001::pe::PeImage::parse(&exe).unwrap()
-            .at(0x5362c0, 4).unwrap().try_into().unwrap());
+        let assets = super::Assets::load(
+            &index,
+            &archive,
+            sun.parent().unwrap().parent().unwrap(),
+            &[],
+            &exe,
+        )
+        .unwrap();
+        let body = u32::from_le_bytes(
+            openmt2001::pe::PeImage::parse(&exe)
+                .unwrap()
+                .at(0x5362c0, 4)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(body, 0xbb000a28);
         for (state, frame) in [(0, 0), (1, 9)] {
-            let (border, _) = ui::panel_frame_base(&index, &archive, path,
-                &[0,1,2,3,6,7,8,9,10,11], frame).unwrap();
+            let (border, _) = ui::panel_frame_base(
+                &index,
+                &archive,
+                path,
+                &[0, 1, 2, 3, 6, 7, 8, 9, 10, 11],
+                frame,
+            )
+            .unwrap();
             let submitted = &assets.base[state];
             let offset = usize::from(frame == 9);
             assert_eq!(submitted.len(), border.len() + offset + 1);
             for (actual, original) in submitted[offset..offset + border.len()].iter().zip(&border) {
-                assert_eq!(actual.vertices, original.vertices, "retained border geometry/order");
+                assert_eq!(
+                    actual.vertices, original.vertices,
+                    "retained border geometry/order"
+                );
                 assert_eq!(actual.pixels, original.pixels, "retained border material");
                 assert_eq!(actual.alpha, original.alpha, "retained border opacity");
             }
@@ -686,15 +715,24 @@ mod tests {
             let mut backing = Surface::solid();
             for (name, colors) in super::background_palette(frame, body) {
                 let bounds = named.iter().find(|r| r.name == name).unwrap().bounds;
-                if name == "P_STATS_LEFT_VERT" { side.rect(bounds, colors); }
-                else { backing.rect(bounds, colors); }
+                if name == "P_STATS_LEFT_VERT" {
+                    side.rect(bounds, colors);
+                } else {
+                    backing.rect(bounds, colors);
+                }
             }
             let actual_side = submitted.last().unwrap();
             assert_eq!(actual_side.vertices, side.vertices);
-            assert_eq!(actual_side.alpha, side.alpha, "intentional gray side gradient retained");
+            assert_eq!(
+                actual_side.alpha, side.alpha,
+                "intentional gray side gradient retained"
+            );
             if frame == 9 {
                 let actual = &submitted[0];
-                assert_eq!(actual.vertices, backing.vertices, "navy body precedes every border");
+                assert_eq!(
+                    actual.vertices, backing.vertices,
+                    "navy body precedes every border"
+                );
                 assert_eq!(actual.alpha, [187; 12]);
                 assert_eq!(actual.pixels, [255; 4]);
                 assert_eq!(actual.draw().mode, openmt2001::render::SurfaceMode::Overlay);
@@ -937,10 +975,18 @@ mod refresh_ui_tests {
     use super::*;
     #[test]
     fn selected_metric_survives_new_objective_and_values_without_input_capture() {
-        let mut old = View::new(Data { objective: 0, rows: vec![(0, [1.; 9])] });
-        old.state.mode = 4; old.state.open = false;
-        old.pressed = Some(2); old.hover = Some(2);
-        let mut new = View::new(Data { objective: 1, rows: vec![(1, [42.; 9])] });
+        let mut old = View::new(Data {
+            objective: 0,
+            rows: vec![(0, [1.; 9])],
+        });
+        old.state.mode = 4;
+        old.state.open = false;
+        old.pressed = Some(2);
+        old.hover = Some(2);
+        let mut new = View::new(Data {
+            objective: 1,
+            rows: vec![(1, [42.; 9])],
+        });
         assert_eq!(new.state.mode, 6);
         new.retain_ui_from(&old);
         assert_eq!(new.state.mode, 4);
@@ -948,11 +994,17 @@ mod refresh_ui_tests {
         assert_eq!(new.data.objective, 1);
         assert_eq!(new.data.values(4), vec![(1, 42.)]);
         assert!(!new.state.enabled[7]);
-        assert!(new.pressed.is_none() && new.hover.is_none() && new.prepared.is_none() && new.dirty);
-        old.state.mode = 7; old.state.open = true;
-        let mut fallback = View::new(new.data.clone()); fallback.retain_ui_from(&old);
-        assert!(fallback.state.open); assert_eq!(fallback.state.mode, 6);
-        old.state.mode = usize::MAX; fallback.retain_ui_from(&old);
+        assert!(
+            new.pressed.is_none() && new.hover.is_none() && new.prepared.is_none() && new.dirty
+        );
+        old.state.mode = 7;
+        old.state.open = true;
+        let mut fallback = View::new(new.data.clone());
+        fallback.retain_ui_from(&old);
+        assert!(fallback.state.open);
+        assert_eq!(fallback.state.mode, 6);
+        old.state.mode = usize::MAX;
+        fallback.retain_ui_from(&old);
         assert_eq!(fallback.state.mode, 6);
     }
 }

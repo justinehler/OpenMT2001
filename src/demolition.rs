@@ -36,7 +36,9 @@ fn quote_word(
     let category = categories
         .get((offset / 380) as usize)
         .ok_or("demolition category pointer outside pool")?;
-    let category = categories.get(word(category,0) as usize).ok_or("demolition category identity outside pool")?;
+    let category = categories
+        .get(word(category, 0) as usize)
+        .ok_or("demolition category identity outside pool")?;
     let volume = (i32::from(building[7]) - i32::from(building[5]) + 1)
         .wrapping_mul(i32::from(building[6]) - i32::from(building[4]) + 1)
         .wrapping_mul(i32::from(building[8]));

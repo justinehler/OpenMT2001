@@ -139,11 +139,16 @@ impl Layer {
         sample: openmt2001::flyby::CameraSample,
         detail: u32,
     ) -> Result<Range<usize>, String> {
-        let time = scene.daylight_time()
+        let time = scene
+            .daylight_time()
             .ok_or("moving layer needs original scene daylight")?;
         let light = self.suncolors.sample(time.0, time.1)?;
         let palette = openmt2001::lighting::Palette::new(
-            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+            light.diffuse,
+            light.ambient,
+            light.diffuse,
+            0,
+            light.scale,
         );
         let draws = scene
             .draws

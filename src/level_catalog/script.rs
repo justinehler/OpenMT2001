@@ -43,7 +43,12 @@ pub fn load(
     development: bool,
     directory: impl FnMut(&[u8]) -> Result<Option<i32>, String>,
 ) -> Result<Catalog, String> {
-    load_sources(image, &[("GAMESTART/hub.lua", source)], development, directory)
+    load_sources(
+        image,
+        &[("GAMESTART/hub.lua", source)],
+        development,
+        directory,
+    )
 }
 
 /// Execute buffers in caller order in one runtime and catalog. The host owns
@@ -71,54 +76,56 @@ fn register_sources(
     let mut catalog = Catalog::default();
     let mut registrations = 0usize;
     for &(name, source) in sources {
-        runtime.execute(name, source, &mut |id, args| {
-            registrations += 1;
-            if registrations > 16_384 {
-                return Err("level registration callback limit exceeded".into());
-            }
-            let number = |i: usize| -> Result<u32, String> {
-                match args.get(i) {
-                    Some(Value::Number(n)) => Ok(ftol_low_word(*n) as u32),
-                    _ => Err("level registration numeric coercion missing".into()),
+        runtime
+            .execute(name, source, &mut |id, args| {
+                registrations += 1;
+                if registrations > 16_384 {
+                    return Err("level registration callback limit exceeded".into());
                 }
-            };
-            let text = |i: usize| -> Result<Vec<u8>, String> {
-                match args.get(i) {
-                    Some(Value::Bytes(s)) => Ok(s.clone()),
-                    _ => Err("level registration string conversion failed".into()),
+                let number = |i: usize| -> Result<u32, String> {
+                    match args.get(i) {
+                        Some(Value::Number(n)) => Ok(ftol_low_word(*n) as u32),
+                        _ => Err("level registration numeric coercion missing".into()),
+                    }
+                };
+                let text = |i: usize| -> Result<Vec<u8>, String> {
+                    match args.get(i) {
+                        Some(Value::Bytes(s)) => Ok(s.clone()),
+                        _ => Err("level registration string conversion failed".into()),
+                    }
+                };
+                let level_id = number(0)? as i32;
+                if !development && level_id / 100000 >= 7 {
+                    return Ok(None);
                 }
-            };
-            let level_id = number(0)? as i32;
-            if !development && level_id / 100000 >= 7 {
-                return Ok(None);
-            }
-            let token = text(1)?;
-            let Some(checksum) = directory(&token)? else {
-                return Ok(None);
-            };
-            let labels = match id {
-                0 => Labels::Literal {
-                    title: text(2)?,
-                    description: text(3)?,
-                },
-                1 => Labels::Localized {
-                    title: number(2)?,
-                    description: number(3)?,
-                },
-                _ => return Err("unknown level registration callback".into()),
-            };
-            catalog.register(
-                Registration {
-                    id: level_id,
-                    directory: token,
-                    labels,
-                    checksum,
-                },
-                development,
-                true,
-            )?;
-            Ok(None)
-        }).map_err(|error| format!("{name}: {error}"))?;
+                let token = text(1)?;
+                let Some(checksum) = directory(&token)? else {
+                    return Ok(None);
+                };
+                let labels = match id {
+                    0 => Labels::Literal {
+                        title: text(2)?,
+                        description: text(3)?,
+                    },
+                    1 => Labels::Localized {
+                        title: number(2)?,
+                        description: number(3)?,
+                    },
+                    _ => return Err("unknown level registration callback".into()),
+                };
+                catalog.register(
+                    Registration {
+                        id: level_id,
+                        directory: token,
+                        labels,
+                        checksum,
+                    },
+                    development,
+                    true,
+                )?;
+                Ok(None)
+            })
+            .map_err(|error| format!("{name}: {error}"))?;
     }
     Ok(catalog)
 }
@@ -184,15 +191,30 @@ mod tests {
         let catalog = register_sources(&mut runtime, sources, false, |name| {
             queried.push(name.to_vec());
             Ok(if name == b"missing" { None } else { Some(123) })
-        }).unwrap();
-        assert_eq!(catalog.levels.iter().map(|l| l.id()).collect::<Vec<_>>(), [200001,500000,500001,500000]);
+        })
+        .unwrap();
+        assert_eq!(
+            catalog.levels.iter().map(|l| l.id()).collect::<Vec<_>>(),
+            [200001, 500000, 500001, 500000]
+        );
         assert_eq!(catalog.find(500000), Some(1));
         assert!(!queried.iter().any(|name| name == b"dev"));
         assert_eq!(catalog.levels[2].directory(), b"custom/second");
-        assert!(matches!(catalog.levels[1].labels(), Labels::Literal { title, description }
-            if title == b"Literal" && description == b"Details"));
-        assert!(matches!(catalog.levels[2].labels(), Labels::Localized { title: 12, description: 34 }));
-        let empty = register_sources(&mut Runtime::new().unwrap(), &[], false, |_| panic!("no callback expected")).unwrap();
+        assert!(
+            matches!(catalog.levels[1].labels(), Labels::Literal { title, description }
+            if title == b"Literal" && description == b"Details")
+        );
+        assert!(matches!(
+            catalog.levels[2].labels(),
+            Labels::Localized {
+                title: 12,
+                description: 34
+            }
+        ));
+        let empty = register_sources(&mut Runtime::new().unwrap(), &[], false, |_| {
+            panic!("no callback expected")
+        })
+        .unwrap();
         assert!(empty.levels.is_empty());
     }
     #[test]

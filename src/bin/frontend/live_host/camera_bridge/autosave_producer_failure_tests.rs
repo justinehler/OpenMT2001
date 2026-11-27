@@ -1,259 +1,493 @@
 //! Real Scenario1 producers and Host callbacks, with a controlled
 //! one-tick midnight alignment. These are component regressions, not natural
 //! rollover, full UI, original-executable, or portable GPU acceptance.
-use crate::{fresh_city::{Session, CommandAssets},
-    live_host::{camera_bridge, Host, CameraSupplierPolicy, ledger_ui_call}};
-use crate::intro::camera_live::{self as live, endpoint::{Context, Endpoint, PropertyInstall},
-    owner::{Owner, Input, Pose}};
-use openmt2001::{camera::{bank::{Bank, Capture}, primary::CursorRequest},
-    live_commands::Command, save::SaveFile};
-use std::{fs, path::{Path, PathBuf}, sync::{Arc, Mutex, mpsc,
-    atomic::{AtomicBool, Ordering}}, thread::{self, JoinHandle}, time::{Duration, Instant}};
-fn word(bytes: &[u8], at: usize) -> u32 { u32::from_le_bytes(bytes[at..at+4].try_into().unwrap()) }
+use crate::intro::camera_live::{
+    self as live,
+    endpoint::{Context, Endpoint, PropertyInstall},
+    owner::{Input, Owner, Pose},
+};
+use crate::{
+    fresh_city::{CommandAssets, Session},
+    live_host::{CameraSupplierPolicy, Host, camera_bridge, ledger_ui_call},
+};
+use openmt2001::{
+    camera::{
+        bank::{Bank, Capture},
+        primary::CursorRequest,
+    },
+    live_commands::Command,
+    save::SaveFile,
+};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
+fn word(bytes: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+}
 const WAIT: Duration = Duration::from_secs(10);
 const LIMIT: usize = 12_000;
 
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .expect("explicit disk scratch parent required"));
+        let parent = PathBuf::from(
+            std::env::var_os("OPENMT2001_TEST_SCRATCH")
+                .expect("explicit disk scratch parent required"),
+        );
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
-        let path = parent.join(format!("autosave-producer-failure-v1-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        fs::create_dir(&path).unwrap(); Self(path)
+        let path = parent.join(format!(
+            "autosave-producer-failure-v1-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&path).unwrap();
+        Self(path)
     }
 }
-impl Drop for Scratch { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 #[derive(Default, Debug)]
-struct CameraAudit { completed: Vec<camera_bridge::Boundary>, retired_queued: bool,
-    before_retire: Option<Capture>, after_retire: Option<Capture>, raw_pairs: Vec<Capture> }
+struct CameraAudit {
+    completed: Vec<camera_bridge::Boundary>,
+    retired_queued: bool,
+    before_retire: Option<Capture>,
+    after_retire: Option<Capture>,
+    raw_pairs: Vec<Capture>,
+}
 /// Deliberately has no provider or process D product. Only the graph-absent
 /// Install, CurrentPose and RawCapture branches are admitted. All actual raw
 /// reads/install/retirement remain in the production Endpoint and Owner.
-struct CaptureContext { expected: camera_bridge::Boundary, installing: bool }
-fn unsupported<T>(name: &str) -> Result<T, String> { Err(format!("capture-only fixture cannot service {name}")) }
+struct CaptureContext {
+    expected: camera_bridge::Boundary,
+    installing: bool,
+}
+fn unsupported<T>(name: &str) -> Result<T, String> {
+    Err(format!("capture-only fixture cannot service {name}"))
+}
 impl Context for CaptureContext {
-    fn primary_construction(&mut self)->Option<(&mut crate::intro::camera_live::deferred_primary::DeferredPrimary,
-        &mut crate::intro::camera_live::primitive_factory::Primitives,&mut crate::intro::camera_live::ui_text_resources::UiTextResources,
-        &crate::intro::camera_live::process_images::Images)>{None}
+    fn primary_construction(
+        &mut self,
+    ) -> Option<(
+        &mut crate::intro::camera_live::deferred_primary::DeferredPrimary,
+        &mut crate::intro::camera_live::primitive_factory::Primitives,
+        &mut crate::intro::camera_live::ui_text_resources::UiTextResources,
+        &crate::intro::camera_live::process_images::Images,
+    )> {
+        None
+    }
 
-    fn save_interface_mode(&self) -> Result<u32,String> {
+    fn save_interface_mode(&self) -> Result<u32, String> {
         // Explicit controlled normal-view component input, not a UI observation.
-        if self.expected != camera_bridge::Boundary::RawCapture { return unsupported("view outside RawCapture"); }
+        if self.expected != camera_bridge::Boundary::RawCapture {
+            return unsupported("view outside RawCapture");
+        }
         Ok(0)
     }
-    fn validate(&self, operation: &camera_bridge::Operation, _: &Owner) -> Result<(),String> {
+    fn validate(&self, operation: &camera_bridge::Operation, _: &Owner) -> Result<(), String> {
         let actual = match operation {
-            camera_bridge::Operation::Install{..} => camera_bridge::Boundary::Install,
+            camera_bridge::Operation::Install { .. } => camera_bridge::Boundary::Install,
             camera_bridge::Operation::CurrentPose => camera_bridge::Boundary::CurrentPose,
             camera_bridge::Operation::RawCapture => camera_bridge::Boundary::RawCapture,
             other => return unsupported(&format!("{other:?}")),
         };
-        if actual != self.expected { return unsupported("unexpected operation order"); }
+        if actual != self.expected {
+            return unsupported("unexpected operation order");
+        }
         Ok(())
     }
-    fn admission(&mut self, a: &camera_bridge::Admission) -> Result<(),String> {
-        if self.expected != camera_bridge::Boundary::Install || self.installing
-            || a.upper.is_some() || a.strategic.is_some() { return unsupported("noninitial/graph admission"); }
-        self.installing = true; Ok(())
+    fn admission(&mut self, a: &camera_bridge::Admission) -> Result<(), String> {
+        if self.expected != camera_bridge::Boundary::Install
+            || self.installing
+            || a.upper.is_some()
+            || a.strategic.is_some()
+        {
+            return unsupported("noninitial/graph admission");
+        }
+        self.installing = true;
+        Ok(())
     }
-    fn take_strategic_writeback(&mut self) -> Result<Option<crate::locator::strategic::Writeback>,String> {
-        if !self.installing { return unsupported("noninstall writeback"); }
-        self.installing = false; Ok(None)
+    fn take_strategic_writeback(
+        &mut self,
+    ) -> Result<Option<crate::locator::strategic::Writeback>, String> {
+        if !self.installing {
+            return unsupported("noninstall writeback");
+        }
+        self.installing = false;
+        Ok(None)
     }
-    fn pre_camera(&mut self, _: &mut Owner, _: &camera_bridge::Admission) -> Result<(),String> { unsupported("pre_camera") }
-    fn input(&mut self, _: &camera_bridge::Admission) -> Result<Input,String> { unsupported("input") }
-    fn consumed_input(&mut self) { panic!("capture-only consumed_input"); }
-    fn cursor(&mut self, _: Vec<CursorRequest>) -> Result<(),String> { unsupported("cursor") }
-    fn navigate(&mut self, _: &mut Owner) -> Result<(),String> { unsupported("navigate") }
-    fn tutorial(&mut self, _: camera_bridge::NativeOperation, _: &mut Owner) -> Result<(),String> { unsupported("tutorial") }
-    fn pending_sound(&mut self, _: Pose) -> Result<(),String> { unsupported("pending_sound") }
-    fn present(&mut self, _: Pose) -> Result<(),String> { unsupported("present") }
-    fn take_task_effects(&mut self) -> Vec<camera_bridge::TaskEffect> { panic!("capture-only task effects"); }
-    fn publish_save_captures(&mut self) { panic!("capture-only manual-save publication"); }
-    fn discard_task_effects(&mut self) { panic!("unsupported endpoint operation reached cleanup"); }
+    fn pre_camera(&mut self, _: &mut Owner, _: &camera_bridge::Admission) -> Result<(), String> {
+        unsupported("pre_camera")
+    }
+    fn input(&mut self, _: &camera_bridge::Admission) -> Result<Input, String> {
+        unsupported("input")
+    }
+    fn consumed_input(&mut self) {
+        panic!("capture-only consumed_input");
+    }
+    fn cursor(&mut self, _: Vec<CursorRequest>) -> Result<(), String> {
+        unsupported("cursor")
+    }
+    fn navigate(&mut self, _: &mut Owner) -> Result<(), String> {
+        unsupported("navigate")
+    }
+    fn tutorial(&mut self, _: camera_bridge::NativeOperation, _: &mut Owner) -> Result<(), String> {
+        unsupported("tutorial")
+    }
+    fn pending_sound(&mut self, _: Pose) -> Result<(), String> {
+        unsupported("pending_sound")
+    }
+    fn present(&mut self, _: Pose) -> Result<(), String> {
+        unsupported("present")
+    }
+    fn take_task_effects(&mut self) -> Vec<camera_bridge::TaskEffect> {
+        panic!("capture-only task effects");
+    }
+    fn publish_save_captures(&mut self) {
+        panic!("capture-only manual-save publication");
+    }
+    fn discard_task_effects(&mut self) {
+        panic!("unsupported endpoint operation reached cleanup");
+    }
 }
-enum CameraStep { Service(camera_bridge::Boundary), RetireQueued(mpsc::Receiver<()>), Fence(mpsc::Sender<()>), Stop }
-struct CameraThread { commands: mpsc::Sender<CameraStep>, join: Option<JoinHandle<Result<(),String>>>,
-    audit: Arc<Mutex<CameraAudit>>, _selection: crate::selection::Assets }
+enum CameraStep {
+    Service(camera_bridge::Boundary),
+    RetireQueued(mpsc::Receiver<()>),
+    Fence(mpsc::Sender<()>),
+    Stop,
+}
+struct CameraThread {
+    commands: mpsc::Sender<CameraStep>,
+    join: Option<JoinHandle<Result<(), String>>>,
+    audit: Arc<Mutex<CameraAudit>>,
+    _selection: crate::selection::Assets,
+}
 impl CameraThread {
-    fn start(inbox: camera_bridge::Inbox, install: PropertyInstall, selection: crate::selection::Assets) -> Self {
+    fn start(
+        inbox: camera_bridge::Inbox,
+        install: PropertyInstall,
+        selection: crate::selection::Assets,
+    ) -> Self {
         let (commands, receive) = mpsc::channel();
-        let audit = Arc::new(Mutex::new(CameraAudit::default())); let seen = audit.clone();
-        let join = thread::Builder::new().stack_size(32*1024*1024).spawn(move || {
-            let mut endpoint = Endpoint::with_property_install(Owner::new(Bank::loader_zero_storage(),1),inbox,install);
-            let mut context = CaptureContext{expected:camera_bridge::Boundary::Install,installing:false};
-            let result = (|| -> Result<bool,String> {
-                loop {
-                    match receive.recv_timeout(WAIT).map_err(|e|e.to_string())? {
-                        CameraStep::Service(expected) => {
-                            context.expected = expected;
-                            let before = endpoint.capture();
-                            if endpoint.wait_service(&mut context,WAIT)? != camera_bridge::Service::Completed {
-                                return Err("expected actual queued camera request did not arrive".into());
+        let audit = Arc::new(Mutex::new(CameraAudit::default()));
+        let seen = audit.clone();
+        let join = thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let mut endpoint = Endpoint::with_property_install(
+                    Owner::new(Bank::loader_zero_storage(), 1),
+                    inbox,
+                    install,
+                );
+                let mut context = CaptureContext {
+                    expected: camera_bridge::Boundary::Install,
+                    installing: false,
+                };
+                let result = (|| -> Result<bool, String> {
+                    loop {
+                        match receive.recv_timeout(WAIT).map_err(|e| e.to_string())? {
+                            CameraStep::Service(expected) => {
+                                context.expected = expected;
+                                let before = endpoint.capture();
+                                if endpoint.wait_service(&mut context, WAIT)?
+                                    != camera_bridge::Service::Completed
+                                {
+                                    return Err(
+                                        "expected actual queued camera request did not arrive"
+                                            .into(),
+                                    );
+                                }
+                                if expected != camera_bridge::Boundary::Install {
+                                    assert_eq!(
+                                        endpoint.capture(),
+                                        before,
+                                        "read-only operation changed raw pair"
+                                    );
+                                }
+                                let mut a = seen.lock().unwrap();
+                                a.completed.push(expected);
+                                if expected == camera_bridge::Boundary::RawCapture {
+                                    a.raw_pairs.push(endpoint.capture());
+                                }
                             }
-                            if expected != camera_bridge::Boundary::Install {
-                                assert_eq!(endpoint.capture(),before,"read-only operation changed raw pair");
+                            CameraStep::RetireQueued(queued) => {
+                                // Notification fires AFTER the real RawCapture Request
+                                // send into this Endpoint's Inbox. No wait/sleep is proof.
+                                queued.recv_timeout(WAIT).map_err(|e| e.to_string())?;
+                                seen.lock().unwrap().before_retire = Some(endpoint.capture());
+                                return Ok(true);
                             }
-                            let mut a = seen.lock().unwrap(); a.completed.push(expected);
-                            if expected == camera_bridge::Boundary::RawCapture { a.raw_pairs.push(endpoint.capture()); }
+                            CameraStep::Fence(done) => {
+                                done.send(()).map_err(|e| e.to_string())?;
+                            }
+                            CameraStep::Stop => return Ok(false),
                         }
-                        CameraStep::RetireQueued(queued) => {
-                            // Notification fires AFTER the real RawCapture Request
-                            // send into this Endpoint's Inbox. No wait/sleep is proof.
-                            queued.recv_timeout(WAIT).map_err(|e|e.to_string())?;
-                            seen.lock().unwrap().before_retire = Some(endpoint.capture());
-                            return Ok(true);
-                        }
-                        CameraStep::Fence(done) => {done.send(()).map_err(|e|e.to_string())?;}
-                        CameraStep::Stop => return Ok(false),
                     }
-                }
-            })();
-            // Sole production retirement path; it invalidates live sources and
-            // calls Inbox::retire while the genuine Request is still queued.
-            let owner = endpoint.into_owner();
-            let mut a = seen.lock().unwrap(); a.after_retire = Some(owner.capture());
-            a.retired_queued = *result.as_ref().unwrap_or(&false);
-            result.map(|_|())
-        }).unwrap(); Self{commands,join:Some(join),audit,_selection:selection}
+                })();
+                // Sole production retirement path; it invalidates live sources and
+                // calls Inbox::retire while the genuine Request is still queued.
+                let owner = endpoint.into_owner();
+                let mut a = seen.lock().unwrap();
+                a.after_retire = Some(owner.capture());
+                a.retired_queued = *result.as_ref().unwrap_or(&false);
+                result.map(|_| ())
+            })
+            .unwrap();
+        Self {
+            commands,
+            join: Some(join),
+            audit,
+            _selection: selection,
+        }
     }
-    fn service(&self, boundary: camera_bridge::Boundary) { self.commands.send(CameraStep::Service(boundary)).unwrap(); }
-    fn retire_queued(&self, queued: mpsc::Receiver<()>) { self.commands.send(CameraStep::RetireQueued(queued)).unwrap(); }
+    fn service(&self, boundary: camera_bridge::Boundary) {
+        self.commands.send(CameraStep::Service(boundary)).unwrap();
+    }
+    fn retire_queued(&self, queued: mpsc::Receiver<()>) {
+        self.commands
+            .send(CameraStep::RetireQueued(queued))
+            .unwrap();
+    }
     fn fence(&self) {
-        let (done,wait)=mpsc::channel();self.commands.send(CameraStep::Fence(done)).unwrap();
+        let (done, wait) = mpsc::channel();
+        self.commands.send(CameraStep::Fence(done)).unwrap();
         wait.recv_timeout(WAIT).unwrap();
     }
     fn finish(&mut self) {
         let _ = self.commands.send(CameraStep::Stop);
-        if let Some(join) = self.join.take() { join.join().unwrap().unwrap(); }
+        if let Some(join) = self.join.take() {
+            join.join().unwrap().unwrap();
+        }
     }
 }
-impl Drop for CameraThread { fn drop(&mut self) {
-    let _ = self.commands.send(CameraStep::Stop);
-    if let Some(join) = self.join.take() {
-        let result = join.join();
-        if !thread::panicking() { result.unwrap().unwrap(); }
+impl Drop for CameraThread {
+    fn drop(&mut self) {
+        let _ = self.commands.send(CameraStep::Stop);
+        if let Some(join) = self.join.take() {
+            let result = join.join();
+            if !thread::panicking() {
+                result.unwrap().unwrap();
+            }
+        }
     }
-} }
+}
 
 #[derive(Default, Debug)]
-struct AuctionAudit { prepare: usize, activate: usize, restore: usize }
-struct AuctionThread { sender: mpsc::Sender<crate::auction_bridge::Request>, stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>, audit: Arc<Mutex<AuctionAudit>> }
+struct AuctionAudit {
+    prepare: usize,
+    activate: usize,
+    restore: usize,
+}
+struct AuctionThread {
+    sender: mpsc::Sender<crate::auction_bridge::Request>,
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+    audit: Arc<Mutex<AuctionAudit>>,
+}
 impl AuctionThread {
     fn start(exe: Arc<Vec<u8>>, directory: Arc<Vec<u8>>, archive: Arc<Vec<u8>>) -> Self {
         let (sender, receive) = mpsc::channel::<crate::auction_bridge::Request>();
-        let stop = Arc::new(AtomicBool::new(false)); let stopped = stop.clone();
-        let audit = Arc::new(Mutex::new(AuctionAudit::default())); let seen = audit.clone();
-        let join = thread::Builder::new().stack_size(32*1024*1024).spawn(move || {
-            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-            if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
-            let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
-            let mut view = crate::auction_bridge::View::default();
-            while !stopped.load(Ordering::Acquire) {
-                let request = match receive.recv_timeout(Duration::from_millis(100)) {
-                    Ok(request) => request,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                };
-                view.service_actors(&renderer).unwrap();
-                let which = match &request.operation {
-                    crate::auction_bridge::Operation::Prepare{..} => 0,
-                    crate::auction_bridge::Operation::Activate => 1,
-                    crate::auction_bridge::Operation::Restore => 2,
-                };
-                // Actual prepared scene, actor owner, transition state and Restore.
-                // No constant Ok reply substitutes for any operation.
-                let result = view.present(request.operation,&renderer,(&exe,&directory,&archive),0);
-                if result.is_ok() {
-                    let mut a = seen.lock().unwrap();
-                    match which { 0=>a.prepare+=1, 1=>a.activate+=1, 2=>a.restore+=1, _=>unreachable!() }
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let audit = Arc::new(Mutex::new(AuctionAudit::default()));
+        let seen = audit.clone();
+        let join = thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+                if cfg!(windows) {
+                    descriptor.backends = wgpu::Backends::DX12;
                 }
-                request.reply.send(result).unwrap();
-            }
-        }).unwrap(); Self{sender,stop,join:Some(join),audit}
+                let renderer =
+                    pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
+                let mut view = crate::auction_bridge::View::default();
+                while !stopped.load(Ordering::Acquire) {
+                    let request = match receive.recv_timeout(Duration::from_millis(100)) {
+                        Ok(request) => request,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    view.service_actors(&renderer).unwrap();
+                    let which = match &request.operation {
+                        crate::auction_bridge::Operation::Prepare { .. } => 0,
+                        crate::auction_bridge::Operation::Activate => 1,
+                        crate::auction_bridge::Operation::Restore => 2,
+                    };
+                    // Actual prepared scene, actor owner, transition state and Restore.
+                    // No constant Ok reply substitutes for any operation.
+                    let result = view.present(
+                        request.operation,
+                        &renderer,
+                        (&exe, &directory, &archive),
+                        0,
+                    );
+                    if result.is_ok() {
+                        let mut a = seen.lock().unwrap();
+                        match which {
+                            0 => a.prepare += 1,
+                            1 => a.activate += 1,
+                            2 => a.restore += 1,
+                            _ => unreachable!(),
+                        }
+                    }
+                    request.reply.send(result).unwrap();
+                }
+            })
+            .unwrap();
+        Self {
+            sender,
+            stop,
+            join: Some(join),
+            audit,
+        }
     }
 }
-impl Drop for AuctionThread { fn drop(&mut self) {
-    self.stop.store(true,Ordering::Release);
-    if let Some(join) = self.join.take() { let result=join.join(); if !thread::panicking() {result.unwrap();} }
-} }
+impl Drop for AuctionThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let result = join.join();
+            if !thread::panicking() {
+                result.unwrap();
+            }
+        }
+    }
+}
 
 fn prompts(host: &mut Host, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
     for prompt in host.take_prompts(session) {
         if let Some(dialog) = prompt.dialog {
-            let button = match (dialog.callback,dialog.button_count) {
+            let button = match (dialog.callback, dialog.button_count) {
                 // Actual purchase-offer refusal and takeover acknowledgement.
-                (0x48b350,2) => 1,
-                (0x48b480,1) | (0,1) => 0,
-                other => panic!("unbound actual UI callback {other:?}; inspect fixture, never admit by default"),
+                (0x48b350, 2) => 1,
+                (0x48b480, 1) | (0, 1) => 0,
+                other => panic!(
+                    "unbound actual UI callback {other:?}; inspect fixture, never admit by default"
+                ),
             };
-            host.human_dialog_reply(session,assets,crate::human_dialog::Reply {
-                callback:dialog.callback,context:dialog.context,button,
-            }).unwrap();
+            host.human_dialog_reply(
+                session,
+                assets,
+                crate::human_dialog::Reply {
+                    callback: dialog.callback,
+                    context: dialog.context,
+                    button,
+                },
+            )
+            .unwrap();
         } else {
             // Genuine InterfacePrompt producer; preserve its actual dismissal ID.
-            session.dispatch_session_event("InterfacePromptDismiss",prompt.dismissal_id as i32,assets,true).unwrap();
+            session
+                .dispatch_session_event(
+                    "InterfacePromptDismiss",
+                    prompt.dismissal_id as i32,
+                    assets,
+                    true,
+                )
+                .unwrap();
         }
     }
 }
 fn tick(host: &mut Host, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
-    assert!(host.running); assert!(!session.world.pause.has_reason()); assert_eq!(host.policy.scheduler.iterations,1);
-    host.tick(session,assets); assert!(host.failure.is_none(),"{:?}",host.failure);
-    prompts(host,session,assets);
+    assert!(host.running);
+    assert!(!session.world.pause.has_reason());
+    assert_eq!(host.policy.scheduler.iterations, 1);
+    host.tick(session, assets);
+    assert!(host.failure.is_none(), "{:?}", host.failure);
+    prompts(host, session, assets);
 }
 fn frame(host: &mut Host, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
-    host.frame(session,assets,40); assert!(host.failure.is_none(),"{:?}",host.failure);
-    prompts(host,session,assets);
+    host.frame(session, assets, 40);
+    assert!(host.failure.is_none(), "{:?}", host.failure);
+    prompts(host, session, assets);
 }
 fn closure_due(session: &Session<'_>) -> Option<u32> {
-    session.live_commands.snapshot().unwrap().iter().find_map(|(domain,outer,inner,direct,c)| {
-        if let Command::Auction{descriptor} = c && word(descriptor,4)==0x20 {
-            assert!(matches!(domain,openmt2001::scheduler::ClockDomain::Total));
-            assert_eq!(outer,inner); assert!(!direct); assert_eq!(word(descriptor,0),0x525c68);
-            assert_eq!(descriptor[16],1); Some(*outer)
-        } else { None }
-    })
+    session.live_commands.snapshot().unwrap().iter().find_map(
+        |(domain, outer, inner, direct, c)| {
+            if let Command::Auction { descriptor } = c
+                && word(descriptor, 4) == 0x20
+            {
+                assert!(matches!(domain, openmt2001::scheduler::ClockDomain::Total));
+                assert_eq!(outer, inner);
+                assert!(!direct);
+                assert_eq!(word(descriptor, 0), 0x525c68);
+                assert_eq!(descriptor[16], 1);
+                Some(*outer)
+            } else {
+                None
+            }
+        },
+    )
 }
 /// Only these controlled writes align the independently produced queue event
 /// with a midnight calendar callback. Total tick, simulation mode, auction owner,
 /// controller and queue deadlines remain untouched.
 fn align_midnight(session: &mut Session<'_>, host: &mut Host) {
-    let next_normal_hour = (session.world.clock.timing[1]/625+1)*625;
-    session.world.clock.timing[1] = next_normal_hour-1;
+    let next_normal_hour = (session.world.clock.timing[1] / 625 + 1) * 625;
+    session.world.clock.timing[1] = next_normal_hour - 1;
     session.world.clock.timing[2] = 624;
     session.world.clock.timing[3] = 14999;
-    session.world.clock.calendar = [23,0,0,23,0];
+    session.world.clock.calendar = [23, 0, 0, 23, 0];
     session.world.settings.tweaks[4..8].copy_from_slice(&1u32.to_le_bytes());
     host.policy.hourly.suppressed = true;
-    assert_eq!(host.policy.scheduler.iterations,1);
+    assert_eq!(host.policy.scheduler.iterations, 1);
     assert!(!host.policy.scheduler.network_enabled);
     assert!(!session.world.pause.has_reason());
 }
-fn install_camera(session: &mut Session<'_>, host: &mut Host, assets: &CommandAssets<'_, '_>,
-    executable: &[u8], directory: &[u8], archive: &[u8], capture: Capture) -> CameraThread {
-    let index = openmt2001::archive::ArchiveIndex::parse(directory,archive.len() as u64).unwrap();
-    let selection = crate::selection::Assets::load(executable,&index,archive).unwrap();
-    let (worker,inbox) = camera_bridge::channel(session.world.topology.epoch().serial());
-    let property=PropertyInstall::capture(&selection,assets.image).unwrap();
-    let handle=selection.pavement_resource().binding().unwrap().handle();
-    let ui = CameraThread::start(inbox,property,selection);
+fn install_camera(
+    session: &mut Session<'_>,
+    host: &mut Host,
+    assets: &CommandAssets<'_, '_>,
+    executable: &[u8],
+    directory: &[u8],
+    archive: &[u8],
+    capture: Capture,
+) -> CameraThread {
+    let index = openmt2001::archive::ArchiveIndex::parse(directory, archive.len() as u64).unwrap();
+    let selection = crate::selection::Assets::load(executable, &index, archive).unwrap();
+    let (worker, inbox) = camera_bridge::channel(session.world.topology.epoch().serial());
+    let property = PropertyInstall::capture(&selection, assets.image).unwrap();
+    let handle = selection.pavement_resource().binding().unwrap().handle();
+    let ui = CameraThread::start(inbox, property, selection);
     ui.service(camera_bridge::Boundary::Install);
-    host.install_camera_bridge(session,assets.image,CameraSupplierPolicy::CameraOnly,worker,capture,
-        handle).unwrap();
-    assert!(host.camera_bridge_installed()); ui
+    host.install_camera_bridge(
+        session,
+        assets.image,
+        CameraSupplierPolicy::CameraOnly,
+        worker,
+        capture,
+        handle,
+    )
+    .unwrap();
+    assert!(host.camera_bridge_installed());
+    ui
 }
 
 #[test]
-#[ignore="supplied original assets and working wgpu adapter; controlled real auction closure/Host cut"]
-fn completed_auction_closure_gate_survives_same_tick_queued_raw_capture_retirement() { run(true); }
+#[ignore = "supplied original assets and working wgpu adapter; controlled real auction closure/Host cut"]
+fn completed_auction_closure_gate_survives_same_tick_queued_raw_capture_retirement() {
+    run(true);
+}
 #[test]
-#[ignore="supplied original assets; actual rejected auction request allocates before Host autosave"]
-fn rejected_busy_auction_producer_saves_live_message_allocator_not_stale_session_cursor() { run(false); }
+#[ignore = "supplied original assets; actual rejected auction request allocates before Host autosave"]
+fn rejected_busy_auction_producer_saves_live_message_allocator_not_stale_session_cursor() {
+    run(false);
+}
 fn run(retirement: bool) {
     thread::Builder::new().stack_size(32*1024*1024).spawn(move || {
         let started=Instant::now(); let scratch=Scratch::new();
@@ -411,26 +645,43 @@ fn run(retirement: bool) {
         }
     }).unwrap().join().unwrap();
 }
-fn assets<'a,'b>(image:&'a openmt2001::pe::PeImage<'b>,board:&'a openmt2001::board::Board,
-    file:&'a openmt2001::build_file::BuildFile<'b>) -> CommandAssets<'a,'b> { CommandAssets{image,board,file} }
+fn assets<'a, 'b>(
+    image: &'a openmt2001::pe::PeImage<'b>,
+    board: &'a openmt2001::board::Board,
+    file: &'a openmt2001::build_file::BuildFile<'b>,
+) -> CommandAssets<'a, 'b> {
+    CommandAssets { image, board, file }
+}
 
 /// Read only the documented record2 envelope; use literal48-byte auxiliary rows
 /// rather than invoking a second encoder or manufacturing a live Arena cursor.
-fn saved_players(mut bytes: &[u8]) -> Vec<Vec<(u32,[u8;48])>> {
+fn saved_players(mut bytes: &[u8]) -> Vec<Vec<(u32, [u8; 48])>> {
     fn take<'a>(bytes: &mut &'a [u8], n: usize) -> &'a [u8] {
-        let (head,tail)=bytes.split_at(n); *bytes=tail; head
+        let (head, tail) = bytes.split_at(n);
+        *bytes = tail;
+        head
     }
-    fn next(bytes: &mut &[u8]) -> u32 { u32::from_le_bytes(take(bytes,4).try_into().unwrap()) }
-    let count=next(&mut bytes); assert_eq!(count,4);
-    take(&mut bytes,40); next(&mut bytes); // manager header and current player.
-    let result=(0..count).map(|_|{
-        next(&mut bytes); // actual player identity.
-        let size=next(&mut bytes) as usize; take(&mut bytes,size);
-        let count=next(&mut bytes);
-        (0..count).map(|_|{
-            let reference=next(&mut bytes);
-            (reference,take(&mut bytes,48).try_into().unwrap())
-        }).collect()
-    }).collect();
-    assert!(bytes.is_empty()); result
+    fn next(bytes: &mut &[u8]) -> u32 {
+        u32::from_le_bytes(take(bytes, 4).try_into().unwrap())
+    }
+    let count = next(&mut bytes);
+    assert_eq!(count, 4);
+    take(&mut bytes, 40);
+    next(&mut bytes); // manager header and current player.
+    let result = (0..count)
+        .map(|_| {
+            next(&mut bytes); // actual player identity.
+            let size = next(&mut bytes) as usize;
+            take(&mut bytes, size);
+            let count = next(&mut bytes);
+            (0..count)
+                .map(|_| {
+                    let reference = next(&mut bytes);
+                    (reference, take(&mut bytes, 48).try_into().unwrap())
+                })
+                .collect()
+        })
+        .collect();
+    assert!(bytes.is_empty());
+    result
 }

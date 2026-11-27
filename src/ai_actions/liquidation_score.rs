@@ -2,7 +2,7 @@
 use crate::{
     ai_developed_targets,
     ai_strategy_queries::visit_chain,
-    player_manager::{word, Player},
+    player_manager::{Player, word},
     x87::Sum,
 };
 pub struct World<'a> {
@@ -43,7 +43,7 @@ pub fn business_value(
     buildings: &[[u8; 916]],
     image: &crate::pe::PeImage<'_>,
 ) -> Result<Sum, String> {
-    let mut value = business_base_value(b,buildings,image)?;
+    let mut value = business_base_value(b, buildings, image)?;
     value.mul_f32(image.f32_at(0x525c50)?)?;
     Ok(value)
 }

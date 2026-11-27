@@ -6,20 +6,36 @@ pub struct Frontend {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Action { Suspend, Resume }
+pub enum Action {
+    Suspend,
+    Resume,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AudioOutcome { Applied, GuardedInactive }
+pub enum AudioOutcome {
+    Applied,
+    GuardedInactive,
+}
 
 impl Frontend {
     /// Supply the real process byte8af401. This is not a per-World default.
-    pub fn from_process_byte(suspended: u8) -> Self { Self { suspended } }
-    pub fn suspended_byte(&self) -> u8 { self.suspended }
+    pub fn from_process_byte(suspended: u8) -> Self {
+        Self { suspended }
+    }
+    pub fn suspended_byte(&self) -> u8 {
+        self.suspended
+    }
 
-    pub fn apply(&mut self, focused: bool, target_present: bool, reason3: i8,
+    pub fn apply(
+        &mut self,
+        focused: bool,
+        target_present: bool,
+        reason3: i8,
         mut callback: impl FnMut(Action) -> Result<AudioOutcome, String>,
     ) -> Result<Option<AudioOutcome>, String> {
-        if !target_present { return Ok(None); }
+        if !target_present {
+            return Ok(None);
+        }
         if !focused && self.suspended == 0 {
             let outcome = callback(Action::Suspend)?;
             self.suspended = 1;
@@ -52,7 +68,12 @@ mod tests {
         ] {
             let mut state = Frontend::from_process_byte(flag);
             let mut calls = Vec::new();
-            state.apply(focused, target, reason, |call| { calls.push(call); Ok(AudioOutcome::Applied) }).unwrap();
+            state
+                .apply(focused, target, reason, |call| {
+                    calls.push(call);
+                    Ok(AudioOutcome::Applied)
+                })
+                .unwrap();
             assert_eq!(state.suspended_byte(), after);
             assert_eq!(calls, action.into_iter().collect::<Vec<_>>());
         }
@@ -60,20 +81,36 @@ mod tests {
     #[test]
     fn incomplete_audio_callback_does_not_publish_flag_transition() {
         let mut state = Frontend::from_process_byte(0);
-        assert!(state.apply(false, true, 0, |_| Err("actual audio unavailable".into())).is_err());
+        assert!(
+            state
+                .apply(false, true, 0, |_| Err("actual audio unavailable".into()))
+                .is_err()
+        );
         assert_eq!(state.suspended_byte(), 0);
         state = Frontend::from_process_byte(1);
-        assert!(state.apply(true, true, 0, |_| Err("actual audio unavailable".into())).is_err());
+        assert!(
+            state
+                .apply(true, true, 0, |_| Err("actual audio unavailable".into()))
+                .is_err()
+        );
         assert_eq!(state.suspended_byte(), 1);
     }
     #[test]
     fn authoritative_inactive_audio_still_completes_the_native_wrapper_latch() {
         let mut state = Frontend::from_process_byte(0);
-        assert_eq!(state.apply(false, true, 0, |_| Ok(AudioOutcome::GuardedInactive)).unwrap(),
-            Some(AudioOutcome::GuardedInactive));
+        assert_eq!(
+            state
+                .apply(false, true, 0, |_| Ok(AudioOutcome::GuardedInactive))
+                .unwrap(),
+            Some(AudioOutcome::GuardedInactive)
+        );
         assert_eq!(state.suspended_byte(), 1);
-        assert_eq!(state.apply(true, true, 0, |_| Ok(AudioOutcome::GuardedInactive)).unwrap(),
-            Some(AudioOutcome::GuardedInactive));
+        assert_eq!(
+            state
+                .apply(true, true, 0, |_| Ok(AudioOutcome::GuardedInactive))
+                .unwrap(),
+            Some(AudioOutcome::GuardedInactive)
+        );
         assert_eq!(state.suspended_byte(), 0);
     }
 }

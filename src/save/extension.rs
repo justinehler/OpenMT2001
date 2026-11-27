@@ -24,14 +24,24 @@ impl<'a> Extension<'a> {
         let valid = match self.version {
             1 => self.records.len() == 13,
             2 => self.records.len() == 14 && auction != view,
-            3 => self.records.contains_key(&16) && !(auction && view)
-                && self.records.len() == 14 + usize::from(auction || view),
-            4 => self.records.contains_key(&16) && self.records.contains_key(&17)
-                && !(auction && view)
-                && self.records.len() == 15 + usize::from(auction || view),
-            5 | 6 => self.records.contains_key(&16) && self.records.contains_key(&17)
-                && self.records.contains_key(&18) && !(auction && view)
-                && self.records.len() == 16 + usize::from(auction || view),
+            3 => {
+                self.records.contains_key(&16)
+                    && !(auction && view)
+                    && self.records.len() == 14 + usize::from(auction || view)
+            }
+            4 => {
+                self.records.contains_key(&16)
+                    && self.records.contains_key(&17)
+                    && !(auction && view)
+                    && self.records.len() == 15 + usize::from(auction || view)
+            }
+            5 | 6 => {
+                self.records.contains_key(&16)
+                    && self.records.contains_key(&17)
+                    && self.records.contains_key(&18)
+                    && !(auction && view)
+                    && self.records.len() == 16 + usize::from(auction || view)
+            }
             _ => false,
         };
         if !(1..=13).all(|tag| self.records.contains_key(&tag)) || !valid {
@@ -133,10 +143,18 @@ mod tests {
         for version in 1..=6 {
             let mut records: std::collections::BTreeMap<u32, &[u8]> =
                 (1..=13).map(|tag| (tag, &[][..])).collect();
-            if version == 2 { records.insert(15, &[]); }
-            if version >= 3 { records.insert(16, &[]); }
-            if version >= 4 { records.insert(17, &[]); }
-            if version >= 5 { records.insert(18, &[]); }
+            if version == 2 {
+                records.insert(15, &[]);
+            }
+            if version >= 3 {
+                records.insert(16, &[]);
+            }
+            if version >= 4 {
+                records.insert(17, &[]);
+            }
+            if version >= 5 {
+                records.insert(18, &[]);
+            }
             let mut extension = Extension { version, records };
             extension.validate_runtime_section_set().unwrap();
             if version >= 3 {

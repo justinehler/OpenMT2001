@@ -632,7 +632,9 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
     ) -> Result<(), String> {
         crate::scheduler::advance(&mut world.clock, controls, |event, clock, controls| {
             if self.event(event, clock, &mut world.city)? {
-                if matches!(event, crate::scheduler::Event::Animations) { animations()?; }
+                if matches!(event, crate::scheduler::Event::Animations) {
+                    animations()?;
+                }
                 Ok(0)
             } else {
                 boundary(event, clock, &mut world.city, controls, self)

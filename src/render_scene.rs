@@ -205,7 +205,9 @@ pub struct SavedBusinessInspection {
 
 impl InspectionBuilding {
     pub fn business(&self) -> Option<&SavedBusinessInspection> {
-        self.initialized_business.as_ref().or(self.saved_business.as_ref())
+        self.initialized_business
+            .as_ref()
+            .or(self.saved_business.as_ref())
     }
 }
 
@@ -281,17 +283,26 @@ pub fn assemble(request: Request<'_>) -> Result<Scene, String> {
 }
 
 /// The host's original board.prm palette; omitted by PE-default geometry fixtures.
-pub fn assemble_with_style(request: Request<'_>, style: Option<&crate::board_style::Style>) -> Result<Scene, String> {
+pub fn assemble_with_style(
+    request: Request<'_>,
+    style: Option<&crate::board_style::Style>,
+) -> Result<Scene, String> {
     assemble_with_style_internal(request, style, None)
 }
 
-pub fn assemble_with_style_cached(request: Request<'_>, style: Option<&crate::board_style::Style>,
-    textures: &mut crate::texture::LoaderCache) -> Result<Scene, String> {
+pub fn assemble_with_style_cached(
+    request: Request<'_>,
+    style: Option<&crate::board_style::Style>,
+    textures: &mut crate::texture::LoaderCache,
+) -> Result<Scene, String> {
     assemble_with_style_internal(request, style, Some(textures))
 }
 
-fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::board_style::Style>,
-    mut textures: Option<&mut crate::texture::LoaderCache>) -> Result<Scene, String> {
+fn assemble_with_style_internal(
+    request: Request<'_>,
+    style: Option<&crate::board_style::Style>,
+    mut textures: Option<&mut crate::texture::LoaderCache>,
+) -> Result<Scene, String> {
     if request.width == 0
         || request.height == 0
         || request.width > i32::MAX as u32
@@ -355,7 +366,9 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
     let mut saved_owner_characters = Vec::new();
     if scene_mode {
         let mut board = Board::from_v14(&PeImage::parse(executable.unwrap())?)?;
-        if let Some(style) = style { style.apply_board(&mut board)?; }
+        if let Some(style) = style {
+            style.apply_board(&mut board)?;
+        }
         let buildings = match request.source {
             Source::Save(data) => {
                 let save = crate::save::SaveFile::parse(data)?;
@@ -441,12 +454,16 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                             let owner_character = if proprietor == 0 {
                                 None
                             } else {
-                                let player = players.get(usize::from(proprietor) - 1)
+                                let player = players
+                                    .get(usize::from(proprietor) - 1)
                                     .ok_or("saved business owner leaves player roster")?;
                                 let character = u32::from_le_bytes(
-                                    player.bytes[0x14c..0x150].try_into().unwrap());
+                                    player.bytes[0x14c..0x150].try_into().unwrap(),
+                                );
                                 if character >= 10 {
-                                    return Err("saved business owner character leaves palette".into());
+                                    return Err(
+                                        "saved business owner character leaves palette".into()
+                                    );
                                 }
                                 Some(character)
                             };
@@ -564,7 +581,11 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         }
     } else {
         match request.source {
-            Source::Model { index, height, variation } => {
+            Source::Model {
+                index,
+                height,
+                variation,
+            } => {
                 inputs.push((file.profile(index, height)?, variation, None));
             }
             Source::Preview(mut building) => {
@@ -579,7 +600,10 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             _ => unreachable!(),
         }
     }
-    let suncolors = request.suncols.map(crate::lighting::SunColors::parse).transpose()?;
+    let suncolors = request
+        .suncols
+        .map(crate::lighting::SunColors::parse)
+        .transpose()?;
     let light = if let Some(colors) = &suncolors {
         let phase = saved_phase.ok_or("lighting requires a scene phase")?;
         if phase >= 24 {
@@ -679,8 +703,11 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                         source_positions.push(building.local_position(positions[source]));
                     }
                     if colors.is_some() && (runtime_slot.is_some() || request.animated) {
-                        source_normals.push(building.as_ref()
-                            .map_or(part.normals[index], |b| b.local_normal(part.normals[index])));
+                        source_normals.push(
+                            building.as_ref().map_or(part.normals[index], |b| {
+                                b.local_normal(part.normals[index])
+                            }),
+                        );
                     }
                     if let Some(uvs) = secondary_uvs {
                         let position = building
@@ -712,12 +739,16 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             }
             if request.animated && !source_normals.is_empty() {
                 lighting_spans.push(CityLightingSpan {
-                    key, draw: usize::MAX, start,
+                    key,
+                    draw: usize::MAX,
+                    start,
                     inputs: CityLightingInputs::Normals(source_normals.clone()),
                     runtime: runtime_slot.map(|slot| (slot, runtime_poses[ordinal])),
                 });
             }
-            if let Some(slot) = runtime_slot && !source_positions.is_empty() {
+            if let Some(slot) = runtime_slot
+                && !source_positions.is_empty()
+            {
                 runtime_spans.push(RuntimeSpan {
                     slot,
                     key,
@@ -831,7 +862,9 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
     if scene_mode {
         let image = PeImage::parse(executable.unwrap())?;
         let mut board = Board::from_v14(&image)?;
-        if let Some(style) = style { style.apply_board(&mut board)?; }
+        if let Some(style) = style {
+            style.apply_board(&mut board)?;
+        }
         // 0044a0a0 creates this quad; 0044faf0 places the owning scene
         // object at the block center. 004b8760/004b8870 exclude flag 1
         // objects and flag 2 ground. 00689624 is BuildingTextures index 1.
@@ -864,10 +897,18 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             .map_err(|e| e.to_string())?;
         let scenery_records =
             crate::scene_assets::scenery_textures(&image, &directory, archive, 1280)?;
-        let (pages, scenery_regions) = crate::scene_assets::scenery_pages_with_material_loader(&scenery_records,
-            |image| textures.as_deref_mut().map_or_else(
-                || (crate::texture::loader_pixels(image).into(), crate::texture::loader_flags(image)),
-                |cache| cache.pixels_and_flags(image)))?;
+        let (pages, scenery_regions) =
+            crate::scene_assets::scenery_pages_with_material_loader(&scenery_records, |image| {
+                textures.as_deref_mut().map_or_else(
+                    || {
+                        (
+                            crate::texture::loader_pixels(image).into(),
+                            crate::texture::loader_flags(image),
+                        )
+                    },
+                    |cache| cache.pixels_and_flags(image),
+                )
+            })?;
         scenery_pages = pages;
         let registered = |name: &str| {
             let key = name.rsplit('\\').next().unwrap();
@@ -1056,10 +1097,13 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                         } else if let Some(colors) = &colors {
                             if request.animated {
                                 let at = index * 12;
-                                let bytes = mesh.normal_bytes.get(at..at + 12)
+                                let bytes = mesh
+                                    .normal_bytes
+                                    .get(at..at + 12)
                                     .ok_or("retained scenery normal missing")?;
-                                source_normals.push(std::array::from_fn(|i|
-                                    f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())));
+                                source_normals.push(std::array::from_fn(|i| {
+                                    f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+                                }));
                             }
                             specular_batches
                                 .entry((family, 0))
@@ -1090,7 +1134,10 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                         let count = batches.get(&(family, 0)).map_or(0, Vec::len) - start;
                         if count != 0 {
                             lighting_spans.push(CityLightingSpan {
-                                key: (family, 0), draw: usize::MAX, start, runtime: None,
+                                key: (family, 0),
+                                draw: usize::MAX,
+                                start,
+                                runtime: None,
                                 inputs: if tint != 0xffffffff {
                                     CityLightingInputs::Constant { color: tint, count }
                                 } else {
@@ -1311,7 +1358,9 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
                 ]);
             }
         }
-        if strips != 0 && (request.animated || light.as_ref().is_some_and(|l| l.diffuse & 255 < 127)) {
+        if strips != 0
+            && (request.animated || light.as_ref().is_some_and(|l| l.diffuse & 255 < 127))
+        {
             let image = crate::pe::PeImage::parse(executable.unwrap())?;
             for star in crate::sky::stars(&image)? {
                 let [x, y, z] = star.position;
@@ -1363,8 +1412,7 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
     // secondary input independently of the legacy conversion used by other roles.
     // sets[2] is the cached BuildingTextures collection loaded above; row 0 is
     // the state-7 handle at 00689620 (004b7df8..004b7e21).
-    let cached_daylight_secondary = sets.get(2)
-        .and_then(|set| set.textures.first()).cloned();
+    let cached_daylight_secondary = sets.get(2).and_then(|set| set.textures.first()).cloned();
     // Preserve existing conversion for all other texture bindings.
     // Retain borrowed original inputs and own only the transformed pixels.
     let loaded_pixels: Vec<Vec<_>> = sets
@@ -1372,8 +1420,12 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         .map(|set| {
             set.textures
                 .iter()
-                .map(|image| textures.as_deref_mut().map_or_else(
-                    || crate::texture::loader_pixels(image).into(), |cache| cache.pixels(image)))
+                .map(|image| {
+                    textures.as_deref_mut().map_or_else(
+                        || crate::texture::loader_pixels(image).into(),
+                        |cache| cache.pixels(image),
+                    )
+                })
                 .collect()
         })
         .collect();
@@ -1415,7 +1467,8 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         let secondary = if family == 1 {
             facade_material.map(|m| {
                 let texture = if m.texture == 0 && m.camera_coordinates {
-                    cached_daylight_secondary.as_ref()
+                    cached_daylight_secondary
+                        .as_ref()
                         .expect("daylight facade requires cached BuildingTextures row 0")
                 } else {
                     &sets[2].textures[m.texture]
@@ -1561,8 +1614,10 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
     });
     let mut images = BTreeMap::<(usize, usize), Arc<[u8]>>::new();
     let mut own_image = |bytes: &[u8]| {
-        images.entry((bytes.as_ptr() as usize, bytes.len()))
-            .or_insert_with(|| Arc::from(bytes)).clone()
+        images
+            .entry((bytes.as_ptr() as usize, bytes.len()))
+            .or_insert_with(|| Arc::from(bytes))
+            .clone()
     };
     let animation = if request.animated {
         let facades: Vec<_> = draws
@@ -1581,18 +1636,28 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
             .collect();
         // Both are real BuildingTextures owners, with the same representations
         // as initial submission: cached row 0, loader-converted row 26.
-        let facade_images = if facades.is_empty() { None } else {
-            let day = cached_daylight_secondary.as_ref()
+        let facade_images = if facades.is_empty() {
+            None
+        } else {
+            let day = cached_daylight_secondary
+                .as_ref()
                 .ok_or("retained day facade image missing")?;
-            let night = sets.get(2).and_then(|set| set.textures.get(26))
+            let night = sets
+                .get(2)
+                .and_then(|set| set.textures.get(26))
                 .ok_or("retained night facade image missing")?;
             Some([day, night].map(|image| FacadeImage {
-                width: image.width, height: image.height, rgba: own_image(image.texels),
+                width: image.width,
+                height: image.height,
+                rgba: own_image(image.texels),
             }))
         };
         for span in &mut lighting_spans {
-            let vertices = batches.get(&span.key).ok_or("retained lighting batch missing")?;
-            span.draw = draws.iter()
+            let vertices = batches
+                .get(&span.key)
+                .ok_or("retained lighting batch missing")?;
+            span.draw = draws
+                .iter()
                 .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
                 .ok_or("retained lighting draw missing")?;
         }
@@ -1607,10 +1672,16 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         } else {
             None
         };
-        let clouds = draws.iter().enumerate().find(|(_, draw)| draw.mode == SurfaceMode::Clouds)
+        let clouds = draws
+            .iter()
+            .enumerate()
+            .find(|(_, draw)| draw.mode == SurfaceMode::Clouds)
             .map(|(index, draw)| {
                 let secondary = draw.secondary.as_ref().unwrap();
-                let coordinates = draw.vertices.iter().zip(secondary.uv.iter())
+                let coordinates = draw
+                    .vertices
+                    .iter()
+                    .zip(secondary.uv.iter())
                     .map(|(vertex, uv)| [vertex[6], vertex[7], uv[0], uv[1]])
                     .collect();
                 (index, crate::sky::CloudMotion::default(), coordinates)
@@ -1643,7 +1714,9 @@ fn assemble_with_style_internal(request: Request<'_>, style: Option<&crate::boar
         None
     } else {
         for span in &mut runtime_spans {
-            let vertices = batches.get(&span.key).ok_or("runtime material batch missing")?;
+            let vertices = batches
+                .get(&span.key)
+                .ok_or("runtime material batch missing")?;
             span.draw = draws
                 .iter()
                 .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
@@ -1722,16 +1795,23 @@ struct FacadeImage {
     rgba: Arc<[u8]>,
 }
 
-fn relight_city(draws: &mut [OwnedDraw], spans: &[CityLightingSpan],
-    palette: &crate::lighting::Palette, sun: [f32; 3],
+fn relight_city(
+    draws: &mut [OwnedDraw],
+    spans: &[CityLightingSpan],
+    palette: &crate::lighting::Palette,
+    sun: [f32; 3],
 ) -> Result<Vec<usize>, String> {
     let unpack = |color: u32| [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.);
     // Compute and validate every affected span before changing any city colors.
     let mut pending = Vec::new();
     for span in spans {
-        let draw = draws.get(span.draw).ok_or("retained lighting draw missing")?;
-        if !matches!(draw.mode, SurfaceMode::StaticLit | SurfaceMode::StaticOpaque
-            | SurfaceMode::FacadeBlend) {
+        let draw = draws
+            .get(span.draw)
+            .ok_or("retained lighting draw missing")?;
+        if !matches!(
+            draw.mode,
+            SurfaceMode::StaticLit | SurfaceMode::StaticOpaque | SurfaceMode::FacadeBlend
+        ) {
             return Err("retained lighting leaves ordinary city material".into());
         }
         let count = match &span.inputs {
@@ -1739,17 +1819,33 @@ fn relight_city(draws: &mut [OwnedDraw], spans: &[CityLightingSpan],
             CityLightingInputs::Constant { color, count } => {
                 // Preserve the source-selected constant branch, including its
                 // sentinel distinction; no normal or material is fabricated.
-                if *color == 0xffffffff { return Err("invalid retained constant color".into()); }
+                if *color == 0xffffffff {
+                    return Err("invalid retained constant color".into());
+                }
                 *count
             }
         };
-        let end = span.start.checked_add(count).ok_or("retained lighting span overflow")?;
-        draw.vertices.get(span.start..end).ok_or("retained lighting span leaves draw")?;
-        let specular = draw.specular.as_ref().ok_or("retained lighting specular missing")?;
-        specular.get(span.start..end).ok_or("retained lighting specular span leaves draw")?;
-        let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
+        let end = span
+            .start
+            .checked_add(count)
+            .ok_or("retained lighting span overflow")?;
+        draw.vertices
+            .get(span.start..end)
+            .ok_or("retained lighting span leaves draw")?;
+        let specular = draw
+            .specular
+            .as_ref()
+            .ok_or("retained lighting specular missing")?;
+        specular
+            .get(span.start..end)
+            .ok_or("retained lighting specular span leaves draw")?;
+        let CityLightingInputs::Normals(normals) = &span.inputs else {
+            continue;
+        };
         let direction = span.runtime.map_or(sun, |(_, pose)| pose.sunlight(sun));
-        let colors = normals.iter().map(|&normal| palette.shade_static(normal, direction))
+        let colors = normals
+            .iter()
+            .map(|&normal| palette.shade_static(normal, direction))
             .collect::<Result<Vec<_>, _>>()?;
         pending.push((span.draw, span.start, colors));
     }
@@ -1768,10 +1864,15 @@ fn relight_city(draws: &mut [OwnedDraw], spans: &[CityLightingSpan],
     Ok(changed)
 }
 
-fn relight_facades(draws: &mut [OwnedDraw], state: &mut Animation,
-    diffuse: u32, camera: &[f32; 12],
+fn relight_facades(
+    draws: &mut [OwnedDraw],
+    state: &mut Animation,
+    diffuse: u32,
+    camera: &[f32; 12],
 ) -> Result<Vec<usize>, String> {
-    if state.facades.is_empty() { return Ok(Vec::new()); }
+    if state.facades.is_empty() {
+        return Ok(Vec::new());
+    }
     // Preserve b53's explicit enabled day/night route. Device capability
     // selection is a separate input contract, not inferred from modern support.
     let material = FacadeMaterial::select(diffuse, true, true)
@@ -1781,12 +1882,20 @@ fn relight_facades(draws: &mut [OwnedDraw], state: &mut Animation,
         (26, false) => 1,
         _ => return Err("unsupported retained facade selection".into()),
     };
-    let image = &state.facade_images.as_ref().ok_or("retained facade images missing")?[variant];
+    let image = &state
+        .facade_images
+        .as_ref()
+        .ok_or("retained facade images missing")?[variant];
     for (index, inputs) in &state.facades {
         let draw = draws.get(*index).ok_or("retained facade draw missing")?;
-        let secondary = draw.secondary.as_ref().ok_or("retained facade secondary missing")?;
-        if draw.mode != SurfaceMode::FacadeBlend || inputs.len() != draw.vertices.len()
-            || secondary.uv.len() != inputs.len() {
+        let secondary = draw
+            .secondary
+            .as_ref()
+            .ok_or("retained facade secondary missing")?;
+        if draw.mode != SurfaceMode::FacadeBlend
+            || inputs.len() != draw.vertices.len()
+            || secondary.uv.len() != inputs.len()
+        {
             return Err("retained facade topology changed".into());
         }
     }
@@ -1826,20 +1935,34 @@ impl Scene {
     ///452780/4c4970: final per-draw policy for normal menu/city owners only.
     /// Keep full retained geometry; generic reframe/daylight/result callers
     /// remain policy-free and owners reapply this after their updates.
-    pub fn apply_normal_star_detail(&mut self, detail: u8,
+    pub fn apply_normal_star_detail(
+        &mut self,
+        detail: u8,
         camera: crate::flyby::CameraSample,
     ) -> Result<Vec<usize>, String> {
-        if !self.draws.iter().any(|draw| draw.mode == SurfaceMode::Stars) {
+        if !self
+            .draws
+            .iter()
+            .any(|draw| draw.mode == SurfaceMode::Stars)
+        {
             return Ok(Vec::new());
         }
-        let color = self.animation.as_ref().and_then(|state| state.sky.map(|(_, _, color)| color))
+        let color = self
+            .animation
+            .as_ref()
+            .and_then(|state| state.sky.map(|(_, _, color)| color))
             .ok_or("normal star policy requires retained sky light")?;
         let strips = crate::sky::visible_strips(crate::sky::upper_view_angle(
-            camera.eye, camera.target, camera.vertical_fov)?)?;
+            camera.eye,
+            camera.target,
+            camera.vertical_fov,
+        )?)?;
         let visible = detail == 2 && strips != 0 && color & 255 < 127;
         let mut changed = Vec::new();
         for (index, draw) in self.draws.iter_mut().enumerate() {
-            if draw.mode != SurfaceMode::Stars { continue; }
+            if draw.mode != SurfaceMode::Stars {
+                continue;
+            }
             let count = if visible { draw.vertices.len() } else { 0 };
             if draw.active_vertices != Some(count) {
                 draw.active_vertices = Some(count);
@@ -1880,27 +2003,36 @@ impl Scene {
             }
             changed_slots.push(slot);
         }
-        let unpack = |color: u32| {
-            [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.)
-        };
+        let unpack = |color: u32| [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.);
         let mut changed_draws = Vec::new();
         for slot in changed_slots {
             let pose = BuildingPose::from_record(&after[slot])?;
             let sunlight = pose.sunlight(patches.sunlight);
             for span in patches.spans.iter().filter(|span| span.slot == slot) {
-                let draw = self.draws.get_mut(span.draw).ok_or("runtime pose draw missing")?;
+                let draw = self
+                    .draws
+                    .get_mut(span.draw)
+                    .ok_or("runtime pose draw missing")?;
                 let end = span.start + span.positions.len();
-                let vertices = draw.vertices.get_mut(span.start..end)
+                let vertices = draw
+                    .vertices
+                    .get_mut(span.start..end)
                     .ok_or("runtime pose span leaves material draw")?;
                 if let Some(palette) = &patches.palette {
                     if span.normals.len() != vertices.len() {
                         return Err("runtime pose normal span mismatch".into());
                     }
-                    let specular = draw.specular.as_mut()
+                    let specular = draw
+                        .specular
+                        .as_mut()
                         .and_then(|values| values.get_mut(span.start..end))
                         .ok_or("runtime pose specular span missing")?;
-                    for (((vertex, highlight), &position), &normal) in vertices.iter_mut()
-                        .zip(specular).zip(&span.positions).zip(&span.normals) {
+                    for (((vertex, highlight), &position), &normal) in vertices
+                        .iter_mut()
+                        .zip(specular)
+                        .zip(&span.positions)
+                        .zip(&span.normals)
+                    {
                         vertex[..3].copy_from_slice(&pose.position(position)?);
                         let [diffuse, shine] = palette.shade_static(normal, sunlight)?;
                         vertex[3..6].copy_from_slice(&unpack(diffuse));
@@ -1928,7 +2060,9 @@ impl Scene {
 
     /// Immutable inputs shared by retained camera-dependent scene layers.
     pub fn viewport_size(&self) -> Option<[u32; 2]> {
-        self.animation.as_ref().map(|state| [state.width, state.height])
+        self.animation
+            .as_ref()
+            .map(|state| [state.width, state.height])
     }
     pub fn daylight_time(&self) -> Option<(u32, u32)> {
         self.animation.as_ref()?.daylight_time
@@ -1936,35 +2070,69 @@ impl Scene {
 
     /// Recompute original daylight at the retained hour and within-hour counter.
     /// Ordinary city colors retain their original inputs, not an hourly bake.
-    pub fn advance_daylight(&mut self, phase: u32, counter: u32,
-        camera: crate::flyby::CameraSample) -> Result<Vec<usize>, String> {
-        let state = self.animation.as_mut().ok_or("scene was not prepared for animation")?;
-        if state.daylight_time == Some((phase, counter)) { return Ok(Vec::new()); }
-        let colors = state.suncolors.clone().ok_or("animated scene has no sun colors")?;
+    pub fn advance_daylight(
+        &mut self,
+        phase: u32,
+        counter: u32,
+        camera: crate::flyby::CameraSample,
+    ) -> Result<Vec<usize>, String> {
+        let state = self
+            .animation
+            .as_mut()
+            .ok_or("scene was not prepared for animation")?;
+        if state.daylight_time == Some((phase, counter)) {
+            return Ok(Vec::new());
+        }
+        let colors = state
+            .suncolors
+            .clone()
+            .ok_or("animated scene has no sun colors")?;
         let light = colors.sample(phase, counter)?;
         let sun = light.direction;
         let palette = crate::lighting::Palette::new(
-            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+            light.diffuse,
+            light.ambient,
+            light.diffuse,
+            0,
+            light.scale,
         );
         let mut changed = relight_city(&mut self.draws, &state.lighting, &palette, sun)?;
         let scene_view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
-        changed.extend(relight_facades(&mut self.draws, state, light.diffuse, &scene_view)?);
+        changed.extend(relight_facades(
+            &mut self.draws,
+            state,
+            light.diffuse,
+            &scene_view,
+        )?);
         self.ground_colors = palette.shade_static([0., 1., 0.], sun)?;
         // A later pose-only patch must shade with this same temporal sample.
         if let Some(patches) = &mut self.runtime_patches {
             patches.sunlight = sun;
             patches.palette = Some(palette);
         }
-        state.sky = Some((sun, colors.daylight.phase_angle(phase, counter), light.diffuse));
+        state.sky = Some((
+            sun,
+            colors.daylight.phase_angle(phase, counter),
+            light.diffuse,
+        ));
         state.daylight_time = Some((phase, counter));
         let [start, end] = light.fog.distances();
-        self.fog = Some(crate::render::EyeFog { color: light.fog.color, start, end });
+        self.fog = Some(crate::render::EyeFog {
+            color: light.fog.color,
+            start,
+            end,
+        });
         let sky = crate::sky::Sky::original();
         let sky_colors = sky.colors(sun);
         let cloud_colors = sky.cloud_colors(sun);
         let view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
-        let quads = crate::sky::celestial_quads(camera.eye, view,
-            colors.daylight.phase_angle(phase, counter), sun, light.diffuse);
+        let quads = crate::sky::celestial_quads(
+            camera.eye,
+            view,
+            colors.daylight.phase_angle(phase, counter),
+            sun,
+            light.diffuse,
+        );
         let mut celestial = 0;
         for (index, draw) in self.draws.iter_mut().enumerate() {
             match draw.mode {
@@ -1974,8 +2142,11 @@ impl Scene {
                     }
                     let cloud = draw.mode == SurfaceMode::Clouds;
                     for (vertex, &source) in draw.vertices.iter_mut().zip(&sky.indices) {
-                        let color = if cloud { cloud_colors[usize::from(source)] }
-                            else { sky_colors[usize::from(source)] };
+                        let color = if cloud {
+                            cloud_colors[usize::from(source)]
+                        } else {
+                            sky_colors[usize::from(source)]
+                        };
                         for (component, shift) in [16, 8, 0].into_iter().enumerate() {
                             vertex[3 + component] = ((color >> shift) & 255) as f32 / 255.;
                         }
@@ -2007,7 +2178,10 @@ impl Scene {
                 }
                 SurfaceMode::Stars => {
                     let strips = crate::sky::visible_strips(crate::sky::upper_view_angle(
-                        camera.eye, camera.target, camera.vertical_fov)?)?;
+                        camera.eye,
+                        camera.target,
+                        camera.vertical_fov,
+                    )?)?;
                     let visible = strips != 0 && light.diffuse & 255 < 127;
                     let count = if visible { draw.vertices.len() } else { 0 };
                     if draw.active_vertices != Some(count) {
@@ -2016,8 +2190,11 @@ impl Scene {
                     }
                 }
                 SurfaceMode::WaterFallback => {
-                    let tick = if state.water.previous_tick == u32::MAX { 0 }
-                        else { state.water.previous_tick };
+                    let tick = if state.water.previous_tick == u32::MAX {
+                        0
+                    } else {
+                        state.water.previous_tick
+                    };
                     update_fallback_water(draw, state, camera.eye, tick)?;
                     changed.push(index);
                 }
@@ -2031,23 +2208,38 @@ impl Scene {
     /// Advance original 822d40-driven water and cloud coordinates. Reframing
     /// the camera at the same logic tick recomputes reflection colors without
     /// advancing either phase again.
-    pub fn advance_environment(&mut self, tick: u32, camera: [f32; 3]) -> Result<Vec<usize>, String> {
-        let state = self.animation.as_mut().ok_or("scene was not prepared for animation")?;
+    pub fn advance_environment(
+        &mut self,
+        tick: u32,
+        camera: [f32; 3],
+    ) -> Result<Vec<usize>, String> {
+        let state = self
+            .animation
+            .as_mut()
+            .ok_or("scene was not prepared for animation")?;
         let mut changed = Vec::new();
         if let Some((index, motion, coordinates)) = &mut state.clouds
-            && motion.previous_tick != tick {
-                motion.advance(tick, coordinates);
-                let draw = &mut self.draws[*index];
-                let secondary = draw.secondary.as_mut().ok_or("cloud secondary layer missing")?;
-                if draw.vertices.len() != coordinates.len() || secondary.uv.len() != coordinates.len() {
-                    return Err("retained cloud vertex topology changed".into());
-                }
-                for ((vertex, uv), value) in draw.vertices.iter_mut()
-                    .zip(secondary.uv.iter_mut()).zip(coordinates.iter()) {
-                    vertex[6..8].copy_from_slice(&value[..2]);
-                    *uv = [value[2], value[3]];
-                }
-                changed.push(*index);
+            && motion.previous_tick != tick
+        {
+            motion.advance(tick, coordinates);
+            let draw = &mut self.draws[*index];
+            let secondary = draw
+                .secondary
+                .as_mut()
+                .ok_or("cloud secondary layer missing")?;
+            if draw.vertices.len() != coordinates.len() || secondary.uv.len() != coordinates.len() {
+                return Err("retained cloud vertex topology changed".into());
+            }
+            for ((vertex, uv), value) in draw
+                .vertices
+                .iter_mut()
+                .zip(secondary.uv.iter_mut())
+                .zip(coordinates.iter())
+            {
+                vertex[6..8].copy_from_slice(&value[..2]);
+                *uv = [value[2], value[3]];
+            }
+            changed.push(*index);
         }
         for (index, draw) in self.draws.iter_mut().enumerate() {
             if draw.mode == SurfaceMode::WaterFallback {
@@ -2066,16 +2258,24 @@ impl Scene {
         };
         state.water = prior.water;
         if let (Some((index, motion, coordinates)), Some((_, old_motion, old_coordinates))) =
-            (&mut state.clouds, &prior.clouds) {
+            (&mut state.clouds, &prior.clouds)
+        {
             if coordinates.len() != old_coordinates.len() {
                 return Err("refreshed cloud vertex topology changed".into());
             }
             *motion = *old_motion;
             coordinates.copy_from_slice(old_coordinates);
             let draw = &mut self.draws[*index];
-            let secondary = draw.secondary.as_mut().ok_or("cloud secondary layer missing")?;
-            for ((vertex, uv), value) in draw.vertices.iter_mut()
-                .zip(secondary.uv.iter_mut()).zip(coordinates.iter()) {
+            let secondary = draw
+                .secondary
+                .as_mut()
+                .ok_or("cloud secondary layer missing")?;
+            for ((vertex, uv), value) in draw
+                .vertices
+                .iter_mut()
+                .zip(secondary.uv.iter_mut())
+                .zip(coordinates.iter())
+            {
                 vertex[6..8].copy_from_slice(&value[..2]);
                 *uv = [value[2], value[3]];
             }
@@ -2131,7 +2331,11 @@ impl Scene {
         let quads = state.sky.map(|(sun, angle, color)| {
             crate::sky::celestial_quads(sample.eye, scene_view, angle, sun, color)
         });
-        let tick = if state.water.previous_tick == u32::MAX { 0 } else { state.water.previous_tick };
+        let tick = if state.water.previous_tick == u32::MAX {
+            0
+        } else {
+            state.water.previous_tick
+        };
         let mut celestial = 0;
         for (index, draw) in self.draws.iter_mut().enumerate() {
             match draw.mode {
@@ -2139,7 +2343,11 @@ impl Scene {
                     draw.view_projection = Some(sky_camera);
                     let count = if draw.mode == SurfaceMode::Stars {
                         if strips == 0 || state.sky.is_some_and(|(_, _, color)| color & 255 >= 127)
-                            { 0 } else { draw.vertices.len() }
+                        {
+                            0
+                        } else {
+                            draw.vertices.len()
+                        }
                     } else {
                         strips * 384
                     };
@@ -2176,13 +2384,17 @@ fn update_fallback_water(
     camera: [f32; 3],
     tick: u32,
 ) -> Result<(), String> {
-    let Some((sun, _, _)) = state.sky else { return Ok(()); };
+    let Some((sun, _, _)) = state.sky else {
+        return Ok(());
+    };
     let mut cursor = 0;
     for (positions, indices) in &state.water_meshes {
         let samples = state.water.fallback_vertices(positions, camera, sun, tick);
         for &i in indices {
             let sample = samples[usize::from(i)];
-            let vertex = draw.vertices.get_mut(cursor)
+            let vertex = draw
+                .vertices
+                .get_mut(cursor)
                 .ok_or("retained fallback water vertex topology changed")?;
             for (component, shift) in [16, 8, 0].into_iter().enumerate() {
                 vertex[3 + component] = ((sample.color >> shift) & 255) as f32 / 255.;
@@ -2286,8 +2498,7 @@ mod tests {
         assert_eq!(BuildingPose::from_record(&record).unwrap().scale, [1.; 3]);
         record[0x14..0x18].copy_from_slice(&3u32.to_le_bytes());
         for axis in 0..3 {
-            record[0x70 + axis * 4..0x74 + axis * 4]
-                .copy_from_slice(&0.25f32.to_le_bytes());
+            record[0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&0.25f32.to_le_bytes());
         }
         assert_eq!(BuildingPose::from_record(&record).unwrap().scale, [0.25; 3]);
     }
@@ -2316,16 +2527,16 @@ mod tests {
             // scale is live. Complete status 4 uses the unit model matrix.
             record[0x14..0x18].copy_from_slice(&3u32.to_le_bytes());
             assert_ne!(record[0x3f], 0);
-            let category = crate::building_geometry::V14_CATEGORY_BASE
-                + saved.category as u32 * 0x17c;
+            let category =
+                crate::building_geometry::V14_CATEGORY_BASE + saved.category as u32 * 0x17c;
             record[0x40..0x44].copy_from_slice(&category.to_le_bytes());
             record[0x170..0x174].copy_from_slice(&1u32.to_le_bytes());
             for (axis, value) in [building.center[0], 0.5, building.center[1]]
-                .into_iter().enumerate() {
-                record[0x58 + axis * 4..0x5c + axis * 4]
-                    .copy_from_slice(&value.to_le_bytes());
-                record[0x70 + axis * 4..0x74 + axis * 4]
-                    .copy_from_slice(&1f32.to_le_bytes());
+                .into_iter()
+                .enumerate()
+            {
+                record[0x58 + axis * 4..0x5c + axis * 4].copy_from_slice(&value.to_le_bytes());
+                record[0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&1f32.to_le_bytes());
             }
         }
         let assemble_runtime = |records: &[[u8; 0x394]]| {
@@ -2346,7 +2557,8 @@ mod tests {
                 width: 1280,
                 height: 960,
                 animated: false,
-            }).unwrap()
+            })
+            .unwrap()
         };
         let mut patched = assemble_runtime(&before);
         #[cfg(feature = "capture")]
@@ -2356,45 +2568,81 @@ mod tests {
                 descriptor.backends = wgpu::Backends::DX12;
             }
             let renderer = pollster::block_on(crate::render::Renderer::new(descriptor)).unwrap();
-            let draws = patched.draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>();
-            let prepared = renderer.prepare(&draws, patched.camera, patched.fog).unwrap();
+            let draws = patched
+                .draws
+                .iter()
+                .map(OwnedDraw::borrowed)
+                .collect::<Vec<_>>();
+            let prepared = renderer
+                .prepare(&draws, patched.camera, patched.fog)
+                .unwrap();
             (renderer, prepared)
         };
         let mut after = before.clone();
         let slot = after.iter().position(|row| row[0x3f] != 0).unwrap();
         for axis in 0..3 {
-            after[slot][0x70 + axis * 4..0x74 + axis * 4]
-                .copy_from_slice(&0.5f32.to_le_bytes());
+            after[slot][0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&0.5f32.to_le_bytes());
         }
         let started = std::time::Instant::now();
-        let changed = patched.patch_runtime_poses(&before, &after).unwrap().unwrap();
+        let changed = patched
+            .patch_runtime_poses(&before, &after)
+            .unwrap()
+            .unwrap();
         let patch_time = started.elapsed();
         assert!(!changed.is_empty());
         #[cfg(feature = "capture")]
         for &index in &changed {
             let draw = &patched.draws[index];
-            renderer.update_dynamic_surface(&mut prepared, index, &draw.borrowed(),
-                draw.view_projection.unwrap_or(patched.camera), patched.fog).unwrap();
+            renderer
+                .update_dynamic_surface(
+                    &mut prepared,
+                    index,
+                    &draw.borrowed(),
+                    draw.view_projection.unwrap_or(patched.camera),
+                    patched.fog,
+                )
+                .unwrap();
         }
         let started = std::time::Instant::now();
         let rebuilt = assemble_runtime(&after);
-        eprintln!("saved-building pose patch {patch_time:?}, full assembly {:?}", started.elapsed());
+        eprintln!(
+            "saved-building pose patch {patch_time:?}, full assembly {:?}",
+            started.elapsed()
+        );
         assert_eq!(patched.draws.len(), rebuilt.draws.len());
         for (index, (partial, full)) in patched.draws.iter().zip(&rebuilt.draws).enumerate() {
-            assert_eq!(partial.vertices.len(), full.vertices.len(), "draw {index} vertex count");
+            assert_eq!(
+                partial.vertices.len(),
+                full.vertices.len(),
+                "draw {index} vertex count"
+            );
             for (at, (a, b)) in partial.vertices.iter().zip(&full.vertices).enumerate() {
-                assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits),
-                    "draw {index} vertex {at}");
+                assert_eq!(
+                    a.map(f32::to_bits),
+                    b.map(f32::to_bits),
+                    "draw {index} vertex {at}"
+                );
             }
             assert_eq!(
-                partial.specular.as_ref().map(|values| values.iter().map(|v| v.map(f32::to_bits)).collect::<Vec<_>>()),
-                full.specular.as_ref().map(|values| values.iter().map(|v| v.map(f32::to_bits)).collect::<Vec<_>>()),
+                partial.specular.as_ref().map(|values| values
+                    .iter()
+                    .map(|v| v.map(f32::to_bits))
+                    .collect::<Vec<_>>()),
+                full.specular.as_ref().map(|values| values
+                    .iter()
+                    .map(|v| v.map(f32::to_bits))
+                    .collect::<Vec<_>>()),
                 "draw {index} specular",
             );
         }
         let mut structural = after.clone();
         structural[slot][0x2d] ^= 1;
-        assert!(patched.patch_runtime_poses(&after, &structural).unwrap().is_none());
+        assert!(
+            patched
+                .patch_runtime_poses(&after, &structural)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -2410,8 +2658,10 @@ mod tests {
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let collection = |path| {
             let entry = index.find(path).unwrap();
-            TextureSet::parse(&archive[entry.offset as usize
-                ..(entry.offset + entry.length) as usize]).unwrap()
+            TextureSet::parse(
+                &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+            )
+            .unwrap()
         };
         let cached = collection("gamedata2/BuildingTextures/textures.gtd");
         let bases = collection("gamedata2/buildtextures/textures.gtd");
@@ -2419,58 +2669,104 @@ mod tests {
         let day = &cached.textures[0];
         assert_eq!((day.width, day.height, day.header[0]), (64, 64, 0x1000));
         let converted_day = crate::texture::loader_pixels(day);
-        assert_ne!(converted_day, day.texels, "fixture must expose the extra saturation");
+        assert_ne!(
+            converted_day, day.texels,
+            "fixture must expose the extra saturation"
+        );
         let night = &cached.textures[26];
         let converted_night = crate::texture::loader_pixels(night);
-        let base_pixels: Vec<_> = bases.textures.iter()
-            .map(crate::texture::loader_pixels).collect();
+        let base_pixels: Vec<_> = bases
+            .textures
+            .iter()
+            .map(crate::texture::loader_pixels)
+            .collect();
         let image = PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();
         let file = BuildFile::parse(&build_file).unwrap();
         let spec = scene::parse_static_map(std::str::from_utf8(&map).unwrap())
-            .unwrap().into_iter().next().unwrap();
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
         let building = SceneBuilding::resolve(spec, &board, &file).unwrap();
         let colors = crate::lighting::SunColors::parse(&suncols).unwrap();
         // Independently choose both sides of native 004b7d9f's low-byte threshold.
-        let phase_for = |daylight| (0..24).find(|&phase| {
-            ((colors.sample(phase, 0).unwrap().diffuse & 255) * 2 >= 127) == daylight
-        }).expect("fixture needs both daylight and night");
+        let phase_for = |daylight| {
+            (0..24)
+                .find(|&phase| {
+                    ((colors.sample(phase, 0).unwrap().diffuse & 255) * 2 >= 127) == daylight
+                })
+                .expect("fixture needs both daylight and night")
+        };
         let mut cache = crate::texture::LoaderCache::default();
         for daylight in [true, false] {
             for cached_loader in [false, true, true] {
                 let request = Request {
-                    build_file: &build_file, source: Source::Preview(building.clone()),
+                    build_file: &build_file,
+                    source: Source::Preview(building.clone()),
                     original: Some(OriginalAssets {
-                        executable: &executable, directory: &directory, archive: &archive,
+                        executable: &executable,
+                        directory: &directory,
+                        archive: &archive,
                     }),
-                    suncols: Some(&suncols), phase: Some(phase_for(daylight)),
-                    camera: None, width: 1280, height: 960, animated: false,
+                    suncols: Some(&suncols),
+                    phase: Some(phase_for(daylight)),
+                    camera: None,
+                    width: 1280,
+                    height: 960,
+                    animated: false,
                 };
                 let scene = if cached_loader {
                     assemble_with_style_cached(request, None, &mut cache)
-                } else { assemble(request) }.unwrap();
+                } else {
+                    assemble(request)
+                }
+                .unwrap();
                 let mut count = 0;
                 for draw in &scene.draws {
-                    if !matches!(draw.mode, SurfaceMode::FacadeBlend) { continue; }
+                    if !matches!(draw.mode, SurfaceMode::FacadeBlend) {
+                        continue;
+                    }
                     count += 1;
                     assert!(!draw.vertices.is_empty());
                     let secondary = draw.secondary.as_ref().unwrap();
-                    let expected = if daylight { day.texels } else { &converted_night };
+                    let expected = if daylight {
+                        day.texels
+                    } else {
+                        &converted_night
+                    };
                     let record = if daylight { day } else { night };
-                    assert_eq!((secondary.width, secondary.height),
-                        (record.width, record.height));
-                    assert_eq!(secondary.rgba.as_ref(), expected,
-                        "actual submitted secondary must use the correct row and representation");
+                    assert_eq!(
+                        (secondary.width, secondary.height),
+                        (record.width, record.height)
+                    );
+                    assert_eq!(
+                        secondary.rgba.as_ref(),
+                        expected,
+                        "actual submitted secondary must use the correct row and representation"
+                    );
                     assert!(secondary.mipmaps);
                     assert_eq!(secondary.uv.len(), draw.vertices.len());
                     let factor = (colors.sample(phase_for(daylight), 0).unwrap().diffuse & 255) * 2;
-                    assert_eq!(secondary.diffuse_alpha,
-                        if daylight { (factor / 6) as u8 } else { (255 - factor) as u8 });
+                    assert_eq!(
+                        secondary.diffuse_alpha,
+                        if daylight {
+                            (factor / 6) as u8
+                        } else {
+                            (255 - factor) as u8
+                        }
+                    );
                     assert!(draw.mipmaps);
-                    assert!(bases.textures.iter().zip(&base_pixels).any(|(raw, pixels)|
-                        (draw.width, draw.height) == (raw.width, raw.height)
-                            && draw.rgba.as_ref() == pixels.as_slice()),
-                        "primary facade retains its existing loader conversion");
+                    assert!(
+                        bases
+                            .textures
+                            .iter()
+                            .zip(&base_pixels)
+                            .any(|(raw, pixels)| (draw.width, draw.height)
+                                == (raw.width, raw.height)
+                                && draw.rgba.as_ref() == pixels.as_slice()),
+                        "primary facade retains its existing loader conversion"
+                    );
                 }
                 assert!(count > 0, "fixture must submit actual facade geometry");
             }
@@ -2491,7 +2787,10 @@ mod tests {
         let board = Board::from_v14(&image).unwrap();
         let file = BuildFile::parse(&build_file).unwrap();
         let spec = scene::parse_static_map(std::str::from_utf8(&map).unwrap())
-            .unwrap().into_iter().next().unwrap();
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
         let building = SceneBuilding::resolve(spec, &board, &file).unwrap();
         let center = building.center;
         let result = assemble(Request {
@@ -2508,15 +2807,23 @@ mod tests {
             width: 1280,
             height: 960,
             animated: false,
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(result.building_count, 1);
         assert_eq!(result.inspection_buildings.len(), 1);
-        assert_eq!(result.inspection_buildings[0].translation,
-            [center[0], 0.5, center[1]]);
-        assert!(result.draws.iter().any(|draw| {
-            !draw.vertices.is_empty() && draw.width > 1 && draw.height > 1
-                && draw.rgba.len() == (draw.width * draw.height * 4) as usize
-        }), "quoted building produced no textured geometry");
+        assert_eq!(
+            result.inspection_buildings[0].translation,
+            [center[0], 0.5, center[1]]
+        );
+        assert!(
+            result.draws.iter().any(|draw| {
+                !draw.vertices.is_empty()
+                    && draw.width > 1
+                    && draw.height > 1
+                    && draw.rgba.len() == (draw.width * draw.height * 4) as usize
+            }),
+            "quoted building produced no textured geometry"
+        );
     }
 
     #[test]
@@ -2668,21 +2975,51 @@ mod tests {
         let track_bytes = read("OPENMT2001_INTRO_TRACK");
         let track = crate::flyby::Flyby::parse(&track_bytes).unwrap();
         let sample = track.sample(1).unwrap();
-        let make_at = |phase, camera| assemble(Request {
-            build_file: &build_file,
-            source: Source::Map(std::str::from_utf8(&map).unwrap()),
-            original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
-            suncols: Some(&suncols), phase: Some(phase), camera: Some(camera),
-            width: 1280, height: 960, animated: true,
-        }).unwrap();
+        let make_at = |phase, camera| {
+            assemble(Request {
+                build_file: &build_file,
+                source: Source::Map(std::str::from_utf8(&map).unwrap()),
+                original: Some(OriginalAssets {
+                    executable: &executable,
+                    directory: &directory,
+                    archive: &archive,
+                }),
+                suncols: Some(&suncols),
+                phase: Some(phase),
+                camera: Some(camera),
+                width: 1280,
+                height: 960,
+                animated: true,
+            })
+            .unwrap()
+        };
         let make = |phase| make_at(phase, sample);
         let mut scene = make(20);
-        let cloud = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::Clouds).unwrap();
-        let water_draw = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::WaterFallback).unwrap();
-        let sky_draw = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::Sky).unwrap();
-        let celestial = scene.draws.iter().position(|draw| draw.mode == SurfaceMode::Celestial).unwrap();
-        let layout = scene.draws.iter().map(|draw| draw.vertices.len()).collect::<Vec<_>>();
+        let cloud = scene
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::Clouds)
+            .unwrap();
+        let water_draw = scene
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::WaterFallback)
+            .unwrap();
+        let sky_draw = scene
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::Sky)
+            .unwrap();
+        let celestial = scene
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::Celestial)
+            .unwrap();
+        let layout = scene
+            .draws
+            .iter()
+            .map(|draw| draw.vertices.len())
+            .collect::<Vec<_>>();
         let first_uv = scene.draws[cloud].vertices[0][6..8].to_vec();
         let first_water_uv = scene.draws[water_draw].vertices[0][6..8].to_vec();
         // Original cold image starts cloud previous_tick at zero and fallback
@@ -2698,10 +3035,21 @@ mod tests {
         assert_eq!(initial_water.previous_tick, saved_tick);
         assert_eq!(initial_water.phase.to_bits(), 0f32.to_bits());
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(crate::render::Renderer::new(descriptor)).unwrap();
-        let mut prepared = renderer.prepare(&scene.draws.iter().map(OwnedDraw::borrowed)
-            .collect::<Vec<_>>(), scene.camera, scene.fog).unwrap();
+        let mut prepared = renderer
+            .prepare(
+                &scene
+                    .draws
+                    .iter()
+                    .map(OwnedDraw::borrowed)
+                    .collect::<Vec<_>>(),
+                scene.camera,
+                scene.fog,
+            )
+            .unwrap();
         let daylight_changed = scene.advance_daylight(6, 197, sample).unwrap();
         assert!(daylight_changed.contains(&sky_draw));
         assert!(daylight_changed.contains(&cloud));
@@ -2710,26 +3058,68 @@ mod tests {
         assert_ne!(scene.draws[sky_draw].vertices[384][3..6], morning_sky);
         assert_ne!(scene.draws[celestial].vertices[0][..3], morning_sun);
         let later_fog = scene.fog.unwrap();
-        assert_ne!((later_fog.color, later_fog.start.to_bits(), later_fog.end.to_bits()),
-            (morning_fog.color, morning_fog.start.to_bits(), morning_fog.end.to_bits()));
+        assert_ne!(
+            (
+                later_fog.color,
+                later_fog.start.to_bits(),
+                later_fog.end.to_bits()
+            ),
+            (
+                morning_fog.color,
+                morning_fog.start.to_bits(),
+                morning_fog.end.to_bits()
+            )
+        );
         for index in daylight_changed {
             let draw = &scene.draws[index];
-            renderer.update_dynamic_surface(&mut prepared, index, &draw.borrowed(),
-                draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+            renderer
+                .update_dynamic_surface(
+                    &mut prepared,
+                    index,
+                    &draw.borrowed(),
+                    draw.view_projection.unwrap_or(scene.camera),
+                    scene.fog,
+                )
+                .unwrap();
         }
         for (index, draw) in scene.draws.iter().enumerate() {
-            renderer.update_camera(&prepared, index,
-                draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+            renderer
+                .update_camera(
+                    &prepared,
+                    index,
+                    draw.view_projection.unwrap_or(scene.camera),
+                    scene.fog,
+                )
+                .unwrap();
         }
-        for tick in [saved_tick, saved_tick + 25, saved_tick + 50,
-            saved_tick + 50, saved_tick + 100] {
+        for tick in [
+            saved_tick,
+            saved_tick + 25,
+            saved_tick + 50,
+            saved_tick + 50,
+            saved_tick + 100,
+        ] {
             let changed = scene.advance_environment(tick, sample.eye).unwrap();
             for index in changed {
                 let draw = &scene.draws[index];
-                renderer.update_dynamic_surface(&mut prepared, index, &draw.borrowed(),
-                    draw.view_projection.unwrap_or(scene.camera), scene.fog).unwrap();
+                renderer
+                    .update_dynamic_surface(
+                        &mut prepared,
+                        index,
+                        &draw.borrowed(),
+                        draw.view_projection.unwrap_or(scene.camera),
+                        scene.fog,
+                    )
+                    .unwrap();
             }
-            assert_eq!(scene.draws.iter().map(|draw| draw.vertices.len()).collect::<Vec<_>>(), layout);
+            assert_eq!(
+                scene
+                    .draws
+                    .iter()
+                    .map(|draw| draw.vertices.len())
+                    .collect::<Vec<_>>(),
+                layout
+            );
         }
         assert_ne!(scene.draws[cloud].vertices[0][6..8], first_uv);
         assert_ne!(scene.draws[water_draw].vertices[0][6..8], first_water_uv);
@@ -2738,32 +3128,81 @@ mod tests {
         let water = scene.animation.as_ref().unwrap().water;
         assert_eq!(water.previous_tick, saved_tick + 100);
         scene.reframe(track.sample(1000).unwrap()).unwrap();
-        assert_eq!(scene.animation.as_ref().unwrap().water.phase.to_bits(), water.phase.to_bits());
+        assert_eq!(
+            scene.animation.as_ref().unwrap().water.phase.to_bits(),
+            water.phase.to_bits()
+        );
         let mut refreshed = make(20);
         refreshed.retain_environment(&scene).unwrap();
         refreshed.advance_daylight(6, 197, sample).unwrap();
-        assert_eq!(refreshed.draws[sky_draw].vertices[384][3..6],
-            scene.draws[sky_draw].vertices[384][3..6]);
-        assert_eq!(refreshed.draws[cloud].diffuse_alpha,
-            scene.draws[cloud].diffuse_alpha);
-        assert_eq!(refreshed.animation.as_ref().unwrap().water.phase.to_bits(), water.phase.to_bits());
-        assert_eq!(refreshed.animation.as_ref().unwrap().clouds.as_ref().unwrap().2,
-            scene.animation.as_ref().unwrap().clouds.as_ref().unwrap().2);
-        refreshed.advance_environment(saved_tick + 125, sample.eye).unwrap();
-        assert_eq!(refreshed.animation.as_ref().unwrap().water.previous_tick, saved_tick + 125);
-        assert_ne!(refreshed.animation.as_ref().unwrap().water.phase.to_bits(), water.phase.to_bits());
+        assert_eq!(
+            refreshed.draws[sky_draw].vertices[384][3..6],
+            scene.draws[sky_draw].vertices[384][3..6]
+        );
+        assert_eq!(
+            refreshed.draws[cloud].diffuse_alpha,
+            scene.draws[cloud].diffuse_alpha
+        );
+        assert_eq!(
+            refreshed.animation.as_ref().unwrap().water.phase.to_bits(),
+            water.phase.to_bits()
+        );
+        assert_eq!(
+            refreshed
+                .animation
+                .as_ref()
+                .unwrap()
+                .clouds
+                .as_ref()
+                .unwrap()
+                .2,
+            scene.animation.as_ref().unwrap().clouds.as_ref().unwrap().2
+        );
+        refreshed
+            .advance_environment(saved_tick + 125, sample.eye)
+            .unwrap();
+        assert_eq!(
+            refreshed.animation.as_ref().unwrap().water.previous_tick,
+            saved_tick + 125
+        );
+        assert_ne!(
+            refreshed.animation.as_ref().unwrap().water.phase.to_bits(),
+            water.phase.to_bits()
+        );
         let mut daytime = make(12);
-        let stars = daytime.draws.iter().position(|draw| draw.mode == SurfaceMode::Stars).unwrap();
-        let mut day_prepared = renderer.prepare(&daytime.draws.iter().map(OwnedDraw::borrowed)
-            .collect::<Vec<_>>(), daytime.camera, daytime.fog).unwrap();
+        let stars = daytime
+            .draws
+            .iter()
+            .position(|draw| draw.mode == SurfaceMode::Stars)
+            .unwrap();
+        let mut day_prepared = renderer
+            .prepare(
+                &daytime
+                    .draws
+                    .iter()
+                    .map(OwnedDraw::borrowed)
+                    .collect::<Vec<_>>(),
+                daytime.camera,
+                daytime.fog,
+            )
+            .unwrap();
         daytime.reframe(sample).unwrap();
         assert_eq!(daytime.draws[stars].active_vertices, Some(0));
         let night_changed = daytime.advance_daylight(20, 0, sample).unwrap();
-        assert_eq!(daytime.draws[stars].active_vertices, Some(daytime.draws[stars].vertices.len()));
+        assert_eq!(
+            daytime.draws[stars].active_vertices,
+            Some(daytime.draws[stars].vertices.len())
+        );
         assert!(night_changed.contains(&stars));
-        renderer.update_dynamic_surface(&mut day_prepared, stars,
-            &daytime.draws[stars].borrowed(), daytime.draws[stars].view_projection.unwrap(),
-            daytime.fog).unwrap();
+        renderer
+            .update_dynamic_surface(
+                &mut day_prepared,
+                stars,
+                &daytime.draws[stars].borrowed(),
+                daytime.draws[stars].view_projection.unwrap(),
+                daytime.fog,
+            )
+            .unwrap();
         let capacity = daytime.draws[stars].vertices.len();
         assert!(capacity > 0);
         let original_stars = daytime.draws[stars].vertices.clone();
@@ -2775,36 +3214,85 @@ mod tests {
             changed.extend(daytime.apply_normal_star_detail(detail, sample).unwrap());
             changed.sort_unstable();
             changed.dedup();
-            assert_eq!(daytime.draws[stars].active_vertices, Some(if detail == 2 { capacity } else { 0 }));
+            assert_eq!(
+                daytime.draws[stars].active_vertices,
+                Some(if detail == 2 { capacity } else { 0 })
+            );
             assert_eq!(daytime.draws[stars].vertices, original_stars);
-            let updates = changed.into_iter().map(|index|
-                (index, daytime.draws[index].borrowed())).collect::<Vec<_>>();
-            renderer.update_dynamic_vertices_batch(&mut day_prepared, &updates).unwrap();
-            assert!(daytime.apply_normal_star_detail(detail, sample).unwrap().is_empty());
+            let updates = changed
+                .into_iter()
+                .map(|index| (index, daytime.draws[index].borrowed()))
+                .collect::<Vec<_>>();
+            renderer
+                .update_dynamic_vertices_batch(&mut day_prepared, &updates)
+                .unwrap();
+            assert!(
+                daytime
+                    .apply_normal_star_detail(detail, sample)
+                    .unwrap()
+                    .is_empty()
+            );
         }
-        assert_eq!(daytime.animation.as_ref().unwrap().water.phase.to_bits(), water_before);
+        assert_eq!(
+            daytime.animation.as_ref().unwrap().water.phase.to_bits(),
+            water_before
+        );
         // Animated assembly reserves the complete catalog even when no sky
         // strips are initially visible. Exercise prepare -> zero -> full on
         // the same prepared scene, not a rebuilt replacement.
         let downward = crate::flyby::CameraSample {
-            eye: [0., 200., 0.], target: [0., 0., 0.], up: [0., 0., 1.], ..sample
+            eye: [0., 200., 0.],
+            target: [0., 0., 0.],
+            up: [0., 0., 1.],
+            ..sample
         };
-        assert_eq!(crate::sky::visible_strips(crate::sky::upper_view_angle(
-            downward.eye, downward.target, downward.vertical_fov).unwrap()).unwrap(), 0);
+        assert_eq!(
+            crate::sky::visible_strips(
+                crate::sky::upper_view_angle(downward.eye, downward.target, downward.vertical_fov)
+                    .unwrap()
+            )
+            .unwrap(),
+            0
+        );
         let mut initially_down = make_at(20, downward);
-        let down_stars = initially_down.draws.iter().position(|d| d.mode == SurfaceMode::Stars).unwrap();
+        let down_stars = initially_down
+            .draws
+            .iter()
+            .position(|d| d.mode == SurfaceMode::Stars)
+            .unwrap();
         assert_eq!(initially_down.draws[down_stars].vertices.len(), capacity);
-        let mut down_prepared = renderer.prepare(&initially_down.draws.iter().map(OwnedDraw::borrowed)
-            .collect::<Vec<_>>(), initially_down.camera, initially_down.fog).unwrap();
-        for (camera, expected) in [(downward, 0), (sample, capacity), (downward, 0), (sample, capacity)] {
+        let mut down_prepared = renderer
+            .prepare(
+                &initially_down
+                    .draws
+                    .iter()
+                    .map(OwnedDraw::borrowed)
+                    .collect::<Vec<_>>(),
+                initially_down.camera,
+                initially_down.fog,
+            )
+            .unwrap();
+        for (camera, expected) in [
+            (downward, 0),
+            (sample, capacity),
+            (downward, 0),
+            (sample, capacity),
+        ] {
             let mut changed = initially_down.reframe(camera).unwrap();
             changed.extend(initially_down.apply_normal_star_detail(2, camera).unwrap());
             changed.sort_unstable();
             changed.dedup();
-            assert_eq!(initially_down.draws[down_stars].active_vertices, Some(expected));
-            let updates = changed.into_iter().map(|index|
-                (index, initially_down.draws[index].borrowed())).collect::<Vec<_>>();
-            renderer.update_dynamic_vertices_batch(&mut down_prepared, &updates).unwrap();
+            assert_eq!(
+                initially_down.draws[down_stars].active_vertices,
+                Some(expected)
+            );
+            let updates = changed
+                .into_iter()
+                .map(|index| (index, initially_down.draws[index].borrowed()))
+                .collect::<Vec<_>>();
+            renderer
+                .update_dynamic_vertices_batch(&mut down_prepared, &updates)
+                .unwrap();
         }
         // Same-hour replacement retains environment but installs a fresh scene;
         // the city owner reapplies its selected Detail before presentation.
@@ -2812,18 +3300,35 @@ mod tests {
         replacement.retain_environment(&daytime).unwrap();
         replacement.advance_daylight(20, 0, sample).unwrap();
         replacement.apply_normal_star_detail(1, sample).unwrap();
-        let replacement_stars = replacement.draws.iter().position(|d| d.mode == SurfaceMode::Stars).unwrap();
-        assert_eq!(replacement.draws[replacement_stars].active_vertices, Some(0));
+        let replacement_stars = replacement
+            .draws
+            .iter()
+            .position(|d| d.mode == SurfaceMode::Stars)
+            .unwrap();
+        assert_eq!(
+            replacement.draws[replacement_stars].active_vertices,
+            Some(0)
+        );
         replacement.apply_normal_star_detail(2, sample).unwrap();
-        assert_eq!(replacement.draws[replacement_stars].active_vertices,
-            Some(replacement.draws[replacement_stars].vertices.len()));
-        assert_eq!(replacement.animation.as_ref().unwrap().water.phase.to_bits(), water_before);
+        assert_eq!(
+            replacement.draws[replacement_stars].active_vertices,
+            Some(replacement.draws[replacement_stars].vertices.len())
+        );
+        assert_eq!(
+            replacement
+                .animation
+                .as_ref()
+                .unwrap()
+                .water
+                .phase
+                .to_bits(),
+            water_before
+        );
         daytime.advance_daylight(12, 0, sample).unwrap();
         for detail in [0, 1, 2] {
             daytime.apply_normal_star_detail(detail, sample).unwrap();
             assert_eq!(daytime.draws[stars].active_vertices, Some(0));
         }
-
     }
 }
 
@@ -2842,37 +3347,64 @@ mod temporal_city_lighting_regressions {
     }
     fn camera() -> crate::flyby::CameraSample {
         crate::flyby::CameraSample {
-            eye: [600., 400., 600.], target: [0., 0., 0.],
-            up: [0., 1., 0.], vertical_fov: 45.,
+            eye: [600., 400., 600.],
+            target: [0., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
         }
     }
 
     // Expected colors come from retained ORIGINAL 4f2580 output words, never
     // a second modern assembly or modern Palette/shade_static calculation.
-    fn assert_native_normal_colors(scene: &Scene, observations: &[u8], row: usize, owner: Option<usize>) -> usize {
+    fn assert_native_normal_colors(
+        scene: &Scene,
+        observations: &[u8],
+        row: usize,
+        owner: Option<usize>,
+    ) -> usize {
         let count = word(observations, 12) as usize;
         let start = 16 + row * (12 + count * 20) + 12;
         let mut matched = 0;
         for span in &scene.animation.as_ref().unwrap().lighting {
-            if owner.is_some_and(|owner| !span.runtime.is_some_and(|(slot, _)| slot == owner)) { continue; }
-            if span.runtime.is_some_and(|(_, pose)| pose.scale != [1.; 3]) { continue; }
-            let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
+            if owner.is_some_and(|owner| !span.runtime.is_some_and(|(slot, _)| slot == owner)) {
+                continue;
+            }
+            if span.runtime.is_some_and(|(_, pose)| pose.scale != [1.; 3]) {
+                continue;
+            }
+            let CityLightingInputs::Normals(normals) = &span.inputs else {
+                continue;
+            };
             for (offset, &normal) in normals.iter().enumerate() {
                 for i in 0..count {
                     let at = start + i * 20;
-                    let source = std::array::from_fn::<_, 3, _>(|axis|
-                        f32::from_bits(word(observations, at + axis * 4)));
-                    if source != normal { continue; }
+                    let source = std::array::from_fn::<_, 3, _>(|axis| {
+                        f32::from_bits(word(observations, at + axis * 4))
+                    });
+                    if source != normal {
+                        continue;
+                    }
                     let draw = &scene.draws[span.draw];
-                    assert_eq!(&draw.vertices[span.start + offset][3..6],
-                        &rgb(word(observations, at + 12)), "row {row}, draw {}", span.draw);
-                    assert_eq!(draw.specular.as_ref().unwrap()[span.start + offset],
-                        rgb(word(observations, at + 16)), "row {row}, draw {}", span.draw);
+                    assert_eq!(
+                        &draw.vertices[span.start + offset][3..6],
+                        &rgb(word(observations, at + 12)),
+                        "row {row}, draw {}",
+                        span.draw
+                    );
+                    assert_eq!(
+                        draw.specular.as_ref().unwrap()[span.start + offset],
+                        rgb(word(observations, at + 16)),
+                        "row {row}, draw {}",
+                        span.draw
+                    );
                     matched += 1;
                 }
             }
         }
-        assert!(matched > 0, "fixture must contain actual city normals covered by original output");
+        assert!(
+            matched > 0,
+            "fixture must contain actual city normals covered by original output"
+        );
         matched
     }
 
@@ -2887,24 +3419,40 @@ mod temporal_city_lighting_regressions {
         let map = read("OPENMT2001_INTRO_MAP");
         let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
         let native = std::fs::read(&native_path).unwrap();
-        let vertices = std::fs::read(std::path::Path::new(&native_path)
-            .with_extension("vertices.bin")).unwrap();
+        let vertices =
+            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
+                .unwrap();
         assert_eq!(&native[..8], b"MTLIGHT3");
         assert_eq!(&vertices[..8], b"MTLITV01");
         assert_eq!(word(&native, 8), word(&vertices, 8));
         let camera = camera();
         let mut scene = assemble(Request {
-            build_file: &build_file, source: Source::Map(std::str::from_utf8(&map).unwrap()),
-            original: Some(OriginalAssets { executable: &executable,
-                directory: &directory, archive: &archive }),
-            suncols: Some(&suncols), phase: Some(20), camera: Some(camera),
-            width: 1280, height: 960, animated: true,
-        }).unwrap();
+            build_file: &build_file,
+            source: Source::Map(std::str::from_utf8(&map).unwrap()),
+            original: Some(OriginalAssets {
+                executable: &executable,
+                directory: &directory,
+                archive: &archive,
+            }),
+            suncols: Some(&suncols),
+            phase: Some(20),
+            camera: Some(camera),
+            width: 1280,
+            height: 960,
+            animated: true,
+        })
+        .unwrap();
         // A separately owned precolored surface can share StaticOpaque mode;
         // selection by pipeline alone would incorrectly recolor this sentinel.
-        let mut precolored = OwnedDraw::texture_page(SurfaceMode::StaticOpaque, 1, 1,
-            Arc::from([255u8; 4].as_slice()));
-        precolored.vertices.push([1., 2., 3., 0.1, 0.2, 0.3, 0.4, 0.5]);
+        let mut precolored = OwnedDraw::texture_page(
+            SurfaceMode::StaticOpaque,
+            1,
+            1,
+            Arc::from([255u8; 4].as_slice()),
+        );
+        precolored
+            .vertices
+            .push([1., 2., 3., 0.1, 0.2, 0.3, 0.4, 0.5]);
         precolored.specular.as_mut().unwrap().push([0.; 3]);
         let precolored_index = scene.draws.len();
         scene.draws.push(precolored.clone());
@@ -2924,17 +3472,24 @@ mod temporal_city_lighting_regressions {
             }
             previous = Some(time);
             let state = scene.animation.as_ref().unwrap();
-            assert!(!state.facades.is_empty(), "fixture must exercise facade material ownership");
+            assert!(
+                !state.facades.is_empty(),
+                "fixture must exercise facade material ownership"
+            );
             for span in &state.lighting {
                 let draw = &scene.draws[span.draw];
                 match &span.inputs {
                     CityLightingInputs::Normals(_) => assert!(changed.contains(&span.draw)),
                     CityLightingInputs::Constant { count, .. } => {
                         let end = span.start + *count;
-                        assert_eq!(&draw.vertices[span.start..end],
-                            &original_draws[span.draw].vertices[span.start..end]);
-                        assert_eq!(&draw.specular.as_ref().unwrap()[span.start..end],
-                            &original_draws[span.draw].specular.as_ref().unwrap()[span.start..end]);
+                        assert_eq!(
+                            &draw.vertices[span.start..end],
+                            &original_draws[span.draw].vertices[span.start..end]
+                        );
+                        assert_eq!(
+                            &draw.specular.as_ref().unwrap()[span.start..end],
+                            &original_draws[span.draw].specular.as_ref().unwrap()[span.start..end]
+                        );
                     }
                 }
             }
@@ -2946,19 +3501,35 @@ mod temporal_city_lighting_regressions {
             for (index, inputs) in &state.facades {
                 let secondary = scene.draws[*index].secondary.as_ref().unwrap();
                 assert_eq!(secondary.rgba, expected.rgba);
-                assert_eq!((secondary.width, secondary.height), (expected.width, expected.height));
-                assert_eq!(secondary.diffuse_alpha,
-                    if daytime { (factor / 6) as u8 } else { (255 - factor) as u8 });
+                assert_eq!(
+                    (secondary.width, secondary.height),
+                    (expected.width, expected.height)
+                );
+                assert_eq!(
+                    secondary.diffuse_alpha,
+                    if daytime {
+                        (factor / 6) as u8
+                    } else {
+                        (255 - factor) as u8
+                    }
+                );
                 if !daytime {
-                    assert_eq!(secondary.uv, inputs.iter().map(|(_, uv)| *uv).collect::<Vec<_>>());
+                    assert_eq!(
+                        secondary.uv,
+                        inputs.iter().map(|(_, uv)| *uv).collect::<Vec<_>>()
+                    );
                 }
             }
             assert_eq!(scene.draws[precolored_index].vertices, precolored.vertices);
             assert_eq!(scene.draws[precolored_index].specular, precolored.specular);
             assert!(!changed.contains(&precolored_index));
             for (index, draw) in scene.draws.iter().enumerate() {
-                if !matches!(draw.mode, SurfaceMode::StaticOpaque | SurfaceMode::StaticLit
-                    | SurfaceMode::FacadeBlend) { continue; }
+                if !matches!(
+                    draw.mode,
+                    SurfaceMode::StaticOpaque | SurfaceMode::StaticLit | SurfaceMode::FacadeBlend
+                ) {
+                    continue;
+                }
                 assert_eq!(draw.vertices.len(), original_draws[index].vertices.len());
                 for (after, before) in draw.vertices.iter().zip(&original_draws[index].vertices) {
                     assert_eq!(&after[..3], &before[..3]);
@@ -2966,9 +3537,17 @@ mod temporal_city_lighting_regressions {
                 }
                 assert!(Arc::ptr_eq(&draw.rgba, &original_draws[index].rgba));
             }
-            assert!(scene.advance_daylight(time.0, time.1, camera).unwrap().is_empty());
+            assert!(
+                scene
+                    .advance_daylight(time.0, time.1, camera)
+                    .unwrap()
+                    .is_empty()
+            );
         }
-        assert!(within_hour_changes > 0, "must cover real same-phase 0/197 native pairs");
+        assert!(
+            within_hour_changes > 0,
+            "must cover real same-phase 0/197 native pairs"
+        );
     }
 
     #[test]
@@ -2982,8 +3561,9 @@ mod temporal_city_lighting_regressions {
         let save_bytes = read("OPENMT2001_SAVE_ONE");
         let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
         let native = std::fs::read(&native_path).unwrap();
-        let observations = std::fs::read(std::path::Path::new(&native_path)
-            .with_extension("vertices.bin")).unwrap();
+        let observations =
+            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
+                .unwrap();
         let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let board = Board::from_v14(&PeImage::parse(&executable).unwrap()).unwrap();
         let file = BuildFile::parse(&build_file).unwrap();
@@ -2993,30 +3573,53 @@ mod temporal_city_lighting_regressions {
             let record = &mut records[saved.slot];
             record[..0x40].copy_from_slice(saved.bytes);
             record[0x14..0x18].copy_from_slice(&3u32.to_le_bytes());
-            let category = crate::building_geometry::V14_CATEGORY_BASE + saved.category as u32 * 0x17c;
+            let category =
+                crate::building_geometry::V14_CATEGORY_BASE + saved.category as u32 * 0x17c;
             record[0x40..0x44].copy_from_slice(&category.to_le_bytes());
             record[0x170..0x174].copy_from_slice(&1u32.to_le_bytes());
-            for (axis, value) in [building.center[0], 0.5, building.center[1]].into_iter().enumerate() {
+            for (axis, value) in [building.center[0], 0.5, building.center[1]]
+                .into_iter()
+                .enumerate()
+            {
                 record[0x58 + axis * 4..0x5c + axis * 4].copy_from_slice(&value.to_le_bytes());
                 record[0x70 + axis * 4..0x74 + axis * 4].copy_from_slice(&1f32.to_le_bytes());
             }
         }
         let mut scene = assemble(Request {
-            build_file: &build_file, source: Source::RuntimeBuildings {
-                records: &records, category_base: crate::building_geometry::V14_CATEGORY_BASE },
-            original: Some(OriginalAssets { executable: &executable, directory: &directory, archive: &archive }),
-            suncols: Some(&suncols), phase: Some(20), camera: Some(camera()),
-            width: 1280, height: 960, animated: true,
-        }).unwrap();
+            build_file: &build_file,
+            source: Source::RuntimeBuildings {
+                records: &records,
+                category_base: crate::building_geometry::V14_CATEGORY_BASE,
+            },
+            original: Some(OriginalAssets {
+                executable: &executable,
+                directory: &directory,
+                archive: &archive,
+            }),
+            suncols: Some(&suncols),
+            phase: Some(20),
+            camera: Some(camera()),
+            width: 1280,
+            height: 960,
+            animated: true,
+        })
+        .unwrap();
         let slot = records.iter().position(|row| row[0x3f] != 0).unwrap();
-        let row_for = |phase, counter| (0..word(&native, 8) as usize).find(|&row| {
-            let at = 12 + row * (60 + 768 * 4);
-            (word(&native, at), word(&native, at + 4)) == (phase, counter)
-        }).unwrap();
+        let row_for = |phase, counter| {
+            (0..word(&native, 8) as usize)
+                .find(|&row| {
+                    let at = 12 + row * (60 + 768 * 4);
+                    (word(&native, at), word(&native, at + 4)) == (phase, counter)
+                })
+                .unwrap()
+        };
         scene.advance_daylight(6, 197, camera()).unwrap();
         let mut moved = records.clone();
         moved[slot][0x58..0x5c].copy_from_slice(&700f32.to_le_bytes());
-        let changed = scene.patch_runtime_poses(&records, &moved).unwrap().unwrap();
+        let changed = scene
+            .patch_runtime_poses(&records, &moved)
+            .unwrap()
+            .unwrap();
         assert!(!changed.is_empty());
         assert_native_normal_colors(&scene, &observations, row_for(6, 197), Some(slot));
         // A scale update must be retained for the NEXT temporal relight too.
@@ -3026,22 +3629,33 @@ mod temporal_city_lighting_regressions {
         }
         scene.patch_runtime_poses(&moved, &shrunk).unwrap().unwrap();
         for span in &scene.animation.as_ref().unwrap().lighting {
-            if let Some((owner, pose)) = span.runtime && owner == slot { assert_eq!(pose.scale, [0.5; 3]); }
+            if let Some((owner, pose)) = span.runtime
+                && owner == slot
+            {
+                assert_eq!(pose.scale, [0.5; 3]);
+            }
         }
         scene.advance_daylight(7, 0, camera()).unwrap();
         // Use the retained ORIGINAL palette words and direction, plus the
         // independently traced 4f2390/4f2580 scalar protocol. No modern palette
         // construction or shade_static call supplies these scaled expectations.
         let palette_at = 12 + row_for(7, 0) * (60 + 768 * 4);
-        let original_sun: [f32; 3] = std::array::from_fn(|axis|
-            f32::from_bits(word(&native, palette_at + 28 + axis * 4)));
+        let original_sun: [f32; 3] =
+            std::array::from_fn(|axis| f32::from_bits(word(&native, palette_at + 28 + axis * 4)));
         let mut scaled_vertices = 0;
         for span in &scene.animation.as_ref().unwrap().lighting {
-            let Some((owner, pose)) = span.runtime else { continue; };
-            if owner != slot { continue; }
-            let CityLightingInputs::Normals(normals) = &span.inputs else { continue; };
-            let mut vector: [f32; 3] = std::array::from_fn(|axis|
-                (f64::from(original_sun[axis]) * f64::from(pose.scale[axis])) as f32);
+            let Some((owner, pose)) = span.runtime else {
+                continue;
+            };
+            if owner != slot {
+                continue;
+            }
+            let CityLightingInputs::Normals(normals) = &span.inputs else {
+                continue;
+            };
+            let mut vector: [f32; 3] = std::array::from_fn(|axis| {
+                (f64::from(original_sun[axis]) * f64::from(pose.scale[axis])) as f32
+            });
             vector[2] = -vector[2];
             vector = vector.map(|value| (f64::from(value) * 127.) as f32);
             for (offset, normal) in normals.iter().enumerate() {
@@ -3054,7 +3668,10 @@ mod temporal_city_lighting_regressions {
                 let shine = word(&native, palette_at + 60 + 256 * 4 + secondary_index * 4);
                 let draw = &scene.draws[span.draw];
                 assert_eq!(&draw.vertices[span.start + offset][3..6], &rgb(primary));
-                assert_eq!(draw.specular.as_ref().unwrap()[span.start + offset], rgb(shine));
+                assert_eq!(
+                    draw.specular.as_ref().unwrap()[span.start + offset],
+                    rgb(shine)
+                );
                 scaled_vertices += 1;
             }
         }

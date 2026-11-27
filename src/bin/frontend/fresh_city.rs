@@ -4,28 +4,28 @@ use openmt2001::{
     business_binding, business_pool, economy, level_script, level_startup, lua4::Value, map_script,
 };
 use std::{fs, path::Path};
-#[path = "session_tick.rs"]
-pub mod tick;
-#[path = "session_cards.rs"]
-pub mod cards;
-#[path = "session_property.rs"]
-pub mod property;
-#[path="session_scenarios.rs"]
-pub mod scenarios;
-#[path="custom_session.rs"]
-pub mod custom;
-#[path="session_restore.rs"]
-pub mod restore;
-#[path="tutorial_announcement.rs"]
-mod tutorial_announcement;
-#[path = "fresh_city/result.rs"]
-pub mod result;
 #[cfg(test)]
 #[path = "fresh_city/ai_resume_probe.rs"]
 mod ai_resume_probe;
-#[cfg(all(test,feature="capture"))]
-#[path="outcome_capture.rs"]
+#[path = "session_cards.rs"]
+pub mod cards;
+#[path = "custom_session.rs"]
+pub mod custom;
+#[cfg(all(test, feature = "capture"))]
+#[path = "outcome_capture.rs"]
 mod outcome_capture;
+#[path = "session_property.rs"]
+pub mod property;
+#[path = "session_restore.rs"]
+pub mod restore;
+#[path = "fresh_city/result.rs"]
+pub mod result;
+#[path = "session_scenarios.rs"]
+pub mod scenarios;
+#[path = "session_tick.rs"]
+pub mod tick;
+#[path = "tutorial_announcement.rs"]
+mod tutorial_announcement;
 
 /// Original4a6830 AI names resolve the descriptor's localized string ID.
 pub fn character_names(
@@ -82,7 +82,7 @@ pub struct Policy {
 pub struct Inputs<'a, 'data> {
     /// Native hosts provide original ambient locators before script binding.
     /// Explicitly headless hosts may omit renderer tree state.
-    pub tree_locators: Option<Vec<[f32;3]>>,
+    pub tree_locators: Option<Vec<[f32; 3]>>,
     pub image: &'a openmt2001::pe::PeImage<'data>,
     pub board: &'a openmt2001::board::Board,
     pub file: &'a openmt2001::build_file::BuildFile<'data>,
@@ -92,7 +92,7 @@ pub struct Inputs<'a, 'data> {
     pub road_routes: Vec<u8>,
     pub scripts: &'a Path,
     pub parameters: &'a str,
-    pub era_styles: [openmt2001::building_styles::Styles;8],
+    pub era_styles: [openmt2001::building_styles::Styles; 8],
     pub timetable: &'a str,
     pub scenario: &'a str,
     pub difficulty: i32,
@@ -101,12 +101,19 @@ pub struct Inputs<'a, 'data> {
     pub character_names: &'a [Vec<u8>; 10],
 }
 ///Load the eight original era files; parameter.prm contains no texture ranks.
-pub fn load_era_styles(directory:&Path)->Result<[openmt2001::building_styles::Styles;8],String>{
-    (1930..=2000).step_by(10).map(|year|{
-        let path=directory.join(format!("{year}.prm"));
-        let text=fs::read_to_string(&path).map_err(|e|format!("{}: {e}",path.display()))?;
-        openmt2001::building_styles::Styles::from_parameters(&text)
-    }).collect::<Result<Vec<_>,String>>()?.try_into().map_err(|_|"original era style bank size mismatch".into())
+pub fn load_era_styles(
+    directory: &Path,
+) -> Result<[openmt2001::building_styles::Styles; 8], String> {
+    (1930..=2000)
+        .step_by(10)
+        .map(|year| {
+            let path = directory.join(format!("{year}.prm"));
+            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            openmt2001::building_styles::Styles::from_parameters(&text)
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .try_into()
+        .map_err(|_| "original era style bank size mismatch".into())
 }
 /// Confirmed setup and full compact participants, separate from ordinary Inputs.
 /// Offline local peer0 is an adapter identity, not a recovered native peer ID.
@@ -124,18 +131,28 @@ impl SkirmishLaunch {
         use openmt2001::skirmish::roster::Kind;
         // Bounded original supplied map support; never join a caller path.
         if !(0..=2).contains(&self.difficulty)
-            || !self.target.is_finite() || !(2..=6).contains(&self.participants.len())
-            || self.participants[0].kind != Kind::Human {
+            || !self.target.is_finite()
+            || !(2..=6).contains(&self.participants.len())
+            || self.participants[0].kind != Kind::Human
+        {
             return Err("invalid offline Skirmish launch".into());
         }
         if self.directory.is_empty() || !self.directory.bytes().all(|b| b.is_ascii_alphanumeric()) {
             return Err("invalid selected level directory".into());
         }
         let mut used = [false; 10];
-        for (slot,p) in self.participants.iter().enumerate() {
-            let token = p.token.filter(|&t|t < 10).ok_or("invalid participant token")?;
-            if used[token] || !p.ready || p.name.is_empty() || p.name.len() >= 32
-                || p.name.contains(&0) || (slot > 0 && p.kind != Kind::Ai) {
+        for (slot, p) in self.participants.iter().enumerate() {
+            let token = p
+                .token
+                .filter(|&t| t < 10)
+                .ok_or("invalid participant token")?;
+            if used[token]
+                || !p.ready
+                || p.name.is_empty()
+                || p.name.len() >= 32
+                || p.name.contains(&0)
+                || (slot > 0 && p.kind != Kind::Ai)
+            {
                 return Err("invalid compact offline participant".into());
             }
             used[token] = true;
@@ -146,8 +163,8 @@ impl SkirmishLaunch {
 
 pub struct Session<'data> {
     pub building_styles: openmt2001::building_styles::Styles,
-    pub era_styles: [openmt2001::building_styles::Styles;8],
-    pub player_style_indices: [i32;6],
+    pub era_styles: [openmt2001::building_styles::Styles; 8],
+    pub player_style_indices: [i32; 6],
     pub difficulty: usize,
     /// Original level object+85c.48d439 leaves this zero for mode2 normal
     /// scenarios; tutorial modes1/7 set it to one. Retain the byte because
@@ -250,7 +267,9 @@ impl<'data> Session<'data> {
                 .wrapping_sub(1),
         ];
         let property_index = u32::from_le_bytes(row[0x8c..0x90].try_into().unwrap());
-        let property_address = property_index.checked_mul(88).and_then(|v|v.checked_add(0x5385a4))
+        let property_address = property_index
+            .checked_mul(88)
+            .and_then(|v| v.checked_add(0x5385a4))
             .ok_or("Planning property metadata overflow")?;
         // Original4c35a8..4c35c0 applies the name-table buildable byte
         // after occupancy. Utilities and nonbuilding blocks cannot admit a lot.
@@ -270,20 +289,27 @@ impl<'data> Session<'data> {
         // command consumer. Revalidate the original planning gates against the
         // current worker state so a stale frontend snapshot cannot admit a lot.
         if let crate::build_panel::Entry::Message { text, .. } = crate::build_panel::entry(
-            row[0x6d], row[5] == owner,
+            row[0x6d],
+            row[5] == owner,
             u32::from_le_bytes(row[0x78..0x7c].try_into().unwrap()),
         ) {
-            return Err(format!("Planning permission changed (original message {text})"));
+            return Err(format!(
+                "Planning permission changed (original message {text})"
+            ));
         }
-        let catalog = self.world.catalog.info.row(request.business as usize)
+        let catalog = self
+            .world
+            .catalog
+            .info
+            .row(request.business as usize)
             .ok_or("Planning business outside catalog")?;
         let catalog_word = |at| u32::from_le_bytes(catalog[at..at + 4].try_into().unwrap());
         let type_allowed = if request.business == 43 {
             let identity = u32::from_le_bytes(row[0x8c..0x90].try_into().unwrap());
             let members = crate::build_panel::special_residential_group(assets.image, identity)?;
             let owners = self.world.categories.each_ref().map(|category| category[5]);
-            request.kind == 1 && crate::build_panel::special_residential_group_owned(
-                &members, row[5], &owners)?
+            request.kind == 1
+                && crate::build_panel::special_residential_group_owned(&members, row[5], &owners)?
         } else {
             catalog_word(0x0c) == request.kind
         };
@@ -291,12 +317,20 @@ impl<'data> Session<'data> {
             return Err("Planning business is unavailable for this type".into());
         }
         let [width, depth] = request.size;
-        let area = width.checked_mul(depth).ok_or("Planning footprint area overflow")?;
-        if width <= 0 || depth <= 0 || width >= 7 || depth >= 7
-            || area < catalog_word(0x38) as i32 || area > catalog_word(0x3c) as i32
+        let area = width
+            .checked_mul(depth)
+            .ok_or("Planning footprint area overflow")?;
+        if width <= 0
+            || depth <= 0
+            || width >= 7
+            || depth >= 7
+            || area < catalog_word(0x38) as i32
+            || area > catalog_word(0x3c) as i32
             || width.max(depth) > catalog_word(0x40) as i32
-            || request.height < catalog_word(0x48) as i32 || request.height > catalog_word(0x44) as i32
-            || request.quality > 2 {
+            || request.height < catalog_word(0x48) as i32
+            || request.height > catalog_word(0x44) as i32
+            || request.quality > 2
+        {
             return Err("Planning dimensions outside original business limits".into());
         }
         let height =
@@ -407,63 +441,202 @@ impl<'data> Session<'data> {
 
     ///48b350/48b480 callbacks use the retained current-player scratch packet.
     /// The local host chooses zero for original unwritten stack-prior bytes.
-    pub fn respond_human_dialog(&mut self,callback_address:u32,button:u32,message_kind:u32,network:[bool;2],mut event:impl FnMut(openmt2001::live_commands::Event)->Result<(),String>)->Result<(),String>{
-        use openmt2001::{human_reply,player_messages,live_commands};
-        let current=self.roster.status.current_player;
-        let slot=self.roster.manager.players.iter().position(|p|p.reference==current).ok_or("human dialog current player unresolved")?;
-        if callback_address==0x48b480{return human_reply::dismiss_notice(&mut self.roster.manager.players[slot]);}
-        if callback_address!=0x48b350{return Err(format!("human dialog callback{callback_address:08x} unresolved"));}
-        let references:Vec<_>=self.roster.manager.players.iter().map(|p|p.reference).collect();
-        let (before,tail)=self.roster.manager.players.split_at_mut(slot);let(player,after)=tail.split_first_mut().unwrap();
-        let mut arena=player_messages::Arena{next:self.allocation_next};let visible=u8::from(self.world.auction.presentation.visible);
-        let result=human_reply::offer_response(player,&mut human_reply::World{categories:&mut self.world.city.categories,player_references:&references},&human_reply::Inputs{button,message_kind,command_prior:[0;52]},|call,player,world|{
-            match call{
-                human_reply::Call::Auction{descriptor}=>{
-                    if network[0]&&!network[1]{return Err("human accepted offer requires network transport".into());}
-                    self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},self.world.clock.timing[0],descriptor[16]!=0,0,|_|Err("human auction delay wrapped into synchronous execution".into()))?;
-                },
-                human_reply::Call::Refuse{packet,..}=>{
-                    player_messages::reply_with_players(&packet,0x26,[0x5f5e0ff;4],&mut player_messages::SplitPlayers{before,current:player,after},&mut arena,player_messages::Routing{current_player:current,network,prior:[0;48]},|route,packet,_|{
-                        if let player_messages::Route::PropertyRefresh{category}=route{
-                            openmt2001::category_ownership::property_view(world.categories.get_mut(category as usize).ok_or("human refusal category outside pool")?,visible,1);
+    pub fn respond_human_dialog(
+        &mut self,
+        callback_address: u32,
+        button: u32,
+        message_kind: u32,
+        network: [bool; 2],
+        mut event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
+    ) -> Result<(), String> {
+        use openmt2001::{human_reply, live_commands, player_messages};
+        let current = self.roster.status.current_player;
+        let slot = self
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == current)
+            .ok_or("human dialog current player unresolved")?;
+        if callback_address == 0x48b480 {
+            return human_reply::dismiss_notice(&mut self.roster.manager.players[slot]);
+        }
+        if callback_address != 0x48b350 {
+            return Err(format!(
+                "human dialog callback{callback_address:08x} unresolved"
+            ));
+        }
+        let references: Vec<_> = self
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|p| p.reference)
+            .collect();
+        let (before, tail) = self.roster.manager.players.split_at_mut(slot);
+        let (player, after) = tail.split_first_mut().unwrap();
+        let mut arena = player_messages::Arena {
+            next: self.allocation_next,
+        };
+        let visible = u8::from(self.world.auction.presentation.visible);
+        let result = human_reply::offer_response(
+            player,
+            &mut human_reply::World {
+                categories: &mut self.world.city.categories,
+                player_references: &references,
+            },
+            &human_reply::Inputs {
+                button,
+                message_kind,
+                command_prior: [0; 52],
+            },
+            |call, player, world| {
+                match call {
+                    human_reply::Call::Auction { descriptor } => {
+                        if network[0] && !network[1] {
+                            return Err("human accepted offer requires network transport".into());
                         }
-                        event(live_commands::Event::PlayerMessageRoute{route,packet:*packet})
-                    })?;
+                        self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},self.world.clock.timing[0],descriptor[16]!=0,0,|_|Err("human auction delay wrapped into synchronous execution".into()))?;
+                    }
+                    human_reply::Call::Refuse { packet, .. } => {
+                        player_messages::reply_with_players(
+                            &packet,
+                            0x26,
+                            [0x5f5e0ff; 4],
+                            &mut player_messages::SplitPlayers {
+                                before,
+                                current: player,
+                                after,
+                            },
+                            &mut arena,
+                            player_messages::Routing {
+                                current_player: current,
+                                network,
+                                prior: [0; 48],
+                            },
+                            |route, packet, _| {
+                                if let player_messages::Route::PropertyRefresh { category } = route
+                                {
+                                    openmt2001::category_ownership::property_view(
+                                        world
+                                            .categories
+                                            .get_mut(category as usize)
+                                            .ok_or("human refusal category outside pool")?,
+                                        visible,
+                                        1,
+                                    );
+                                }
+                                event(live_commands::Event::PlayerMessageRoute {
+                                    route,
+                                    packet: *packet,
+                                })
+                            },
+                        )?;
+                    }
                 }
-            }Ok(())
-        });
-        self.allocation_next=arena.next;result
+                Ok(())
+            },
+        );
+        self.allocation_next = arena.next;
+        result
     }
     /// Immediate local464610 action consumer, used by the original auction UI
     /// producers. Admission and control availability belong to the caller.
-    pub fn apply_auction_action(&mut self,command:openmt2001::ai_messages::offers::auction::Command,
-        assets:&CommandAssets<'_,'_>,mut event:impl FnMut(openmt2001::live_commands::Event)->Result<u32,String>)->Result<(),String>{
-        let mut descriptor=[0;52];descriptor[4..8].copy_from_slice(&0x1fu32.to_le_bytes());
-        for(off,value)in[(20,command.action),(24,command.participant),(28,command.amount)]{descriptor[off..off+4].copy_from_slice(&value.to_le_bytes());}
+    pub fn apply_auction_action(
+        &mut self,
+        command: openmt2001::ai_messages::offers::auction::Command,
+        assets: &CommandAssets<'_, '_>,
+        mut event: impl FnMut(openmt2001::live_commands::Event) -> Result<u32, String>,
+    ) -> Result<(), String> {
+        let mut descriptor = [0; 52];
+        descriptor[4..8].copy_from_slice(&0x1fu32.to_le_bytes());
+        for (off, value) in [
+            (20, command.action),
+            (24, command.participant),
+            (28, command.amount),
+        ] {
+            descriptor[off..off + 4].copy_from_slice(&value.to_le_bytes());
+        }
         if self.tutorial_state != 1 {
-            let mut messages=openmt2001::player_messages::Context{arena:openmt2001::player_messages::Arena{next:self.allocation_next},current_player:self.roster.status.current_player,network:[false,false],prior:[0;48]};
-            let mut runtime=openmt2001::live_commands::Runtime{city:&mut self.world.city,roster:&mut self.roster,population:&mut self.population,
-                utilities:&mut self.hooks.utilities,board:assets.board,event_cards:&mut self.event_cards,message_context:&mut messages};
-            let result=runtime.auction_phase(&descriptor,&mut self.world.clock,[false,false],|call,_|event(call));
-            self.allocation_next=messages.arena.next;
+            let mut messages = openmt2001::player_messages::Context {
+                arena: openmt2001::player_messages::Arena {
+                    next: self.allocation_next,
+                },
+                current_player: self.roster.status.current_player,
+                network: [false, false],
+                prior: [0; 48],
+            };
+            let mut runtime = openmt2001::live_commands::Runtime {
+                city: &mut self.world.city,
+                roster: &mut self.roster,
+                population: &mut self.population,
+                utilities: &mut self.hooks.utilities,
+                board: assets.board,
+                event_cards: &mut self.event_cards,
+                message_context: &mut messages,
+            };
+            let result = runtime.auction_phase(
+                &descriptor,
+                &mut self.world.clock,
+                [false, false],
+                |call, _| event(call),
+            );
+            self.allocation_next = messages.arena.next;
             return result;
         }
-        let mut context=self.world.script_context(assets.image,&self.resident_models,
-            level_startup::HostContext{accounting_enabled:true,difficulty:self.difficulty as i32,
-                notifications:self.world.city.ai_demand.ready!=0,auxiliary_template:self.policy.auxiliary_prior_bytes,
-                category_base:0x617628,building_base:0x591318})?;
-        let mut geometry=openmt2001::building_geometry::BuildingGeometry::new(assets.board,assets.file,std::mem::take(&mut self.models));
-        let mut utilities=std::mem::replace(&mut self.hooks.utilities,economy::Utilities::new([0;4]));
-        let mut messages=openmt2001::player_messages::Context{arena:openmt2001::player_messages::Arena{next:self.allocation_next},current_player:self.roster.status.current_player,network:[false,false],prior:[0;48]};
-        let hooks=std::cell::RefCell::new(&mut self.hooks);
-        let mut announcement=tutorial_announcement::Bridge{scripts:&mut self.scripts,hooks:&hooks,context:&mut context};
-        let mut runtime=openmt2001::live_commands::Runtime{city:&mut self.world.city,roster:&mut self.roster,population:&mut self.population,
-            utilities:&mut utilities,board:assets.board,event_cards:&mut self.event_cards,message_context:&mut messages};
-        let result=runtime.auction_phase_with_tutorial(&descriptor,&mut self.world.clock,[false,false],
-            Some((self.tutorial_state,&mut geometry,&mut announcement)),|call,_|event(call));
-        self.hooks.utilities=utilities;
-        self.models=std::mem::take(geometry.registrar_mut());
-        self.allocation_next=messages.arena.next;result
+        let mut context = self.world.script_context(
+            assets.image,
+            &self.resident_models,
+            level_startup::HostContext {
+                accounting_enabled: true,
+                difficulty: self.difficulty as i32,
+                notifications: self.world.city.ai_demand.ready != 0,
+                auxiliary_template: self.policy.auxiliary_prior_bytes,
+                category_base: 0x617628,
+                building_base: 0x591318,
+            },
+        )?;
+        let mut geometry = openmt2001::building_geometry::BuildingGeometry::new(
+            assets.board,
+            assets.file,
+            std::mem::take(&mut self.models),
+        );
+        let mut utilities =
+            std::mem::replace(&mut self.hooks.utilities, economy::Utilities::new([0; 4]));
+        let mut messages = openmt2001::player_messages::Context {
+            arena: openmt2001::player_messages::Arena {
+                next: self.allocation_next,
+            },
+            current_player: self.roster.status.current_player,
+            network: [false, false],
+            prior: [0; 48],
+        };
+        let hooks = std::cell::RefCell::new(&mut self.hooks);
+        let mut announcement = tutorial_announcement::Bridge {
+            scripts: &mut self.scripts,
+            hooks: &hooks,
+            context: &mut context,
+        };
+        let mut runtime = openmt2001::live_commands::Runtime {
+            city: &mut self.world.city,
+            roster: &mut self.roster,
+            population: &mut self.population,
+            utilities: &mut utilities,
+            board: assets.board,
+            event_cards: &mut self.event_cards,
+            message_context: &mut messages,
+        };
+        let result = runtime.auction_phase_with_tutorial(
+            &descriptor,
+            &mut self.world.clock,
+            [false, false],
+            Some((self.tutorial_state, &mut geometry, &mut announcement)),
+            |call, _| event(call),
+        );
+        self.hooks.utilities = utilities;
+        self.models = std::mem::take(geometry.registrar_mut());
+        self.allocation_next = messages.arena.next;
+        result
     }
     fn command_batch(
         &mut self,
@@ -475,20 +648,36 @@ impl<'data> Session<'data> {
             building_geometry::{BuildingGeometry, RegisteredModel},
             live_commands,
         };
-        let mut script_context=if self.tutorial_state==1 {Some(self.world.script_context(assets.image,&self.resident_models,
-            level_startup::HostContext{accounting_enabled:true,difficulty:self.difficulty as i32,
-                notifications:self.world.city.ai_demand.ready!=0,auxiliary_template:self.policy.auxiliary_prior_bytes,
-                category_base:0x617628,building_base:0x591318})?)}else{None};
+        let mut script_context = if self.tutorial_state == 1 {
+            Some(self.world.script_context(
+                assets.image,
+                &self.resident_models,
+                level_startup::HostContext {
+                    accounting_enabled: true,
+                    difficulty: self.difficulty as i32,
+                    notifications: self.world.city.ai_demand.ready != 0,
+                    auxiliary_template: self.policy.auxiliary_prior_bytes,
+                    category_base: 0x617628,
+                    building_base: 0x591318,
+                },
+            )?)
+        } else {
+            None
+        };
         let mut geometry =
             BuildingGeometry::new(assets.board, assets.file, std::mem::take(&mut self.models));
         // Direct command submission uses deterministic zero prior packet bytes;
         // scheduler-driven submission uses its explicit Session policy instead.
         let mut command_messages = openmt2001::player_messages::Context {
-            arena: openmt2001::player_messages::Arena { next: self.allocation_next },
+            arena: openmt2001::player_messages::Arena {
+                next: self.allocation_next,
+            },
             current_player: self.roster.status.current_player,
-            network: [false,false], prior: [0;0x30],
+            network: [false, false],
+            prior: [0; 0x30],
         };
-        let mut utilities=std::mem::replace(&mut self.hooks.utilities,economy::Utilities::new([0;4]));
+        let mut utilities =
+            std::mem::replace(&mut self.hooks.utilities, economy::Utilities::new([0; 4]));
         let result = (|| {
             for index in 0..geometry.registrar().models.len() {
                 let definition = geometry.registrar().models[index].definition;
@@ -521,49 +710,115 @@ impl<'data> Session<'data> {
                 utilities: &mut utilities,
                 board: assets.board,
             };
-            let hooks=std::cell::RefCell::new(&mut self.hooks);
-            let mut announcement=script_context.as_mut().map(|context|tutorial_announcement::Bridge{
-                scripts:&mut self.scripts,hooks:&hooks,context});
+            let hooks = std::cell::RefCell::new(&mut self.hooks);
+            let mut announcement =
+                script_context
+                    .as_mut()
+                    .map(|context| tutorial_announcement::Bridge {
+                        scripts: &mut self.scripts,
+                        hooks: &hooks,
+                        context,
+                    });
             let submission_tick = context.clock.timing[0];
             let mut drain_clocks = context.clock.timing[..2].try_into().unwrap();
             if let Some(live_commands::Command::Build(command)) = &command {
-                let admitted = openmt2001::construction::admit(command, &mut runtime.city.categories,
-                    &mut runtime.roster.manager.players, &mut runtime.message_context.arena,
+                let admitted = openmt2001::construction::admit(
+                    command,
+                    &mut runtime.city.categories,
+                    &mut runtime.roster.manager.players,
+                    &mut runtime.message_context.arena,
                     u32::from_le_bytes(runtime.roster.manager.bytes[12..16].try_into().unwrap()),
                     openmt2001::player_messages::Routing {
                         current_player: runtime.message_context.current_player,
                         network: runtime.message_context.network,
                         prior: runtime.message_context.prior,
-                    }, |route, packet| event(live_commands::Event::PlayerMessageRoute{route,packet:*packet}))?;
-                if !admitted { return Ok(()); }
+                    },
+                    |route, packet| {
+                        event(live_commands::Event::PlayerMessageRoute {
+                            route,
+                            packet: *packet,
+                        })
+                    },
+                )?;
+                if !admitted {
+                    return Ok(());
+                }
             }
             let apply = |command: &live_commands::Command| {
-                runtime.apply_with_announcement(command, &mut context, &mut geometry,
-                    announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement), |call,_clock|event(call))
+                runtime.apply_with_announcement(
+                    command,
+                    &mut context,
+                    &mut geometry,
+                    announcement
+                        .as_mut()
+                        .map(|bridge| bridge as &mut dyn live_commands::TutorialAnnouncement),
+                    |call, _clock| event(call),
+                )
             };
             if let Some(command) = command {
                 self.live_commands
                     .submit(command, submission_tick, true, apply)
             } else {
                 drop(apply);
-                self.live_commands.drain_scheduling(&mut drain_clocks, |command,enqueue|{
-                    runtime.apply_with_announcement(command,&mut context,&mut geometry,
-                        announcement.as_mut().map(|bridge|bridge as &mut dyn live_commands::TutorialAnnouncement),|call,_clock|{
-                        if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=call{
-                            enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
-                        }else if let live_commands::Event::CategoryReadyAt{category,normal_tick}=call{
-                            enqueue(live_commands::Command::CategoryReady{category},openmt2001::local_commands::Schedule::Normal{due:normal_tick})
-                        }else if let live_commands::Event::Outcome(openmt2001::outcome_notice::Call::Timers(timers))=call {
-                            timers.apply(&mut hooks.borrow_mut().timers);Ok(())
-                        }else if matches!(call,live_commands::Event::Elimination(openmt2001::player_elimination::Call::FinishLocal)) {
-                            openmt2001::player_elimination::finish_local(self.network_command_timer,&mut hooks.borrow_mut().timers)?;
-                            event(call)
-                        }else{event(call)}
+                self.live_commands
+                    .drain_scheduling(&mut drain_clocks, |command, enqueue| {
+                        runtime.apply_with_announcement(
+                            command,
+                            &mut context,
+                            &mut geometry,
+                            announcement.as_mut().map(|bridge| {
+                                bridge as &mut dyn live_commands::TutorialAnnouncement
+                            }),
+                            |call, _clock| {
+                                if let live_commands::Event::AuctionQueue {
+                                    descriptor,
+                                    additional_delay,
+                                } = call
+                                {
+                                    enqueue(
+                                        live_commands::Command::Auction { descriptor },
+                                        openmt2001::local_commands::Schedule::Local {
+                                            delayed: descriptor[16] != 0,
+                                            additional: additional_delay,
+                                        },
+                                    )
+                                } else if let live_commands::Event::CategoryReadyAt {
+                                    category,
+                                    normal_tick,
+                                } = call
+                                {
+                                    enqueue(
+                                        live_commands::Command::CategoryReady { category },
+                                        openmt2001::local_commands::Schedule::Normal {
+                                            due: normal_tick,
+                                        },
+                                    )
+                                } else if let live_commands::Event::Outcome(
+                                    openmt2001::outcome_notice::Call::Timers(timers),
+                                ) = call
+                                {
+                                    timers.apply(&mut hooks.borrow_mut().timers);
+                                    Ok(())
+                                } else if matches!(
+                                    call,
+                                    live_commands::Event::Elimination(
+                                        openmt2001::player_elimination::Call::FinishLocal
+                                    )
+                                ) {
+                                    openmt2001::player_elimination::finish_local(
+                                        self.network_command_timer,
+                                        &mut hooks.borrow_mut().timers,
+                                    )?;
+                                    event(call)
+                                } else {
+                                    event(call)
+                                }
+                            },
+                        )
                     })
-                })
             }
         })();
-        self.hooks.utilities=utilities;
+        self.hooks.utilities = utilities;
         self.models = std::mem::take(geometry.registrar_mut());
         self.allocation_next = command_messages.arena.next;
         result
@@ -612,7 +867,10 @@ impl<'data> Session<'data> {
                     openmt2001::live_commands::PendingCall::ReleaseBuilding { .. }
                 ) {
                     crate::building_models::release_record_with_trees(
-                        record.as_deref_mut().ok_or("missing building release record")?, tree_state.as_ref(),
+                        record
+                            .as_deref_mut()
+                            .ok_or("missing building release record")?,
+                        tree_state.as_ref(),
                     )?;
                 }
                 let value = effect(call, record)?;
@@ -644,8 +902,12 @@ impl<'data> Session<'data> {
     //host palette; combining those inputs would churn independent callers.
     #[allow(clippy::too_many_arguments)]
     pub fn scene_with_style(
-        &self, build_file: &[u8], original: openmt2001::render_scene::OriginalAssets<'_>,
-        suncols: &[u8], camera: Option<openmt2001::flyby::CameraSample>, animated: bool,
+        &self,
+        build_file: &[u8],
+        original: openmt2001::render_scene::OriginalAssets<'_>,
+        suncols: &[u8],
+        camera: Option<openmt2001::flyby::CameraSample>,
+        animated: bool,
         style: Option<&openmt2001::board_style::Style>,
     ) -> Result<openmt2001::render_scene::Scene, String> {
         self.scene_with_style_cached(build_file, original, suncols, camera, animated, style, None)
@@ -653,8 +915,12 @@ impl<'data> Session<'data> {
 
     #[allow(clippy::too_many_arguments)]
     pub fn scene_with_style_cached(
-        &self, build_file: &[u8], original: openmt2001::render_scene::OriginalAssets<'_>,
-        suncols: &[u8], camera: Option<openmt2001::flyby::CameraSample>, animated: bool,
+        &self,
+        build_file: &[u8],
+        original: openmt2001::render_scene::OriginalAssets<'_>,
+        suncols: &[u8],
+        camera: Option<openmt2001::flyby::CameraSample>,
+        animated: bool,
         style: Option<&openmt2001::board_style::Style>,
         textures: Option<&mut openmt2001::texture::LoaderCache>,
     ) -> Result<openmt2001::render_scene::Scene, String> {
@@ -682,7 +948,10 @@ impl<'data> Session<'data> {
     }
 
     /// Refresh current business/player metadata without rebuilding unchanged meshes.
-    pub fn refresh_scene_records(&self, scene: &mut openmt2001::render_scene::Scene) -> Result<(), String> {
+    pub fn refresh_scene_records(
+        &self,
+        scene: &mut openmt2001::render_scene::Scene,
+    ) -> Result<(), String> {
         scene.saved_business_catalog = Some(self.world.catalog.info.clone());
         scene.saved_commodity_rows = Some(self.world.commodities.rows);
         for building in &mut scene.inspection_buildings {
@@ -694,7 +963,11 @@ impl<'data> Session<'data> {
                 .ok_or("initialized building identity missing")?;
             let record = &self.world.buildings[slot];
             if record[0x2d] != 0 {
-                let player = self.roster.manager.players.get(usize::from(record[0x2d]) - 1)
+                let player = self
+                    .roster
+                    .manager
+                    .players
+                    .get(usize::from(record[0x2d]) - 1)
                     .ok_or("live building owner leaves roster")?;
                 let character = u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap());
                 if character >= 10 {
@@ -724,7 +997,10 @@ impl<'data> Session<'data> {
             let owner_character = if business[0xa] == 0 {
                 None
             } else {
-                let player = self.roster.manager.players
+                let player = self
+                    .roster
+                    .manager
+                    .players
                     .get(usize::from(business[0xa]) - 1)
                     .ok_or("initialized business owner leaves roster")?;
                 let character = u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap());
@@ -753,29 +1029,43 @@ impl<'data> Session<'data> {
                     });
             } else if business[..4] == [0; 4] || business[..4] == [2, 0, 0, 0] {
                 let kind = u32::from_le_bytes(business[4..8].try_into().unwrap());
-                let info = self.world.catalog.info.row(kind as usize)
+                let info = self
+                    .world
+                    .catalog
+                    .info
+                    .row(kind as usize)
                     .ok_or("initialized business leaves catalog")?;
-                if building.kind != business[0]
-                    || info[0xc..0x10] != business[..4]
-                {
+                if building.kind != business[0] || info[0xc..0x10] != business[..4] {
                     return Err("initialized business discriminator disagrees".into());
                 }
-                building.initialized_business = Some(openmt2001::render_scene::SavedBusinessInspection {
-                    slot: business_slot,
-                    record: *business,
-                    owner_character,
-                    business_type: kind,
-                    name_text_id: u32::from_le_bytes(info[4..8].try_into().unwrap()),
-                    account: openmt2001::economy::BusinessAccount::from_saved(
-                        &openmt2001::save::SavedBusiness { bytes: business }),
-                });
+                building.initialized_business =
+                    Some(openmt2001::render_scene::SavedBusinessInspection {
+                        slot: business_slot,
+                        record: *business,
+                        owner_character,
+                        business_type: kind,
+                        name_text_id: u32::from_le_bytes(info[4..8].try_into().unwrap()),
+                        account: openmt2001::economy::BusinessAccount::from_saved(
+                            &openmt2001::save::SavedBusiness { bytes: business },
+                        ),
+                    });
             }
         }
         Ok(())
     }
 
     pub fn initialize(input: Inputs<'_, 'data>, policy: Policy) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, None, None, false, None, crate::compatibility::Mode::StrictV14, None, None)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            None,
+            None,
+            false,
+            None,
+            crate::compatibility::Mode::StrictV14,
+            None,
+            None,
+        )
     }
 
     /// Start from the host's loaded campaign profile, preserving its unlocks
@@ -786,201 +1076,390 @@ impl<'data> Session<'data> {
         catalog: openmt2001::level_catalog::Catalog,
         profile_path: std::path::PathBuf,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, crate::compatibility::Mode::StrictV14, None, None)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            Some(profile_path),
+            false,
+            None,
+            crate::compatibility::Mode::StrictV14,
+            None,
+            None,
+        )
     }
 
     pub fn initialize_campaign_with_style(
-        input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: std::path::PathBuf,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), crate::compatibility::Mode::StrictV14, None, None)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            Some(profile_path),
+            false,
+            Some(style),
+            crate::compatibility::Mode::StrictV14,
+            None,
+            None,
+        )
     }
 
     /// Start with the host-selected compatibility policy. Legacy entry points
     /// above deliberately retain the original v1.4 ownership result.
     pub fn initialize_campaign_compatible(
-        input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: std::path::PathBuf,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, None, compatibility, None, None)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            Some(profile_path),
+            false,
+            None,
+            compatibility,
+            None,
+            None,
+        )
     }
 
     pub fn initialize_campaign_with_style_and_compatibility(
-        input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, profile_path: std::path::PathBuf,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: std::path::PathBuf,
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_with_catalog(input, policy, Some(catalog), Some(profile_path), false, Some(style), compatibility, None, None)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            Some(profile_path),
+            false,
+            Some(style),
+            compatibility,
+            None,
+            None,
+        )
     }
 
     /// Fresh offline kernel only. Policy.seed is injected by the host; offline
     /// wall-clock sampling belongs at the future launch boundary.
     pub fn initialize_skirmish(
-        input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        launch: SkirmishLaunch,
     ) -> Result<Self, String> {
-        Self::initialize_skirmish_inner(input,policy,catalog,launch,None, None)
+        Self::initialize_skirmish_inner(input, policy, catalog, launch, None, None)
     }
 
     pub fn initialize_skirmish_with_style(
-        input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        launch: SkirmishLaunch,
         style: &openmt2001::board_style::Style,
     ) -> Result<Self, String> {
-        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style), None)
+        Self::initialize_skirmish_inner(input, policy, catalog, launch, Some(style), None)
     }
 
     fn initialize_skirmish_inner(
-        mut input: Inputs<'_, 'data>, policy: Policy,
-        catalog: openmt2001::level_catalog::Catalog, launch: SkirmishLaunch,
+        mut input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        launch: SkirmishLaunch,
         style: Option<&openmt2001::board_style::Style>,
-        process:Option<crate::live_host::process_runtime::Handle>,
+        process: Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
         launch.validate()?;
         let options = openmt2001::skirmish::Options::from_pe(input.image)?;
-        let rule = options.rules().iter().find(|r|r.kind == launch.objective_kind)
+        let rule = options
+            .rules()
+            .iter()
+            .find(|r| r.kind == launch.objective_kind)
             .ok_or("unknown Skirmish objective")?;
-        if launch.target < rule.minimum as f32 || launch.target > rule.maximum as f32
-            || launch.target.fract() != 0. {
+        if launch.target < rule.minimum as f32
+            || launch.target > rule.maximum as f32
+            || launch.target.fract() != 0.
+        {
             return Err("Skirmish target outside original bounds".into());
         }
         input.difficulty = launch.difficulty;
-        Self::initialize_with_catalog(input, policy, Some(catalog), None, false,
-            style, crate::compatibility::Mode::StrictV14, Some(launch), process)
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            None,
+            false,
+            style,
+            crate::compatibility::Mode::StrictV14,
+            Some(launch),
+            process,
+        )
     }
 
     /// Authored startup without a named profile, for read-only/import callers.
     pub fn initialize_custom_with_style(
-        input: Inputs<'_, 'data>, policy: Policy,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
         catalog: openmt2001::level_catalog::Catalog,
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        Self::initialize_custom_with_style_and_profile(input, policy, catalog, None,
-            style, compatibility)
+        Self::initialize_custom_with_style_and_profile(
+            input,
+            policy,
+            catalog,
+            None,
+            style,
+            compatibility,
+        )
     }
 
     /// Original Custom completion uses the active named profile and shared
     /// catalog. The caller supplies its progress destination independently of saves.
     pub fn initialize_custom_with_style_and_profile(
-        input: Inputs<'_, 'data>, policy: Policy,
+        input: Inputs<'_, 'data>,
+        policy: Policy,
         catalog: openmt2001::level_catalog::Catalog,
         profile_path: Option<std::path::PathBuf>,
         style: &openmt2001::board_style::Style,
         compatibility: crate::compatibility::Mode,
     ) -> Result<Self, String> {
-        let level = catalog.levels.iter().find(|level|
-            custom::same_directory(level.directory(), input.scenario.as_bytes()))
+        let level = catalog
+            .levels
+            .iter()
+            .find(|level| custom::same_directory(level.directory(), input.scenario.as_bytes()))
             .ok_or("custom scenario missing from registered catalog")?;
-        if !custom::valid_level(level) { return Err("invalid custom scenario identity".into()); }
-        Self::initialize_with_catalog(input, policy, Some(catalog), profile_path, false,
-            Some(style), compatibility, None, None)
+        if !custom::valid_level(level) {
+            return Err("invalid custom scenario identity".into());
+        }
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            profile_path,
+            false,
+            Some(style),
+            compatibility,
+            None,
+            None,
+        )
     }
 
     /// Explicit process identity for standalone callers that execute Game.performance.
-    pub fn initialize_in_process(input:Inputs<'_, 'data>,policy:Policy,
-        process:crate::live_host::process_runtime::Handle)->Result<Self,String>{
-        Self::initialize_with_catalog(input,policy,None,None,false,None,
-            crate::compatibility::Mode::StrictV14,None,Some(process))
+    pub fn initialize_in_process(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        process: crate::live_host::process_runtime::Handle,
+    ) -> Result<Self, String> {
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            None,
+            None,
+            false,
+            None,
+            crate::compatibility::Mode::StrictV14,
+            None,
+            Some(process),
+        )
     }
     pub fn initialize_campaign_with_style_and_compatibility_in_process(
-        input:Inputs<'_, 'data>,policy:Policy,catalog:openmt2001::level_catalog::Catalog,
-        profile_path:std::path::PathBuf,style:&openmt2001::board_style::Style,
-        compatibility:crate::compatibility::Mode,process:Option<crate::live_host::process_runtime::Handle>,
-    )->Result<Self,String>{
-        Self::initialize_with_catalog(input,policy,Some(catalog),Some(profile_path),false,
-            Some(style),compatibility,None,process)
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: std::path::PathBuf,
+        style: &openmt2001::board_style::Style,
+        compatibility: crate::compatibility::Mode,
+        process: Option<crate::live_host::process_runtime::Handle>,
+    ) -> Result<Self, String> {
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            Some(profile_path),
+            false,
+            Some(style),
+            compatibility,
+            None,
+            process,
+        )
     }
-    pub fn initialize_skirmish_with_style_in_process(input:Inputs<'_, 'data>,policy:Policy,
-        catalog:openmt2001::level_catalog::Catalog,launch:SkirmishLaunch,
-        style:&openmt2001::board_style::Style,process:Option<crate::live_host::process_runtime::Handle>,
-    )->Result<Self,String>{
-        Self::initialize_skirmish_inner(input,policy,catalog,launch,Some(style),process)
+    pub fn initialize_skirmish_with_style_in_process(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        launch: SkirmishLaunch,
+        style: &openmt2001::board_style::Style,
+        process: Option<crate::live_host::process_runtime::Handle>,
+    ) -> Result<Self, String> {
+        Self::initialize_skirmish_inner(input, policy, catalog, launch, Some(style), process)
     }
-    pub fn initialize_custom_with_style_and_profile_in_process(input:Inputs<'_, 'data>,policy:Policy,
-        catalog:openmt2001::level_catalog::Catalog,profile_path:Option<std::path::PathBuf>,
-        style:&openmt2001::board_style::Style,compatibility:crate::compatibility::Mode,
-        process:Option<crate::live_host::process_runtime::Handle>,
-    )->Result<Self,String>{
-        let level=catalog.levels.iter().find(|level|
-            custom::same_directory(level.directory(),input.scenario.as_bytes()))
+    pub fn initialize_custom_with_style_and_profile_in_process(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        catalog: openmt2001::level_catalog::Catalog,
+        profile_path: Option<std::path::PathBuf>,
+        style: &openmt2001::board_style::Style,
+        compatibility: crate::compatibility::Mode,
+        process: Option<crate::live_host::process_runtime::Handle>,
+    ) -> Result<Self, String> {
+        let level = catalog
+            .levels
+            .iter()
+            .find(|level| custom::same_directory(level.directory(), input.scenario.as_bytes()))
             .ok_or("custom scenario missing from registered catalog")?;
-        if !custom::valid_level(level){return Err("invalid custom scenario identity".into());}
-        Self::initialize_with_catalog(input,policy,Some(catalog),profile_path,false,
-            Some(style),compatibility,None,process)
+        if !custom::valid_level(level) {
+            return Err("invalid custom scenario identity".into());
+        }
+        Self::initialize_with_catalog(
+            input,
+            policy,
+            Some(catalog),
+            profile_path,
+            false,
+            Some(style),
+            compatibility,
+            None,
+            process,
+        )
     }
 
-    fn initialize_with_catalog(mut input: Inputs<'_, 'data>, policy: Policy,
+    fn initialize_with_catalog(
+        mut input: Inputs<'_, 'data>,
+        policy: Policy,
         supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
         load_mode: bool,
         style: Option<&openmt2001::board_style::Style>,
         compatibility: crate::compatibility::Mode,
         skirmish: Option<SkirmishLaunch>,
-        process:Option<crate::live_host::process_runtime::Handle>,
+        process: Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
-        Self::initialize_joined(input,policy,supplied_catalog,profile_path,load_mode,style,compatibility,skirmish,process,None)
+        Self::initialize_joined(
+            input,
+            policy,
+            supplied_catalog,
+            profile_path,
+            load_mode,
+            style,
+            compatibility,
+            skirmish,
+            process,
+            None,
+        )
     }
 
-    pub(crate) fn initialize_joined(mut input: Inputs<'_, 'data>, policy: Policy,
+    pub(crate) fn initialize_joined(
+        mut input: Inputs<'_, 'data>,
+        policy: Policy,
         supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
         load_mode: bool,
         style: Option<&openmt2001::board_style::Style>,
         compatibility: crate::compatibility::Mode,
         skirmish: Option<SkirmishLaunch>,
-        process:Option<crate::live_host::process_runtime::Handle>,
-        mut dispatch:Option<crate::process_dispatch::Seed>,
+        process: Option<crate::live_host::process_runtime::Handle>,
+        mut dispatch: Option<crate::process_dispatch::Seed>,
     ) -> Result<Self, String> {
-        if !load_mode && dispatch.as_ref().is_some_and(|seed|(seed.pause.bytes[0] as i8)<0) {
+        if !load_mode
+            && dispatch
+                .as_ref()
+                .is_some_and(|seed| (seed.pause.bytes[0] as i8) < 0)
+        {
             return Err("Unsupported negative reason0 before World reset".into());
         }
-        if let Some(launch)=&skirmish {
+        if let Some(launch) = &skirmish {
             launch.validate()?;
-            let options=openmt2001::skirmish::Options::from_pe(input.image)?;
-            let rule=options.rules().iter().find(|r|r.kind==launch.objective_kind).ok_or("unknown Skirmish objective")?;
-            if launch.target<rule.minimum as f32 || launch.target>rule.maximum as f32 || launch.target.fract()!=0. {
+            let options = openmt2001::skirmish::Options::from_pe(input.image)?;
+            let rule = options
+                .rules()
+                .iter()
+                .find(|r| r.kind == launch.objective_kind)
+                .ok_or("unknown Skirmish objective")?;
+            if launch.target < rule.minimum as f32
+                || launch.target > rule.maximum as f32
+                || launch.target.fract() != 0.
+            {
                 return Err("Skirmish target outside original bounds".into());
             }
         }
-        if !(0..=2).contains(&input.difficulty){return Err("campaign difficulty outside three levels".into());}
-        let mut catalog=if let Some(catalog)=supplied_catalog {catalog} else {
-            let mut catalog=crate::campaign_store::load_catalog(input.image,input.scripts)?;
+        if !(0..=2).contains(&input.difficulty) {
+            return Err("campaign difficulty outside three levels".into());
+        }
+        let mut catalog = if let Some(catalog) = supplied_catalog {
+            catalog
+        } else {
+            let mut catalog = crate::campaign_store::load_catalog(input.image, input.scripts)?;
             catalog.reset_progress();
             catalog.unlock_first();
             catalog
         };
-        let selected=catalog.find_directory(input.scenario.as_bytes()).or_else(|| {
-            catalog.levels.iter().position(|level| custom::valid_level(level)
-                && custom::same_directory(level.directory(), input.scenario.as_bytes()))
-        }).ok_or("scenario missing from original level catalog")?;
-        let id=catalog.levels[selected].id();
+        let selected = catalog
+            .find_directory(input.scenario.as_bytes())
+            .or_else(|| {
+                catalog.levels.iter().position(|level| {
+                    custom::valid_level(level)
+                        && custom::same_directory(level.directory(), input.scenario.as_bytes())
+                })
+            })
+            .ok_or("scenario missing from original level catalog")?;
+        let id = catalog.levels[selected].id();
         let is_custom = custom::valid_level(&catalog.levels[selected]);
-        let saved_net = load_mode && (300000..=300006).contains(&id)
+        let saved_net = load_mode
+            && (300000..=300006).contains(&id)
             && !catalog.levels[selected].single_player()
-            && catalog.levels[selected].directory().eq_ignore_ascii_case(
-                format!("net{}", id - 300000).as_bytes());
-        if skirmish.is_none() && !saved_net && !is_custom && !(200001..=200016).contains(&id) && !matches!(id, 100000..=100012 | 400001 | 400002) {
+            && catalog.levels[selected]
+                .directory()
+                .eq_ignore_ascii_case(format!("net{}", id - 300000).as_bytes());
+        if skirmish.is_none()
+            && !saved_net
+            && !is_custom
+            && !(200001..=200016).contains(&id)
+            && !matches!(id, 100000..=100012 | 400001 | 400002)
+        {
             return Err("fresh-city initialization requires a supported scenario, Tutorials 1 through 12, Bonus or Sandbox".into());
         }
         if let Some(launch) = &skirmish {
-            if id != launch.level_id || catalog.levels[selected].directory() != launch.directory.as_bytes()
-                || catalog.levels[selected].single_player() {
-                return Err("Skirmish identity does not match selected multiplayer catalog record".into());
+            if id != launch.level_id
+                || catalog.levels[selected].directory() != launch.directory.as_bytes()
+                || catalog.levels[selected].single_player()
+            {
+                return Err(
+                    "Skirmish identity does not match selected multiplayer catalog record".into(),
+                );
             }
             catalog.levels[selected].set_objective_target(launch.target);
         }
-        if !catalog.select(id,skirmish.is_some() || saved_net){return Err("scenario is not a single-player catalog entry".into());}
-        catalog.difficulty=input.difficulty as u32;
+        if !catalog.select(id, skirmish.is_some() || saved_net) {
+            return Err("scenario is not a single-player catalog entry".into());
+        }
+        catalog.difficulty = input.difficulty as u32;
         let resolved_skirmish_map = if let Some(launch) = &skirmish {
-            Some(crate::skirmish_maps::Catalog::discover(input.scripts)?
-                .resolve(input.scripts, &launch.map)?)
-        } else { None };
-        let skirmish_map = resolved_skirmish_map.as_ref().map(|map| map.identity.clone())
-            .or_else(|| saved_net.then_some(crate::skirmish_maps::MapIdentity::MaterializedUnknown));
+            Some(
+                crate::skirmish_maps::Catalog::discover(input.scripts)?
+                    .resolve(input.scripts, &launch.map)?,
+            )
+        } else {
+            None
+        };
+        let skirmish_map = resolved_skirmish_map
+            .as_ref()
+            .map(|map| map.identity.clone())
+            .or_else(|| {
+                saved_net.then_some(crate::skirmish_maps::MapIdentity::MaterializedUnknown)
+            });
         let configuration = openmt2001::resident::Configuration::before_defaults(
             input.parameters,
             input.timetable,
@@ -990,11 +1469,19 @@ impl<'data> Session<'data> {
             .resident_creation(openmt2001::resident::AuxiliaryPool::for_residents());
         let mut world =
             level_startup::World::fresh(input.image, input.board, configuration, creation)?;
-        world.city.building_parameters = openmt2001::building_parameters::BuildingKinds::from_parameters(input.parameters, input.image)?;
-        if let Some(style) = style { style.apply_categories(&mut world.categories); }
+        world.city.building_parameters =
+            openmt2001::building_parameters::BuildingKinds::from_parameters(
+                input.parameters,
+                input.image,
+            )?;
+        if let Some(style) = style {
+            style.apply_categories(&mut world.categories);
+        }
         let mut scripts = level_startup::Scripts::new(input.image)?;
         let read = |relative: &str| {
-            if is_custom { custom::read(input.scripts, relative) } else {
+            if is_custom {
+                custom::read(input.scripts, relative)
+            } else {
                 fs::read(input.scripts.join(relative)).map_err(|e| format!("{relative}: {e}"))
             }
         };
@@ -1017,13 +1504,17 @@ impl<'data> Session<'data> {
         }
         if skirmish.is_some() || saved_net {
             let relative = format!("{}/initialpref.lua", input.scenario);
-            scripts.runtime.script_buffer(&format!("scripts/{relative}"), &read(&relative)?)?;
+            scripts
+                .runtime
+                .script_buffer(&format!("scripts/{relative}"), &read(&relative)?)?;
         } else if is_custom {
             custom::register_sources(&mut scripts.runtime, input.scripts, input.scenario)?;
         } else {
-            scenarios::register_sources(&mut scripts.runtime,input.scripts)?;
+            scenarios::register_sources(&mut scripts.runtime, input.scripts)?;
         }
-        scripts.bindings.bind_selected_level(catalog.selected_level());
+        scripts
+            .bindings
+            .bind_selected_level(catalog.selected_level());
         // These opaque identities resolve to retained original people meshes;
         // no resident drawing or native graphics-manager pointer is claimed.
         let handles = std::array::from_fn(|i| [(i * 2 + 1) as u32, (i * 2 + 2) as u32]);
@@ -1033,14 +1524,20 @@ impl<'data> Session<'data> {
             input.file,
             crate::building_models::Models::with_tree_locators(input.tree_locators.as_deref())?,
         );
-        if let Some(seed)=dispatch.as_mut(){
-            if load_mode {seed.world_reset_accumulators();} else {seed.fresh_reset()?;}
+        if let Some(seed) = dispatch.as_mut() {
+            if load_mode {
+                seed.world_reset_accumulators();
+            } else {
+                seed.fresh_reset()?;
+            }
         }
-        let mut hooks = if let Some(seed)=dispatch.take() {
-            world.pause=seed.pause; // SAME process image, before any top-level script.
-            Hooks::with_dispatch(seed.tasks,seed.frequency)
-        } else { Hooks::new() };
-        hooks.process=process; // Before top-level, initialize and Level dispatch.
+        let mut hooks = if let Some(seed) = dispatch.take() {
+            world.pause = seed.pause; // SAME process image, before any top-level script.
+            Hooks::with_dispatch(seed.tasks, seed.frequency)
+        } else {
+            Hooks::new()
+        };
+        hooks.process = process; // Before top-level, initialize and Level dispatch.
         let context = world.script_context(
             input.image,
             &resident_models,
@@ -1061,43 +1558,88 @@ impl<'data> Session<'data> {
             scenario_hub: &scenario_hub,
         };
         if !load_mode && !matches!(id, 100000..=100012) {
-            scripts.initialize_active(sources, &mut world.script_state(&[None; 6]),
-                &context, &mut geometry, &mut hooks)?;
+            scripts.initialize_active(
+                sources,
+                &mut world.script_state(&[None; 6]),
+                &context,
+                &mut geometry,
+                &mut hooks,
+            )?;
         } else {
-            scripts.initialize(sources, &mut world.script_state(&[None; 6]),
-                &context, &mut geometry, &mut hooks)?;
+            scripts.initialize(
+                sources,
+                &mut world.script_state(&[None; 6]),
+                &context,
+                &mut geometry,
+                &mut hooks,
+            )?;
         }
         if let Some(launch) = &skirmish {
             //4ba07d: Level has executed; the extra multiplayer map precedes48cca0.
-            let resolved = resolved_skirmish_map.as_ref().ok_or("selected Skirmish map absent")?;
+            let resolved = resolved_skirmish_map
+                .as_ref()
+                .ok_or("selected Skirmish map absent")?;
             let mut state = world.script_state(&[None; 6]);
             let bindings = &mut scripts.bindings;
             let events = &mut scripts.events;
-            scripts.runtime.execute(&format!("scripts/maps/{}", launch.map), &resolved.bytes,
-                &mut |id,args| bindings.handle(id,args,&mut state,events,&context,&mut geometry,&mut hooks))?;
-            if world.objective.kind != launch.objective_kind || world.objective.target != launch.target {
+            scripts.runtime.execute(
+                &format!("scripts/maps/{}", launch.map),
+                &resolved.bytes,
+                &mut |id, args| {
+                    bindings.handle(
+                        id,
+                        args,
+                        &mut state,
+                        events,
+                        &context,
+                        &mut geometry,
+                        &mut hooks,
+                    )
+                },
+            )?;
+            if world.objective.kind != launch.objective_kind
+                || world.objective.target != launch.target
+            {
                 return Err("authored Skirmish objective differs from confirmed setup".into());
             }
         }
-        if matches!(id,100009|100012){
-            let hub=read(&format!("{}/hub.lua",input.scenario))?;
-            let compact:String=std::str::from_utf8(&hub).map_err(|e|e.to_string())?
-                .chars().filter(|c|!c.is_ascii_whitespace()).collect();
-            let bid = if id==100009 {"Interface.ForcePlayerToBid(a,50*a);"}
-                else {"Interface.ForcePlayerToBid(a,1181+(500*a)+(g_counter*50));"};
-            for(name,call)in[("EVENT_AIBid",bid),
-                ("EVENT_AIPass","Interface.ForcePlayerToPass(a);"),
-                ("EVENT_AIPullout","Interface.ForcePlayerToPullOut(a);")]{
-                let declaration=format!("function{name}(a)");
-                if compact.matches(&declaration).count()!=1 || !compact.contains(&format!("{declaration}{call}end;")){
-                    return Err(format!("forced auction handler{name} is not the audited terminal original shape"));
+        if matches!(id, 100009 | 100012) {
+            let hub = read(&format!("{}/hub.lua", input.scenario))?;
+            let compact: String = std::str::from_utf8(&hub)
+                .map_err(|e| e.to_string())?
+                .chars()
+                .filter(|c| !c.is_ascii_whitespace())
+                .collect();
+            let bid = if id == 100009 {
+                "Interface.ForcePlayerToBid(a,50*a);"
+            } else {
+                "Interface.ForcePlayerToBid(a,1181+(500*a)+(g_counter*50));"
+            };
+            for (name, call) in [
+                ("EVENT_AIBid", bid),
+                ("EVENT_AIPass", "Interface.ForcePlayerToPass(a);"),
+                ("EVENT_AIPullout", "Interface.ForcePlayerToPullOut(a);"),
+            ] {
+                let declaration = format!("function{name}(a)");
+                if compact.matches(&declaration).count() != 1
+                    || !compact.contains(&format!("{declaration}{call}end;"))
+                {
+                    return Err(format!(
+                        "forced auction handler{name} is not the audited terminal original shape"
+                    ));
                 }
-                let reference=scripts.runtime.reference_function(name)?.ok_or("forced auction original handler absent")?;
-                let identity=scripts.runtime.event_reference_identity(reference);
+                let reference = scripts
+                    .runtime
+                    .reference_function(name)?
+                    .ok_or("forced auction original handler absent")?;
+                let identity = scripts.runtime.event_reference_identity(reference);
                 scripts.runtime.release_reference(reference)?;
-                let (actual_name,body)=identity?.ok_or("forced auction original handler identity unresolved")?;
-                if actual_name!=name{return Err("forced auction original handler name mismatch".into());}
-                hooks.forced_auction_handlers.insert(actual_name,body);
+                let (actual_name, body) =
+                    identity?.ok_or("forced auction original handler identity unresolved")?;
+                if actual_name != name {
+                    return Err("forced auction original handler name mismatch".into());
+                }
+                hooks.forced_auction_handlers.insert(actual_name, body);
             }
         }
         let models = std::mem::take(geometry.registrar_mut());
@@ -1112,159 +1654,231 @@ impl<'data> Session<'data> {
         let mut static_rng_tail_next = 0;
         let mut saved_player_metadata = [[0u8; 48]; 6];
         if !load_mode {
-        let mut pending = openmt2001::player_script::PendingRoster::default();
-        if let Some(launch) = &skirmish {
-            for (slot, participant) in launch.participants.iter().enumerate() {
-                pending.records[slot] = openmt2001::player_script::Registration {
-                    index: slot as i32,
-                    kind: if participant.kind == openmt2001::skirmish::roster::Kind::Human {0} else {1},
-                    character: participant.token.unwrap() as i32,
-                    difficulty: participant.difficulty,
-                };
-                pending.script_characters[slot] = participant.token.unwrap() as i32;
-            }
-        } else if matches!(id, 100000..=100012) {
-            // Original 4a84cd..4a851b: tutorial players.lua is optional. When
-            // absent, 4a6a20 registers slot 0 as kind 0, character 0.
-            match fs::read(input.scripts.join(format!("{}/players.lua", input.scenario))) {
-                Ok(source) => {
-                    for registration in openmt2001::player_script::evaluate(
-                        input.scenario, &source, input.difficulty,
-                    )? {
-                        let slot = usize::try_from(registration.index)
-                            .map_err(|_| "negative tutorial registration slot")?;
-                        *pending.records.get_mut(slot)
-                            .ok_or("tutorial registration exceeds six slots")? = registration;
-                        pending.script_characters[slot] = registration.character;
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    pending.records[0].kind = 0;
-                    pending.records[0].character = 0;
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        } else {
-            pending.load_normal(
-                input.scenario,
-                &read(&format!("{}/players.lua", input.scenario))?,
-                input.difficulty,
-                i32::try_from(input.selected_character).map_err(|_| "character index overflow")?,
-            )?;
-        }
-        let names: [&[u8]; 6] = std::array::from_fn(|slot| {
+            let mut pending = openmt2001::player_script::PendingRoster::default();
             if let Some(launch) = &skirmish {
-                return launch.participants.get(slot).map_or(&[][..], |p| p.name.as_slice());
-            }
-            let record = pending.records[slot];
-            if record.kind == 0 {
-                input.profile_name
-            } else if record.kind == 1 {
-                input.character_names[record.character as usize].as_slice()
+                for (slot, participant) in launch.participants.iter().enumerate() {
+                    pending.records[slot] = openmt2001::player_script::Registration {
+                        index: slot as i32,
+                        kind: if participant.kind == openmt2001::skirmish::roster::Kind::Human {
+                            0
+                        } else {
+                            1
+                        },
+                        character: participant.token.unwrap() as i32,
+                        difficulty: participant.difficulty,
+                    };
+                    pending.script_characters[slot] = participant.token.unwrap() as i32;
+                }
+            } else if matches!(id, 100000..=100012) {
+                // Original 4a84cd..4a851b: tutorial players.lua is optional. When
+                // absent, 4a6a20 registers slot 0 as kind 0, character 0.
+                match fs::read(
+                    input
+                        .scripts
+                        .join(format!("{}/players.lua", input.scenario)),
+                ) {
+                    Ok(source) => {
+                        for registration in openmt2001::player_script::evaluate(
+                            input.scenario,
+                            &source,
+                            input.difficulty,
+                        )? {
+                            let slot = usize::try_from(registration.index)
+                                .map_err(|_| "negative tutorial registration slot")?;
+                            *pending
+                                .records
+                                .get_mut(slot)
+                                .ok_or("tutorial registration exceeds six slots")? = registration;
+                            pending.script_characters[slot] = registration.character;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        pending.records[0].kind = 0;
+                        pending.records[0].character = 0;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
             } else {
-                &[]
+                pending.load_normal(
+                    input.scenario,
+                    &read(&format!("{}/players.lua", input.scenario))?,
+                    input.difficulty,
+                    i32::try_from(input.selected_character)
+                        .map_err(|_| "character index overflow")?,
+                )?;
             }
-        });
-        // Native86cea0 rows retain the frontend's character/kind/name,
-        // offline peer ID(+40) and4a6a00 difficulty(+44). They also feed
-        //485520 appearance and80000 save records independently of Players.
-        for ((metadata, registration), name) in saved_player_metadata.iter_mut()
-            .zip(&pending.records).zip(names) {
-            metadata[..4].copy_from_slice(&registration.character.to_le_bytes());
-            metadata[4..8].copy_from_slice(&registration.kind.to_le_bytes());
-            let name = &name[..name.iter().position(|&byte| byte == 0).unwrap_or(name.len())];
-            if name.len() >= 32 { return Err("frontend player metadata name exceeds field".into()); }
-            metadata[8..8 + name.len()].copy_from_slice(name);
-            if let Some(launch) = &skirmish {
-                let peer = if launch.participants.get(registration.index as usize)
-                    .is_some_and(|p| p.kind == openmt2001::skirmish::roster::Kind::Ai) {-1i32} else {0};
-                metadata[40..44].copy_from_slice(&peer.to_le_bytes());
+            let names: [&[u8]; 6] = std::array::from_fn(|slot| {
+                if let Some(launch) = &skirmish {
+                    return launch
+                        .participants
+                        .get(slot)
+                        .map_or(&[][..], |p| p.name.as_slice());
+                }
+                let record = pending.records[slot];
+                if record.kind == 0 {
+                    input.profile_name
+                } else if record.kind == 1 {
+                    input.character_names[record.character as usize].as_slice()
+                } else {
+                    &[]
+                }
+            });
+            // Native86cea0 rows retain the frontend's character/kind/name,
+            // offline peer ID(+40) and4a6a00 difficulty(+44). They also feed
+            //485520 appearance and80000 save records independently of Players.
+            for ((metadata, registration), name) in saved_player_metadata
+                .iter_mut()
+                .zip(&pending.records)
+                .zip(names)
+            {
+                metadata[..4].copy_from_slice(&registration.character.to_le_bytes());
+                metadata[4..8].copy_from_slice(&registration.kind.to_le_bytes());
+                let name = &name[..name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len())];
+                if name.len() >= 32 {
+                    return Err("frontend player metadata name exceeds field".into());
+                }
+                metadata[8..8 + name.len()].copy_from_slice(name);
+                if let Some(launch) = &skirmish {
+                    let peer = if launch
+                        .participants
+                        .get(registration.index as usize)
+                        .is_some_and(|p| p.kind == openmt2001::skirmish::roster::Kind::Ai)
+                    {
+                        -1i32
+                    } else {
+                        0
+                    };
+                    metadata[40..44].copy_from_slice(&peer.to_le_bytes());
+                }
+                metadata[44..48].copy_from_slice(&registration.difficulty.to_le_bytes());
             }
-            metadata[44..48].copy_from_slice(&registration.difficulty.to_le_bytes());
-        }
-        // Explicit fresh host arena: zero-filled allocations and opaque,
-        // nonoverlapping logical identities, never native host addresses.
-        let mut demand_ready = world.city.ai_demand.ready;
-        let scenario_ai = if is_custom {
-            custom::read_optional(input.scripts, &format!("{}/ai.lua", input.scenario))?
-        } else { match fs::read(input.scripts.join(format!("{}/ai.lua", input.scenario))) {
-            Ok(bytes) => Some(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.to_string()),
-        }};
-        let cash = world.player_money;
-        let roster_allocation_next = std::cell::Cell::new(allocation_next);
-        let allocate_roster = |size: usize| -> Result<u32, String> {
-            let reference = roster_allocation_next.get();
-            let span = u32::try_from(size).map_err(|_| "player allocation size overflow")?
-                .checked_add(0xfff).ok_or("player allocation alignment overflow")? & !0xfff;
-            roster_allocation_next.set(reference.checked_add(span).ok_or("player arena exhausted")?);
-            Ok(reference)
-        };
-        roster.initialize_world_with_ownership_allocator(
-            &pending,
-            openmt2001::player_script::RosterInputs {
-                names,
-                initial_cash: cash,
-                default_ai: &read("DEFAULT/ai.lua")?,
-                scenario_ai: scenario_ai
-                    .as_deref()
-                    .map(|bytes| ("scenario/ai.lua", bytes)),
-            },
-            &mut openmt2001::player_constructor::RosterConstruction {
-                image: input.image,
-                registry: &mut random_registry,
-                global_reset: &mut demand_ready,
-                allocate: &mut |size| {
-                    let reference = allocate_roster(size)?;
-                    Ok(Some(openmt2001::player_constructor::Allocation {
-                        reference,
-                        bytes: vec![0; size],
-                    }))
+            // Explicit fresh host arena: zero-filled allocations and opaque,
+            // nonoverlapping logical identities, never native host addresses.
+            let mut demand_ready = world.city.ai_demand.ready;
+            let scenario_ai = if is_custom {
+                custom::read_optional(input.scripts, &format!("{}/ai.lua", input.scenario))?
+            } else {
+                match fs::read(input.scripts.join(format!("{}/ai.lua", input.scenario))) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(error.to_string()),
+                }
+            };
+            let cash = world.player_money;
+            let roster_allocation_next = std::cell::Cell::new(allocation_next);
+            let allocate_roster = |size: usize| -> Result<u32, String> {
+                let reference = roster_allocation_next.get();
+                let span = u32::try_from(size)
+                    .map_err(|_| "player allocation size overflow")?
+                    .checked_add(0xfff)
+                    .ok_or("player allocation alignment overflow")?
+                    & !0xfff;
+                roster_allocation_next.set(
+                    reference
+                        .checked_add(span)
+                        .ok_or("player arena exhausted")?,
+                );
+                Ok(reference)
+            };
+            roster.initialize_world_with_ownership_allocator(
+                &pending,
+                openmt2001::player_script::RosterInputs {
+                    names,
+                    initial_cash: cash,
+                    default_ai: &read("DEFAULT/ai.lua")?,
+                    scenario_ai: scenario_ai
+                        .as_deref()
+                        .map(|bytes| ("scenario/ai.lua", bytes)),
                 },
-                external_rng_link: &mut |reference, next| {
-                    if reference != openmt2001::startup_rng::TAIL || static_rng_tail_next != 0 {
-                        return Err("unexpected external RNG tail during fresh roster".into());
+                &mut openmt2001::player_constructor::RosterConstruction {
+                    image: input.image,
+                    registry: &mut random_registry,
+                    global_reset: &mut demand_ready,
+                    allocate: &mut |size| {
+                        let reference = allocate_roster(size)?;
+                        Ok(Some(openmt2001::player_constructor::Allocation {
+                            reference,
+                            bytes: vec![0; size],
+                        }))
+                    },
+                    external_rng_link: &mut |reference, next| {
+                        if reference != openmt2001::startup_rng::TAIL || static_rng_tail_next != 0 {
+                            return Err("unexpected external RNG tail during fresh roster".into());
+                        }
+                        static_rng_tail_next = next;
+                        Ok(())
+                    },
+                },
+                &mut world,
+                input.difficulty,
+                |size| allocate_roster(size),
+            )?;
+            allocation_next = roster_allocation_next.get();
+            world.city.ai_demand.ready = demand_ready;
+            let mut ownership_lists = std::mem::take(&mut roster.ai_ownership);
+            let ownership_catalog = world.catalog.info.clone();
+            // Retain script-authored values before the native ownership reset.
+            let authored_rights = std::array::from_fn(|index| {
+                let row = &world.categories[index];
+                (
+                    row[0x05],
+                    u32::from_le_bytes(row[0x78..0x7c].try_into().unwrap()),
+                )
+            });
+            let ownership_result =
+                roster.initialize_ownership(&mut world, input.image, &mut |ownership, event| {
+                    use openmt2001::category_ownership::Seam;
+                    match event {
+                        Seam::BuildingAppearance { building } => {
+                            // Initial scene submission materializes these retained records.
+                            hooks.notifications.push((0x485520, building));
+                            Ok(())
+                        }
+                        Seam::AiOwnershipLists { player } => {
+                            openmt2001::ai_ownership::maintain_player(
+                                &mut ownership_lists,
+                                &mut ownership.players[player],
+                                ownership.categories,
+                                ownership.buildings,
+                                ownership.businesses,
+                                input.image,
+                                &ownership_catalog,
+                                |size| {
+                                    let reference = allocation_next;
+                                    let span = u32::try_from(size)
+                                        .map_err(|_| "ownership allocation size overflow")?
+                                        .checked_add(0xfff)
+                                        .ok_or("ownership allocation alignment overflow")?
+                                        & !0xfff;
+                                    allocation_next = allocation_next
+                                        .checked_add(span)
+                                        .ok_or("ownership allocation arena exhausted")?;
+                                    Ok(reference)
+                                },
+                            )
+                        }
+                        Seam::NativeUiCall {
+                            address: 0x41f410, ..
+                        } => {
+                            hooks.notifications.push((0x41f410, 0));
+                            Ok(())
+                        }
+                        other => Err(format!(
+                            "initial player-owned category needs host boundary {other:?}"
+                        )),
                     }
-                    static_rng_tail_next = next;
-                    Ok(())
-                },
-            },
-            &mut world,
-            input.difficulty,
-            |size| allocate_roster(size),
-        )?;
-        allocation_next = roster_allocation_next.get();
-        world.city.ai_demand.ready = demand_ready;
-        let mut ownership_lists = std::mem::take(&mut roster.ai_ownership);
-        let ownership_catalog = world.catalog.info.clone();
-        // Retain script-authored values before the native ownership reset.
-        let authored_rights = std::array::from_fn(|index| {
-            let row = &world.categories[index];
-            (row[0x05], u32::from_le_bytes(row[0x78..0x7c].try_into().unwrap()))
-        });
-        let ownership_result = roster.initialize_ownership(&mut world, input.image, &mut |ownership, event| {
-            use openmt2001::category_ownership::Seam;
-            match event {
-                Seam::BuildingAppearance { building } => {
-                    // Initial scene submission materializes these retained records.
-                    hooks.notifications.push((0x485520, building));
-                    Ok(())
-                }
-                Seam::AiOwnershipLists { player } => openmt2001::ai_ownership::maintain_player(
-                    &mut ownership_lists, &mut ownership.players[player], ownership.categories,
-                    ownership.buildings, ownership.businesses, input.image, &ownership_catalog,
-                    |size| { let reference = allocation_next; let span = u32::try_from(size).map_err(|_| "ownership allocation size overflow")?.checked_add(0xfff).ok_or("ownership allocation alignment overflow")? & !0xfff; allocation_next = allocation_next.checked_add(span).ok_or("ownership allocation arena exhausted")?; Ok(reference) }),
-                Seam::NativeUiCall { address: 0x41f410, .. } => {
-                    hooks.notifications.push((0x41f410, 0));
-                    Ok(())
-                }
-                other => Err(format!("initial player-owned category needs host boundary {other:?}")),
-            }
-        });
-        roster.ai_ownership = ownership_lists;
-        ownership_result?;
-        compatibility.repair_startup_rights(id, load_mode, &authored_rights, &mut world.categories);
+                });
+            roster.ai_ownership = ownership_lists;
+            ownership_result?;
+            compatibility.repair_startup_rights(
+                id,
+                load_mode,
+                &authored_rights,
+                &mut world.categories,
+            );
         }
         openmt2001::traffic::road::routes::RoadRoutes::from_bytes(
             &input.road_routes,
@@ -1306,21 +1920,38 @@ impl<'data> Session<'data> {
         .reset_income(&mut hooks.utilities, &mut population.properties);
         // Original4ba148 resets shared metrics before the demand/space refresh.
         {
-            let city=&mut world.city;
-            let players:Vec<_>=roster.manager.players.iter().collect();
-            openmt2001::player_metrics::reset(&mut city.ai_neighbors,&mut city.ownership_refresh_counter,
-                &mut population.business_counts,&mut population.market,&players,&city.categories,
-                &city.ledgers.businesses,&city.ledgers.residents,input.image)?;
+            let city = &mut world.city;
+            let players: Vec<_> = roster.manager.players.iter().collect();
+            openmt2001::player_metrics::reset(
+                &mut city.ai_neighbors,
+                &mut city.ownership_refresh_counter,
+                &mut population.business_counts,
+                &mut population.market,
+                &players,
+                &city.categories,
+                &city.ledgers.businesses,
+                &city.ledgers.residents,
+                input.image,
+            )?;
         }
         // Original fresh-start4ba14d rebuilds demand after resident/player
         // setup and income reset, before the post-start player callback loop.
         {
             let city = &mut world.city;
-            city.ai_demand.rebuild(&city.ledgers.residents, &city.ledgers.businesses,
-                &city.buildings, &city.catalog.info, &city.catalog.products,
-                &city.commodities.rows, input.image)?;
-            openmt2001::ai_space::refresh_all(&mut city.category_footprints,
-                &city.categories, input.image)?;
+            city.ai_demand.rebuild(
+                &city.ledgers.residents,
+                &city.ledgers.businesses,
+                &city.buildings,
+                &city.catalog.info,
+                &city.catalog.products,
+                &city.commodities.rows,
+                input.image,
+            )?;
+            openmt2001::ai_space::refresh_all(
+                &mut city.category_footprints,
+                &city.categories,
+                input.image,
+            )?;
         }
         let mut history = openmt2001::player_history::State::default();
         let transport = openmt2001::traffic::scene::Scene::fresh(
@@ -1335,9 +1966,22 @@ impl<'data> Session<'data> {
             }
         }
         Ok(Self {
-            building_styles: input.era_styles.get(world.clock.calendar[2] as usize).ok_or("fresh era leaves original style banks")?.clone(),
+            building_styles: input
+                .era_styles
+                .get(world.clock.calendar[2] as usize)
+                .ok_or("fresh era leaves original style banks")?
+                .clone(),
             era_styles: input.era_styles,
-            player_style_indices: std::array::from_fn(|i|i32::from_le_bytes(input.image.at(0x53c9dc+i as u32*4,4).unwrap().try_into().unwrap())),
+            player_style_indices: std::array::from_fn(|i| {
+                i32::from_le_bytes(
+                    input
+                        .image
+                        .at(0x53c9dc + i as u32 * 4, 4)
+                        .unwrap()
+                        .try_into()
+                        .unwrap(),
+                )
+            }),
             difficulty: input.difficulty as usize,
             // The original sixteen campaign registrations use mode2.
             tutorial_state: u8::from(matches!(id, 100000..=100012)),
@@ -1358,7 +2002,9 @@ impl<'data> Session<'data> {
             script_random_state: startup.state(0x93aee8),
             credit_random_state: startup.state(0x8b06e8),
             particle_random_state: startup.state(0x68c028),
-            demolition_effects: openmt2001::demolition_effect::Manager::new(startup.state(0x940cf8)),
+            demolition_effects: openmt2001::demolition_effect::Manager::new(
+                startup.state(0x940cf8),
+            ),
             demolition_points: vec![],
             build_random_state: startup.state(0x560a08),
             pulse_lights: openmt2001::pulse_lights::PulseLights::from_original(input.image)?,
@@ -1391,7 +2037,11 @@ impl<'data> Session<'data> {
         if self.tutorial_state != 1 {
             return Ok(());
         }
-        if self.catalog.selected_level().is_some_and(|level| matches!(level.id(), 100001..=100012)) {
+        if self
+            .catalog
+            .selected_level()
+            .is_some_and(|level| matches!(level.id(), 100001..=100012))
+        {
             self.scripts.bind_tutorial_camera()?;
         }
         let context = self.world.script_context(
@@ -1420,12 +2070,18 @@ impl<'data> Session<'data> {
                     )?,
                 )?;
             }
-            let players: Vec<_> = self.roster.manager.players.iter().map(|player| {
-                Some(openmt2001::business_binding::Player {
-                    identity: player.reference,
-                    kind: u32::from_le_bytes(player.bytes[0x154..0x158].try_into().unwrap()),
+            let players: Vec<_> = self
+                .roster
+                .manager
+                .players
+                .iter()
+                .map(|player| {
+                    Some(openmt2001::business_binding::Player {
+                        identity: player.reference,
+                        kind: u32::from_le_bytes(player.bytes[0x154..0x158].try_into().unwrap()),
+                    })
                 })
-            }).collect();
+                .collect();
             self.scripts.enter_level(
                 &mut self.world.script_state(&players),
                 &context,
@@ -1441,10 +2097,10 @@ impl<'data> Session<'data> {
 /// Recorded UI work is retained for a later presenter, never treated as applied.
 /// Non-city ownership, new-resident events and cash charges fail explicitly.
 pub struct Hooks {
-    process:Option<crate::live_host::process_runtime::Handle>,
+    process: Option<crate::live_host::process_runtime::Handle>,
     /// Only an audited original terminal forced-auction EVENT invocation.
     forced_auction_allowed: bool,
-    forced_auction_handlers:std::collections::BTreeMap<String,Vec<u8>>,
+    forced_auction_handlers: std::collections::BTreeMap<String, Vec<u8>>,
     pub notifications: Vec<(u32, usize)>,
     pub commands: Vec<(level_script::Command, Vec<Value>)>,
     pub utilities: economy::Utilities,
@@ -1453,18 +2109,28 @@ pub struct Hooks {
 }
 impl Hooks {
     pub(crate) fn new() -> Self {
-        Self::with_dispatch(openmt2001::timers::startup_tasks([0;20]),
-            openmt2001::timers::CalendarFrequency { frequency:0.,calendar_timer:None,logic_timer:None })
+        Self::with_dispatch(
+            openmt2001::timers::startup_tasks([0; 20]),
+            openmt2001::timers::CalendarFrequency {
+                frequency: 0.,
+                calendar_timer: None,
+                logic_timer: None,
+            },
+        )
     }
-    fn with_dispatch(timers:Vec<openmt2001::timers::Task>,frequency:openmt2001::timers::CalendarFrequency)->Self {
+    fn with_dispatch(
+        timers: Vec<openmt2001::timers::Task>,
+        frequency: openmt2001::timers::CalendarFrequency,
+    ) -> Self {
         Self {
-            process:None,
+            process: None,
             forced_auction_allowed: false,
-            forced_auction_handlers:Default::default(),
+            forced_auction_handlers: Default::default(),
             notifications: vec![],
             commands: vec![],
             utilities: economy::Utilities::new([0; 4]),
-            frequency, timers,
+            frequency,
+            timers,
         }
     }
 }
@@ -1524,13 +2190,19 @@ impl map_script::Hooks for Hooks {
     }
 }
 impl level_script::Hooks for Hooks {
-    fn performance8b26cc(&mut self)->Result<i32,String>{
-        self.process.as_ref().ok_or("Game.performance process owner absent")?
-            .performance8b26cc().map_err(|e|e.to_string())
+    fn performance8b26cc(&mut self) -> Result<i32, String> {
+        self.process
+            .as_ref()
+            .ok_or("Game.performance process owner absent")?
+            .performance8b26cc()
+            .map_err(|e| e.to_string())
     }
-    fn set_performance8b26cc(&mut self,value:i32)->Result<(),String>{
-        self.process.as_ref().ok_or("Game.performance process owner absent")?
-            .set_performance8b26cc(value).map_err(|e|e.to_string())
+    fn set_performance8b26cc(&mut self, value: i32) -> Result<(), String> {
+        self.process
+            .as_ref()
+            .ok_or("Game.performance process owner absent")?
+            .set_performance8b26cc(value)
+            .map_err(|e| e.to_string())
     }
     fn pause_timers(&mut self, event: openmt2001::pause::Timers) -> Result<(), String> {
         event.apply(&mut self.timers);
@@ -1549,13 +2221,16 @@ impl level_script::Hooks for Hooks {
         command: level_script::Command,
         arguments: &[Value],
     ) -> Result<(), String> {
-        if matches!(command,level_script::Command::ForcedAuction { .. }) && !self.forced_auction_allowed {
-            return Err("forced auction requires an audited original terminal event handler".into());
+        if matches!(command, level_script::Command::ForcedAuction { .. })
+            && !self.forced_auction_allowed
+        {
+            return Err(
+                "forced auction requires an audited original terminal event handler".into(),
+            );
         }
         self.commands.push((command, arguments.to_vec()));
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -1594,7 +2269,7 @@ mod tests {
             effect_model: 0,
             market_share_prior: [0.; 6],
             player_message_prior: [0; 48],
-                ai_event_gate: false,
+            ai_event_gate: false,
         }
     }
     fn exercise_ai_hourly(
@@ -1677,11 +2352,12 @@ mod tests {
             .advance_session(&assets, &mut policy, |event, _| {
                 if matches!(
                     event,
-                    tick::Event::Ai(_) | tick::Event::Calendar(CalendarEvent::Hourly(
-                        hourly::Event::CurrentPlayerUpdate
-                            | hourly::Event::PlayerUpdate(_)
-                            | hourly::Event::Helper(0x470b80)
-                    ))
+                    tick::Event::Ai(_)
+                        | tick::Event::Calendar(CalendarEvent::Hourly(
+                            hourly::Event::CurrentPlayerUpdate
+                                | hourly::Event::PlayerUpdate(_)
+                                | hourly::Event::Helper(0x470b80)
+                        ))
                 ) {
                     return Err("connected hourly AI operation escaped to host".into());
                 }
@@ -1789,632 +2465,2136 @@ mod tests {
             ai.len()
         );
     }
-    fn exercise_event_retirement(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>) {
-        let word=|b:&[u8],at:usize|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at:usize,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let slots:Vec<_>=session.roster.manager.players.iter().enumerate().filter(|(_,p)|word(&p.bytes,0x154)==1).map(|(i,_)|i).collect();
-        assert!(slots.len()>=2);
+    fn exercise_event_retirement(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        let word = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let slots: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| word(&p.bytes, 0x154) == 1)
+            .map(|(i, _)| i)
+            .collect();
+        assert!(slots.len() >= 2);
         for &slot in &slots {
-            let p=&mut session.roster.manager.players[slot];p.bytes[0x1403]=1;
-            let reference=word(&p.bytes,0x21c);let aux=p.auxiliaries.iter_mut().find(|a|a.reference==reference).unwrap();
-            put(&mut aux.bytes,0x18,0);
+            let p = &mut session.roster.manager.players[slot];
+            p.bytes[0x1403] = 1;
+            let reference = word(&p.bytes, 0x21c);
+            let aux = p
+                .auxiliaries
+                .iter_mut()
+                .find(|a| a.reference == reference)
+                .unwrap();
+            put(&mut aux.bytes, 0x18, 0);
         }
-        for (slot,card,mode) in [(slots[0],1,1),(slots[1],65,2)] {
-            let p=&mut session.roster.manager.players[slot];let reference=word(&p.bytes,0x21c);
-            openmt2001::event_cards::lifecycle::receive(p,reference,card).unwrap();
-            openmt2001::event_cards::lifecycle::set_mode(p,reference,mode).unwrap();
-            put(&mut p.bytes,0x13e0,49);p.bytes[0x13dd]=1;p.bytes[0x13c1]=0;
-            session.event_cards.used[card as usize]=1;
+        for (slot, card, mode) in [(slots[0], 1, 1), (slots[1], 65, 2)] {
+            let p = &mut session.roster.manager.players[slot];
+            let reference = word(&p.bytes, 0x21c);
+            openmt2001::event_cards::lifecycle::receive(p, reference, card).unwrap();
+            openmt2001::event_cards::lifecycle::set_mode(p, reference, mode).unwrap();
+            put(&mut p.bytes, 0x13e0, 49);
+            p.bytes[0x13dd] = 1;
+            p.bytes[0x13c1] = 0;
+            session.event_cards.used[card as usize] = 1;
         }
-        session.world.clock.calendar[0]=8;
-        session.world.clock.timing[0]=1249;session.world.clock.timing[1]=1249;
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();
-        let mut accept=|event:tick::Event<'_>,_:&openmt2001::clock::Clock|->Result<u32,String>{
-            if matches!(event,tick::Event::Ai(_)){return Err("event retirement unexpectedly entered normal AI strategy".into());}Ok(0)
-        };
-        session.advance_session(&assets,&mut policy,&mut accept).unwrap();
-        assert_eq!(session.world.clock.timing[0],1250);
-        assert_eq!(session.event_cards.used[65],0,"discard broadcast releases targeted card immediately");
-        assert_eq!(session.event_cards.used[1],1,"financial command is still delayed");
+        session.world.clock.calendar[0] = 8;
+        session.world.clock.timing[0] = 1249;
+        session.world.clock.timing[1] = 1249;
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        let mut accept =
+            |event: tick::Event<'_>, _: &openmt2001::clock::Clock| -> Result<u32, String> {
+                if matches!(event, tick::Event::Ai(_)) {
+                    return Err("event retirement unexpectedly entered normal AI strategy".into());
+                }
+                Ok(0)
+            };
+        session
+            .advance_session(&assets, &mut policy, &mut accept)
+            .unwrap();
+        assert_eq!(session.world.clock.timing[0], 1250);
+        assert_eq!(
+            session.event_cards.used[65], 0,
+            "discard broadcast releases targeted card immediately"
+        );
+        assert_eq!(
+            session.event_cards.used[1], 1,
+            "financial command is still delayed"
+        );
         for &slot in &slots[..2] {
-            let p=&session.roster.manager.players[slot];let aux=p.auxiliaries.iter().find(|a|a.reference==word(&p.bytes,0x21c)).unwrap();
-            assert_eq!(word(&aux.bytes,0x18),0);assert_eq!(word(&p.bytes,0x1b8),0);
-            assert!((20..=28).contains(&word(&aux.bytes,0)));assert_eq!(word(&p.bytes,0x13e0),0);assert_eq!(p.bytes[0x13dd],0);
+            let p = &session.roster.manager.players[slot];
+            let aux = p
+                .auxiliaries
+                .iter()
+                .find(|a| a.reference == word(&p.bytes, 0x21c))
+                .unwrap();
+            assert_eq!(word(&aux.bytes, 0x18), 0);
+            assert_eq!(word(&p.bytes, 0x1b8), 0);
+            assert!((20..=28).contains(&word(&aux.bytes, 0)));
+            assert_eq!(word(&p.bytes, 0x13e0), 0);
+            assert_eq!(p.bytes[0x13dd], 0);
         }
-        let ledger=session.world.ledgers.players[slots[0]].ledger(0x24).unwrap();
-        while session.world.clock.timing[0]<1275 {session.advance_session(&assets,&mut policy,&mut accept).unwrap();if session.world.clock.timing[0]<1275 {assert_eq!(session.event_cards.used[1],1);}}
-        assert_eq!(session.event_cards.used[1],0);
-        assert_eq!(session.world.ledgers.players[slots[0]].ledger(0x24).unwrap(),ledger+200.);
-        assert_eq!(word(&session.roster.manager.players[slots[0]].bytes,4),session.world.ledgers.players[slots[0]].cash.to_bits());
-        println!("Retained event lifecycle: targeted discard, financial retirement,25-tick delay and200-dollar ledger credit verified");
+        let ledger = session.world.ledgers.players[slots[0]]
+            .ledger(0x24)
+            .unwrap();
+        while session.world.clock.timing[0] < 1275 {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if session.world.clock.timing[0] < 1275 {
+                assert_eq!(session.event_cards.used[1], 1);
+            }
+        }
+        assert_eq!(session.event_cards.used[1], 0);
+        assert_eq!(
+            session.world.ledgers.players[slots[0]]
+                .ledger(0x24)
+                .unwrap(),
+            ledger + 200.
+        );
+        assert_eq!(
+            word(&session.roster.manager.players[slots[0]].bytes, 4),
+            session.world.ledgers.players[slots[0]].cash.to_bits()
+        );
+        println!(
+            "Retained event lifecycle: targeted discard, financial retirement,25-tick delay and200-dollar ledger credit verified"
+        );
     }
-    fn exercise_ai_business_management(session: &mut Session<'_>, image: &openmt2001::pe::PeImage<'_>, board: &openmt2001::board::Board, file: &openmt2001::build_file::BuildFile<'_>) {
-        let word=|r:&[u8],at|u32::from_le_bytes(r[at..at+4].try_into().unwrap());
-        let put=|r:&mut[u8],at,v:u32|r[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let assets=CommandAssets{image,board,file};
-        let slot=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        let business=session.world.ledgers.businesses.iter().position(|b|b[0x21c]!=0 && word(b,0)==1).unwrap();
-        let old_business=session.world.ledgers.businesses[business];
-        session.world.ledgers.businesses[business][10]=slot as u8+1;
+    fn exercise_ai_business_management(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        let word = |r: &[u8], at| u32::from_le_bytes(r[at..at + 4].try_into().unwrap());
+        let put = |r: &mut [u8], at, v: u32| r[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let assets = CommandAssets { image, board, file };
+        let slot = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        let business = session
+            .world
+            .ledgers
+            .businesses
+            .iter()
+            .position(|b| b[0x21c] != 0 && word(b, 0) == 1)
+            .unwrap();
+        let old_business = session.world.ledgers.businesses[business];
+        session.world.ledgers.businesses[business][10] = slot as u8 + 1;
         session.world.ledgers.businesses[business][16..18].copy_from_slice(&0u16.to_le_bytes());
-        put(&mut session.world.ledgers.businesses[business],0x1dc,1000f32.to_bits());
-        put(&mut session.world.ledgers.businesses[business],0x204,1000f32.to_bits());
+        put(
+            &mut session.world.ledgers.businesses[business],
+            0x1dc,
+            1000f32.to_bits(),
+        );
+        put(
+            &mut session.world.ledgers.businesses[business],
+            0x204,
+            1000f32.to_bits(),
+        );
         // Controlled dispatcher exercise: postpone strategy selection by its
         // original due WORD, while ownership and rent flags run normally.
-        for p in &mut session.roster.manager.players {if word(&p.bytes,0x154)==1 {p.bytes[0x1403]=1;}}
-        let p=&mut session.roster.manager.players[slot];
-        p.bytes[0x1400]=0;p.bytes[0x1401]=1;p.bytes[0x1403]=0;p.bytes[0x1df8]=0;
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
+        }
+        let p = &mut session.roster.manager.players[slot];
+        p.bytes[0x1400] = 0;
+        p.bytes[0x1401] = 1;
+        p.bytes[0x1403] = 0;
+        p.bytes[0x1df8] = 0;
         p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
-        p.bytes[0x239]=0;p.bytes[0x23a]=0;p.bytes[0x1e11]=0;p.bytes[0x1e12]=0;
-        p.bytes[0xcc0]=0;put(&mut p.bytes,0xb64,u32::MAX);put(&mut p.bytes,8,100);
-        put(&mut p.bytes,0x220,0x11);
-        let mut policy=simulation_test_policy();
-        let mut accept=|event:tick::Event<'_>,_:&openmt2001::clock::Clock|{
-            if matches!(event,tick::Event::Ai(_)){return Err(format!("AI management escaped {event:?}"));}Ok(0)
+        p.bytes[0x239] = 0;
+        p.bytes[0x23a] = 0;
+        p.bytes[0x1e11] = 0;
+        p.bytes[0x1e12] = 0;
+        p.bytes[0xcc0] = 0;
+        put(&mut p.bytes, 0xb64, u32::MAX);
+        put(&mut p.bytes, 8, 100);
+        put(&mut p.bytes, 0x220, 0x11);
+        let mut policy = simulation_test_policy();
+        let mut accept = |event: tick::Event<'_>, _: &openmt2001::clock::Clock| {
+            if matches!(event, tick::Event::Ai(_)) {
+                return Err(format!("AI management escaped {event:?}"));
+            }
+            Ok(0)
         };
         for _ in 0..5 {
-            session.advance_session(&assets,&mut policy,&mut accept).unwrap();
-            if session.world.clock.timing[0].is_multiple_of(5) {break;}
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if session.world.clock.timing[0].is_multiple_of(5) {
+                break;
+            }
         }
-        let due=session.world.clock.timing[0]+25;
-        let pending=word(&session.world.ledgers.businesses[business],0x204);
-        assert_ne!(pending,1000f32.to_bits(),"flags {:x}, owned {:?}",word(&session.roster.manager.players[slot].bytes,0x220),session.roster.ai_ownership.state(&session.roster.manager.players[slot]).unwrap().lists[0]);
-        assert_eq!(word(&session.world.ledgers.businesses[business],0x1dc),1000f32.to_bits());
-        assert_eq!(session.world.ledgers.businesses[business][0x208],0);
-        assert_eq!(word(&session.roster.manager.players[slot].bytes,0x220)&0x11,0);
-        while session.world.clock.timing[0]<due {session.advance_session(&assets,&mut policy,&mut accept).unwrap();}
-        assert_eq!(word(&session.world.ledgers.businesses[business],0x1dc),pending);
-        session.world.ledgers.businesses[business]=old_business;
-        println!("Retained AI rent: ownership refresh, pending rent, dirty clear and25-tick command application verified");
+        let due = session.world.clock.timing[0] + 25;
+        let pending = word(&session.world.ledgers.businesses[business], 0x204);
+        assert_ne!(
+            pending,
+            1000f32.to_bits(),
+            "flags {:x}, owned {:?}",
+            word(&session.roster.manager.players[slot].bytes, 0x220),
+            session
+                .roster
+                .ai_ownership
+                .state(&session.roster.manager.players[slot])
+                .unwrap()
+                .lists[0]
+        );
+        assert_eq!(
+            word(&session.world.ledgers.businesses[business], 0x1dc),
+            1000f32.to_bits()
+        );
+        assert_eq!(session.world.ledgers.businesses[business][0x208], 0);
+        assert_eq!(
+            word(&session.roster.manager.players[slot].bytes, 0x220) & 0x11,
+            0
+        );
+        while session.world.clock.timing[0] < due {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+        }
+        assert_eq!(
+            word(&session.world.ledgers.businesses[business], 0x1dc),
+            pending
+        );
+        session.world.ledgers.businesses[business] = old_business;
+        println!(
+            "Retained AI rent: ownership refresh, pending rent, dirty clear and25-tick command application verified"
+        );
     }
-    fn exercise_business_sale(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{business_sale,live_commands};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let seller=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        let business=session.world.ledgers.businesses.iter().position(|b|b[0x21c]!=0&&word(b,0)!=2).unwrap();
-        let building=i16::from_le_bytes(session.world.ledgers.businesses[business][8..10].try_into().unwrap()) as usize;
-        let old_business=session.world.ledgers.businesses[business];let old_building=session.world.buildings[building];
-        let old_accounts=session.world.ledgers.players.clone();let old_age=session.population.business_counts.age;
-        let old_players:Vec<_>=session.roster.manager.players.iter().map(|p|p.bytes.clone()).collect();
-        for p in &mut session.roster.manager.players{if word(&p.bytes,0x154)==1{p.bytes[0x1403]=1;}}
+    fn exercise_business_sale(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{business_sale, live_commands};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let seller = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        let business = session
+            .world
+            .ledgers
+            .businesses
+            .iter()
+            .position(|b| b[0x21c] != 0 && word(b, 0) != 2)
+            .unwrap();
+        let building = i16::from_le_bytes(
+            session.world.ledgers.businesses[business][8..10]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let old_business = session.world.ledgers.businesses[business];
+        let old_building = session.world.buildings[building];
+        let old_accounts = session.world.ledgers.players.clone();
+        let old_age = session.population.business_counts.age;
+        let old_players: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|p| p.bytes.clone())
+            .collect();
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
+        }
         // Set up an owned business through the real accounting transfer before
         // testing the independently verified consumer through its live queue.
-        {let city=&mut session.world.city;
-        openmt2001::economy::transfer_business_owner(&mut city.ledgers.businesses[business],
-            city.buildings[building][..64].try_into().unwrap(),seller as u8+1,true,&mut city.ledgers.players).unwrap();}
-        session.world.buildings[building][0x2d]=seller as u8+1;session.world.buildings[building][0x3e]=1;
-        let credit=session.world.ledgers.players[seller].ledger(0x18).unwrap();
-        let due=session.world.clock.timing[0]+25;let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();let mut panels=0;
-        session.submit_command(live_commands::Command::SellBusiness(business_sale::Command{business:business as u32,player:seller as u8}),&assets,|_|Err("sale applied before25ticks".into())).unwrap();
-        while session.world.clock.timing[0]<due{
-            session.advance_session(&assets,&mut policy,|event:tick::Event<'_>,_:&openmt2001::clock::Clock|{
-                if matches!(event,tick::Event::Ai(_)){return Err(format!("sale escaped authoritative callbacks: {event:?}"));}
-                if let tick::Event::Command(live_commands::Event::BusinessSale(business_sale::Call::BuildingPanel(id)))=event{assert_eq!(id,building);panels+=1;}
-                Ok(0)
-            }).unwrap();
-            if session.world.clock.timing[0]<due{assert_eq!(session.world.ledgers.businesses[business][10],seller as u8+1);assert_eq!(session.world.ledgers.players[seller].ledger(0x18).unwrap(),credit);}
+        {
+            let city = &mut session.world.city;
+            openmt2001::economy::transfer_business_owner(
+                &mut city.ledgers.businesses[business],
+                city.buildings[building][..64].try_into().unwrap(),
+                seller as u8 + 1,
+                true,
+                &mut city.ledgers.players,
+            )
+            .unwrap();
         }
-        assert_eq!(session.world.ledgers.businesses[business][10],0);assert_eq!(session.world.buildings[building][0x2d],0);assert_eq!(session.world.buildings[building][0x3e],0);
-        assert_eq!(session.world.ledgers.businesses[business][0x21c],old_business[0x21c]);
-        assert!(session.world.ledgers.players[seller].ledger(0x18).unwrap()>credit);assert_eq!(panels,1);
-        assert_eq!(word(&session.world.buildings[building],0x1c),business as u32);
-        session.world.ledgers.businesses[business]=old_business;session.world.buildings[building]=old_building;session.world.ledgers.players=old_accounts;session.population.business_counts.age=old_age;
-        for(p,bytes)in session.roster.manager.players.iter_mut().zip(old_players){p.bytes=bytes;}
-        session.population.refresh_city(&session.world.city,board).unwrap();
-        println!("Retained business sale:25-tick delay, ledger18 credit, city ownership, active business retention and panel-flag clear verified");
+        session.world.buildings[building][0x2d] = seller as u8 + 1;
+        session.world.buildings[building][0x3e] = 1;
+        let credit = session.world.ledgers.players[seller].ledger(0x18).unwrap();
+        let due = session.world.clock.timing[0] + 25;
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        let mut panels = 0;
+        session
+            .submit_command(
+                live_commands::Command::SellBusiness(business_sale::Command {
+                    business: business as u32,
+                    player: seller as u8,
+                }),
+                &assets,
+                |_| Err("sale applied before25ticks".into()),
+            )
+            .unwrap();
+        while session.world.clock.timing[0] < due {
+            session
+                .advance_session(
+                    &assets,
+                    &mut policy,
+                    |event: tick::Event<'_>, _: &openmt2001::clock::Clock| {
+                        if matches!(event, tick::Event::Ai(_)) {
+                            return Err(format!("sale escaped authoritative callbacks: {event:?}"));
+                        }
+                        if let tick::Event::Command(live_commands::Event::BusinessSale(
+                            business_sale::Call::BuildingPanel(id),
+                        )) = event
+                        {
+                            assert_eq!(id, building);
+                            panels += 1;
+                        }
+                        Ok(0)
+                    },
+                )
+                .unwrap();
+            if session.world.clock.timing[0] < due {
+                assert_eq!(
+                    session.world.ledgers.businesses[business][10],
+                    seller as u8 + 1
+                );
+                assert_eq!(
+                    session.world.ledgers.players[seller].ledger(0x18).unwrap(),
+                    credit
+                );
+            }
+        }
+        assert_eq!(session.world.ledgers.businesses[business][10], 0);
+        assert_eq!(session.world.buildings[building][0x2d], 0);
+        assert_eq!(session.world.buildings[building][0x3e], 0);
+        assert_eq!(
+            session.world.ledgers.businesses[business][0x21c],
+            old_business[0x21c]
+        );
+        assert!(session.world.ledgers.players[seller].ledger(0x18).unwrap() > credit);
+        assert_eq!(panels, 1);
+        assert_eq!(
+            word(&session.world.buildings[building], 0x1c),
+            business as u32
+        );
+        session.world.ledgers.businesses[business] = old_business;
+        session.world.buildings[building] = old_building;
+        session.world.ledgers.players = old_accounts;
+        session.population.business_counts.age = old_age;
+        for (p, bytes) in session.roster.manager.players.iter_mut().zip(old_players) {
+            p.bytes = bytes;
+        }
+        session
+            .population
+            .refresh_city(&session.world.city, board)
+            .unwrap();
+        println!(
+            "Retained business sale:25-tick delay, ledger18 credit, city ownership, active business retention and panel-flag clear verified"
+        );
     }
-    fn exercise_business_takeover(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{business_takeover,live_commands};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let slots:Vec<_>=session.roster.manager.players.iter().enumerate().filter_map(|(i,p)|(word(&p.bytes,0x154)==1).then_some(i)).collect();let (buyer,seller)=(slots[0],slots[1]);
-        let business=session.world.ledgers.businesses.iter().position(|b|b[0x21c]!=0).unwrap();
-        let building=i16::from_le_bytes(session.world.ledgers.businesses[business][8..10].try_into().unwrap()) as usize;
-        let category=((word(&session.world.buildings[building],0x40)-0x617628)/380) as usize;
+    fn exercise_business_takeover(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{business_takeover, live_commands};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let slots: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| (word(&p.bytes, 0x154) == 1).then_some(i))
+            .collect();
+        let (buyer, seller) = (slots[0], slots[1]);
+        let business = session
+            .world
+            .ledgers
+            .businesses
+            .iter()
+            .position(|b| b[0x21c] != 0)
+            .unwrap();
+        let building = i16::from_le_bytes(
+            session.world.ledgers.businesses[business][8..10]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let category = ((word(&session.world.buildings[building], 0x40) - 0x617628) / 380) as usize;
         // Controlled ownership fixture; restore it after observing the actual
         // delayed consumer and the seller's scheduled2e inbox consequence.
-        let old_business=session.world.ledgers.businesses[business];let old_building=session.world.buildings[building];let old_category=session.world.categories[category];
-        let old_accounts=session.world.ledgers.players.clone();let old_lists=session.roster.ai_ownership.lists.clone();let old_age=session.population.business_counts.age;
-        let old_players:Vec<_>=session.roster.manager.players.iter().map(|p|(p.bytes.clone(),p.auxiliaries.iter().map(|a|(a.reference,a.bytes)).collect::<Vec<_>>())).collect();
-        for p in &mut session.roster.manager.players{if word(&p.bytes,0x154)==1{p.bytes[0x1403]=1;}}
-        {let city=&mut session.world.city;
-            openmt2001::economy::transfer_business_owner(&mut city.ledgers.businesses[business],city.buildings[building][..64].try_into().unwrap(),seller as u8+1,true,&mut city.ledgers.players).unwrap();
-            city.categories[category][5]=buyer as u8+1;city.buildings[building][0x2d]=seller as u8+1;city.buildings[building][0x3e]=1;}
-        {let p=&mut session.roster.manager.players[seller];put(&mut p.bytes,0x214,0);put(&mut p.bytes,0x218,0);
-            session.roster.ai_ownership.mutate(p,|size|{let v=session.allocation_next;session.allocation_next+=size as u32;Ok(v)},|state|state.insert(0,business as i32,|_|Ok(123))).unwrap();}
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();let due=session.world.clock.timing[0]+25;
-        let debit=session.world.ledgers.players[buyer].ledger(3).unwrap();let credit=session.world.ledgers.players[seller].ledger(0x16).unwrap();
-        session.submit_command(live_commands::Command::Takeover(business_takeover::Command{building:building as u32}),&assets,|_|Err("takeover applied before25ticks".into())).unwrap();
-        let mut accept=|event:tick::Event<'_>,_:&openmt2001::clock::Clock|{if matches!(event,tick::Event::Ai(_)){return Err(format!("takeover escaped authoritative callbacks: {event:?}"));}Ok(0)};
-        while session.world.clock.timing[0]<due{session.advance_session(&assets,&mut policy,&mut accept).unwrap();if session.world.clock.timing[0]<due{assert_eq!(session.world.ledgers.businesses[business][10],seller as u8+1);}}
-        assert_eq!(session.world.ledgers.businesses[business][10],buyer as u8+1);assert_eq!(session.world.buildings[building][0x2d],buyer as u8+1);assert_eq!(session.world.buildings[building][0x3e],0);
-        let paid=debit-session.world.ledgers.players[buyer].ledger(3).unwrap();assert!(paid>0.);assert_eq!(session.world.ledgers.players[seller].ledger(0x16).unwrap()-credit,paid);
-        let p=&mut session.roster.manager.players[seller];assert_eq!(word(&p.bytes,0x214),1);let head=word(&p.bytes,0x218);assert_eq!(word(&p.auxiliaries.iter().find(|a|a.reference==head).unwrap().bytes,4),0x2e);
-        for at in [0x1400,0x1403,0x1df8,0x239,0x23a,0x1e11,0x1e12,0xcc0]{p.bytes[at]=0;}p.bytes[0x1401]=1;p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());put(&mut p.bytes,8,100);put(&mut p.bytes,0x220,0);put(&mut p.bytes,0xb64,u32::MAX);
-        for _ in 0..5{session.advance_session(&assets,&mut policy,&mut accept).unwrap();if word(&session.roster.manager.players[seller].bytes,0x214)==0{break;}}
-        assert_eq!(word(&session.roster.manager.players[seller].bytes,0x214),0);assert!(!session.roster.ai_ownership.state(&session.roster.manager.players[seller]).unwrap().lists[0].entries.iter().any(|e|e[0]!=0&&word(e,4)==business as u32));
-        session.world.ledgers.businesses[business]=old_business;session.world.buildings[building]=old_building;session.world.categories[category]=old_category;session.world.ledgers.players=old_accounts;session.roster.ai_ownership.lists=old_lists;session.population.business_counts.age=old_age;
-        for(p,(bytes,aux))in session.roster.manager.players.iter_mut().zip(old_players){p.bytes=bytes;p.auxiliaries=aux.into_iter().map(|(reference,bytes)|openmt2001::player_manager::Auxiliary{reference,bytes}).collect();}
-        session.population.refresh_city(&session.world.city,board).unwrap();
-        println!("Retained business takeover:25-tick delay, live price/payment, owner transfer and scheduled seller2e ownership-list removal verified");
-    }
-    fn exercise_property_transfer(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>) {
-        use openmt2001::live_commands;
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let buyer=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        for p in &mut session.roster.manager.players {if word(&p.bytes,0x154)==1 {p.bytes[0x1403]=1;}}
-        let chains=openmt2001::building_pool::category_chains(&session.world.categories,&session.world.buildings,0x591318).unwrap();
-        let category=(0..52).find(|&c|session.world.categories[c][5]==0 && !chains[c].is_empty()).unwrap();
-        let businesses:Vec<_>=chains[category].iter().filter(|&&b|word(&session.world.buildings[b],0x24)==2).map(|&b|word(&session.world.buildings[b],0x1c) as usize).collect();
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();
-        let account=session.world.ledgers.players[buyer].clone();
-        let lease=session.world.settings.lease_length() as u32;
-        let mut notices=0;let mut views=0;
-        for (owner,amount) in [(buyer as u8+1,250),(0,150)] {
-            let old_owner=session.world.categories[category][5];
-            let due=session.world.clock.timing[0]+25;
-            session.submit_command(live_commands::Command::PropertyTransfer{category:category as i16,owner,amount},&assets,|_|Err("property transfer ran before25ticks".into())).unwrap();
-            while session.world.clock.timing[0]<due {
-                session.advance_session(&assets,&mut policy,|event:tick::Event<'_>,_:&openmt2001::clock::Clock| {
-                    match event {
-                        tick::Event::Ai(call)=>return Err(format!("controlled property transfer entered AI decision {call:?}")),
-                        tick::Event::Command(live_commands::Event::PropertyTransferNotice{category:c,owner:o,amount:a})=>{assert_eq!((c,o,a),(category as i16,owner,amount));notices+=1;},
-                        tick::Event::Command(live_commands::Event::PropertyView(c))=>{assert_eq!(c,category as i16);views+=1;},
-                        _=>(),
-                    }Ok(0)
-                }).unwrap();
-                if session.world.clock.timing[0]<due {assert_eq!(session.world.categories[category][5],old_owner);}
+        let old_business = session.world.ledgers.businesses[business];
+        let old_building = session.world.buildings[building];
+        let old_category = session.world.categories[category];
+        let old_accounts = session.world.ledgers.players.clone();
+        let old_lists = session.roster.ai_ownership.lists.clone();
+        let old_age = session.population.business_counts.age;
+        let old_players: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|p| {
+                (
+                    p.bytes.clone(),
+                    p.auxiliaries
+                        .iter()
+                        .map(|a| (a.reference, a.bytes))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
             }
-            assert_eq!(session.world.categories[category][5],owner);
-            assert_eq!(word(&session.world.categories[category],0x7c),lease);
-            assert_eq!(word(&session.world.categories[category],0x78),if owner==0 {2}else{0});
-            for &business in &businesses {assert_eq!(session.world.ledgers.businesses[business][10],owner);}
-            assert_eq!(session.world.ledgers.players[buyer].owned_categories[category],u8::from(owner!=0));
-            assert_eq!(word(&session.roster.manager.players[buyer].bytes,4),session.world.ledgers.players[buyer].cash.to_bits());
-            if owner!=0{exercise_offer_refusal(session,category,buyer,&assets);}
         }
-        assert_eq!(session.world.ledgers.players[buyer].ledger(0).unwrap(),account.ledger(0).unwrap()-100.);
-        assert_eq!(session.world.ledgers.players[buyer].housing_counter,account.housing_counter);
-        assert_eq!((notices,views),(1,2));
-        println!("Retained property roundtrip:25-tick purchase/city-sale, category ownership, ledger0, lease duration, AI ownership refresh and UI event order verified");
+        {
+            let city = &mut session.world.city;
+            openmt2001::economy::transfer_business_owner(
+                &mut city.ledgers.businesses[business],
+                city.buildings[building][..64].try_into().unwrap(),
+                seller as u8 + 1,
+                true,
+                &mut city.ledgers.players,
+            )
+            .unwrap();
+            city.categories[category][5] = buyer as u8 + 1;
+            city.buildings[building][0x2d] = seller as u8 + 1;
+            city.buildings[building][0x3e] = 1;
+        }
+        {
+            let p = &mut session.roster.manager.players[seller];
+            put(&mut p.bytes, 0x214, 0);
+            put(&mut p.bytes, 0x218, 0);
+            session
+                .roster
+                .ai_ownership
+                .mutate(
+                    p,
+                    |size| {
+                        let v = session.allocation_next;
+                        session.allocation_next += size as u32;
+                        Ok(v)
+                    },
+                    |state| state.insert(0, business as i32, |_| Ok(123)),
+                )
+                .unwrap();
+        }
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        let due = session.world.clock.timing[0] + 25;
+        let debit = session.world.ledgers.players[buyer].ledger(3).unwrap();
+        let credit = session.world.ledgers.players[seller].ledger(0x16).unwrap();
+        session
+            .submit_command(
+                live_commands::Command::Takeover(business_takeover::Command {
+                    building: building as u32,
+                }),
+                &assets,
+                |_| Err("takeover applied before25ticks".into()),
+            )
+            .unwrap();
+        let mut accept = |event: tick::Event<'_>, _: &openmt2001::clock::Clock| {
+            if matches!(event, tick::Event::Ai(_)) {
+                return Err(format!(
+                    "takeover escaped authoritative callbacks: {event:?}"
+                ));
+            }
+            Ok(0)
+        };
+        while session.world.clock.timing[0] < due {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if session.world.clock.timing[0] < due {
+                assert_eq!(
+                    session.world.ledgers.businesses[business][10],
+                    seller as u8 + 1
+                );
+            }
+        }
+        assert_eq!(
+            session.world.ledgers.businesses[business][10],
+            buyer as u8 + 1
+        );
+        assert_eq!(session.world.buildings[building][0x2d], buyer as u8 + 1);
+        assert_eq!(session.world.buildings[building][0x3e], 0);
+        let paid = debit - session.world.ledgers.players[buyer].ledger(3).unwrap();
+        assert!(paid > 0.);
+        assert_eq!(
+            session.world.ledgers.players[seller].ledger(0x16).unwrap() - credit,
+            paid
+        );
+        let p = &mut session.roster.manager.players[seller];
+        assert_eq!(word(&p.bytes, 0x214), 1);
+        let head = word(&p.bytes, 0x218);
+        assert_eq!(
+            word(
+                &p.auxiliaries
+                    .iter()
+                    .find(|a| a.reference == head)
+                    .unwrap()
+                    .bytes,
+                4
+            ),
+            0x2e
+        );
+        for at in [0x1400, 0x1403, 0x1df8, 0x239, 0x23a, 0x1e11, 0x1e12, 0xcc0] {
+            p.bytes[at] = 0;
+        }
+        p.bytes[0x1401] = 1;
+        p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
+        put(&mut p.bytes, 8, 100);
+        put(&mut p.bytes, 0x220, 0);
+        put(&mut p.bytes, 0xb64, u32::MAX);
+        for _ in 0..5 {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if word(&session.roster.manager.players[seller].bytes, 0x214) == 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            word(&session.roster.manager.players[seller].bytes, 0x214),
+            0
+        );
+        assert!(
+            !session
+                .roster
+                .ai_ownership
+                .state(&session.roster.manager.players[seller])
+                .unwrap()
+                .lists[0]
+                .entries
+                .iter()
+                .any(|e| e[0] != 0 && word(e, 4) == business as u32)
+        );
+        session.world.ledgers.businesses[business] = old_business;
+        session.world.buildings[building] = old_building;
+        session.world.categories[category] = old_category;
+        session.world.ledgers.players = old_accounts;
+        session.roster.ai_ownership.lists = old_lists;
+        session.population.business_counts.age = old_age;
+        for (p, (bytes, aux)) in session.roster.manager.players.iter_mut().zip(old_players) {
+            p.bytes = bytes;
+            p.auxiliaries = aux
+                .into_iter()
+                .map(|(reference, bytes)| openmt2001::player_manager::Auxiliary {
+                    reference,
+                    bytes,
+                })
+                .collect();
+        }
+        session
+            .population
+            .refresh_city(&session.world.city, board)
+            .unwrap();
+        println!(
+            "Retained business takeover:25-tick delay, live price/payment, owner transfer and scheduled seller2e ownership-list removal verified"
+        );
     }
-    fn exercise_offer_refusal(session:&mut Session<'_>,category:usize,seller:usize,assets:&CommandAssets<'_,'_>){
-        use openmt2001::{ai_actions::proposals,ai_messages::offers::execution};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let buyer=session.roster.manager.players.iter().enumerate().position(|(i,p)|i!=seller&&word(&p.bytes,0x154)==1).unwrap();
-        for slot in [seller,buyer]{
-            let p=&mut session.roster.manager.players[slot];
-            for at in [0x1400,0x1403,0x1df8,0x239,0x23a,0x1e11,0x1e12,0xcc0]{p.bytes[at]=0;}
-            p.bytes[0x1401]=1;p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
-            for(at,v)in[(0xb64,u32::MAX),(0x220,0),(8,if slot==buyer{0}else{100}),(0xb6c,0)]{p.bytes[at..at+4].copy_from_slice(&v.to_le_bytes());}
+    fn exercise_property_transfer(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::live_commands;
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let buyer = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
+        }
+        let chains = openmt2001::building_pool::category_chains(
+            &session.world.categories,
+            &session.world.buildings,
+            0x591318,
+        )
+        .unwrap();
+        let category = (0..52)
+            .find(|&c| session.world.categories[c][5] == 0 && !chains[c].is_empty())
+            .unwrap();
+        let businesses: Vec<_> = chains[category]
+            .iter()
+            .filter(|&&b| word(&session.world.buildings[b], 0x24) == 2)
+            .map(|&b| word(&session.world.buildings[b], 0x1c) as usize)
+            .collect();
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        let account = session.world.ledgers.players[buyer].clone();
+        let lease = session.world.settings.lease_length() as u32;
+        let mut notices = 0;
+        let mut views = 0;
+        for (owner, amount) in [(buyer as u8 + 1, 250), (0, 150)] {
+            let old_owner = session.world.categories[category][5];
+            let due = session.world.clock.timing[0] + 25;
+            session
+                .submit_command(
+                    live_commands::Command::PropertyTransfer {
+                        category: category as i16,
+                        owner,
+                        amount,
+                    },
+                    &assets,
+                    |_| Err("property transfer ran before25ticks".into()),
+                )
+                .unwrap();
+            while session.world.clock.timing[0] < due {
+                session
+                    .advance_session(
+                        &assets,
+                        &mut policy,
+                        |event: tick::Event<'_>, _: &openmt2001::clock::Clock| {
+                            match event {
+                                tick::Event::Ai(call) => {
+                                    return Err(format!(
+                                        "controlled property transfer entered AI decision {call:?}"
+                                    ));
+                                }
+                                tick::Event::Command(
+                                    live_commands::Event::PropertyTransferNotice {
+                                        category: c,
+                                        owner: o,
+                                        amount: a,
+                                    },
+                                ) => {
+                                    assert_eq!((c, o, a), (category as i16, owner, amount));
+                                    notices += 1;
+                                }
+                                tick::Event::Command(live_commands::Event::PropertyView(c)) => {
+                                    assert_eq!(c, category as i16);
+                                    views += 1;
+                                }
+                                _ => (),
+                            }
+                            Ok(0)
+                        },
+                    )
+                    .unwrap();
+                if session.world.clock.timing[0] < due {
+                    assert_eq!(session.world.categories[category][5], old_owner);
+                }
+            }
+            assert_eq!(session.world.categories[category][5], owner);
+            assert_eq!(word(&session.world.categories[category], 0x7c), lease);
+            assert_eq!(
+                word(&session.world.categories[category], 0x78),
+                if owner == 0 { 2 } else { 0 }
+            );
+            for &business in &businesses {
+                assert_eq!(session.world.ledgers.businesses[business][10], owner);
+            }
+            assert_eq!(
+                session.world.ledgers.players[buyer].owned_categories[category],
+                u8::from(owner != 0)
+            );
+            assert_eq!(
+                word(&session.roster.manager.players[buyer].bytes, 4),
+                session.world.ledgers.players[buyer].cash.to_bits()
+            );
+            if owner != 0 {
+                exercise_offer_refusal(session, category, buyer, &assets);
+            }
+        }
+        assert_eq!(
+            session.world.ledgers.players[buyer].ledger(0).unwrap(),
+            account.ledger(0).unwrap() - 100.
+        );
+        assert_eq!(
+            session.world.ledgers.players[buyer].housing_counter,
+            account.housing_counter
+        );
+        assert_eq!((notices, views), (1, 2));
+        println!(
+            "Retained property roundtrip:25-tick purchase/city-sale, category ownership, ledger0, lease duration, AI ownership refresh and UI event order verified"
+        );
+    }
+    fn exercise_offer_refusal(
+        session: &mut Session<'_>,
+        category: usize,
+        seller: usize,
+        assets: &CommandAssets<'_, '_>,
+    ) {
+        use openmt2001::{ai_actions::proposals, ai_messages::offers::execution};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let buyer = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .enumerate()
+            .position(|(i, p)| i != seller && word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        for slot in [seller, buyer] {
+            let p = &mut session.roster.manager.players[slot];
+            for at in [0x1400, 0x1403, 0x1df8, 0x239, 0x23a, 0x1e11, 0x1e12, 0xcc0] {
+                p.bytes[at] = 0;
+            }
+            p.bytes[0x1401] = 1;
+            p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
+            for (at, v) in [
+                (0xb64, u32::MAX),
+                (0x220, 0),
+                (8, if slot == buyer { 0 } else { 100 }),
+                (0xb6c, 0),
+            ] {
+                p.bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            }
         }
         // The seller has no willingness-to-sell history for this newly bought
         // category. Original47c5f0 must refuse; no external callback decides it.
-        session.roster.manager.players[seller].bytes[0x1150+category*12]=0;
-        let reserved=word(&session.roster.manager.players[buyer].bytes,0x1430);
-        let value=execution::category_value(&session.world.categories[category],assets.image).unwrap();
-        assert!(proposals::transaction(0x4784c0,&mut session.roster.manager.players[buyer],[category as u32,0],[0;104],&mut session.roster.proposal_identity,
-            |call,_,_|match call{proposals::Call::CategoryValue(c)if c==category as u32=>Ok(value),other=>Err(format!("unexpected proposal{other:?}"))}).unwrap());
-        let mut policy=simulation_test_policy();let mut ticks=0;
-        while session.roster.manager.players[buyer].bytes[0x1404]!=0{
+        session.roster.manager.players[seller].bytes[0x1150 + category * 12] = 0;
+        let reserved = word(&session.roster.manager.players[buyer].bytes, 0x1430);
+        let value =
+            execution::category_value(&session.world.categories[category], assets.image).unwrap();
+        assert!(
+            proposals::transaction(
+                0x4784c0,
+                &mut session.roster.manager.players[buyer],
+                [category as u32, 0],
+                [0; 104],
+                &mut session.roster.proposal_identity,
+                |call, _, _| match call {
+                    proposals::Call::CategoryValue(c) if c == category as u32 => Ok(value),
+                    other => Err(format!("unexpected proposal{other:?}")),
+                }
+            )
+            .unwrap()
+        );
+        let mut policy = simulation_test_policy();
+        let mut ticks = 0;
+        while session.roster.manager.players[buyer].bytes[0x1404] != 0 {
             session.advance_session(assets,&mut policy,|event:tick::Event<'_>,_:&openmt2001::clock::Clock|{
                 if matches!(event,tick::Event::Ai(openmt2001::ai_runtime::Call::MessageRoute{route:openmt2001::player_messages::Route::PropertyRefresh{category:c},..}) if c==category as u32){return Ok(0);}
                 if matches!(event,tick::Event::Ai(_)){return Err(format!("offer refusal escaped{event:?}"));}Ok(0)
-            }).unwrap();ticks+=1;assert!(ticks<=25,"live offer refusal did not finish");
+            }).unwrap();
+            ticks += 1;
+            assert!(ticks <= 25, "live offer refusal did not finish");
         }
-        let p=&session.roster.manager.players[buyer];
-        assert_eq!(word(&p.bytes,0x1430),reserved,"refusal releases the original reservation");
-        assert_eq!(p.bytes[0x1406],0,"refusal removes the pending category");
-        let history=0x1438+(category+52*seller)*8;
-        assert_eq!(word(&p.bytes,history),value.to_f32().to_bits());
-        assert!(word(&p.bytes,history+4)>=20,"refusal records actual profile/RNG history age");
-        assert_eq!(session.world.categories[category][5],seller as u8+1);
-        for slot in [seller,buyer]{session.roster.manager.players[slot].bytes[0x1403]=1;}
-        println!("Retained negotiation: native purchase proposal,23 request,47c5f0 refusal,26 peer reply, reservation/pending release and price history verified");
+        let p = &session.roster.manager.players[buyer];
+        assert_eq!(
+            word(&p.bytes, 0x1430),
+            reserved,
+            "refusal releases the original reservation"
+        );
+        assert_eq!(p.bytes[0x1406], 0, "refusal removes the pending category");
+        let history = 0x1438 + (category + 52 * seller) * 8;
+        assert_eq!(word(&p.bytes, history), value.to_f32().to_bits());
+        assert!(
+            word(&p.bytes, history + 4) >= 20,
+            "refusal records actual profile/RNG history age"
+        );
+        assert_eq!(session.world.categories[category][5], seller as u8 + 1);
+        for slot in [seller, buyer] {
+            session.roster.manager.players[slot].bytes[0x1403] = 1;
+        }
+        println!(
+            "Retained negotiation: native purchase proposal,23 request,47c5f0 refusal,26 peer reply, reservation/pending release and price history verified"
+        );
     }
-    fn exercise_live_auction(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{live_commands,ai_messages::offers::auction};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
+    fn exercise_live_auction(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{ai_messages::offers::auction, live_commands};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         // Isolate auction transactions from strategic choices; inbox production
         // remains live and is asserted below. Presentation calls are named seams.
-        for p in &mut session.roster.manager.players{if word(&p.bytes,0x154)==1{p.bytes[0x1403]=1;}}
-        let category=(0..52).find(|&i|session.world.categories[i][5]==0).unwrap();
-        let bidder=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        let initiator=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();
-        let mut descriptor=[0;52];for(off,v)in[(4,0x1d),(20,category as u32),(24,initiator as u32),(28,100)]{descriptor[off..off+4].copy_from_slice(&v.to_le_bytes());}descriptor[16]=1;
-        let admitted_at=session.world.clock.timing[0]+25;
-        session.submit_command(live_commands::Command::Auction{descriptor},&assets,|_|Err("auction admission ran early".into())).unwrap();
-        let mut scene_prepares=0;
-        let mut boundary=|event:tick::Event<'_>,_:&openmt2001::clock::Clock|->Result<u32,String>{
-            match event {
-                tick::Event::Ai(openmt2001::ai_runtime::Call::AuctionAction(_))=>(),
-                tick::Event::Ai(call)=>return Err(format!("controlled auction entered strategy{call:?}")),
-                tick::Event::Command(live_commands::Event::AuctionScenePrepare)=>{scene_prepares+=1;return Ok(1);},
-                tick::Event::Command(live_commands::Event::AuctionActivation(auction::activation::Call::Camera))=>return Ok(1),
-                // Named native visual/audio boundaries are intentionally not
-                // evidence of a rendered auction room in this simulation test.
-                tick::Event::Command(live_commands::Event::AuctionAdmission(_)|live_commands::Event::AuctionActivation(_)|live_commands::Event::AuctionAction(_)|live_commands::Event::AuctionClosure(_))=>(),
-                _=>(),
-            }Ok(0)
-        };
-        let mut announcement_host=crate::live_host::Host::new([0.;3]);
-        announcement_host.set_running(true);
-        while session.world.clock.timing[0]<admitted_at{
-            announcement_host.tick(session,&assets);
-            assert!(announcement_host.failure.is_none(),"real host admission failed: {:?}",announcement_host.failure);
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
         }
-        assert_eq!(session.world.auction.controller.active_count,1);assert_eq!(session.world.auction.controller.record[0x7d],1);assert_eq!(session.world.auction.presentation.countdown,6000);assert!(session.world.auction.presentation.visible);assert_eq!(session.world.categories[category][0x6c],1);
-        let status=announcement_host.status(session);let notice=status.auction_notice.unwrap();
-        assert_eq!((notice.category,notice.amount,notice.seconds),(category as u32,100,None));
-        assert_eq!(notice.character,word(&session.roster.manager.players[initiator].bytes,0x150));
-        assert_eq!(notice.actor.as_slice(),&session.roster.manager.players[initiator].bytes[0x158..0x1b8]);
+        let category = (0..52)
+            .find(|&i| session.world.categories[i][5] == 0)
+            .unwrap();
+        let bidder = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        let initiator = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        let mut descriptor = [0; 52];
+        for (off, v) in [
+            (4, 0x1d),
+            (20, category as u32),
+            (24, initiator as u32),
+            (28, 100),
+        ] {
+            descriptor[off..off + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        descriptor[16] = 1;
+        let admitted_at = session.world.clock.timing[0] + 25;
+        session
+            .submit_command(
+                live_commands::Command::Auction { descriptor },
+                &assets,
+                |_| Err("auction admission ran early".into()),
+            )
+            .unwrap();
+        let mut scene_prepares = 0;
+        let mut boundary =
+            |event: tick::Event<'_>, _: &openmt2001::clock::Clock| -> Result<u32, String> {
+                match event {
+                    tick::Event::Ai(openmt2001::ai_runtime::Call::AuctionAction(_)) => (),
+                    tick::Event::Ai(call) => {
+                        return Err(format!("controlled auction entered strategy{call:?}"));
+                    }
+                    tick::Event::Command(live_commands::Event::AuctionScenePrepare) => {
+                        scene_prepares += 1;
+                        return Ok(1);
+                    }
+                    tick::Event::Command(live_commands::Event::AuctionActivation(
+                        auction::activation::Call::Camera,
+                    )) => return Ok(1),
+                    // Named native visual/audio boundaries are intentionally not
+                    // evidence of a rendered auction room in this simulation test.
+                    tick::Event::Command(
+                        live_commands::Event::AuctionAdmission(_)
+                        | live_commands::Event::AuctionActivation(_)
+                        | live_commands::Event::AuctionAction(_)
+                        | live_commands::Event::AuctionClosure(_),
+                    ) => (),
+                    _ => (),
+                }
+                Ok(0)
+            };
+        let mut announcement_host = crate::live_host::Host::new([0.; 3]);
+        announcement_host.set_running(true);
+        while session.world.clock.timing[0] < admitted_at {
+            announcement_host.tick(session, &assets);
+            assert!(
+                announcement_host.failure.is_none(),
+                "real host admission failed: {:?}",
+                announcement_host.failure
+            );
+        }
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        assert_eq!(session.world.auction.controller.record[0x7d], 1);
+        assert_eq!(session.world.auction.presentation.countdown, 6000);
+        assert!(session.world.auction.presentation.visible);
+        assert_eq!(session.world.categories[category][0x6c], 1);
+        let status = announcement_host.status(session);
+        let notice = status.auction_notice.unwrap();
+        assert_eq!(
+            (notice.category, notice.amount, notice.seconds),
+            (category as u32, 100, None)
+        );
+        assert_eq!(
+            notice.character,
+            word(&session.roster.manager.players[initiator].bytes, 0x150)
+        );
+        assert_eq!(
+            notice.actor.as_slice(),
+            &session.roster.manager.players[initiator].bytes[0x158..0x1b8]
+        );
         assert!(status.auction_locked_categories.contains(&category));
         // Exercise the real scheduled controller while the announcement is
         // active. Original1040=-1 postpones continuation actions, so this tests
         // valuation without pretending the remaining strategy is complete.
-        let prior_category=word(&session.roster.manager.players[bidder].bytes,0xb68);
+        let prior_category = word(&session.roster.manager.players[bidder].bytes, 0xb68);
         {
-            let p=&mut session.roster.manager.players[bidder];
-            for at in [0x1400,0x1403,0x1df8,0x239,0x23a,0x1e11,0x1e12,0xcc0,0x13c5,0xb86]{p.bytes[at]=0;}
-            p.bytes[0x1401]=1;p.bytes[0xb4c..0xb4e].fill(0);
-            for (at,v) in [(0xb64,u32::MAX),(0x1040,u32::MAX),(0x240,7),(0x220,0),(8,100),(0x1c4,0xfeed)]{p.bytes[at..at+4].copy_from_slice(&v.to_le_bytes());}
+            let p = &mut session.roster.manager.players[bidder];
+            for at in [
+                0x1400, 0x1403, 0x1df8, 0x239, 0x23a, 0x1e11, 0x1e12, 0xcc0, 0x13c5, 0xb86,
+            ] {
+                p.bytes[at] = 0;
+            }
+            p.bytes[0x1401] = 1;
+            p.bytes[0xb4c..0xb4e].fill(0);
+            for (at, v) in [
+                (0xb64, u32::MAX),
+                (0x1040, u32::MAX),
+                (0x240, 7),
+                (0x220, 0),
+                (8, 100),
+                (0x1c4, 0xfeed),
+            ] {
+                p.bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            }
             p.bytes[0x1c8..0x20c].fill(0xff);
         }
-        let mut valuation_ticks=0;
-        while session.roster.manager.players[bidder].bytes[0x13c5]==0{
-            session.advance_session(&assets,&mut policy,&mut boundary).unwrap();
-            valuation_ticks+=1;assert!(valuation_ticks<=5,"scheduled auction valuation did not run");
+        let mut valuation_ticks = 0;
+        while session.roster.manager.players[bidder].bytes[0x13c5] == 0 {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            valuation_ticks += 1;
+            assert!(
+                valuation_ticks <= 5,
+                "scheduled auction valuation did not run"
+            );
         }
-        let p=&mut session.roster.manager.players[bidder];
-        assert_eq!(word(&p.bytes,0xb68),prior_category,"auction predecision restores the prior target");
-        assert_eq!(word(&p.bytes,0x1c4),0,"valuation ran the actual poll lifecycle");
-        assert!(p.bytes[0x1c8..0x20c].iter().all(|&v|v==0));
-        assert_eq!(p.bytes[0x13c4],1);assert_eq!(p.bytes[0x13c5],1);
-        p.bytes[0x1403]=1;
-        let valued_at=session.world.clock.timing[0];
+        let p = &mut session.roster.manager.players[bidder];
+        assert_eq!(
+            word(&p.bytes, 0xb68),
+            prior_category,
+            "auction predecision restores the prior target"
+        );
+        assert_eq!(
+            word(&p.bytes, 0x1c4),
+            0,
+            "valuation ran the actual poll lifecycle"
+        );
+        assert!(p.bytes[0x1c8..0x20c].iter().all(|&v| v == 0));
+        assert_eq!(p.bytes[0x13c4], 1);
+        assert_eq!(p.bytes[0x13c5], 1);
+        p.bytes[0x1403] = 1;
+        let valued_at = session.world.clock.timing[0];
         announcement_host.set_running(false);
-        let mut displayed=Vec::new();for _ in 0..6000{
-            announcement_host.frame(session,&assets,20);
-            let status=announcement_host.status(session);
-            assert!(status.failure.is_none(),"real host countdown failed: {:?}",status.failure);
-            if let Some(seconds)=status.auction_seconds && displayed.last()!=Some(&seconds){displayed.push(seconds);}
+        let mut displayed = Vec::new();
+        for _ in 0..6000 {
+            announcement_host.frame(session, &assets, 20);
+            let status = announcement_host.status(session);
+            assert!(
+                status.failure.is_none(),
+                "real host countdown failed: {:?}",
+                status.failure
+            );
+            if let Some(seconds) = status.auction_seconds
+                && displayed.last() != Some(&seconds)
+            {
+                displayed.push(seconds);
+            }
         }
-        assert_eq!(session.world.clock.timing[0],valued_at,"host pause keeps25Hz accumulator frozen while50Hz countdown advances");
-        assert_eq!(displayed.len(),120);assert_eq!(displayed.first(),Some(&119));assert_eq!(displayed.last(),Some(&0));
+        assert_eq!(
+            session.world.clock.timing[0], valued_at,
+            "host pause keeps25Hz accumulator frozen while50Hz countdown advances"
+        );
+        assert_eq!(displayed.len(), 120);
+        assert_eq!(displayed.first(), Some(&119));
+        assert_eq!(displayed.last(), Some(&0));
         // Advance to the scheduled boundary explicitly; this verifies the queue
         // delay without claiming6000 UI calls established host elapsed time.
-        let start=admitted_at+3025;session.world.clock.timing[0]=start-2;
-        session.advance_session(&assets,&mut policy,&mut boundary).unwrap();assert_eq!(session.world.clock.timing[5],1);assert_eq!(session.world.auction.controller.record[0x7d],1);
-        session.advance_session(&assets,&mut policy,&mut boundary).unwrap();assert_eq!(session.world.clock.timing[5],2);assert!(!session.world.auction.presentation.visible);assert_eq!(word(&session.world.auction.controller.record,0x74),1);
-        let normal=session.world.clock.timing[1];session.advance_session(&assets,&mut policy,&mut boundary).unwrap();assert_eq!(word(&session.world.auction.controller.record,0x74),2);
+        let start = admitted_at + 3025;
+        session.world.clock.timing[0] = start - 2;
+        session
+            .advance_session(&assets, &mut policy, &mut boundary)
+            .unwrap();
+        assert_eq!(session.world.clock.timing[5], 1);
+        assert_eq!(session.world.auction.controller.record[0x7d], 1);
+        session
+            .advance_session(&assets, &mut policy, &mut boundary)
+            .unwrap();
+        assert_eq!(session.world.clock.timing[5], 2);
+        assert!(!session.world.auction.presentation.visible);
+        assert_eq!(word(&session.world.auction.controller.record, 0x74), 1);
+        let normal = session.world.clock.timing[1];
+        session
+            .advance_session(&assets, &mut policy, &mut boundary)
+            .unwrap();
+        assert_eq!(word(&session.world.auction.controller.record, 0x74), 2);
         // Consume the real27 inbox and let the retained urgent offer budget,
         // wait and submit its own bid. Other participants withdraw through the
         // same immediate command path to isolate this bidder's transaction.
         {
-            let p=&mut session.roster.manager.players[bidder];p.bytes[0x1403]=0;
+            let p = &mut session.roster.manager.players[bidder];
+            p.bytes[0x1403] = 0;
             p.bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
             p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
         }
-        let mut inbox_ticks=0;
-        while session.roster.manager.players[bidder].bytes[0x1405]==0{
-            session.advance_session(&assets,&mut policy,&mut boundary).unwrap();
-            inbox_ticks+=1;assert!(inbox_ticks<=10,"auction start inbox not consumed");
+        let mut inbox_ticks = 0;
+        while session.roster.manager.players[bidder].bytes[0x1405] == 0 {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            inbox_ticks += 1;
+            assert!(inbox_ticks <= 10, "auction start inbox not consumed");
         }
-        assert!(session.roster.manager.players[bidder].bytes[0x1405]>0,"auction activation inserts a retained urgent offer");
-        for _ in 0..6{let participant=word(&session.world.auction.controller.record,0x58);if participant==bidder as u32{break;}session.apply_auction_action(auction::Command{action:2,participant,amount:0},&assets,|_|Ok(0)).unwrap();}
-        let winner=bidder as u32;assert_eq!(word(&session.world.auction.controller.record,0x58),winner);
-        let ledger=session.world.ledgers.players[bidder].ledger(0).unwrap();
-        let mut bid_ticks=0;let opening_price=word(&session.world.auction.controller.record,0x6c);
-        while word(&session.world.auction.controller.record,0x6c)==opening_price{
-            session.advance_session(&assets,&mut policy,&mut boundary).unwrap();
-            bid_ticks+=1;assert!(bid_ticks<=160,"retained AI offer did not submit its bid: player={:?}, auction={:?}",[8,0xcb8,0xcc4,0xcc8,0x1dfc,0x1e00,0x1e38,0x658+8,0x658+16].map(|i|(i,word(&session.roster.manager.players[bidder].bytes,i))),[0x58,0x60,0x68,0x6c,0x74].map(|i|(i,word(&session.world.auction.controller.record,i))));
+        assert!(
+            session.roster.manager.players[bidder].bytes[0x1405] > 0,
+            "auction activation inserts a retained urgent offer"
+        );
+        for _ in 0..6 {
+            let participant = word(&session.world.auction.controller.record, 0x58);
+            if participant == bidder as u32 {
+                break;
+            }
+            session
+                .apply_auction_action(
+                    auction::Command {
+                        action: 2,
+                        participant,
+                        amount: 0,
+                    },
+                    &assets,
+                    |_| Ok(0),
+                )
+                .unwrap();
         }
-        let winning_price=word(&session.world.auction.controller.record,0x6c) as i32;
-        assert!(winning_price>100);session.roster.manager.players[bidder].bytes[0x1403]=1;
-        for _ in 0..6{if word(&session.world.auction.controller.record,0x60)!=u32::MAX{break;}let participant=word(&session.world.auction.controller.record,0x58);assert_ne!(participant,winner);session.apply_auction_action(auction::Command{action:2,participant,amount:0},&assets,|_|Ok(0)).unwrap();}
-        assert_eq!(word(&session.world.auction.controller.record,0x60),winner);
-        let mut steps=0;while session.world.auction.controller.active_count!=0{session.advance_session(&assets,&mut policy,&mut boundary).unwrap();steps+=1;assert!(steps<200);if session.world.clock.timing[5]==2{assert_eq!(session.world.clock.timing[1],normal);}}
-        assert_eq!(session.world.clock.timing[5],1);assert_eq!(session.world.auction.controller.record[0x7c],0);assert_eq!(session.world.categories[category][0x6c],0);assert_eq!(word(&session.world.auction.controller.record,0x60),winner);assert_ne!(session.world.auction.controller.reference,0);assert_eq!(session.world.categories[category][5],0);
-        let transfer=session.world.clock.timing[0]+25;while session.world.clock.timing[0]<transfer{session.advance_session(&assets,&mut policy,&mut boundary).unwrap();if session.world.clock.timing[0]<transfer{assert_eq!(session.world.categories[category][5],0);}}
-        assert_eq!(session.world.categories[category][5],winner as u8+1);assert_eq!(session.world.ledgers.players[winner as usize].ledger(0).unwrap(),ledger-winning_price as f32);
-        let queued:Vec<u32>=session.roster.manager.players.iter().flat_map(|p|p.auxiliaries.iter().map(|a|word(&a.bytes,4))).collect();for kind in [0x27,0x28,0x29,0x2a]{assert!(queued.contains(&kind),"missing retained auction message{kind:x}");}
+        let winner = bidder as u32;
+        assert_eq!(word(&session.world.auction.controller.record, 0x58), winner);
+        let ledger = session.world.ledgers.players[bidder].ledger(0).unwrap();
+        let mut bid_ticks = 0;
+        let opening_price = word(&session.world.auction.controller.record, 0x6c);
+        while word(&session.world.auction.controller.record, 0x6c) == opening_price {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            bid_ticks += 1;
+            assert!(
+                bid_ticks <= 160,
+                "retained AI offer did not submit its bid: player={:?}, auction={:?}",
+                [
+                    8,
+                    0xcb8,
+                    0xcc4,
+                    0xcc8,
+                    0x1dfc,
+                    0x1e00,
+                    0x1e38,
+                    0x658 + 8,
+                    0x658 + 16
+                ]
+                .map(|i| (i, word(&session.roster.manager.players[bidder].bytes, i))),
+                [0x58, 0x60, 0x68, 0x6c, 0x74]
+                    .map(|i| (i, word(&session.world.auction.controller.record, i)))
+            );
+        }
+        let winning_price = word(&session.world.auction.controller.record, 0x6c) as i32;
+        assert!(winning_price > 100);
+        session.roster.manager.players[bidder].bytes[0x1403] = 1;
+        for _ in 0..6 {
+            if word(&session.world.auction.controller.record, 0x60) != u32::MAX {
+                break;
+            }
+            let participant = word(&session.world.auction.controller.record, 0x58);
+            assert_ne!(participant, winner);
+            session
+                .apply_auction_action(
+                    auction::Command {
+                        action: 2,
+                        participant,
+                        amount: 0,
+                    },
+                    &assets,
+                    |_| Ok(0),
+                )
+                .unwrap();
+        }
+        assert_eq!(word(&session.world.auction.controller.record, 0x60), winner);
+        let mut steps = 0;
+        while session.world.auction.controller.active_count != 0 {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            steps += 1;
+            assert!(steps < 200);
+            if session.world.clock.timing[5] == 2 {
+                assert_eq!(session.world.clock.timing[1], normal);
+            }
+        }
+        assert_eq!(session.world.clock.timing[5], 1);
+        assert_eq!(session.world.auction.controller.record[0x7c], 0);
+        assert_eq!(session.world.categories[category][0x6c], 0);
+        assert_eq!(word(&session.world.auction.controller.record, 0x60), winner);
+        assert_ne!(session.world.auction.controller.reference, 0);
+        assert_eq!(session.world.categories[category][5], 0);
+        let transfer = session.world.clock.timing[0] + 25;
+        while session.world.clock.timing[0] < transfer {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            if session.world.clock.timing[0] < transfer {
+                assert_eq!(session.world.categories[category][5], 0);
+            }
+        }
+        assert_eq!(session.world.categories[category][5], winner as u8 + 1);
+        assert_eq!(
+            session.world.ledgers.players[winner as usize]
+                .ledger(0)
+                .unwrap(),
+            ledger - winning_price as f32
+        );
+        let queued: Vec<u32> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .flat_map(|p| p.auxiliaries.iter().map(|a| word(&a.bytes, 4)))
+            .collect();
+        for kind in [0x27, 0x28, 0x29, 0x2a] {
+            assert!(
+                queued.contains(&kind),
+                "missing retained auction message{kind:x}"
+            );
+        }
         // Consume winner29 and completion28 through the same scheduled AI;
         // this releases the urgent offer and schedules the real category19.
-        session.roster.manager.players[bidder].bytes[0x1403]=0;
-        let mut completion_ticks=0;
-        while session.roster.manager.players[bidder].bytes[0x1df8]!=0{
-            session.advance_session(&assets,&mut policy,&mut boundary).unwrap();completion_ticks+=1;
-            assert!(completion_ticks<=20,"auction result inbox did not complete");
+        session.roster.manager.players[bidder].bytes[0x1403] = 0;
+        let mut completion_ticks = 0;
+        while session.roster.manager.players[bidder].bytes[0x1df8] != 0 {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+            completion_ticks += 1;
+            assert!(
+                completion_ticks <= 20,
+                "auction result inbox did not complete"
+            );
         }
-        let p=&mut session.roster.manager.players[bidder];p.bytes[0x1403]=1;
-        assert_eq!(p.bytes[0x1405],0,"completion cancels finished urgent offers");
-        assert_eq!(p.bytes[0x1150+category*12],1,"winner history comes from result29");
-        let wait_at=session.world.clock.timing[0]+25;
-        while session.world.clock.timing[0]<wait_at{session.advance_session(&assets,&mut policy,&mut boundary).unwrap();}
-        assert_eq!(word(&session.world.categories[category],0x78),1);
-        assert_eq!(word(&session.world.categories[category],0x80),24);
+        let p = &mut session.roster.manager.players[bidder];
+        p.bytes[0x1403] = 1;
+        assert_eq!(
+            p.bytes[0x1405], 0,
+            "completion cancels finished urgent offers"
+        );
+        assert_eq!(
+            p.bytes[0x1150 + category * 12],
+            1,
+            "winner history comes from result29"
+        );
+        let wait_at = session.world.clock.timing[0] + 25;
+        while session.world.clock.timing[0] < wait_at {
+            session
+                .advance_session(&assets, &mut policy, &mut boundary)
+                .unwrap();
+        }
+        assert_eq!(word(&session.world.categories[category], 0x78), 1);
+        assert_eq!(word(&session.world.categories[category], 0x80), 24);
         // A controlled normal-clock jump verifies retained expiry routing;
         // the native lifecycle oracle separately checks the exact15000 boundary.
-        session.world.clock.timing[1]=session.world.clock.timing[1].wrapping_add(15000);
-        session.advance_session(&assets,&mut policy,&mut boundary).unwrap();
-        assert_eq!(word(&session.world.categories[category],0x78),2);
-        assert_eq!(scene_prepares,1);
-        println!("Retained auction: valuation, actual27 inbox/AI bid,3025-tick start,120 announcement seconds,151+25-tick settlement,25-tick ownership transfer, winner29/completion28 and normal-clock category expiry verified; camera/audio remain named seams");
+        session.world.clock.timing[1] = session.world.clock.timing[1].wrapping_add(15000);
+        session
+            .advance_session(&assets, &mut policy, &mut boundary)
+            .unwrap();
+        assert_eq!(word(&session.world.categories[category], 0x78), 2);
+        assert_eq!(scene_prepares, 1);
+        println!(
+            "Retained auction: valuation, actual27 inbox/AI bid,3025-tick start,120 announcement seconds,151+25-tick settlement,25-tick ownership transfer, winner29/completion28 and normal-clock category expiry verified; camera/audio remain named seams"
+        );
     }
-    fn exercise_business_conversion(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{business_conversion,live_commands};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let buyer=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        for p in &mut session.roster.manager.players{if word(&p.bytes,0x154)==1{p.bytes[0x1403]=1;}}
+    fn exercise_business_conversion(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{business_conversion, live_commands};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let buyer = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
+        }
         //4073a0 scans types42/43 for structure1, excluding the current type;
         //463bb0 checks the actual scripted catalog and retained geometry.
         //407970 separately disables this apartment's interactive conversion;
         //this fixture tests the queued consumer, not the UI admission gate.
-        let (old,building,kind)=session.world.ledgers.businesses.iter().enumerate().find_map(|(i,b)|{
-            if b[0x21c]==0||word(b,0)!=1{return None;}
-            let building=i16::from_le_bytes(b[8..10].try_into().unwrap()) as usize;
-            let row=&session.world.buildings[building];let kind=43u32;
-            (word(row,0x24)==1&&word(b,4)!=kind&&business_conversion::fits(row,session.world.catalog.info.row(kind as usize).unwrap()).unwrap()).then_some((i,building,kind))
-        }).expect("fresh city has an apartment that satisfies original office-conversion geometry");
-        let p=&mut session.roster.manager.players[buyer];put(&mut p.bytes,0x214,0);put(&mut p.bytes,0x218,0);
-        let quote=business_conversion::quote(building as u32,kind,&session.world.categories,&session.world.buildings,&session.world.catalog.info,image).unwrap().to_f32();
-        let prior=session.world.ledgers.players[buyer].ledger(0x14).unwrap();let age=session.population.business_counts.age;let due=session.world.clock.timing[0]+25;
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();
-        session.submit_command(live_commands::Command::Convert(business_conversion::Command{kind,building:building as u32,owner:buyer as u32+1}),&assets,|_|Err("conversion applied before25ticks".into())).unwrap();
-        let mut accept=|event:tick::Event<'_>,_:&openmt2001::clock::Clock|{match event{
-            tick::Event::Ai(_)=>return Err(format!("conversion escaped authoritative callbacks: {event:?}")),
-            tick::Event::Command(live_commands::Event::RefreshInterface|live_commands::Event::ConstructionNotice{..}
-                |live_commands::Event::Business(openmt2001::business_binding::Call::RefreshBuilding{..})
-                |live_commands::Event::Detach(openmt2001::business_detach::Call::RefreshBuilding{..}))=>(),
-            tick::Event::Command(other)=>return Err(format!("conversion unresolved command callback: {other:?}")),
-            _=>(),
-        }Ok(0)};
-        while session.world.clock.timing[0]<due{session.advance_session(&assets,&mut policy,&mut accept).unwrap();if session.world.clock.timing[0]<due{assert_eq!(word(&session.world.buildings[building],0x1c),old as u32);assert_eq!(session.world.ledgers.players[buyer].ledger(0x14).unwrap(),prior);}}
-        let new=word(&session.world.buildings[building],0x1c) as usize;assert_ne!(new,old);assert_eq!(session.world.ledgers.businesses[old][0x21c],0);assert_ne!(session.world.ledgers.businesses[new][0x21c],0);assert_eq!(word(&session.world.ledgers.businesses[new],4),kind);assert_eq!(session.world.ledgers.businesses[new][10],buyer as u8+1);assert_eq!(session.world.buildings[building][0x3d],0);
-        assert_eq!(session.world.ledgers.players[buyer].ledger(0x14).unwrap(),prior-quote);assert_eq!(session.population.business_counts.age,age.wrapping_add(100));
-        let p=&mut session.roster.manager.players[buyer];assert_eq!(word(&p.bytes,0x214),1);let head=word(&p.bytes,0x218);assert_eq!(word(&p.auxiliaries.iter().find(|a|a.reference==head).unwrap().bytes,4),0x2f);
-        for at in [0x1400,0x1403,0x1df8,0x239,0x23a,0x1e11,0x1e12,0xcc0]{p.bytes[at]=0;}p.bytes[0x1401]=1;p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());put(&mut p.bytes,8,100);put(&mut p.bytes,0x220,0);put(&mut p.bytes,0xb64,u32::MAX);
-        for _ in 0..5{session.advance_session(&assets,&mut policy,&mut accept).unwrap();if word(&session.roster.manager.players[buyer].bytes,0x214)==0{break;}}
-        assert_eq!(word(&session.roster.manager.players[buyer].bytes,0x214),0);assert!(session.roster.ai_ownership.state(&session.roster.manager.players[buyer]).unwrap().lists[0].entries.iter().any(|e|e[0]!=0&&word(e,4)==new as u32));session.roster.manager.players[buyer].bytes[0x1403]=1;
-        println!("Retained conversion consumer: fit-valid apartment-to-office change,25-tick delay, ledger14 charge, actual allocation/detach/rebind and scheduled buyer2f ownership insertion verified; UI admission is separate");
-    }
-    fn exercise_human_replies(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{human_messages,live_commands,player_messages};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let local=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let buyer=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        for p in &mut session.roster.manager.players{if word(&p.bytes,0x154)==1{p.bytes[0x1403]=1;}}
-        for at in [0x214,0x218,0x220]{put(&mut session.roster.manager.players[local].bytes,at,0);}
-        let category=(0..52).find(|&i|session.world.categories[i][5]==0).unwrap();
-        // Controlled category-owner fixtures isolate response revalidation;
-        // actual property transfers and settlements are exercised separately.
-        session.world.categories[category][5]=local as u8+1;
-        let assets=CommandAssets{image,board,file};let mut policy=simulation_test_policy();
-        fn boundary(event:tick::Event<'_>,_:&openmt2001::clock::Clock)->Result<u32,String>{
-            match event{
-                tick::Event::Ai(_)=>Err(format!("human reply escaped AI callback:{event:?}")),
-                tick::Event::HumanDialog{call:human_messages::Call::Diagnostic,..}=>Err("human reply reached native diagnostic".into()),
-                tick::Event::Command(live_commands::Event::AuctionAdmission(openmt2001::ai_messages::offers::auction::admission::Call::ShowAnnouncement|openmt2001::ai_messages::offers::auction::admission::Call::CategoryStatus(_)))=>Ok(0),
-                tick::Event::Command(other)=>Err(format!("human reply unresolved command callback:{other:?}")),
-                _=>Ok(0),
+        let (old, building, kind) = session
+            .world
+            .ledgers
+            .businesses
+            .iter()
+            .enumerate()
+            .find_map(|(i, b)| {
+                if b[0x21c] == 0 || word(b, 0) != 1 {
+                    return None;
+                }
+                let building = i16::from_le_bytes(b[8..10].try_into().unwrap()) as usize;
+                let row = &session.world.buildings[building];
+                let kind = 43u32;
+                (word(row, 0x24) == 1
+                    && word(b, 4) != kind
+                    && business_conversion::fits(
+                        row,
+                        session.world.catalog.info.row(kind as usize).unwrap(),
+                    )
+                    .unwrap())
+                .then_some((i, building, kind))
+            })
+            .expect(
+                "fresh city has an apartment that satisfies original office-conversion geometry",
+            );
+        let p = &mut session.roster.manager.players[buyer];
+        put(&mut p.bytes, 0x214, 0);
+        put(&mut p.bytes, 0x218, 0);
+        let quote = business_conversion::quote(
+            building as u32,
+            kind,
+            &session.world.categories,
+            &session.world.buildings,
+            &session.world.catalog.info,
+            image,
+        )
+        .unwrap()
+        .to_f32();
+        let prior = session.world.ledgers.players[buyer].ledger(0x14).unwrap();
+        let age = session.population.business_counts.age;
+        let due = session.world.clock.timing[0] + 25;
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        session
+            .submit_command(
+                live_commands::Command::Convert(business_conversion::Command {
+                    kind,
+                    building: building as u32,
+                    owner: buyer as u32 + 1,
+                }),
+                &assets,
+                |_| Err("conversion applied before25ticks".into()),
+            )
+            .unwrap();
+        let mut accept = |event: tick::Event<'_>, _: &openmt2001::clock::Clock| {
+            match event {
+                tick::Event::Ai(_) => {
+                    return Err(format!(
+                        "conversion escaped authoritative callbacks: {event:?}"
+                    ));
+                }
+                tick::Event::Command(
+                    live_commands::Event::RefreshInterface
+                    | live_commands::Event::ConstructionNotice { .. }
+                    | live_commands::Event::Business(
+                        openmt2001::business_binding::Call::RefreshBuilding { .. },
+                    )
+                    | live_commands::Event::Detach(
+                        openmt2001::business_detach::Call::RefreshBuilding { .. },
+                    ),
+                ) => (),
+                tick::Event::Command(other) => {
+                    return Err(format!("conversion unresolved command callback: {other:?}"));
+                }
+                _ => (),
+            }
+            Ok(0)
+        };
+        while session.world.clock.timing[0] < due {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if session.world.clock.timing[0] < due {
+                assert_eq!(word(&session.world.buildings[building], 0x1c), old as u32);
+                assert_eq!(
+                    session.world.ledgers.players[buyer].ledger(0x14).unwrap(),
+                    prior
+                );
             }
         }
-        fn deliver(session:&mut Session<'_>,assets:&CommandAssets<'_,'_>,policy:&mut tick::Policy,local:usize,args:[i32;8])->(u32,u32){
-            let mut messages=player_messages::Context{arena:player_messages::Arena{next:session.allocation_next},current_player:session.roster.status.current_player,network:[false,false],prior:[0;48]};
-            messages.produce(args,&mut session.roster.manager,|route,_|Err(format!("human message unexpected external route:{route:?}"))).unwrap();session.allocation_next=messages.arena.next;
+        let new = word(&session.world.buildings[building], 0x1c) as usize;
+        assert_ne!(new, old);
+        assert_eq!(session.world.ledgers.businesses[old][0x21c], 0);
+        assert_ne!(session.world.ledgers.businesses[new][0x21c], 0);
+        assert_eq!(word(&session.world.ledgers.businesses[new], 4), kind);
+        assert_eq!(session.world.ledgers.businesses[new][10], buyer as u8 + 1);
+        assert_eq!(session.world.buildings[building][0x3d], 0);
+        assert_eq!(
+            session.world.ledgers.players[buyer].ledger(0x14).unwrap(),
+            prior - quote
+        );
+        assert_eq!(
+            session.population.business_counts.age,
+            age.wrapping_add(100)
+        );
+        let p = &mut session.roster.manager.players[buyer];
+        assert_eq!(word(&p.bytes, 0x214), 1);
+        let head = word(&p.bytes, 0x218);
+        assert_eq!(
+            word(
+                &p.auxiliaries
+                    .iter()
+                    .find(|a| a.reference == head)
+                    .unwrap()
+                    .bytes,
+                4
+            ),
+            0x2f
+        );
+        for at in [0x1400, 0x1403, 0x1df8, 0x239, 0x23a, 0x1e11, 0x1e12, 0xcc0] {
+            p.bytes[at] = 0;
+        }
+        p.bytes[0x1401] = 1;
+        p.bytes[0xb4c..0xb4e].copy_from_slice(&u16::MAX.to_le_bytes());
+        put(&mut p.bytes, 8, 100);
+        put(&mut p.bytes, 0x220, 0);
+        put(&mut p.bytes, 0xb64, u32::MAX);
+        for _ in 0..5 {
+            session
+                .advance_session(&assets, &mut policy, &mut accept)
+                .unwrap();
+            if word(&session.roster.manager.players[buyer].bytes, 0x214) == 0 {
+                break;
+            }
+        }
+        assert_eq!(word(&session.roster.manager.players[buyer].bytes, 0x214), 0);
+        assert!(
+            session
+                .roster
+                .ai_ownership
+                .state(&session.roster.manager.players[buyer])
+                .unwrap()
+                .lists[0]
+                .entries
+                .iter()
+                .any(|e| e[0] != 0 && word(e, 4) == new as u32)
+        );
+        session.roster.manager.players[buyer].bytes[0x1403] = 1;
+        println!(
+            "Retained conversion consumer: fit-valid apartment-to-office change,25-tick delay, ledger14 charge, actual allocation/detach/rebind and scheduled buyer2f ownership insertion verified; UI admission is separate"
+        );
+    }
+    fn exercise_human_replies(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{human_messages, live_commands, player_messages};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let local = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let buyer = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        for p in &mut session.roster.manager.players {
+            if word(&p.bytes, 0x154) == 1 {
+                p.bytes[0x1403] = 1;
+            }
+        }
+        for at in [0x214, 0x218, 0x220] {
+            put(&mut session.roster.manager.players[local].bytes, at, 0);
+        }
+        let category = (0..52)
+            .find(|&i| session.world.categories[i][5] == 0)
+            .unwrap();
+        // Controlled category-owner fixtures isolate response revalidation;
+        // actual property transfers and settlements are exercised separately.
+        session.world.categories[category][5] = local as u8 + 1;
+        let assets = CommandAssets { image, board, file };
+        let mut policy = simulation_test_policy();
+        fn boundary(event: tick::Event<'_>, _: &openmt2001::clock::Clock) -> Result<u32, String> {
+            match event {
+                tick::Event::Ai(_) => Err(format!("human reply escaped AI callback:{event:?}")),
+                tick::Event::HumanDialog {
+                    call: human_messages::Call::Diagnostic,
+                    ..
+                } => Err("human reply reached native diagnostic".into()),
+                tick::Event::Command(live_commands::Event::AuctionAdmission(
+                    openmt2001::ai_messages::offers::auction::admission::Call::ShowAnnouncement
+                    | openmt2001::ai_messages::offers::auction::admission::Call::CategoryStatus(_),
+                )) => Ok(0),
+                tick::Event::Command(other) => {
+                    Err(format!("human reply unresolved command callback:{other:?}"))
+                }
+                _ => Ok(0),
+            }
+        }
+        fn deliver(
+            session: &mut Session<'_>,
+            assets: &CommandAssets<'_, '_>,
+            policy: &mut tick::Policy,
+            local: usize,
+            args: [i32; 8],
+        ) -> (u32, u32) {
+            let mut messages = player_messages::Context {
+                arena: player_messages::Arena {
+                    next: session.allocation_next,
+                },
+                current_player: session.roster.status.current_player,
+                network: [false, false],
+                prior: [0; 48],
+            };
+            messages
+                .produce(args, &mut session.roster.manager, |route, _| {
+                    Err(format!("human message unexpected external route:{route:?}"))
+                })
+                .unwrap();
+            session.allocation_next = messages.arena.next;
             session.roster.manager.players[local].bytes[8..12].copy_from_slice(&0u32.to_le_bytes());
-            let mut dialog=(0,0);
-            for _ in 0..5{session.advance_session(assets,policy,|event:tick::Event<'_>,clock:&openmt2001::clock::Clock|{
-                match &event{
-                    tick::Event::HumanDialog{call:human_messages::Call::Ui{address:0x43be20,..},..}=>dialog=(0,0),
-                    tick::Event::HumanDialog{call:human_messages::Call::Handler{callback,context},..}=>{dialog.0 = *callback;if let Some(context)=context{dialog.1 = *context;}},
-                    _=>(),
-                }boundary(event,clock)
-            }).unwrap();if u32::from_le_bytes(session.roster.manager.players[local].bytes[0x220..0x224].try_into().unwrap())==1{break;}}
-            assert_eq!(u32::from_le_bytes(session.roster.manager.players[local].bytes[0x220..0x224].try_into().unwrap()),1);
+            let mut dialog = (0, 0);
+            for _ in 0..5 {
+                session
+                    .advance_session(
+                        assets,
+                        policy,
+                        |event: tick::Event<'_>, clock: &openmt2001::clock::Clock| {
+                            match &event {
+                                tick::Event::HumanDialog {
+                                    call:
+                                        human_messages::Call::Ui {
+                                            address: 0x43be20, ..
+                                        },
+                                    ..
+                                } => dialog = (0, 0),
+                                tick::Event::HumanDialog {
+                                    call: human_messages::Call::Handler { callback, context },
+                                    ..
+                                } => {
+                                    dialog.0 = *callback;
+                                    if let Some(context) = context {
+                                        dialog.1 = *context;
+                                    }
+                                }
+                                _ => (),
+                            }
+                            boundary(event, clock)
+                        },
+                    )
+                    .unwrap();
+                if u32::from_le_bytes(
+                    session.roster.manager.players[local].bytes[0x220..0x224]
+                        .try_into()
+                        .unwrap(),
+                ) == 1
+                {
+                    break;
+                }
+            }
+            assert_eq!(
+                u32::from_le_bytes(
+                    session.roster.manager.players[local].bytes[0x220..0x224]
+                        .try_into()
+                        .unwrap()
+                ),
+                1
+            );
             dialog
         }
-        let offer=[local as i32,buyer as i32,0x23,category as i32,12500,73,91,-999];
-        session.world.categories[category][0x6c]=1;let dialog=deliver(session,&assets,&mut policy,local,offer);
-        assert_eq!(dialog,(0x48b350,0x23));
-        let queued=word(&session.roster.manager.players[buyer].bytes,0x214);let mut views=0;
-        session.respond_human_dialog(0x48b350,1,0x23,[false,false],|event|match event{
-            live_commands::Event::PlayerMessageRoute{route:player_messages::Route::PropertyRefresh{category:c},..}=>{assert_eq!(c,category as u32);views+=1;Ok(())},
-            other=>Err(format!("refusal external callback:{other:?}")),
-        }).unwrap();
-        assert_eq!(views,1);assert_eq!(session.world.categories[category][0x6c],0);assert_eq!(word(&session.roster.manager.players[buyer].bytes,0x214),queued+1);assert_eq!(word(&session.roster.manager.players[local].bytes,0x220),0);
-        deliver(session,&assets,&mut policy,local,offer);session.world.categories[category][5]=buyer as u8+1;
-        session.respond_human_dialog(0x48b350,0,0x23,[false,false],|_|Err("stale offer emitted a response".into())).unwrap();
-        assert_eq!(word(&session.roster.manager.players[local].bytes,0x220),0);
-        let until=session.world.clock.timing[0]+25;while session.world.clock.timing[0]<until{session.advance_session(&assets,&mut policy,boundary).unwrap();}assert_eq!(session.world.auction.controller.active_count,0,"stale owner must not queue an auction");
-        let building=session.world.buildings.iter().position(|b|b[0x3f]!=0&&word(b,0x1c)!=u32::MAX).unwrap();
-        let notice=deliver(session,&assets,&mut policy,local,[local as i32,buyer as i32,0x2e,building as i32,0,0,0,-999]);assert_eq!(notice,(0x48b480,0));
-        session.respond_human_dialog(notice.0,0,notice.1,[false,false],|_|Err("notice dismissal emitted a command".into())).unwrap();assert_eq!(word(&session.roster.manager.players[local].bytes,0x220),0);
-        session.world.categories[category][5]=local as u8+1;deliver(session,&assets,&mut policy,local,offer);let due=session.world.clock.timing[0]+25;
-        session.respond_human_dialog(0x48b350,0,0x23,[false,false],|_|Err("accepted offer unexpectedly routed externally".into())).unwrap();assert_eq!(word(&session.roster.manager.players[local].bytes,0x220),0);
-        while session.world.clock.timing[0]<due{session.advance_session(&assets,&mut policy,boundary).unwrap();if session.world.clock.timing[0]<due{assert_eq!(session.world.auction.controller.active_count,0);}}
-        assert_eq!(session.world.auction.controller.active_count,1);assert_eq!(word(&session.world.auction.controller.record,4),category as u32);assert_eq!(word(&session.world.auction.controller.record,0x68),12500);assert!(session.world.auction.presentation.visible);
-        println!("Retained human replies: real inbox/dialog handoff, refusal26/unlock, stale-owner rejection, takeover-notice dismissal and accepted25-tick auction admission verified");
+        let offer = [
+            local as i32,
+            buyer as i32,
+            0x23,
+            category as i32,
+            12500,
+            73,
+            91,
+            -999,
+        ];
+        session.world.categories[category][0x6c] = 1;
+        let dialog = deliver(session, &assets, &mut policy, local, offer);
+        assert_eq!(dialog, (0x48b350, 0x23));
+        let queued = word(&session.roster.manager.players[buyer].bytes, 0x214);
+        let mut views = 0;
+        session
+            .respond_human_dialog(0x48b350, 1, 0x23, [false, false], |event| match event {
+                live_commands::Event::PlayerMessageRoute {
+                    route: player_messages::Route::PropertyRefresh { category: c },
+                    ..
+                } => {
+                    assert_eq!(c, category as u32);
+                    views += 1;
+                    Ok(())
+                }
+                other => Err(format!("refusal external callback:{other:?}")),
+            })
+            .unwrap();
+        assert_eq!(views, 1);
+        assert_eq!(session.world.categories[category][0x6c], 0);
+        assert_eq!(
+            word(&session.roster.manager.players[buyer].bytes, 0x214),
+            queued + 1
+        );
+        assert_eq!(word(&session.roster.manager.players[local].bytes, 0x220), 0);
+        deliver(session, &assets, &mut policy, local, offer);
+        session.world.categories[category][5] = buyer as u8 + 1;
+        session
+            .respond_human_dialog(0x48b350, 0, 0x23, [false, false], |_| {
+                Err("stale offer emitted a response".into())
+            })
+            .unwrap();
+        assert_eq!(word(&session.roster.manager.players[local].bytes, 0x220), 0);
+        let until = session.world.clock.timing[0] + 25;
+        while session.world.clock.timing[0] < until {
+            session
+                .advance_session(&assets, &mut policy, boundary)
+                .unwrap();
+        }
+        assert_eq!(
+            session.world.auction.controller.active_count, 0,
+            "stale owner must not queue an auction"
+        );
+        let building = session
+            .world
+            .buildings
+            .iter()
+            .position(|b| b[0x3f] != 0 && word(b, 0x1c) != u32::MAX)
+            .unwrap();
+        let notice = deliver(
+            session,
+            &assets,
+            &mut policy,
+            local,
+            [
+                local as i32,
+                buyer as i32,
+                0x2e,
+                building as i32,
+                0,
+                0,
+                0,
+                -999,
+            ],
+        );
+        assert_eq!(notice, (0x48b480, 0));
+        session
+            .respond_human_dialog(notice.0, 0, notice.1, [false, false], |_| {
+                Err("notice dismissal emitted a command".into())
+            })
+            .unwrap();
+        assert_eq!(word(&session.roster.manager.players[local].bytes, 0x220), 0);
+        session.world.categories[category][5] = local as u8 + 1;
+        deliver(session, &assets, &mut policy, local, offer);
+        let due = session.world.clock.timing[0] + 25;
+        session
+            .respond_human_dialog(0x48b350, 0, 0x23, [false, false], |_| {
+                Err("accepted offer unexpectedly routed externally".into())
+            })
+            .unwrap();
+        assert_eq!(word(&session.roster.manager.players[local].bytes, 0x220), 0);
+        while session.world.clock.timing[0] < due {
+            session
+                .advance_session(&assets, &mut policy, boundary)
+                .unwrap();
+            if session.world.clock.timing[0] < due {
+                assert_eq!(session.world.auction.controller.active_count, 0);
+            }
+        }
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        assert_eq!(
+            word(&session.world.auction.controller.record, 4),
+            category as u32
+        );
+        assert_eq!(word(&session.world.auction.controller.record, 0x68), 12500);
+        assert!(session.world.auction.presentation.visible);
+        println!(
+            "Retained human replies: real inbox/dialog handoff, refusal26/unlock, stale-owner rejection, takeover-notice dismissal and accepted25-tick auction admission verified"
+        );
     }
-    fn exercise_lease_expiry(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let local=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let category=word(&session.world.auction.controller.record,4) as usize;
-        assert_eq!(session.world.auction.controller.active_count,1);
-        assert_eq!(session.world.categories[category][5],local as u8+1);
+    fn exercise_lease_expiry(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let local = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let category = word(&session.world.auction.controller.record, 4) as usize;
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        assert_eq!(session.world.categories[category][5], local as u8 + 1);
         // Controlled remaining lease values isolate the actual hourly boundary.
         // The accepted auction from the preceding reply exercise stays live.
-        for row in &mut session.world.categories{put(row,0x7c,0);}
-        put(&mut session.world.categories[category],0x7c,25);put(&mut session.world.categories[category],0x80,25);
-        session.world.ledgers.players[local].owned_categories[category]=1;
-        let assets=CommandAssets{image,board,file};let mut host=crate::live_host::Host::new([0.;3]);host.set_running(true);
-        session.world.clock.calendar[0]=11;
-        session.world.clock.timing[1]=(session.world.clock.timing[1]/625+1)*625-1;
-        host.policy.scheduler.iterations=3;host.tick(session,&assets);
-        assert!(host.failure.is_none(),"lease warning Host failed:{:?}",host.failure);
-        assert_eq!(host.policy.scheduler.iterations,1,"original modal restores normal speed");
-        let warning=host.take_prompts(session).into_iter().filter_map(|p|p.dialog).find(|d|d.body==0x6c0).expect("24-hour lease warning modal");
-        assert_eq!((warning.title,warning.button_count,warning.buttons[0]),(0x6bf,1,0x59b));
-        assert_eq!(word(&session.world.categories[category],0x7c),24);assert_eq!(session.world.auction.controller.active_count,1);
-        put(&mut session.world.categories[category],0x7c,1);put(&mut session.world.categories[category],0x80,1);
-        let cash=session.world.ledgers.players[local].cash;let age=session.world.ownership_refresh_counter;
-        session.world.clock.timing[1]=(session.world.clock.timing[1]/625+1)*625-1;
-        host.tick(session,&assets);assert!(host.failure.is_none(),"lease expiry Host failed:{:?}",host.failure);
-        let expired=host.take_prompts(session).into_iter().filter_map(|p|p.dialog).find(|d|d.body==0x6c1).expect("lease expiry modal");
-        assert_eq!(expired.title,0x6bf);assert_eq!(session.world.categories[category][5],0);assert_eq!(word(&session.world.categories[category],0x78),2);
-        assert_eq!(session.world.ledgers.players[local].owned_categories[category],0);assert_eq!(session.world.ledgers.players[local].cash,cash);
-        assert_eq!(session.world.ownership_refresh_counter,age.wrapping_add(100));
-        assert_eq!(session.world.auction.controller.active_count,0);assert_eq!(session.world.auction.controller.record[0x7d],0);assert!(!session.world.auction.presentation.visible);
-        assert_eq!(session.world.categories[category][0x6c],0);
+        for row in &mut session.world.categories {
+            put(row, 0x7c, 0);
+        }
+        put(&mut session.world.categories[category], 0x7c, 25);
+        put(&mut session.world.categories[category], 0x80, 25);
+        session.world.ledgers.players[local].owned_categories[category] = 1;
+        let assets = CommandAssets { image, board, file };
+        let mut host = crate::live_host::Host::new([0.; 3]);
+        host.set_running(true);
+        session.world.clock.calendar[0] = 11;
+        session.world.clock.timing[1] = (session.world.clock.timing[1] / 625 + 1) * 625 - 1;
+        host.policy.scheduler.iterations = 3;
+        host.tick(session, &assets);
+        assert!(
+            host.failure.is_none(),
+            "lease warning Host failed:{:?}",
+            host.failure
+        );
+        assert_eq!(
+            host.policy.scheduler.iterations, 1,
+            "original modal restores normal speed"
+        );
+        let warning = host
+            .take_prompts(session)
+            .into_iter()
+            .filter_map(|p| p.dialog)
+            .find(|d| d.body == 0x6c0)
+            .expect("24-hour lease warning modal");
+        assert_eq!(
+            (warning.title, warning.button_count, warning.buttons[0]),
+            (0x6bf, 1, 0x59b)
+        );
+        assert_eq!(word(&session.world.categories[category], 0x7c), 24);
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        put(&mut session.world.categories[category], 0x7c, 1);
+        put(&mut session.world.categories[category], 0x80, 1);
+        let cash = session.world.ledgers.players[local].cash;
+        let age = session.world.ownership_refresh_counter;
+        session.world.clock.timing[1] = (session.world.clock.timing[1] / 625 + 1) * 625 - 1;
+        host.tick(session, &assets);
+        assert!(
+            host.failure.is_none(),
+            "lease expiry Host failed:{:?}",
+            host.failure
+        );
+        let expired = host
+            .take_prompts(session)
+            .into_iter()
+            .filter_map(|p| p.dialog)
+            .find(|d| d.body == 0x6c1)
+            .expect("lease expiry modal");
+        assert_eq!(expired.title, 0x6bf);
+        assert_eq!(session.world.categories[category][5], 0);
+        assert_eq!(word(&session.world.categories[category], 0x78), 2);
+        assert_eq!(
+            session.world.ledgers.players[local].owned_categories[category],
+            0
+        );
+        assert_eq!(session.world.ledgers.players[local].cash, cash);
+        assert_eq!(
+            session.world.ownership_refresh_counter,
+            age.wrapping_add(100)
+        );
+        assert_eq!(session.world.auction.controller.active_count, 0);
+        assert_eq!(session.world.auction.controller.record[0x7d], 0);
+        assert!(!session.world.auction.presentation.visible);
+        assert_eq!(session.world.categories[category][0x6c], 0);
         for player in &session.roster.manager.players {
-            if word(&player.bytes,0x154)==1 {
-                assert!(player.auxiliaries.iter().any(|p|word(&p.bytes,4)==0x2a&&word(&p.bytes,0x18)==category as u32),"auction cancellation reaches actual AI inbox");
+            if word(&player.bytes, 0x154) == 1 {
+                assert!(
+                    player
+                        .auxiliaries
+                        .iter()
+                        .any(|p| word(&p.bytes, 4) == 0x2a
+                            && word(&p.bytes, 0x18) == category as u32),
+                    "auction cancellation reaches actual AI inbox"
+                );
             }
         }
         // A second expiry exercises synchronous467a30 on an AI-owned category.
-        let owner=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        session.world.categories[category][5]=owner as u8+1;session.world.ledgers.players[owner].owned_categories[category]=1;
-        put(&mut session.world.categories[category],0x7c,1);let age=session.world.ownership_refresh_counter;
-        session.world.clock.timing[1]=(session.world.clock.timing[1]/625+1)*625-1;
-        host.tick(session,&assets);assert!(host.failure.is_none(),"AI lease expiry Host failed:{:?}",host.failure);
-        assert_eq!(session.world.categories[category][5],0);assert_eq!(session.world.ledgers.players[owner].owned_categories[category],0);
-        assert_eq!(session.world.ownership_refresh_counter,age.wrapping_add(100));
-        session.roster.ai_ownership.state(&session.roster.manager.players[owner]).unwrap();
-        println!("Retained lease expiry: real Host warning/expiry dialogs, zero-compensation release, AI ownership refresh and active-auction cancellation inboxes verified");
+        let owner = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        session.world.categories[category][5] = owner as u8 + 1;
+        session.world.ledgers.players[owner].owned_categories[category] = 1;
+        put(&mut session.world.categories[category], 0x7c, 1);
+        let age = session.world.ownership_refresh_counter;
+        session.world.clock.timing[1] = (session.world.clock.timing[1] / 625 + 1) * 625 - 1;
+        host.tick(session, &assets);
+        assert!(
+            host.failure.is_none(),
+            "AI lease expiry Host failed:{:?}",
+            host.failure
+        );
+        assert_eq!(session.world.categories[category][5], 0);
+        assert_eq!(
+            session.world.ledgers.players[owner].owned_categories[category],
+            0
+        );
+        assert_eq!(
+            session.world.ownership_refresh_counter,
+            age.wrapping_add(100)
+        );
+        session
+            .roster
+            .ai_ownership
+            .state(&session.roster.manager.players[owner])
+            .unwrap();
+        println!(
+            "Retained lease expiry: real Host warning/expiry dialogs, zero-compensation release, AI ownership refresh and active-auction cancellation inboxes verified"
+        );
     }
-    fn exercise_rights_and_outcome(session:&mut Session<'_>,assets:&CommandAssets<'_,'_>){
-        use openmt2001::{live_commands,outcome_notice::{Call,Response,Sequence}};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let local=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let category=0usize;
+    fn exercise_rights_and_outcome(session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
+        use openmt2001::{
+            live_commands,
+            outcome_notice::{Call, Response, Sequence},
+        };
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let local = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let category = 0usize;
         // Isolate these controlled command clocks from other deliberately
         // pending transaction exercises, then restore the fixture's prior state.
-        let pending=std::mem::take(&mut session.live_commands);
-        let original=session.world.categories[category];let clocks=session.world.clock.timing;
-        session.world.categories[category][5]=local as u8+1;
-        session.world.categories[category][0x6d]=0;
+        let pending = std::mem::take(&mut session.live_commands);
+        let original = session.world.categories[category];
+        let clocks = session.world.clock.timing;
+        session.world.categories[category][5] = local as u8 + 1;
+        session.world.categories[category][0x6d] = 0;
         session.world.categories[category][0x78..0x7c].copy_from_slice(&0u32.to_le_bytes());
-        assert!(session.inspect_property_rights(category as u32,0).unwrap().activate_visible);
-        assert!(!session.inspect_property_rights(category as u32,1).unwrap().activate_visible);
-        assert_eq!(session.activate_property_rights(category as u32,0).unwrap().message,Some(1406));
-        let due=clocks[0]+25;
-        session.world.clock.timing[0]=due-1;
-        session.drain_commands(assets,|call|Err(format!("rights premature effect:{call:?}"))).unwrap();
-        assert_eq!(word(&session.world.categories[category],0x78),0);
-        session.world.clock.timing[0]=due;
-        session.drain_commands(assets,|call|Err(format!("rights unexpected host effect:{call:?}"))).unwrap();
-        assert_eq!(session.world.categories[category][0x6d],0);
-        assert_eq!(word(&session.world.categories[category],0x78),1);
-        assert_eq!(word(&session.world.categories[category],0x80),24);
-        assert!(session.inspect_property_rights(category as u32,0).unwrap().open);
-        session.world.clock.timing[1]=clocks[1]+14999;
-        session.drain_commands(assets,|call|Err(format!("rights early unlock:{call:?}"))).unwrap();
-        assert_eq!(word(&session.world.categories[category],0x78),1);
-        session.world.clock.timing[1]+=1;
-        session.drain_commands(assets,|call|Err(format!("rights unexpected unlock effect:{call:?}"))).unwrap();
-        assert_eq!(word(&session.world.categories[category],0x78),2);
-        session.world.categories[category]=original;
-        session.world.clock.timing=clocks;
-        let pause=session.world.pause.clone();let timers=session.hooks.timers.clone();
-        session.world.pause=openmt2001::pause::State::default();
-        for task in &mut session.hooks.timers{task[0]=1;}
-        let rival=(local+1)%session.roster.manager.players.len();
-        session.submit_command(live_commands::Command::OutcomeNotice{player:rival as i32,reason:2},assets,|_|Err("outcome dispatched immediately".into())).unwrap();
-        session.world.clock.timing[0]=clocks[0]+24;
-        session.drain_commands(assets,|_|Err("outcome dispatched before25ticks".into())).unwrap();
-        session.world.clock.timing[0]+=1;let mut calls=vec![];
-        session.drain_commands(assets,|event|match event{
-            live_commands::Event::OutcomeNotice{player,reason}=>{assert_eq!((player,reason),(rival as i32,2));Ok(())},
-            live_commands::Event::Outcome(call)=>{calls.push(call);Ok(())},
-            other=>Err(format!("result command unexpected effect:{other:?}")),
-        }).unwrap();
+        assert!(
+            session
+                .inspect_property_rights(category as u32, 0)
+                .unwrap()
+                .activate_visible
+        );
+        assert!(
+            !session
+                .inspect_property_rights(category as u32, 1)
+                .unwrap()
+                .activate_visible
+        );
+        assert_eq!(
+            session
+                .activate_property_rights(category as u32, 0)
+                .unwrap()
+                .message,
+            Some(1406)
+        );
+        let due = clocks[0] + 25;
+        session.world.clock.timing[0] = due - 1;
+        session
+            .drain_commands(assets, |call| {
+                Err(format!("rights premature effect:{call:?}"))
+            })
+            .unwrap();
+        assert_eq!(word(&session.world.categories[category], 0x78), 0);
+        session.world.clock.timing[0] = due;
+        session
+            .drain_commands(assets, |call| {
+                Err(format!("rights unexpected host effect:{call:?}"))
+            })
+            .unwrap();
+        assert_eq!(session.world.categories[category][0x6d], 0);
+        assert_eq!(word(&session.world.categories[category], 0x78), 1);
+        assert_eq!(word(&session.world.categories[category], 0x80), 24);
+        assert!(
+            session
+                .inspect_property_rights(category as u32, 0)
+                .unwrap()
+                .open
+        );
+        session.world.clock.timing[1] = clocks[1] + 14999;
+        session
+            .drain_commands(assets, |call| Err(format!("rights early unlock:{call:?}")))
+            .unwrap();
+        assert_eq!(word(&session.world.categories[category], 0x78), 1);
+        session.world.clock.timing[1] += 1;
+        session
+            .drain_commands(assets, |call| {
+                Err(format!("rights unexpected unlock effect:{call:?}"))
+            })
+            .unwrap();
+        assert_eq!(word(&session.world.categories[category], 0x78), 2);
+        session.world.categories[category] = original;
+        session.world.clock.timing = clocks;
+        let pause = session.world.pause.clone();
+        let timers = session.hooks.timers.clone();
+        session.world.pause = openmt2001::pause::State::default();
+        for task in &mut session.hooks.timers {
+            task[0] = 1;
+        }
+        let rival = (local + 1) % session.roster.manager.players.len();
+        session
+            .submit_command(
+                live_commands::Command::OutcomeNotice {
+                    player: rival as i32,
+                    reason: 2,
+                },
+                assets,
+                |_| Err("outcome dispatched immediately".into()),
+            )
+            .unwrap();
+        session.world.clock.timing[0] = clocks[0] + 24;
+        session
+            .drain_commands(assets, |_| Err("outcome dispatched before25ticks".into()))
+            .unwrap();
+        session.world.clock.timing[0] += 1;
+        let mut calls = vec![];
+        session
+            .drain_commands(assets, |event| match event {
+                live_commands::Event::OutcomeNotice { player, reason } => {
+                    assert_eq!((player, reason), (rival as i32, 2));
+                    Ok(())
+                }
+                live_commands::Event::Outcome(call) => {
+                    calls.push(call);
+                    Ok(())
+                }
+                other => Err(format!("result command unexpected effect:{other:?}")),
+            })
+            .unwrap();
         assert!(calls.contains(&Call::Timeout(30)));
-        assert!(calls.contains(&Call::Handler{callback:Some(0x48b490),context:None}));
-        assert!(calls.contains(&Call::Handler{callback:None,context:Some(rival as u32)}));
-        assert_eq!(session.world.pause.bytes[0],1);assert_eq!(session.world.pause.bytes[8],1);
-        for task in &session.hooks.timers{assert_eq!(task[0],u8::from(word(task,4)&2==0));}
-        let mut response=vec![];session.respond_outcome(rival as u32,assets,|call|{response.push(call);Ok(())}).unwrap();
-        assert_eq!(response,vec![Response::Characters{winner:word(&session.roster.manager.players[rival].bytes,0x150),loser:word(&session.roster.manager.players[local].bytes,0x150)},Response::Sequence(Sequence::Lose),Response::Music{address:0x541cdc}]);
-        session.world.pause=pause;session.hooks.timers=timers;session.world.clock.timing=clocks;session.live_commands=pending;
-        println!("Retained rights/result: pending→25tickexclusive→15000normaltickopen;25tickresult→30sectimeout+handler+pause/group2suspension→originallose-sequence request verified (controlled rendering boundary)");
+        assert!(calls.contains(&Call::Handler {
+            callback: Some(0x48b490),
+            context: None
+        }));
+        assert!(calls.contains(&Call::Handler {
+            callback: None,
+            context: Some(rival as u32)
+        }));
+        assert_eq!(session.world.pause.bytes[0], 1);
+        assert_eq!(session.world.pause.bytes[8], 1);
+        for task in &session.hooks.timers {
+            assert_eq!(task[0], u8::from(word(task, 4) & 2 == 0));
+        }
+        let mut response = vec![];
+        session
+            .respond_outcome(rival as u32, assets, |call| {
+                response.push(call);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            response,
+            vec![
+                Response::Characters {
+                    winner: word(&session.roster.manager.players[rival].bytes, 0x150),
+                    loser: word(&session.roster.manager.players[local].bytes, 0x150)
+                },
+                Response::Sequence(Sequence::Lose),
+                Response::Music { address: 0x541cdc }
+            ]
+        );
+        session.world.pause = pause;
+        session.hooks.timers = timers;
+        session.world.clock.timing = clocks;
+        session.live_commands = pending;
+        println!(
+            "Retained rights/result: pending→25tickexclusive→15000normaltickopen;25tickresult→30sectimeout+handler+pause/group2suspension→originallose-sequence request verified (controlled rendering boundary)"
+        );
     }
-    fn exercise_host_outcome(host:&mut crate::live_host::Host,session:&mut Session<'_>,assets:&CommandAssets<'_,'_>){
-        use openmt2001::{live_commands,outcome_notice::Response};
-        let local=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let winner=(local+1)%session.roster.manager.players.len();
-        host.set_running(true);assert!(!session.world.pause.has_reason());
-        let remaining=u32::from_le_bytes(session.roster.manager.bytes[12..16].try_into().unwrap());
-        assert_eq!(host.status(session).player_panels,[true,true]);
-        session.submit_command(live_commands::Command::OutcomeNotice{player:winner as i32,reason:2},assets,|_|Err("result dispatched withoutdelay".into())).unwrap();
+    fn exercise_host_outcome(
+        host: &mut crate::live_host::Host,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+    ) {
+        use openmt2001::{live_commands, outcome_notice::Response};
+        let local = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let winner = (local + 1) % session.roster.manager.players.len();
+        host.set_running(true);
+        assert!(!session.world.pause.has_reason());
+        let remaining =
+            u32::from_le_bytes(session.roster.manager.bytes[12..16].try_into().unwrap());
+        assert_eq!(host.status(session).player_panels, [true, true]);
+        session
+            .submit_command(
+                live_commands::Command::OutcomeNotice {
+                    player: winner as i32,
+                    reason: 2,
+                },
+                assets,
+                |_| Err("result dispatched withoutdelay".into()),
+            )
+            .unwrap();
         // Original bankruptcy queues result then elimination at the same due
         // tick. The drain completes even though the result pauses later ticks.
-        session.submit_command(live_commands::Command::Eliminate{slot:local},assets,|_|Err("elimination dispatched without delay".into())).unwrap();
-        let due=session.world.clock.timing[0]+25;let mut modal=None;
+        session
+            .submit_command(
+                live_commands::Command::Eliminate { slot: local },
+                assets,
+                |_| Err("elimination dispatched without delay".into()),
+            )
+            .unwrap();
+        let due = session.world.clock.timing[0] + 25;
+        let mut modal = None;
         for _ in 0..30 {
-            host.frame(session,assets,40);assert!(host.failure.is_none(),"result Host:{:?}",host.failure);
-            for request in host.take_prompts(session){if request.dialog.is_some_and(|d|d.callback==0x48b490){modal=Some(request);}}
-            if modal.is_some(){break;}
-            assert!(session.world.clock.timing[0]<due);
+            host.frame(session, assets, 40);
+            assert!(host.failure.is_none(), "result Host:{:?}", host.failure);
+            for request in host.take_prompts(session) {
+                if request.dialog.is_some_and(|d| d.callback == 0x48b490) {
+                    modal = Some(request);
+                }
+            }
+            if modal.is_some() {
+                break;
+            }
+            assert!(session.world.clock.timing[0] < due);
         }
-        let request=modal.expect("real Host original result modal");let dialog=request.dialog.unwrap();
-        #[cfg(feature="capture")]
-        super::outcome_capture::capture(request.clone(),session,assets);
-        assert_eq!(session.world.clock.timing[0],due);assert_eq!(dialog.context,winner as u32);
-        assert_eq!(session.roster.manager.players[local].bytes[0x10],0);
-        assert_eq!(u32::from_le_bytes(session.roster.manager.players[local].bytes[0x154..0x158].try_into().unwrap()),2);
-        assert_eq!(u32::from_le_bytes(session.roster.manager.bytes[12..16].try_into().unwrap()),remaining-1);
-        assert_eq!(host.status(session).player_panels,[false,false]);
-        assert_eq!(dialog.timeout_ticks,Some(1500));assert_eq!(dialog.button_count,1);assert_eq!(dialog.buttons[0],1435);
-        assert!(dialog.title!=0&&dialog.body!=0);assert_eq!(session.world.pause.bytes[0],1);
-        let clock=session.world.clock.timing[0];for _ in 0..10{host.frame(session,assets,40);assert!(host.failure.is_none());}
-        assert_eq!(session.world.clock.timing[0],clock,"result freezes normal logic");
-        let mut ui=crate::prompt::State::default();ui.submit(request);
-        for _ in 0..1500{ui.tick();}assert!(ui.take_dialog_replies().is_empty());ui.tick();
-        let replies=ui.take_dialog_replies();assert_eq!(replies.len(),1);assert_eq!((replies[0].callback,replies[0].context,replies[0].button),(0x48b490,winner as u32,0));
-        let mut responses=vec![];session.respond_outcome(replies[0].context,assets,|call|{responses.push(call);Ok(())}).unwrap();
-        assert!(responses.contains(&Response::Sequence(openmt2001::outcome_notice::Sequence::Lose)));
-        println!("Real Host result:25tick admission, localized modal/portrait,30second automaticOK, actual timer pause, local elimination closes both original player panels, and verified response request; cinematic remains a separate renderer boundary");
+        let request = modal.expect("real Host original result modal");
+        let dialog = request.dialog.unwrap();
+        #[cfg(feature = "capture")]
+        super::outcome_capture::capture(request.clone(), session, assets);
+        assert_eq!(session.world.clock.timing[0], due);
+        assert_eq!(dialog.context, winner as u32);
+        assert_eq!(session.roster.manager.players[local].bytes[0x10], 0);
+        assert_eq!(
+            u32::from_le_bytes(
+                session.roster.manager.players[local].bytes[0x154..0x158]
+                    .try_into()
+                    .unwrap()
+            ),
+            2
+        );
+        assert_eq!(
+            u32::from_le_bytes(session.roster.manager.bytes[12..16].try_into().unwrap()),
+            remaining - 1
+        );
+        assert_eq!(host.status(session).player_panels, [false, false]);
+        assert_eq!(dialog.timeout_ticks, Some(1500));
+        assert_eq!(dialog.button_count, 1);
+        assert_eq!(dialog.buttons[0], 1435);
+        assert!(dialog.title != 0 && dialog.body != 0);
+        assert_eq!(session.world.pause.bytes[0], 1);
+        let clock = session.world.clock.timing[0];
+        for _ in 0..10 {
+            host.frame(session, assets, 40);
+            assert!(host.failure.is_none());
+        }
+        assert_eq!(
+            session.world.clock.timing[0], clock,
+            "result freezes normal logic"
+        );
+        let mut ui = crate::prompt::State::default();
+        ui.submit(request);
+        for _ in 0..1500 {
+            ui.tick();
+        }
+        assert!(ui.take_dialog_replies().is_empty());
+        ui.tick();
+        let replies = ui.take_dialog_replies();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(
+            (replies[0].callback, replies[0].context, replies[0].button),
+            (0x48b490, winner as u32, 0)
+        );
+        let mut responses = vec![];
+        session
+            .respond_outcome(replies[0].context, assets, |call| {
+                responses.push(call);
+                Ok(())
+            })
+            .unwrap();
+        assert!(responses.contains(&Response::Sequence(
+            openmt2001::outcome_notice::Sequence::Lose
+        )));
+        println!(
+            "Real Host result:25tick admission, localized modal/portrait,30second automaticOK, actual timer pause, local elimination closes both original player panels, and verified response request; cinematic remains a separate renderer boundary"
+        );
     }
-    fn exercise_property_offers(session:&mut Session<'_>,image:&openmt2001::pe::PeImage<'_>,board:&openmt2001::board::Board,file:&openmt2001::build_file::BuildFile<'_>){
-        use openmt2001::{live_commands,property_offer};
-        let word=|b:&[u8],at|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-        let put=|b:&mut[u8],at,v:u32|b[at..at+4].copy_from_slice(&v.to_le_bytes());
-        let local=session.roster.manager.players.iter().position(|p|p.reference==session.roster.status.current_player).unwrap();
-        let rival=session.roster.manager.players.iter().position(|p|word(&p.bytes,0x154)==1).unwrap();
-        let category=session.world.categories.iter().position(|r|r[5]==0&&r[0x6c]==0&&r[0x74]!=0).unwrap() as u32;
-        let assets=CommandAssets{image,board,file};let initial=session.inspect_property_offer(category,None,&assets).unwrap();assert_eq!(initial.panel.visible,1);assert!(!initial.owned);
-        let amount=initial.panel.amount;let cash=session.world.ledgers.players[local].cash;
-        session.world.ledgers.players[local].cash = -10000.;let mut calls=vec![];
-        let result=session.submit_property_offer(category,amount,&assets,|event|match event{
-            live_commands::Event::PropertyOffer(call)=>{calls.push(call);Ok(())},other=>Err(format!("cash denial escaped property UI:{other:?}")),
-        }).unwrap();assert!(!result.submitted);assert_eq!(session.world.categories[category as usize][0x6c],0);
-        assert!(calls.iter().any(|call|matches!(call,property_offer::Call::Ui{address:0x429820,arguments:[1,0x6c2,0],..})),"original cash failure modal body");
-        session.world.ledgers.players[local].cash=cash.max(amount);
+    fn exercise_property_offers(
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        board: &openmt2001::board::Board,
+        file: &openmt2001::build_file::BuildFile<'_>,
+    ) {
+        use openmt2001::{live_commands, property_offer};
+        let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let put = |b: &mut [u8], at, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let local = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let rival = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| word(&p.bytes, 0x154) == 1)
+            .unwrap();
+        let category = session
+            .world
+            .categories
+            .iter()
+            .position(|r| r[5] == 0 && r[0x6c] == 0 && r[0x74] != 0)
+            .unwrap() as u32;
+        let assets = CommandAssets { image, board, file };
+        let initial = session
+            .inspect_property_offer(category, None, &assets)
+            .unwrap();
+        assert_eq!(initial.panel.visible, 1);
+        assert!(!initial.owned);
+        let amount = initial.panel.amount;
+        let cash = session.world.ledgers.players[local].cash;
+        session.world.ledgers.players[local].cash = -10000.;
+        let mut calls = vec![];
+        let result = session
+            .submit_property_offer(category, amount, &assets, |event| match event {
+                live_commands::Event::PropertyOffer(call) => {
+                    calls.push(call);
+                    Ok(())
+                }
+                other => Err(format!("cash denial escaped property UI:{other:?}")),
+            })
+            .unwrap();
+        assert!(!result.submitted);
+        assert_eq!(session.world.categories[category as usize][0x6c], 0);
+        assert!(
+            calls.iter().any(|call| matches!(
+                call,
+                property_offer::Call::Ui {
+                    address: 0x429820,
+                    arguments: [1, 0x6c2, 0],
+                    ..
+                }
+            )),
+            "original cash failure modal body"
+        );
+        session.world.ledgers.players[local].cash = cash.max(amount);
         // A controlled rival owner isolates the direct23 inbox route.
-        session.world.categories[category as usize][5]=rival as u8+1;let before=word(&session.roster.manager.players[rival].bytes,0x214);
-        let presentation=|event|match event{live_commands::Event::PropertyOffer(_)=>Ok(()),other=>Err(format!("property offer unexpected external route:{other:?}"))};
-        let result=session.submit_property_offer(category,amount,&assets,presentation).unwrap();assert!(result.submitted);assert_eq!(word(&session.roster.manager.players[rival].bytes,0x214),before+1);
-        let player=&session.roster.manager.players[rival];let mut pointer=word(&player.bytes,0x218);let packet=loop{let p=&player.auxiliaries.iter().find(|a|a.reference==pointer).unwrap().bytes;let next=word(p,0x2c);if next==0{break p;}pointer=next;};
-        assert_eq!(word(packet,4),0x23);assert_eq!(packet[0x14],local as u8);assert_eq!(word(packet,0x18),category);assert_eq!(word(packet,0x1c),amount as u32);
-        session.world.categories[category as usize][5]=0;session.world.categories[category as usize][0x6c]=0;
-        let mut host=crate::live_host::Host::new([0.;3]);host.set_running(true);
-        let due=session.world.clock.timing[0]+25;assert!(session.submit_property_offer(category,amount,&assets,presentation).unwrap().submitted);
-        while session.world.clock.timing[0]<due{host.tick(session,&assets);assert!(host.failure.is_none(),"city offer admission:{:?}",host.failure);if session.world.clock.timing[0]<due{assert_eq!(session.world.auction.controller.active_count,0);}}
-        assert_eq!(session.world.auction.controller.active_count,1);assert_eq!(word(&session.world.auction.controller.record,4),category);assert_eq!(word(&session.world.auction.controller.record,0x84),local as u32);
+        session.world.categories[category as usize][5] = rival as u8 + 1;
+        let before = word(&session.roster.manager.players[rival].bytes, 0x214);
+        let presentation = |event| match event {
+            live_commands::Event::PropertyOffer(_) => Ok(()),
+            other => Err(format!(
+                "property offer unexpected external route:{other:?}"
+            )),
+        };
+        let result = session
+            .submit_property_offer(category, amount, &assets, presentation)
+            .unwrap();
+        assert!(result.submitted);
+        assert_eq!(
+            word(&session.roster.manager.players[rival].bytes, 0x214),
+            before + 1
+        );
+        let player = &session.roster.manager.players[rival];
+        let mut pointer = word(&player.bytes, 0x218);
+        let packet = loop {
+            let p = &player
+                .auxiliaries
+                .iter()
+                .find(|a| a.reference == pointer)
+                .unwrap()
+                .bytes;
+            let next = word(p, 0x2c);
+            if next == 0 {
+                break p;
+            }
+            pointer = next;
+        };
+        assert_eq!(word(packet, 4), 0x23);
+        assert_eq!(packet[0x14], local as u8);
+        assert_eq!(word(packet, 0x18), category);
+        assert_eq!(word(packet, 0x1c), amount as u32);
+        session.world.categories[category as usize][5] = 0;
+        session.world.categories[category as usize][0x6c] = 0;
+        let mut host = crate::live_host::Host::new([0.; 3]);
+        host.set_running(true);
+        let due = session.world.clock.timing[0] + 25;
+        assert!(
+            session
+                .submit_property_offer(category, amount, &assets, presentation)
+                .unwrap()
+                .submitted
+        );
+        while session.world.clock.timing[0] < due {
+            host.tick(session, &assets);
+            assert!(
+                host.failure.is_none(),
+                "city offer admission:{:?}",
+                host.failure
+            );
+            if session.world.clock.timing[0] < due {
+                assert_eq!(session.world.auction.controller.active_count, 0);
+            }
+        }
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        assert_eq!(word(&session.world.auction.controller.record, 4), category);
+        assert_eq!(
+            word(&session.world.auction.controller.record, 0x84),
+            local as u32
+        );
         // End this controlled admission through the real hourly lease release.
-        session.world.categories[category as usize][5]=local as u8+1;session.world.ledgers.players[local].owned_categories[category as usize]=1;put(&mut session.world.categories[category as usize],0x7c,1);
-        session.world.clock.timing[1]=(session.world.clock.timing[1]/625+1)*625-1;host.tick(session,&assets);assert!(host.failure.is_none(),"property offer cancellation:{:?}",host.failure);assert_eq!(session.world.auction.controller.active_count,0);
-        session.world.categories[category as usize][5]=local as u8+1;session.world.ledgers.players[local].owned_categories[category as usize]=1;
-        let own=session.inspect_property_offer(category,None,&assets).unwrap();assert!(own.owned);assert_eq!(own.panel.visible,1);
-        let due=session.world.clock.timing[0]+25;assert!(session.submit_property_offer(category,own.panel.amount,&assets,presentation).unwrap().submitted);
-        while session.world.clock.timing[0]<due{host.tick(session,&assets);assert!(host.failure.is_none(),"owned property sale admission:{:?}",host.failure);}
-        assert_eq!(session.world.auction.controller.active_count,1);assert_eq!(word(&session.world.auction.controller.record,0x84),u32::MAX);assert_eq!(word(&session.world.auction.controller.record,0x88),own.panel.amount as u32);
-        session.world.ledgers.players[local].cash=cash;
-        println!("Retained human property offers: native controls/cash rejection, rival23 inbox, city purchase and owned sale through25-tick auction admission verified");
+        session.world.categories[category as usize][5] = local as u8 + 1;
+        session.world.ledgers.players[local].owned_categories[category as usize] = 1;
+        put(&mut session.world.categories[category as usize], 0x7c, 1);
+        session.world.clock.timing[1] = (session.world.clock.timing[1] / 625 + 1) * 625 - 1;
+        host.tick(session, &assets);
+        assert!(
+            host.failure.is_none(),
+            "property offer cancellation:{:?}",
+            host.failure
+        );
+        assert_eq!(session.world.auction.controller.active_count, 0);
+        session.world.categories[category as usize][5] = local as u8 + 1;
+        session.world.ledgers.players[local].owned_categories[category as usize] = 1;
+        let own = session
+            .inspect_property_offer(category, None, &assets)
+            .unwrap();
+        assert!(own.owned);
+        assert_eq!(own.panel.visible, 1);
+        let due = session.world.clock.timing[0] + 25;
+        assert!(
+            session
+                .submit_property_offer(category, own.panel.amount, &assets, presentation)
+                .unwrap()
+                .submitted
+        );
+        while session.world.clock.timing[0] < due {
+            host.tick(session, &assets);
+            assert!(
+                host.failure.is_none(),
+                "owned property sale admission:{:?}",
+                host.failure
+            );
+        }
+        assert_eq!(session.world.auction.controller.active_count, 1);
+        assert_eq!(
+            word(&session.world.auction.controller.record, 0x84),
+            u32::MAX
+        );
+        assert_eq!(
+            word(&session.world.auction.controller.record, 0x88),
+            own.panel.amount as u32
+        );
+        session.world.ledgers.players[local].cash = cash;
+        println!(
+            "Retained human property offers: native controls/cash rejection, rival23 inbox, city purchase and owned sale through25-tick auction admission verified"
+        );
     }
     fn exercise_calendar(
         session: &mut Session<'_>,
@@ -2432,7 +4612,7 @@ mod tests {
         let mut paused = 0;
         let mut before_six_sounds = 0;
         let mut scripts = Vec::new();
-        let mut deferred_prompts=0;
+        let mut deferred_prompts = 0;
         let mut boundaries = std::collections::BTreeSet::new();
         let mut tick_boundaries = std::collections::BTreeSet::new();
         let mut hours = Vec::new();
@@ -2515,11 +4695,14 @@ mod tests {
             session
                 .advance_session(&assets, &mut policy, |event, clock| {
                     match event {
-                        tick::Event::ScriptCommands(commands)=>{
-                            assert!(commands.iter().all(|(command,args)|matches!(command,openmt2001::level_script::Command::Prompt) && args.len()==3));
-                            deferred_prompts+=commands.len();
-                        },
-                tick::Event::Script { name, argument, .. } => {
+                        tick::Event::ScriptCommands(commands) => {
+                            assert!(commands.iter().all(|(command, args)| matches!(
+                                command,
+                                openmt2001::level_script::Command::Prompt
+                            ) && args.len() == 3));
+                            deferred_prompts += commands.len();
+                        }
+                        tick::Event::Script { name, argument, .. } => {
                             if name == "HourlyUpdate" {
                                 hours.push(clock.hour());
                             }
@@ -2550,7 +4733,7 @@ mod tests {
                             assert!(sound.distance.is_finite());
                         }
                         tick::Event::TransportEnvironment { .. } => {}
-                        tick::Event::HumanDialog{call,..} => human_calls.push(call),
+                        tick::Event::HumanDialog { call, .. } => human_calls.push(call),
                         other => {
                             return Err(format!("unexpected retained full-day boundary {other:?}"));
                         }
@@ -2568,7 +4751,10 @@ mod tests {
                 assert_eq!(rent, if tick < 25 { old_rent } else { new_rent });
             }
         }
-        assert!(deferred_prompts>0,"scheduled prompt output must reach the retained host boundary");
+        assert!(
+            deferred_prompts > 0,
+            "scheduled prompt output must reach the retained host boundary"
+        );
         assert_eq!(session.world.clock.hour(), 9);
         assert_eq!(human_calls.len(), 6);
         assert!(matches!(
@@ -2606,11 +4792,9 @@ mod tests {
         assert_eq!(session.history.cursor(0, 0), Some(34));
         assert_eq!(
             tick_boundaries,
-            [
-                0x4805b0, 0x4eb5b0, 0x450080, 0x4b5db0, 0x4b5d50
-            ]
-            .into_iter()
-            .collect()
+            [0x4805b0, 0x4eb5b0, 0x450080, 0x4b5db0, 0x4b5d50]
+                .into_iter()
+                .collect()
         );
         println!(
             "Full day: 15000 ticks, {} paused host frames, {} explicit tick helper boundaries",
@@ -2737,7 +4921,10 @@ mod tests {
             .unwrap();
         assert_ne!(session.roster.manager.players[1].bytes[0x10], 0);
         session.world.clock.timing[0] = tick + 25;
-        let before_elimination_ages=[session.world.ownership_refresh_counter,session.population.business_counts.age];
+        let before_elimination_ages = [
+            session.world.ownership_refresh_counter,
+            session.population.business_counts.age,
+        ];
         let mut notices = vec![];
         session
             .drain_commands(&assets, |event| {
@@ -2772,8 +4959,14 @@ mod tests {
             session.world.ledgers.players[1].housing_counter,
             baseline_housing
         );
-        assert_eq!(session.world.ownership_refresh_counter, before_elimination_ages[0].wrapping_add(100));
-        assert_eq!(session.population.business_counts.age, before_elimination_ages[1].wrapping_add(100));
+        assert_eq!(
+            session.world.ownership_refresh_counter,
+            before_elimination_ages[0].wrapping_add(100)
+        );
+        assert_eq!(
+            session.population.business_counts.age,
+            before_elimination_ages[1].wrapping_add(100)
+        );
         assert_eq!(session.roster.manager.players.len(), 2);
         println!(
             "Market-share win: callback marker, score, retail reset, queued notice,25-tick elimination, property/business/account transfer and retained slots verified"
@@ -2852,7 +5045,9 @@ mod tests {
         let mut effects = vec![];
         session
             .drain_commands(&assets, |event| {
-                if !matches!(event,live_commands::Event::Outcome(_)) {effects.push(event);}
+                if !matches!(event, live_commands::Event::Outcome(_)) {
+                    effects.push(event);
+                }
                 Ok(())
             })
             .unwrap();
@@ -2992,7 +5187,6 @@ mod tests {
         );
     }
 
-
     #[test]
     #[ignore = "requires original level scripts, people meshes and rendering assets"]
     fn original_construction_lifecycle() {
@@ -3024,32 +5218,39 @@ mod tests {
             // under Residential even though its catalog type word is zero.
             let kind = if case == 3 { 1 } else { case };
             let inputs = || Inputs {
-                    tree_locators: None,
-                    image: &image,
-                    board: &board,
-                    file: &file,
-                    people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                tree_locators: None,
+                image: &image,
+                board: &board,
+                file: &file,
+                people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
+                vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                    &image, &index, &archive,
+                )
+                .unwrap(),
+                transport_models: openmt2001::traffic::models::Models::from_original(
+                    &image, &index, &archive,
+                )
+                .unwrap(),
+                road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+                scripts,
+                parameters: std::str::from_utf8(&parameters).unwrap(),
+                era_styles: load_era_styles(
+                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                        .parent()
                         .unwrap(),
-                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(
-                        &image, &index, &archive,
-                    )
-                    .unwrap(),
-                    transport_models: openmt2001::traffic::models::Models::from_original(
-                        &image, &index, &archive,
-                    )
-                    .unwrap(),
-                    road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
-                    scripts,
-                    parameters: std::str::from_utf8(&parameters).unwrap(),
-                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
-                    timetable: std::str::from_utf8(&timetable).unwrap(),
-                    scenario: "SCENARIO3",
-                    difficulty: 0,
-                    selected_character: 4,
-                    profile_name: b"Construction Fixture",
-                    character_names: &names,
-                };
-            let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
+                )
+                .unwrap(),
+                timetable: std::str::from_utf8(&timetable).unwrap(),
+                scenario: "SCENARIO3",
+                difficulty: 0,
+                selected_character: 4,
+                profile_name: b"Construction Fixture",
+                character_names: &names,
+            };
+            let policy = || Policy {
+                seed: 0x12345678,
+                auxiliary_prior_bytes: [0; 0x11c],
+            };
             let mut session = Session::initialize(inputs(), policy()).unwrap();
             session.world.clock.calendar[0] = 9;
             let assets = CommandAssets {
@@ -3062,11 +5263,15 @@ mod tests {
                 // sees one owner across the complete property-color group.
                 let category = 33usize;
                 let identity = u32::from_le_bytes(
-                    session.world.categories[category][0x8c..0x90].try_into().unwrap());
-                let members = crate::build_panel::special_residential_group(&image, identity).unwrap();
+                    session.world.categories[category][0x8c..0x90]
+                        .try_into()
+                        .unwrap(),
+                );
+                let members =
+                    crate::build_panel::special_residential_group(&image, identity).unwrap();
                 assert_eq!(members, [27, 23, 33, -1]);
-                let prior = members.map(|id| (id >= 0).then(||
-                    session.world.categories[id as usize][5]));
+                let prior =
+                    members.map(|id| (id >= 0).then(|| session.world.categories[id as usize][5]));
                 for id in members.into_iter().filter(|&id| id >= 0) {
                     session.world.categories[id as usize][5] = 1;
                 }
@@ -3075,52 +5280,97 @@ mod tests {
                 let mut selected = None;
                 for width in 1..=6 {
                     for depth in 1..=6 {
-                        if width * depth < info_word(0x38) || width * depth > info_word(0x3c)
-                            || width.max(depth) > info_word(0x40) { continue; }
+                        if width * depth < info_word(0x38)
+                            || width * depth > info_word(0x3c)
+                            || width.max(depth) > info_word(0x40)
+                        {
+                            continue;
+                        }
                         for x in 0..=7 - width {
                             for y in 0..=7 - depth {
-                                let rect = [x as i32, y as i32,
-                                    (x + width - 1) as i32, (y + depth - 1) as i32];
+                                let rect = [
+                                    x as i32,
+                                    y as i32,
+                                    (x + width - 1) as i32,
+                                    (y + depth - 1) as i32,
+                                ];
                                 if building_pool::can_place(
-                                    session.world.categories[category][0x9c..0xcd].try_into().unwrap(), rect) {
+                                    session.world.categories[category][0x9c..0xcd]
+                                        .try_into()
+                                        .unwrap(),
+                                    rect,
+                                ) {
                                     selected = Some((x, y, width, depth));
                                 }
                             }
                         }
                     }
                 }
-                let (x, y, width, depth) = selected.expect("original owned Hotel group has a buildable lot");
+                let (x, y, width, depth) =
+                    selected.expect("original owned Hotel group has a buildable lot");
                 let request = crate::build_panel::Request {
-                    category: category as i32, origin: [x as i32, y as i32],
-                    size: [width as i32, depth as i32], height: info_word(0x48) as i32,
-                    packed_model: 0, kind: 1, quality: 0, displayed_quote: 0., business: 43,
+                    category: category as i32,
+                    origin: [x as i32, y as i32],
+                    size: [width as i32, depth as i32],
+                    height: info_word(0x48) as i32,
+                    packed_model: 0,
+                    kind: 1,
+                    quality: 0,
+                    displayed_quote: 0.,
+                    business: 43,
                 };
                 let quote = session.inspect_build(&request, &assets).unwrap();
-                assert!(quote.preview.is_some(), "special Hotel has original model preview");
+                assert!(
+                    quote.preview.is_some(),
+                    "special Hotel has original model preview"
+                );
                 assert!(quote.allowed(), "owned group permits Hotel construction");
                 session.world.categories[23][5] = 2;
-                assert!(session.inspect_build(&request, &assets).is_err(),
-                    "stale Hotel quote cannot bypass lost group ownership");
+                assert!(
+                    session.inspect_build(&request, &assets).is_err(),
+                    "stale Hotel quote cannot bypass lost group ownership"
+                );
                 session.world.categories[23][5] = 1;
                 let mut wrong_kind = request.clone();
                 wrong_kind.kind = 0;
-                assert!(session.inspect_build(&wrong_kind, &assets).is_err(),
-                    "special row 43 is not an ordinary retail choice");
-                for (id, owner) in members.into_iter().zip(prior).filter_map(|(id, owner)| owner.map(|owner| (id, owner))) {
+                assert!(
+                    session.inspect_build(&wrong_kind, &assets).is_err(),
+                    "special row 43 is not an ordinary retail choice"
+                );
+                for (id, owner) in members
+                    .into_iter()
+                    .zip(prior)
+                    .filter_map(|(id, owner)| owner.map(|owner| (id, owner)))
+                {
                     session.world.categories[id as usize][5] = owner;
                 }
             }
-            let business = if case == 3 { 43 } else {
-                session.world.catalog.info.rows().iter()
-                    .position(|r| r[0xc..0x10] == kind.to_le_bytes()).unwrap()
+            let business = if case == 3 {
+                43
+            } else {
+                session
+                    .world
+                    .catalog
+                    .info
+                    .rows()
+                    .iter()
+                    .position(|r| r[0xc..0x10] == kind.to_le_bytes())
+                    .unwrap()
             };
             let height = if case == 3 {
-                u32::from_le_bytes(session.world.catalog.info.row(43).unwrap()[0x48..0x4c]
-                    .try_into().unwrap()) as u8
-            } else { 1 };
+                u32::from_le_bytes(
+                    session.world.catalog.info.row(43).unwrap()[0x48..0x4c]
+                        .try_into()
+                        .unwrap(),
+                ) as u8
+            } else {
+                1
+            };
             let mut selected = None;
             let mut blocks: Vec<_> = board.blocks.iter().collect();
-            if case == 3 { blocks.retain(|block| block.id == 33); }
+            if case == 3 {
+                blocks.retain(|block| block.id == 33);
+            }
             blocks.sort_by_key(|block| {
                 std::cmp::Reverse(u32::from_le_bytes(
                     session.world.categories[block.id][8..12]
@@ -3135,21 +5385,34 @@ mod tests {
                 }
                 for (x, y, width, depth) in (1..=6u32)
                     .flat_map(|width| (1..=6u32).map(move |depth| (width, depth)))
-                    .flat_map(|(width, depth)| (0..=7-width).flat_map(move |x|
-                        (0..=7-depth).map(move |y| (x, y, width, depth))))
+                    .flat_map(|(width, depth)| {
+                        (0..=7 - width)
+                            .flat_map(move |x| (0..=7 - depth).map(move |y| (x, y, width, depth)))
+                    })
                 {
-                    if case != 3 && (width != 2 || depth != 2
-                        || ![[0, 0], [0, 5], [5, 0], [5, 5]].contains(&[x, y])) {
+                    if case != 3
+                        && (width != 2
+                            || depth != 2
+                            || ![[0, 0], [0, 5], [5, 0], [5, 5]].contains(&[x, y]))
+                    {
                         continue;
                     }
                     if case == 3 {
                         let row = session.world.catalog.info.row(43).unwrap();
                         let word = |at| u32::from_le_bytes(row[at..at + 4].try_into().unwrap());
-                        if width * depth < word(0x38) || width * depth > word(0x3c)
-                            || width.max(depth) > word(0x40) { continue; }
+                        if width * depth < word(0x38)
+                            || width * depth > word(0x3c)
+                            || width.max(depth) > word(0x40)
+                        {
+                            continue;
+                        }
                     }
-                    let rectangle = [x as i32, y as i32,
-                        (x + width - 1) as i32, (y + depth - 1) as i32];
+                    let rectangle = [
+                        x as i32,
+                        y as i32,
+                        (x + width - 1) as i32,
+                        (y + depth - 1) as i32,
+                    ];
                     if !building_pool::can_place(
                         category[0x9c..0xcd].try_into().unwrap(),
                         rectangle,
@@ -3200,19 +5463,37 @@ mod tests {
                 // base600 + rent69.588455f32 + utilities24 -> FTOL693.
                 // Pin the operands; raw PE defaults10/10 instead quote735.
                 assert_eq!((category, business, kind, height, hour), (33, 43, 1, 2, 9));
-                assert_eq!((rectangle[2] - rectangle[0] + 1)
-                    * (rectangle[3] - rectangle[1] + 1), 6);
+                assert_eq!(
+                    (rectangle[2] - rectangle[0] + 1) * (rectangle[3] - rectangle[1] + 1),
+                    6
+                );
                 assert_eq!(command.quality, 0);
-                assert_eq!(session.world.city.building_parameters.row(1).unwrap(), [3, 15, 4]);
-                assert_eq!(f32::from_le_bytes(session.world.categories[33][0x84..0x88]
-                    .try_into().unwrap()), 4.);
+                assert_eq!(
+                    session.world.city.building_parameters.row(1).unwrap(),
+                    [3, 15, 4]
+                );
+                assert_eq!(
+                    f32::from_le_bytes(
+                        session.world.categories[33][0x84..0x88].try_into().unwrap()
+                    ),
+                    4.
+                );
                 let hotel = session.world.catalog.info.row(43).unwrap();
                 let hotel_word = |at| u32::from_le_bytes(hotel[at..at + 4].try_into().unwrap());
-                assert_eq!((hotel_word(0x38), hotel_word(0x3c), hotel_word(0x48),
-                    hotel_word(0x54)), (6, 16, 2, 10));
+                assert_eq!(
+                    (
+                        hotel_word(0x38),
+                        hotel_word(0x3c),
+                        hotel_word(0x48),
+                        hotel_word(0x54)
+                    ),
+                    (6, 16, 2, 10)
+                );
                 assert_eq!(image.f32_at(0x53be78).unwrap(), 0.5);
-                assert_eq!(command.components.map(f32::to_bits),
-                    [600_f32, 0., 69.588455, 24.].map(f32::to_bits));
+                assert_eq!(
+                    command.components.map(f32::to_bits),
+                    [600_f32, 0., 69.588455, 24.].map(f32::to_bits)
+                );
                 assert_eq!(quote, 693, "configured Hotel lifecycle quote");
             }
             let slot = building_pool::first_free(&session.world.buildings)
@@ -3226,11 +5507,14 @@ mod tests {
                     .unwrap();
             }
             //Native45184e reserves these literal x-major cells before enqueue.
-            let mut admitted_grid: [u8;49] = session.world.categories[category][0x9c..0xcd]
-                .try_into().unwrap();
-            for x in rectangle[0]..=rectangle[2] { for y in rectangle[1]..=rectangle[3] {
-                admitted_grid[(x*7+y) as usize] = command.height as u8;
-            }}
+            let mut admitted_grid: [u8; 49] = session.world.categories[category][0x9c..0xcd]
+                .try_into()
+                .unwrap();
+            for x in rectangle[0]..=rectangle[2] {
+                for y in rectangle[1]..=rectangle[3] {
+                    admitted_grid[(x * 7 + y) as usize] = command.height as u8;
+                }
+            }
             let cash_before_admission = session.world.ledgers.players[0].cash.to_bits();
             let mut events = Vec::new();
             session
@@ -3244,56 +5528,116 @@ mod tests {
                 )
                 .unwrap();
             assert!(events.is_empty());
-            assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
-            assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
+            assert_eq!(
+                &session.world.categories[category][0x9c..0xcd],
+                &admitted_grid
+            );
+            assert_eq!(
+                session.world.ledgers.players[0].cash.to_bits(),
+                cash_before_admission
+            );
             let pending_packet = match session.live_commands.snapshot().unwrap()[0].4 {
-                live_commands::Command::Build(c) => c.packet(), _ => panic!("wrong pending command"),
+                live_commands::Command::Build(c) => c.packet(),
+                _ => panic!("wrong pending command"),
             };
             //A second direct packet sees the first pending footprint and returns
             //sender success without another node, cash post, or human notice.
             let pending_count = session.live_commands.snapshot().unwrap().len();
-            session.submit_command(live_commands::Command::Build(command.clone()), &assets,
-                |e| Err(format!("rejected human construction emitted {e:?}"))).unwrap();
-            assert_eq!(session.live_commands.snapshot().unwrap().len(), pending_count);
-            assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
-            assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
-            assert_eq!(pending_packet, command.packet(), "quoted components stay in the packet");
+            session
+                .submit_command(
+                    live_commands::Command::Build(command.clone()),
+                    &assets,
+                    |e| Err(format!("rejected human construction emitted {e:?}")),
+                )
+                .unwrap();
+            assert_eq!(
+                session.live_commands.snapshot().unwrap().len(),
+                pending_count
+            );
+            assert_eq!(
+                &session.world.categories[category][0x9c..0xcd],
+                &admitted_grid
+            );
+            assert_eq!(
+                session.world.ledgers.players[0].cash.to_bits(),
+                cash_before_admission
+            );
+            assert_eq!(
+                pending_packet,
+                command.packet(),
+                "quoted components stay in the packet"
+            );
             let start = session.world.clock.timing[0];
             let mut cold_pending = if case == 0 {
-                let camera = openmt2001::flyby::CameraSample { eye:[100.,120.,100.], target:[0.;3], up:[0.,1.,0.], vertical_fov:0.7 };
-                let cameras = crate::save_menu::cameras(None,camera).unwrap();
-                let bytes = session.save_v2(&image,cameras,1).unwrap();
+                let camera = openmt2001::flyby::CameraSample {
+                    eye: [100., 120., 100.],
+                    target: [0.; 3],
+                    up: [0., 1., 0.],
+                    vertical_fov: 0.7,
+                };
+                let cameras = crate::save_menu::cameras(None, camera).unwrap();
+                let bytes = session.save_v2(&image, cameras, 1).unwrap();
                 let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
-                let mut cold = Session::load_original(inputs(),policy(),&bytes).unwrap();
+                let mut cold = Session::load_original(inputs(), policy(), &bytes).unwrap();
                 cold.restore_v2_extension(&save).unwrap();
                 let rows = cold.live_commands.snapshot().unwrap();
-                assert_eq!(rows.len(),pending_count);
-                assert_eq!((rows[0].1,rows[0].2,rows[0].3),(start+25,start+25,false));
-                let live_commands::Command::Build(restored) = rows[0].4 else { panic!("lost saved Build0f") };
-                assert_eq!(restored.packet(),pending_packet);
-                assert_eq!(cold.allocation_next,session.allocation_next,"restore cannot produce message30");
-                assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),cash_before_admission);
+                assert_eq!(rows.len(), pending_count);
+                assert_eq!(
+                    (rows[0].1, rows[0].2, rows[0].3),
+                    (start + 25, start + 25, false)
+                );
+                let live_commands::Command::Build(restored) = rows[0].4 else {
+                    panic!("lost saved Build0f")
+                };
+                assert_eq!(restored.packet(), pending_packet);
+                assert_eq!(
+                    cold.allocation_next, session.allocation_next,
+                    "restore cannot produce message30"
+                );
+                assert_eq!(
+                    cold.world.ledgers.players[0].cash.to_bits(),
+                    cash_before_admission
+                );
                 //Original447d70 rebuilds occupancy from buildings; the saved
                 //140-byte category prefix excludes+9c. A future packet enters
                 //450a30/480900, not451720. No fresh reservation on cold restore.
-                for x in rectangle[0]..=rectangle[2] { for y in rectangle[1]..=rectangle[3] {
-                    assert_eq!(cold.world.categories[category][0x9c+(x*7+y) as usize],0);
-                }}
+                for x in rectangle[0]..=rectangle[2] {
+                    for y in rectangle[1]..=rectangle[3] {
+                        assert_eq!(
+                            cold.world.categories[category][0x9c + (x * 7 + y) as usize],
+                            0
+                        );
+                    }
+                }
                 Some(cold)
-            } else { None };
+            } else {
+                None
+            };
             for tick in start..start + 25 {
                 session.world.clock.timing[0] = tick;
                 session
                     .drain_commands(&assets, |_| panic!("construction dispatched early"))
                     .unwrap();
                 assert_eq!(session.world.buildings[slot], original_slot);
-                assert_eq!(&session.world.categories[category][0x9c..0xcd], &admitted_grid);
-                assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash_before_admission);
+                assert_eq!(
+                    &session.world.categories[category][0x9c..0xcd],
+                    &admitted_grid
+                );
+                assert_eq!(
+                    session.world.ledgers.players[0].cash.to_bits(),
+                    cash_before_admission
+                );
                 if let Some(cold) = cold_pending.as_mut() {
                     cold.world.clock.timing[0] = tick;
-                    cold.drain_commands(&assets,|e|Err(format!("saved Build0f dispatched early: {e:?}"))).unwrap();
-                    assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),cash_before_admission);
-                    assert_eq!(cold.world.pending_world.count,0);
+                    cold.drain_commands(&assets, |e| {
+                        Err(format!("saved Build0f dispatched early: {e:?}"))
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        cold.world.ledgers.players[0].cash.to_bits(),
+                        cash_before_admission
+                    );
+                    assert_eq!(cold.world.pending_world.count, 0);
                 }
             }
             session.world.clock.timing[0] = start + 25;
@@ -3305,11 +5649,17 @@ mod tests {
                 .unwrap();
             assert_eq!(session.world.pending_world.count, 1);
             if let Some(cold) = cold_pending.as_mut() {
-                cold.world.clock.timing[0] = start+25;
-                cold.drain_commands(&assets,|_|Ok(())).unwrap();
-                assert_eq!(cold.world.pending_world.count,1,"saved packet must apply once at its original Total deadline");
-                assert_eq!(cold.world.ledgers.players[0].cash.to_bits(),expected_account.cash.to_bits());
-                assert_eq!(&cold.world.categories[category][0x9c..0xcd],&admitted_grid);
+                cold.world.clock.timing[0] = start + 25;
+                cold.drain_commands(&assets, |_| Ok(())).unwrap();
+                assert_eq!(
+                    cold.world.pending_world.count, 1,
+                    "saved packet must apply once at its original Total deadline"
+                );
+                assert_eq!(
+                    cold.world.ledgers.players[0].cash.to_bits(),
+                    expected_account.cash.to_bits()
+                );
+                assert_eq!(&cold.world.categories[category][0x9c..0xcd], &admitted_grid);
                 assert!(cold.live_commands.snapshot().unwrap().is_empty());
             }
             assert_eq!(session.world.buildings[slot][0x14..0x18], [0; 4]);
@@ -3455,8 +5805,10 @@ mod tests {
                 assert!(session.world.available.contains(&linked));
             }
             if case == 3 {
-                assert!(!session.world.available.contains(&linked),
-                    "special Hotel keeps its original catalog availability class");
+                assert!(
+                    !session.world.available.contains(&linked),
+                    "special Hotel keeps its original catalog availability class"
+                );
             }
             if kind == 0 {
                 assert!(
@@ -3695,120 +6047,232 @@ mod tests {
     #[test]
     #[ignore = "requires original data and GPU; natural Scenario1 reaches its first terminal result"]
     fn natural_ai_reaches_terminal_loss() {
-        run_unrestricted_ai(72,true,false,true,0,false,0);
+        run_unrestricted_ai(72, true, false, true, 0, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; unrestricted opponents through a full day"]
     fn unrestricted_ai_completes_one_day() {
-        run_unrestricted_ai(24,true,false,false,0,false,0);
+        run_unrestricted_ai(24, true, false, false, 0, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; legal human planning through the following trading day"]
     fn human_retail_opens_and_trades() {
-        run_unrestricted_ai(48,true,true,false,0,false,0);
+        run_unrestricted_ai(48, true, true, false, 0, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; measured two-shop Scenario1 loss"]
     fn competitive_two_shop_loss() {
-        run_unrestricted_ai(72,true,true,false,2,false,0);
+        run_unrestricted_ai(72, true, true, false, 2, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; measured three-shop Scenario1 result"]
     fn competitive_diversified_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,3,false,0);
+        run_unrestricted_ai(72, true, true, false, 3, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; legal scaled retail through Scenario1 result"]
     fn competitive_scaled_retail_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,8,false,0);
+        run_unrestricted_ai(72, true, true, false, 8, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; five observed-selling shops through Scenario1 result"]
     fn competitive_five_shop_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,5,false,0);
+        run_unrestricted_ai(72, true, true, false, 5, false, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; five-shop value-informed visible auction bidding"]
     fn competitive_five_shop_auction_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,5,true,0);
+        run_unrestricted_ai(72, true, true, false, 5, true, 0);
     }
     #[test]
     #[ignore = "requires original data and GPU; legal enlarged stockout shops through Scenario1 result"]
     fn competitive_five_shop_capacity_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,5,false,1);
+        run_unrestricted_ai(72, true, true, false, 5, false, 1);
     }
     #[test]
     #[ignore = "requires original data and GPU; legal five-shop Scenario1 human win"]
     fn competitive_five_shop_further_capacity_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,5,false,2);
+        run_unrestricted_ai(72, true, true, false, 5, false, 2);
     }
     #[test]
     #[ignore = "requires original data and GPU; natural Win through retained result and V2 profile"]
     fn competitive_five_shop_win_profile_scenario_one() {
-        run_unrestricted_ai(72,true,true,false,5,false,3);
+        run_unrestricted_ai(72, true, true, false, 5, false, 3);
     }
     #[test]
     #[ignore = "requires original data, GPU, and retained Scenario1 profile; genuine three-election mayor win remains open"]
     fn natural_scenario_six_mayor_objective_frontier() {
-        run_unrestricted_ai(144,true,true,false,5,false,4);
+        run_unrestricted_ai(144, true, true, false, 5, false, 4);
     }
     #[test]
     #[ignore = "requires original data, GPU, and retained Scenario1+6 Win profile in OPENMT2001_NATURAL_WIN_PROFILE"]
     fn natural_scenario_eleven_sales_frontier() {
-        run_unrestricted_ai(72,false,true,false,5,false,5);
+        run_unrestricted_ai(72, false, true, false, 5, false, 5);
     }
-    fn try_human_bakery(session:&mut Session<'_>,assets:&CommandAssets<'_,'_>,excluded:&[u32],reserve:f32,competitive_limit:usize,capacity_mode:u8)->Result<Option<u32>,String>{
-        let competitive=competitive_limit!=0;
-        let mut categories=(0..52).collect::<Vec<_>>();
-        categories.sort_by_key(|&i|std::cmp::Reverse(u32::from_le_bytes(session.world.categories[i][0x88..0x8c].try_into().unwrap())));
-        let businesses=if competitive_limit==5{
-            let ranked=[20,21,11,13,26];
+    fn try_human_bakery(
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        excluded: &[u32],
+        reserve: f32,
+        competitive_limit: usize,
+        capacity_mode: u8,
+    ) -> Result<Option<u32>, String> {
+        let competitive = competitive_limit != 0;
+        let mut categories = (0..52).collect::<Vec<_>>();
+        categories.sort_by_key(|&i| {
+            std::cmp::Reverse(u32::from_le_bytes(
+                session.world.categories[i][0x88..0x8c].try_into().unwrap(),
+            ))
+        });
+        let businesses = if competitive_limit == 5 {
+            let ranked = [20, 21, 11, 13, 26];
             ranked[excluded.len().min(ranked.len())..].to_vec()
-        }else if competitive_limit==8{
-            let ranked=[20,21,11,19,13,26,27,17];
+        } else if competitive_limit == 8 {
+            let ranked = [20, 21, 11, 19, 13, 26, 27, 17];
             ranked[excluded.len().min(ranked.len())..].to_vec()
-        }else if competitive{match excluded.len(){0=>vec![20],1=>vec![21],2=>vec![13,26,11],_=>vec![]}}else{vec![0]};
-        for business in businesses {let info=session.world.catalog.info.row(business).unwrap().to_vec();
-        if info[0x30]==0{continue;}
-        let catalog_word=|at|u32::from_le_bytes(info[at..at+4].try_into().unwrap()) as i32;
-        let minimum_height=catalog_word(0x48);
-        let enlarge=capacity_mode!=0&&matches!(business,20|13|26);
-        let increment=if capacity_mode>=2&&matches!(business,13|26){2}else{i32::from(enlarge)};
-        let height=(minimum_height+increment).min(catalog_word(0x44));
-        let minimum_area=catalog_word(0x38)+i32::from(enlarge&&height<minimum_height+increment);
-        for &category in &categories{
-            if excluded.contains(&(category as u32)){continue;}
-            if !matches!(crate::build_panel::Context::from_session(session,category)?.entry(),crate::build_panel::Entry::Open){continue;}
-            for width in 1..=6 {for depth in 1..=6 {
-                if !competitive&&(width,depth)!=(2,2) {continue;}
-                if width*depth<minimum_area||width*depth>catalog_word(0x3c)||width.max(depth)>catalog_word(0x40){continue;}
-            for x in 0..=(7-width){for y in 0..=(7-depth){
-                let request=crate::build_panel::Request{category:category as i32,origin:[x,y],size:[width,depth],height,packed_model:0,kind:0,quality:0,displayed_quote:0.,business:business as u32};
-                let inspected=session.inspect_build(&request,assets)?;
-                if !inspected.allowed(){continue;}
-                if session.world.ledgers.players[0].cash-inspected.total<reserve{continue;}
-                let form=crate::build_panel::Form{category:category as i32,rectangle:[x,y,x+width-1,y+depth-1],height,quality:0,choices:[0;3],variants:vec![0],kind:0,business:business as u32,displayed_quote:inspected.total};
-                let request=form.request(inspected.category_locked,inspected.affordable,inspected.preview.is_some())?.map_err(|e|format!("legal human construction form blocked: {e:?}"))?;
-                let result=session.submit_build(&request,assets,|event|Err(format!("human build dispatched synchronously: {event:?}")))?;
-                assert!(result.submitted);
-                let rate=f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap());
-                let capacity=openmt2001::economy::stock_capacity(width*depth,height as u8,rate);
-                if enlarge {
-                    let baseline=openmt2001::economy::stock_capacity(catalog_word(0x38),minimum_height as u8,rate);
-                    assert!(capacity>baseline,"stockout shop did not gain original stock capacity");
-                if capacity_mode>=2&&matches!(business,13|26) {
-                        let prior=openmt2001::economy::stock_capacity(catalog_word(0x38),(minimum_height+1) as u8,rate);
-                        assert!(capacity>prior,"second legal increase did not exceed prior shop capacity");
+        } else if competitive {
+            match excluded.len() {
+                0 => vec![20],
+                1 => vec![21],
+                2 => vec![13, 26, 11],
+                _ => vec![],
+            }
+        } else {
+            vec![0]
+        };
+        for business in businesses {
+            let info = session.world.catalog.info.row(business).unwrap().to_vec();
+            if info[0x30] == 0 {
+                continue;
+            }
+            let catalog_word = |at| u32::from_le_bytes(info[at..at + 4].try_into().unwrap()) as i32;
+            let minimum_height = catalog_word(0x48);
+            let enlarge = capacity_mode != 0 && matches!(business, 20 | 13 | 26);
+            let increment = if capacity_mode >= 2 && matches!(business, 13 | 26) {
+                2
+            } else {
+                i32::from(enlarge)
+            };
+            let height = (minimum_height + increment).min(catalog_word(0x44));
+            let minimum_area =
+                catalog_word(0x38) + i32::from(enlarge && height < minimum_height + increment);
+            for &category in &categories {
+                if excluded.contains(&(category as u32)) {
+                    continue;
+                }
+                if !matches!(
+                    crate::build_panel::Context::from_session(session, category)?.entry(),
+                    crate::build_panel::Entry::Open
+                ) {
+                    continue;
+                }
+                for width in 1..=6 {
+                    for depth in 1..=6 {
+                        if !competitive && (width, depth) != (2, 2) {
+                            continue;
+                        }
+                        if width * depth < minimum_area
+                            || width * depth > catalog_word(0x3c)
+                            || width.max(depth) > catalog_word(0x40)
+                        {
+                            continue;
+                        }
+                        for x in 0..=(7 - width) {
+                            for y in 0..=(7 - depth) {
+                                let request = crate::build_panel::Request {
+                                    category: category as i32,
+                                    origin: [x, y],
+                                    size: [width, depth],
+                                    height,
+                                    packed_model: 0,
+                                    kind: 0,
+                                    quality: 0,
+                                    displayed_quote: 0.,
+                                    business: business as u32,
+                                };
+                                let inspected = session.inspect_build(&request, assets)?;
+                                if !inspected.allowed() {
+                                    continue;
+                                }
+                                if session.world.ledgers.players[0].cash - inspected.total < reserve
+                                {
+                                    continue;
+                                }
+                                let form = crate::build_panel::Form {
+                                    category: category as i32,
+                                    rectangle: [x, y, x + width - 1, y + depth - 1],
+                                    height,
+                                    quality: 0,
+                                    choices: [0; 3],
+                                    variants: vec![0],
+                                    kind: 0,
+                                    business: business as u32,
+                                    displayed_quote: inspected.total,
+                                };
+                                let request = form
+                                    .request(
+                                        inspected.category_locked,
+                                        inspected.affordable,
+                                        inspected.preview.is_some(),
+                                    )?
+                                    .map_err(|e| {
+                                        format!("legal human construction form blocked: {e:?}")
+                                    })?;
+                                let result = session.submit_build(&request, assets, |event| {
+                                    Err(format!("human build dispatched synchronously: {event:?}"))
+                                })?;
+                                assert!(result.submitted);
+                                let rate = f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap());
+                                let capacity = openmt2001::economy::stock_capacity(
+                                    width * depth,
+                                    height as u8,
+                                    rate,
+                                );
+                                if enlarge {
+                                    let baseline = openmt2001::economy::stock_capacity(
+                                        catalog_word(0x38),
+                                        minimum_height as u8,
+                                        rate,
+                                    );
+                                    assert!(
+                                        capacity > baseline,
+                                        "stockout shop did not gain original stock capacity"
+                                    );
+                                    if capacity_mode >= 2 && matches!(business, 13 | 26) {
+                                        let prior = openmt2001::economy::stock_capacity(
+                                            catalog_word(0x38),
+                                            (minimum_height + 1) as u8,
+                                            rate,
+                                        );
+                                        assert!(
+                                            capacity > prior,
+                                            "second legal increase did not exceed prior shop capacity"
+                                        );
+                                    }
+                                }
+                                println!(
+                                    "Human original construction form submits business{business} on category{category}, lot[{x},{y}], size[{width},{depth}], height{height}, capacity{capacity}, quote{} at tick{}",
+                                    result.total, session.world.clock.timing[0]
+                                );
+                                return Ok(Some(category as u32));
+                            }
+                        }
                     }
                 }
-                println!("Human original construction form submits business{business} on category{category}, lot[{x},{y}], size[{width},{depth}], height{height}, capacity{capacity}, quote{} at tick{}",result.total,session.world.clock.timing[0]);
-                return Ok(Some(category as u32));
-            }}}}
-        }}
+            }
+        }
         Ok(None)
     }
-    fn run_unrestricted_ai(hours:u32,require_completion:bool,human_build:bool,expect_loss:bool,competitive_limit:usize,auction_value_bid:bool,capacity_mode:u8) {
-        let competitive=competitive_limit!=0;
+    fn run_unrestricted_ai(
+        hours: u32,
+        require_completion: bool,
+        human_build: bool,
+        expect_loss: bool,
+        competitive_limit: usize,
+        auction_value_bid: bool,
+        capacity_mode: u8,
+    ) {
+        let competitive = competitive_limit != 0;
         std::thread::Builder::new().stack_size(16*1024*1024).spawn(move || {
             let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
             let executable=read("OPENMT2001_EXE");let directory=read("OPENMT2001_ARCHIVE_DIR");
@@ -4495,7 +6959,12 @@ mod tests {
                         .unwrap(),
                         scripts,
                         parameters: std::str::from_utf8(&parameters).unwrap(),
-                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                        era_styles: load_era_styles(
+                            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                                .parent()
+                                .unwrap(),
+                        )
+                        .unwrap(),
                         timetable: std::str::from_utf8(&timetable).unwrap(),
                         scenario,
                         difficulty,
@@ -4604,8 +7073,12 @@ mod tests {
                 }
                 assert_eq!(session.world.clock.hour(), 9);
                 assert!(session.world.ledgers.residents.active_count > 0);
-                let report =
-                    crate::city_people::Report::from_world(&session.world, &image, &session.roster.manager).unwrap();
+                let report = crate::city_people::Report::from_world(
+                    &session.world,
+                    &image,
+                    &session.roster.manager,
+                )
+                .unwrap();
                 assert!(report.initialized);
                 assert_eq!(
                     report.rows[0].value,
@@ -4747,7 +7220,15 @@ mod tests {
                         .iter()
                         .all(|(command, _)| !matches!(command, level_script::Command::Prompt))
                 );
-                assert_eq!(session.hooks.timers.iter().map(|t|u32::from_le_bytes(t[16..20].try_into().unwrap())).collect::<Vec<_>>(),[0x4baa10,0x4ba4d0,0x4ba580,0x481680]);
+                assert_eq!(
+                    session
+                        .hooks
+                        .timers
+                        .iter()
+                        .map(|t| u32::from_le_bytes(t[16..20].try_into().unwrap()))
+                        .collect::<Vec<_>>(),
+                    [0x4baa10, 0x4ba4d0, 0x4ba580, 0x481680]
+                );
                 if difficulty == 0 {
                     let scene = session
                         .scene(
@@ -4912,7 +7393,15 @@ mod tests {
                 if scenario == "SCENARIO1" && difficulty == 0 {
                     exercise_ai_hourly(&mut session, &image, &board, &file);
                     exercise_event_retirement(&mut session, &image, &board, &file);
-                    cards::exercise(&mut session,&CommandAssets{image:&image,board:&board,file:&file},&mut simulation_test_policy());
+                    cards::exercise(
+                        &mut session,
+                        &CommandAssets {
+                            image: &image,
+                            board: &board,
+                            file: &file,
+                        },
+                        &mut simulation_test_policy(),
+                    );
                     exercise_ai_business_management(&mut session, &image, &board, &file);
                     exercise_business_takeover(&mut session, &image, &board, &file);
                     exercise_business_sale(&mut session, &image, &board, &file);
@@ -4922,7 +7411,14 @@ mod tests {
                     exercise_human_replies(&mut session, &image, &board, &file);
                     exercise_lease_expiry(&mut session, &image, &board, &file);
                     exercise_property_offers(&mut session, &image, &board, &file);
-                    exercise_rights_and_outcome(&mut session,&CommandAssets{image:&image,board:&board,file:&file});
+                    exercise_rights_and_outcome(
+                        &mut session,
+                        &CommandAssets {
+                            image: &image,
+                            board: &board,
+                            file: &file,
+                        },
+                    );
                 }
                 if scenario == "SCENARIO3" && difficulty == 1 {
                     exercise_retained_population(&mut session);
@@ -4978,72 +7474,112 @@ mod skirmish_session_acceptance {
         use openmt2001::skirmish::roster::{Kind, Participant};
         let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
         let launch = SkirmishLaunch {
-            level_id:300001, directory:"net1".into(), map:"empty.lua".into(),
-            objective_kind:6, target:3500., difficulty:1,
-            participants:vec![
-                Participant{kind:Kind::Human,token:Some(4),name:b"Fixture Player".to_vec(),ready:true,difficulty:2},
-                Participant{kind:Kind::Ai,token:Some(1),name:b"Explicit Opponent".to_vec(),ready:true,difficulty:0},
+            level_id: 300001,
+            directory: "net1".into(),
+            map: "empty.lua".into(),
+            objective_kind: 6,
+            target: 3500.,
+            difficulty: 1,
+            participants: vec![
+                Participant {
+                    kind: Kind::Human,
+                    token: Some(4),
+                    name: b"Fixture Player".to_vec(),
+                    ready: true,
+                    difficulty: 2,
+                },
+                Participant {
+                    kind: Kind::Ai,
+                    token: Some(1),
+                    name: b"Explicit Opponent".to_vec(),
+                    ready: true,
+                    difficulty: 0,
+                },
             ],
         };
         let session = Session::initialize_skirmish(
-                    Inputs {
-                        tree_locators: None,
-                        image: &image,
-                        board: &board,
-                        file: &file,
-                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
-                            .unwrap(),
-                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
-                            &image, &index, &archive,
-                        )
+            Inputs {
+                tree_locators: None,
+                image: &image,
+                board: &board,
+                file: &file,
+                people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
+                vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                    &image, &index, &archive,
+                )
+                .unwrap(),
+                transport_models: openmt2001::traffic::models::Models::from_original(
+                    &image, &index, &archive,
+                )
+                .unwrap(),
+                road_routes: std::fs::read(std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap())
+                    .unwrap(),
+                scripts,
+                parameters: std::str::from_utf8(&parameters).unwrap(),
+                era_styles: load_era_styles(
+                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                        .parent()
                         .unwrap(),
-                        transport_models: openmt2001::traffic::models::Models::from_original(
-                            &image, &index, &archive,
-                        )
-                        .unwrap(),
-                        road_routes: std::fs::read(
-                            std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
-                        )
-                        .unwrap(),
-                        scripts,
-                        parameters: std::str::from_utf8(&parameters).unwrap(),
-                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
-                        timetable: std::str::from_utf8(&timetable).unwrap(),
-                        scenario: "NET1",
-                        difficulty: 1,
-                        selected_character: 4,
-                        profile_name: b"Fixture Player",
-                        character_names: &names,
-                    },
-                    Policy {
-                        seed: 0x12345678,
-                        auxiliary_prior_bytes: [0; 0x11c],
-                    },
-                    catalog, launch,
-                ).unwrap();
-        let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
-        assert_eq!(session.catalog.selected_level().unwrap().id(),300001);
+                )
+                .unwrap(),
+                timetable: std::str::from_utf8(&timetable).unwrap(),
+                scenario: "NET1",
+                difficulty: 1,
+                selected_character: 4,
+                profile_name: b"Fixture Player",
+                character_names: &names,
+            },
+            Policy {
+                seed: 0x12345678,
+                auxiliary_prior_bytes: [0; 0x11c],
+            },
+            catalog,
+            launch,
+        )
+        .unwrap();
+        let word =
+            |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        assert_eq!(session.catalog.selected_level().unwrap().id(), 300001);
         assert!(!session.catalog.selected_level().unwrap().single_player());
-        assert_eq!(session.catalog.selected_level().unwrap().objective_target(),3500.);
-        assert_eq!(session.world.objective.kind,6);
-        assert_eq!(session.world.objective.target,3500.);
-        assert_eq!(session.difficulty,1);
-        assert_eq!(session.roster.manager.players.len(),2);
-        assert_eq!(session.roster.status.ai_count,1);
-        assert_eq!(session.world.player_money,6500.);
-        assert_eq!(session.world.ledgers.residents.active_count,251);
-        for (slot,(token,kind,difficulty,peer,name)) in [
-            (4,0,2,0,b"Fixture Player".as_slice()),
-            (1,1,0,u32::MAX,b"Explicit Opponent".as_slice()),
-        ].into_iter().enumerate() {
-            let row=&session.saved_player_metadata[slot];
-            assert_eq!(word(row,0),token); assert_eq!(word(row,4),kind);
-            assert_eq!(word(row,40),peer); assert_eq!(word(row,44),difficulty);
-            assert_eq!(&row[8..8+name.len()],name);
-            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x150),token);
-            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x154),kind);
-            if kind == 1 { assert_eq!(word(&session.roster.manager.players[slot].bytes,0x13f4),difficulty); }
-            assert_eq!(session.world.ledgers.players[slot].cash,6500.);
+        assert_eq!(
+            session.catalog.selected_level().unwrap().objective_target(),
+            3500.
+        );
+        assert_eq!(session.world.objective.kind, 6);
+        assert_eq!(session.world.objective.target, 3500.);
+        assert_eq!(session.difficulty, 1);
+        assert_eq!(session.roster.manager.players.len(), 2);
+        assert_eq!(session.roster.status.ai_count, 1);
+        assert_eq!(session.world.player_money, 6500.);
+        assert_eq!(session.world.ledgers.residents.active_count, 251);
+        for (slot, (token, kind, difficulty, peer, name)) in [
+            (4, 0, 2, 0, b"Fixture Player".as_slice()),
+            (1, 1, 0, u32::MAX, b"Explicit Opponent".as_slice()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let row = &session.saved_player_metadata[slot];
+            assert_eq!(word(row, 0), token);
+            assert_eq!(word(row, 4), kind);
+            assert_eq!(word(row, 40), peer);
+            assert_eq!(word(row, 44), difficulty);
+            assert_eq!(&row[8..8 + name.len()], name);
+            assert_eq!(
+                word(&session.roster.manager.players[slot].bytes, 0x150),
+                token
+            );
+            assert_eq!(
+                word(&session.roster.manager.players[slot].bytes, 0x154),
+                kind
+            );
+            if kind == 1 {
+                assert_eq!(
+                    word(&session.roster.manager.players[slot].bytes, 0x13f4),
+                    difficulty
+                );
+            }
+            assert_eq!(session.world.ledgers.players[slot].cash, 6500.);
         }
         assert!(session.campaign_profile.is_none());
         assert!(session.network_command_timer.is_none());
@@ -5066,58 +7602,114 @@ mod skirmish_session_acceptance {
         specs: &[openmt2001::scene::BuildingSpec],
         board: &openmt2001::board::Board,
         file: &openmt2001::build_file::BuildFile<'_>,
-    ) -> Vec<(usize,usize)> {
-        let word = |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+    ) -> Vec<(usize, usize)> {
+        let word =
+            |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut identities = Vec::new();
         for spec in specs {
-            let scene = openmt2001::scene::SceneBuilding::resolve(spec.clone(), board, file).unwrap();
+            let scene =
+                openmt2001::scene::SceneBuilding::resolve(spec.clone(), board, file).unwrap();
             let category_reference = openmt2001::building_geometry::V14_CATEGORY_BASE
                 + scene.block_id as u32 * openmt2001::building_geometry::CATEGORY_STRIDE;
-            let [x,y,w,d] = spec.lot;
-            let endpoints = [x,y,x+w-1,y+d-1];
-            let matches: Vec<_> = state.world.buildings.iter().enumerate()
-                .filter(|(_, row)| row[0x3f] != 0 && word(*row,0x40) == category_reference
-                    && row[4..8] == endpoints).collect();
-            assert_eq!(matches.len(), 1, "authored lot missing or duplicated: {:?}", spec.lot);
+            let [x, y, w, d] = spec.lot;
+            let endpoints = [x, y, x + w - 1, y + d - 1];
+            let matches: Vec<_> = state
+                .world
+                .buildings
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| {
+                    row[0x3f] != 0
+                        && word(*row, 0x40) == category_reference
+                        && row[4..8] == endpoints
+                })
+                .collect();
+            assert_eq!(
+                matches.len(),
+                1,
+                "authored lot missing or duplicated: {:?}",
+                spec.lot
+            );
             let (slot, row) = matches[0];
-            assert_eq!(word(row,0), slot as u32);
+            assert_eq!(word(row, 0), slot as u32);
             assert_eq!(row[8], spec.height);
-            assert_eq!(word(row,0x20), spec.variation);
-            assert_eq!(word(row,0x24), u32::from(spec.kind));
+            assert_eq!(word(row, 0x20), spec.variation);
+            assert_eq!(word(row, 0x24), u32::from(spec.kind));
             assert_eq!(row[0x2c], spec.quality);
-            assert_eq!([f32::from_bits(word(row,0xc)),f32::from_bits(word(row,0x10))], scene.center);
+            assert_eq!(
+                [
+                    f32::from_bits(word(row, 0xc)),
+                    f32::from_bits(word(row, 0x10))
+                ],
+                scene.center
+            );
             assert_eq!(row[0x2d], state.world.categories[scene.block_id][5]);
-            let business_slot = word(row,0x1c) as usize;
+            let business_slot = word(row, 0x1c) as usize;
             let business = &state.world.ledgers.businesses[business_slot];
             assert_ne!(business[0x21c], 0);
-            assert_eq!(word(business,0x210), business_slot as u32);
-            assert_eq!(u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize, slot);
+            assert_eq!(word(business, 0x210), business_slot as u32);
+            assert_eq!(
+                u16::from_le_bytes(business[8..10].try_into().unwrap()) as usize,
+                slot
+            );
             assert_eq!(spec.businesses.len(), 1);
-            let request = openmt2001::map_script::Business::from_arguments(&[
-                openmt2001::lua4::Value::Number(slot as f64),
-                openmt2001::lua4::Value::Bytes(spec.businesses[0].as_bytes().to_vec()),
-            ], &state.world.catalog.info).unwrap().unwrap();
-            assert_eq!(word(business,4), request.kind);
-            assert_eq!(word(business,0), word(state.world.catalog.info.row(request.kind as usize).unwrap(),0xc));
+            let request = openmt2001::map_script::Business::from_arguments(
+                &[
+                    openmt2001::lua4::Value::Number(slot as f64),
+                    openmt2001::lua4::Value::Bytes(spec.businesses[0].as_bytes().to_vec()),
+                ],
+                &state.world.catalog.info,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(word(business, 4), request.kind);
+            assert_eq!(
+                word(business, 0),
+                word(
+                    state.world.catalog.info.row(request.kind as usize).unwrap(),
+                    0xc
+                )
+            );
             let binding = state.models.bindings.get(&slot).unwrap();
-            assert_eq!(word(row,0x170), binding.handle);
+            assert_eq!(word(row, 0x170), binding.handle);
             assert_ne!(binding.handle, 0);
-            let model = &state.models.models[binding.handle as usize-1];
+            let model = &state.models.models[binding.handle as usize - 1];
             let prepared = openmt2001::geometry::prepare(&scene.layers);
-            let positions: Vec<_> = openmt2001::geometry::facade_positions(&prepared).into_iter()
+            let positions: Vec<_> = openmt2001::geometry::facade_positions(&prepared)
+                .into_iter()
                 .chain(openmt2001::roof::mesh(&prepared).positions)
-                .map(|p| scene.local_position(p)).collect();
+                .map(|p| scene.local_position(p))
+                .collect();
             assert!(!positions.is_empty());
             assert_eq!(model.positions, positions);
-            let bytes: Vec<_> = positions.iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
-            assert_eq!(model.definition, openmt2001::mesh::model_definition(&bytes).unwrap());
-            assert_eq!(binding.translation, std::array::from_fn(|i| f32::from_bits(word(row,0x58+i*4))));
-            identities.push((slot,business_slot));
+            let bytes: Vec<_> = positions
+                .iter()
+                .flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes()))
+                .collect();
+            assert_eq!(
+                model.definition,
+                openmt2001::mesh::model_definition(&bytes).unwrap()
+            );
+            assert_eq!(
+                binding.translation,
+                std::array::from_fn(|i| f32::from_bits(word(row, 0x58 + i * 4)))
+            );
+            identities.push((slot, business_slot));
         }
-        let buildings: std::collections::BTreeSet<_> = identities.iter().map(|pair| pair.0).collect();
-        let businesses: std::collections::BTreeSet<_> = identities.iter().map(|pair| pair.1).collect();
-        assert_eq!(buildings.len(), specs.len(), "authored building identities must be unique");
-        assert_eq!(businesses.len(), specs.len(), "authored business identities must be unique");
+        let buildings: std::collections::BTreeSet<_> =
+            identities.iter().map(|pair| pair.0).collect();
+        let businesses: std::collections::BTreeSet<_> =
+            identities.iter().map(|pair| pair.1).collect();
+        assert_eq!(
+            buildings.len(),
+            specs.len(),
+            "authored building identities must be unique"
+        );
+        assert_eq!(
+            businesses.len(),
+            specs.len(),
+            "authored business identities must be unique"
+        );
         identities
     }
 
@@ -5241,233 +7833,411 @@ mod skirmish_session_acceptance {
     }
 
     fn skirmish_map_cold_reload_continuation(map: &'static str) {
-        std::thread::Builder::new().stack_size(64*1024*1024).spawn(move || {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-        let executable = read("OPENMT2001_EXE");
-        let directory = read("OPENMT2001_ARCHIVE_DIR");
-        let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let build = read("OPENMT2001_BUILD_FILE");
-        let sun = read("OPENMT2001_SUNCOLS");
-        let parameters = read("OPENMT2001_PARAMETERS");
-        let timetable = read("OPENMT2001_TIMETABLE");
-        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-        let board = openmt2001::board::Board::from_v14(&image).unwrap();
-        let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
-        let index =
-            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
-        let scripts = default_path.parent().unwrap().parent().unwrap();
-        let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("US/language/usa");
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let executable = read("OPENMT2001_EXE");
+                let directory = read("OPENMT2001_ARCHIVE_DIR");
+                let archive = read("OPENMT2001_ARCHIVE_BIN");
+                let build = read("OPENMT2001_BUILD_FILE");
+                let sun = read("OPENMT2001_SUNCOLS");
+                let parameters = read("OPENMT2001_PARAMETERS");
+                let timetable = read("OPENMT2001_TIMETABLE");
+                let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+                let board = openmt2001::board::Board::from_v14(&image).unwrap();
+                let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+                let index =
+                    openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
+                        .unwrap();
+                let default_path =
+                    std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let scripts = default_path.parent().unwrap().parent().unwrap();
+                let language = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("US/language/usa");
 
-        use crate::skirmish_maps::{MapIdentity, Selection};
-        // Read the actual supplied launch file, never manufacture or patch it.
-        let authored = if map == "monopolymap.lua" {
-            let path = crate::campaign_store::original_path(scripts, "MAPS/monopolymap.lua")
-                .unwrap().unwrap();
-            let bytes = fs::read(path).unwrap();
-            assert_eq!(bytes.len(), 222);
-            let checksum = bytes.iter().fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
-            assert_eq!(checksum, 15_786);
-            let specs = openmt2001::scene::parse_static_map(std::str::from_utf8(&bytes).unwrap()).unwrap();
-            assert_eq!(specs.len(), 2);
-            Some((MapIdentity::Named { basename: map.into(), checksum, source_len: 222 }, specs))
-        } else {
-            assert_eq!(map, "empty.lua");
-            None
-        };
-        let names = character_names(&image, &language).unwrap();
-        use openmt2001::skirmish::roster::{Kind, Participant};
-        let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
-        let launch = SkirmishLaunch {
-            level_id:300001, directory:"net1".into(), map:map.into(),
-            objective_kind:6, target:3500., difficulty:1,
-            participants:vec![
-                Participant{kind:Kind::Human,token:Some(4),name:b"Fixture Player".to_vec(),ready:true,difficulty:2},
-                Participant{kind:Kind::Ai,token:Some(1),name:b"Explicit Opponent".to_vec(),ready:true,difficulty:0},
-            ],
-        };
-        let inputs = || Inputs {
-                        tree_locators: None,
-                        image: &image,
-                        board: &board,
-                        file: &file,
-                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                use crate::skirmish_maps::{MapIdentity, Selection};
+                // Read the actual supplied launch file, never manufacture or patch it.
+                let authored = if map == "monopolymap.lua" {
+                    let path =
+                        crate::campaign_store::original_path(scripts, "MAPS/monopolymap.lua")
+                            .unwrap()
+                            .unwrap();
+                    let bytes = fs::read(path).unwrap();
+                    assert_eq!(bytes.len(), 222);
+                    let checksum = bytes
+                        .iter()
+                        .fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
+                    assert_eq!(checksum, 15_786);
+                    let specs =
+                        openmt2001::scene::parse_static_map(std::str::from_utf8(&bytes).unwrap())
+                            .unwrap();
+                    assert_eq!(specs.len(), 2);
+                    Some((
+                        MapIdentity::Named {
+                            basename: map.into(),
+                            checksum,
+                            source_len: 222,
+                        },
+                        specs,
+                    ))
+                } else {
+                    assert_eq!(map, "empty.lua");
+                    None
+                };
+                let names = character_names(&image, &language).unwrap();
+                use openmt2001::skirmish::roster::{Kind, Participant};
+                let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
+                let launch = SkirmishLaunch {
+                    level_id: 300001,
+                    directory: "net1".into(),
+                    map: map.into(),
+                    objective_kind: 6,
+                    target: 3500.,
+                    difficulty: 1,
+                    participants: vec![
+                        Participant {
+                            kind: Kind::Human,
+                            token: Some(4),
+                            name: b"Fixture Player".to_vec(),
+                            ready: true,
+                            difficulty: 2,
+                        },
+                        Participant {
+                            kind: Kind::Ai,
+                            token: Some(1),
+                            name: b"Explicit Opponent".to_vec(),
+                            ready: true,
+                            difficulty: 0,
+                        },
+                    ],
+                };
+                let inputs = || Inputs {
+                    tree_locators: None,
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                    people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                        .unwrap(),
+                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                        &image, &index, &archive,
+                    )
+                    .unwrap(),
+                    transport_models: openmt2001::traffic::models::Models::from_original(
+                        &image, &index, &archive,
+                    )
+                    .unwrap(),
+                    road_routes: std::fs::read(
+                        std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
+                    )
+                    .unwrap(),
+                    scripts,
+                    parameters: std::str::from_utf8(&parameters).unwrap(),
+                    era_styles: load_era_styles(
+                        Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                            .parent()
                             .unwrap(),
-                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
-                            &image, &index, &archive,
-                        )
-                        .unwrap(),
-                        transport_models: openmt2001::traffic::models::Models::from_original(
-                            &image, &index, &archive,
-                        )
-                        .unwrap(),
-                        road_routes: std::fs::read(
-                            std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap(),
-                        )
-                        .unwrap(),
-                        scripts,
-                        parameters: std::str::from_utf8(&parameters).unwrap(),
-                    era_styles:load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
-                        timetable: std::str::from_utf8(&timetable).unwrap(),
-                        scenario: "NET1",
-                        difficulty: 1,
-                        selected_character: 4,
-                        profile_name: b"Fixture Player",
-                        character_names: &names,
+                    )
+                    .unwrap(),
+                    timetable: std::str::from_utf8(&timetable).unwrap(),
+                    scenario: "NET1",
+                    difficulty: 1,
+                    selected_character: 4,
+                    profile_name: b"Fixture Player",
+                    character_names: &names,
+                };
+                let policy = || Policy {
+                    seed: 0x12345678,
+                    auxiliary_prior_bytes: [0; 0x11c],
+                };
+                let mut session =
+                    Session::initialize_skirmish(inputs(), policy(), catalog, launch).unwrap();
+                let word = |bytes: &[u8], at: usize| {
+                    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+                };
+                // Preserve the cold fixture's two-pair distinctness assertions.
+                let check_authored =
+                    |state: &Session<'_>, specs: &[openmt2001::scene::BuildingSpec]| {
+                        let identities = check_authored_records(state, specs, &board, &file);
+                        assert_ne!(identities[0].0, identities[1].0);
+                        assert_ne!(identities[0].1, identities[1].1);
+                        identities
                     };
-        let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] };
-        let mut session = Session::initialize_skirmish(inputs(), policy(), catalog, launch).unwrap();
-        let word=|bytes:&[u8],at:usize|u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
-        // Preserve the cold fixture's two-pair distinctness assertions.
-        let check_authored = |state: &Session<'_>, specs: &[openmt2001::scene::BuildingSpec]| {
-            let identities = check_authored_records(state, specs, &board, &file);
-            assert_ne!(identities[0].0, identities[1].0);
-            assert_ne!(identities[0].1, identities[1].1);
-            identities
-        };
-        let authored_identities = authored.as_ref().map(|(identity,specs)| {
-            assert_eq!(session.skirmish_map.as_ref(), Some(identity));
-            assert_eq!(session.world.buildings.iter().filter(|row| row[0x3f] != 0).count(), 2);
-            assert_eq!(session.world.ledgers.businesses.iter().filter(|row| row[0x21c] != 0).count(), 2);
-            let identities = check_authored(&session, specs);
-            for &(building,business) in &identities {
-                // Original AddBuilding/AddBusiness pass neutral owner0.
-                assert_eq!(session.world.buildings[building][0x2d], 0);
-                assert_eq!(session.world.ledgers.businesses[business][0xa], 0);
-            }
-            identities
-        });
-        let check_selection = |save: &openmt2001::save::SaveFile<'_>| {
-            let extension = openmt2001::save::extension::Extension::parse(save).unwrap().unwrap();
-            let (version, identity) = match &authored {
-                Some((identity,_)) => (6,identity.clone()),
-                None => (5,MapIdentity::LegacyEmpty),
-            };
-            assert_eq!(extension.version, version);
-            let payload = extension.required(18).unwrap();
-            if version == 6 {
-                assert_eq!(payload[..28].chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect::<Vec<_>>(),
-                    [300001,3500f32.to_bits(),1,1,222,15_786,map.len() as u32]);
-                assert_eq!(&payload[28..], b"monopolymap.lua");
-            }
-            assert_eq!(payload.len(), if version == 6 {28+map.len()} else {16});
-            let selection = Selection::decode(extension.version, payload).unwrap();
-            assert_eq!(selection.level_id, 300001);
-            assert_eq!(selection.target.to_bits(), 3500f32.to_bits());
-            assert_eq!(selection.map, identity);
-            assert_eq!(selection.encode(version).unwrap(), payload);
-        };
-        assert_eq!(session.catalog.selected_level().unwrap().id(),300001);
-        assert!(!session.catalog.selected_level().unwrap().single_player());
-        assert_eq!(session.catalog.selected_level().unwrap().objective_target(),3500.);
-        assert_eq!(session.world.objective.kind,6);
-        assert_eq!(session.world.objective.target,3500.);
-        assert_eq!(session.difficulty,1);
-        assert_eq!(session.roster.manager.players.len(),2);
-        assert_eq!(session.roster.status.ai_count,1);
-        assert_eq!(session.world.player_money,6500.);
-        assert_eq!(session.world.ledgers.residents.active_count,251);
-        for (slot,(token,kind,difficulty,peer,name)) in [
-            (4,0,2,0,b"Fixture Player".as_slice()),
-            (1,1,0,u32::MAX,b"Explicit Opponent".as_slice()),
-        ].into_iter().enumerate() {
-            let row=&session.saved_player_metadata[slot];
-            assert_eq!(word(row,0),token); assert_eq!(word(row,4),kind);
-            assert_eq!(word(row,40),peer); assert_eq!(word(row,44),difficulty);
-            assert_eq!(&row[8..8+name.len()],name);
-            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x150),token);
-            assert_eq!(word(&session.roster.manager.players[slot].bytes,0x154),kind);
-            if kind == 1 { assert_eq!(word(&session.roster.manager.players[slot].bytes,0x13f4),difficulty); }
-            assert_eq!(session.world.ledgers.players[slot].cash,6500.);
-        }
-        assert!(session.campaign_profile.is_none());
-        assert!(session.network_command_timer.is_none());
-        // A deliberately distinct active objective must not replace selected+870.
-        session.world.objective.target = 3499.;
-        let assets = CommandAssets { image: &image, board: &board, file: &file };
-        let camera = openmt2001::flyby::CameraSample {
-            eye: [100.,120.,100.], target: [0.,0.,0.], up: [0.,1.,0.], vertical_fov: 0.7,
-        };
-        let cameras = crate::save_menu::cameras(None, camera).unwrap();
-        let mut host = crate::live_host::Host::new(camera.eye);
-        host.running = true;
-        let initial = session.world.clock.timing[0];
-        for _ in 0..30 {
-            host.tick(&mut session, &assets);
-            assert!(host.failure.is_none(), "{:?}", host.failure);
-        }
-        assert!(session.world.clock.timing[0] > initial);
-        struct Scratch(std::path::PathBuf);
-        impl Drop for Scratch { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
-        let path = std::path::PathBuf::from("work/save").join(format!("net1-cold-{}-{}",
-            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::create_dir(&path).unwrap();
-        let scratch = Scratch(path);
-        let bytes = session.save_v2(&image, cameras, 1).unwrap();
-        let saved_path = crate::save_menu::write_new(&scratch.0, &bytes).unwrap();
-        let bytes = fs::read(saved_path).unwrap();
-        let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
-        check_selection(&save);
-        assert_eq!(save.level_metadata().unwrap()[0], 300001);
-        assert_eq!(save.game_mode().unwrap(), 1);
-        let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
-        resumed.restore_v2_extension_with_image(&save, &image).unwrap();
-        assert_eq!(resumed.catalog.selected_level().unwrap().objective_target(), 3500.);
-        assert_eq!(resumed.world.objective.target, 3499.);
-        assert_eq!(resumed.world.objective.kind, 6);
-        assert_eq!(resumed.difficulty, 1);
-        assert_eq!(&resumed.saved_player_metadata[..2], &session.saved_player_metadata[..2]);
-        assert!(resumed.campaign_profile.is_none());
-        assert!(resumed.network_command_timer.is_none());
-        assert_eq!(resumed.skirmish_map, session.skirmish_map);
-        if let Some((identity,specs)) = &authored {
-            assert_eq!(resumed.skirmish_map.as_ref(), Some(identity));
-            assert_eq!(check_authored(&session, specs), *authored_identities.as_ref().unwrap());
-            assert_eq!(check_authored(&resumed, specs), *authored_identities.as_ref().unwrap());
-            assert_eq!(resumed.world.buildings.iter().filter(|r| r[0x3f] != 0).count(),
-                session.world.buildings.iter().filter(|r| r[0x3f] != 0).count());
-            assert_eq!(resumed.world.ledgers.businesses.iter().filter(|r| r[0x21c] != 0).count(),
-                session.world.ledgers.businesses.iter().filter(|r| r[0x21c] != 0).count());
-            for &(building,business) in authored_identities.as_ref().unwrap() {
-                assert_eq!(resumed.world.buildings[building][0x2d], session.world.buildings[building][0x2d]);
-                assert_eq!(resumed.world.ledgers.businesses[business], session.world.ledgers.businesses[business]);
-            }
-        }
-        let reexport = resumed.save_v2(&image, cameras, 1).unwrap();
-        let reexport_save = openmt2001::save::SaveFile::parse(&reexport).unwrap();
-        check_selection(&reexport_save);
-        let mut other_host = crate::live_host::Host::new(camera.eye);
-        other_host.running = true;
-        // Both hosts restart at the same wall-frame boundary, as visible load does.
-        host = crate::live_host::Host::new(camera.eye); host.running = true;
-        let before = resumed.world.clock.timing[0];
-        for _ in 0..60 {
-            host.tick(&mut session, &assets); other_host.tick(&mut resumed, &assets);
-            assert!(host.failure.is_none(), "{:?}", host.failure);
-            assert!(other_host.failure.is_none(), "{:?}", other_host.failure);
-            assert_eq!(session.world.clock, resumed.world.clock);
-            assert_eq!(session.world.ledgers.businesses, resumed.world.ledgers.businesses);
-            assert_eq!(session.world.pending_world.to_bytes(), resumed.world.pending_world.to_bytes());
-            assert_eq!(session.roster.profiles, resumed.roster.profiles);
-            assert_eq!(session.script_random_state, resumed.script_random_state);
-            for (left, right) in session.roster.manager.players.iter().zip(&resumed.roster.manager.players) {
-                assert_eq!(left.bytes, right.bytes);
-            }
-        }
-        assert!(resumed.world.clock.timing[0] > before);
-        // Complete native+modern serialization compares the entire portable world,
-        // retained scripts, participant metadata and scheduler after continuation.
-        assert_eq!(session.save_v2(&image, cameras, 1).unwrap(), resumed.save_v2(&image, cameras, 1).unwrap());
-
-
-        }).unwrap().join().unwrap();
+                let authored_identities = authored.as_ref().map(|(identity, specs)| {
+                    assert_eq!(session.skirmish_map.as_ref(), Some(identity));
+                    assert_eq!(
+                        session
+                            .world
+                            .buildings
+                            .iter()
+                            .filter(|row| row[0x3f] != 0)
+                            .count(),
+                        2
+                    );
+                    assert_eq!(
+                        session
+                            .world
+                            .ledgers
+                            .businesses
+                            .iter()
+                            .filter(|row| row[0x21c] != 0)
+                            .count(),
+                        2
+                    );
+                    let identities = check_authored(&session, specs);
+                    for &(building, business) in &identities {
+                        // Original AddBuilding/AddBusiness pass neutral owner0.
+                        assert_eq!(session.world.buildings[building][0x2d], 0);
+                        assert_eq!(session.world.ledgers.businesses[business][0xa], 0);
+                    }
+                    identities
+                });
+                let check_selection = |save: &openmt2001::save::SaveFile<'_>| {
+                    let extension = openmt2001::save::extension::Extension::parse(save)
+                        .unwrap()
+                        .unwrap();
+                    let (version, identity) = match &authored {
+                        Some((identity, _)) => (6, identity.clone()),
+                        None => (5, MapIdentity::LegacyEmpty),
+                    };
+                    assert_eq!(extension.version, version);
+                    let payload = extension.required(18).unwrap();
+                    if version == 6 {
+                        assert_eq!(
+                            payload[..28]
+                                .chunks_exact(4)
+                                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                                .collect::<Vec<_>>(),
+                            [
+                                300001,
+                                3500f32.to_bits(),
+                                1,
+                                1,
+                                222,
+                                15_786,
+                                map.len() as u32
+                            ]
+                        );
+                        assert_eq!(&payload[28..], b"monopolymap.lua");
+                    }
+                    assert_eq!(
+                        payload.len(),
+                        if version == 6 { 28 + map.len() } else { 16 }
+                    );
+                    let selection = Selection::decode(extension.version, payload).unwrap();
+                    assert_eq!(selection.level_id, 300001);
+                    assert_eq!(selection.target.to_bits(), 3500f32.to_bits());
+                    assert_eq!(selection.map, identity);
+                    assert_eq!(selection.encode(version).unwrap(), payload);
+                };
+                assert_eq!(session.catalog.selected_level().unwrap().id(), 300001);
+                assert!(!session.catalog.selected_level().unwrap().single_player());
+                assert_eq!(
+                    session.catalog.selected_level().unwrap().objective_target(),
+                    3500.
+                );
+                assert_eq!(session.world.objective.kind, 6);
+                assert_eq!(session.world.objective.target, 3500.);
+                assert_eq!(session.difficulty, 1);
+                assert_eq!(session.roster.manager.players.len(), 2);
+                assert_eq!(session.roster.status.ai_count, 1);
+                assert_eq!(session.world.player_money, 6500.);
+                assert_eq!(session.world.ledgers.residents.active_count, 251);
+                for (slot, (token, kind, difficulty, peer, name)) in [
+                    (4, 0, 2, 0, b"Fixture Player".as_slice()),
+                    (1, 1, 0, u32::MAX, b"Explicit Opponent".as_slice()),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let row = &session.saved_player_metadata[slot];
+                    assert_eq!(word(row, 0), token);
+                    assert_eq!(word(row, 4), kind);
+                    assert_eq!(word(row, 40), peer);
+                    assert_eq!(word(row, 44), difficulty);
+                    assert_eq!(&row[8..8 + name.len()], name);
+                    assert_eq!(
+                        word(&session.roster.manager.players[slot].bytes, 0x150),
+                        token
+                    );
+                    assert_eq!(
+                        word(&session.roster.manager.players[slot].bytes, 0x154),
+                        kind
+                    );
+                    if kind == 1 {
+                        assert_eq!(
+                            word(&session.roster.manager.players[slot].bytes, 0x13f4),
+                            difficulty
+                        );
+                    }
+                    assert_eq!(session.world.ledgers.players[slot].cash, 6500.);
+                }
+                assert!(session.campaign_profile.is_none());
+                assert!(session.network_command_timer.is_none());
+                // A deliberately distinct active objective must not replace selected+870.
+                session.world.objective.target = 3499.;
+                let assets = CommandAssets {
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                };
+                let camera = openmt2001::flyby::CameraSample {
+                    eye: [100., 120., 100.],
+                    target: [0., 0., 0.],
+                    up: [0., 1., 0.],
+                    vertical_fov: 0.7,
+                };
+                let cameras = crate::save_menu::cameras(None, camera).unwrap();
+                let mut host = crate::live_host::Host::new(camera.eye);
+                host.running = true;
+                let initial = session.world.clock.timing[0];
+                for _ in 0..30 {
+                    host.tick(&mut session, &assets);
+                    assert!(host.failure.is_none(), "{:?}", host.failure);
+                }
+                assert!(session.world.clock.timing[0] > initial);
+                struct Scratch(std::path::PathBuf);
+                impl Drop for Scratch {
+                    fn drop(&mut self) {
+                        let _ = fs::remove_dir_all(&self.0);
+                    }
+                }
+                let path = std::path::PathBuf::from("work/save").join(format!(
+                    "net1-cold-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::create_dir(&path).unwrap();
+                let scratch = Scratch(path);
+                let bytes = session.save_v2(&image, cameras, 1).unwrap();
+                let saved_path = crate::save_menu::write_new(&scratch.0, &bytes).unwrap();
+                let bytes = fs::read(saved_path).unwrap();
+                let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+                check_selection(&save);
+                assert_eq!(save.level_metadata().unwrap()[0], 300001);
+                assert_eq!(save.game_mode().unwrap(), 1);
+                let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
+                resumed
+                    .restore_v2_extension_with_image(&save, &image)
+                    .unwrap();
+                assert_eq!(
+                    resumed.catalog.selected_level().unwrap().objective_target(),
+                    3500.
+                );
+                assert_eq!(resumed.world.objective.target, 3499.);
+                assert_eq!(resumed.world.objective.kind, 6);
+                assert_eq!(resumed.difficulty, 1);
+                assert_eq!(
+                    &resumed.saved_player_metadata[..2],
+                    &session.saved_player_metadata[..2]
+                );
+                assert!(resumed.campaign_profile.is_none());
+                assert!(resumed.network_command_timer.is_none());
+                assert_eq!(resumed.skirmish_map, session.skirmish_map);
+                if let Some((identity, specs)) = &authored {
+                    assert_eq!(resumed.skirmish_map.as_ref(), Some(identity));
+                    assert_eq!(
+                        check_authored(&session, specs),
+                        *authored_identities.as_ref().unwrap()
+                    );
+                    assert_eq!(
+                        check_authored(&resumed, specs),
+                        *authored_identities.as_ref().unwrap()
+                    );
+                    assert_eq!(
+                        resumed
+                            .world
+                            .buildings
+                            .iter()
+                            .filter(|r| r[0x3f] != 0)
+                            .count(),
+                        session
+                            .world
+                            .buildings
+                            .iter()
+                            .filter(|r| r[0x3f] != 0)
+                            .count()
+                    );
+                    assert_eq!(
+                        resumed
+                            .world
+                            .ledgers
+                            .businesses
+                            .iter()
+                            .filter(|r| r[0x21c] != 0)
+                            .count(),
+                        session
+                            .world
+                            .ledgers
+                            .businesses
+                            .iter()
+                            .filter(|r| r[0x21c] != 0)
+                            .count()
+                    );
+                    for &(building, business) in authored_identities.as_ref().unwrap() {
+                        assert_eq!(
+                            resumed.world.buildings[building][0x2d],
+                            session.world.buildings[building][0x2d]
+                        );
+                        assert_eq!(
+                            resumed.world.ledgers.businesses[business],
+                            session.world.ledgers.businesses[business]
+                        );
+                    }
+                }
+                let reexport = resumed.save_v2(&image, cameras, 1).unwrap();
+                let reexport_save = openmt2001::save::SaveFile::parse(&reexport).unwrap();
+                check_selection(&reexport_save);
+                let mut other_host = crate::live_host::Host::new(camera.eye);
+                other_host.running = true;
+                // Both hosts restart at the same wall-frame boundary, as visible load does.
+                host = crate::live_host::Host::new(camera.eye);
+                host.running = true;
+                let before = resumed.world.clock.timing[0];
+                for _ in 0..60 {
+                    host.tick(&mut session, &assets);
+                    other_host.tick(&mut resumed, &assets);
+                    assert!(host.failure.is_none(), "{:?}", host.failure);
+                    assert!(other_host.failure.is_none(), "{:?}", other_host.failure);
+                    assert_eq!(session.world.clock, resumed.world.clock);
+                    assert_eq!(
+                        session.world.ledgers.businesses,
+                        resumed.world.ledgers.businesses
+                    );
+                    assert_eq!(
+                        session.world.pending_world.to_bytes(),
+                        resumed.world.pending_world.to_bytes()
+                    );
+                    assert_eq!(session.roster.profiles, resumed.roster.profiles);
+                    assert_eq!(session.script_random_state, resumed.script_random_state);
+                    for (left, right) in session
+                        .roster
+                        .manager
+                        .players
+                        .iter()
+                        .zip(&resumed.roster.manager.players)
+                    {
+                        assert_eq!(left.bytes, right.bytes);
+                    }
+                }
+                assert!(resumed.world.clock.timing[0] > before);
+                // Complete native+modern serialization compares the entire portable world,
+                // retained scripts, participant metadata and scheduler after continuation.
+                assert_eq!(
+                    session.save_v2(&image, cameras, 1).unwrap(),
+                    resumed.save_v2(&image, cameras, 1).unwrap()
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
-
 }

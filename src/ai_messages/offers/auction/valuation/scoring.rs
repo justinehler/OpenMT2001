@@ -208,7 +208,9 @@ impl World<'_> {
         }
         let mut ratio = Sum::from_f32(amount)?;
         ratio.mul_f32(self.image.f32_at(0x525058)?)?;
-        ratio.div_f32(value).map_err(|e|format!("auction valuation category{category} amount{amount} value{value}: {e}"))?;
+        ratio.div_f32(value).map_err(|e| {
+            format!("auction valuation category{category} amount{amount} value{value}: {e}")
+        })?;
         ratio.mul_f32(self.image.f32_at(0x52524c)?)?;
         ratio.mul(self.factor(p, 0x47cf90)?);
         ratio.add_f32(input)?;

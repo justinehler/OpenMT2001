@@ -348,7 +348,8 @@ fn successful_receipt_preserves_typed_post_order_and_drop_emits_none() {
 fn worker_terminal_disconnect_is_not_clean_completion_and_is_consumed_once() {
     let (sender, answer) = std::sync::mpsc::channel();
     let mut worker = WorkerExit {
-        receiver: Some(answer),custody:None,
+        receiver: Some(answer),
+        custody: None,
     };
     assert!(worker.poll().is_none());
     drop(sender);

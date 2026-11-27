@@ -25,23 +25,43 @@ pub struct Controller {
 impl Controller {
     pub fn new(bypass: bool, credits: bool, credit_rows: usize) -> Self {
         Self {
-            state: State { active: true, mode: 1, phase: 0, fade: 0, alpha: 0 },
-            bypass, credits, credit_rows, shown_rows: 0, phase_ticks: 0, frame: 0,
+            state: State {
+                active: true,
+                mode: 1,
+                phase: 0,
+                fade: 0,
+                alpha: 0,
+            },
+            bypass,
+            credits,
+            credit_rows,
+            shown_rows: 0,
+            phase_ticks: 0,
+            frame: 0,
             text_present: true,
             credit_construction_edge: false,
         }
     }
     #[cfg(test)]
-    pub fn state(&self) -> State { self.state }
+    pub fn state(&self) -> State {
+        self.state
+    }
     /// Original4b22e8 uses the current controller alpha as the result title's
     /// high colour byte. Kept separate from the script's text identifier.
-    pub fn alpha(&self) -> u8 { self.state.alpha.min(255) as u8 }
+    pub fn alpha(&self) -> u8 {
+        self.state.alpha.min(255) as u8
+    }
     /// Original4b27c4 dispatches phase0/1 to the result title and13/14 to
     /// the current4b1b20 credit record. Other phases draw neither text.
-    pub fn title_visible(&self) -> bool { self.state.active && self.state.phase <= 1 }
+    pub fn title_visible(&self) -> bool {
+        self.state.active && self.state.phase <= 1
+    }
     pub fn credit_row(&self) -> Option<usize> {
-        (self.state.active && self.credits && matches!(self.state.phase, 13 | 14)
-            && self.shown_rows > 0 && self.shown_rows <= self.credit_rows)
+        (self.state.active
+            && self.credits
+            && matches!(self.state.phase, 13 | 14)
+            && self.shown_rows > 0
+            && self.shown_rows <= self.credit_rows)
             .then_some(self.shown_rows.saturating_sub(1))
     }
     /// Returns true once on native4b1f82's synchronous4b1bc0 call tick.
@@ -51,18 +71,27 @@ impl Controller {
     pub fn set_identifier(&mut self, identifier: Option<u32>) {
         self.text_present = identifier.is_some();
     }
-    pub fn set_bypass(&mut self, enabled: bool) { self.bypass = enabled; }
+    pub fn set_bypass(&mut self, enabled: bool) {
+        self.bypass = enabled;
+    }
     /// Returns the native CutSceneEnded dispatch edge for this service tick.
     pub fn tick(&mut self, bypass_input: bool) -> bool {
-        if !self.state.active { return false; }
+        if !self.state.active {
+            return false;
+        }
         self.frame = self.frame.wrapping_add(1);
-        if bypass_input && self.bypass { self.state.mode = 2; }
+        if bypass_input && self.bypass {
+            self.state.mode = 2;
+        }
         let mut ended = false;
         let mut alpha_underflow = 0i32;
         match self.state.mode {
             1 => {
-                if self.state.fade >= 85 { self.state.mode = 0; }
-                else { self.state.fade += 1; }
+                if self.state.fade >= 85 {
+                    self.state.mode = 0;
+                } else {
+                    self.state.fade += 1;
+                }
             }
             2 => {
                 if self.state.alpha > 0 {
@@ -92,7 +121,9 @@ impl Controller {
     }
     fn advance_text(&mut self) {
         if !self.credits {
-            if self.text_present { self.state.alpha = (self.state.alpha + 2).min(254); }
+            if self.text_present {
+                self.state.alpha = (self.state.alpha + 2).min(254);
+            }
             return;
         }
         match self.state.phase {
@@ -100,7 +131,9 @@ impl Controller {
                 if self.state.alpha >= 254 {
                     self.state.phase = 1;
                     self.phase_ticks = 0;
-                } else { self.state.alpha = (self.state.alpha + 2).min(254); }
+                } else {
+                    self.state.alpha = (self.state.alpha + 2).min(254);
+                }
             }
             1 => {
                 self.phase_ticks += 1;
@@ -120,7 +153,9 @@ impl Controller {
                     if self.shown_rows >= self.credit_rows {
                         self.state.phase = 2;
                         self.state.mode = 2;
-                    } else { self.state.phase = 12; }
+                    } else {
+                        self.state.phase = 12;
+                    }
                 }
             }
             12 => {
@@ -164,7 +199,10 @@ mod tests {
             let mut controller = Controller::new(bypass, credits, 3);
             let mut ended = None;
             for frame in 1..=frames {
-                if controller.tick(skip == Some(frame)) { ended = Some(frame); break; }
+                if controller.tick(skip == Some(frame)) {
+                    ended = Some(frame);
+                    break;
+                }
             }
             assert_eq!(ended, expected, "{name}");
         }
@@ -172,7 +210,8 @@ mod tests {
     #[test]
     #[ignore = "requires explicit-PC64 native result-controller fixture"]
     fn native_result_every_service_tick() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CONTROLLER").unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CONTROLLER").unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTRCTRL1");
         let mut at = 8;
         let word = |bytes: &[u8], at: &mut usize| {
@@ -196,13 +235,23 @@ mod tests {
                 _ => unreachable!(),
             };
             let mut controller = Controller::new(bypass, credits, 3);
-            if case == 5 { controller.set_identifier(None); }
+            if case == 5 {
+                controller.set_identifier(None);
+            }
             for frame in 1..=frames {
-                if case == 5 && frame == 501 { controller.set_identifier(Some(1)); }
+                if case == 5 && frame == 501 {
+                    controller.set_identifier(Some(1));
+                }
                 controller.tick(skip == Some(frame));
                 let expected = std::array::from_fn::<_, 5, _>(|_| word(&bytes, &mut at));
                 let state = controller.state();
-                let actual = [u32::from(state.active), state.mode, state.phase, state.fade, state.alpha];
+                let actual = [
+                    u32::from(state.active),
+                    state.mode,
+                    state.phase,
+                    state.fade,
+                    state.alpha,
+                ];
                 assert_eq!(actual, expected, "{name} tick{frame}");
             }
         }
@@ -212,7 +261,9 @@ mod tests {
     #[test]
     #[ignore = "requires original explicit-PC64 full credit timing fixture"]
     fn original_complete_thirty_two_credit_rows() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CREDITS_TIMING").unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CREDITS_TIMING").unwrap())
+                .unwrap();
         assert_eq!(&bytes[..8], b"MTRC32T2");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
         let frames = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
@@ -222,20 +273,46 @@ mod tests {
         controller.set_identifier(Some(3));
         let mut ended = None;
         for frame in 1..=frames {
-            if controller.tick(false) { ended = Some(frame); }
-            assert_eq!(controller.take_credit_construction_edge(), frame == construct_tick,
-                "credit constructor edge tick{frame}");
+            if controller.tick(false) {
+                ended = Some(frame);
+            }
+            assert_eq!(
+                controller.take_credit_construction_edge(),
+                frame == construct_tick,
+                "credit constructor edge tick{frame}"
+            );
             let at = 20 + (frame - 1) * 24;
             let native: [u32; 6] = std::array::from_fn(|column| {
-                u32::from_le_bytes(bytes[at + column * 4..at + column * 4 + 4].try_into().unwrap())
+                u32::from_le_bytes(
+                    bytes[at + column * 4..at + column * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                )
             });
             let state = controller.state();
-            assert_eq!([u32::from(state.active), state.mode, state.phase, state.fade, state.alpha],
-                native[..5], "complete result tick{frame}");
+            assert_eq!(
+                [
+                    u32::from(state.active),
+                    state.mode,
+                    state.phase,
+                    state.fade,
+                    state.alpha
+                ],
+                native[..5],
+                "complete result tick{frame}"
+            );
             if matches!(state.phase, 13 | 14) {
-                assert_eq!(controller.credit_row(), Some(native[5] as usize), "credit row tick{frame}");
+                assert_eq!(
+                    controller.credit_row(),
+                    Some(native[5] as usize),
+                    "credit row tick{frame}"
+                );
             } else {
-                assert_eq!(controller.credit_row(), None, "non-credit phase tick{frame}");
+                assert_eq!(
+                    controller.credit_row(),
+                    None,
+                    "non-credit phase tick{frame}"
+                );
             }
         }
         assert_eq!(ended, Some(8566));

@@ -197,9 +197,20 @@ fn arrow_draw(origin: [f32; 2], target: [f32; 2]) -> Option<OwnedDraw> {
     for index in [0, 1, 2, 0, 2, 3] {
         let point = points[index];
         let red = index < 2;
-        draw.vertices.push([point[0], point[1], 0.1,
-            1., if red { 0. } else { 1. }, if red { 0. } else { 1. }, 0., 0.]);
-        draw.diffuse_alpha.as_mut().unwrap().push(if red { 127 } else { 255 });
+        draw.vertices.push([
+            point[0],
+            point[1],
+            0.1,
+            1.,
+            if red { 0. } else { 1. },
+            if red { 0. } else { 1. },
+            0.,
+            0.,
+        ]);
+        draw.diffuse_alpha
+            .as_mut()
+            .unwrap()
+            .push(if red { 127 } else { 255 });
     }
     Some(draw)
 }
@@ -212,14 +223,42 @@ mod tests {
         // 429eef..42a0be under FPCW 0x037f, original v1.4 mc.exe. The
         // independent Unicorn oracle is work/frontend/native_tutorial_arrow.py.
         for (target, expected) in [
-            ([534., 461.], [[434.894, 293.9932], [427.7101, 300.9496],
-                [533., 461.], [535., 461.]]),
-            ([100., 100.], [[182.3298, 201.2683], [187.6985, 192.8316],
-                [99., 100.], [101., 100.]]),
-            ([540., 120.], [[458.069, 197.3024], [462.8575, 206.0813],
-                [539., 120.], [541., 120.]]),
-            ([100., 420.], [[199.333, 294.5288], [193.0007, 286.7892],
-                [99., 420.], [101., 420.]]),
+            (
+                [534., 461.],
+                [
+                    [434.894, 293.9932],
+                    [427.7101, 300.9496],
+                    [533., 461.],
+                    [535., 461.],
+                ],
+            ),
+            (
+                [100., 100.],
+                [
+                    [182.3298, 201.2683],
+                    [187.6985, 192.8316],
+                    [99., 100.],
+                    [101., 100.],
+                ],
+            ),
+            (
+                [540., 120.],
+                [
+                    [458.069, 197.3024],
+                    [462.8575, 206.0813],
+                    [539., 120.],
+                    [541., 120.],
+                ],
+            ),
+            (
+                [100., 420.],
+                [
+                    [199.333, 294.5288],
+                    [193.0007, 286.7892],
+                    [99., 420.],
+                    [101., 420.],
+                ],
+            ),
         ] {
             let draw = arrow_draw([320., 240.], target).unwrap();
             for (i, expected) in expected.iter().enumerate() {
@@ -229,7 +268,10 @@ mod tests {
                 assert_eq!(vertex[2].to_bits(), 0.1f32.to_bits());
                 assert_eq!(vertex[3..6], if i < 2 { [1., 0., 0.] } else { [1.; 3] });
             }
-            assert_eq!(draw.diffuse_alpha.as_deref(), Some(&[127, 127, 255, 127, 255, 255][..]));
+            assert_eq!(
+                draw.diffuse_alpha.as_deref(),
+                Some(&[127, 127, 255, 127, 255, 255][..])
+            );
         }
     }
     #[test]

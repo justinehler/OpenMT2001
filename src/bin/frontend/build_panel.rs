@@ -22,7 +22,8 @@ pub fn special_residential_group_owned(
     owners: &[u8; 52],
 ) -> Result<bool, String> {
     openmt2001::ai_strategy_queries::owns_group(u32::from(landlord), members, |id| {
-        let index = usize::try_from(id).map_err(|_| "planning special residential group sentinel")?;
+        let index =
+            usize::try_from(id).map_err(|_| "planning special residential group sentinel")?;
         owners
             .get(index)
             .map(|&owner| u32::from(owner))
@@ -210,10 +211,13 @@ pub enum Entry {
     Message { text: u32, show_rights_action: bool },
 }
 pub fn entry(restricted: u8, is_landlord: bool, rights: u32) -> Entry {
-    let inspected=openmt2001::property_rights::inspect_values(restricted,is_landlord,rights,0);
+    let inspected = openmt2001::property_rights::inspect_values(restricted, is_landlord, rights, 0);
     match inspected.message {
-        Some(text)=>Entry::Message{text,show_rights_action:inspected.activate_visible},
-        None=>Entry::Open,
+        Some(text) => Entry::Message {
+            text,
+            show_rights_action: inspected.activate_visible,
+        },
+        None => Entry::Open,
     }
 }
 
@@ -359,7 +363,9 @@ mod tests {
         let members = special_residential_group(&image, 33).unwrap();
         assert_eq!(members, [27, 23, 33, -1]);
         let mut owners = [0u8; 52];
-        for id in [27, 23, 33] { owners[id] = 1; }
+        for id in [27, 23, 33] {
+            owners[id] = 1;
+        }
         assert!(special_residential_group_owned(&members, 1, &owners).unwrap());
         owners[23] = 2;
         assert!(!special_residential_group_owned(&members, 1, &owners).unwrap());
@@ -367,8 +373,10 @@ mod tests {
         assert!(!special_residential_group_owned(&members, 1, &owners).unwrap());
         owners[27] = 0;
         owners[33] = 0;
-        assert!(special_residential_group_owned(&members, 0, &owners).unwrap(),
-            "48a770 compares the null city-owner reference too");
+        assert!(
+            special_residential_group_owned(&members, 0, &owners).unwrap(),
+            "48a770 compares the null city-owner reference too"
+        );
     }
     #[test]
     #[ignore = "private original planning grid oracle"]

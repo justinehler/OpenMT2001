@@ -76,7 +76,10 @@ impl Bits {
     // No f32/f64 conversion occurs before this retained PC64 remainder.
     fn fraction(self, denominator: usize, negative: bool) -> Sum {
         let Some(top_word) = self.0.iter().rposition(|&word| word != 0) else {
-            return Sum { negative, ..Sum::default() };
+            return Sum {
+                negative,
+                ..Sum::default()
+            };
         };
         let top = top_word * 64 + 63 - self.0[top_word].leading_zeros() as usize;
         let mut mantissa = 0u64;
@@ -95,7 +98,11 @@ impl Bits {
                 exponent += i32::from(carry);
             }
         }
-        Sum { negative, significand: mantissa, exponent }
+        Sum {
+            negative,
+            significand: mantissa,
+            exponent,
+        }
     }
 }
 
@@ -109,8 +116,7 @@ fn reduced(abs: Sum) -> Result<(u8, Sum)> {
     // Caller handles abs <= 2^-32, so e >= -95 and 384 <= shift <= 607.
     let shift = (512 - abs.exponent) as usize;
     let mut product = Bits::product(abs.significand);
-    let mut quadrant = u8::from(product.bit(shift))
-        | (u8::from(product.bit(shift + 1)) << 1);
+    let mut quadrant = u8::from(product.bit(shift)) | (u8::from(product.bit(shift + 1)) << 1);
     // Round the approximate multiple of pi/2 to nearest, ties upward. Either
     // choice at an exact tie is valid if fraction and quadrant stay paired.
     let upper = product.bit(shift - 1);
@@ -168,7 +174,9 @@ impl PortableTrig {
             3 => (c.negated(), s),
             _ => unreachable!(),
         };
-        if value.negative { sine = sine.negated(); }
+        if value.negative {
+            sine = sine.negated();
+        }
         Ok((sine, cosine))
     }
 }
@@ -187,14 +195,45 @@ mod tests {
     use super::*;
     #[test]
     fn signed_zero_tiny_cutoff_and_camera_envelope() {
-        let mut trig=PortableTrig;
-        for negative in [false,true] {
-            let zero=Sum{negative,..Sum::default()};
-            let (s,c)=trig.pair(zero).unwrap();assert_eq!(s.to_f32().to_bits(),u32::from(negative)<<31);assert_eq!(c.to_f32(),1.);
-            let tiny=Sum{negative,..TINY};let (s,c)=trig.pair(tiny).unwrap();assert_eq!(s.compare(tiny),std::cmp::Ordering::Equal);assert_eq!(c.compare(Sum::from_i32(1)),std::cmp::Ordering::Equal);
-            for significand in [(1<<63)+1,u64::MAX] {assert!(trig.pair(Sum{negative,significand,exponent:-95}).is_ok());}
-            assert!(trig.pair(Sum{negative,significand:u64::MAX,exponent:128}).is_ok());
-            assert!(trig.pair(Sum{negative,significand:1<<63,exponent:129}).is_err());
+        let mut trig = PortableTrig;
+        for negative in [false, true] {
+            let zero = Sum {
+                negative,
+                ..Sum::default()
+            };
+            let (s, c) = trig.pair(zero).unwrap();
+            assert_eq!(s.to_f32().to_bits(), u32::from(negative) << 31);
+            assert_eq!(c.to_f32(), 1.);
+            let tiny = Sum { negative, ..TINY };
+            let (s, c) = trig.pair(tiny).unwrap();
+            assert_eq!(s.compare(tiny), std::cmp::Ordering::Equal);
+            assert_eq!(c.compare(Sum::from_i32(1)), std::cmp::Ordering::Equal);
+            for significand in [(1 << 63) + 1, u64::MAX] {
+                assert!(
+                    trig.pair(Sum {
+                        negative,
+                        significand,
+                        exponent: -95
+                    })
+                    .is_ok()
+                );
+            }
+            assert!(
+                trig.pair(Sum {
+                    negative,
+                    significand: u64::MAX,
+                    exponent: 128
+                })
+                .is_ok()
+            );
+            assert!(
+                trig.pair(Sum {
+                    negative,
+                    significand: 1 << 63,
+                    exponent: 129
+                })
+                .is_err()
+            );
         }
     }
 }

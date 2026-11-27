@@ -6,7 +6,7 @@ use openmt2001::{
     pe::PeImage,
 };
 
-#[path="pavement_resource.rs"]
+#[path = "pavement_resource.rs"]
 pub(crate) mod pavement_resource;
 
 pub struct Assets {
@@ -34,13 +34,16 @@ impl CategoryFrustum {
         let [near, far] = openmt2001::camera::city_clip(camera.eye[1])?;
         Ok(Self {
             view: openmt2001::camera::scene_view_with_up(camera.eye, camera.target, camera.up),
-            projection: openmt2001::picking::QueryProjection::new(
-                1280., 960., 45., near, far)?,
+            projection: openmt2001::picking::QueryProjection::new(1280., 960., 45., near, far)?,
         })
     }
 
-    pub fn category(&self, id: usize, center: [f32; 2], model_height: Option<f32>)
-        -> Result<(openmt2001::picking::QueryBox, bool), String> {
+    pub fn category(
+        &self,
+        id: usize,
+        center: [f32; 2],
+        model_height: Option<f32>,
+    ) -> Result<(openmt2001::picking::QueryBox, bool), String> {
         use openmt2001::{camera, picking};
         let bounds = picking::category_bounds(model_height)?;
         let height = bounds[2][1];
@@ -49,13 +52,23 @@ impl CategoryFrustum {
         let object_center = camera::transform_scene_point(transform, [0., height * 0.5, 0.]);
         let bounds = bounds.map(|point| camera::transform_scene_point(transform, point));
         let visible = self.projection.visible(&bounds, object_center, radius);
-        Ok((picking::QueryBox {
-            id: id as u32, bounds, center: object_center, radius,
-        }, visible))
+        Ok((
+            picking::QueryBox {
+                id: id as u32,
+                bounds,
+                center: object_center,
+                radius,
+            },
+            visible,
+        ))
     }
 
-    pub fn visible(&self, id: usize, center: [f32; 2], model_height: Option<f32>)
-        -> Result<bool, String> {
+    pub fn visible(
+        &self,
+        id: usize,
+        center: [f32; 2],
+        model_height: Option<f32>,
+    ) -> Result<bool, String> {
         Ok(self.category(id, center, model_height)?.1)
     }
 }
@@ -77,7 +90,8 @@ impl Assets {
         // Install the SAME computed CPU definition and exact archive source.
         // This finite resource is not the native mesh/material/render manager.
         let pavement = pavement_resource::Directory::install(
-            pavement_resource::LoadedPavement::from_loaded(directory,archive,entry,definition)?)?;
+            pavement_resource::LoadedPavement::from_loaded(directory, archive, entry, definition)?,
+        )?;
         let f = |i: usize| f32::from_le_bytes(definition[i * 4..i * 4 + 4].try_into().unwrap());
         let entry = directory
             .find("gamedata2/bounding_box/bound_tubed.tm")
@@ -122,26 +136,43 @@ impl Assets {
         })
     }
     /// Sole retained occupied definition owner; callers resolve typed bindings.
-    pub(crate) fn pavement_resource(&self) -> &pavement_resource::Directory { &self.pavement }
-    pub(crate) fn pavement_definition(&self) -> Result<[u8;116],String> {
+    pub(crate) fn pavement_resource(&self) -> &pavement_resource::Directory {
+        &self.pavement
+    }
+    pub(crate) fn pavement_definition(&self) -> Result<[u8; 116], String> {
         self.pavement.binding()?.definition()
     }
     /// Actual asset removal only. Root must retire dependent Pool allocations
     /// BEFORE calling this, replacing Assets, or dropping the process owner.
-    pub(crate) fn retire_pavement_resource(&mut self) -> Result<(),String> { self.pavement.retire() }
-    #[cfg(test)]
-    pub(crate) fn descriptor_test_assets(blocks: Vec<Block>, definition: [u8;116]) -> Self {
-        // Authored test fixture only; never used as a live/default producer.
-        let center = [24,25,26].map(|i| f32::from_bits(u32::from_le_bytes(
-            definition[i*4..i*4+4].try_into().unwrap())));
-        Self { blocks,center,marker:crate::ui::Surface::solid(),
-            pavement:pavement_resource::Directory::synthetic(definition) }
+    pub(crate) fn retire_pavement_resource(&mut self) -> Result<(), String> {
+        self.pavement.retire()
     }
     #[cfg(test)]
-    pub(crate) fn replace_descriptor_test_resource(&mut self, definition:[u8;116]) -> Result<(),String> {
+    pub(crate) fn descriptor_test_assets(blocks: Vec<Block>, definition: [u8; 116]) -> Self {
+        // Authored test fixture only; never used as a live/default producer.
+        let center = [24, 25, 26].map(|i| {
+            f32::from_bits(u32::from_le_bytes(
+                definition[i * 4..i * 4 + 4].try_into().unwrap(),
+            ))
+        });
+        Self {
+            blocks,
+            center,
+            marker: crate::ui::Surface::solid(),
+            pavement: pavement_resource::Directory::synthetic(definition),
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn replace_descriptor_test_resource(
+        &mut self,
+        definition: [u8; 116],
+    ) -> Result<(), String> {
         self.pavement.replace_synthetic(definition)?;
-        self.center = [24,25,26].map(|i| f32::from_bits(u32::from_le_bytes(
-            definition[i*4..i*4+4].try_into().unwrap())));
+        self.center = [24, 25, 26].map(|i| {
+            f32::from_bits(u32::from_le_bytes(
+                definition[i * 4..i * 4 + 4].try_into().unwrap(),
+            ))
+        });
         Ok(())
     }
     /// Retained allocation has room for selected and hovered boxes. Paused
@@ -226,24 +257,40 @@ impl Assets {
         if scene.inspection_buildings.len() != 1 {
             return Err("Planning preview must contain one building".into());
         }
-        let category = self.blocks.iter().position(|block| {
-            block.id == scene.inspection_buildings[0].category
-        }).ok_or("Planning preview category missing")?;
-        self.marker_surface(Some(Hit { category, building: Some(0) }), None, scene)
+        let category = self
+            .blocks
+            .iter()
+            .position(|block| block.id == scene.inspection_buildings[0].category)
+            .ok_or("Planning preview category missing")?;
+        self.marker_surface(
+            Some(Hit {
+                category,
+                building: Some(0),
+            }),
+            None,
+            scene,
+        )
     }
     /// 482580 consumes actor translation and model center SEPARATELY, with
     /// retained x87 addition. Do not feed already-rounded center(index).
     /// Original44faf0 creates pavement descriptors at [blockX,0,blockZ].
-    pub(crate) fn camera_block_initialization(&self, category_id: u32,
-        height_word: u32, radius_word: u32,
+    pub(crate) fn camera_block_initialization(
+        &self,
+        category_id: u32,
+        height_word: u32,
+        radius_word: u32,
     ) -> Result<openmt2001::camera::primary::BlockInitialization, String> {
-        let block = self.blocks.iter().find(|block| block.id == category_id as usize)
+        let block = self
+            .blocks
+            .iter()
+            .find(|block| block.id == category_id as usize)
             .filter(|block| block.flags & 1 == 0)
             .ok_or("Camera category has no active immutable pavement descriptor")?;
         Ok(openmt2001::camera::primary::BlockInitialization {
             actor_translation: [block.center[0].to_bits(), 0, block.center[1].to_bits()],
             model_offsets: self.center.map(f32::to_bits),
-            height_word, radius_word,
+            height_word,
+            radius_word,
         })
     }
     pub fn center(&self, index: usize) -> [f32; 3] {
@@ -274,8 +321,13 @@ impl Assets {
             .enumerate()
             .filter(|(_, b)| b.flags & 1 == 0)
         {
-            let (bounds, visible) = frustum.category(block.id, block.center,
-                scene.category_model_heights.get(&block.id).copied()).ok()?;
+            let (bounds, visible) = frustum
+                .category(
+                    block.id,
+                    block.center,
+                    scene.category_model_heights.get(&block.id).copied(),
+                )
+                .ok()?;
             let mut indices = Vec::new();
             let mut buildings = Vec::new();
             for (i, b) in scene
@@ -329,8 +381,13 @@ mod tests {
         let frustum = CategoryFrustum {
             view: [1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.],
             projection: openmt2001::picking::QueryProjection::new(
-                parameters[0], parameters[1], parameters[2],
-                parameters[3], parameters[4]).unwrap(),
+                parameters[0],
+                parameters[1],
+                parameters[2],
+                parameters[3],
+                parameters[4],
+            )
+            .unwrap(),
         };
         for i in 0..count {
             let at = 12 + 7 * 4 + 0x74 + i * 20;
@@ -338,9 +395,14 @@ mod tests {
             assert_eq!(translation[1], 0.);
             let classification = word(at + 12);
             let flags = word(at + 16);
-            let visible = frustum.visible(i, [translation[0], translation[2]], None).unwrap();
-            assert_eq!(visible, flags & 2 != 0,
-                "native class {classification:#x} at {translation:?}");
+            let visible = frustum
+                .visible(i, [translation[0], translation[2]], None)
+                .unwrap();
+            assert_eq!(
+                visible,
+                flags & 2 != 0,
+                "native class {classification:#x} at {translation:?}"
+            );
             assert_eq!(visible, classification != 0x40);
         }
     }

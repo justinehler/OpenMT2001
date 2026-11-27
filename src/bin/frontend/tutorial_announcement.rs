@@ -7,12 +7,12 @@ pub(super) struct Bridge<'a, 'hooks, 'context, 'image> {
     pub hooks: &'a RefCell<&'hooks mut super::Hooks>,
     pub context: &'a mut level_script::Context<'context, 'image>,
 }
-pub(super) struct PartsBridge<'a,'hooks,'context,'image>{
-    pub runtime:&'a mut openmt2001::lua4::Runtime,
-    pub bindings:&'a mut level_script::Bindings,
-    pub events:&'a mut openmt2001::script_events::Events,
-    pub hooks:&'a RefCell<&'hooks mut super::Hooks>,
-    pub context:&'a mut level_script::Context<'context,'image>,
+pub(super) struct PartsBridge<'a, 'hooks, 'context, 'image> {
+    pub runtime: &'a mut openmt2001::lua4::Runtime,
+    pub bindings: &'a mut level_script::Bindings,
+    pub events: &'a mut openmt2001::script_events::Events,
+    pub hooks: &'a RefCell<&'hooks mut super::Hooks>,
+    pub context: &'a mut level_script::Context<'context, 'image>,
 }
 
 struct Geometry<'a>(&'a mut dyn GeometryBinding);
@@ -58,14 +58,24 @@ impl Bridge<'_, '_, '_, '_> {
         geometry: &mut dyn GeometryBinding,
         utilities: &mut openmt2001::economy::Utilities,
     ) -> Result<(), String> {
-        PartsBridge{runtime:&mut self.scripts.runtime,bindings:&mut self.scripts.bindings,
-            events:&mut self.scripts.events,hooks:self.hooks,context:self.context}
-            .dispatch_control(control,state,geometry,utilities)
+        PartsBridge {
+            runtime: &mut self.scripts.runtime,
+            bindings: &mut self.scripts.bindings,
+            events: &mut self.scripts.events,
+            hooks: self.hooks,
+            context: self.context,
+        }
+        .dispatch_control(control, state, geometry, utilities)
     }
 }
-impl PartsBridge<'_,'_,'_,'_>{
-    fn dispatch_control(&mut self,control:u32,state:&mut level_script::State<'_>,geometry:&mut dyn GeometryBinding,
-        utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
+impl PartsBridge<'_, '_, '_, '_> {
+    fn dispatch_control(
+        &mut self,
+        control: u32,
+        state: &mut level_script::State<'_>,
+        geometry: &mut dyn GeometryBinding,
+        utilities: &mut openmt2001::economy::Utilities,
+    ) -> Result<(), String> {
         let mut hooks = self.hooks.borrow_mut();
         let active = active_dismissal(&hooks)?;
         let first = hooks.commands.len();
@@ -73,7 +83,10 @@ impl PartsBridge<'_,'_,'_,'_>{
         let mut geometry = Geometry(geometry);
         std::mem::swap(utilities, &mut hooks.utilities);
         let result = (|| {
-            level_startup::Scripts::dispatch_catch_event_parts(self.runtime,self.bindings,self.events,
+            level_startup::Scripts::dispatch_catch_event_parts(
+                self.runtime,
+                self.bindings,
+                self.events,
                 ("TutorialEvent", control as i32),
                 state,
                 self.context,
@@ -89,7 +102,10 @@ impl PartsBridge<'_,'_,'_,'_>{
                 // when no prompt is shown. Tutorial12 does this after prompt4
                 // closes, so no InterfacePromptDismiss callback is emitted.
                 if let Some(dismissal) = active {
-                    level_startup::Scripts::dispatch_catch_event_parts(self.runtime,self.bindings,self.events,
+                    level_startup::Scripts::dispatch_catch_event_parts(
+                        self.runtime,
+                        self.bindings,
+                        self.events,
                         ("InterfacePromptDismiss", dismissal),
                         state,
                         self.context,
@@ -106,15 +122,24 @@ impl PartsBridge<'_,'_,'_,'_>{
     }
 }
 
-impl live_commands::TutorialAnnouncement for PartsBridge<'_,'_,'_,'_>{
-    fn start(&mut self,state:&mut level_script::State<'_>,
-        _presentation:&openmt2001::ai_messages::offers::auction::admission::Presentation,
-        geometry:&mut dyn GeometryBinding,utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
-        self.dispatch_control(61,state,geometry,utilities)
+impl live_commands::TutorialAnnouncement for PartsBridge<'_, '_, '_, '_> {
+    fn start(
+        &mut self,
+        state: &mut level_script::State<'_>,
+        _presentation: &openmt2001::ai_messages::offers::auction::admission::Presentation,
+        geometry: &mut dyn GeometryBinding,
+        utilities: &mut openmt2001::economy::Utilities,
+    ) -> Result<(), String> {
+        self.dispatch_control(61, state, geometry, utilities)
     }
-    fn control(&mut self,control:u32,state:&mut level_script::State<'_>,
-        geometry:&mut dyn GeometryBinding,utilities:&mut openmt2001::economy::Utilities)->Result<(),String>{
-        self.dispatch_control(control,state,geometry,utilities)
+    fn control(
+        &mut self,
+        control: u32,
+        state: &mut level_script::State<'_>,
+        geometry: &mut dyn GeometryBinding,
+        utilities: &mut openmt2001::economy::Utilities,
+    ) -> Result<(), String> {
+        self.dispatch_control(control, state, geometry, utilities)
     }
 }
 

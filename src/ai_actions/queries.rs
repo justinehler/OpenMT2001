@@ -1,5 +1,5 @@
 //! Direct world/profile queries used by continuation actions.
-use crate::player_manager::{put, word, Player};
+use crate::player_manager::{Player, put, word};
 ///4727d0: positive cash-trouble status gives the remaining hours to24.
 pub fn trouble_hours(player: &Player, statuses: &[u8; 6], hour: i32) -> Result<i32, String> {
     let status = *statuses
@@ -9,11 +9,7 @@ pub fn trouble_hours(player: &Player, statuses: &[u8; 6], hour: i32) -> Result<i
         0
     } else {
         let value = 24i32.wrapping_sub(hour);
-        if value == 0 {
-            1
-        } else {
-            value
-        }
+        if value == 0 { 1 } else { value }
     })
 }
 ///47d700/47d990 read adjacent bytes in the live profile's difficulty group.

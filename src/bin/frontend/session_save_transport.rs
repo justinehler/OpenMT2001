@@ -11,13 +11,13 @@ fn rows<const N: usize>(r: &mut Input<'_>, dst: &mut [[u8; N]]) -> Result<(), St
     Ok(())
 }
 pub(super) fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
-    encode_parts(&s.world.road_network,&s.road_traffic,&s.transport)
+    encode_parts(&s.world.road_network, &s.road_traffic, &s.transport)
 }
 pub(super) fn encode_parts(
-    network:&openmt2001::traffic::road::construction::RoadNetwork,
-    roads:&openmt2001::traffic::road::runtime::RoadTraffic,
-    t:&openmt2001::traffic::scene::Scene,
-)->Result<Vec<u8>,String> {
+    network: &openmt2001::traffic::road::construction::RoadNetwork,
+    roads: &openmt2001::traffic::road::runtime::RoadTraffic,
+    t: &openmt2001::traffic::scene::Scene,
+) -> Result<Vec<u8>, String> {
     let mut out = Output(vec![]);
     for b in [
         flat(&network.roads),
@@ -31,8 +31,7 @@ pub(super) fn encode_parts(
     out.blob(roads.records.as_flattened())?;
     out.word(roads.auxiliaries.used() as u32);
     out.blob(&flat(roads.auxiliaries.slots()))?;
-    out.0
-        .extend_from_slice(&words(roads.admission.random));
+    out.0.extend_from_slice(&words(roads.admission.random));
     out.0.extend_from_slice(&words(
         roads
             .admission
@@ -43,18 +42,12 @@ pub(super) fn encode_parts(
     ));
     out.0
         .extend_from_slice(&words(roads.admission.selected.map(|v| v as u32)));
-    out.0
-        .extend_from_slice(&words(roads.admission.counts));
+    out.0.extend_from_slice(&words(roads.admission.counts));
     out.word(roads.admission.entries as u32);
     out.word(roads.signals.counter);
     out.word(roads.signals.phase);
     out.0.extend_from_slice(&words(
-        roads
-            .proximity
-            .nearest
-            .as_flattened()
-            .iter()
-            .copied(),
+        roads.proximity.nearest.as_flattened().iter().copied(),
     ));
     out.word(roads.proximity.reciprocal_sum.to_bits());
     out.word(roads.proximity.count as u32);

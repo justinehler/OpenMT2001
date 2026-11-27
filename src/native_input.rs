@@ -246,9 +246,13 @@ impl KeyboardMode {
 /// Missing recording providers must retain prior/device writes and NOT tick.
 #[derive(Debug)]
 #[must_use = "Resolve actual recording gate/provider, then finish on SAME StagedInput"]
-pub struct KeyboardPollBeforeRecording { report: PollReport }
+pub struct KeyboardPollBeforeRecording {
+    report: PollReport,
+}
 impl KeyboardPollBeforeRecording {
-    pub fn report(&self) -> PollReport { self.report }
+    pub fn report(&self) -> PollReport {
+        self.report
+    }
 }
 
 /// HRESULT remains observable, including native failures; the native 4e48f0
@@ -398,7 +402,10 @@ impl StagedInput {
 
     /// 4e53e2..ea, only after actual recording handling/admitted off gate.
     /// Consume once on SAME owner; never use a ticket to replay prior copies.
-    pub fn finish_poll1_after_recording(&mut self, pending: KeyboardPollBeforeRecording) -> PollReport {
+    pub fn finish_poll1_after_recording(
+        &mut self,
+        pending: KeyboardPollBeforeRecording,
+    ) -> PollReport {
         self.cells.keyboard_poll_tick = self.cells.keyboard_poll_tick.wrapping_add(1);
         pending.report
     }

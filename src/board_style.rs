@@ -31,7 +31,9 @@ impl Style {
         let mut category_kinds = [0; 52];
         for (category, kind) in category_kinds.iter_mut().enumerate() {
             *kind = image.at(0x5385a4 + category as u32 * 0x58, 1)?[0];
-            if usize::from(*kind) >= 12 { return Err("original category district is outside the style table".into()); }
+            if usize::from(*kind) >= 12 {
+                return Err("original category district is outside the style table".into());
+            }
         }
         Ok(Self {
             names,
@@ -165,8 +167,11 @@ mod tests {
                 assert_eq!(&category[..0x94], &[0xa5; 0x94]);
                 assert_eq!(&category[0x98..], &[0xa5; 380 - 0x98]);
                 if word(0) == 0 && membership & (1 << id) != 0 {
-                    assert_eq!(u32::from_le_bytes(category[0x94..0x98].try_into().unwrap()), word(5),
-                        "original category propagation case{case}, slot{id}");
+                    assert_eq!(
+                        u32::from_le_bytes(category[0x94..0x98].try_into().unwrap()),
+                        word(5),
+                        "original category propagation case{case}, slot{id}"
+                    );
                 }
             }
             for block in &board.blocks {

@@ -2,11 +2,11 @@
 //! Unknown payloads and fields remain opaque.
 use crate::pe::PeImage;
 
-pub mod writer;
-pub mod extension;
-pub mod demolition;
-pub mod restore;
 pub mod appearance;
+pub mod demolition;
+pub mod extension;
+pub mod restore;
+pub mod writer;
 
 #[derive(Debug)]
 pub struct Section<'a> {
@@ -29,47 +29,77 @@ impl<'a> SaveFile<'a> {
     /// consumes the first and fourth words.
     pub fn level_metadata(&self) -> Result<[u32; 4], String> {
         let bytes = self.table(0x2000, 16)?;
-        Ok(std::array::from_fn(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())))
+        Ok(std::array::from_fn(|i| {
+            u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+        }))
     }
 
     /// Original 483dd0/483df0 consume two distinct camera allocations.
     /// Headless callers retain the exact records for their presentation owner.
     pub fn cameras(&self) -> Result<[&'a [u8; 196]; 2], String> {
-        Ok([self.table(0x100, 196)?.try_into().unwrap(),
-            self.table(0x100000, 196)?.try_into().unwrap()])
+        Ok([
+            self.table(0x100, 196)?.try_into().unwrap(),
+            self.table(0x100000, 196)?.try_into().unwrap(),
+        ])
     }
 
     /// 4810e0 visits repeated 4000 records in stream order. A kind-zero
     /// record owns a packet whose size word is at packet+8.
     pub fn scheduled(&self) -> Result<Vec<SavedScheduled<'a>>, String> {
-        self.sections.iter().filter(|s| s.tag == 0x4000).map(|section| {
-            let bytes = section.payload;
-            let header: &[u8; 24] = bytes.get(..24).ok_or("truncated scheduled header")?.try_into().unwrap();
-            let kind = u32::from_le_bytes(header[..4].try_into().unwrap());
-            let packet = if kind == 0 {
-                let packet = bytes.get(24..).ok_or("scheduled packet missing")?;
-                if packet.len() < 16 || u32::from_le_bytes(packet[8..12].try_into().unwrap()) as usize != packet.len() {
-                    return Err("scheduled packet length disagrees with its native size word".into());
-                }
-                Some(packet)
-            } else {
-                if bytes.len() != 24 { return Err("non-packet scheduled record has trailing bytes".into()); }
-                None
-            };
-            Ok(SavedScheduled { header, packet })
-        }).collect()
+        self.sections
+            .iter()
+            .filter(|s| s.tag == 0x4000)
+            .map(|section| {
+                let bytes = section.payload;
+                let header: &[u8; 24] = bytes
+                    .get(..24)
+                    .ok_or("truncated scheduled header")?
+                    .try_into()
+                    .unwrap();
+                let kind = u32::from_le_bytes(header[..4].try_into().unwrap());
+                let packet = if kind == 0 {
+                    let packet = bytes.get(24..).ok_or("scheduled packet missing")?;
+                    if packet.len() < 16
+                        || u32::from_le_bytes(packet[8..12].try_into().unwrap()) as usize
+                            != packet.len()
+                    {
+                        return Err(
+                            "scheduled packet length disagrees with its native size word".into(),
+                        );
+                    }
+                    Some(packet)
+                } else {
+                    if bytes.len() != 24 {
+                        return Err("non-packet scheduled record has trailing bytes".into());
+                    }
+                    None
+                };
+                Ok(SavedScheduled { header, packet })
+            })
+            .collect()
     }
 
     /// 465810 copies the 0x158-byte auction controller at 7f4758.
     pub fn auction(&self) -> Result<Option<&'a [u8; 344]>, String> {
         let mut records = self.sections.iter().filter(|s| s.tag == 0x8000);
-        let Some(record) = records.next() else { return Ok(None) };
-        if records.next().is_some() { return Err("multiple saved auction allocations".into()); }
-        Ok(Some(record.payload.try_into().map_err(|_| "saved auction must contain 344 bytes")?))
+        let Some(record) = records.next() else {
+            return Ok(None);
+        };
+        if records.next().is_some() {
+            return Err("multiple saved auction allocations".into());
+        }
+        Ok(Some(
+            record
+                .payload
+                .try_into()
+                .map_err(|_| "saved auction must contain 344 bytes")?,
+        ))
     }
 
     pub fn game_mode(&self) -> Result<u32, String> {
-        Ok(u32::from_le_bytes(self.table(0x400000, 4)?.try_into().unwrap()))
+        Ok(u32::from_le_bytes(
+            self.table(0x400000, 4)?.try_into().unwrap(),
+        ))
     }
 
     pub fn scenario_objective(&self) -> Result<crate::scenario_objective::State, String> {
@@ -260,12 +290,16 @@ impl<'a> SaveFile<'a> {
     /// catalog ordering remains separately owned by the replayed Lua context.
     pub fn business_catalog(&self) -> Result<[[u8; 0x74]; 45], String> {
         let bytes = self.table(0x40000, 45 * 0x74)?;
-        Ok(std::array::from_fn(|i| bytes[i * 0x74..(i + 1) * 0x74].try_into().unwrap()))
+        Ok(std::array::from_fn(|i| {
+            bytes[i * 0x74..(i + 1) * 0x74].try_into().unwrap()
+        }))
     }
 
     pub fn commodity_rows(&self) -> Result<[[u8; 0x1c]; 32], String> {
         let bytes = self.table(0x200000, 32 * 0x1c)?;
-        Ok(std::array::from_fn(|i| bytes[i * 0x1c..(i + 1) * 0x1c].try_into().unwrap()))
+        Ok(std::array::from_fn(|i| {
+            bytes[i * 0x1c..(i + 1) * 0x1c].try_into().unwrap()
+        }))
     }
 
     pub fn building_record(&self) -> Result<&'a [u8; 0xb270], String> {

@@ -1,5 +1,5 @@
 //! Camera-facing result points for the original 4ec120/4ec270 draw stream.
-use super::fireworks::{Point, POINT_CAPACITY as RESULT_POINT_CAPACITY};
+use super::fireworks::{POINT_CAPACITY as RESULT_POINT_CAPACITY, Point};
 use openmt2001::{flyby::CameraSample, render::SurfaceMode, render_scene::OwnedDraw};
 use std::sync::Arc;
 
@@ -19,15 +19,29 @@ pub struct FireworkTexture {
 }
 impl FireworkTexture {
     pub fn load(index: &openmt2001::archive::ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
-        let entry = index.find(FIREWORK_BANK).ok_or("original result firework texture bank missing")?;
-        let end = entry.offset.checked_add(entry.length).ok_or("result firework texture range overflow")?;
-        let bytes = archive.get(usize::try_from(entry.offset).map_err(|_| "result firework texture offset")?
-            ..usize::try_from(end).map_err(|_| "result firework texture end")?)
+        let entry = index
+            .find(FIREWORK_BANK)
+            .ok_or("original result firework texture bank missing")?;
+        let end = entry
+            .offset
+            .checked_add(entry.length)
+            .ok_or("result firework texture range overflow")?;
+        let bytes = archive
+            .get(
+                usize::try_from(entry.offset).map_err(|_| "result firework texture offset")?
+                    ..usize::try_from(end).map_err(|_| "result firework texture end")?,
+            )
             .ok_or("result firework texture range")?;
         let set = openmt2001::texture::TextureSet::parse(bytes).map_err(|e| e.to_string())?;
-        let image = set.textures.get(FIREWORK_RECORD).ok_or("original result firework texture record missing")?;
-        Ok(Self { width: image.width, height: image.height,
-            rgba: openmt2001::texture::loader_pixels(image).into() })
+        let image = set
+            .textures
+            .get(FIREWORK_RECORD)
+            .ok_or("original result firework texture record missing")?;
+        Ok(Self {
+            width: image.width,
+            height: image.height,
+            rgba: openmt2001::texture::loader_pixels(image).into(),
+        })
     }
     pub fn empty_draw(&self) -> OwnedDraw {
         let mut draw = empty_draw();
@@ -35,8 +49,14 @@ impl FireworkTexture {
         // The result path prepares once, then update_surface requires enough
         // retained GPU capacity for the complete admitted collector prefix.
         draw.vertices.resize(RESULT_POINT_CAPACITY * 6, [0.; 8]);
-        draw.specular.as_mut().unwrap().resize(RESULT_POINT_CAPACITY * 6, [0.; 3]);
-        draw.diffuse_alpha.as_mut().unwrap().resize(RESULT_POINT_CAPACITY * 6, 0);
+        draw.specular
+            .as_mut()
+            .unwrap()
+            .resize(RESULT_POINT_CAPACITY * 6, [0.; 3]);
+        draw.diffuse_alpha
+            .as_mut()
+            .unwrap()
+            .resize(RESULT_POINT_CAPACITY * 6, 0);
         draw.width = self.width;
         draw.height = self.height;
         draw.rgba = self.rgba.clone();
@@ -154,7 +174,11 @@ mod tests {
         // Controlled no-asset field oracle: the original collector takes the
         // first750, generic callers retain512. Geometry uses the established
         // axis-aligned camera and radius=size*.5, not a mirrored fill helper.
-        let texture = FireworkTexture { width: 1, height: 1, rgba: Arc::from([255,255,255,255]) };
+        let texture = FireworkTexture {
+            width: 1,
+            height: 1,
+            rgba: Arc::from([255, 255, 255, 255]),
+        };
         let mut result = texture.empty_draw();
         let mut shared = empty_draw();
         for (draw, count) in [(&result, 4500), (&shared, 3072)] {
@@ -163,32 +187,59 @@ mod tests {
             assert_eq!(draw.diffuse_alpha.as_ref().unwrap().len(), count);
             assert_eq!(draw.borrowed().vertices.len(), count);
         }
-        let points = (0..900).map(|id| Point { position: [id as f32*4.,8.,-16.], size: 2.,
-            argb: (((64+id%128) as u32) << 24) | ((id as u8 as u32) << 16)
-                | (((id >> 8) as u8 as u32) << 8) | 0x33 }).collect::<Vec<_>>();
-        let camera = CameraSample { eye: [0.;3], target: [0.,0.,-1.], up: [0.,1.,0.], vertical_fov: 45. };
+        let points = (0..900)
+            .map(|id| Point {
+                position: [id as f32 * 4., 8., -16.],
+                size: 2.,
+                argb: (((64 + id % 128) as u32) << 24)
+                    | ((id as u8 as u32) << 16)
+                    | (((id >> 8) as u8 as u32) << 8)
+                    | 0x33,
+            })
+            .collect::<Vec<_>>();
+        let camera = CameraSample {
+            eye: [0.; 3],
+            target: [0., 0., -1.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
+        };
         for count in [0, 1, 511, 512, 513, 749, 750, 751, 900, 1, 750] {
             fill(&mut result, &points[..count], camera).unwrap();
             fill(&mut shared, &points[..count], camera).unwrap();
             for (draw, limit) in [(&result, 750), (&shared, 512)] {
                 let admitted = count.min(limit);
-                assert_eq!(draw.vertices.len(), admitted*6);
-                assert_eq!(draw.specular.as_ref().unwrap().len(), admitted*6);
-                assert_eq!(draw.diffuse_alpha.as_ref().unwrap().len(), admitted*6);
-                assert_eq!(draw.borrowed().vertices.len(), admitted*6);
+                assert_eq!(draw.vertices.len(), admitted * 6);
+                assert_eq!(draw.specular.as_ref().unwrap().len(), admitted * 6);
+                assert_eq!(draw.diffuse_alpha.as_ref().unwrap().len(), admitted * 6);
+                assert_eq!(draw.borrowed().vertices.len(), admitted * 6);
                 for id in 0..admitted {
                     let x = id as f32 * 4.;
-                    let expected = [[x-1.,7.,16.], [x+1.,7.,16.], [x+1.,9.,16.],
-                        [x-1.,7.,16.], [x+1.,9.,16.], [x-1.,9.,16.]];
-                    let rgb = [(id as u8) as f32/255., ((id>>8) as u8) as f32/255., 51./255.];
+                    let expected = [
+                        [x - 1., 7., 16.],
+                        [x + 1., 7., 16.],
+                        [x + 1., 9., 16.],
+                        [x - 1., 7., 16.],
+                        [x + 1., 9., 16.],
+                        [x - 1., 9., 16.],
+                    ];
+                    let rgb = [
+                        (id as u8) as f32 / 255.,
+                        ((id >> 8) as u8) as f32 / 255.,
+                        51. / 255.,
+                    ];
                     for (offset, position) in expected.into_iter().enumerate() {
-                        let vertex = &draw.vertices[id*6+offset];
+                        let vertex = &draw.vertices[id * 6 + offset];
                         assert_eq!(vertex[..3], position, "ordered geometry point{id}");
                         assert_eq!(vertex[3..6], rgb);
-                        assert_eq!(vertex[6..8], [[0.,1.], [1.,1.], [1.,0.],
-                            [0.,1.], [1.,0.], [0.,0.]][offset]);
-                        assert_eq!(draw.diffuse_alpha.as_ref().unwrap()[id*6+offset], (64+id%128) as u8);
-                        assert_eq!(draw.specular.as_ref().unwrap()[id*6+offset], [0.;3]);
+                        assert_eq!(
+                            vertex[6..8],
+                            [[0., 1.], [1., 1.], [1., 0.], [0., 1.], [1., 0.], [0., 0.]][offset]
+                        );
+                        assert_eq!(
+                            draw.diffuse_alpha.as_ref().unwrap()[id * 6 + offset],
+                            (64 + id % 128) as u8
+                        );
+                        assert_eq!(draw.specular.as_ref().unwrap()[id * 6 + offset], [0.; 3]);
                     }
                 }
             }
@@ -201,66 +252,126 @@ mod tests {
     #[cfg(feature = "capture")]
     #[ignore = "requires GPU adapter; retained result750 allocation/update boundary"]
     fn result_750_updates_prepared_surface_without_reallocation_api() {
-        let texture = FireworkTexture { width: 1, height: 1, rgba: Arc::from([255,255,255,255]) };
+        let texture = FireworkTexture {
+            width: 1,
+            height: 1,
+            rgba: Arc::from([255, 255, 255, 255]),
+        };
         let mut draw = texture.empty_draw();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let matrix = Mat4::IDENTITY.to_cols_array();
         let mut prepared = renderer.prepare(&[draw.borrowed()], matrix, None).unwrap();
-        let camera = CameraSample { eye: [0.;3], target: [0.,0.,-1.], up: [0.,1.,0.], vertical_fov: 45. };
-        let points = vec![Point { position: [0.,0.,-1.], argb: 0x804080ff, size: 2. }; 751];
+        let camera = CameraSample {
+            eye: [0.; 3],
+            target: [0., 0., -1.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
+        };
+        let points = vec![
+            Point {
+                position: [0., 0., -1.],
+                argb: 0x804080ff,
+                size: 2.
+            };
+            751
+        ];
         // update_surface is the actual result caller's bounded API, not the
         // dynamic-growth API which could conceal an undersized initial draw.
         for count in [513, 750, 1, 749, 751, 0, 750] {
             fill(&mut draw, &points[..count], camera).unwrap();
-            assert_eq!(draw.borrowed().vertices.len(), count.min(750)*6);
-            renderer.update_surface(&mut prepared, 0, &draw.borrowed(), matrix, None).unwrap();
+            assert_eq!(draw.borrowed().vertices.len(), count.min(750) * 6);
+            renderer
+                .update_surface(&mut prepared, 0, &draw.borrowed(), matrix, None)
+                .unwrap();
         }
     }
 
     #[test]
     #[ignore = "requires supplied original archive; no GPU"]
     fn supplied_fireworks_texture_identity_and_point_fields() {
-        use openmt2001::{archive::ArchiveIndex, texture::{TextureSet, loader_pixels}};
+        use openmt2001::{
+            archive::ArchiveIndex,
+            texture::{TextureSet, loader_pixels},
+        };
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let entry = index.find("gamedata2/billboardrepeattextures/textures.gtd").unwrap();
-        assert_eq!((entry.offset, entry.length), (41063112, 132268), "pinned supplied corpus");
+        let entry = index
+            .find("gamedata2/billboardrepeattextures/textures.gtd")
+            .unwrap();
+        assert_eq!(
+            (entry.offset, entry.length),
+            (41063112, 132268),
+            "pinned supplied corpus"
+        );
         let bytes = &archive[entry.offset as usize..(entry.offset + entry.length) as usize];
         let set = TextureSet::parse(bytes).unwrap();
         assert_eq!(set.textures.len(), 3);
         let image = &set.textures[1];
-        assert_eq!((image.width, image.height, image.header[0]), (128, 128, 0x8000));
+        assert_eq!(
+            (image.width, image.height, image.header[0]),
+            (128, 128, 0x8000)
+        );
         assert!(image.texels.chunks_exact(4).all(|p| p[3] == 255));
         for (x, y) in [(0, 0), (127, 0), (0, 127), (127, 127)] {
-            assert_eq!(&image.texels[(y*128+x)*4..(y*128+x+1)*4], &[0, 0, 0, 255]);
+            assert_eq!(
+                &image.texels[(y * 128 + x) * 4..(y * 128 + x + 1) * 4],
+                &[0, 0, 0, 255]
+            );
         }
-        assert_eq!(&image.texels[(64*128+64)*4..(64*128+65)*4], &[255, 255, 252, 255]);
+        assert_eq!(
+            &image.texels[(64 * 128 + 64) * 4..(64 * 128 + 65) * 4],
+            &[255, 255, 252, 255]
+        );
         let texture = FireworkTexture::load(&index, &archive).unwrap();
         let mut actual = texture.empty_draw();
         assert_eq!(actual.mode, SurfaceMode::ResultFireworks);
         assert_eq!((actual.width, actual.height), (128, 128));
         assert_eq!(actual.rgba.as_ref(), loader_pixels(image));
         assert!(actual.mipmaps);
-        assert!(FireworkTexture::load(&index, &archive[..(entry.offset+entry.length-1) as usize]).is_err());
+        assert!(
+            FireworkTexture::load(
+                &index,
+                &archive[..(entry.offset + entry.length - 1) as usize]
+            )
+            .is_err()
+        );
         let mut missing = index.clone();
-        missing.entries.retain(|e| e.path.replace('\\', "/").to_ascii_lowercase() != FIREWORK_BANK);
+        missing
+            .entries
+            .retain(|e| e.path.replace('\\', "/").to_ascii_lowercase() != FIREWORK_BANK);
         assert!(FireworkTexture::load(&missing, &archive).is_err());
         let mut shared = empty_draw();
         assert_eq!(shared.mode, SurfaceMode::ResultParticles);
-        assert_eq!((shared.width, shared.height, shared.rgba.as_ref()), (1, 1, &[255, 255, 255, 255][..]));
+        assert_eq!(
+            (shared.width, shared.height, shared.rgba.as_ref()),
+            (1, 1, &[255, 255, 255, 255][..])
+        );
         assert!(!shared.mipmaps);
-        let points = [Point { position: [10., 20., -30.], argb: 0x804080ff, size: 2. }];
-        let camera = CameraSample { eye: [10., 20., 50.], target: [10., 20., 0.],
-            up: [0., 1., 0.], vertical_fov: 45. };
+        let points = [Point {
+            position: [10., 20., -30.],
+            argb: 0x804080ff,
+            size: 2.,
+        }];
+        let camera = CameraSample {
+            eye: [10., 20., 50.],
+            target: [10., 20., 0.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
+        };
         fill(&mut shared, &points, camera).unwrap();
         fill(&mut actual, &points, camera).unwrap();
-        assert_eq!(actual.vertices, shared.vertices, "material-only: preserve geometry/UV/RGB");
+        assert_eq!(
+            actual.vertices, shared.vertices,
+            "material-only: preserve geometry/UV/RGB"
+        );
         assert_eq!(actual.diffuse_alpha, shared.diffuse_alpha);
         assert_eq!(actual.diffuse_alpha.as_ref().unwrap().as_slice(), &[128; 6]);
-        assert_eq!(actual.vertices[0][3..6], [64./255., 128./255., 1.]);
+        assert_eq!(actual.vertices[0][3..6], [64. / 255., 128. / 255., 1.]);
     }
 
     // Controlled material fixture: no original payload or simulation changes.
@@ -272,40 +383,89 @@ mod tests {
         draw.diffuse_alpha = None;
         draw.mipmaps = false;
         let [l, b, r, t] = bounds;
-        let positions = [[l,b,z], [r,b,z], [r,t,z], [l,t,z]];
-        draw.vertices = TRIANGLES.into_iter().map(|i| {
-            let [x,y,z] = positions[i]; [x,y,z,1.,1.,1.,UV[i][0],UV[i][1]]
-        }).collect();
+        let positions = [[l, b, z], [r, b, z], [r, t, z], [l, t, z]];
+        draw.vertices = TRIANGLES
+            .into_iter()
+            .map(|i| {
+                let [x, y, z] = positions[i];
+                [x, y, z, 1., 1., 1., UV[i][0], UV[i][1]]
+            })
+            .collect();
         draw
     }
 
     #[cfg(feature = "capture")]
     fn material_readback(renderer: &Renderer, draws: &[OwnedDraw]) -> Vec<u8> {
-        let size = wgpu::Extent3d { width: 64, height: 64, depth_or_array_layers: 1 };
-        let texture = |format, usage| renderer.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("firework material regression"), size, mip_level_count: 1, sample_count: 1,
-            dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[],
-        });
-        let color = texture(openmt2001::render::COLOR_FORMAT,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-        let depth = texture(openmt2001::render::DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let prepared = renderer.prepare(&draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(),
-            Mat4::IDENTITY.to_cols_array(), None).unwrap();
-        renderer.draw_prepared(&color.create_view(&Default::default()),
-            &depth.create_view(&Default::default()), &prepared);
+        let size = wgpu::Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        };
+        let texture = |format, usage| {
+            renderer.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("firework material regression"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let color = texture(
+            openmt2001::render::COLOR_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        );
+        let depth = texture(
+            openmt2001::render::DEPTH_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        let prepared = renderer
+            .prepare(
+                &draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(),
+                Mat4::IDENTITY.to_cols_array(),
+                None,
+            )
+            .unwrap();
+        renderer.draw_prepared(
+            &color.create_view(&Default::default()),
+            &depth.create_view(&Default::default()),
+            &prepared,
+        );
         let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("firework material readback"), size: 64*64*4,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false,
+            label: Some("firework material readback"),
+            size: 64 * 64 * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
         });
         let mut encoder = renderer.device.create_command_encoder(&Default::default());
-        encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo { texture: &color,
-            mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
-                offset: 0, bytes_per_row: Some(256), rows_per_image: Some(64) } }, size);
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &color,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(64),
+                },
+            },
+            size,
+        );
         renderer.queue.submit([encoder.finish()]);
         let (tx, rx) = std::sync::mpsc::channel();
-        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
-        renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        renderer
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
         rx.recv().unwrap().unwrap();
         let bytes = buffer.slice(..).get_mapped_range().unwrap().to_vec();
         buffer.unmap();
@@ -317,34 +477,104 @@ mod tests {
     #[ignore = "requires a GPU adapter; controlled offscreen material fixture"]
     fn result_fireworks_additive_depth_and_shared_material_boundary() {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let camera = CameraSample { eye: [0.;3], target: [0.,0.,-1.], up: [0.,1.,0.], vertical_fov: 45. };
-        let point = Point { position: [0.,0.,-0.5], argb: 0x80ff8040, size: 1.5 };
-        let texture = FireworkTexture { width: 1, height: 1, rgba: Arc::from([128,128,128,255]) };
-        let background = || material_quad(SurfaceMode::UiDepth, [-1.,-1.,1.,1.], 0.9, [20,30,40,255]);
-        let mut one = texture.empty_draw(); fill(&mut one, &[point], camera).unwrap();
-        let mut two = texture.empty_draw(); fill(&mut two, &[point, point], camera).unwrap();
-        let pixel = |bytes: &[u8], x: usize| <[u8;3]>::try_from(&bytes[(32*64+x)*4..(32*64+x)*4+3]).unwrap();
-        let close = |actual: [u8;3], expected: [u8;3]| {
-            for (a,e) in actual.into_iter().zip(expected) { assert!(a.abs_diff(e) <= 2, "{actual:?} != {expected:?}"); }
+        let camera = CameraSample {
+            eye: [0.; 3],
+            target: [0., 0., -1.],
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
         };
-        close(pixel(&material_readback(&renderer, &[background(), one.clone()]), 32), [84,62,56]);
-        close(pixel(&material_readback(&renderer, &[background(), two]), 32), [148,94,72]);
-        let front = material_quad(SurfaceMode::UiDepth, [-1.,-1.,0.,1.], 0.25, [20,30,40,255]);
-        let equal = material_quad(SurfaceMode::UiDepth, [0.,-1.,1.,1.], 0.5, [20,30,40,255]);
+        let point = Point {
+            position: [0., 0., -0.5],
+            argb: 0x80ff8040,
+            size: 1.5,
+        };
+        let texture = FireworkTexture {
+            width: 1,
+            height: 1,
+            rgba: Arc::from([128, 128, 128, 255]),
+        };
+        let background = || {
+            material_quad(
+                SurfaceMode::UiDepth,
+                [-1., -1., 1., 1.],
+                0.9,
+                [20, 30, 40, 255],
+            )
+        };
+        let mut one = texture.empty_draw();
+        fill(&mut one, &[point], camera).unwrap();
+        let mut two = texture.empty_draw();
+        fill(&mut two, &[point, point], camera).unwrap();
+        let pixel = |bytes: &[u8], x: usize| {
+            <[u8; 3]>::try_from(&bytes[(32 * 64 + x) * 4..(32 * 64 + x) * 4 + 3]).unwrap()
+        };
+        let close = |actual: [u8; 3], expected: [u8; 3]| {
+            for (a, e) in actual.into_iter().zip(expected) {
+                assert!(a.abs_diff(e) <= 2, "{actual:?} != {expected:?}");
+            }
+        };
+        close(
+            pixel(
+                &material_readback(&renderer, &[background(), one.clone()]),
+                32,
+            ),
+            [84, 62, 56],
+        );
+        close(
+            pixel(&material_readback(&renderer, &[background(), two]), 32),
+            [148, 94, 72],
+        );
+        let front = material_quad(
+            SurfaceMode::UiDepth,
+            [-1., -1., 0., 1.],
+            0.25,
+            [20, 30, 40, 255],
+        );
+        let equal = material_quad(
+            SurfaceMode::UiDepth,
+            [0., -1., 1., 1.],
+            0.5,
+            [20, 30, 40, 255],
+        );
         let depth = material_readback(&renderer, &[background(), front, equal, one.clone()]);
-        close(pixel(&depth, 24), [20,30,40]); // Occluded.
-        close(pixel(&depth, 40), [84,62,56]); // Equal depth is admitted.
-        let behind = material_quad(SurfaceMode::UiDepth, [-1.,-1.,1.,1.], 0.6, [7,11,17,255]);
-        close(pixel(&material_readback(&renderer, &[background(), one, behind]), 32), [7,11,17]);
+        close(pixel(&depth, 24), [20, 30, 40]); // Occluded.
+        close(pixel(&depth, 40), [84, 62, 56]); // Equal depth is admitted.
+        let behind = material_quad(
+            SurfaceMode::UiDepth,
+            [-1., -1., 1., 1.],
+            0.6,
+            [7, 11, 17, 255],
+        );
+        close(
+            pixel(
+                &material_readback(&renderer, &[background(), one, behind]),
+                32,
+            ),
+            [7, 11, 17],
+        );
         // Black opaque texels contribute zero with mode12; no fabricated alpha.
-        let black = FireworkTexture { width: 1, height: 1, rgba: Arc::from([0,0,0,255]) };
-        let mut firework = black.empty_draw(); fill(&mut firework, &[point], camera).unwrap();
-        close(pixel(&material_readback(&renderer, &[background(), firework]), 32), [20,30,40]);
-        let mut shared = empty_draw(); shared.rgba = black.rgba.clone();
+        let black = FireworkTexture {
+            width: 1,
+            height: 1,
+            rgba: Arc::from([0, 0, 0, 255]),
+        };
+        let mut firework = black.empty_draw();
+        fill(&mut firework, &[point], camera).unwrap();
+        close(
+            pixel(&material_readback(&renderer, &[background(), firework]), 32),
+            [20, 30, 40],
+        );
+        let mut shared = empty_draw();
+        shared.rgba = black.rgba.clone();
         fill(&mut shared, &[point], camera).unwrap();
-        close(pixel(&material_readback(&renderer, &[background(), shared]), 32), [10,15,20]);
+        close(
+            pixel(&material_readback(&renderer, &[background(), shared]), 32),
+            [10, 15, 20],
+        );
     }
 
     #[test]
@@ -471,7 +701,8 @@ mod tests {
         };
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let texture = FireworkTexture::load(&index, &archive).unwrap();
         let mut draw = texture.empty_draw();
         fill(&mut draw, &points, camera).unwrap();

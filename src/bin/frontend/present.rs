@@ -1,6 +1,9 @@
 use std::{
     cell::RefCell,
-    sync::{Arc, atomic::{AtomicU64, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use winit::window::Window;
@@ -127,7 +130,9 @@ impl Presenter {
     /// Queue completion is distinct from physical display scanout. Keep this
     /// diagnostic beside CPU timing so skipped presents and backlog are visible.
     pub fn report_presentation(&self) {
-        let Some(profile) = &self.profile else { return; };
+        let Some(profile) = &self.profile else {
+            return;
+        };
         let mut p = profile.borrow_mut();
         let completed = p.completion.completed.swap(0, Ordering::Relaxed);
         let submitted = p.completion.submitted.load(Ordering::Relaxed);
@@ -135,16 +140,22 @@ impl Presenter {
         let slowest = p.completion.slowest_us.swap(0, Ordering::Relaxed);
         eprintln!(
             "PRESENT queued={} skipped={} acquire_mean={:.2}ms acquire_max={:.2}ms gap_max={:.2}ms GPU_completed={} GPU_callback_mean={:.2}ms GPU_callback_max={:.2}ms pending={}",
-            p.presented, p.skipped,
+            p.presented,
+            p.skipped,
             p.acquire.as_secs_f64() * 1000. / f64::from(p.presented + p.skipped).max(1.),
-            p.slowest_acquire.as_secs_f64() * 1000., p.longest_gap.as_secs_f64() * 1000.,
-            completed, elapsed as f64 / completed.max(1) as f64 / 1000.,
-            slowest as f64 / 1000., submitted,
+            p.slowest_acquire.as_secs_f64() * 1000.,
+            p.longest_gap.as_secs_f64() * 1000.,
+            completed,
+            elapsed as f64 / completed.max(1) as f64 / 1000.,
+            slowest as f64 / 1000.,
+            submitted,
         );
         if p.menu_updates != 0 {
-            eprintln!("MENU CPU prepare_mean={:.2}ms submit_mean={:.2}ms",
+            eprintln!(
+                "MENU CPU prepare_mean={:.2}ms submit_mean={:.2}ms",
                 p.menu_prepare.as_secs_f64() * 1000. / f64::from(p.menu_updates),
-                p.menu_submit.as_secs_f64() * 1000. / f64::from(p.menu_updates));
+                p.menu_submit.as_secs_f64() * 1000. / f64::from(p.menu_updates)
+            );
         }
         p.presented = 0;
         p.skipped = 0;
@@ -297,8 +308,13 @@ impl Presenter {
             let elapsed = started.elapsed();
             p.acquire += elapsed;
             p.slowest_acquire = p.slowest_acquire.max(elapsed);
-            if !matches!(&acquired, wgpu::CurrentSurfaceTexture::Success(_)
-                | wgpu::CurrentSurfaceTexture::Suboptimal(_)) { p.skipped += 1; }
+            if !matches!(
+                &acquired,
+                wgpu::CurrentSurfaceTexture::Success(_)
+                    | wgpu::CurrentSurfaceTexture::Suboptimal(_)
+            ) {
+                p.skipped += 1;
+            }
         }
         let frame = match acquired {
             wgpu::CurrentSurfaceTexture::Success(frame)
@@ -350,7 +366,9 @@ impl Presenter {
         if let Some(profile) = &self.profile {
             let mut p = profile.borrow_mut();
             let now = Instant::now();
-            if let Some(last) = p.last_present { p.longest_gap = p.longest_gap.max(now - last); }
+            if let Some(last) = p.last_present {
+                p.longest_gap = p.longest_gap.max(now - last);
+            }
             p.last_present = Some(now);
             p.presented += 1;
             let completion = p.completion.clone();

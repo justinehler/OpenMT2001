@@ -1,39 +1,73 @@
 //! Supplied-data checks on the actual Session/result dispatch path.
 use super::*;
-use crate::fresh_city::{Inputs,Policy};
-use crate::live_host::process_runtime::{Handle,OriginalGraphicsPolicy};
-use std::path::{Path,PathBuf};
+use crate::fresh_city::{Inputs, Policy};
+use crate::live_host::process_runtime::{Handle, OriginalGraphicsPolicy};
+use std::path::{Path, PathBuf};
 
 // Exercise the actual raw current-camera callback. This does not install a
 // synthetic bank in production, widen camera modes, or admit fresh autosave.
-fn camera_zoom_height(process:&Handle)->f32 {
-    use crate::intro::camera_live::owner::{Owner,Input};
-    use openmt2001::camera::{bank::{Bank,Capture},primary::{Mode12Input,Mode13Input}};
-    let mut raw=[0u8;196];raw[0]=12;raw[0x70]=1;raw[0x71]=1;raw[0x74]=10;
-    for (at,value) in [(0x38,20f32),(0x68,1.),(0x90,1.),(0xb0,80.)] {
-        raw[at..at+4].copy_from_slice(&value.to_le_bytes());
+fn camera_zoom_height(process: &Handle) -> f32 {
+    use crate::intro::camera_live::owner::{Input, Owner};
+    use openmt2001::camera::{
+        bank::{Bank, Capture},
+        primary::{Mode12Input, Mode13Input},
+    };
+    let mut raw = [0u8; 196];
+    raw[0] = 12;
+    raw[0x70] = 1;
+    raw[0x71] = 1;
+    raw[0x74] = 10;
+    for (at, value) in [(0x38, 20f32), (0x68, 1.), (0x90, 1.), (0xb0, 80.)] {
+        raw[at..at + 4].copy_from_slice(&value.to_le_bytes());
     }
-    let low_height=process.performance_nonzero().unwrap();
-    let mut owner=Owner::new(Bank::from_capture(Capture::from_records([raw,[0;196]])),0);
-    owner.central(Input{
-        mode12:Mode12Input{build_visible:false,enable_translation:false,enable_keyboard:false,
-            enable_rotation:false,enable_zoom:true,buttons:[false,true],delta:[0,2],keys:[false;4],
-            sensitivity:50,legacy_yaw:false,invert_vertical:false,low_height},
-        mode13:Mode13Input{enable_translation:false,enable_keyboard:false,enable_zoom:true,
-            buttons:[false,true],delta:[0,2],keys:[false;4],sensitivity:50,
-            legacy_yaw:false,invert_vertical:false,low_height},
-    }).unwrap();
+    let low_height = process.performance_nonzero().unwrap();
+    let mut owner = Owner::new(
+        Bank::from_capture(Capture::from_records([raw, [0; 196]])),
+        0,
+    );
+    owner
+        .central(Input {
+            mode12: Mode12Input {
+                build_visible: false,
+                enable_translation: false,
+                enable_keyboard: false,
+                enable_rotation: false,
+                enable_zoom: true,
+                buttons: [false, true],
+                delta: [0, 2],
+                keys: [false; 4],
+                sensitivity: 50,
+                legacy_yaw: false,
+                invert_vertical: false,
+                low_height,
+            },
+            mode13: Mode13Input {
+                enable_translation: false,
+                enable_keyboard: false,
+                enable_zoom: true,
+                buttons: [false, true],
+                delta: [0, 2],
+                keys: [false; 4],
+                sensitivity: 50,
+                legacy_yaw: false,
+                invert_vertical: false,
+                low_height,
+            },
+        })
+        .unwrap();
     f32::from_le_bytes(owner.capture().records()[0][0x38..0x3c].try_into().unwrap())
 }
-fn eval(session:&mut Session<'_>,source:&[u8],assets:&CommandAssets<'_, '_>){
-    session.result_presentation=Some(ResultPresentation::new(Sequence::Complete,(0,1)));
-    session.run_result("performance regression",Some(source),&[],assets).unwrap();
-    session.result_presentation=None;
+fn eval(session: &mut Session<'_>, source: &[u8], assets: &CommandAssets<'_, '_>) {
+    session.result_presentation = Some(ResultPresentation::new(Sequence::Complete, (0, 1)));
+    session
+        .run_result("performance regression", Some(source), &[], assets)
+        .unwrap();
+    session.result_presentation = None;
 }
 
 #[test]
-#[ignore="requires supplied v1.4 scripts, archive, models, roads and parameter assets"]
-fn actual_process_lua_cross_vm_level_camera_and_complete_bound(){
+#[ignore = "requires supplied v1.4 scripts, archive, models, roads and parameter assets"]
+fn actual_process_lua_cross_vm_level_camera_and_complete_bound() {
     std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
         let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
         let executable=read("OPENMT2001_EXE");let archive=read("OPENMT2001_ARCHIVE_BIN");

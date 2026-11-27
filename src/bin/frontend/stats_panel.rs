@@ -114,15 +114,14 @@ fn action(index: usize) -> crate::live_host::StatsAction {
 // reverse-facing layout geometry. Keep native index order; do not flip faces.
 // This applies only to authored Stats mesh triangles, never palette/UI quads.
 fn stats_mesh_triangles<'a>(
-    positions: &'a [[f32; 3]], indices: &'a [usize],
+    positions: &'a [[f32; 3]],
+    indices: &'a [usize],
 ) -> impl Iterator<Item = [usize; 3]> + 'a {
     indices.chunks_exact(3).filter_map(move |triangle| {
         let ids = [triangle[0], triangle[1], triangle[2]];
         let [a, b, c] = ids.map(|id| positions[id]);
-        let area = (f64::from(b[0]) - f64::from(a[0]))
-            * (f64::from(c[1]) - f64::from(a[1]))
-            - (f64::from(b[1]) - f64::from(a[1]))
-            * (f64::from(c[0]) - f64::from(a[0]));
+        let area = (f64::from(b[0]) - f64::from(a[0])) * (f64::from(c[1]) - f64::from(a[1]))
+            - (f64::from(b[1]) - f64::from(a[1])) * (f64::from(c[0]) - f64::from(a[0]));
         // No epsilon: degenerate and nonfinite faces contribute no raster area.
         (area.is_finite() && area < 0.).then_some(ids)
     })
@@ -169,7 +168,9 @@ impl Assets {
                     surface.alpha.push(255);
                 }
             }
-            if !surface.vertices.is_empty() { model.push(surface); }
+            if !surface.vertices.is_empty() {
+                model.push(surface);
+            }
         }
         let root = openmt2001::ui_mesh::parent_bounds(&mesh, 0)?;
         let regions = openmt2001::ui_mesh::regions(&mesh, 0)?
@@ -1743,73 +1744,156 @@ mod mesh_culling_tests {
 
     #[test]
     fn stats_mesh_winding_degeneracy_and_retained_order() {
-        let points = [[0., 0., 7.], [0., 2., 7.], [3., 2., 7.],
-            [3., 0., 7.], [1.5, 1., 7.]];
+        let points = [
+            [0., 0., 7.],
+            [0., 2., 7.],
+            [3., 2., 7.],
+            [3., 0., 7.],
+            [1.5, 1., 7.],
+        ];
         let indices = [0, 2, 1, 0, 1, 2, 0, 4, 2, 0, 0, 1, 0, 2, 3];
-        assert_eq!(stats_mesh_triangles(&points, &indices).collect::<Vec<_>>(),
-            [[0, 1, 2], [0, 2, 3]]);
+        assert_eq!(
+            stats_mesh_triangles(&points, &indices).collect::<Vec<_>>(),
+            [[0, 1, 2], [0, 2, 3]]
+        );
         // A real screen reflection changes which face survives. Translation,
         // positive scaling and depth changes do not reverse screen winding.
         let reflected = points.map(|[x, y, z]| [x, -y, z]);
-        assert_eq!(stats_mesh_triangles(&reflected, &indices).collect::<Vec<_>>(),
-            [[0, 2, 1]]);
+        assert_eq!(
+            stats_mesh_triangles(&reflected, &indices).collect::<Vec<_>>(),
+            [[0, 2, 1]]
+        );
         let moved = points.map(|[x, y, _]| [x * 2. + 10., y * 3. - 5., -42.]);
-        assert_eq!(stats_mesh_triangles(&moved, &indices).collect::<Vec<_>>(),
-            [[0, 1, 2], [0, 2, 3]]);
-        assert_eq!(stats_mesh_triangles(&points, &[0, 4, 2, 0, 0, 1]).count(), 0);
+        assert_eq!(
+            stats_mesh_triangles(&moved, &indices).collect::<Vec<_>>(),
+            [[0, 1, 2], [0, 2, 3]]
+        );
+        assert_eq!(
+            stats_mesh_triangles(&points, &[0, 4, 2, 0, 0, 1]).count(),
+            0
+        );
     }
     fn guard(bytes: &[u8], expected: &str) {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let mut process = Command::new("sha256sum").stdin(Stdio::piped())
-            .stdout(Stdio::piped()).spawn().expect("fixture checks require sha256sum");
+        let mut process = Command::new("sha256sum")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("fixture checks require sha256sum");
         process.stdin.take().unwrap().write_all(bytes).unwrap();
         let output = process.wait_with_output().unwrap();
         assert!(output.status.success());
-        assert_eq!(std::str::from_utf8(&output.stdout).unwrap().split_whitespace().next(), Some(expected));
+        assert_eq!(
+            std::str::from_utf8(&output.stdout)
+                .unwrap()
+                .split_whitespace()
+                .next(),
+            Some(expected)
+        );
     }
     fn guarded(path: &Path, expected: &str) -> Vec<u8> {
-        let bytes = fs::read(path).unwrap(); guard(&bytes, expected); bytes
+        let bytes = fs::read(path).unwrap();
+        guard(&bytes, expected);
+        bytes
     }
     struct Supplied {
-        directory: Vec<u8>, archive: Vec<u8>, executable: Vec<u8>,
-        installer: PathBuf, strings: Vec<Vec<u8>>,
+        directory: Vec<u8>,
+        archive: Vec<u8>,
+        executable: Vec<u8>,
+        installer: PathBuf,
+        strings: Vec<Vec<u8>>,
     }
     impl Supplied {
         fn read() -> Self {
             let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
             let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-            let executable = guarded(&PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap()),
-                "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b");
+            let executable = guarded(
+                &PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap()),
+                "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
+            );
             let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
-                .parent().unwrap().parent().unwrap().to_path_buf();
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf();
             for (name, hash) in [
-                ("cust640p.tab", "082d6a0488289a0926ee3b2e279882a03c31922e6f1ec6aa75e56a6ffc1d72d5"),
-                ("tahoma12bldnoantip.tab", "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be"),
-                ("coppgoth23p.tab", "5e5ac4756550b3b22058510de5fafa31114709b10735fdfb41823b7d283ac300"),
-            ] { guarded(&installer.join("Standard/fonts").join(name), hash); }
+                (
+                    "cust640p.tab",
+                    "082d6a0488289a0926ee3b2e279882a03c31922e6f1ec6aa75e56a6ffc1d72d5",
+                ),
+                (
+                    "tahoma12bldnoantip.tab",
+                    "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be",
+                ),
+                (
+                    "coppgoth23p.tab",
+                    "5e5ac4756550b3b22058510de5fafa31114709b10735fdfb41823b7d283ac300",
+                ),
+            ] {
+                guarded(&installer.join("Standard/fonts").join(name), hash);
+            }
             let language = PathBuf::from(std::env::var("OPENMT2001_STATS_LANGUAGE").unwrap());
-            let off = guarded(&language.join("tycoon.off"),
-                "54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d");
-            let bin = guarded(&language.join("tycoon.bin"),
-                "4d5e302035f3579d2c0cb8cd35a58abae5ea6d8159e6c3661bef091fedff6c38");
+            let off = guarded(
+                &language.join("tycoon.off"),
+                "54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d",
+            );
+            let bin = guarded(
+                &language.join("tycoon.bin"),
+                "4d5e302035f3579d2c0cb8cd35a58abae5ea6d8159e6c3661bef091fedff6c38",
+            );
             assert_eq!(off.len() % 2, 0);
             let mut at = 0;
-            let strings = off.chunks_exact(2).map(|n| {
-                let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
-                let row = bin.get(at..end).unwrap().to_vec(); at = end; row
-            }).collect();
+            let strings = off
+                .chunks_exact(2)
+                .map(|n| {
+                    let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                    let row = bin.get(at..end).unwrap().to_vec();
+                    at = end;
+                    row
+                })
+                .collect();
             assert_eq!(at, bin.len());
-            let supplied = Self { directory, archive, executable, installer, strings };
+            let supplied = Self {
+                directory,
+                archive,
+                executable,
+                installer,
+                strings,
+            };
             for (name, hash) in [
-                (PANEL, "2b80d6798bd9a42ec464979d29d2e75f1b0acb65f28146f2d4c2ac3685a45958"),
-                ("1New_Maya_grey_border.tt", "31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f"),
-                ("front_end_background_blue.tt", "c43054ad3f84223b7719938db42b92675648f361d47a1f1acf842dfecd2957bb"),
-                ("FRONT_END_BLUE_BOARD.TT", "6b36529ac23bdfbeadc166a9838d8ed2dc716aad52093ffad4f77a30158772a0"),
-                ("4by4_colours_black4by4.tt", "9a19ef3b8659aab6370b591615e418b5776d12b7de5ad3a85cea92a83e95a934"),
-                ("gamedata2/GenericTextures640/textures.gtd", "10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4"),
-                ("gamedata2/font640/textures.gtd", "21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912"),
-            ] { guard(supplied.payload(name), hash); }
+                (
+                    PANEL,
+                    "2b80d6798bd9a42ec464979d29d2e75f1b0acb65f28146f2d4c2ac3685a45958",
+                ),
+                (
+                    "1New_Maya_grey_border.tt",
+                    "31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f",
+                ),
+                (
+                    "front_end_background_blue.tt",
+                    "c43054ad3f84223b7719938db42b92675648f361d47a1f1acf842dfecd2957bb",
+                ),
+                (
+                    "FRONT_END_BLUE_BOARD.TT",
+                    "6b36529ac23bdfbeadc166a9838d8ed2dc716aad52093ffad4f77a30158772a0",
+                ),
+                (
+                    "4by4_colours_black4by4.tt",
+                    "9a19ef3b8659aab6370b591615e418b5776d12b7de5ad3a85cea92a83e95a934",
+                ),
+                (
+                    "gamedata2/GenericTextures640/textures.gtd",
+                    "10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4",
+                ),
+                (
+                    "gamedata2/font640/textures.gtd",
+                    "21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912",
+                ),
+            ] {
+                guard(supplied.payload(name), hash);
+            }
             supplied
         }
         fn payload(&self, name: &str) -> &[u8] {
@@ -1820,7 +1904,14 @@ mod mesh_culling_tests {
         fn assets(&self) -> Assets {
             let index = ArchiveIndex::parse(&self.directory, self.archive.len() as u64).unwrap();
             let refs = self.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
-            Assets::load(&index, &self.archive, &self.installer, &refs, &self.executable).unwrap()
+            Assets::load(
+                &index,
+                &self.archive,
+                &self.installer,
+                &refs,
+                &self.executable,
+            )
+            .unwrap()
         }
     }
     #[test]
@@ -1828,7 +1919,10 @@ mod mesh_culling_tests {
     fn supplied_stats_mesh_retains_borders_background_and_all_regions() {
         let supplied = Supplied::read();
         let mesh = CachedMesh::parse(supplied.payload(PANEL)).unwrap();
-        assert_eq!((mesh.vertex_count, mesh.parts.len(), mesh.frames), (184, 34, 1));
+        assert_eq!(
+            (mesh.vertex_count, mesh.parts.len(), mesh.frames),
+            (184, 34, 1)
+        );
         let positions = panel_positions(&mesh).unwrap();
         let uv = mesh.uvs();
         let assets = supplied.assets(); // exercise the actual production loader
@@ -1841,8 +1935,14 @@ mod mesh_culling_tests {
             let indices = part.vertex_indices().collect::<Vec<_>>();
             let visible = stats_mesh_triangles(&positions, &indices).collect::<Vec<_>>();
             if retained.contains(&part_id) {
-                assert_eq!(visible.iter().flat_map(|tri| tri.iter().copied()).collect::<Vec<_>>(),
-                    indices, "front-facing part{part_id} changed order");
+                assert_eq!(
+                    visible
+                        .iter()
+                        .flat_map(|tri| tri.iter().copied())
+                        .collect::<Vec<_>>(),
+                    indices,
+                    "front-facing part{part_id} changed order"
+                );
                 kept_triangles += visible.len();
             } else {
                 assert!(visible.is_empty(), "layout part{part_id} became visible");
@@ -1853,42 +1953,87 @@ mod mesh_culling_tests {
         assert_eq!((rejected.len(), rejected_triangles), (25, 50));
         assert_eq!(assets.model.len(), 9);
         // All supplied named bounds survive, including non-rendered rectangles.
-        let regions = openmt2001::ui_mesh::regions(&mesh, 0).unwrap().into_iter()
-            .map(|region| (region.name, region.bounds)).collect::<Vec<_>>();
+        let regions = openmt2001::ui_mesh::regions(&mesh, 0)
+            .unwrap()
+            .into_iter()
+            .map(|region| (region.name, region.bounds))
+            .collect::<Vec<_>>();
         assert_eq!(assets.regions, regions);
         assert_eq!(assets.regions.len(), 34);
-        assert_eq!(assets.root, openmt2001::ui_mesh::parent_bounds(&mesh, 0).unwrap());
-        assert_eq!(assets.bounds("STATS_BACKING3"), [32.017193, 66.70275, 603.9501, 404.15662]);
+        assert_eq!(
+            assets.root,
+            openmt2001::ui_mesh::parent_bounds(&mesh, 0).unwrap()
+        );
+        assert_eq!(
+            assets.bounds("STATS_BACKING3"),
+            [32.017193, 66.70275, 603.9501, 404.15662]
+        );
         assert_ne!(assets.bounds("STATS_TOKEN_BACKING06"), [0.; 4]);
         assert_eq!(assets.body, 0xbb000a28);
         // Check actual output surfaces against original retained indices, UVs,
         // alpha and original texture bytes, not a mirror of the cull predicate.
         for (actual, &part_id) in assets.model.iter().zip(&retained) {
             let part = &mesh.parts[part_id];
-            let expected_vertices = part.vertex_indices().map(|vertex| [
-                positions[vertex][0], positions[vertex][1], positions[vertex][2],
-                1., 1., 1., uv[vertex][0], uv[vertex][1],
-            ]).collect::<Vec<_>>();
-            assert_eq!(actual.vertices, expected_vertices, "submitted part{part_id}");
+            let expected_vertices = part
+                .vertex_indices()
+                .map(|vertex| {
+                    [
+                        positions[vertex][0],
+                        positions[vertex][1],
+                        positions[vertex][2],
+                        1.,
+                        1.,
+                        1.,
+                        uv[vertex][0],
+                        uv[vertex][1],
+                    ]
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual.vertices, expected_vertices,
+                "submitted part{part_id}"
+            );
             assert_eq!(actual.alpha, vec![255; expected_vertices.len()]);
-            let textures = TextureSet::parse(supplied.payload(mesh.texture_names[part.texture as usize])).unwrap();
+            let textures =
+                TextureSet::parse(supplied.payload(mesh.texture_names[part.texture as usize]))
+                    .unwrap();
             let expected = Surface::new(&textures.textures[0]);
-            assert_eq!((actual.width, actual.height, &actual.pixels),
-                (expected.width, expected.height, &expected.pixels));
+            assert_eq!(
+                (actual.width, actual.height, &actual.pixels),
+                (expected.width, expected.height, &expected.pixels)
+            );
         }
         let gray = TextureSet::parse(supplied.payload("1New_Maya_grey_border.tt")).unwrap();
         assert_eq!((gray.textures[0].width, gray.textures[0].height), (4, 4));
-        assert!(gray.textures[0].texels.chunks_exact(4).all(|p| p == [146, 144, 144, 255]));
+        assert!(
+            gray.textures[0]
+                .texels
+                .chunks_exact(4)
+                .all(|p| p == [146, 144, 144, 255])
+        );
         for part in [4, 6, 7, 8, 9] {
-            assert!(mesh.texture_names[mesh.parts[part].texture as usize]
-                .eq_ignore_ascii_case("1New_Maya_grey_border.tt"));
+            assert!(
+                mesh.texture_names[mesh.parts[part].texture as usize]
+                    .eq_ignore_ascii_case("1New_Maya_grey_border.tt")
+            );
             assert!(retained.contains(&part));
         }
-        let background = TextureSet::parse(supplied.payload("front_end_background_blue.tt")).unwrap();
-        assert_eq!((background.textures[0].width, background.textures[0].height), (32, 28));
-        assert!(background.textures[0].texels.chunks_exact(4).all(|p| p[3] == 128));
-        assert!(mesh.texture_names[mesh.parts[3].texture as usize]
-            .eq_ignore_ascii_case("front_end_background_blue.tt"));
+        let background =
+            TextureSet::parse(supplied.payload("front_end_background_blue.tt")).unwrap();
+        assert_eq!(
+            (background.textures[0].width, background.textures[0].height),
+            (32, 28)
+        );
+        assert!(
+            background.textures[0]
+                .texels
+                .chunks_exact(4)
+                .all(|p| p[3] == 128)
+        );
+        assert!(
+            mesh.texture_names[mesh.parts[3].texture as usize]
+                .eq_ignore_ascii_case("front_end_background_blue.tt")
+        );
     }
 
     #[test]
@@ -1897,49 +2042,113 @@ mod mesh_culling_tests {
     fn capture_stats_surround_over_nonuniform_underlay() {
         let supplied = Supplied::read();
         let assets = supplied.assets();
-        let saved = guarded(&PathBuf::from(std::env::var("OPENMT2001_STATS_SAVE_ONE").unwrap()),
-            "2c3bfdbbdaeb2e12e08752e9f3ed05d6e5c4dc60aa48208113f46a84b329dded");
+        let saved = guarded(
+            &PathBuf::from(std::env::var("OPENMT2001_STATS_SAVE_ONE").unwrap()),
+            "2c3bfdbbdaeb2e12e08752e9f3ed05d6e5c4dc60aa48208113f46a84b329dded",
+        );
         let save = openmt2001::save::SaveFile::parse(&saved).unwrap();
-        let players = save.players().unwrap().iter().map(|player| {
-            // SavedPlayer bytes start at runtime+4, not runtime+0.
-            let character = u32::from_le_bytes(player.bytes[0x14c..0x150].try_into().unwrap());
-            let raw = &player.bytes[0x154..0x174];
-            let end = raw.iter().position(|&b| b == 0).unwrap();
-            Player { character, name: raw[..end].to_vec() }
-        }).collect::<Vec<_>>();
+        let players = save
+            .players()
+            .unwrap()
+            .iter()
+            .map(|player| {
+                // SavedPlayer bytes start at runtime+4, not runtime+0.
+                let character = u32::from_le_bytes(player.bytes[0x14c..0x150].try_into().unwrap());
+                let raw = &player.bytes[0x154..0x174];
+                let end = raw.iter().position(|&b| b == 0).unwrap();
+                Player {
+                    character,
+                    name: raw[..end].to_vec(),
+                }
+            })
+            .collect::<Vec<_>>();
         assert_eq!(players.len(), 1);
         let history = save.player_history().unwrap().as_bytes().to_vec();
-        let supplied_one = Snapshot { state: State::show(6, true, 1).unwrap(),
-            players, history, years_per_day: 1 }; // component display scale only
+        let supplied_one = Snapshot {
+            state: State::show(6, true, 1).unwrap(),
+            players,
+            history,
+            years_per_day: 1,
+        }; // component display scale only
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let output = PathBuf::from(std::env::var("OPENMT2001_STATS_CAPTURE_DIR").unwrap());
         assert!(output.is_dir());
         for count in [0, 1, 6] {
             let mut snapshot = supplied_one.clone();
             snapshot.state = State::show(6, true, count).unwrap();
-            if count == 0 { snapshot.players.clear(); }
+            if count == 0 {
+                snapshot.players.clear();
+            }
             if count == 6 {
                 // Explicit synthetic roster diagnostic; no supplied six-player
                 // save/city state is claimed or manufactured as gameplay evidence.
-                snapshot.players = (0..6).map(|slot| Player {
-                    character: slot as u32,
-                    name: format!("Synthetic{slot}").into_bytes(),
-                }).collect();
+                snapshot.players = (0..6)
+                    .map(|slot| Player {
+                        character: slot as u32,
+                        name: format!("Synthetic{slot}").into_bytes(),
+                    })
+                    .collect();
             }
             let prepared = assets.prepare(&renderer, &snapshot, None, None).unwrap();
             let mut checker = Surface::solid();
-            for row in 0..15 { for col in 0..20 {
-                let rgb = if (row + col) % 2 == 0 { 0xfff04020 } else { 0xff1040e0 };
-                checker.rect([col as f32 * 32., row as f32 * 32.,
-                    (col + 1) as f32 * 32., (row + 1) as f32 * 32.], [rgb; 4]);
-            }}
-            let underlay = renderer.prepare(&[checker.draw()],
-                [2./640.,0.,0.,0., 0.,-2./480.,0.,0., 0.,0.,1.,0., -1.,1.,0.,1.], None).unwrap();
-            let label = if count == 1 { "supplied-one" } else { "synthetic-slots" };
+            for row in 0..15 {
+                for col in 0..20 {
+                    let rgb = if (row + col) % 2 == 0 {
+                        0xfff04020
+                    } else {
+                        0xff1040e0
+                    };
+                    checker.rect(
+                        [
+                            col as f32 * 32.,
+                            row as f32 * 32.,
+                            (col + 1) as f32 * 32.,
+                            (row + 1) as f32 * 32.,
+                        ],
+                        [rgb; 4],
+                    );
+                }
+            }
+            let underlay = renderer
+                .prepare(
+                    &[checker.draw()],
+                    [
+                        2. / 640.,
+                        0.,
+                        0.,
+                        0.,
+                        0.,
+                        -2. / 480.,
+                        0.,
+                        0.,
+                        0.,
+                        0.,
+                        1.,
+                        0.,
+                        -1.,
+                        1.,
+                        0.,
+                        1.,
+                    ],
+                    None,
+                )
+                .unwrap();
+            let label = if count == 1 {
+                "supplied-one"
+            } else {
+                "synthetic-slots"
+            };
             let path = output.join(format!("stats-{label}-{count}-underlay.png"));
-            crate::capture_test::capture_overlay(&renderer, &underlay, &prepared, path.to_str().unwrap());
+            crate::capture_test::capture_overlay(
+                &renderer,
+                &underlay,
+                &prepared,
+                path.to_str().unwrap(),
+            );
         }
         // No input/session/profile mutation or original runtime was performed.
     }

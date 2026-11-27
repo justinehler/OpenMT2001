@@ -91,8 +91,11 @@ fn matches_native_transport_frame() {
                 Ok(())
             })
             .unwrap();
-        submitted_models.extend(actual.iter().map(|aux|
-            u32::from_le_bytes(aux[..4].try_into().unwrap())));
+        submitted_models.extend(
+            actual
+                .iter()
+                .map(|aux| u32::from_le_bytes(aux[..4].try_into().unwrap())),
+        );
         assert_eq!(state.first_frame, afterflag, "flag case {case}");
         let observed: [Vec<u8>; 3] = [
             state.aircraft.iter().flatten().copied().collect(),
@@ -119,8 +122,11 @@ fn matches_native_transport_frame() {
     }
     assert!(reader.0.is_empty());
     for i in 0..4 {
-        let reference = u32::from_le_bytes(image.at(0x539d50 + i * 4, 4)
-            .unwrap().try_into().unwrap());
-        assert!(submitted_models.contains(&reference), "native hourly ship {reference:08x} not covered");
+        let reference =
+            u32::from_le_bytes(image.at(0x539d50 + i * 4, 4).unwrap().try_into().unwrap());
+        assert!(
+            submitted_models.contains(&reference),
+            "native hourly ship {reference:08x} not covered"
+        );
     }
 }

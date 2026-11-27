@@ -1,6 +1,6 @@
 //! Original48b350 offer answer and48b480 takeover-notice dismissal.
 use crate::{
-    player_manager::{put, word, Player},
+    player_manager::{Player, put, word},
     player_messages::Packet,
 };
 pub struct World<'a> {
@@ -146,7 +146,7 @@ fn matches_native_human_replies() {
             .collect();
         let references: Vec<_> = players.iter().map(|p| p.reference).collect();
         let mut categories = Box::new([[0; 380]; 52]);
-        let category_id=word(&source,0x18) as usize;
+        let category_id = word(&source, 0x18) as usize;
         categories[category_id] = b[3].try_into().unwrap();
         let mut world = World {
             categories: &mut categories,
@@ -229,7 +229,7 @@ fn matches_native_human_replies() {
                                         other => {
                                             return Err(format!(
                                                 "unexpected human refusal external route{other:?}"
-                                            ))
+                                            ));
                                         }
                                     }
                                     Ok(())

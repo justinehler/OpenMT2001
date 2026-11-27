@@ -1,7 +1,7 @@
 //! Original47ef20 neighbor cache and46c2b0/46c470 expansion selection.
 use crate::{
     pe::PeImage,
-    player_manager::{put, word, Player},
+    player_manager::{Player, put, word},
     x87::Sum,
 };
 
@@ -26,12 +26,23 @@ impl Default for Cache {
 }
 impl Cache {
     ///47eee0 counts residents' current category byte7c, storing a wrapping WORD.
-    pub fn refresh_population(&mut self,residents:&crate::economy::ResidentAccounts)->Result<(),String>{
-        let active=if residents.active_count as i32>0 {
-            residents.nodes.get(..residents.active_count as usize).ok_or("neighbor resident count exceeds pool")?
-        }else{&[]};
+    pub fn refresh_population(
+        &mut self,
+        residents: &crate::economy::ResidentAccounts,
+    ) -> Result<(), String> {
+        let active = if residents.active_count as i32 > 0 {
+            residents
+                .nodes
+                .get(..residents.active_count as usize)
+                .ok_or("neighbor resident count exceeds pool")?
+        } else {
+            &[]
+        };
         for row in &mut self.rows {
-            let count=active.iter().filter(|resident|resident.as_bytes()[0x7c]==row[0]).count() as u16;
+            let count = active
+                .iter()
+                .filter(|resident| resident.as_bytes()[0x7c] == row[0])
+                .count() as u16;
             row[14..16].copy_from_slice(&count.to_le_bytes());
         }
         Ok(())
@@ -527,8 +538,12 @@ mod tests {
         let mut live = [[0u8; 380]; 52];
         bind_geometry(&mut live, &board);
         for block in &board.blocks {
-            assert_eq!(word(&live[block.id], 0x94), word(&categories[block.id], 0x94),
-                "native fresh category tint {}", block.name);
+            assert_eq!(
+                word(&live[block.id], 0x94),
+                word(&categories[block.id], 0x94),
+                "native fresh category tint {}",
+                block.name
+            );
         }
         let mut actual = Cache::default();
         actual.refresh(&live, &image).unwrap();

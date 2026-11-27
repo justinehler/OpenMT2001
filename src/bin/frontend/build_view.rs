@@ -76,16 +76,28 @@ const BUSINESS_SCROLL: [f32; 4] = [172., 71., 188., 166.];
 const BUSINESS_UP: [f32; 4] = [172., 71., 188., 87.];
 const BUSINESS_DOWN: [f32; 4] = [172., 150., 188., 166.];
 fn business_row(point: [f32; 2]) -> Option<usize> {
-    if !hit(BUSINESS_LIST, point) { return None; }
+    if !hit(BUSINESS_LIST, point) {
+        return None;
+    }
     // Native42f640 subtracts the list's3px glyph inset before FTOL;
     // the top inset still picks row0 because FTOL truncates toward zero.
     let row = ((point[1] - BUSINESS_LIST[1] - 3.) / BUSINESS_ROW_HEIGHT).trunc() as i32;
-    (0..BUSINESS_ROWS as i32).contains(&row).then_some(row as usize)
+    (0..BUSINESS_ROWS as i32)
+        .contains(&row)
+        .then_some(row as usize)
 }
 fn business_selection(row: usize) -> ([f32; 4], u32) {
     // Original430c58/430deb:3px margin, one-pixel inset on lower edge.
     let top = BUSINESS_LIST[1] + 4. + row as f32 * BUSINESS_ROW_HEIGHT;
-    ([BUSINESS_LIST[0], top, BUSINESS_LIST[2] - 1., top + BUSINESS_ROW_HEIGHT - 1.], 0xff288be1)
+    (
+        [
+            BUSINESS_LIST[0],
+            top,
+            BUSINESS_LIST[2] - 1.,
+            top + BUSINESS_ROW_HEIGHT - 1.,
+        ],
+        0xff288be1,
+    )
 }
 const PROJECTION: [f32; 16] = [
     2. / 640.,
@@ -166,7 +178,12 @@ impl Assets {
             font.textures[6..8].iter().map(Surface::new).collect(),
             font.textures[0..2].iter().map(Surface::new).collect(),
         ];
-        let tabs = ["tahoma12bldnoantip.tab", "tahoma10bldnoantip.tab", "cust640p.tab"].map(|name| {
+        let tabs = [
+            "tahoma12bldnoantip.tab",
+            "tahoma10bldnoantip.tab",
+            "cust640p.tab",
+        ]
+        .map(|name| {
             fs::read(installer.join("Standard/fonts").join(name))
                 .map_err(|e| format!("{name}: {e}"))
         });
@@ -232,11 +249,19 @@ impl Assets {
             color,
         )
     }
-    fn heading(&self, pages: &mut [Surface], id: u32, bounds: [f32; 4], color: u32) -> Result<(), String> {
+    fn heading(
+        &self,
+        pages: &mut [Surface],
+        id: u32,
+        bounds: [f32; 4],
+        color: u32,
+    ) -> Result<(), String> {
         ui::text_widget_style4(
             pages,
             &self.tabs[1],
-            self.strings.get(id as usize).ok_or("Planning heading language ID")?,
+            self.strings
+                .get(id as usize)
+                .ok_or("Planning heading language ID")?,
             bounds,
             color,
         )
@@ -350,8 +375,12 @@ impl Assets {
         let mut surfaces = self.base.clone();
         // Shared MPP mode3 takes the default title icon path in 41edb0.
         let mut title_icon = self.textures[20].clone();
-        let title_icon_bounds = [35., 5., 35. + title_icon.width as f32,
-            5. + title_icon.height as f32];
+        let title_icon_bounds = [
+            35.,
+            5.,
+            35. + title_icon.width as f32,
+            5. + title_icon.height as f32,
+        ];
         rect(&mut title_icon, title_icon_bounds, 0xffffffff);
         surfaces.push(title_icon);
         let mut body = self.fonts[1].clone();
@@ -454,7 +483,10 @@ impl Assets {
                                 // Native 430e60 paints the style1 heading on
                                 // transition to the following style2 row.
                                 let top = BUSINESS_LIST[1] + 2. + n as f32 * BUSINESS_ROW_HEIGHT;
-                                panel.rect([BUSINESS_LIST[0], top, BUSINESS_LIST[2], top + 10.], [0xff01762f; 4]);
+                                panel.rect(
+                                    [BUSINESS_LIST[0], top, BUSINESS_LIST[2], top + 10.],
+                                    [0xff01762f; 4],
+                                );
                                 label
                             }
                             BusinessRow::Separator => continue,
@@ -477,13 +509,25 @@ impl Assets {
                             self.business_list_color,
                         )?;
                     }
-                    ui::Slider { bounds: BUSINESS_SCROLL, vertical: true,
+                    ui::Slider {
+                        bounds: BUSINESS_SCROLL,
+                        vertical: true,
                         value: state.scroll as f32,
-                        range: [0., state.display_rows.len().saturating_sub(BUSINESS_ROWS) as f32],
-                        pointer: state.pointer, pressed: state.pressed,
-                    }.paint(&mut panel, &mut controls, &self.textures);
+                        range: [
+                            0.,
+                            state.display_rows.len().saturating_sub(BUSINESS_ROWS) as f32,
+                        ],
+                        pointer: state.pointer,
+                        pressed: state.pressed,
+                    }
+                    .paint(&mut panel, &mut controls, &self.textures);
                     panel.rect([30.4, 163.6, 188.8, 177.6], [0xff01762f; 4]);
-                    self.heading(&mut body, 1513, [30.4, 163.6, 188.8, 177.6], self.text_color)?;
+                    self.heading(
+                        &mut body,
+                        1513,
+                        [30.4, 163.6, 188.8, 177.6],
+                        self.text_color,
+                    )?;
                     if let Some(business) = state.preview_business {
                         for (i, text_id) in state
                             .context
@@ -548,9 +592,13 @@ impl Assets {
                         )?;
                     }
                     if state.kind != 2 {
-                        ui::text_widget_style0(&mut body, &self.tabs[1],
+                        ui::text_widget_style0(
+                            &mut body,
+                            &self.tabs[1],
                             self.strings.get(1516).ok_or("Planning Floors caption")?,
-                            [30.4, 127.6, 188.8038, 141.6], self.text_color)?;
+                            [30.4, 127.6, 188.8038, 141.6],
+                            self.text_color,
+                        )?;
                         let floors = formatted_pair(
                             self.strings.get(1519).ok_or("Planning step count text")?,
                             state.height,
@@ -572,9 +620,15 @@ impl Assets {
                             pressed: state.pressed,
                         }
                         .paint(&mut panel, &mut controls, &self.textures);
-                        ui::text_widget_style0(&mut body, &self.tabs[1],
-                            self.strings.get(1520).ok_or("Planning Build Quality caption")?,
-                            [30.4, 157.6, 188.8038, 171.6], self.text_color)?;
+                        ui::text_widget_style0(
+                            &mut body,
+                            &self.tabs[1],
+                            self.strings
+                                .get(1520)
+                                .ok_or("Planning Build Quality caption")?,
+                            [30.4, 157.6, 188.8038, 171.6],
+                            self.text_color,
+                        )?;
                         // Native child31 is a filled navy text widget behind
                         // the quality choices, even though its text is empty.
                         panel.rect([30.4, 171.6, 188.8038, 185.6], [0xff000a48; 4]);
@@ -594,9 +648,15 @@ impl Assets {
                                 self.text_color,
                             )?;
                         }
-                        ui::text_widget_style0(&mut body, &self.tabs[1],
-                            self.strings.get(1518).ok_or("Planning Build Style caption")?,
-                            [30.4, 186.6, 188.8038, 200.6], self.text_color)?;
+                        ui::text_widget_style0(
+                            &mut body,
+                            &self.tabs[1],
+                            self.strings
+                                .get(1518)
+                                .ok_or("Planning Build Style caption")?,
+                            [30.4, 186.6, 188.8038, 200.6],
+                            self.text_color,
+                        )?;
                         let count = state.design_count();
                         let style = formatted_pair(
                             self.strings.get(1519).ok_or("Planning step count text")?,
@@ -825,9 +885,17 @@ impl BusinessRow {
     }
 }
 
-fn display_rows_for(context: &Context, kind: u32, businesses: &[u32]) -> Result<Vec<BusinessRow>, String> {
+fn display_rows_for(
+    context: &Context,
+    kind: u32,
+    businesses: &[u32],
+) -> Result<Vec<BusinessRow>, String> {
     if kind != 0 {
-        return Ok(businesses.iter().copied().map(BusinessRow::Business).collect());
+        return Ok(businesses
+            .iter()
+            .copied()
+            .map(BusinessRow::Business)
+            .collect());
     }
     // 4229f0 appends both retail hour groups through 4317f0, with a blank
     // 431860 row between them. All three rows occupy list/scroll slots.
@@ -838,7 +906,10 @@ fn display_rows_for(context: &Context, kind: u32, businesses: &[u32]) -> Result<
             rows.push(BusinessRow::Heading(1527));
         }
         for &id in businesses {
-            let row = context.catalog.row(id as usize).ok_or("Planning business index")?;
+            let row = context
+                .catalog
+                .row(id as usize)
+                .ok_or("Planning business index")?;
             if row[0x5c] == hour {
                 rows.push(BusinessRow::Business(id));
             }
@@ -1256,49 +1327,66 @@ impl State {
     /// List rows (43ec30), text captions (43e9a0), and 43f510 tracks are silent.
     pub fn pointer_click_cue(&mut self) -> bool {
         if !self.button_down || self.slider_capture.is_some() {
-            self.click_latch=None;
+            self.click_latch = None;
             return false;
         }
-        let target=self.pointer.and_then(|p|self.click_target(p));
-        if target==self.click_latch { return false; }
-        self.click_latch=target;
+        let target = self.pointer.and_then(|p| self.click_target(p));
+        if target == self.click_latch {
+            return false;
+        }
+        self.click_latch = target;
         target.is_some()
     }
-    fn click_target(&self,p:[f32;2]) -> Option<u8> {
+    fn click_target(&self, p: [f32; 2]) -> Option<u8> {
         if self.placement_choices_pending || self.placement_pending.is_some() {
             return None;
         }
-        if hit(CANCEL,p) { return Some(0); }
-        if self.message.is_some() { return None; }
-        if hit(ACCEPT,p) && self.can_submit() { return Some(1); }
-        if let Some(i)=STEPS.iter().take(self.step).position(|r|hit(*r,p)) {
-            return Some(2+i as u8);
+        if hit(CANCEL, p) {
+            return Some(0);
         }
-        if let Some(i)=STEP_BACK.iter().take(self.step).position(|r|hit(*r,p)) {
-            return Some(6+i as u8);
+        if self.message.is_some() {
+            return None;
+        }
+        if hit(ACCEPT, p) && self.can_submit() {
+            return Some(1);
+        }
+        if let Some(i) = STEPS.iter().take(self.step).position(|r| hit(*r, p)) {
+            return Some(2 + i as u8);
+        }
+        if let Some(i) = STEP_BACK.iter().take(self.step).position(|r| hit(*r, p)) {
+            return Some(6 + i as u8);
         }
         match self.step {
-            0=>TYPE.iter().enumerate().position(|(i,r)|hit(*r,p)
-                && !self.type_businesses[i].is_empty()
-                && (self.tutorial_build_type==-1 || self.tutorial_build_type==i as i32))
-                .map(|i|9+i as u8),
-            1=>{
-                if hit(BUSINESS_UP,p) {Some(12)}
-                else if hit(BUSINESS_DOWN,p) {Some(13)}
-                else {None}
-            }
-            3 if self.kind!=2=>{
-                if let Some(i)=QUALITY.iter().position(|r|hit(*r,p)) {
-                    return Some(14+i as u8);
+            0 => TYPE
+                .iter()
+                .enumerate()
+                .position(|(i, r)| {
+                    hit(*r, p)
+                        && !self.type_businesses[i].is_empty()
+                        && (self.tutorial_build_type == -1 || self.tutorial_build_type == i as i32)
+                })
+                .map(|i| 9 + i as u8),
+            1 => {
+                if hit(BUSINESS_UP, p) {
+                    Some(12)
+                } else if hit(BUSINESS_DOWN, p) {
+                    Some(13)
+                } else {
+                    None
                 }
-                for (slider,bounds) in [FLOOR_SLIDER,STYLE_SLIDER].into_iter().enumerate() {
-                    if let Some(side)=slider_arrows(bounds).iter().position(|r|hit(*r,p)) {
-                        return Some(17+slider as u8*2+side as u8);
+            }
+            3 if self.kind != 2 => {
+                if let Some(i) = QUALITY.iter().position(|r| hit(*r, p)) {
+                    return Some(14 + i as u8);
+                }
+                for (slider, bounds) in [FLOOR_SLIDER, STYLE_SLIDER].into_iter().enumerate() {
+                    if let Some(side) = slider_arrows(bounds).iter().position(|r| hit(*r, p)) {
+                        return Some(17 + slider as u8 * 2 + side as u8);
                     }
                 }
                 None
             }
-            _=>None,
+            _ => None,
         }
     }
     fn sample_captured_slider(&mut self) {
@@ -1307,15 +1395,24 @@ impl State {
         };
         if slider == 2 && self.step == 1 {
             let maximum = self.display_rows.len().saturating_sub(BUSINESS_ROWS) as i32;
-            let value = ui::slider_selection(ui::slider_track(BUSINESS_SCROLL, true), p[1], maximum, true) as usize;
-            if value != self.scroll { self.scroll = value; self.dirty = true; }
+            let value =
+                ui::slider_selection(ui::slider_track(BUSINESS_SCROLL, true), p[1], maximum, true)
+                    as usize;
+            if value != self.scroll {
+                self.scroll = value;
+                self.dirty = true;
+            }
             return;
         }
         if self.step != 3 || self.kind == 2 {
             return;
         }
         if slider == 0 {
-            let row = self.context.catalog.row(self.business.unwrap() as usize).unwrap();
+            let row = self
+                .context
+                .catalog
+                .row(self.business.unwrap() as usize)
+                .unwrap();
             let min = word(row, 0x48) as i32;
             let max = word(row, 0x44) as i32;
             let value = min + slider_selection(slider_track(FLOOR_SLIDER), p[0], max - min);
@@ -1325,7 +1422,9 @@ impl State {
             }
         } else {
             let count = self.design_count();
-            if count == 0 { return; }
+            if count == 0 {
+                return;
+            }
             let value = slider_selection(slider_track(STYLE_SLIDER), p[0], count as i32 - 1);
             if value != self.choices[self.quality] {
                 self.choices[self.quality] = value;
@@ -1375,8 +1474,10 @@ impl State {
     /// Reports a completed panel widget activation. The base-plate drag and
     /// slider drags do not emit the generic UI click cue.
     pub fn mouse(&mut self, down: bool) -> bool {
-        self.button_down=down;
-        if !down { self.click_latch=None; }
+        self.button_down = down;
+        if !down {
+            self.click_latch = None;
+        }
         if self.placement_choices_pending || self.placement_pending.is_some() {
             return false;
         }
@@ -1386,7 +1487,9 @@ impl State {
         let Some(p) = self.pointer else {
             self.pressed = None;
             self.drag = None;
-            if !down { self.slider_capture = None; }
+            if !down {
+                self.slider_capture = None;
+            }
             return false;
         };
         self.dirty = true;
@@ -1398,7 +1501,8 @@ impl State {
             }
             if self.step == 3 && self.kind != 2 && self.message.is_none() {
                 self.slider_capture = [FLOOR_SLIDER, STYLE_SLIDER]
-                    .iter().position(|bounds| hit(slider_track(*bounds), p));
+                    .iter()
+                    .position(|bounds| hit(slider_track(*bounds), p));
                 self.sample_captured_slider();
             }
             if self.step == 2
@@ -1464,11 +1568,13 @@ impl State {
                     }
                     if !businesses.is_empty() {
                         self.kind = kind as u32;
-                        self.display_rows = display_rows_for(&self.context, kind as u32, &businesses)
-                            .expect("validated planning catalog");
+                        self.display_rows =
+                            display_rows_for(&self.context, kind as u32, &businesses)
+                                .expect("validated planning catalog");
                         self.businesses = businesses;
                         self.business = None;
-                        self.preview_business = self.display_rows.first().and_then(|row| row.business());
+                        self.preview_business =
+                            self.display_rows.first().and_then(|row| row.business());
                         self.rectangle = None;
                         self.scroll = 0;
                         self.quote = None;
@@ -1499,7 +1605,8 @@ impl State {
                     && let Some(id) = self.display_rows.get(i).and_then(|row| row.business())
                 {
                     self.tutorial_activated = Some(87);
-                    if self.tutorial_build_use != -1 && self.tutorial_build_use != 999
+                    if self.tutorial_build_use != -1
+                        && self.tutorial_build_use != 999
                         && self.tutorial_build_use != i as i32
                     {
                         // Original 42505b returns after event87, without
@@ -1677,10 +1784,17 @@ fn verify_native_retail_rows(state: &State, data: &[u8]) {
         let actual = match row {
             BusinessRow::Heading(id) => (1, *id, u32::MAX),
             BusinessRow::Separator => (2, 0, u32::MAX),
-            BusinessRow::Business(id) =>
-                (2, word(state.context.catalog.row(*id as usize).unwrap(), 4), *id),
+            BusinessRow::Business(id) => (
+                2,
+                word(state.context.catalog.row(*id as usize).unwrap(), 4),
+                *id,
+            ),
         };
-        assert_eq!(actual, (fixture_word(at), fixture_word(at + 4), fixture_word(at + 8)), "native retail row {index}");
+        assert_eq!(
+            actual,
+            (fixture_word(at), fixture_word(at + 4), fixture_word(at + 8)),
+            "native retail row {index}"
+        );
         at += 12;
     }
     let green_count = fixture_word(at) as usize;
@@ -1690,11 +1804,18 @@ fn verify_native_retail_rows(state: &State, data: &[u8]) {
         let current = fixture_word(at) as usize;
         let scroll = fixture_word(at + 4) as usize;
         let visible = current - 1 - scroll;
-        assert!(matches!(state.display_rows[current - 1], BusinessRow::Heading(_)));
+        assert!(matches!(
+            state.display_rows[current - 1],
+            BusinessRow::Heading(_)
+        ));
         let top = BUSINESS_LIST[1] + 2. + visible as f32 * BUSINESS_ROW_HEIGHT;
         let actual = [BUSINESS_LIST[0], top, BUSINESS_LIST[2], top + 10.];
         for (axis, value) in actual.into_iter().enumerate() {
-            assert_eq!(value.to_bits(), fixture_word(at + 8 + axis * 4), "native green axis {axis}");
+            assert_eq!(
+                value.to_bits(),
+                fixture_word(at + 8 + axis * 4),
+                "native green axis {axis}"
+            );
         }
         assert_eq!(fixture_word(at + 24), 0xff01762f);
         at += 28;
@@ -1915,7 +2036,8 @@ pub fn verify_live_context(
                 installer,
                 &board.blocks,
                 &crate::block_sidewalk_labels::load_style(&image, installer).unwrap(),
-            ).unwrap();
+            )
+            .unwrap();
             sidewalk_assets.prepare(renderer, scene).unwrap().0
         });
         let row = *state.context.catalog.row(business as usize).unwrap();
@@ -1990,8 +2112,14 @@ pub fn verify_live_context(
         assert_eq!(state.step, 3);
         if kind != 2 {
             state.sync_model_variants(&build_bytes).unwrap();
-            assert!(state.design_count() > 0, "stage3 style total is available before the worker quote");
-            assert!(state.quote.is_none(), "first adjustment frame precedes the worker quote");
+            assert!(
+                state.design_count() > 0,
+                "stage3 style total is available before the worker quote"
+            );
+            assert!(
+                state.quote.is_none(),
+                "first adjustment frame precedes the worker quote"
+            );
             #[cfg(feature = "capture")]
             if let Some((prefix, renderer)) = &typed_capture {
                 assets.prepare(renderer, &mut state).unwrap();
@@ -2103,20 +2231,36 @@ pub fn verify_live_context(
     assert_eq!(state.step, 1);
     let business_count = state.display_rows.len();
     assert_eq!(state.display_rows[0], BusinessRow::Heading(1526));
-    let separator = state.display_rows.iter().position(|row| *row == BusinessRow::Separator).unwrap();
-    assert_eq!(state.display_rows[separator + 1], BusinessRow::Heading(1527));
+    let separator = state
+        .display_rows
+        .iter()
+        .position(|row| *row == BusinessRow::Separator)
+        .unwrap();
+    assert_eq!(
+        state.display_rows[separator + 1],
+        BusinessRow::Heading(1527)
+    );
     assert_eq!(business_count, state.businesses.len() + 3);
     assert_eq!(state.preview_business, None);
-    assert!(!click(&mut state, [200, 158]), "Retail group heading cannot select a business");
+    assert!(
+        !click(&mut state, [200, 158]),
+        "Retail group heading cannot select a business"
+    );
     assert_eq!(state.step, 1);
     #[cfg(feature = "capture")]
     if let Ok(prefix) = std::env::var("OPENMT2001_PLANNER_CAPTURE") {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         assets.prepare(&renderer, &mut state).unwrap();
-        crate::capture_test::capture(&renderer, state.prepared.as_ref(), scene,
-            &format!("{prefix}-1-retail-initial.png"));
+        crate::capture_test::capture(
+            &renderer,
+            state.prepared.as_ref(),
+            scene,
+            &format!("{prefix}-1-retail-initial.png"),
+        );
     }
     assert!(business_count > BUSINESS_ROWS);
     assert!(click(&mut state, [356, 312]));
@@ -2126,11 +2270,17 @@ pub fn verify_live_context(
     state.scroll(-100);
     assert_eq!(state.scroll, business_count - BUSINESS_ROWS);
     state.pointer(Some([200, 313]));
-    assert_eq!(state.hovered_business(), state.display_rows.last().and_then(|row| row.business()));
+    assert_eq!(
+        state.hovered_business(),
+        state.display_rows.last().and_then(|row| row.business())
+    );
     state.scroll(100);
     assert_eq!(state.scroll, 0);
     state.scroll = separator - 5;
-    assert!(!click(&mut state, [200, 247]), "blank separator cannot select a business");
+    assert!(
+        !click(&mut state, [200, 247]),
+        "blank separator cannot select a business"
+    );
     assert_eq!(state.step, 1);
     state.scroll = 0;
     // Original 43ec30 list selection does not emit the generic 443360 cue.
@@ -2146,7 +2296,11 @@ pub fn verify_live_context(
     assert_eq!(state.scroll, business_count - BUSINESS_ROWS);
     state.pointer = Some([180., 100.]);
     assert!(!state.mouse(false));
-    assert_eq!(state.scroll, business_count - BUSINESS_ROWS, "scrollbar release preserves last held sample");
+    assert_eq!(
+        state.scroll,
+        business_count - BUSINESS_ROWS,
+        "scrollbar release preserves last held sample"
+    );
     state.scroll(100);
     // A release over a list row after pressing elsewhere must not select it.
     state.pointer(Some([196, 116]));
@@ -2154,7 +2308,11 @@ pub fn verify_live_context(
     state.pointer(Some([200, 158]));
     assert!(!state.mouse(false));
     assert_eq!(state.step, 1);
-    assert_eq!(state.hovered_business(), None, "the Day heading is not a business");
+    assert_eq!(
+        state.hovered_business(),
+        None,
+        "the Day heading is not a business"
+    );
     assert!(click(&mut state, [200, 176]));
     assert_eq!(state.step, 2);
     // The retained completed-stage circle remains clickable under both
@@ -2288,12 +2446,21 @@ pub fn verify_live_context(
     let max = word(&row, 0x44) as i32;
     state.pointer(Some([120, 298]));
     assert!(!state.mouse(true));
-    assert!(!state.pointer_click_cue(), "native 43f510 track drag is silent");
+    assert!(
+        !state.pointer_click_cue(),
+        "native 43f510 track drag is silent"
+    );
     state.pointer(Some([600, 298]));
-    assert_eq!(state.height, max, "captured drag clamps to maximum outside panel");
+    assert_eq!(
+        state.height, max,
+        "captured drag clamps to maximum outside panel"
+    );
     state.pointer = Some([60., 149.]);
     assert!(!state.mouse(false));
-    assert_eq!(state.height, max, "release does not resample its new position");
+    assert_eq!(
+        state.height, max,
+        "release does not resample its new position"
+    );
     state.pointer(Some([120, 298]));
     state.mouse(true);
     state.pointer(Some([0, 298]));
@@ -2366,7 +2533,11 @@ pub fn verify_live_context(
                 state.apply_placement_choices(placement());
             }
         }
-        let furniture = state.display_rows.iter().position(|row| *row == BusinessRow::Business(39)).unwrap();
+        let furniture = state
+            .display_rows
+            .iter()
+            .position(|row| *row == BusinessRow::Business(39))
+            .unwrap();
         state.scroll = furniture.saturating_sub(4);
         state.step = 1;
         let furniture_point = [
@@ -2380,12 +2551,17 @@ pub fn verify_live_context(
         assert_eq!(state.hovered_business(), Some(39));
         state.pointer(Some([
             200,
-            ((BUSINESS_ROW_TOP + (BUSINESS_ROWS - 1) as f32 * BUSINESS_ROW_HEIGHT + BUSINESS_ROW_HEIGHT * 0.5) * 2.)
-                as i32,
+            ((BUSINESS_ROW_TOP
+                + (BUSINESS_ROWS - 1) as f32 * BUSINESS_ROW_HEIGHT
+                + BUSINESS_ROW_HEIGHT * 0.5)
+                * 2.) as i32,
         ]));
         assert_eq!(
             state.hovered_business(),
-            state.display_rows.get(state.scroll + BUSINESS_ROWS - 1).and_then(|row| row.business())
+            state
+                .display_rows
+                .get(state.scroll + BUSINESS_ROWS - 1)
+                .and_then(|row| row.business())
         );
         state.pointer(Some([
             200,
@@ -2534,27 +2710,57 @@ mod caption_tests {
     #[test]
     #[ignore = "requires original v1.4 static planner caption glyph fixture"]
     fn original_static_adjustment_caption_glyphs() {
-        assert_native_fixture("work/frontend/native-construction-static-labels.bin", b"MTCLBL01", &[1516, 1520, 1518], 3, 0);
+        assert_native_fixture(
+            "work/frontend/native-construction-static-labels.bin",
+            b"MTCLBL01",
+            &[1516, 1520, 1518],
+            3,
+            0,
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 quality-label glyph fixture"]
     fn original_quality_label_glyphs() {
-        assert_native_fixture("work/frontend/native-construction-quality-labels.bin", b"MTQLBL01", &[1656, 1655, 1657], 0, 3);
+        assert_native_fixture(
+            "work/frontend/native-construction-quality-labels.bin",
+            b"MTQLBL01",
+            &[1656, 1655, 1657],
+            0,
+            3,
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 stage-title glyph fixture"]
     fn original_stage_title_glyphs() {
-        assert_native_fixture("work/frontend/native-construction-stage-title.bin", b"MTSTTL01", &[1512, 1521], 3, 4);
+        assert_native_fixture(
+            "work/frontend/native-construction-stage-title.bin",
+            b"MTSTTL01",
+            &[1512, 1521],
+            3,
+            4,
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 numeric-caption glyph fixture"]
     fn original_floor_count_glyphs() {
-        assert_native_fixture("work/frontend/native-construction-floor-count.bin", b"MTFCNT01", &[1519], 3, 5);
+        assert_native_fixture(
+            "work/frontend/native-construction-floor-count.bin",
+            b"MTFCNT01",
+            &[1519],
+            3,
+            5,
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 short and wrapped block-title fixture"]
     fn original_block_title_glyphs() {
-        assert_native_fixture("work/frontend/native-construction-block-title.bin", b"MTBTIT01", &[1436, 1437, 1438], 1, 4);
+        assert_native_fixture(
+            "work/frontend/native-construction-block-title.bin",
+            b"MTBTIT01",
+            &[1436, 1437, 1438],
+            1,
+            4,
+        );
     }
     fn assert_native_fixture(path: &str, magic: &[u8; 8], ids: &[u32], font_id: u32, style: u32) {
         let data = std::fs::read(path).unwrap();
@@ -2581,15 +2787,20 @@ mod caption_tests {
                 4 => crate::ui::text_widget_style4(&mut pages, font, encoded, bounds, 0xffffffff),
                 5 => crate::ui::text_widget_style5(&mut pages, font, encoded, bounds, 0xffffffff),
                 _ => unreachable!(),
-            }.unwrap();
+            }
+            .unwrap();
             for (page, actual) in pages.iter().enumerate() {
                 let count = word(at) as usize;
                 at += 4;
-                assert_eq!(actual.vertices.len(), count * 6, "label {id} page {page} glyph count");
+                assert_eq!(
+                    actual.vertices.len(),
+                    count * 6,
+                    "label {id} page {page} glyph count"
+                );
                 for glyph in 0..count {
                     for (vertex, index) in [0, 1, 2, 5].into_iter().enumerate() {
                         let actual_vertex = actual.vertices[glyph * 6 + index];
-                        for (axis,value) in actual_vertex[..3].iter().enumerate() {
+                        for (axis, value) in actual_vertex[..3].iter().enumerate() {
                             assert_eq!(
                                 value.to_bits(),
                                 word(at + glyph * 48 + vertex * 12 + axis * 4),
@@ -2622,52 +2833,76 @@ mod slider_tests {
     #[test]
     #[ignore = "requires original construction list/slider fixture"]
     fn construction_list_and_slider_background_match_original() {
-        let source = std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_BUILDER_SLIDERS").unwrap());
+        let source =
+            std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_BUILDER_SLIDERS").unwrap());
         let font = std::fs::read(source.with_file_name("native-construction-font.bin")).unwrap();
         assert_eq!(&font[..8], b"MTCFONT1");
-        let fw = |at|u32::from_le_bytes(font[at..at+4].try_into().unwrap());
-        assert_eq!(fw(8),0x037f);
-        assert_eq!(super::BUSINESS_ROW_HEIGHT,fw(12) as f32);
-        assert_eq!(super::BUSINESS_ROW_TOP,fw(20) as f32);
+        let fw = |at| u32::from_le_bytes(font[at..at + 4].try_into().unwrap());
+        assert_eq!(fw(8), 0x037f);
+        assert_eq!(super::BUSINESS_ROW_HEIGHT, fw(12) as f32);
+        assert_eq!(super::BUSINESS_ROW_TOP, fw(20) as f32);
         let list = std::fs::read(source.with_file_name("native-construction-list.bin")).unwrap();
         assert_eq!(&list[..8], b"MTCLIST1");
-        let word = |at| u32::from_le_bytes(list[at..at+4].try_into().unwrap());
+        let word = |at| u32::from_le_bytes(list[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x037f);
         assert_eq!(word(12), 13);
-        let rect = |at| std::array::from_fn::<_,4,_>(|i| f32::from_bits(word(at+i*4)));
-        for (actual, expected) in [(super::BUSINESS_LIST,rect(16)),(crate::ui::slider_track(super::BUSINESS_SCROLL,true),rect(32)),(super::BUSINESS_UP,rect(48)),(super::BUSINESS_DOWN,rect(64))] {
-            for (a,b) in actual.into_iter().zip(expected) { assert!((a-b).abs()<0.0001); }
+        let rect = |at| std::array::from_fn::<_, 4, _>(|i| f32::from_bits(word(at + i * 4)));
+        for (actual, expected) in [
+            (super::BUSINESS_LIST, rect(16)),
+            (
+                crate::ui::slider_track(super::BUSINESS_SCROLL, true),
+                rect(32),
+            ),
+            (super::BUSINESS_UP, rect(48)),
+            (super::BUSINESS_DOWN, rect(64)),
+        ] {
+            for (a, b) in actual.into_iter().zip(expected) {
+                assert!((a - b).abs() < 0.0001);
+            }
         }
         for i in 0..word(80) as usize {
-            let y=word(84+i*8) as f32;
+            let y = word(84 + i * 8) as f32;
             if (super::BUSINESS_LIST[1]..=super::BUSINESS_LIST[3]).contains(&y) {
-                assert_eq!(super::business_row([50.,y]),Some(word(88+i*8) as usize));
+                assert_eq!(
+                    super::business_row([50., y]),
+                    Some(word(88 + i * 8) as usize)
+                );
             }
         }
         let mut at = 84 + word(80) as usize * 8;
-        let count = word(at); at += 4;
+        let count = word(at);
+        at += 4;
         for _ in 0..count {
             let row = word(at) as usize;
-            let fills = word(at+8) as usize; at += 12;
-            assert_eq!(fills,2, "original hover fill precedes opaque selected fill");
+            let fills = word(at + 8) as usize;
+            at += 12;
+            assert_eq!(
+                fills, 2,
+                "original hover fill precedes opaque selected fill"
+            );
             for i in 0..fills {
                 let expected = rect(at);
                 let (actual, color) = super::business_selection(row);
-                for (a,b) in actual.into_iter().zip(expected) { assert!((a-b).abs()<0.0001); }
-                assert_eq!(word(at+16),if i==0 { 0xff6ed1e1 } else { color });
+                for (a, b) in actual.into_iter().zip(expected) {
+                    assert!((a - b).abs() < 0.0001);
+                }
+                assert_eq!(word(at + 16), if i == 0 { 0xff6ed1e1 } else { color });
                 at += 20;
             }
         }
-        assert_eq!(at,list.len());
-        let data=std::fs::read(source.with_file_name("native-slider-track.bin")).unwrap();
-        assert_eq!(&data[..8],b"MTTRACK1");
-        let w=|at|u32::from_le_bytes(data[at..at+4].try_into().unwrap());
-        assert_eq!(w(8),0x037f);
+        assert_eq!(at, list.len());
+        let data = std::fs::read(source.with_file_name("native-slider-track.bin")).unwrap();
+        assert_eq!(&data[..8], b"MTTRACK1");
+        let w = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+        assert_eq!(w(8), 0x037f);
         for i in 0..w(12) as usize {
-            let at=16+i*48;
-            let track=std::array::from_fn(|j|f32::from_bits(w(at+12+j*4)));
-            let expected=std::array::from_fn(|j|f32::from_bits(w(at+28+j*4)));
-            assert_eq!(crate::ui::slider_background(track,w(at)!=0,w(at+4)>0&&w(at+8)==0),(expected,w(at+44)));
+            let at = 16 + i * 48;
+            let track = std::array::from_fn(|j| f32::from_bits(w(at + 12 + j * 4)));
+            let expected = std::array::from_fn(|j| f32::from_bits(w(at + 28 + j * 4)));
+            assert_eq!(
+                crate::ui::slider_background(track, w(at) != 0, w(at + 4) > 0 && w(at + 8) == 0),
+                (expected, w(at + 44))
+            );
         }
     }
     #[test]
@@ -2762,7 +2997,6 @@ mod slider_tests {
     }
 }
 
-
 #[cfg(test)]
 mod mesh_facing_tests {
     use super::*;
@@ -2771,141 +3005,309 @@ mod mesh_facing_tests {
     // Test oracle only: production uses a finite authored part list, not a
     // new renderer/filter. Raw mesh Y is negated by the shared panel loader.
     fn area(positions: &[[f32; 3]], ids: [usize; 3]) -> f64 {
-        let [a,b,c] = ids.map(|id| [f64::from(positions[id][0]), -f64::from(positions[id][1])]);
-        (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+        let [a, b, c] = ids.map(|id| [f64::from(positions[id][0]), -f64::from(positions[id][1])]);
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     }
     #[test]
     fn canonical_facing_oracle_checks_orientation_degeneracy_and_order() {
-        let positions = [[0.,0.,9.],[0.,-2.,9.],[3.,-2.,9.],[3.,0.,9.],[1.5,-1.,9.]];
-        let triangles = [[0,2,1],[0,1,2],[0,4,2],[0,0,1],[0,2,3]];
-        assert_eq!(triangles.map(|ids| area(&positions,ids)), [6.,-6.,0.,0.,-6.]);
-        let fronts = |points: &[[f32;3]]| triangles.into_iter()
-            .filter(|&ids| area(points,ids)<0.).collect::<Vec<_>>();
-        assert_eq!(fronts(&positions), [[0,1,2],[0,2,3]]);
-        assert_eq!(fronts(&positions.map(|[x,y,z]|[x,-y,z])), [[0,2,1]]);
-        assert_eq!(fronts(&positions.map(|[x,y,_]|[x*2.+11.,y*3.-7.,-99.])),
-            [[0,1,2],[0,2,3]]);
+        let positions = [
+            [0., 0., 9.],
+            [0., -2., 9.],
+            [3., -2., 9.],
+            [3., 0., 9.],
+            [1.5, -1., 9.],
+        ];
+        let triangles = [[0, 2, 1], [0, 1, 2], [0, 4, 2], [0, 0, 1], [0, 2, 3]];
+        assert_eq!(
+            triangles.map(|ids| area(&positions, ids)),
+            [6., -6., 0., 0., -6.]
+        );
+        let fronts = |points: &[[f32; 3]]| {
+            triangles
+                .into_iter()
+                .filter(|&ids| area(points, ids) < 0.)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(fronts(&positions), [[0, 1, 2], [0, 2, 3]]);
+        assert_eq!(fronts(&positions.map(|[x, y, z]| [x, -y, z])), [[0, 2, 1]]);
+        assert_eq!(
+            fronts(&positions.map(|[x, y, _]| [x * 2. + 11., y * 3. - 7., -99.])),
+            [[0, 1, 2], [0, 2, 3]]
+        );
     }
     fn guard(bytes: &[u8], expected: &str) {
         use std::io::Write;
-        use std::process::{Command,Stdio};
-        let mut child=Command::new("sha256sum").stdin(Stdio::piped())
-            .stdout(Stdio::piped()).spawn().expect("fixture SHA guards need sha256sum");
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("sha256sum")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("fixture SHA guards need sha256sum");
         child.stdin.take().unwrap().write_all(bytes).unwrap();
-        let result=child.wait_with_output().unwrap();
+        let result = child.wait_with_output().unwrap();
         assert!(result.status.success());
-        assert_eq!(std::str::from_utf8(&result.stdout).unwrap().split_whitespace().next(), Some(expected));
+        assert_eq!(
+            std::str::from_utf8(&result.stdout)
+                .unwrap()
+                .split_whitespace()
+                .next(),
+            Some(expected)
+        );
     }
-    fn same_surface(a: &Surface,b: &Surface) {
-        assert_eq!(a.vertices,b.vertices); assert_eq!(a.alpha,b.alpha);
-        assert_eq!((a.width,a.height),(b.width,b.height)); assert_eq!(a.pixels,b.pixels);
-        assert!(matches!(a.draw().mode,openmt2001::render::SurfaceMode::Overlay));
+    fn same_surface(a: &Surface, b: &Surface) {
+        assert_eq!(a.vertices, b.vertices);
+        assert_eq!(a.alpha, b.alpha);
+        assert_eq!((a.width, a.height), (b.width, b.height));
+        assert_eq!(a.pixels, b.pixels);
+        assert!(matches!(
+            a.draw().mode,
+            openmt2001::render::SurfaceMode::Overlay
+        ));
     }
     fn supplied() -> Assets {
-        let read=|key| fs::read(std::env::var(key).unwrap()).unwrap();
-        let directory=read("OPENMT2001_ARCHIVE_DIR");
-        guard(&directory,"8ecb0d18a3896eba61db9ff6edc10869a84a64229169b52f0f7d981b81980d52");
-        let archive=read("OPENMT2001_ARCHIVE_BIN");
-        let index=ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-        let payload=|name: &str| {
-            let e=index.find(name).unwrap();
-            &archive[e.offset as usize..(e.offset+e.length) as usize]
+        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        guard(
+            &directory,
+            "8ecb0d18a3896eba61db9ff6edc10869a84a64229169b52f0f7d981b81980d52",
+        );
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let payload = |name: &str| {
+            let e = index.find(name).unwrap();
+            &archive[e.offset as usize..(e.offset + e.length) as usize]
         };
-        let name="gamedata2/brand_new_panels/main_panel_v2.tm";
-        guard(payload(name),"b405f1b5146fdc6ea76a13984a7cd97f54c13ce41cb26f752c4ffec62549eab1");
-        for (name,hash) in [
-            ("1New_Maya_grey_border.tt","31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f"),
-            ("1New_Maya_alphablack50.tt","7b53dfc9bd46c56b5ce2082645586fa328c46590a86e9a79be676393bded0f92"),
-            ("gamedata2/GenericTextures640/textures.gtd","10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4"),
-            ("gamedata2/font640/textures.gtd","21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912"),
-        ] { guard(payload(name),hash); }
-        let executable=read("OPENMT2001_EXE");
-        guard(&executable,"1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b");
-        let parameter=std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let installer=parameter.parent().unwrap().parent().unwrap();
-            guard(&fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(), "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be");
-            guard(&fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap(), "7df258462744a70bce18516dd6d79239cd0fd434c7e100ce4ef8ad399d36c644");
-            guard(&fs::read(installer.join("Standard/fonts/cust640p.tab")).unwrap(), "082d6a0488289a0926ee3b2e279882a03c31922e6f1ec6aa75e56a6ffc1d72d5");
-            guard(&fs::read(installer.join("parameters/1930.prm")).unwrap(), "1c172a6fb41104ae39ca24b7a171e93d3619c8b8dc642b4b6dfddacca32e1648");
-            guard(&fs::read(installer.join("parameters/1940.prm")).unwrap(), "adfe73d6999158310ca5988a05a097263e383f30bb753d3c2fc3b76e5815e142");
-            guard(&fs::read(installer.join("parameters/1950.prm")).unwrap(), "70ec82d8074a2f0ba853fc450e911fef7a14025262876d71f5818de3a215a526");
-            guard(&fs::read(installer.join("parameters/1960.prm")).unwrap(), "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a");
-            guard(&fs::read(installer.join("parameters/1970.prm")).unwrap(), "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a");
-            guard(&fs::read(installer.join("parameters/1980.prm")).unwrap(), "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a");
-            guard(&fs::read(installer.join("parameters/1990.prm")).unwrap(), "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a");
-            guard(&fs::read(installer.join("parameters/2000.prm")).unwrap(), "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a");
+        let name = "gamedata2/brand_new_panels/main_panel_v2.tm";
+        guard(
+            payload(name),
+            "b405f1b5146fdc6ea76a13984a7cd97f54c13ce41cb26f752c4ffec62549eab1",
+        );
+        for (name, hash) in [
+            (
+                "1New_Maya_grey_border.tt",
+                "31a3aafc028c5b3798eb8fb8eca314c1f2cf4e88b0fd3af3204d9c004396cd9f",
+            ),
+            (
+                "1New_Maya_alphablack50.tt",
+                "7b53dfc9bd46c56b5ce2082645586fa328c46590a86e9a79be676393bded0f92",
+            ),
+            (
+                "gamedata2/GenericTextures640/textures.gtd",
+                "10a278bd4ed76076f5b517069f1c8a96ddc7a8b3bb282ff8998842fa8beb88f4",
+            ),
+            (
+                "gamedata2/font640/textures.gtd",
+                "21ed8e328fc95d98eb8cf6f99927d2dc28bd7b3bd309b67bbfbbec52f9be5912",
+            ),
+        ] {
+            guard(payload(name), hash);
+        }
+        let executable = read("OPENMT2001_EXE");
+        guard(
+            &executable,
+            "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
+        );
+        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        guard(
+            &fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(),
+            "03b9924e83bb7a8c650bd58c87bcb3d669dcdf0198bb240e5f964d434d8c62be",
+        );
+        guard(
+            &fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap(),
+            "7df258462744a70bce18516dd6d79239cd0fd434c7e100ce4ef8ad399d36c644",
+        );
+        guard(
+            &fs::read(installer.join("Standard/fonts/cust640p.tab")).unwrap(),
+            "082d6a0488289a0926ee3b2e279882a03c31922e6f1ec6aa75e56a6ffc1d72d5",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1930.prm")).unwrap(),
+            "1c172a6fb41104ae39ca24b7a171e93d3619c8b8dc642b4b6dfddacca32e1648",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1940.prm")).unwrap(),
+            "adfe73d6999158310ca5988a05a097263e383f30bb753d3c2fc3b76e5815e142",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1950.prm")).unwrap(),
+            "70ec82d8074a2f0ba853fc450e911fef7a14025262876d71f5818de3a215a526",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1960.prm")).unwrap(),
+            "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1970.prm")).unwrap(),
+            "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1980.prm")).unwrap(),
+            "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a",
+        );
+        guard(
+            &fs::read(installer.join("parameters/1990.prm")).unwrap(),
+            "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a",
+        );
+        guard(
+            &fs::read(installer.join("parameters/2000.prm")).unwrap(),
+            "98cc9a74d43e0a39b95141d5b7bfe80493dacc58d5f3a651df9f2c97a274477a",
+        );
         // Assets::load stores these strings without indexing them; no planner
         // State/Context or worker is opened by this geometry/material fixture.
-        let assets=Assets::load(&index,&archive,installer,&[],&executable).unwrap();
-        let mesh=CachedMesh::parse(payload(name)).unwrap();
-        assert_eq!((mesh.vertex_count,mesh.parts.len(),mesh.frames),(196,49,10));
-        let pos=mesh.positions(9).unwrap(); let uv=mesh.uvs();
-        let regions=ui_mesh::regions(&mesh,9).unwrap(); assert_eq!(regions.len(),49);
-        assert_eq!(regions.iter().map(|r|r.part).collect::<Vec<_>>(),(0..49).collect::<Vec<_>>());
+        let assets = Assets::load(&index, &archive, installer, &[], &executable).unwrap();
+        let mesh = CachedMesh::parse(payload(name)).unwrap();
+        assert_eq!(
+            (mesh.vertex_count, mesh.parts.len(), mesh.frames),
+            (196, 49, 10)
+        );
+        let pos = mesh.positions(9).unwrap();
+        let uv = mesh.uvs();
+        let regions = ui_mesh::regions(&mesh, 9).unwrap();
+        assert_eq!(regions.len(), 49);
+        assert_eq!(
+            regions.iter().map(|r| r.part).collect::<Vec<_>>(),
+            (0..49).collect::<Vec<_>>()
+        );
         // The shared helper must return every region even when most parts
         // are not uploaded. Verify raw indexed bounds for all 49 records.
-        let (shared,bounds)=ui::panel_frame_base(&index,&archive,name,&(0..9).collect::<Vec<_>>(),9).unwrap();
-        assert_eq!(bounds.len(),49);
-        for (i,region) in regions.iter().enumerate() {
-            let ids=mesh.parts[region.part].vertex_indices().collect::<Vec<_>>();
-            let expected=[ids.iter().map(|&j|pos[j][0]).fold(f32::INFINITY,f32::min),
-                ids.iter().map(|&j|-pos[j][1]).fold(f32::INFINITY,f32::min),
-                ids.iter().map(|&j|pos[j][0]).fold(f32::NEG_INFINITY,f32::max),
-                ids.iter().map(|&j|-pos[j][1]).fold(f32::NEG_INFINITY,f32::max)];
-            assert_eq!(region.bounds,expected); assert_eq!(bounds[i],expected);
+        let (shared, bounds) =
+            ui::panel_frame_base(&index, &archive, name, &(0..9).collect::<Vec<_>>(), 9).unwrap();
+        assert_eq!(bounds.len(), 49);
+        for (i, region) in regions.iter().enumerate() {
+            let ids = mesh.parts[region.part].vertex_indices().collect::<Vec<_>>();
+            let expected = [
+                ids.iter().map(|&j| pos[j][0]).fold(f32::INFINITY, f32::min),
+                ids.iter()
+                    .map(|&j| -pos[j][1])
+                    .fold(f32::INFINITY, f32::min),
+                ids.iter()
+                    .map(|&j| pos[j][0])
+                    .fold(f32::NEG_INFINITY, f32::max),
+                ids.iter()
+                    .map(|&j| -pos[j][1])
+                    .fold(f32::NEG_INFINITY, f32::max),
+            ];
+            assert_eq!(region.bounds, expected);
+            assert_eq!(bounds[i], expected);
         }
-        assert_eq!(assets.entry_bounds,regions[16].bounds);
-        assert_eq!(assets.input_bounds,ui_mesh::parent_bounds(&mesh,9).unwrap());
-        for (i,name) in [(9,"P_MAIN_MAIN_WINDOW"),(10,"P_MAIN_VERTCAL_BAR_BACKING"),
-            (11,"P_MAIN_TITLE_AREA_BACKING")] { assert_eq!(regions[i].name,name); }
-        assert_eq!(assets.base.len(),10,"nine borders and the live palette, no black placeholders");
-        let mut counts=[0usize;2];
-        for (part_id,part) in mesh.parts[..12].iter().enumerate() {
-            let ids=part.vertex_indices().collect::<Vec<_>>();
+        assert_eq!(assets.entry_bounds, regions[16].bounds);
+        assert_eq!(
+            assets.input_bounds,
+            ui_mesh::parent_bounds(&mesh, 9).unwrap()
+        );
+        for (i, name) in [
+            (9, "P_MAIN_MAIN_WINDOW"),
+            (10, "P_MAIN_VERTCAL_BAR_BACKING"),
+            (11, "P_MAIN_TITLE_AREA_BACKING"),
+        ] {
+            assert_eq!(regions[i].name, name);
+        }
+        assert_eq!(
+            assets.base.len(),
+            10,
+            "nine borders and the live palette, no black placeholders"
+        );
+        let mut counts = [0usize; 2];
+        for (part_id, part) in mesh.parts[..12].iter().enumerate() {
+            let ids = part.vertex_indices().collect::<Vec<_>>();
             for triangle in ids.chunks_exact(3) {
-                let signed=area(&pos,triangle.try_into().unwrap());
-                assert!(signed.is_finite() && signed!=0.);
-                if part_id<9 { assert!(signed<0.);counts[0]+=1; }
-                else { assert!(signed>0.);counts[1]+=1; }
+                let signed = area(&pos, triangle.try_into().unwrap());
+                assert!(signed.is_finite() && signed != 0.);
+                if part_id < 9 {
+                    assert!(signed < 0.);
+                    counts[0] += 1;
+                } else {
+                    assert!(signed > 0.);
+                    counts[1] += 1;
+                }
             }
-            let textures=TextureSet::parse(payload(mesh.texture_names[part.texture as usize])).unwrap();
-            if part_id<9 {
-                let mut expected=Surface::new(&textures.textures[0]);
-                for id in ids { expected.vertices.push([pos[id][0],-pos[id][1],0.5,1.,1.,1.,uv[id][0],uv[id][1]]);expected.alpha.push(255); }
-                same_surface(&assets.base[part_id],&expected);
-                same_surface(&assets.base[part_id],&shared[part_id]);
+            let textures =
+                TextureSet::parse(payload(mesh.texture_names[part.texture as usize])).unwrap();
+            if part_id < 9 {
+                let mut expected = Surface::new(&textures.textures[0]);
+                for id in ids {
+                    expected.vertices.push([
+                        pos[id][0],
+                        -pos[id][1],
+                        0.5,
+                        1.,
+                        1.,
+                        1.,
+                        uv[id][0],
+                        uv[id][1],
+                    ]);
+                    expected.alpha.push(255);
+                }
+                same_surface(&assets.base[part_id], &expected);
+                same_surface(&assets.base[part_id], &shared[part_id]);
             } else {
-                assert!(textures.textures[0].texels.chunks_exact(4).all(|p|p==[0,0,0,137]));
+                assert!(
+                    textures.textures[0]
+                        .texels
+                        .chunks_exact(4)
+                        .all(|p| p == [0, 0, 0, 137])
+                );
             }
         }
-        assert_eq!(counts,[18,6]);
-        let image=PeImage::parse(&executable).unwrap();
-        assert_eq!(image.at(0x5362c0,4).unwrap(),0xbb000a28u32.to_le_bytes());
-        let palette=ui::mpp_background(&mesh,9,&image).unwrap();
-        same_surface(&assets.base[9],&palette);
+        assert_eq!(counts, [18, 6]);
+        let image = PeImage::parse(&executable).unwrap();
+        assert_eq!(image.at(0x5362c0, 4).unwrap(), 0xbb000a28u32.to_le_bytes());
+        let palette = ui::mpp_background(&mesh, 9, &image).unwrap();
+        same_surface(&assets.base[9], &palette);
         assert!(!palette.vertices.is_empty());
         assets
     }
     #[test]
-    #[ignore="requires SHA-pinned original Build mesh/materials/PE/fonts/year parameters; CPU only"]
-    fn supplied_build_front_parts_regions_and_materials() { let _=supplied(); }
+    #[ignore = "requires SHA-pinned original Build mesh/materials/PE/fonts/year parameters; CPU only"]
+    fn supplied_build_front_parts_regions_and_materials() {
+        let _ = supplied();
+    }
 
-    #[cfg(feature="capture")]
+    #[cfg(feature = "capture")]
     #[test]
-    #[ignore="SHA-pinned supplied assets, offscreen GPU and output path; base/palette diagnostic only"]
+    #[ignore = "SHA-pinned supplied assets, offscreen GPU and output path; base/palette diagnostic only"]
     fn capture_build_base_palette_over_checker() {
-        let assets=supplied();
-        let mut descriptor=wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) {descriptor.backends=wgpu::Backends::DX12;}
-        let renderer=pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let mut checker=Surface::solid();
-        for row in 0..15 {for col in 0..20 {
-            let color=if (row+col)%2==0 {0xfff04020} else {0xff1040e0};
-            checker.rect([col as f32*32.,row as f32*32.,(col+1) as f32*32.,(row+1) as f32*32.],[color;4]);
-        }}
-        let underlay=renderer.prepare(&[checker.draw()],PROJECTION,None).unwrap();
-        let panel=renderer.prepare(&assets.base.iter().map(Surface::draw).collect::<Vec<_>>(),PROJECTION,None).unwrap();
-        crate::capture_test::capture_overlay(&renderer,&underlay,&panel,
-            &std::env::var("OPENMT2001_BUILD_BASE_CAPTURE_PATH").unwrap());
+        let assets = supplied();
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let mut checker = Surface::solid();
+        for row in 0..15 {
+            for col in 0..20 {
+                let color = if (row + col) % 2 == 0 {
+                    0xfff04020
+                } else {
+                    0xff1040e0
+                };
+                checker.rect(
+                    [
+                        col as f32 * 32.,
+                        row as f32 * 32.,
+                        (col + 1) as f32 * 32.,
+                        (row + 1) as f32 * 32.,
+                    ],
+                    [color; 4],
+                );
+            }
+        }
+        let underlay = renderer
+            .prepare(&[checker.draw()], PROJECTION, None)
+            .unwrap();
+        let panel = renderer
+            .prepare(
+                &assets.base.iter().map(Surface::draw).collect::<Vec<_>>(),
+                PROJECTION,
+                None,
+            )
+            .unwrap();
+        crate::capture_test::capture_overlay(
+            &renderer,
+            &underlay,
+            &panel,
+            &std::env::var("OPENMT2001_BUILD_BASE_CAPTURE_PATH").unwrap(),
+        );
     }
 }

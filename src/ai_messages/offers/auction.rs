@@ -259,9 +259,19 @@ impl State {
 /// Original4644a0/4644f0/464530 immediate pass/withdraw/bid descriptors.
 ///450490/451720 routing is performed synchronously by the caller.
 ///472750 adds the script-supplied increment to the live current bid.
-pub fn forced_action_descriptor(address:u32,participant:u32,amount:u32,state:&[u8;128],prior:[u8;32])->Result<[u8;32],String>{
-    let amount=if address==0x464530{word(state,0x6c).wrapping_add(amount)}else{amount};
-    action_descriptor(address,participant,amount,prior)
+pub fn forced_action_descriptor(
+    address: u32,
+    participant: u32,
+    amount: u32,
+    state: &[u8; 128],
+    prior: [u8; 32],
+) -> Result<[u8; 32], String> {
+    let amount = if address == 0x464530 {
+        word(state, 0x6c).wrapping_add(amount)
+    } else {
+        amount
+    };
+    action_descriptor(address, participant, amount, prior)
 }
 
 pub fn action_descriptor(

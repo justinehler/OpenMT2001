@@ -18,11 +18,26 @@ mod restore_tests {
         queue.restore_queued(11, crate::scheduler::ClockDomain::Total, 31, 31, false);
         queue.restore_queued(20, crate::scheduler::ClockDomain::Normal, 8, 8, true);
         let mut seen = Vec::new();
-        queue.drain(&mut [30, 7], |command| { seen.push(*command); Ok(()) }).unwrap();
+        queue
+            .drain(&mut [30, 7], |command| {
+                seen.push(*command);
+                Ok(())
+            })
+            .unwrap();
         assert!(seen.is_empty());
-        queue.drain(&mut [31, 7], |command| { seen.push(*command); Ok(()) }).unwrap();
+        queue
+            .drain(&mut [31, 7], |command| {
+                seen.push(*command);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(seen, [10, 11]);
-        queue.drain(&mut [31, 8], |command| { seen.push(*command); Ok(()) }).unwrap();
+        queue
+            .drain(&mut [31, 8], |command| {
+                seen.push(*command);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(seen, [10, 11, 20]);
     }
     #[test]
@@ -30,9 +45,22 @@ mod restore_tests {
         let mut queue = Queue::default();
         queue.restore_queued(7, crate::scheduler::ClockDomain::Normal, 50, 51, false);
         let mut seen = Vec::new();
-        queue.drain(&mut [50, 50], |command| { seen.push(*command); Ok(()) }).unwrap();
-        assert!(seen.is_empty(), "450a30 must requeue the packet by its inner due");
-        queue.drain(&mut [51, 50], |command| { seen.push(*command); Ok(()) }).unwrap();
+        queue
+            .drain(&mut [50, 50], |command| {
+                seen.push(*command);
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            seen.is_empty(),
+            "450a30 must requeue the packet by its inner due"
+        );
+        queue
+            .drain(&mut [51, 50], |command| {
+                seen.push(*command);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(seen, [7]);
     }
 }
@@ -56,8 +84,12 @@ impl<T> Default for Queue<T> {
 impl<T: Clone> Queue<T> {
     /// Preserve outer queue and inner admission deadlines independently.
     pub fn snapshot(&self) -> Result<Vec<Snapshot<'_, T>>, String> {
-        Ok(self.queue.snapshot()?.into_iter().map(|(domain, due, row)|
-            (domain, due, row.due, row.direct, &row.command)).collect())
+        Ok(self
+            .queue
+            .snapshot()?
+            .into_iter()
+            .map(|(domain, due, row)| (domain, due, row.due, row.direct, &row.command))
+            .collect())
     }
     /// Reconstruct an already admitted 4810e0 queue node. The saved header's
     /// +4 word selects the total or normal list and +8 is its original queue

@@ -61,11 +61,22 @@ fn build_reserved_owned_shop(
     category: usize,
     reserve: f32,
 ) -> Option<(f32, bool)> {
-    let info = session.world.catalog.info.row(business as usize).unwrap().to_vec();
+    let info = session
+        .world
+        .catalog
+        .info
+        .row(business as usize)
+        .unwrap()
+        .to_vec();
     let signed = |at| i32::from_le_bytes(info[at..at + 4].try_into().unwrap());
-    assert_ne!(info[0x30], 0, "original business unavailable at planner attempt");
+    assert_ne!(
+        info[0x30], 0,
+        "original business unavailable at planner attempt"
+    );
     assert!(matches!(
-        crate::build_panel::Context::from_session(session, category).unwrap().entry(),
+        crate::build_panel::Context::from_session(session, category)
+            .unwrap()
+            .entry(),
         crate::build_panel::Entry::Open
     ));
     let minimum_area = signed(0x38);
@@ -93,7 +104,8 @@ fn build_reserved_owned_shop(
                         business,
                     };
                     let inspected = session.inspect_build(&probe, assets).unwrap();
-                    if inspected.category_locked || !inspected.placement_allowed
+                    if inspected.category_locked
+                        || !inspected.placement_allowed
                         || inspected.preview.is_none()
                     {
                         continue;

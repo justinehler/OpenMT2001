@@ -10,13 +10,13 @@ pub struct World<'a> {
     pub building_parameters: crate::building_parameters::BuildingKinds,
     pub neighbor_cache: &'a mut crate::ai_neighbors::Cache,
     pub ownership_refresh_counter: &'a mut u8,
-    pub utility_enabled: [bool;4],
-    pub liquidation_targets: &'a mut std::collections::BTreeMap<u32,[u8;12]>,
+    pub utility_enabled: [bool; 4],
+    pub liquidation_targets: &'a mut std::collections::BTreeMap<u32, [u8; 12]>,
     pub colors: Option<crate::ai_messages::offers::execution::Colors<'a>>,
-    pub category_counts: &'a mut [u32;52*45],
-    pub ai_demand_rows: &'a [[u8;264];33],
+    pub category_counts: &'a mut [u32; 52 * 45],
+    pub ai_demand_rows: &'a [[u8; 264]; 33],
     pub active_player_count: u32,
-    pub construction_components: &'a mut [f32;4],
+    pub construction_components: &'a mut [f32; 4],
     pub construction_allowance: i32,
     pub construction_discount: f32,
     pub affordability_override: bool,
@@ -24,11 +24,11 @@ pub struct World<'a> {
     pub acquisition_checks: bool,
     pub proposal_identity: &'a mut u32,
     pub residents: &'a crate::economy::ResidentAccounts,
-    pub commodity_active: [bool;32],
+    pub commodity_active: [bool; 32],
     pub catalog: &'a crate::business_pool::BusinessCatalog,
-    pub products: &'a [[[u32;2];6];45],
-    pub commodities: &'a [[u8;28];32],
-    pub category_footprints: &'a mut [[i32;2];52],
+    pub products: &'a [[[u32; 2]; 6]; 45],
+    pub commodities: &'a [[u8; 28]; 32],
+    pub category_footprints: &'a mut [[i32; 2]; 52],
     pub strategy_time: Option<crate::ai_selection::Time>,
     pub ownership_tick: Option<u32>,
     pub strategy_mode: i32,
@@ -55,13 +55,26 @@ pub enum Call {
     Message(ai_messages::Call),
     OfferAdmission(ai_messages::offers::Call),
     OfferExecution(ai_messages::offers::execution::Call),
-    MessageRoute { route: crate::player_messages::Route, packet: crate::player_messages::Packet },
+    MessageRoute {
+        route: crate::player_messages::Route,
+        packet: crate::player_messages::Packet,
+    },
     ///Already accepted/reserved by451720 admission; the host queues without re-admitting.
-    ConstructionCommand { descriptor:[u8;60] },
-    TakeoverCommand { building:u32 },
-    AuctionCommand { descriptor:[u8;52], additional_delay:u32 },
+    ConstructionCommand {
+        descriptor: [u8; 60],
+    },
+    TakeoverCommand {
+        building: u32,
+    },
+    AuctionCommand {
+        descriptor: [u8; 52],
+        additional_delay: u32,
+    },
     AuctionAction(ai_messages::offers::auction::Call),
-    TimetableDiagnostic { secondary: bool, code: i32 },
+    TimetableDiagnostic {
+        secondary: bool,
+        code: i32,
+    },
     Management(crate::ai_dispatch::Event),
     Strategy(crate::ai_strategy::Call),
     Continuation(crate::ai_strategy::ContinuationCall),
@@ -74,172 +87,506 @@ pub enum Call {
 /// Original47c630, with caller-owned status/cost words retained across queries.
 #[allow(clippy::too_many_arguments)]
 pub fn planning(
-    player: &mut Player, profiles: &mut [[u8;0x650]], image: &PeImage<'_>,
-    input: crate::ai_actions::Input, outputs: &mut [u32;2],
-    peers: &[Option<&Player>], world: &mut World<'_>,
-    diagnostic: impl FnMut(crate::ai_actions::Call,&mut Player,&mut [[u8;0x650]])->Result<(),String>,
-)->Result<bool,String>{
-    let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let mut state=crate::ai_actions::Planning{outputs:*outputs,..Default::default()};
-    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
-        categories:world.categories,buildings:world.buildings,catalog:world.catalog,
-        products:world.products,commodities:world.commodities,residents:world.residents,
-        player_references:&references,player_count:world.active_player_count as i32,
-        category_counts:world.category_counts,proposal_identity:world.proposal_identity,
-        construction_components:world.construction_components,
-        hour:world.strategy_time.ok_or("AI planning clock unresolved")?.hour,
-        mode:world.strategy_mode as u32,allowance:world.construction_allowance,
-        affordability_override:world.affordability_override,discount:world.construction_discount,
-        // Explicit host policy for original uninitialized proposal stack padding.
-        proposal_prior:[0;104],
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    input: crate::ai_actions::Input,
+    outputs: &mut [u32; 2],
+    peers: &[Option<&Player>],
+    world: &mut World<'_>,
+    diagnostic: impl FnMut(
+        crate::ai_actions::Call,
+        &mut Player,
+        &mut [[u8; 0x650]],
+    ) -> Result<(), String>,
+) -> Result<bool, String> {
+    let references: Vec<_> = peers
+        .iter()
+        .map(|p| p.unwrap_or(player).reference)
+        .collect();
+    let mut state = crate::ai_actions::Planning {
+        outputs: *outputs,
+        ..Default::default()
     };
-    let result=crate::ai_actions::retained::choose(player,profiles,image,input,&mut state,&mut context,diagnostic);
-    *outputs=state.outputs;
+    let mut context = crate::ai_actions::retained::World {
+        building_parameters: world.building_parameters,
+        categories: world.categories,
+        buildings: world.buildings,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        residents: world.residents,
+        player_references: &references,
+        player_count: world.active_player_count as i32,
+        category_counts: world.category_counts,
+        proposal_identity: world.proposal_identity,
+        construction_components: world.construction_components,
+        hour: world
+            .strategy_time
+            .ok_or("AI planning clock unresolved")?
+            .hour,
+        mode: world.strategy_mode as u32,
+        allowance: world.construction_allowance,
+        affordability_override: world.affordability_override,
+        discount: world.construction_discount,
+        // Explicit host policy for original uninitialized proposal stack padding.
+        proposal_prior: [0; 104],
+    };
+    let result = crate::ai_actions::retained::choose(
+        player,
+        profiles,
+        image,
+        input,
+        &mut state,
+        &mut context,
+        diagnostic,
+    );
+    *outputs = state.outputs;
     result
 }
 
+fn initial_target(
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+    prior: u32,
+) -> Result<crate::ai_selection::Reply, String> {
+    let time = world.strategy_time.ok_or("AI candidate clock unresolved")?;
 
-fn initial_target(player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage<'_>,world:&mut World<'_>,prior:u32)->Result<crate::ai_selection::Reply,String>{
-let time=world.strategy_time.ok_or("AI candidate clock unresolved")?;
-
-                                        let categories=&*world.categories;
-                                        let buildings=world.buildings;
-                                        let resident_kinds:Vec<_>=world.residents.nodes.get(..world.residents.active_count as usize)
-                                            .ok_or("AI candidate resident count exceeds pool")?.iter().map(|r|word(r.as_bytes(),0x3c)).collect();
-                                        // These candidate helpers never write the profiles. Keep
-                                        // their read view separate from the outer callback borrow.
-                                        let profile_view=profiles.to_vec();
-                                        let fill_world=crate::ai_candidate_fill::World{image,profiles:&profile_view,categories,buildings,resident_kinds:&resident_kinds,time};
-                                        let mut kind=prior;
-                                        let value=crate::ai_targets::initial(player,categories,buildings,image,&mut kind,|address,player,rows,count|{
-                                            crate::ai_candidate_fill::fill(address==0x472b90,player,&fill_world,rows,count,|call,player|{
-                                                use crate::ai_candidate_queries as q;
-                                                let id=call.arguments[0];
-                                                Ok(match call.address {
-                                                    0x46c900|0x46c9f0=>u32::from(q::window_gate(call.address==0x46c900,&categories[id as usize],buildings,world.businesses,world.catalog,image)?),
-                                                    0x473ec0=>q::vacant_perimeter(&categories[id as usize]) as u32,
-                                                    0x46e540=>q::owned_siblings(id,call.arguments[1],categories,buildings,image)? as u32,
-                                                    0x47d110=>crate::ai_profiles::preferred_tier(id) as u32,
-                                                    0x48b030=>{crate::consumer_poll::start(player,id as i32,categories,buildings,world.businesses,world.residents,&world.commodity_active)?;0},
-                                                    0x48b130=>{crate::consumer_poll::stop(player);0},
-                                                    0x48b140=>{crate::consumer_poll::clear(player);0},
-                                                    0x473230|0x473420=>u32::from(q::feasible(call.address==0x473420,crate::ai_selection::windows(player,profiles,time.hour)?,&categories[id as usize],buildings,world.businesses,world.catalog)?),
-                                                    0x473740|0x472ed0|0x473030=>{
-                                                        let scores=crate::ai_candidate_scores::World{catalog:world.catalog,products:world.products,commodities:world.commodities,
-                                                            category:&categories[call.arguments[1] as usize],buildings,businesses:world.businesses,image};
-                                                        let window=crate::ai_selection::windows(player,profiles,time.hour)?;
-                                                        if call.address==0x473740 {crate::ai_candidate_scores::coverage(window,&scores)? as u32}
-                                                        else {crate::ai_candidate_scores::ownership(call.address==0x472ed0,player,window,&scores)? as u32}
-                                                    },
-                                                    _=>return Err(format!("unresolved candidate helper {:x}",call.address)),
-                                                })
-                                            })
-                                        })?;
-                                        Ok(crate::ai_selection::Reply{value:value as u32,output:kind})
-
+    let categories = &*world.categories;
+    let buildings = world.buildings;
+    let resident_kinds: Vec<_> = world
+        .residents
+        .nodes
+        .get(..world.residents.active_count as usize)
+        .ok_or("AI candidate resident count exceeds pool")?
+        .iter()
+        .map(|r| word(r.as_bytes(), 0x3c))
+        .collect();
+    // These candidate helpers never write the profiles. Keep
+    // their read view separate from the outer callback borrow.
+    let profile_view = profiles.to_vec();
+    let fill_world = crate::ai_candidate_fill::World {
+        image,
+        profiles: &profile_view,
+        categories,
+        buildings,
+        resident_kinds: &resident_kinds,
+        time,
+    };
+    let mut kind = prior;
+    let value = crate::ai_targets::initial(
+        player,
+        categories,
+        buildings,
+        image,
+        &mut kind,
+        |address, player, rows, count| {
+            crate::ai_candidate_fill::fill(
+                address == 0x472b90,
+                player,
+                &fill_world,
+                rows,
+                count,
+                |call, player| {
+                    use crate::ai_candidate_queries as q;
+                    let id = call.arguments[0];
+                    Ok(match call.address {
+                        0x46c900 | 0x46c9f0 => u32::from(q::window_gate(
+                            call.address == 0x46c900,
+                            &categories[id as usize],
+                            buildings,
+                            world.businesses,
+                            world.catalog,
+                            image,
+                        )?),
+                        0x473ec0 => q::vacant_perimeter(&categories[id as usize]) as u32,
+                        0x46e540 => {
+                            q::owned_siblings(id, call.arguments[1], categories, buildings, image)?
+                                as u32
+                        }
+                        0x47d110 => crate::ai_profiles::preferred_tier(id) as u32,
+                        0x48b030 => {
+                            crate::consumer_poll::start(
+                                player,
+                                id as i32,
+                                categories,
+                                buildings,
+                                world.businesses,
+                                world.residents,
+                                &world.commodity_active,
+                            )?;
+                            0
+                        }
+                        0x48b130 => {
+                            crate::consumer_poll::stop(player);
+                            0
+                        }
+                        0x48b140 => {
+                            crate::consumer_poll::clear(player);
+                            0
+                        }
+                        0x473230 | 0x473420 => u32::from(q::feasible(
+                            call.address == 0x473420,
+                            crate::ai_selection::windows(player, profiles, time.hour)?,
+                            &categories[id as usize],
+                            buildings,
+                            world.businesses,
+                            world.catalog,
+                        )?),
+                        0x473740 | 0x472ed0 | 0x473030 => {
+                            let scores = crate::ai_candidate_scores::World {
+                                catalog: world.catalog,
+                                products: world.products,
+                                commodities: world.commodities,
+                                category: &categories[call.arguments[1] as usize],
+                                buildings,
+                                businesses: world.businesses,
+                                image,
+                            };
+                            let window = crate::ai_selection::windows(player, profiles, time.hour)?;
+                            if call.address == 0x473740 {
+                                crate::ai_candidate_scores::coverage(window, &scores)? as u32
+                            } else {
+                                crate::ai_candidate_scores::ownership(
+                                    call.address == 0x472ed0,
+                                    player,
+                                    window,
+                                    &scores,
+                                )? as u32
+                            }
+                        }
+                        _ => return Err(format!("unresolved candidate helper {:x}", call.address)),
+                    })
+                },
+            )
+        },
+    )?;
+    Ok(crate::ai_selection::Reply {
+        value: value as u32,
+        output: kind,
+    })
 }
-fn neighbor_target(player:&mut Player,profiles:&[[u8;0x650]],image:&PeImage<'_>,world:&World<'_>,mode:&mut u32)->Result<bool,String>{
-    let context=crate::ai_neighbors::World{image,profiles,hour:world.strategy_time.ok_or("AI neighbor clock unresolved")?.hour,
-        categories:world.categories,buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,
-        products:world.products,commodities:world.commodities,residents:world.residents,commodity_active:&world.commodity_active,
-        footprints:world.category_footprints,cache:world.neighbor_cache};
-    crate::ai_neighbors::select(player,mode,&context)
+fn neighbor_target(
+    player: &mut Player,
+    profiles: &[[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &World<'_>,
+    mode: &mut u32,
+) -> Result<bool, String> {
+    let context = crate::ai_neighbors::World {
+        image,
+        profiles,
+        hour: world
+            .strategy_time
+            .ok_or("AI neighbor clock unresolved")?
+            .hour,
+        categories: world.categories,
+        buildings: world.buildings,
+        businesses: world.businesses,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        residents: world.residents,
+        commodity_active: &world.commodity_active,
+        footprints: world.category_footprints,
+        cache: world.neighbor_cache,
+    };
+    crate::ai_neighbors::select(player, mode, &context)
 }
 
-fn finance(player:&mut Player,peers:&[Option<&Player>],profiles:&[[u8;0x650]],
-    image:&PeImage<'_>,world:&World<'_>,normal_tick:u32,periodic:bool)->Result<(),String>{
-    let due=u16::from_le_bytes(player.bytes[0xb4e..0xb50].try_into().unwrap());
-    if periodic && normal_tick<u32::from(due){return Ok(());}
-    let count=usize::from(u16::from_le_bytes(player.bytes[0xb44..0xb46].try_into().unwrap()));
-    let mut balances=Vec::with_capacity(count);
-    if count!=0 {
-        let rows=world.ownership.lists.get(&word(&player.bytes,0xb3c)).ok_or("AI finance ownership list unresolved")?;
-        for row in rows.get(..count).ok_or("AI finance count exceeds ownership list")? {
-            let slot=word(row,4);
+fn finance(
+    player: &mut Player,
+    peers: &[Option<&Player>],
+    profiles: &[[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &World<'_>,
+    normal_tick: u32,
+    periodic: bool,
+) -> Result<(), String> {
+    let due = u16::from_le_bytes(player.bytes[0xb4e..0xb50].try_into().unwrap());
+    if periodic && normal_tick < u32::from(due) {
+        return Ok(());
+    }
+    let count = usize::from(u16::from_le_bytes(
+        player.bytes[0xb44..0xb46].try_into().unwrap(),
+    ));
+    let mut balances = Vec::with_capacity(count);
+    if count != 0 {
+        let rows = world
+            .ownership
+            .lists
+            .get(&word(&player.bytes, 0xb3c))
+            .ok_or("AI finance ownership list unresolved")?;
+        for row in rows
+            .get(..count)
+            .ok_or("AI finance count exceeds ownership list")?
+        {
+            let slot = word(row, 4);
             // Native 466fa0 reads the first b44 physical rows even after
             // 46ae20 leaves a cleared -1 row among them. Index -1 reads
             // 0x7a3fa8, the zero-initialized word before the business pool
             // in this v1.4 fresh process (native_ai_finance_list_edges.py).
-            let balance=if slot==u32::MAX {0.0} else {
-                let business=world.businesses.get(slot as usize).ok_or("AI finance business leaves pool")?;
-                f32::from_bits(word(business,0x20))
+            let balance = if slot == u32::MAX {
+                0.0
+            } else {
+                let business = world
+                    .businesses
+                    .get(slot as usize)
+                    .ok_or("AI finance business leaves pool")?;
+                f32::from_bits(word(business, 0x20))
             };
             balances.push(balance);
         }
     }
-    let projected=crate::ai_finance::projected_income(player.bytes[0x1bc],world.categories,&world.native_utilities,&world.properties,image)?;
-    crate::ai_finance::update_selected(player,peers,profiles,normal_tick,periodic,&balances,projected)
+    let projected = crate::ai_finance::projected_income(
+        player.bytes[0x1bc],
+        world.categories,
+        &world.native_utilities,
+        &world.properties,
+        image,
+    )?;
+    crate::ai_finance::update_selected(
+        player,
+        peers,
+        profiles,
+        normal_tick,
+        periodic,
+        &balances,
+        projected,
+    )
 }
 
-fn score_query(call:crate::ai_scoring::Query,player:&Player,peers:&[Option<&Player>],
-    image:&PeImage<'_>,world:&mut World<'_>)->Result<crate::ai_scoring::Reply,String>{
-    use crate::{ai_scoring::{Query,Reply},ai_strategy_queries as q};
-    let value=match call {
-        Query::FirstDay=>u32::from(world.strategy_time.ok_or("AI strategy clock unresolved")?.first_day()),
-        Query::GroupSize(index)=>q::group_size(&q::group(image,index)?) as u32,
-        Query::OwnedInGroup(index)=>q::owned_in_group(player,&q::group(image,index)?,|id|q::category_owner(id,world.categories,world.buildings))? as u32,
-        Query::UtilityOrTransport(category)=>u32::from(q::utility_or_transport(image,category)?),
-        Query::Income=>return Ok(Reply{value:0,extended:crate::ai_finance::income_extended(player,false)?}),
-        Query::OccupiedArea(category)=>q::occupied_area(world.categories.get(category as usize).ok_or("AI score area category missing")?,world.buildings)? as u32,
-        Query::OwnsGroup(index)=>u32::from(q::owns_group(player.reference,&q::group(image,index)?,|id|{
-            let owner=q::category_owner(id,world.categories,world.buildings)? as u8;
-            if owner==0{return Ok(0);}
-            Ok(peers.get(usize::from(owner)-1).ok_or("AI group owner leaves roster")?.unwrap_or(player).reference)
-        })?),
-        Query::LandscapeCount(index)=>q::landscape_count(&q::group(image,index)?,world.categories,world.buildings,world.businesses)? as u32,
-        Query::OwnedCategories=>q::owned_categories(player)? as u32,
-        Query::BusinessCount(slot)=>world.business_counts.as_mut().ok_or("AI business-count cache unresolved")?.get(slot as usize,peers.len(),world.businesses)? as u32,
+fn score_query(
+    call: crate::ai_scoring::Query,
+    player: &Player,
+    peers: &[Option<&Player>],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+) -> Result<crate::ai_scoring::Reply, String> {
+    use crate::{
+        ai_scoring::{Query, Reply},
+        ai_strategy_queries as q,
+    };
+    let value = match call {
+        Query::FirstDay => u32::from(
+            world
+                .strategy_time
+                .ok_or("AI strategy clock unresolved")?
+                .first_day(),
+        ),
+        Query::GroupSize(index) => q::group_size(&q::group(image, index)?) as u32,
+        Query::OwnedInGroup(index) => q::owned_in_group(player, &q::group(image, index)?, |id| {
+            q::category_owner(id, world.categories, world.buildings)
+        })? as u32,
+        Query::UtilityOrTransport(category) => u32::from(q::utility_or_transport(image, category)?),
+        Query::Income => {
+            return Ok(Reply {
+                value: 0,
+                extended: crate::ai_finance::income_extended(player, false)?,
+            });
+        }
+        Query::OccupiedArea(category) => q::occupied_area(
+            world
+                .categories
+                .get(category as usize)
+                .ok_or("AI score area category missing")?,
+            world.buildings,
+        )? as u32,
+        Query::OwnsGroup(index) => u32::from(q::owns_group(
+            player.reference,
+            &q::group(image, index)?,
+            |id| {
+                let owner = q::category_owner(id, world.categories, world.buildings)? as u8;
+                if owner == 0 {
+                    return Ok(0);
+                }
+                Ok(peers
+                    .get(usize::from(owner) - 1)
+                    .ok_or("AI group owner leaves roster")?
+                    .unwrap_or(player)
+                    .reference)
+            },
+        )?),
+        Query::LandscapeCount(index) => q::landscape_count(
+            &q::group(image, index)?,
+            world.categories,
+            world.buildings,
+            world.businesses,
+        )? as u32,
+        Query::OwnedCategories => q::owned_categories(player)? as u32,
+        Query::BusinessCount(slot) => world
+            .business_counts
+            .as_mut()
+            .ok_or("AI business-count cache unresolved")?
+            .get(slot as usize, peers.len(), world.businesses)?
+            as u32,
     };
     Ok(value.into())
 }
 
-struct OfferPeers<'a>{before:&'a mut [Player],after:&'a mut [Player]}
+struct OfferPeers<'a> {
+    before: &'a mut [Player],
+    after: &'a mut [Player],
+}
 fn offer_predecision(
-    player:&mut Player,arguments:[u32;2],peers:&mut OfferPeers<'_>,profiles:&mut [[u8;0x650]],
-    image:&PeImage<'_>,world:&mut World<'_>,
-    callback:&mut impl FnMut(Call,&mut Player,&mut [[u8;0x650]],&mut World<'_>)->Result<ai_messages::Reply,String>,
-)->Result<(),String>{
-    use ai_messages::offers::{self,negotiation,auction::valuation};
-    if world.auction.is_some() && world.offer_auction.is_none(){return Err("AI offer auction context unresolved".into());}
-    offers::predecision(player,arguments[0],arguments[1],world.offer_auction,world.cash_statuses,image,|call,player|{
-        match call{
-            offers::Call::AuctionBudget=>{
-                let scoring=valuation::scoring::World{image,categories:world.categories,buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,
-                    native_utilities:&world.native_utilities,loan_status:world.cash_statuses,hour:world.strategy_time.ok_or("auction valuation clock unresolved")?.hour,
-                    residents:world.residents,commodity_active:&world.commodity_active,before:peers.before,after:peers.after};
-                let mut amount=0;
-                let extended=valuation::evaluate(player,1,world.offer_auction.map(|a|a.category),image.f32_at(0x5250e0)?,&mut amount,|call,player|scoring.dispatch(call,player))?;
-                return Ok(offers::Reply{amount,extended,value:0});
-            },
-            offers::Call::CategoryValue(category)=>{
-                let category=world.categories.get(category as usize).ok_or("offer value category unresolved")?;
-                return Ok(offers::Reply{extended:offers::execution::category_value(category,image)?,..Default::default()});
-            },
-            offers::Call::Eligible{target,amount}=>return Ok(offers::Reply{value:u32::from(negotiation::eligible(player,target,amount)?),..Default::default()}),
-            offers::Call::Complete{category,amount,recipient}=>negotiation::remember(player,category,amount,recipient,profiles)?,
-            offers::Call::Submit(arguments)=>{
-                let routing=world.message_routing.ok_or("offer request command routing unresolved")?;
-                if routing.network[0]&&!routing.network[1]{return Err("offer request requires network command transport".into());}
-                callback(Call::AuctionCommand{descriptor:negotiation::request(arguments,[0;52]),additional_delay:0},player,profiles,world)?;
-            },
-            offers::Call::Reply{packet,kind}=>{
-                let source=offers::packet(player,packet)?;
-                let routing=world.message_routing.ok_or("offer reply routing unresolved")?;
-                let mut arena=crate::player_messages::Arena{next:*world.allocation_next};
-                let result=crate::player_messages::reply_with_players(&source,kind,[0x5f5e0ff;4],
-                    &mut crate::player_messages::SplitPlayers{before:peers.before,current:player,after:peers.after},&mut arena,routing,
-                    |route,packet,players|{
-                        if let crate::player_messages::Route::PropertyRefresh{category}=route {
-                            crate::category_ownership::property_view(world.categories.get_mut(category as usize).ok_or("refusal property category leaves pool")?,0,1);
-                        }
-                        callback(Call::MessageRoute{route,packet:*packet},players.current,profiles,world).map(|_|())
+    player: &mut Player,
+    arguments: [u32; 2],
+    peers: &mut OfferPeers<'_>,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+    callback: &mut impl FnMut(
+        Call,
+        &mut Player,
+        &mut [[u8; 0x650]],
+        &mut World<'_>,
+    ) -> Result<ai_messages::Reply, String>,
+) -> Result<(), String> {
+    use ai_messages::offers::{self, auction::valuation, negotiation};
+    if world.auction.is_some() && world.offer_auction.is_none() {
+        return Err("AI offer auction context unresolved".into());
+    }
+    offers::predecision(
+        player,
+        arguments[0],
+        arguments[1],
+        world.offer_auction,
+        world.cash_statuses,
+        image,
+        |call, player| {
+            match call {
+                offers::Call::AuctionBudget => {
+                    let scoring = valuation::scoring::World {
+                        image,
+                        categories: world.categories,
+                        buildings: world.buildings,
+                        businesses: world.businesses,
+                        catalog: world.catalog,
+                        native_utilities: &world.native_utilities,
+                        loan_status: world.cash_statuses,
+                        hour: world
+                            .strategy_time
+                            .ok_or("auction valuation clock unresolved")?
+                            .hour,
+                        residents: world.residents,
+                        commodity_active: &world.commodity_active,
+                        before: peers.before,
+                        after: peers.after,
+                    };
+                    let mut amount = 0;
+                    let extended = valuation::evaluate(
+                        player,
+                        1,
+                        world.offer_auction.map(|a| a.category),
+                        image.f32_at(0x5250e0)?,
+                        &mut amount,
+                        |call, player| scoring.dispatch(call, player),
+                    )?;
+                    return Ok(offers::Reply {
+                        amount,
+                        extended,
+                        value: 0,
                     });
-                *world.allocation_next=arena.next;result?;
-            },
-            other=>{let result=callback(Call::OfferAdmission(other),player,profiles,world)?;return Ok(offers::Reply{value:result.value,amount:result.value as i32,..Default::default()});}
-        }
-        Ok(Default::default())
-    })
+                }
+                offers::Call::CategoryValue(category) => {
+                    let category = world
+                        .categories
+                        .get(category as usize)
+                        .ok_or("offer value category unresolved")?;
+                    return Ok(offers::Reply {
+                        extended: offers::execution::category_value(category, image)?,
+                        ..Default::default()
+                    });
+                }
+                offers::Call::Eligible { target, amount } => {
+                    return Ok(offers::Reply {
+                        value: u32::from(negotiation::eligible(player, target, amount)?),
+                        ..Default::default()
+                    });
+                }
+                offers::Call::Complete {
+                    category,
+                    amount,
+                    recipient,
+                } => negotiation::remember(player, category, amount, recipient, profiles)?,
+                offers::Call::Submit(arguments) => {
+                    let routing = world
+                        .message_routing
+                        .ok_or("offer request command routing unresolved")?;
+                    if routing.network[0] && !routing.network[1] {
+                        return Err("offer request requires network command transport".into());
+                    }
+                    callback(
+                        Call::AuctionCommand {
+                            descriptor: negotiation::request(arguments, [0; 52]),
+                            additional_delay: 0,
+                        },
+                        player,
+                        profiles,
+                        world,
+                    )?;
+                }
+                offers::Call::Reply { packet, kind } => {
+                    let source = offers::packet(player, packet)?;
+                    let routing = world
+                        .message_routing
+                        .ok_or("offer reply routing unresolved")?;
+                    let mut arena = crate::player_messages::Arena {
+                        next: *world.allocation_next,
+                    };
+                    let result = crate::player_messages::reply_with_players(
+                        &source,
+                        kind,
+                        [0x5f5e0ff; 4],
+                        &mut crate::player_messages::SplitPlayers {
+                            before: peers.before,
+                            current: player,
+                            after: peers.after,
+                        },
+                        &mut arena,
+                        routing,
+                        |route, packet, players| {
+                            if let crate::player_messages::Route::PropertyRefresh { category } =
+                                route
+                            {
+                                crate::category_ownership::property_view(
+                                    world
+                                        .categories
+                                        .get_mut(category as usize)
+                                        .ok_or("refusal property category leaves pool")?,
+                                    0,
+                                    1,
+                                );
+                            }
+                            callback(
+                                Call::MessageRoute {
+                                    route,
+                                    packet: *packet,
+                                },
+                                players.current,
+                                profiles,
+                                world,
+                            )
+                            .map(|_| ())
+                        },
+                    );
+                    *world.allocation_next = arena.next;
+                    result?;
+                }
+                other => {
+                    let result = callback(Call::OfferAdmission(other), player, profiles, world)?;
+                    return Ok(offers::Reply {
+                        value: result.value,
+                        amount: result.value as i32,
+                        ..Default::default()
+                    });
+                }
+            }
+            Ok(Default::default())
+        },
+    )
 }
 
 pub(crate) fn allocate(next: &mut u32, size: usize) -> Result<u32, String> {
@@ -259,137 +606,490 @@ pub(crate) fn allocate(next: &mut u32, size: usize) -> Result<u32, String> {
     Ok(reference)
 }
 
-fn expand_housing(player:&mut Player,profiles:&mut[[u8;0x650]],image:&PeImage<'_>,peers:&[Option<&Player>],world:&mut World<'_>)->Result<(),String>{
-    let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
-        categories:world.categories,buildings:world.buildings,catalog:world.catalog,products:world.products,
-        commodities:world.commodities,residents:world.residents,player_references:&references,
-        player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
-        construction_components:world.construction_components,hour:world.strategy_time.ok_or("AI expansion clock unresolved")?.hour,
-        mode:world.strategy_mode as u32,allowance:world.construction_allowance,affordability_override:world.affordability_override,
-        discount:world.construction_discount,proposal_prior:[0;104],
+fn expand_housing(
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    peers: &[Option<&Player>],
+    world: &mut World<'_>,
+) -> Result<(), String> {
+    let references: Vec<_> = peers
+        .iter()
+        .map(|p| p.unwrap_or(player).reference)
+        .collect();
+    let mut context = crate::ai_actions::retained::World {
+        building_parameters: world.building_parameters,
+        categories: world.categories,
+        buildings: world.buildings,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        residents: world.residents,
+        player_references: &references,
+        player_count: world.active_player_count as i32,
+        category_counts: world.category_counts,
+        proposal_identity: world.proposal_identity,
+        construction_components: world.construction_components,
+        hour: world
+            .strategy_time
+            .ok_or("AI expansion clock unresolved")?
+            .hour,
+        mode: world.strategy_mode as u32,
+        allowance: world.construction_allowance,
+        affordability_override: world.affordability_override,
+        discount: world.construction_discount,
+        proposal_prior: [0; 104],
     };
-    crate::ai_actions::expansion::build(player,profiles,world.category_footprints,world.cash_statuses,image,&mut context,|player|{
-        let players:Vec<_>=peers.iter().map(|p|p.unwrap_or(player)).collect();
-        world.neighbor_cache.groups(world.ownership_refresh_counter,player.bytes[0x1bc]as usize,&players,world.categories,world.residents,image)
-    },planning_diagnostic)
+    crate::ai_actions::expansion::build(
+        player,
+        profiles,
+        world.category_footprints,
+        world.cash_statuses,
+        image,
+        &mut context,
+        |player| {
+            let players: Vec<_> = peers.iter().map(|p| p.unwrap_or(player)).collect();
+            world.neighbor_cache.groups(
+                world.ownership_refresh_counter,
+                player.bytes[0x1bc] as usize,
+                &players,
+                world.categories,
+                world.residents,
+                image,
+            )
+        },
+        planning_diagnostic,
+    )
 }
 
-fn liquidation_finalize(player:&mut Player,profiles:&[[u8;0x650]],image:&PeImage<'_>,world:&mut World<'_>)->Result<(),String>{
-    let context=crate::ai_actions::liquidation_score::World{
-        mode:world.strategy_mode,cash_statuses:world.cash_statuses,
-        auction_active:world.auction_guard.is_some_and(|a|a.active),
-        developed:crate::ai_developed_targets::World{
-            image,profiles,hour:world.strategy_time.ok_or("AI liquidation clock unresolved")?.hour,
-            categories:world.categories,buildings:world.buildings,businesses:world.businesses,
-            catalog:world.catalog,ownership:world.ownership,residents:world.residents,
-            commodity_active:&world.commodity_active,
+fn liquidation_finalize(
+    player: &mut Player,
+    profiles: &[[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+) -> Result<(), String> {
+    let context = crate::ai_actions::liquidation_score::World {
+        mode: world.strategy_mode,
+        cash_statuses: world.cash_statuses,
+        auction_active: world.auction_guard.is_some_and(|a| a.active),
+        developed: crate::ai_developed_targets::World {
+            image,
+            profiles,
+            hour: world
+                .strategy_time
+                .ok_or("AI liquidation clock unresolved")?
+                .hour,
+            categories: world.categories,
+            buildings: world.buildings,
+            businesses: world.businesses,
+            catalog: world.catalog,
+            ownership: world.ownership,
+            residents: world.residents,
+            commodity_active: &world.commodity_active,
         },
     };
     // Original stack padding has no producer; zero prior is explicit host policy.
-    crate::ai_actions::liquidation_producer::produce(player,world.liquidation_targets,[0;12],&context,|call,_,_|match call{
-        crate::ai_actions::liquidation_pool::Call::Allocate(size)=>allocate(world.allocation_next,size),
-        crate::ai_actions::liquidation_pool::Call::Release(_)=>Ok(0),
-    })
+    crate::ai_actions::liquidation_producer::produce(
+        player,
+        world.liquidation_targets,
+        [0; 12],
+        &context,
+        |call, _, _| match call {
+            crate::ai_actions::liquidation_pool::Call::Allocate(size) => {
+                allocate(world.allocation_next, size)
+            }
+            crate::ai_actions::liquidation_pool::Call::Release(_) => Ok(0),
+        },
+    )
 }
 
-fn ownership(player: &mut Player,image:&PeImage<'_>,world:&mut World<'_>)->Result<(),String> {
-    crate::ai_ownership::maintain_player(world.ownership,player,world.categories,world.buildings,world.businesses,image,world.catalog,
-        |size|allocate(world.allocation_next,size))
+fn ownership(
+    player: &mut Player,
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+) -> Result<(), String> {
+    crate::ai_ownership::maintain_player(
+        world.ownership,
+        player,
+        world.categories,
+        world.buildings,
+        world.businesses,
+        image,
+        world.catalog,
+        |size| allocate(world.allocation_next, size),
+    )
 }
 
-fn planning_diagnostic(call:crate::ai_actions::Call,_player:&mut Player,_profiles:&mut [[u8;0x650]])->Result<(),String>{
+fn planning_diagnostic(
+    call: crate::ai_actions::Call,
+    _player: &mut Player,
+    _profiles: &mut [[u8; 0x650]],
+) -> Result<(), String> {
     // Native sprintf/4e6960 only report a debug warning and then continue.
-    eprintln!("Original AI planning diagnostic {:08x}: {:?}",call.address,&call.arguments[..call.count]);
+    eprintln!(
+        "Original AI planning diagnostic {:08x}: {:?}",
+        call.address,
+        &call.arguments[..call.count]
+    );
     Ok(())
 }
 
-fn transaction_proposal(address:u32,player:&mut Player,profiles:&mut[[u8;0x650]],args:[u32;2],image:&PeImage<'_>,world:&mut World<'_>)->Result<bool,String>{
-    crate::ai_actions::proposals::transaction(address,player,args,[0;104],world.proposal_identity,|call,player,_|{
-        use crate::ai_actions::proposals::Call as P;
-        match call{
-            P::CategoryValue(id)=>ai_messages::offers::execution::category_value(world.categories.get(id as usize).ok_or("AI proposal category value missing")?,image),
-            P::CategoryActive(id)=>Ok(crate::x87::Sum::from_i32(i32::from(world.categories.get(id as usize).ok_or("AI proposal category activity missing")?[0x74]))),
-            P::Diagnostic(address)=>{planning_diagnostic(crate::ai_actions::Call{address:0x4e6960,arguments:[1,0,address,0,0,0,0,0,0,0],count:3},player,profiles)?;Ok(Default::default())},
-            P::UnknownKind(kind)=>Err(format!("AI transaction proposal unexpected kind{kind}")),
-        }
-    })
+fn transaction_proposal(
+    address: u32,
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    args: [u32; 2],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+) -> Result<bool, String> {
+    crate::ai_actions::proposals::transaction(
+        address,
+        player,
+        args,
+        [0; 104],
+        world.proposal_identity,
+        |call, player, _| {
+            use crate::ai_actions::proposals::Call as P;
+            match call {
+                P::CategoryValue(id) => ai_messages::offers::execution::category_value(
+                    world
+                        .categories
+                        .get(id as usize)
+                        .ok_or("AI proposal category value missing")?,
+                    image,
+                ),
+                P::CategoryActive(id) => Ok(crate::x87::Sum::from_i32(i32::from(
+                    world
+                        .categories
+                        .get(id as usize)
+                        .ok_or("AI proposal category activity missing")?[0x74],
+                ))),
+                P::Diagnostic(address) => {
+                    planning_diagnostic(
+                        crate::ai_actions::Call {
+                            address: 0x4e6960,
+                            arguments: [1, 0, address, 0, 0, 0, 0, 0, 0, 0],
+                            count: 3,
+                        },
+                        player,
+                        profiles,
+                    )?;
+                    Ok(Default::default())
+                }
+                P::UnknownKind(kind) => {
+                    Err(format!("AI transaction proposal unexpected kind{kind}"))
+                }
+            }
+        },
+    )
 }
 
-fn business_kind(player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage<'_>,peers:&[Option<&Player>],world:&mut World<'_>)->Result<bool,String>{
+fn business_kind(
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    peers: &[Option<&Player>],
+    world: &mut World<'_>,
+) -> Result<bool, String> {
     use crate::ai_business_choice::Call as Choice;
-    let time=world.strategy_time.ok_or("AI business selection clock unresolved")?;
+    let time = world
+        .strategy_time
+        .ok_or("AI business selection clock unresolved")?;
     // Execute=0 planning never inserts proposals or changes category counts;
     // retain this read view while the planner borrows its execution context.
-    let counts=*world.category_counts;
-    let profile_view=profiles.to_vec();
-    let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let ranking=crate::ai_business_ranking::World{image,catalog:world.catalog,products:world.products,commodities:world.commodities,
-        categories:world.categories,buildings:world.buildings,businesses:world.businesses,counts:&counts,
-        demand:world.ai_demand_rows,residents:world.residents,time};
-    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:world.categories,buildings:world.buildings,catalog:world.catalog,
-        products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
-        player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
-        construction_components:world.construction_components,hour:time.hour,mode:world.strategy_mode as u32,
-        allowance:world.construction_allowance,affordability_override:world.affordability_override,discount:world.construction_discount,proposal_prior:[0;104]};
-    let mut probe=|player:&mut Player,outputs:&mut[u32;2]|{
-        let mut state=crate::ai_actions::Planning{outputs:*outputs,..Default::default()};
-        let result=crate::ai_actions::retained::choose(player,profiles,image,crate::ai_actions::Input{execute:0,style_override:0,style:0},&mut state,&mut context,planning_diagnostic);
-        *outputs=state.outputs;result
+    let counts = *world.category_counts;
+    let profile_view = profiles.to_vec();
+    let references: Vec<_> = peers
+        .iter()
+        .map(|p| p.unwrap_or(player).reference)
+        .collect();
+    let ranking = crate::ai_business_ranking::World {
+        image,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        categories: world.categories,
+        buildings: world.buildings,
+        businesses: world.businesses,
+        counts: &counts,
+        demand: world.ai_demand_rows,
+        residents: world.residents,
+        time,
     };
-    crate::ai_business_choice::select(player,&profile_view,world.categories,time,|call,player,outputs|match call{
-        Choice::Plan=>probe(player,outputs).map(u32::from),
-        Choice::HousingEligible=>crate::ai_business_ranking::housing_eligible(player,&ranking).map(u32::from),
-        Choice::Rank(mode)=>crate::ai_business_ranking::rank(player,&profile_view,mode,&ranking,&mut probe).map(|v|v as u32),
-        Choice::Diagnostic=>{eprintln!("Original AI business choice reported unexpected landscape kind");Ok(0)},
+    let mut context = crate::ai_actions::retained::World {
+        building_parameters: world.building_parameters,
+        categories: world.categories,
+        buildings: world.buildings,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        residents: world.residents,
+        player_references: &references,
+        player_count: world.active_player_count as i32,
+        category_counts: world.category_counts,
+        proposal_identity: world.proposal_identity,
+        construction_components: world.construction_components,
+        hour: time.hour,
+        mode: world.strategy_mode as u32,
+        allowance: world.construction_allowance,
+        affordability_override: world.affordability_override,
+        discount: world.construction_discount,
+        proposal_prior: [0; 104],
+    };
+    let mut probe = |player: &mut Player, outputs: &mut [u32; 2]| {
+        let mut state = crate::ai_actions::Planning {
+            outputs: *outputs,
+            ..Default::default()
+        };
+        let result = crate::ai_actions::retained::choose(
+            player,
+            profiles,
+            image,
+            crate::ai_actions::Input {
+                execute: 0,
+                style_override: 0,
+                style: 0,
+            },
+            &mut state,
+            &mut context,
+            planning_diagnostic,
+        );
+        *outputs = state.outputs;
+        result
+    };
+    crate::ai_business_choice::select(
+        player,
+        &profile_view,
+        world.categories,
+        time,
+        |call, player, outputs| match call {
+            Choice::Plan => probe(player, outputs).map(u32::from),
+            Choice::HousingEligible => {
+                crate::ai_business_ranking::housing_eligible(player, &ranking).map(u32::from)
+            }
+            Choice::Rank(mode) => {
+                crate::ai_business_ranking::rank(player, &profile_view, mode, &ranking, &mut probe)
+                    .map(|v| v as u32)
+            }
+            Choice::Diagnostic => {
+                eprintln!("Original AI business choice reported unexpected landscape kind");
+                Ok(0)
+            }
+        },
+    )
+}
+
+fn maintain_businesses(
+    selling: bool,
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    peers: &[Option<&Player>],
+    world: &mut World<'_>,
+) -> Result<(), String> {
+    let time = world
+        .strategy_time
+        .ok_or("AI maintenance clock unresolved")?;
+    let profile_view = profiles.to_vec();
+    let references: Vec<_> = peers
+        .iter()
+        .map(|p| p.unwrap_or(player).reference)
+        .collect();
+    let count = usize::from(u16::from_le_bytes(
+        player.bytes[0xb46..0xb48].try_into().unwrap(),
+    ));
+    let entries = if count == 0 {
+        &[][..]
+    } else {
+        world
+            .ownership
+            .lists
+            .get(&word(&player.bytes, 0xb3c))
+            .and_then(|r| r.get(..count))
+            .ok_or("AI maintenance ownership allocation missing")?
+    };
+    let mut maintenance = crate::ai_maintenance::World {
+        building_parameters: world.building_parameters,
+        image,
+        profiles: &profile_view,
+        categories: world.categories,
+        buildings: world.buildings,
+        businesses: world.businesses,
+        catalog: world.catalog,
+        entries,
+        counts: world.category_counts,
+        identity: world.proposal_identity,
+        prior: [0; 104],
+    };
+    crate::ai_maintenance::maintain(selling, player, &mut maintenance, |player, mode, w| {
+        let counts = *w.counts;
+        let ranking = crate::ai_business_ranking::World {
+            image,
+            catalog: w.catalog,
+            products: world.products,
+            commodities: world.commodities,
+            categories: w.categories,
+            buildings: w.buildings,
+            businesses: w.businesses,
+            counts: &counts,
+            demand: world.ai_demand_rows,
+            residents: world.residents,
+            time,
+        };
+        let mut context = crate::ai_actions::retained::World {
+            building_parameters: world.building_parameters,
+            categories: w.categories,
+            buildings: w.buildings,
+            catalog: w.catalog,
+            products: world.products,
+            commodities: world.commodities,
+            residents: world.residents,
+            player_references: &references,
+            player_count: world.active_player_count as i32,
+            category_counts: w.counts,
+            proposal_identity: w.identity,
+            construction_components: world.construction_components,
+            hour: time.hour,
+            mode: world.strategy_mode as u32,
+            allowance: world.construction_allowance,
+            affordability_override: world.affordability_override,
+            discount: world.construction_discount,
+            proposal_prior: [0; 104],
+        };
+        crate::ai_business_ranking::rank(
+            player,
+            &profile_view,
+            mode,
+            &ranking,
+            |player, outputs| {
+                let mut state = crate::ai_actions::Planning {
+                    outputs: *outputs,
+                    ..Default::default()
+                };
+                let result = crate::ai_actions::retained::choose(
+                    player,
+                    profiles,
+                    image,
+                    crate::ai_actions::Input {
+                        execute: 0,
+                        style_override: 0,
+                        style: 0,
+                    },
+                    &mut state,
+                    &mut context,
+                    planning_diagnostic,
+                );
+                *outputs = state.outputs;
+                result
+            },
+        )
     })
 }
 
-fn maintain_businesses(selling:bool,player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage<'_>,peers:&[Option<&Player>],world:&mut World<'_>)->Result<(),String>{
-    let time=world.strategy_time.ok_or("AI maintenance clock unresolved")?;
-    let profile_view=profiles.to_vec();let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let count=usize::from(u16::from_le_bytes(player.bytes[0xb46..0xb48].try_into().unwrap()));
-    let entries=if count==0{&[][..]}else{world.ownership.lists.get(&word(&player.bytes,0xb3c)).and_then(|r|r.get(..count)).ok_or("AI maintenance ownership allocation missing")?};
-    let mut maintenance=crate::ai_maintenance::World{building_parameters:world.building_parameters,image,profiles:&profile_view,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
-        catalog:world.catalog,entries,counts:world.category_counts,identity:world.proposal_identity,prior:[0;104]};
-    crate::ai_maintenance::maintain(selling,player,&mut maintenance,|player,mode,w|{
-        let counts=*w.counts;
-        let ranking=crate::ai_business_ranking::World{image,catalog:w.catalog,products:world.products,commodities:world.commodities,
-            categories:w.categories,buildings:w.buildings,businesses:w.businesses,counts:&counts,demand:world.ai_demand_rows,residents:world.residents,time};
-        let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:w.categories,buildings:w.buildings,catalog:w.catalog,
-            products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
-            player_count:world.active_player_count as i32,category_counts:w.counts,proposal_identity:w.identity,construction_components:world.construction_components,
-            hour:time.hour,mode:world.strategy_mode as u32,allowance:world.construction_allowance,affordability_override:world.affordability_override,
-            discount:world.construction_discount,proposal_prior:[0;104]};
-        crate::ai_business_ranking::rank(player,&profile_view,mode,&ranking,|player,outputs|{
-            let mut state=crate::ai_actions::Planning{outputs:*outputs,..Default::default()};
-            let result=crate::ai_actions::retained::choose(player,profiles,image,crate::ai_actions::Input{execute:0,style_override:0,style:0},&mut state,&mut context,planning_diagnostic);
-            *outputs=state.outputs;result
-        })
-    })
+fn portfolio_value(
+    player: &Player,
+    profiles: &[[u8; 0x650]],
+    image: &PeImage<'_>,
+    world: &mut World<'_>,
+) -> Result<i32, String> {
+    let count = usize::from(u16::from_le_bytes(
+        player.bytes[0xb44..0xb46].try_into().unwrap(),
+    ));
+    let entries = if count == 0 {
+        &[][..]
+    } else {
+        world
+            .ownership
+            .lists
+            .get(&word(&player.bytes, 0xb3c))
+            .and_then(|r| r.get(..count))
+            .ok_or("AI portfolio ownership allocation missing")?
+    };
+    crate::ai_maintenance::portfolio(
+        player,
+        &crate::ai_maintenance::World {
+            building_parameters: world.building_parameters,
+            image,
+            profiles,
+            categories: world.categories,
+            buildings: world.buildings,
+            businesses: world.businesses,
+            catalog: world.catalog,
+            entries,
+            counts: world.category_counts,
+            identity: world.proposal_identity,
+            prior: [0; 104],
+        },
+    )
 }
 
-fn portfolio_value(player:&Player,profiles:&[[u8;0x650]],image:&PeImage<'_>,world:&mut World<'_>)->Result<i32,String>{
-    let count=usize::from(u16::from_le_bytes(player.bytes[0xb44..0xb46].try_into().unwrap()));
-    let entries=if count==0{&[][..]}else{world.ownership.lists.get(&word(&player.bytes,0xb3c)).and_then(|r|r.get(..count)).ok_or("AI portfolio ownership allocation missing")?};
-    crate::ai_maintenance::portfolio(player,&crate::ai_maintenance::World{building_parameters:world.building_parameters,image,profiles,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
-        catalog:world.catalog,entries,counts:world.category_counts,identity:world.proposal_identity,prior:[0;104]})
-}
-
-fn developed_target(player:&mut Player,profiles:&mut [[u8;0x650]],image:&PeImage<'_>,peers:&[Option<&Player>],world:&mut World<'_>)->Result<bool,String>{
-    let time=world.strategy_time.ok_or("AI developed-target clock unresolved")?;
-    let profile_view=profiles.to_vec();let references:Vec<_>=peers.iter().map(|p|p.unwrap_or(player).reference).collect();
-    let target=crate::ai_developed_targets::World{image,profiles:&profile_view,hour:time.hour,categories:world.categories,
-        buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,ownership:world.ownership,residents:world.residents,commodity_active:&world.commodity_active};
-    let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,categories:world.categories,buildings:world.buildings,catalog:world.catalog,
-        products:world.products,commodities:world.commodities,residents:world.residents,player_references:&references,
-        player_count:world.active_player_count as i32,category_counts:world.category_counts,proposal_identity:world.proposal_identity,
-        construction_components:world.construction_components,hour:time.hour,mode:world.strategy_mode as u32,
-        allowance:world.construction_allowance,affordability_override:world.affordability_override,discount:world.construction_discount,proposal_prior:[0;104]};
-    crate::ai_developed_targets::select(player,&target,|player,outputs|{
-        let mut state=crate::ai_actions::Planning{outputs:*outputs,..Default::default()};
-        let result=crate::ai_actions::retained::choose(player,profiles,image,crate::ai_actions::Input{execute:0,style_override:0,style:0},&mut state,&mut context,planning_diagnostic);
-        *outputs=state.outputs;result
+fn developed_target(
+    player: &mut Player,
+    profiles: &mut [[u8; 0x650]],
+    image: &PeImage<'_>,
+    peers: &[Option<&Player>],
+    world: &mut World<'_>,
+) -> Result<bool, String> {
+    let time = world
+        .strategy_time
+        .ok_or("AI developed-target clock unresolved")?;
+    let profile_view = profiles.to_vec();
+    let references: Vec<_> = peers
+        .iter()
+        .map(|p| p.unwrap_or(player).reference)
+        .collect();
+    let target = crate::ai_developed_targets::World {
+        image,
+        profiles: &profile_view,
+        hour: time.hour,
+        categories: world.categories,
+        buildings: world.buildings,
+        businesses: world.businesses,
+        catalog: world.catalog,
+        ownership: world.ownership,
+        residents: world.residents,
+        commodity_active: &world.commodity_active,
+    };
+    let mut context = crate::ai_actions::retained::World {
+        building_parameters: world.building_parameters,
+        categories: world.categories,
+        buildings: world.buildings,
+        catalog: world.catalog,
+        products: world.products,
+        commodities: world.commodities,
+        residents: world.residents,
+        player_references: &references,
+        player_count: world.active_player_count as i32,
+        category_counts: world.category_counts,
+        proposal_identity: world.proposal_identity,
+        construction_components: world.construction_components,
+        hour: time.hour,
+        mode: world.strategy_mode as u32,
+        allowance: world.construction_allowance,
+        affordability_override: world.affordability_override,
+        discount: world.construction_discount,
+        proposal_prior: [0; 104],
+    };
+    crate::ai_developed_targets::select(player, &target, |player, outputs| {
+        let mut state = crate::ai_actions::Planning {
+            outputs: *outputs,
+            ..Default::default()
+        };
+        let result = crate::ai_actions::retained::choose(
+            player,
+            profiles,
+            image,
+            crate::ai_actions::Input {
+                execute: 0,
+                style_override: 0,
+                style: 0,
+            },
+            &mut state,
+            &mut context,
+            planning_diagnostic,
+        );
+        *outputs = state.outputs;
+        result
     })
 }
 
@@ -407,8 +1107,13 @@ fn dispatch(
         &mut World<'_>,
     ) -> Result<ai_messages::Reply, String>,
 ) -> Result<(), String> {
-    let peer_rows:Vec<_>=before.iter().map(Some).chain(std::iter::once(None)).chain(after.iter().map(Some)).collect();
-    let peers=peer_rows.as_slice();
+    let peer_rows: Vec<_> = before
+        .iter()
+        .map(Some)
+        .chain(std::iter::once(None))
+        .chain(after.iter().map(Some))
+        .collect();
+    let peers = peer_rows.as_slice();
     let mut flags = word(&player.bytes, 0x220);
     let mut blocked = if flags & 0x40 != 0 {
         world.auction_blocked.ok_or("AI auction gate unresolved")?
@@ -423,54 +1128,174 @@ fn dispatch(
             let result = if event == crate::ai_dispatch::Event::Ownership {
                 ownership(player, image, world).map(|_| 0)
             } else if event == crate::ai_dispatch::Event::Helper(0x468920) {
-                expand_housing(player,profiles,image,peers,world).map(|_|0)
+                expand_housing(player, profiles, image, peers, world).map(|_| 0)
             } else if event == crate::ai_dispatch::Event::Helper(0x47c4f0) {
-                let inputs=ai_messages::offers::auction::valuation::scoring::World{image,categories:world.categories,buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,
-                    native_utilities:&world.native_utilities,loan_status:world.cash_statuses,hour:world.strategy_time.ok_or("AI auction seeking calendar unresolved")?.hour,
-                    residents:world.residents,commodity_active:&world.commodity_active,before,after};
-                let auction=world.offer_auction.map(|a|(a.category,world.auction_blocked.unwrap_or(false)));
-                crate::ai_acquisition::seek_auction(player,&inputs,auction,world.proposal_identity,[0;104]).map(|_|0)
-            } else if event == crate::ai_dispatch::Event::Helper(0x468fc0) {
-                let target={
-                    let players:Vec<_>=peers.iter().map(|p|p.unwrap_or(player)).collect();
-                    let references:Vec<_>=players.iter().map(|p|p.reference).collect();
-                    let inputs=crate::ai_takeover::World{categories:world.categories,buildings:world.buildings,businesses:world.businesses,
-                        players:&players,cash_statuses:world.cash_statuses,time:world.strategy_time.ok_or("AI takeover calendar unresolved")?,image};
-                    let prices=crate::business_takeover::PriceWorld{categories:world.categories,buildings:world.buildings,businesses:world.businesses,player_references:&references};
-                    crate::ai_takeover::select(player,&inputs,|id|crate::business_takeover::price(id,&prices,world.ownership_tick.ok_or("AI takeover ownership clock unresolved")?,image))?
+                let inputs = ai_messages::offers::auction::valuation::scoring::World {
+                    image,
+                    categories: world.categories,
+                    buildings: world.buildings,
+                    businesses: world.businesses,
+                    catalog: world.catalog,
+                    native_utilities: &world.native_utilities,
+                    loan_status: world.cash_statuses,
+                    hour: world
+                        .strategy_time
+                        .ok_or("AI auction seeking calendar unresolved")?
+                        .hour,
+                    residents: world.residents,
+                    commodity_active: &world.commodity_active,
+                    before,
+                    after,
                 };
-                if let Some(business)=target {
-                    let row=world.businesses.get(business as usize).ok_or("AI takeover selected business missing")?;
-                    let index=i32::from(i16::from_le_bytes(row[8..10].try_into().unwrap())) as usize;
-                    let building=word(world.buildings.get(index).ok_or("AI takeover building missing")?,0);
-                    callback(Call::TakeoverCommand{building},player,profiles,world)?;
-                    world.ownership.mutate(player,|size|allocate(world.allocation_next,size),|state|{
-                        state.insert(0,business as i32,|id|crate::ai_ownership::live_entry_value_from_catalog(id,world.businesses,world.buildings,world.categories,world.catalog))?;
-                        state.lists[1].remove(business as i32);Ok(())
-                    })?;
+                let auction = world
+                    .offer_auction
+                    .map(|a| (a.category, world.auction_blocked.unwrap_or(false)));
+                crate::ai_acquisition::seek_auction(
+                    player,
+                    &inputs,
+                    auction,
+                    world.proposal_identity,
+                    [0; 104],
+                )
+                .map(|_| 0)
+            } else if event == crate::ai_dispatch::Event::Helper(0x468fc0) {
+                let target = {
+                    let players: Vec<_> = peers.iter().map(|p| p.unwrap_or(player)).collect();
+                    let references: Vec<_> = players.iter().map(|p| p.reference).collect();
+                    let inputs = crate::ai_takeover::World {
+                        categories: world.categories,
+                        buildings: world.buildings,
+                        businesses: world.businesses,
+                        players: &players,
+                        cash_statuses: world.cash_statuses,
+                        time: world
+                            .strategy_time
+                            .ok_or("AI takeover calendar unresolved")?,
+                        image,
+                    };
+                    let prices = crate::business_takeover::PriceWorld {
+                        categories: world.categories,
+                        buildings: world.buildings,
+                        businesses: world.businesses,
+                        player_references: &references,
+                    };
+                    crate::ai_takeover::select(player, &inputs, |id| {
+                        crate::business_takeover::price(
+                            id,
+                            &prices,
+                            world
+                                .ownership_tick
+                                .ok_or("AI takeover ownership clock unresolved")?,
+                            image,
+                        )
+                    })?
+                };
+                if let Some(business) = target {
+                    let row = world
+                        .businesses
+                        .get(business as usize)
+                        .ok_or("AI takeover selected business missing")?;
+                    let index =
+                        i32::from(i16::from_le_bytes(row[8..10].try_into().unwrap())) as usize;
+                    let building = word(
+                        world
+                            .buildings
+                            .get(index)
+                            .ok_or("AI takeover building missing")?,
+                        0,
+                    );
+                    callback(Call::TakeoverCommand { building }, player, profiles, world)?;
+                    world.ownership.mutate(
+                        player,
+                        |size| allocate(world.allocation_next, size),
+                        |state| {
+                            state.insert(0, business as i32, |id| {
+                                crate::ai_ownership::live_entry_value_from_catalog(
+                                    id,
+                                    world.businesses,
+                                    world.buildings,
+                                    world.categories,
+                                    world.catalog,
+                                )
+                            })?;
+                            state.lists[1].remove(business as i32);
+                            Ok(())
+                        },
+                    )?;
                 }
                 Ok(0)
             } else if event == crate::ai_dispatch::Event::Helper(0x4687e0) {
-                crate::ai_actions::expansion::clear_space(player,world.category_footprints,&mut crate::ai_maintenance::World{building_parameters:world.building_parameters,
-                    image,profiles,categories:world.categories,buildings:world.buildings,businesses:world.businesses,
-                    catalog:world.catalog,entries:&[],counts:world.category_counts,identity:world.proposal_identity,prior:[0;104],
-                }).map(|_|0)
+                crate::ai_actions::expansion::clear_space(
+                    player,
+                    world.category_footprints,
+                    &mut crate::ai_maintenance::World {
+                        building_parameters: world.building_parameters,
+                        image,
+                        profiles,
+                        categories: world.categories,
+                        buildings: world.buildings,
+                        businesses: world.businesses,
+                        catalog: world.catalog,
+                        entries: &[],
+                        counts: world.category_counts,
+                        identity: world.proposal_identity,
+                        prior: [0; 104],
+                    },
+                )
+                .map(|_| 0)
             } else if event == crate::ai_dispatch::Event::Helper(0x46eda0) {
-                let context=crate::ai_actions::performance::World{catalog:world.catalog,products:world.products,commodities:world.commodities,
-                    categories:world.categories,buildings:world.buildings,businesses:world.businesses,enabled:world.utility_enabled,image};
+                let context = crate::ai_actions::performance::World {
+                    catalog: world.catalog,
+                    products: world.products,
+                    commodities: world.commodities,
+                    categories: world.categories,
+                    buildings: world.buildings,
+                    businesses: world.businesses,
+                    enabled: world.utility_enabled,
+                    image,
+                };
                 // Unknown building discriminators only issue the native debug message;
                 // the original then grades zero revenue/zero cost as100.
-                crate::ai_actions::performance::refresh(player,world.ownership,&context,|_|Ok(())).map(|_|0)
+                crate::ai_actions::performance::refresh(player, world.ownership, &context, |_| {
+                    Ok(())
+                })
+                .map(|_| 0)
             } else if event == crate::ai_dispatch::Event::Helper(0x471d00) {
-                crate::ai_space::refresh_all(world.category_footprints,world.categories,image).map(|_|0)
+                crate::ai_space::refresh_all(world.category_footprints, world.categories, image)
+                    .map(|_| 0)
             } else if event == crate::ai_dispatch::Event::Helper(0x468de0) {
-                business_kind(player,profiles,image,peers,world).map(u32::from)
-            } else if matches!(event,crate::ai_dispatch::Event::Helper(0x467dc0|0x467c30)) {
-                maintain_businesses(event==crate::ai_dispatch::Event::Helper(0x467c30),player,profiles,image,peers,world).map(|_|0)
+                business_kind(player, profiles, image, peers, world).map(u32::from)
+            } else if matches!(
+                event,
+                crate::ai_dispatch::Event::Helper(0x467dc0 | 0x467c30)
+            ) {
+                maintain_businesses(
+                    event == crate::ai_dispatch::Event::Helper(0x467c30),
+                    player,
+                    profiles,
+                    image,
+                    peers,
+                    world,
+                )
+                .map(|_| 0)
             } else if event == crate::ai_dispatch::Event::ChooseBusiness {
-                let mut outputs=[choices[1] as u32,choices[0] as u32];
-                let result=planning(player,profiles,image,crate::ai_actions::Input{execute:1,style_override:0,style:0},&mut outputs,peers,world,planning_diagnostic);
-                choices[1]=outputs[0] as i32;choices[0]=outputs[1] as i32;
+                let mut outputs = [choices[1] as u32, choices[0] as u32];
+                let result = planning(
+                    player,
+                    profiles,
+                    image,
+                    crate::ai_actions::Input {
+                        execute: 1,
+                        style_override: 0,
+                        style: 0,
+                    },
+                    &mut outputs,
+                    peers,
+                    world,
+                    planning_diagnostic,
+                );
+                choices[1] = outputs[0] as i32;
+                choices[0] = outputs[1] as i32;
                 result.map(u32::from)
             } else {
                 callback(Call::Management(event), player, profiles, world).map(|reply| reply.value)

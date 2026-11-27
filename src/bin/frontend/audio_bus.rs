@@ -20,7 +20,13 @@ pub struct Bus {
     attempted: bool,
 }
 impl Bus {
-    pub fn new() -> Self { Self { level: 100, gain: 1., ..Self::default() } }
+    pub fn new() -> Self {
+        Self {
+            level: 100,
+            gain: 1.,
+            ..Self::default()
+        }
+    }
     fn connect_to(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
         let (mixer, source) = rodio::mixer::mixer(channels, sample_rate);
         // A mixer with no source detaches from its parent and would not pick
@@ -74,7 +80,9 @@ impl Bus {
         self.connect_to(output, channels, sample_rate);
     }
     #[cfg(test)]
-    pub fn level(&self) -> u8 { self.level }
+    pub fn level(&self) -> u8 {
+        self.level
+    }
 }
 
 #[cfg(test)]
@@ -85,16 +93,43 @@ mod tests {
         let mut bus = Bus::new();
         let mut attempts = 0;
         for _ in 0..1000 {
-            assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+            assert!(
+                bus.mixer_with(|| {
+                    attempts += 1;
+                    None
+                })
+                .is_none()
+            );
         }
         bus.set_level(40);
-        assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+        assert!(
+            bus.mixer_with(|| {
+                attempts += 1;
+                None
+            })
+            .is_none()
+        );
         bus.set_music_level(25);
-        for _ in 0..1000 { assert!(bus.combined_mixer().is_none()); }
-        assert!(bus.mixer_with(|| { attempts += 1; None }).is_none());
+        for _ in 0..1000 {
+            assert!(bus.combined_mixer().is_none());
+        }
+        assert!(
+            bus.mixer_with(|| {
+                attempts += 1;
+                None
+            })
+            .is_none()
+        );
         assert_eq!(attempts, 1);
         let mut next_launch = Bus::new();
-        assert!(next_launch.mixer_with(|| { attempts += 1; None }).is_none());
+        assert!(
+            next_launch
+                .mixer_with(|| {
+                    attempts += 1;
+                    None
+                })
+                .is_none()
+        );
         assert_eq!(attempts, 2);
     }
     #[test]
@@ -119,9 +154,15 @@ mod tests {
         output.add(Zero::new(1, 22_050));
         let mut bus = Bus::new();
         bus.connect_to(&output, 1, 22_050);
-        for _ in 0..512 { assert_eq!(source.next(),Some(0.)); }
+        for _ in 0..512 {
+            assert_eq!(source.next(), Some(0.));
+        }
         let song = rodio::Sink::connect_new(bus.mixer.as_ref().unwrap());
-        song.append(rodio::buffer::SamplesBuffer::new(1,22_050,vec![0.5;128]));
-        assert!((0..512).filter_map(|_| source.next()).any(|sample| sample > 0.1));
+        song.append(rodio::buffer::SamplesBuffer::new(1, 22_050, vec![0.5; 128]));
+        assert!(
+            (0..512)
+                .filter_map(|_| source.next())
+                .any(|sample| sample > 0.1)
+        );
     }
 }

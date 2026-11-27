@@ -107,7 +107,9 @@ fn crowd_level(weight: f32) -> Option<i32> {
     (weight > 30.).then(|| (f64::from(weight) - 30.).trunc().clamp(0., 65.) as i32)
 }
 #[cfg(test)]
-fn crowd_gain(weight: f32) -> Option<f32> { crowd_level(weight).map(|q| q as f32 / 100.) }
+fn crowd_gain(weight: f32) -> Option<f32> {
+    crowd_level(weight).map(|q| q as f32 / 100.)
+}
 
 pub struct Request {
     pub operation: Operation,
@@ -199,7 +201,9 @@ fn pcm16(path: &Path) -> Result<Vec<f32>, String> {
 /// actual directory entry so the same private assets load on case-sensitive
 /// Linux/macOS filesystems as well as Windows.
 pub(crate) fn original_case_path(path: &Path) -> Result<PathBuf, String> {
-    if path.is_file() { return Ok(path.to_path_buf()); }
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
     let parent = path.parent().ok_or("original sound path has no parent")?;
     let requested = path
         .file_name()
@@ -352,7 +356,9 @@ impl Player {
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
         self.bus.combined_mixer()
     }
-    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) { self.audio = audio; }
+    pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) {
+        self.audio = audio;
+    }
     pub fn set_level(&mut self, effects: u8) {
         self.audio.set_effects(effects);
     }
@@ -501,7 +507,10 @@ impl Player {
                     }
                 }
                 if let Some(sink) = &self.construction[index] {
-                    sink.set_volume(self.audio.source_gain(construction_fallback_level(candidate.distance)));
+                    sink.set_volume(
+                        self.audio
+                            .source_gain(construction_fallback_level(candidate.distance)),
+                    );
                 }
             }
         }
@@ -549,7 +558,9 @@ impl Player {
             return;
         }
         if call.id == 8 {
-            let toot_gain = self.audio.source_gain(train_level(call.distance, 0.05, false));
+            let toot_gain = self
+                .audio
+                .source_gain(train_level(call.distance, 0.05, false));
             let samples = self.assets.train_toot.clone();
             if let Some(mixer) = self.mixer() {
                 let sink = Self::one_shot(mixer, &samples, toot_gain);
@@ -560,7 +571,10 @@ impl Player {
         } else if let Some(sink) = &self.train_toot {
             // 4af502..4af50c precedes id7 motion work and consumes the live
             // effects factor with the freshly computed toot source word.
-            sink.set_volume(self.audio.source_gain(train_level(call.distance, 0.05, false)));
+            sink.set_volume(
+                self.audio
+                    .source_gain(train_level(call.distance, 0.05, false)),
+            );
         }
         if call.id == 11 {
             if let Some(sink) = self.train_motion.take() {
@@ -576,7 +590,10 @@ impl Player {
         }
         if let Some(sink) = &self.train_motion {
             // 4af430 stores distance + 1 as f32 before this second gain.
-            sink.set_volume(self.audio.source_gain(train_level(call.distance, 0.1, true)));
+            sink.set_volume(
+                self.audio
+                    .source_gain(train_level(call.distance, 0.1, true)),
+            );
             if call.id == 7 {
                 let speed = f32::from_bits(call.arguments[0]);
                 // Original frequency: speed * 0.25 * 22050 + 11025 Hz.
@@ -639,7 +656,8 @@ impl Player {
             }
             if self.road_motors[slot].is_none() {
                 if let Some(mixer) = mixer {
-                    self.road_motors[slot] = Some(Self::loop_sink(mixer, &self.assets.road_motor, 0.));
+                    self.road_motors[slot] =
+                        Some(Self::loop_sink(mixer, &self.assets.road_motor, 0.));
                 }
                 // 4af9b5 jumps past both setters on the creation frame.
                 continue;
@@ -860,13 +878,21 @@ fn road_motor_frequency(speed: f32) -> i32 {
 }
 
 #[cfg(test)]
-fn positional_gain(d: f32, r: f32) -> f32 { positional_level(d, r) as f32 / 100. }
+fn positional_gain(d: f32, r: f32) -> f32 {
+    positional_level(d, r) as f32 / 100.
+}
 #[cfg(test)]
-fn construction_fallback_gain(d: f32) -> f32 { construction_fallback_level(d) as f32 / 100. }
+fn construction_fallback_gain(d: f32) -> f32 {
+    construction_fallback_level(d) as f32 / 100.
+}
 #[cfg(test)]
-fn train_gain(d: f32, scale: f32, stored: bool) -> f32 { train_level(d, scale, stored) as f32 / 100. }
+fn train_gain(d: f32, scale: f32, stored: bool) -> f32 {
+    train_level(d, scale, stored) as f32 / 100.
+}
 #[cfg(test)]
-fn road_gain(sum: f32) -> f32 { road_level(sum) as f32 / 100. }
+fn road_gain(sum: f32) -> f32 {
+    road_level(sum) as f32 / 100.
+}
 
 #[cfg(test)]
 mod focus_tests {
@@ -892,29 +918,57 @@ mod tests {
     fn detached_audio_ui_preserves_live_backend_errors() {
         let (auction, receiver) = mpsc::channel();
         drop(receiver);
-        assert_eq!(crate::live_host::auction_audio::request(&Some(auction.clone()),
-            crate::live_host::auction_audio::Operation::Reset).unwrap(), 0);
-        crate::live_host::auction_audio::enqueue(&Some(auction),
-            crate::live_host::auction_audio::Operation::Reset).unwrap();
+        assert_eq!(
+            crate::live_host::auction_audio::request(
+                &Some(auction.clone()),
+                crate::live_host::auction_audio::Operation::Reset
+            )
+            .unwrap(),
+            0
+        );
+        crate::live_host::auction_audio::enqueue(
+            &Some(auction),
+            crate::live_host::auction_audio::Operation::Reset,
+        )
+        .unwrap();
 
         let (era, receiver) = mpsc::channel();
         drop(receiver);
-        assert_eq!(crate::era_audio::request(&Some(era),
-            crate::era_audio::Operation::Stop).unwrap(), 0);
+        assert_eq!(
+            crate::era_audio::request(&Some(era), crate::era_audio::Operation::Stop).unwrap(),
+            0
+        );
 
         let (gameplay, receiver) = mpsc::channel();
         drop(receiver);
-        assert_eq!(crate::gameplay_sound::request(&Some(gameplay.clone()),
-            crate::gameplay_sound::Operation::UiLightClick).unwrap(), 0);
-        crate::gameplay_sound::enqueue(&Some(gameplay),
-            crate::gameplay_sound::Operation::UiLightClick).unwrap();
+        assert_eq!(
+            crate::gameplay_sound::request(
+                &Some(gameplay.clone()),
+                crate::gameplay_sound::Operation::UiLightClick
+            )
+            .unwrap(),
+            0
+        );
+        crate::gameplay_sound::enqueue(
+            &Some(gameplay),
+            crate::gameplay_sound::Operation::UiLightClick,
+        )
+        .unwrap();
 
         let (sender, receiver) = mpsc::channel::<crate::era_audio::Request>();
-        let ui = std::thread::spawn(move || receiver.recv().unwrap().reply
-            .send(Err("original audio backend failure".to_owned())).unwrap());
-        assert_eq!(crate::era_audio::request(&Some(sender),
-            crate::era_audio::Operation::Stop).unwrap_err(),
-            "original audio backend failure");
+        let ui = std::thread::spawn(move || {
+            receiver
+                .recv()
+                .unwrap()
+                .reply
+                .send(Err("original audio backend failure".to_owned()))
+                .unwrap()
+        });
+        assert_eq!(
+            crate::era_audio::request(&Some(sender), crate::era_audio::Operation::Stop)
+                .unwrap_err(),
+            "original audio backend failure"
+        );
         ui.join().unwrap();
     }
 
@@ -1068,9 +1122,13 @@ mod tests {
             assert_eq!(sink.speed(), 1.);
         }
         player.update_road_motors(nearest, Some(&mixer));
-        for (slot, (volume, frequency)) in [(0.12175870, 34_300), (0.07413103, 28_175), (0.04345102, 25_112)]
-            .into_iter()
-            .enumerate()
+        for (slot, (volume, frequency)) in [
+            (0.12175870, 34_300),
+            (0.07413103, 28_175),
+            (0.04345102, 25_112),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let sink = player.road_motors[slot].as_ref().unwrap();
             assert!((sink.volume() - volume).abs() < 1e-7);

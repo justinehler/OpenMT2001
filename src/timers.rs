@@ -96,8 +96,9 @@ pub struct Frame {
 
 impl Frame {
     /// Original4ebaa0 updates only previous/current. Not manager initialization.
-    pub fn synchronize(&mut self, milliseconds:u32) {
-        self.previous=u64::from(milliseconds); self.current=u64::from(milliseconds);
+    pub fn synchronize(&mut self, milliseconds: u32) {
+        self.previous = u64::from(milliseconds);
+        self.current = u64::from(milliseconds);
     }
 
     /// Timing part of original4eb660. The host must also clear active timer

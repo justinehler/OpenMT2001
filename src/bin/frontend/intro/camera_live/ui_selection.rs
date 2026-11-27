@@ -11,17 +11,21 @@ pub enum SelectionKey {
 }
 impl SelectionKey {
     /// Source cycling accepts only an issued actual resident-domain handle.
-    pub fn require_resident(self)->Result<(),String> {
+    pub fn require_resident(self) -> Result<(), String> {
         match self {
-            Self::ResidentDescriptor(_)=>Ok(()),
-            _=>Err("participant source requires actual6899a0 resident origin".into()),
+            Self::ResidentDescriptor(_) => Ok(()),
+            _ => Err("participant source requires actual6899a0 resident origin".into()),
         }
     }
-    pub fn native_key(self) -> Result<u32,String> {
+    pub fn native_key(self) -> Result<u32, String> {
         match self {
             Self::NativeObject(key) => Ok(key),
-            Self::ResidentDescriptor(_)=>Err("resident handle has no native pointer/category/player conversion".into()),
-            Self::PropertyDescriptor(_) => Err("modern property handle has no proven native pointer/key conversion".into()),
+            Self::ResidentDescriptor(_) => {
+                Err("resident handle has no native pointer/category/player conversion".into())
+            }
+            Self::PropertyDescriptor(_) => {
+                Err("modern property handle has no proven native pointer/key conversion".into())
+            }
         }
     }
 }
@@ -37,29 +41,46 @@ pub struct Selected {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RelatedKey(u32);
 impl RelatedKey {
-    pub fn from_native_cell(raw: u32) -> Option<Self> { (raw != 0).then_some(Self(raw)) }
-    pub fn native_key(self) -> u32 { self.0 }
+    pub fn from_native_cell(raw: u32) -> Option<Self> {
+        (raw != 0).then_some(Self(raw))
+    }
+    pub fn native_key(self) -> u32 {
+        self.0
+    }
 }
 #[derive(Debug)]
 pub struct SelectionState {
-    pub current: Option<Selected>,       //822d50
-    pub published: Option<Selected>,     //590f58
-    pub transient: Option<Selected>,     //823168
-    pub related: Option<RelatedKey>,     //6175f8
-    pub selected_building: Option<u32>,  //590f60
+    pub current: Option<Selected>,      //822d50
+    pub published: Option<Selected>,    //590f58
+    pub transient: Option<Selected>,    //823168
+    pub related: Option<RelatedKey>,    //6175f8
+    pub selected_building: Option<u32>, //590f60
     pub sequence_index: Option<i32>,
     pub list_business: i32,
     pub list_commodity: i32,
 }
 impl SelectionState {
     /// Explicit process-cell/live-producer install only. Never Default.
-    pub fn installed(current: Option<Selected>, published: Option<Selected>,
-        transient: Option<Selected>, related: Option<RelatedKey>,
-        selected_building: Option<u32>, sequence_index: Option<i32>,
-        list_business: i32, list_commodity: i32,
+    pub fn installed(
+        current: Option<Selected>,
+        published: Option<Selected>,
+        transient: Option<Selected>,
+        related: Option<RelatedKey>,
+        selected_building: Option<u32>,
+        sequence_index: Option<i32>,
+        list_business: i32,
+        list_commodity: i32,
     ) -> Self {
-        Self { current,published,transient,related,selected_building,
-            sequence_index,list_business,list_commodity }
+        Self {
+            current,
+            published,
+            transient,
+            related,
+            selected_building,
+            sequence_index,
+            list_business,
+            list_commodity,
+        }
     }
     ///40f890 preserved: it does not implicitly overwrite823168/6175f8.
     pub fn strategic_hide(&mut self, retained: Option<Selected>) {
@@ -68,5 +89,7 @@ impl SelectionState {
         self.list_business = -1;
         self.list_commodity = -1;
     }
-    pub fn publish_current(&mut self) { self.published = self.current; }
+    pub fn publish_current(&mut self) {
+        self.published = self.current;
+    }
 }

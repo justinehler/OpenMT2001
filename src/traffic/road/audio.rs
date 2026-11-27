@@ -46,7 +46,9 @@ impl Proximity {
                 distance = extended(10.)?;
             }
             let mut weight = extended(1.)?;
-            weight.div(distance).map_err(|e|format!("road sound distance attenuation: {e}"))?;
+            weight
+                .div(distance)
+                .map_err(|e| format!("road sound distance attenuation: {e}"))?;
             weight.add_f32(self.reciprocal_sum)?;
             self.reciprocal_sum = weight.to_f32();
             let index = (0..self.count)

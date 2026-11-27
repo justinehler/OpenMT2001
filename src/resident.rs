@@ -9,16 +9,23 @@ struct AuxiliaryOrigin;
 #[derive(Debug)]
 struct AuxiliaryAllocation;
 #[derive(Clone, Debug)]
-pub struct AuxiliarySource { origin: Weak<AuxiliaryOrigin> }
+pub struct AuxiliarySource {
+    origin: Weak<AuxiliaryOrigin>,
+}
 impl PartialEq for AuxiliarySource {
-    fn eq(&self,other:&Self)->bool { self.origin.ptr_eq(&other.origin) }
+    fn eq(&self, other: &Self) -> bool {
+        self.origin.ptr_eq(&other.origin)
+    }
 }
 impl Eq for AuxiliarySource {}
 impl AuxiliarySource {
-    pub fn validate_live(&self)->Result<(),String> {
-        self.origin.upgrade().map(|_|()).ok_or_else(||"resident auxiliary pool retired/replaced".into())
+    pub fn validate_live(&self) -> Result<(), String> {
+        self.origin
+            .upgrade()
+            .map(|_| ())
+            .ok_or_else(|| "resident auxiliary pool retired/replaced".into())
     }
-    pub fn validate_pool(&self,pool:&AuxiliaryPool)->Result<(),String> {
+    pub fn validate_pool(&self, pool: &AuxiliaryPool) -> Result<(), String> {
         self.validate_live()?;
         if !self.origin.ptr_eq(&Arc::downgrade(&pool.origin)) {
             return Err("resident auxiliary source belongs to another actual pool".into());
@@ -36,20 +43,25 @@ pub struct AuxiliaryBinding {
     index: usize,
 }
 impl PartialEq for AuxiliaryBinding {
-    fn eq(&self,other:&Self)->bool {
-        self.source==other.source && self.allocation.ptr_eq(&other.allocation)
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source && self.allocation.ptr_eq(&other.allocation)
     }
 }
 impl Eq for AuxiliaryBinding {}
 impl AuxiliaryBinding {
-    pub fn validate_live(&self)->Result<(),String> {
+    pub fn validate_live(&self) -> Result<(), String> {
         self.source.validate_live()?;
-        self.allocation.upgrade().map(|_|()).ok_or_else(||"resident auxiliary allocation revoked".into())
+        self.allocation
+            .upgrade()
+            .map(|_| ())
+            .ok_or_else(|| "resident auxiliary allocation revoked".into())
     }
-    pub fn validate_source(&self,source:&AuxiliarySource)->Result<(),String> {
+    pub fn validate_source(&self, source: &AuxiliarySource) -> Result<(), String> {
         self.validate_live()?;
         source.validate_live()?;
-        if self.source!=*source {return Err("resident binding/source pool mismatch".into());}
+        if self.source != *source {
+            return Err("resident binding/source pool mismatch".into());
+        }
         Ok(())
     }
 }
@@ -64,64 +76,98 @@ pub struct AuxiliaryPool {
 }
 impl AuxiliaryPool {
     /// Original45badd..45bae7 allocates6899a0 with2000 records through4dfad0.
-    pub fn for_residents() -> Self { Self::new(2000) }
+    pub fn for_residents() -> Self {
+        Self::new(2000)
+    }
     pub fn new(capacity: usize) -> Self {
-        Self {slots:vec![[0;0x11c];capacity],used:0,
-            origin:Arc::new(AuxiliaryOrigin),allocations:Vec::new()}
+        Self {
+            slots: vec![[0; 0x11c]; capacity],
+            used: 0,
+            origin: Arc::new(AuxiliaryOrigin),
+            allocations: Vec::new(),
+        }
     }
     /// Restore full storage including unused bytes. Every occupied allocation
     /// receives a fresh identity; equal imported bytes never revive a binding.
-    pub fn from_slots(slots:Vec<[u8;0x11c]>,used:usize)->Result<Self,String> {
-        if used>slots.len(){return Err("auxiliary used count exceeds capacity".into());}
-        Ok(Self {slots,used,origin:Arc::new(AuxiliaryOrigin),
-            allocations:(0..used).map(|_|Arc::new(AuxiliaryAllocation)).collect()})
+    pub fn from_slots(slots: Vec<[u8; 0x11c]>, used: usize) -> Result<Self, String> {
+        if used > slots.len() {
+            return Err("auxiliary used count exceeds capacity".into());
+        }
+        Ok(Self {
+            slots,
+            used,
+            origin: Arc::new(AuxiliaryOrigin),
+            allocations: (0..used).map(|_| Arc::new(AuxiliaryAllocation)).collect(),
+        })
     }
     /// Real reset/import writer: revoke prior allocated identities FIRST. The
     /// next pool is fully prepared before this infallible publication step.
-    pub fn replace_with(&mut self,next:Self) {
+    pub fn replace_with(&mut self, next: Self) {
         self.allocations.clear();
-        *self=next; // drops old sole origin before publishing the new pool
+        *self = next; // drops old sole origin before publishing the new pool
     }
-    pub fn reset_for_residents(&mut self) { self.replace_with(Self::for_residents()); }
-    pub fn source(&self)->AuxiliarySource {
-        AuxiliarySource{origin:Arc::downgrade(&self.origin)}
+    pub fn reset_for_residents(&mut self) {
+        self.replace_with(Self::for_residents());
     }
-    pub fn bind(&self,index:usize)->Result<AuxiliaryBinding,String> {
-        let allocation=self.allocations.get(index).filter(|_|index<self.used)
+    pub fn source(&self) -> AuxiliarySource {
+        AuxiliarySource {
+            origin: Arc::downgrade(&self.origin),
+        }
+    }
+    pub fn bind(&self, index: usize) -> Result<AuxiliaryBinding, String> {
+        let allocation = self
+            .allocations
+            .get(index)
+            .filter(|_| index < self.used)
             .ok_or("resident auxiliary index is unused/out of range")?;
-        Ok(AuxiliaryBinding{source:self.source(),allocation:Arc::downgrade(allocation),index})
+        Ok(AuxiliaryBinding {
+            source: self.source(),
+            allocation: Arc::downgrade(allocation),
+            index,
+        })
     }
-    pub fn resolve(&self,binding:&AuxiliaryBinding)->Result<&[u8;0x11c],String> {
+    pub fn resolve(&self, binding: &AuxiliaryBinding) -> Result<&[u8; 0x11c], String> {
         binding.source.validate_pool(self)?;
         binding.validate_live()?;
-        let actual=self.allocations.get(binding.index).filter(|_|binding.index<self.used)
+        let actual = self
+            .allocations
+            .get(binding.index)
+            .filter(|_| binding.index < self.used)
             .ok_or("resident auxiliary binding is no longer allocated")?;
         if !binding.allocation.ptr_eq(&Arc::downgrade(actual)) {
             return Err("resident auxiliary allocation replaced".into());
         }
-        self.slots.get(binding.index).ok_or_else(||"resident auxiliary storage absent".into())
+        self.slots
+            .get(binding.index)
+            .ok_or_else(|| "resident auxiliary storage absent".into())
     }
-    pub fn used(&self)->usize {self.used}
-    pub fn slots(&self)->&[[u8;0x11c]] {&self.slots}
-    pub fn slots_mut(&mut self)->&mut [[u8;0x11c]] {&mut self.slots}
-    pub fn get_mut(&mut self,index:usize)->Option<&mut [u8;0x11c]> {
+    pub fn used(&self) -> usize {
+        self.used
+    }
+    pub fn slots(&self) -> &[[u8; 0x11c]] {
+        &self.slots
+    }
+    pub fn slots_mut(&mut self) -> &mut [[u8; 0x11c]] {
+        &mut self.slots
+    }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut [u8; 0x11c]> {
         self.slots.get_mut(..self.used)?.get_mut(index)
     }
     /// Every byte is copied before used/identity publication. Exhaustion has
     /// no payload/identity/count effect. Appending retains prior identities.
-    pub fn allocate(&mut self,template:&[u8;0x11c])->Option<usize> {
-        let index=self.used;
-        let slot=self.slots.get_mut(index)?;
-        let allocation=Arc::new(AuxiliaryAllocation);
-        *slot=*template;
+    pub fn allocate(&mut self, template: &[u8; 0x11c]) -> Option<usize> {
+        let index = self.used;
+        let slot = self.slots.get_mut(index)?;
+        let allocation = Arc::new(AuxiliaryAllocation);
+        *slot = *template;
         self.allocations.push(allocation);
-        self.used+=1;
+        self.used += 1;
         Some(index)
     }
 }
 
 #[cfg(test)]
-#[path="resident/auxiliary_identity_tests.rs"]
+#[path = "resident/auxiliary_identity_tests.rs"]
 mod auxiliary_identity_tests;
 
 /// Bind a registered model as004dfa40 does. `reference` is an opaque model
@@ -1372,7 +1418,10 @@ impl Resident {
     pub fn reset_category_counter(&mut self, category: i32) -> Result<(), String> {
         let offset = usize::try_from(0x2ci32.wrapping_add(category / 4))
             .map_err(|_| "category counter precedes resident")?;
-        let byte = self.bytes.get_mut(offset).ok_or("category counter leaves resident")?;
+        let byte = self
+            .bytes
+            .get_mut(offset)
+            .ok_or("category counter leaves resident")?;
         let shift = (category % 4 * 2) as u32;
         *byte &= !(3u32.wrapping_shl(shift) as u8);
         Ok(())

@@ -1,12 +1,12 @@
 //! Host controls for the retained session. A failed simulation boundary latches
 //! a stop: resuming must never replay a partially completed original tick.
 pub mod auction_audio;
-#[path = "live_host/process_runtime.rs"]
-pub mod process_runtime;
 #[path = "live_host/camera_bridge.rs"]
 pub mod camera_bridge;
 #[path = "live_host/camera_session_service.rs"]
 mod camera_session_service;
+#[path = "live_host/process_runtime.rs"]
+pub mod process_runtime;
 use crate::{
     fresh_city::{self, CommandAssets, Session},
     prompt,
@@ -19,7 +19,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
-    pub autosave:Option<crate::save_menu::AutosaveStatus>,
+    pub autosave: Option<crate::save_menu::AutosaveStatus>,
     pub time_display: crate::time_panel::DisplayState,
     pub cash_arrow: crate::cash_arrow::State,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
@@ -35,7 +35,7 @@ pub struct Status {
     /// Current original 4112a0 resident counts and ratios for the City tab.
     pub city_people_rows: Option<Vec<crate::city_people::Row>>,
     pub tutorial_controls: TutorialControls,
-    pub source_picking:Option<process_runtime::PickingProjection>,
+    pub source_picking: Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
     pub tutorial_message: Option<prompt::Request>,
     pub tutorial_enabled_controls: Vec<u32>,
@@ -87,24 +87,58 @@ pub struct TutorialControls {
 /// speed or hour transition; clock polling must not flood the console.
 pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
     if previous.is_none() {
-        eprintln!("[controls] Space pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal.");
+        eprintln!(
+            "[controls] Space pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
+        );
     }
     if !status.pending_presentation.is_empty()
-        && previous.is_none_or(|previous| previous.pending_presentation != status.pending_presentation) {
-        eprintln!("[presentation] Pending callbacks: {:x?}", status.pending_presentation);
+        && previous
+            .is_none_or(|previous| previous.pending_presentation != status.pending_presentation)
+    {
+        eprintln!(
+            "[presentation] Pending callbacks: {:x?}",
+            status.pending_presentation
+        );
     }
-    let key = |s: &Status| (s.running, s.script_paused, s.failure.is_some(),
-        s.speed, s.year, s.hour, s.stats.is_some(), s.tutorial_completed);
-    if previous.is_some_and(|previous| key(previous) == key(status)) { return; }
-    let state = if status.failure.is_some() { "STOPPED" }
-        else if status.tutorial_completed { "COMPLETED" }
-        else if status.script_paused { "PROMPT PAUSED" }
-        else if !status.running { "PAUSED" }
-        else { "RUNNING" };
-    eprintln!("[session] {state}: year {}, {:02}:{:02}, tick {}, speed {}x{}",
-        status.year, status.hour, status.hour_fraction * 60 / 625,
-        status.ticks, status.speed,
-        if status.stats.is_some() { ", statistics open" } else { "" });
+    let key = |s: &Status| {
+        (
+            s.running,
+            s.script_paused,
+            s.failure.is_some(),
+            s.speed,
+            s.year,
+            s.hour,
+            s.stats.is_some(),
+            s.tutorial_completed,
+        )
+    };
+    if previous.is_some_and(|previous| key(previous) == key(status)) {
+        return;
+    }
+    let state = if status.failure.is_some() {
+        "STOPPED"
+    } else if status.tutorial_completed {
+        "COMPLETED"
+    } else if status.script_paused {
+        "PROMPT PAUSED"
+    } else if !status.running {
+        "PAUSED"
+    } else {
+        "RUNNING"
+    };
+    eprintln!(
+        "[session] {state}: year {}, {:02}:{:02}, tick {}, speed {}x{}",
+        status.year,
+        status.hour,
+        status.hour_fraction * 60 / 625,
+        status.ticks,
+        status.speed,
+        if status.stats.is_some() {
+            ", statistics open"
+        } else {
+            ""
+        }
+    );
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TutorialCameraAction {
@@ -127,34 +161,43 @@ pub struct Auction {
     pub info: Option<crate::auction_panel::Info>,
 }
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum StatsAction { Open, Close, Cycle(bool), Toggle(usize) }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatsAction {
+    Open,
+    Close,
+    Cycle(bool),
+    Toggle(usize),
+}
 
 /// Caller chooses the actual install path. CameraOnly does not capture C
 /// tables/inputs or fabricate F globals for an inactive ordinary UI graph.
 pub enum CameraSupplierPolicy {
     CameraOnly,
-    Graph { upper:crate::navigator::upper::Producer },
+    Graph {
+        upper: crate::navigator::upper::Producer,
+    },
 }
 enum CameraSuppliers {
     CameraOnly,
-    Graph { tables:std::sync::Arc<crate::locator::strategic::Tables>,
-        upper:crate::navigator::upper::Producer },
+    Graph {
+        tables: std::sync::Arc<crate::locator::strategic::Tables>,
+        upper: crate::navigator::upper::Producer,
+    },
 }
 
 pub struct Host {
     //Missing process source is explicit for legacy CPU Hosts. Production binds
     //the SAME Assets-born handle before commands/startup are consumed.
-    pub process_runtime:Option<process_runtime::Handle>,
+    pub process_runtime: Option<process_runtime::Handle>,
     /// None retains existing callers. Installation is an explicit ack barrier.
     camera_bridge: Option<camera_bridge::Worker>,
     /// Explicit legacy UI snapshot source, mutually exclusive with the native
     /// camera bridge. Absence retains the pre-connection supported routes.
     ui_camera_source: Option<crate::save_menu::camera_source::Reader>,
     /// Authority supplied only by Inputs::session_worker selected profile.
-    pub(crate) autosave_profile_root:Option<std::path::PathBuf>,
-    pub autosave_status:Option<crate::save_menu::AutosaveStatus>,
-    camera_suppliers:Option<CameraSuppliers>,
+    pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
+    pub autosave_status: Option<crate::save_menu::AutosaveStatus>,
+    camera_suppliers: Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
@@ -209,9 +252,14 @@ impl Host {
     ///4ba17e (fresh) /4bbd6b (loaded) shows the persistent normal Time
     /// instance. Re-showing an already visible widget has no activation call.
     pub fn begin_presentation(&mut self, session: &Session<'_>) -> Result<(), String> {
-        if self.presentation_started { return Ok(()); }
+        if self.presentation_started {
+            return Ok(());
+        }
         let cash = current_cash(session)?;
-        let mut runtime = self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?;
+        let mut runtime = self
+            .time_runtime
+            .lock()
+            .map_err(|_| "Time runtime poisoned")?;
         runtime.bind_panels();
         runtime.show(cash, 0)?;
         self.presentation_started = true;
@@ -243,7 +291,9 @@ impl Host {
         if self.failure.is_some() {
             return Err("Stopped session cannot begin build placement".into());
         }
-        let styles = session.era_styles.get(session.world.clock.calendar[2] as usize)
+        let styles = session
+            .era_styles
+            .get(session.world.clock.calendar[2] as usize)
             .ok_or("build era outside original parameter banks")?;
         let choices = crate::build_panel::placement_choices(
             &mut session.build_random_state,
@@ -262,18 +312,30 @@ impl Host {
         {
             return Ok(());
         }
-        let prior = u32::from_le_bytes(session.world.city.auction.controller.record[0x150..0x154]
-            .try_into().unwrap());
+        let prior = u32::from_le_bytes(
+            session.world.city.auction.controller.record[0x150..0x154]
+                .try_into()
+                .unwrap(),
+        );
         if prior != 0 && prior != 3 {
-            return Err(format!("saved auction prior interface mode {prior} has no V2 presenter"));
+            return Err(format!(
+                "saved auction prior interface mode {prior} has no V2 presenter"
+            ));
         }
-        let characters = session.roster.manager.players.iter()
+        let characters = session
+            .roster
+            .manager
+            .players
+            .iter()
             .map(|player| u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()))
             .collect::<Vec<_>>();
         let (actor_sender, actor_events) = std::sync::mpsc::channel();
         crate::auction_bridge::request(
             &self.auction_renderer,
-            crate::auction_bridge::Operation::Prepare { characters, actor_events },
+            crate::auction_bridge::Operation::Prepare {
+                characters,
+                actor_events,
+            },
         )?;
         self.auction_actor_events = Some(actor_sender);
         self.policy.ai_event_gate = false;
@@ -297,17 +359,37 @@ impl Host {
                 use openmt2001::ai_messages::offers::auction::activation::Call;
                 match call {
                     Call::Ambient => crate::gameplay_sound::request(
-                        gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientCreate),
+                        gameplay_sound,
+                        crate::gameplay_sound::Operation::AuctionAmbientCreate,
+                    ),
                     Call::Camera => crate::auction_bridge::request(
-                        renderer, crate::auction_bridge::Operation::Activate),
+                        renderer,
+                        crate::auction_bridge::Operation::Activate,
+                    ),
                     Call::Action(action) => {
-                        if action == openmt2001::ai_messages::offers::auction::Call::ShowPanel(0x565ba8) {
-                            time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
-                        } else { auction_action(action, auction, &mut omitted, tutorial_state,
-                            actor_events, &bid_gate)?; }
+                        if action
+                            == openmt2001::ai_messages::offers::auction::Call::ShowPanel(0x565ba8)
+                        {
+                            time_runtime
+                                .lock()
+                                .map_err(|_| "Time runtime poisoned")?
+                                .show(cash, 1)?;
+                        } else {
+                            auction_action(
+                                action,
+                                auction,
+                                &mut omitted,
+                                tutorial_state,
+                                actor_events,
+                                &bid_gate,
+                            )?;
+                        }
                         Ok(0)
                     }
-                    Call::RefreshPanel => { omitted.insert(0x414f90); Ok(0) }
+                    Call::RefreshPanel => {
+                        omitted.insert(0x414f90);
+                        Ok(0)
+                    }
                     Call::NormalSpeed => Ok(0),
                 }
             },
@@ -317,12 +399,12 @@ impl Host {
 
     pub fn new(camera: [f32; 3]) -> Self {
         Self {
-            process_runtime:None,
+            process_runtime: None,
             camera_bridge: None,
             ui_camera_source: None,
-            autosave_profile_root:None,
-            autosave_status:None,
-            camera_suppliers:None,
+            autosave_profile_root: None,
+            autosave_status: None,
+            camera_suppliers: None,
             time_runtime: Default::default(),
             presentation_started: false,
             game_active: false,
@@ -407,28 +489,36 @@ impl Host {
         }
     }
     pub fn camera_bridge_installed(&self) -> bool {
-        self.camera_bridge.as_ref().is_some_and(camera_bridge::Worker::installed)
+        self.camera_bridge
+            .as_ref()
+            .is_some_and(camera_bridge::Worker::installed)
     }
     pub fn camera_retired(&self) -> bool {
-        self.camera_bridge.as_ref().is_some_and(camera_bridge::Worker::retired)
+        self.camera_bridge
+            .as_ref()
+            .is_some_and(camera_bridge::Worker::retired)
     }
     /// Unlike fail(), this records no simulation fault and sends no new work.
     /// The retired generation cannot resume, including through Options/Run.
     fn stop_retired_camera(&mut self) -> bool {
-        if !self.camera_retired() { return false; }
+        if !self.camera_retired() {
+            return false;
+        }
         self.running = false;
         true
     }
     fn camera_error(&mut self, error: camera_bridge::RequestError) {
         match error {
-            camera_bridge::RequestError::Retired => { self.stop_retired_camera(); }
+            camera_bridge::RequestError::Retired => {
+                self.stop_retired_camera();
+            }
             camera_bridge::RequestError::Failed(error) => self.fail(error),
         }
     }
     fn camera_admission(&self, session: &Session<'_>) -> camera_bridge::Admission {
         camera_bridge::Admission {
-            strategic:None,
-            upper:None,
+            strategic: None,
+            upper: None,
             tutorial_session: session.tutorial_state == 1,
             all_disabled: self.tutorial_controls.all_disabled,
             camera_disabled: self.tutorial_controls.camera_disabled,
@@ -441,13 +531,14 @@ impl Host {
     pub fn install_camera_bridge(
         &mut self,
         session: &mut Session<'_>,
-        image:&openmt2001::pe::PeImage<'_>,
-        supplier_policy:CameraSupplierPolicy,
+        image: &openmt2001::pe::PeImage<'_>,
+        supplier_policy: CameraSupplierPolicy,
         mut worker: camera_bridge::Worker,
         capture: openmt2001::camera::bank::Capture,
-        pavement:crate::selection::pavement_resource::LocalPavementHandle,
+        pavement: crate::selection::pavement_resource::LocalPavementHandle,
     ) -> Result<(), camera_bridge::RequestError> {
-        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some() {
+        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some()
+        {
             return Err("Camera bridge cannot replace an installed/stopped host".into());
         }
         if !self.tutorial_camera_events.is_empty() {
@@ -455,97 +546,154 @@ impl Host {
         }
         // Retain a failed endpoint too: a partially completed install cannot
         // silently fall back to legacy camera progression or be retried.
-        self.camera_suppliers=Some(match supplier_policy {
-            CameraSupplierPolicy::CameraOnly=>CameraSuppliers::CameraOnly,
-            CameraSupplierPolicy::Graph{upper}=>CameraSuppliers::Graph{
-                tables:std::sync::Arc::new(crate::locator::strategic::Tables::capture(image)?),upper},
+        self.camera_suppliers = Some(match supplier_policy {
+            CameraSupplierPolicy::CameraOnly => CameraSuppliers::CameraOnly,
+            CameraSupplierPolicy::Graph { upper } => CameraSuppliers::Graph {
+                tables: std::sync::Arc::new(crate::locator::strategic::Tables::capture(image)?),
+                upper,
+            },
         });
-        let admission=self.supplied_camera_admission(session,true)?;
-        let operation = camera_bridge::Operation::Install {capture,admission,property:Some(std::sync::Arc::new(camera_bridge::PropertySource::capture(session,pavement)))};
-        let result = worker.request_with_handler(operation, |call| camera_session_service::handle(session,call));
+        let admission = self.supplied_camera_admission(session, true)?;
+        let operation = camera_bridge::Operation::Install {
+            capture,
+            admission,
+            property: Some(std::sync::Arc::new(camera_bridge::PropertySource::capture(
+                session, pavement,
+            ))),
+        };
+        let result = worker.request_with_handler(operation, |call| {
+            camera_session_service::handle(session, call)
+        });
         self.camera_bridge = Some(worker);
         match result.and_then(|mut observation| {
             Self::check_camera_finalization(&observation)?;
-            if let Some(writeback)=observation.strategic_writeback.take(){writeback.commit(session)?;}
+            if let Some(writeback) = observation.strategic_writeback.take() {
+                writeback.commit(session)?;
+            }
             self.observe_camera(&observation).map_err(Into::into)
         }) {
             Ok(()) => Ok(()),
-            Err(error) => { self.camera_error(error.clone()); Err(error) }
+            Err(error) => {
+                self.camera_error(error.clone());
+                Err(error)
+            }
         }
     }
     /// Bind only the actual Session topology epoch. Missing initial publication
     /// is retained as an explicit unavailable source, never legacy fallback.
-    pub(crate) fn install_ui_camera_source(&mut self, session: &Session<'_>,
+    pub(crate) fn install_ui_camera_source(
+        &mut self,
+        session: &Session<'_>,
         source: crate::save_menu::camera_source::Reader,
     ) -> Result<(), String> {
-        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some() {
+        if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some()
+        {
             return Err("UI camera source cannot replace an installed/stopped host".into());
         }
         source.check_epoch(session.world.topology.epoch())?;
         self.ui_camera_source = Some(source);
         Ok(())
     }
-    pub(crate) fn has_ui_camera_source(&self) -> bool { self.ui_camera_source.is_some() }
+    pub(crate) fn has_ui_camera_source(&self) -> bool {
+        self.ui_camera_source.is_some()
+    }
     /// Producer-dependent ordinary SaveSelected consumer. The same atomic
     /// pair/mode source is used by autosave below; no cached request pose is
     /// overlaid and Options stays held throughout encoding/publication.
-    pub(crate) fn save_selected_from_ui_snapshot(&self, session: &mut Session<'_>,
-        image: &openmt2001::pe::PeImage<'_>, root: &std::path::Path,
-        target: &crate::save_menu::Target, game_mode: u32,
+    pub(crate) fn save_selected_from_ui_snapshot(
+        &self,
+        session: &mut Session<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
+        root: &std::path::Path,
+        target: &crate::save_menu::Target,
+        game_mode: u32,
     ) -> Result<std::path::PathBuf, String> {
         if !self.options_save_allowed(&session.world.pause, &session.hooks.timers) {
             return Err("Save requires the active Options hold".into());
         }
-        let source = self.ui_camera_source.as_ref().ok_or("UI camera source is not installed")?;
+        let source = self
+            .ui_camera_source
+            .as_ref()
+            .ok_or("UI camera source is not installed")?;
         let snapshot = source.read(session.world.topology.epoch())?;
-        let bytes = session.save_v2_with_options_view(image, snapshot.capture().into_records(),
-            game_mode, self, snapshot.interface_mode())?;
+        let bytes = session.save_v2_with_options_view(
+            image,
+            snapshot.capture().into_records(),
+            game_mode,
+            self,
+            snapshot.interface_mode(),
+        )?;
         crate::save_menu::write_target_from_snapshot(root, target, &bytes, source, &snapshot)
     }
     /// Legacy Status clients supply their render sample. An installed owner
     /// already supplies current vectors at the acknowledged boundaries; a
     /// sampled Status argument must never replace those world inputs.
-    pub fn observe_presentation_camera(&mut self, eye:[f32;3]) {
-        if self.camera_bridge.is_none() {self.policy.camera=eye;}
+    pub fn observe_presentation_camera(&mut self, eye: [f32; 3]) {
+        if self.camera_bridge.is_none() {
+            self.policy.camera = eye;
+        }
     }
-    fn check_camera_finalization(observation:&camera_bridge::Observation)->Result<(),String>{
-        match &observation.finalization_fault{Some(error)=>Err(error.clone()),None=>Ok(())}
+    fn check_camera_finalization(observation: &camera_bridge::Observation) -> Result<(), String> {
+        match &observation.finalization_fault {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
     fn observe_camera(&mut self, observation: &camera_bridge::Observation) -> Result<(), String> {
         Self::check_camera_finalization(observation)?;
         let eye = observation.current.eye.map(f32::from_bits);
         if eye.iter().any(|v| !v.is_finite()) {
-            return Err("Acknowledged current camera eye is unsupported by live world consumers".into());
+            return Err(
+                "Acknowledged current camera eye is unsupported by live world consumers".into(),
+            );
         }
         self.policy.camera = eye;
         Ok(())
     }
-    fn request_camera(&mut self, operation: camera_bridge::Operation)
-        -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError>
-    {
+    fn request_camera(
+        &mut self,
+        operation: camera_bridge::Operation,
+    ) -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError> {
         let observation = self.exchange_camera(operation)?;
-        if let Some(observation) = &observation { self.observe_camera(observation)?; }
+        if let Some(observation) = &observation {
+            self.observe_camera(observation)?;
+        }
         Ok(observation)
     }
     // Exchange without fallible world projection. Callers must commit the
     // completed boundary's scheduler effects before projection can fail.
-    fn exchange_camera(&mut self, operation: camera_bridge::Operation)
-        -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError>
-    {
-        if let Some(error) = &self.failure { return Err(error.clone().into()); }
-        let Some(worker) = &mut self.camera_bridge else { return Ok(None) };
+    fn exchange_camera(
+        &mut self,
+        operation: camera_bridge::Operation,
+    ) -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone().into());
+        }
+        let Some(worker) = &mut self.camera_bridge else {
+            return Ok(None);
+        };
         worker.request(operation).map(Some)
     }
     /// Actual Session remains on this Host stack throughout the UI operation.
     /// Both Worker and Session are exclusively borrowed, so a callback cannot
     /// re-enter this request or send dependent work to the blocked Host.
-    pub(crate) fn exchange_camera_with_session(&mut self,session:&mut Session<'_>,
-        operation:camera_bridge::Operation,
-    )->Result<Option<camera_bridge::Observation>,camera_bridge::RequestError> {
-        if let Some(error)=&self.failure { return Err(error.clone().into()); }
-        let Some(worker)=&mut self.camera_bridge else { return Ok(None) };
-        let process=self.process_runtime.as_ref();
-        worker.request_with_handler(operation,|call|camera_session_service::handle_with_process(session,process,call)).map(Some)
+    pub(crate) fn exchange_camera_with_session(
+        &mut self,
+        session: &mut Session<'_>,
+        operation: camera_bridge::Operation,
+    ) -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone().into());
+        }
+        let Some(worker) = &mut self.camera_bridge else {
+            return Ok(None);
+        };
+        let process = self.process_runtime.as_ref();
+        worker
+            .request_with_handler(operation, |call| {
+                camera_session_service::handle_with_process(session, process, call)
+            })
+            .map(Some)
     }
     fn tutorial_camera_action(&mut self, session: &Session<'_>, action: TutorialCameraAction) {
         if self.camera_bridge.is_none() {
@@ -553,88 +701,148 @@ impl Host {
             return;
         }
         let operation = match action {
-            TutorialCameraAction::Mode { mode, target } =>
-                camera_bridge::NativeOperation::TutorialMode { mode, target },
+            TutorialCameraAction::Mode { mode, target } => {
+                camera_bridge::NativeOperation::TutorialMode { mode, target }
+            }
             TutorialCameraAction::CityView => camera_bridge::NativeOperation::TutorialCityView,
             TutorialCameraAction::PlanView => camera_bridge::NativeOperation::TutorialPlanView,
         };
-        let result=(||{
-            let admission=self.supplied_camera_admission(session,false)?;
-            self.request_camera(camera_bridge::Operation::Apply{operation,admission})
+        let result = (|| {
+            let admission = self.supplied_camera_admission(session, false)?;
+            self.request_camera(camera_bridge::Operation::Apply {
+                operation,
+                admission,
+            })
         })();
-        if let Err(error) = result { self.camera_error(error); }
+        if let Err(error) = result {
+            self.camera_error(error);
+        }
     }
-    fn supplied_camera_admission(&self,session:&Session<'_>,protected:bool)->Result<camera_bridge::Admission,String>{
-        let mut admission=self.camera_admission(session);
-        match self.camera_suppliers.as_ref().ok_or("Camera supplier policy not installed")?{
-            CameraSuppliers::CameraOnly=>{},
-            CameraSuppliers::Graph{tables,upper}=>{
-                if protected{admission.strategic=Some(std::sync::Arc::new(
-                    crate::locator::strategic::Inputs::capture(session,tables.clone())?));}
-                admission.upper=Some(upper.capture(session)?);
-            },
+    fn supplied_camera_admission(
+        &self,
+        session: &Session<'_>,
+        protected: bool,
+    ) -> Result<camera_bridge::Admission, String> {
+        let mut admission = self.camera_admission(session);
+        match self
+            .camera_suppliers
+            .as_ref()
+            .ok_or("Camera supplier policy not installed")?
+        {
+            CameraSuppliers::CameraOnly => {}
+            CameraSuppliers::Graph { tables, upper } => {
+                if protected {
+                    admission.strategic = Some(std::sync::Arc::new(
+                        crate::locator::strategic::Inputs::capture(session, tables.clone())?,
+                    ));
+                }
+                admission.upper = Some(upper.capture(session)?);
+            }
         }
         Ok(admission)
     }
     ///Bind at the actual presentation policy writer; count belongs to World topology.
-    pub fn upper_presentation_mode(&mut self,mode8b2318:u32)->Result<(),String>{
-        let Some(CameraSuppliers::Graph{upper,..})=&mut self.camera_suppliers else{
+    pub fn upper_presentation_mode(&mut self, mode8b2318: u32) -> Result<(), String> {
+        let Some(CameraSuppliers::Graph { upper, .. }) = &mut self.camera_suppliers else {
             return Err("F globals before actual graph producer install".into());
         };
-        upper.mode8b2318=mode8b2318;Ok(())
+        upper.mode8b2318 = mode8b2318;
+        Ok(())
     }
-    fn camera_central_tail(&mut self, session: &mut Session<'_>) -> Result<(), camera_bridge::RequestError> {
-        if self.camera_bridge.is_none() { return Ok(()) }
-        let admission=self.supplied_camera_admission(session,true)?;
-        let central=if let Some(process)=&self.process_runtime {
-            let identity=self.camera_bridge.as_ref().expect("checked camera bridge").central_identity()?;
-            Some(process.begin_central(identity).map_err(|e|e.to_string())?)
-        }else{None};
-        let exchanged=self.exchange_camera_with_session(session,camera_bridge::Operation::CentralTail{admission});
-        let mut observation=match exchanged {
-            Ok(Some(value))=>value,
-            Ok(None)=>{if let (Some(process),Some(token))=(&self.process_runtime,central){let _=process.fail_central(token);}
-                return Err("Camera bridge disappeared during admitted central".into())},
-            Err(error)=>{if let (Some(process),Some(token))=(&self.process_runtime,central){let _=process.fail_central(token);}return Err(error);}
+    fn camera_central_tail(
+        &mut self,
+        session: &mut Session<'_>,
+    ) -> Result<(), camera_bridge::RequestError> {
+        if self.camera_bridge.is_none() {
+            return Ok(());
+        }
+        let admission = self.supplied_camera_admission(session, true)?;
+        let central = if let Some(process) = &self.process_runtime {
+            let identity = self
+                .camera_bridge
+                .as_ref()
+                .expect("checked camera bridge")
+                .central_identity()?;
+            Some(process.begin_central(identity).map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        let exchanged = self.exchange_camera_with_session(
+            session,
+            camera_bridge::Operation::CentralTail { admission },
+        );
+        let mut observation = match exchanged {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                if let (Some(process), Some(token)) = (&self.process_runtime, central) {
+                    let _ = process.fail_central(token);
+                }
+                return Err("Camera bridge disappeared during admitted central".into());
+            }
+            Err(error) => {
+                if let (Some(process), Some(token)) = (&self.process_runtime, central) {
+                    let _ = process.fail_central(token);
+                }
+                return Err(error);
+            }
         };
         {
             //All already-committed camera effects precede fallible C/world projection.
-            Self::apply_camera_effects(&mut session.hooks.timers,&observation);
+            Self::apply_camera_effects(&mut session.hooks.timers, &observation);
             //A completed ack's timers survive even a later process-token/lock
             //failure. Only this operation can satisfy its quit tail obligation.
-            if let (Some(process),Some(token))=(&self.process_runtime,central){process.complete_central_tail(token).map_err(|e|e.to_string())?;}
+            if let (Some(process), Some(token)) = (&self.process_runtime, central) {
+                process
+                    .complete_central_tail(token)
+                    .map_err(|e| e.to_string())?;
+            }
             Self::check_camera_finalization(&observation)?;
-            if let Some(writeback)=observation.strategic_writeback.take(){writeback.commit(session)?;}
+            if let Some(writeback) = observation.strategic_writeback.take() {
+                writeback.commit(session)?;
+            }
             self.observe_camera(&observation)?;
         }
         Ok(())
     }
-    fn complete_camera_central(&mut self, tasks: &mut [openmt2001::timers::Task],
-        observation: camera_bridge::Observation) -> Result<(), String>
-    {
-        Self::apply_camera_effects(tasks,&observation);
+    fn complete_camera_central(
+        &mut self,
+        tasks: &mut [openmt2001::timers::Task],
+        observation: camera_bridge::Observation,
+    ) -> Result<(), String> {
+        Self::apply_camera_effects(tasks, &observation);
         self.observe_camera(&observation)
     }
-    fn apply_camera_effects(tasks:&mut [openmt2001::timers::Task],observation:&camera_bridge::Observation) {
-            for effect in &observation.task_effects {
-                match *effect {
-                    camera_bridge::TaskEffect::SetEnabled { mask, enabled } => {
-                        for task in tasks.iter_mut() {
-                            if u32::from_le_bytes(task[4..8].try_into().unwrap()) & mask != 0 {
-                                task[0] = u8::from(enabled);
-                            }
+    fn apply_camera_effects(
+        tasks: &mut [openmt2001::timers::Task],
+        observation: &camera_bridge::Observation,
+    ) {
+        for effect in &observation.task_effects {
+            match *effect {
+                camera_bridge::TaskEffect::SetEnabled { mask, enabled } => {
+                    for task in tasks.iter_mut() {
+                        if u32::from_le_bytes(task[4..8].try_into().unwrap()) & mask != 0 {
+                            task[0] = u8::from(enabled);
                         }
                     }
-                    camera_bridge::TaskEffect::ClearElapsed => {
-                        for task in tasks.iter_mut() { task[12..16].fill(0); }
+                }
+                camera_bridge::TaskEffect::ClearElapsed => {
+                    for task in tasks.iter_mut() {
+                        task[12..16].fill(0);
                     }
                 }
             }
+        }
     }
-    pub fn interface_ticks(&self) -> u64 { self.interface_ticks }
+    pub fn interface_ticks(&self) -> u64 {
+        self.interface_ticks
+    }
     pub fn auction_save_state(&self) -> Option<crate::session_save::AuctionHostState> {
         Some(crate::session_save::AuctionHostState {
-            controls: self.auction.as_ref().map(|auction| auction.controls.clone()).unwrap_or_default(),
+            controls: self
+                .auction
+                .as_ref()
+                .map(|auction| auction.controls.clone())
+                .unwrap_or_default(),
             visible: self.auction.as_ref().is_some_and(|auction| auction.visible),
             interface_ticks: self.interface_ticks,
             announcement_seconds: self.auction_seconds,
@@ -649,7 +857,9 @@ impl Host {
             self.interface_ticks = state.interface_ticks;
             self.auction_seconds = state.announcement_seconds;
             if session.saved_game_mode == Some(2) {
-                let auction = self.auction.as_mut()
+                let auction = self
+                    .auction
+                    .as_mut()
                     .ok_or("V2 auction widgets have no rebuilt auction scene")?;
                 let rebuilt_sound = auction.controls.timer.sound;
                 auction.controls = state.controls.clone();
@@ -662,10 +872,15 @@ impl Host {
                 // it does not issue this show after the constructor reset.
                 // Reconstruct only Time visibility from the saved group,
                 // without replaying the phase setter or gameplay callbacks.
-                let mut runtime = self.time_runtime.lock()
+                let mut runtime = self
+                    .time_runtime
+                    .lock()
                     .map_err(|_| "Time runtime poisoned")?;
-                if state.visible { runtime.show(current_cash(session)?, 1)?; }
-                else { runtime.hide(1)?; }
+                if state.visible {
+                    runtime.show(current_cash(session)?, 1)?;
+                } else {
+                    runtime.hide(1)?;
+                }
             } else {
                 // Announcement has not prepared a scene; settlement releases it.
                 self.auction = None;
@@ -674,91 +889,166 @@ impl Host {
         Ok(())
     }
     pub fn set_running(&mut self, running: bool) {
-        if self.stop_retired_camera() { return; }
+        if self.stop_retired_camera() {
+            return;
+        }
         let was_running = self.running;
-        self.running = running && !self.camera_retired() && self.failure.is_none() && self.options_resume.is_none();
+        self.running = running
+            && !self.camera_retired()
+            && self.failure.is_none()
+            && self.options_resume.is_none();
         if self.running != was_running {
-            eprintln!("[simulation] {}{}", if self.running { "RUNNING" } else { "PAUSED" },
-                if self.options_resume.is_some() { " (Options)" } else { "" });
+            eprintln!(
+                "[simulation] {}{}",
+                if self.running { "RUNNING" } else { "PAUSED" },
+                if self.options_resume.is_some() {
+                    " (Options)"
+                } else {
+                    ""
+                }
+            );
         }
         if !self.running {
-            let _ = crate::transport_audio::submit(&self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4]));
+            let _ = crate::transport_audio::submit(
+                &self.transport_audio,
+                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
+            );
         }
     }
     /// Apply one received offline host focus operation, before the next frame.
     /// The required provider finishes device/input and guarded frontend-audio
     /// effects first. Player running and all ordinary pause owners stay intact.
-    pub(crate) fn focus(&mut self, pause: &mut openmt2001::pause::State,
-        timers: &mut [openmt2001::timers::Task], focused: bool,
+    pub(crate) fn focus(
+        &mut self,
+        pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task],
+        focused: bool,
         prefix: impl FnOnce(i8) -> Result<crate::intro::focus::Prefix, String>,
     ) -> Result<(), String> {
-        if self.stop_retired_camera() { return Err("Focus Session retired".into()); }
-        if let Some(error) = &self.failure { return Err(error.clone()); }
+        if self.stop_retired_camera() {
+            return Err("Focus Session retired".into());
+        }
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
         let result = (|| {
             let prefix = prefix(pause.bytes[3] as i8)?;
-            if prefix == crate::intro::focus::Prefix::ReceiverAbsent { return Ok(()); }
+            if prefix == crate::intro::focus::Prefix::ReceiverAbsent {
+                return Ok(());
+            }
             // Native tests this gate after the frontend callback, not instead
             // of it. No fabricated success when a required provider is absent.
-            let blocked = if let Some(process)=&self.process_runtime {
-                process.byte(process_runtime::Byte::Network93bbb9).map_err(|e|e.to_string())?!=0
-            } else {self.policy.scheduler.network_enabled};
-            if focused {
-                pause.focus_gained(blocked, |change, _| { change.apply(timers); Ok(()) })
+            let blocked = if let Some(process) = &self.process_runtime {
+                process
+                    .byte(process_runtime::Byte::Network93bbb9)
+                    .map_err(|e| e.to_string())?
+                    != 0
             } else {
-                pause.focus_lost(blocked, |change, _| { change.apply(timers); Ok(()) })
+                self.policy.scheduler.network_enabled
+            };
+            if focused {
+                pause.focus_gained(blocked, |change, _| {
+                    change.apply(timers);
+                    Ok(())
+                })
+            } else {
+                pause.focus_lost(blocked, |change, _| {
+                    change.apply(timers);
+                    Ok(())
+                })
             }
         })();
-        if let Err(error) = &result { self.fail(error.clone()); }
+        if let Err(error) = &result {
+            self.fail(error.clone());
+        }
         result
     }
     ///49e860/49e994 local Options owns one reason0 transition. The UI's
     ///oneshot acknowledgement is sent only after this actual owner operation.
     ///Keep the existing player-run latch distinct from native pause bytes.
-    pub fn options(&mut self,pause:&mut openmt2001::pause::State,
-        timers:&mut [openmt2001::timers::Task],open:bool)->Result<(),String> {
-        if self.stop_retired_camera(){return Err("Options session retired".into());}
+    pub fn options(
+        &mut self,
+        pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task],
+        open: bool,
+    ) -> Result<(), String> {
+        if self.stop_retired_camera() {
+            return Err("Options session retired".into());
+        }
         if open {
-            if let Some(error)=&self.failure{return Err(error.clone());}
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
             if self.options_resume.is_none() {
                 if !self.policy.scheduler.network_enabled {
-                    pause.pause(0,|change,_|{change.apply(timers);Ok(())})?;
+                    pause.pause(0, |change, _| {
+                        change.apply(timers);
+                        Ok(())
+                    })?;
                 }
-                self.options_resume=Some(self.running);
+                self.options_resume = Some(self.running);
                 self.set_running(false);
             }
-        } else if let Some(running)=self.options_resume {
+        } else if let Some(running) = self.options_resume {
             if !self.policy.scheduler.network_enabled {
-                pause.unpause(0,|change,_|{change.apply(timers);Ok(())})?;
+                pause.unpause(0, |change, _| {
+                    change.apply(timers);
+                    Ok(())
+                })?;
             }
-            self.options_resume=None;
+            self.options_resume = None;
             self.set_running(running);
         }
         Ok(())
     }
     ///Recheck the SAME worker/Session at ordinary captured-save consumption.
     ///This is a current modal hold check, not a native construction token.
-    pub fn options_save_allowed(&self,pause:&openmt2001::pause::State,timers:&[openmt2001::timers::Task])->bool {
-        self.options_resume.is_some() && !self.running && self.failure.is_none()
+    pub fn options_save_allowed(
+        &self,
+        pause: &openmt2001::pause::State,
+        timers: &[openmt2001::timers::Task],
+    ) -> bool {
+        self.options_resume.is_some()
+            && !self.running
+            && self.failure.is_none()
             && !self.camera_retired()
-            && (self.policy.scheduler.network_enabled || (pause.bytes[0]!=0 && pause.bytes[8]!=0
-                && timers.iter().filter(|t|u32::from_le_bytes(t[4..8].try_into().unwrap())&2!=0).all(|t|t[0]==0)))
+            && (self.policy.scheduler.network_enabled
+                || (pause.bytes[0] != 0
+                    && pause.bytes[8] != 0
+                    && timers
+                        .iter()
+                        .filter(|t| u32::from_le_bytes(t[4..8].try_into().unwrap()) & 2 != 0)
+                        .all(|t| t[0] == 0)))
     }
     /// Project only this live Options owner's transient pause into a cold-load
     /// continuation. The actual Session stays held until the UI closes Options.
     /// Other reason0 holders, other reasons, timer padding and accumulators stay.
-    pub(crate) fn options_save_projection(&self,pause:&openmt2001::pause::State,
-        timers:&[openmt2001::timers::Task])
-        ->Result<Option<(openmt2001::pause::State,Vec<openmt2001::timers::Task>)>,String> {
-        if self.options_resume.is_none(){return Ok(None);}
-        if !self.options_save_allowed(pause,timers){return Err("Options save owner is not held".into());}
-        if self.policy.scheduler.network_enabled{return Ok(None);}
+    pub(crate) fn options_save_projection(
+        &self,
+        pause: &openmt2001::pause::State,
+        timers: &[openmt2001::timers::Task],
+    ) -> Result<Option<(openmt2001::pause::State, Vec<openmt2001::timers::Task>)>, String> {
+        if self.options_resume.is_none() {
+            return Ok(None);
+        }
+        if !self.options_save_allowed(pause, timers) {
+            return Err("Options save owner is not held".into());
+        }
+        if self.policy.scheduler.network_enabled {
+            return Ok(None);
+        }
         // Native unpause is signed. A wrapped/nonpositive count cannot account
         // for the one owned release: refuse rather than clear or repair it.
-        if pause.bytes[0] as i8<=0{return Err("Options save pause count cannot release one owner".into());}
-        let mut continuation=pause.clone();let mut tasks=timers.to_vec();
-        continuation.unpause(0,|change,_|{change.apply(&mut tasks);Ok(())})?;
-        Ok(Some((continuation,tasks)))
+        if pause.bytes[0] as i8 <= 0 {
+            return Err("Options save pause count cannot release one owner".into());
+        }
+        let mut continuation = pause.clone();
+        let mut tasks = timers.to_vec();
+        continuation.unpause(0, |change, _| {
+            change.apply(&mut tasks);
+            Ok(())
+        })?;
+        Ok(Some((continuation, tasks)))
     }
     /// Native 481910 chooses one or four logic/interface passes per timer
     /// callback in an offline game; 481940 toggles between those settings.
@@ -772,44 +1062,66 @@ impl Host {
     }
     /// Original Manager12/2 reaches49dcb0; local games add pause reason0.
     /// Repeated UI polls cannot reopen the modal or add another pause reason.
-    pub fn stats_action(&mut self, session:&mut Session<'_>,action:StatsAction)
-        -> Result<(),String> {
+    pub fn stats_action(
+        &mut self,
+        session: &mut Session<'_>,
+        action: StatsAction,
+    ) -> Result<(), String> {
         match action {
             StatsAction::Open => {
-                if self.stats.is_some() {return Ok(());}
-                let state=crate::stats_panel::State::show(session.world.objective.kind,
-                    self.game_active,session.roster.manager.players.len())?;
-                if self.game_active && !self.policy.scheduler.network_enabled {
-                    let timers=&mut session.hooks.timers;
-                    session.world.pause.pause(0,|change,_|{change.apply(timers);Ok(())})?;
+                if self.stats.is_some() {
+                    return Ok(());
                 }
-                self.stats=Some(state);
+                let state = crate::stats_panel::State::show(
+                    session.world.objective.kind,
+                    self.game_active,
+                    session.roster.manager.players.len(),
+                )?;
+                if self.game_active && !self.policy.scheduler.network_enabled {
+                    let timers = &mut session.hooks.timers;
+                    session.world.pause.pause(0, |change, _| {
+                        change.apply(timers);
+                        Ok(())
+                    })?;
+                }
+                self.stats = Some(state);
             }
             StatsAction::Close => {
-                if self.stats.take().is_none() {return Ok(());}
+                if self.stats.take().is_none() {
+                    return Ok(());
+                }
                 if self.game_active && !self.policy.scheduler.network_enabled {
-                    let timers=&mut session.hooks.timers;
-                    session.world.pause.unpause(0,|change,_|{change.apply(timers);Ok(())})?;
+                    let timers = &mut session.hooks.timers;
+                    session.world.pause.unpause(0, |change, _| {
+                        change.apply(timers);
+                        Ok(())
+                    })?;
                 }
             }
             StatsAction::Cycle(right) => {
-                if let Some(state)=&mut self.stats {
-                    state.cycle(right,session.world.objective.kind,self.game_active);
+                if let Some(state) = &mut self.stats {
+                    state.cycle(right, session.world.objective.kind, self.game_active);
                 }
             }
             StatsAction::Toggle(slot) => {
-                if let Some(state)=&mut self.stats {state.toggle(slot)?;}
+                if let Some(state) = &mut self.stats {
+                    state.toggle(slot)?;
+                }
             }
         }
         Ok(())
     }
     pub fn fail(&mut self, error: String) {
         self.running = false;
-        let _ = crate::transport_audio::submit(&self.transport_audio,
-            crate::transport_audio::Operation::Construction([[None; 2]; 4]));
+        let _ = crate::transport_audio::submit(
+            &self.transport_audio,
+            crate::transport_audio::Operation::Construction([[None; 2]; 4]),
+        );
         if self.failure.is_none() {
             eprintln!("[simulation error] {error}");
-            eprintln!("[simulation] Stopped at an incomplete boundary; this session cannot safely resume.");
+            eprintln!(
+                "[simulation] Stopped at an incomplete boundary; this session cannot safely resume."
+            );
             self.failure = Some(error);
         }
     }
@@ -880,15 +1192,25 @@ impl Host {
         let (time_display, card_visual) = {
             let runtime = self.time_runtime.lock().expect("Time runtime poisoned");
             let instance = usize::from(self.auction.is_some());
-            (runtime.widgets[instance].display(), runtime.chance_visuals[instance])
+            (
+                runtime.widgets[instance].display(),
+                runtime.chance_visuals[instance],
+            )
         };
-        let stats=match self.stats.as_ref().map(|state|
-            crate::stats_panel::Snapshot::from_session(session,state)).transpose() {
-            Ok(snapshot)=>snapshot,
-            Err(error)=>{self.fail(error);None}
+        let stats = match self
+            .stats
+            .as_ref()
+            .map(|state| crate::stats_panel::Snapshot::from_session(session, state))
+            .transpose()
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.fail(error);
+                None
+            }
         };
         Status {
-            autosave:self.autosave_status.clone(),
+            autosave: self.autosave_status.clone(),
             time_display,
             cash_arrow: self.cash_arrow,
             pulse_lights: session.pulse_lights.clone(),
@@ -897,19 +1219,34 @@ impl Host {
             result_request: self.result_request,
             player_panels: self.player_panels,
             financial,
-            business_owner: session.roster.manager.players.iter()
+            business_owner: session
+                .roster
+                .manager
+                .players
+                .iter()
                 .find(|p| p.reference == session.roster.status.current_player)
                 .map(|p| p.bytes[0x1bc].wrapping_add(1)),
             city_people_rows,
             tutorial_controls: self.tutorial_controls,
-            source_picking:self.process_runtime.as_ref().and_then(|p|p.picking_projection().ok()),
+            source_picking: self
+                .process_runtime
+                .as_ref()
+                .and_then(|p| p.picking_projection().ok()),
             tutorial_arrows: self.tutorial_arrows.clone(),
             tutorial_message: self.tutorial_message.clone(),
             tutorial_enabled_controls: self.tutorial_enabled_controls.iter().copied().collect(),
             tutorial_interaction: self.tutorial_interaction,
             tutorial_camera_events: self.tutorial_camera_events.clone(),
-            tutorial_build_type: if session.tutorial_state==1 {self.tutorial_build_type}else{-1},
-            tutorial_build_use: if session.tutorial_state==1 {self.tutorial_build_use}else{999},
+            tutorial_build_type: if session.tutorial_state == 1 {
+                self.tutorial_build_type
+            } else {
+                -1
+            },
+            tutorial_build_use: if session.tutorial_state == 1 {
+                self.tutorial_build_use
+            } else {
+                999
+            },
             tutorial_completed: self.tutorial_completed,
             tutorial_session: session.tutorial_state == 1,
             event_list_visible: self.event_list_visible,
@@ -948,8 +1285,12 @@ impl Host {
     }
     /// Deliver an enabled tutorial control action through the original Lua
     /// CATCHEVENT, then close its nonmodal message when the script requests it.
-    pub fn tutorial_event(&mut self, session: &mut Session<'_>,
-        assets: &CommandAssets<'_, '_>, control: u32) -> Result<(), String> {
+    pub fn tutorial_event(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        control: u32,
+    ) -> Result<(), String> {
         if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
             // Original48dc40 returns without dispatch when level+85c !=1.
             // Campaign builder controls share these producers with tutorials.
@@ -967,35 +1308,55 @@ impl Host {
     /// Callback7 from numeric/list edits differs from registered controls
     /// 41..44/40. The producer owns input admission; this helper preserves the
     /// original active-level byte gate and synchronous prompt continuation.
-    pub fn tutorial_producer_event(&mut self, session: &mut Session<'_>,
-        assets: &CommandAssets<'_, '_>, control: u32, callback: u32) -> Result<(), String> {
+    pub fn tutorial_producer_event(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        control: u32,
+        callback: u32,
+    ) -> Result<(), String> {
         if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
             return Ok(());
         }
         self.collect_script_prompts(session);
         if callback != 7 || !matches!(control, 40..=44) {
-            return Err(format!("Unsupported tutorial producer {control}/{callback}"));
+            return Err(format!(
+                "Unsupported tutorial producer {control}/{callback}"
+            ));
         }
         if !self.tutorial_enabled_controls.contains(&control) {
             return Ok(());
         }
         self.dispatch_tutorial_callback(session, assets, callback)
     }
-    fn dispatch_tutorial_callback(&mut self, session: &mut Session<'_>,
-        assets: &CommandAssets<'_, '_>, callback: u32) -> Result<(), String> {
+    fn dispatch_tutorial_callback(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        callback: u32,
+    ) -> Result<(), String> {
         if self.failure.is_some() || session.tutorial_state != 1 {
             return Ok(());
         }
         self.collect_script_prompts(session);
-        let active = self.tutorial_message.clone().or_else(|| self.tutorial_prompt.clone());
+        let active = self
+            .tutorial_message
+            .clone()
+            .or_else(|| self.tutorial_prompt.clone());
         let before = session.hooks.commands.len();
         session.dispatch_session_event("TutorialEvent", callback as i32, assets, false)?;
-        if session.hooks.commands[before..].iter().any(|(command, _)|
-            matches!(command, level_script::Command::TutorialDismissPrompt)) {
+        if session.hooks.commands[before..]
+            .iter()
+            .any(|(command, _)| matches!(command, level_script::Command::TutorialDismissPrompt))
+        {
             // Native43bed0 skips dismissal when its active byte+345 is zero.
             if let Some(message) = active {
-                session.dispatch_session_event("InterfacePromptDismiss",
-                    message.dismissal_id as i32, assets, false)?;
+                session.dispatch_session_event(
+                    "InterfacePromptDismiss",
+                    message.dismissal_id as i32,
+                    assets,
+                    false,
+                )?;
             }
         }
         self.collect_script_prompts(session);
@@ -1006,12 +1367,19 @@ impl Host {
     /// 4c3929/4c3979 dispatch 0 for block selection, 4c3beb/4c3cf6 dispatch
     /// 1 for block entry, and 4c3958 dispatches 2 for building selection.
     /// The script owns dismissal and the following prompt.
-    fn tutorial_pick_callback(&self,pick:crate::tutorial_two_interaction::Pick)->Option<i32>{
-        if self.tutorial_controls.picking_disabled{None}else{self.tutorial_interaction.callback(pick)}
+    fn tutorial_pick_callback(&self, pick: crate::tutorial_two_interaction::Pick) -> Option<i32> {
+        if self.tutorial_controls.picking_disabled {
+            None
+        } else {
+            self.tutorial_interaction.callback(pick)
+        }
     }
-    pub fn tutorial_pick(&mut self, session: &mut Session<'_>,
-        assets: &CommandAssets<'_, '_>, pick: crate::tutorial_two_interaction::Pick)
-        -> Result<bool, String> {
+    pub fn tutorial_pick(
+        &mut self,
+        session: &mut Session<'_>,
+        assets: &CommandAssets<'_, '_>,
+        pick: crate::tutorial_two_interaction::Pick,
+    ) -> Result<bool, String> {
         if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
             return Ok(false);
         }
@@ -1022,14 +1390,23 @@ impl Host {
         // The original scripts also attach a 3D pick gate to a modal prompt
         // (Tutorials 10/11 Navigator steps). Dismiss whichever presenter owns
         // the active prompt before publishing its scripted successor.
-        let message = self.tutorial_message.clone().or_else(|| self.tutorial_prompt.clone())
+        let message = self
+            .tutorial_message
+            .clone()
+            .or_else(|| self.tutorial_prompt.clone())
             .ok_or("Tutorial pick has no active prompt")?;
         let before = session.hooks.commands.len();
         session.dispatch_session_event("Picked3D", callback, assets, false)?;
-        if session.hooks.commands[before..].iter().any(|(command, _)|
-            matches!(command, level_script::Command::TutorialDismissPrompt)) {
-            session.dispatch_session_event("InterfacePromptDismiss",
-                message.dismissal_id as i32, assets, false)?;
+        if session.hooks.commands[before..]
+            .iter()
+            .any(|(command, _)| matches!(command, level_script::Command::TutorialDismissPrompt))
+        {
+            session.dispatch_session_event(
+                "InterfacePromptDismiss",
+                message.dismissal_id as i32,
+                assets,
+                false,
+            )?;
         }
         self.collect_script_prompts(session);
         Ok(true)
@@ -1085,9 +1462,13 @@ impl Host {
                 openmt2001::event_cards::human::Call::Activate => {
                     if !self.card_visible {
                         self.pending_presentation.insert(0x41b430);
-                        let card = self.card.as_ref()
-                            .ok_or("Card activation has no presented panel")?.card;
-                        let positive = crate::gameplay_sound::card_open_positive(assets.image, card)?;
+                        let card = self
+                            .card
+                            .as_ref()
+                            .ok_or("Card activation has no presented panel")?
+                            .card;
+                        let positive =
+                            crate::gameplay_sound::card_open_positive(assets.image, card)?;
                         crate::gameplay_sound::enqueue(
                             &self.gameplay_sound,
                             crate::gameplay_sound::Operation::CardOpen { positive },
@@ -1172,8 +1553,13 @@ impl Host {
         panel: openmt2001::property_offer::Panel,
         initialize_amount: bool,
     ) -> Result<crate::fresh_city::property::Inspection, String> {
-        session.inspect_property_offer_display(category, panel, initialize_amount,
-            self.auction.as_ref().is_some_and(|auction| auction.visible), assets)
+        session.inspect_property_offer_display(
+            category,
+            panel,
+            initialize_amount,
+            self.auction.as_ref().is_some_and(|auction| auction.visible),
+            assets,
+        )
     }
     pub fn property_offer(
         &mut self,
@@ -1192,18 +1578,29 @@ impl Host {
         session.submit_property_offer_panel(category, inspection.panel, assets, |event| {
             use openmt2001::{live_commands::Event, property_offer::Call};
             match event {
-                Event::PropertyOffer(Call::Ui { address, arguments, count }) => {
+                Event::PropertyOffer(Call::Ui {
+                    address,
+                    arguments,
+                    count,
+                }) => {
                     if openmt2001::construction::INSUFFICIENT_CASH_CALLS
-                        .iter().any(|(expected, _)| *expected == address)
+                        .iter()
+                        .any(|(expected, _)| *expected == address)
                     {
                         if address == 0x43be20 && !self.policy.scheduler.network_enabled {
                             self.policy.scheduler.iterations = 1;
                         }
-                        human_dialog_ui(&mut self.pending_prompts, address,
-                            [arguments[0], arguments[1], arguments[2], 0], usize::from(count), None)
-                    } else if matches!(address,
-                        0x442960 | 0x441940 | 0x441220 | 0x42efb0 | 0x42ee70 | 0x442af0)
-                    {
+                        human_dialog_ui(
+                            &mut self.pending_prompts,
+                            address,
+                            [arguments[0], arguments[1], arguments[2], 0],
+                            usize::from(count),
+                            None,
+                        )
+                    } else if matches!(
+                        address,
+                        0x442960 | 0x441940 | 0x441220 | 0x42efb0 | 0x42ee70 | 0x442af0
+                    ) {
                         // The returned authoritative panel carries these widget
                         // changes. The UI owns its geometry and pointer state.
                         Ok(())
@@ -1213,7 +1610,8 @@ impl Host {
                 }
                 Event::PropertyOffer(Call::RefreshProperty)
                 | Event::PlayerMessageRoute {
-                    route: openmt2001::player_messages::Route::PropertyRefresh { .. }, ..
+                    route: openmt2001::player_messages::Route::PropertyRefresh { .. },
+                    ..
                 } => {
                     self.pending_presentation.insert(0x405260);
                     Ok(())
@@ -1223,28 +1621,37 @@ impl Host {
         })
     }
     fn collect_script_prompts(&mut self, session: &Session<'_>) {
-        if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) { return; }
+        if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) {
+            return;
+        }
         for (command, arguments) in &session.hooks.commands[self.commands_seen..] {
-            if let Some(process)=&self.process_runtime {
-                if let Err(error)=apply_source_picking_command(process,command,arguments){self.fail(error);return;}
+            if let Some(process) = &self.process_runtime {
+                if let Err(error) = apply_source_picking_command(process, command, arguments) {
+                    self.fail(error);
+                    return;
+                }
             }
             match command {
-                level_script::Command::TutorialEnableAllPicking=>{
-                    self.tutorial_controls.picking_disabled=false;
+                level_script::Command::TutorialEnableAllPicking => {
+                    self.tutorial_controls.picking_disabled = false;
                 }
                 level_script::Command::PlaySound => {
                     let result = match arguments.as_slice() {
                         [Value::Bytes(name)] => std::str::from_utf8(name)
                             .map_err(|_| "script sound filename is not UTF-8".to_owned())
-                            .and_then(|name| crate::gameplay_sound::enqueue(
-                                &self.gameplay_sound,
-                                crate::gameplay_sound::Operation::Script {
-                                    name: name.to_owned(),
-                                },
-                            )),
+                            .and_then(|name| {
+                                crate::gameplay_sound::enqueue(
+                                    &self.gameplay_sound,
+                                    crate::gameplay_sound::Operation::Script {
+                                        name: name.to_owned(),
+                                    },
+                                )
+                            }),
                         _ => Err("script sound requires one filename".to_owned()),
                     };
-                    if let Err(error) = result { self.fail(error); }
+                    if let Err(error) = result {
+                        self.fail(error);
+                    }
                 }
                 level_script::Command::Prompt => match prompt_request(arguments) {
                     Ok(request) => {
@@ -1253,7 +1660,7 @@ impl Host {
                             self.tutorial_prompt = Some(request.clone());
                         }
                         self.pending_prompts.push(request)
-                    },
+                    }
                     Err(error) => self.fail(error),
                 },
                 level_script::Command::TutorialDisableAllControls => {
@@ -1265,8 +1672,9 @@ impl Host {
                     //building policy. EnableAll must restore the same gate.
                     self.tutorial_controls.picking_disabled = true;
                 }
-                level_script::Command::TutorialDisableCameraControl =>
-                    self.tutorial_controls.camera_disabled = true,
+                level_script::Command::TutorialDisableCameraControl => {
+                    self.tutorial_controls.camera_disabled = true
+                }
                 level_script::Command::TutorialArrow => {
                     if let [Value::Number(x), Value::Number(y)] = arguments.as_slice() {
                         self.tutorial_arrows.push([*x as i32, *y as i32]);
@@ -1292,14 +1700,28 @@ impl Host {
                 | level_script::Command::TutorialDisableControl => {
                     if let [Value::Number(value)] = arguments.as_slice() {
                         let id = *value as u32;
-                        if matches!(command, level_script::Command::TutorialEnableControl | level_script::Command::TutorialEnableControlAndChildren) {
+                        if matches!(
+                            command,
+                            level_script::Command::TutorialEnableControl
+                                | level_script::Command::TutorialEnableControlAndChildren
+                        ) {
                             self.tutorial_enabled_controls.insert(id);
                             // Native4db910/48dd60 recursively enables descendants.
                             // The retained owned-business group30 contains hyperlink6.
-                            if matches!(id, 30 | 32) && matches!(command, level_script::Command::TutorialEnableControlAndChildren) {
+                            if matches!(id, 30 | 32)
+                                && matches!(
+                                    command,
+                                    level_script::Command::TutorialEnableControlAndChildren
+                                )
+                            {
                                 self.tutorial_enabled_controls.insert(6);
                             }
-                            if id == 104 && matches!(command, level_script::Command::TutorialEnableControlAndChildren) {
+                            if id == 104
+                                && matches!(
+                                    command,
+                                    level_script::Command::TutorialEnableControlAndChildren
+                                )
+                            {
                                 // Native420f20..4228e9 publishes these same-manager
                                 // descendants before publishing manager104. Internal
                                 // callbacks88/99 and property-rights91 are not nodes.
@@ -1309,7 +1731,9 @@ impl Host {
                             }
                         } else {
                             self.tutorial_enabled_controls.remove(&id);
-                            if matches!(id, 30 | 32) { self.tutorial_enabled_controls.remove(&6); }
+                            if matches!(id, 30 | 32) {
+                                self.tutorial_enabled_controls.remove(&6);
+                            }
                         }
                     } else {
                         self.fail("Tutorial control identifier changed".into());
@@ -1321,7 +1745,8 @@ impl Host {
                             Value::Number(number) => Some(*number as f32),
                             _ => None,
                         };
-                        self.tutorial_interaction.position_prompt_parts(part(x), part(y));
+                        self.tutorial_interaction
+                            .position_prompt_parts(part(x), part(y));
                     } else {
                         self.fail("Tutorial prompt position arguments changed".into());
                     }
@@ -1338,7 +1763,8 @@ impl Host {
                 level_script::Command::TutorialEnableBuildingPicking => {
                     match tutorial_pick_target(arguments) {
                         Ok(target) => {
-                            self.tutorial_interaction.enable_building_picking(target.map(|v| v as usize));
+                            self.tutorial_interaction
+                                .enable_building_picking(target.map(|v| v as usize));
                             self.tutorial_controls.picking_disabled = false;
                         }
                         Err(error) => self.fail(error),
@@ -1346,18 +1772,23 @@ impl Host {
                 }
                 level_script::Command::TutorialCameraMode => {
                     if let [Value::Number(mode), Value::Number(target)] = arguments.as_slice() {
-                        self.tutorial_camera_action(session, TutorialCameraAction::Mode {
-                            mode: *mode as u32,
-                            target: *target as u32,
-                        });
+                        self.tutorial_camera_action(
+                            session,
+                            TutorialCameraAction::Mode {
+                                mode: *mode as u32,
+                                target: *target as u32,
+                            },
+                        );
                     } else {
                         self.fail("Tutorial Camera.SetMode arguments changed".into());
                     }
                 }
-                level_script::Command::TutorialCityView =>
-                    self.tutorial_camera_action(session, TutorialCameraAction::CityView),
-                level_script::Command::TutorialPlanView =>
-                    self.tutorial_camera_action(session, TutorialCameraAction::PlanView),
+                level_script::Command::TutorialCityView => {
+                    self.tutorial_camera_action(session, TutorialCameraAction::CityView)
+                }
+                level_script::Command::TutorialPlanView => {
+                    self.tutorial_camera_action(session, TutorialCameraAction::PlanView)
+                }
                 level_script::Command::TutorialBuildType => {
                     if let [Value::Number(value)] = arguments.as_slice() {
                         self.tutorial_build_type = *value as i32;
@@ -1385,10 +1816,14 @@ impl Host {
                     self.game_active = false;
                     self.running = false;
                     //4ba1df/43c690 hides visible widgets in normal manager57e710.
-                    let hidden = self.time_runtime.lock()
+                    let hidden = self
+                        .time_runtime
+                        .lock()
                         .map_err(|_| "Time runtime poisoned".to_owned())
                         .and_then(|mut runtime| runtime.hide(0));
-                    if let Err(error) = hidden { self.fail(error); }
+                    if let Err(error) = hidden {
+                        self.fail(error);
+                    }
                     if session.tutorial_state == 1 {
                         self.tutorial_end_requested = Some(matches!(arguments.first(),
                             Some(Value::Number(value)) if *value != 0.));
@@ -1399,28 +1834,44 @@ impl Host {
             // Send each admission mutation in command order, before a following
             // camera setter. Status continues to carry presentation information;
             // bridged actions are never also appended to its camera event list.
-            if self.camera_bridge.is_some() && matches!(command,
-                level_script::Command::TutorialDisableAllControls
-                | level_script::Command::TutorialDisableCameraControl
-                | level_script::Command::TutorialEnableControl
-                | level_script::Command::TutorialEnableControlAndChildren
-                | level_script::Command::TutorialDisableControl)
+            if self.camera_bridge.is_some()
+                && matches!(
+                    command,
+                    level_script::Command::TutorialDisableAllControls
+                        | level_script::Command::TutorialDisableCameraControl
+                        | level_script::Command::TutorialEnableControl
+                        | level_script::Command::TutorialEnableControlAndChildren
+                        | level_script::Command::TutorialDisableControl
+                )
             {
                 let result = self.request_camera(camera_bridge::Operation::Admission(
-                    self.camera_admission(session)));
-                if let Err(error) = result { self.camera_error(error); }
+                    self.camera_admission(session),
+                ));
+                if let Err(error) = result {
+                    self.camera_error(error);
+                }
             }
-            if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) { return; }
+            if self.stop_retired_camera()
+                || (self.camera_bridge.is_some() && self.failure.is_some())
+            {
+                return;
+            }
         }
         self.commands_seen = session.hooks.commands.len();
     }
     pub fn tick(&mut self, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
-        if self.stop_retired_camera() { return; }
+        if self.stop_retired_camera() {
+            return;
+        }
         self.collect_script_prompts(session);
-        if self.stop_retired_camera() { return; }
+        if self.stop_retired_camera() {
+            return;
+        }
         if !self.running || self.failure.is_some() || session.world.pause.has_reason() {
-            if let Err(error) = crate::transport_audio::submit(&self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4])) {
+            if let Err(error) = crate::transport_audio::submit(
+                &self.transport_audio,
+                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
+            ) {
                 self.fail(error);
             }
             return;
@@ -1429,24 +1880,26 @@ impl Host {
             self.camera_error(error);
             return;
         }
-        if self.stop_retired_camera() { return; }
+        if self.stop_retired_camera() {
+            return;
+        }
         // Original93bbb9 is the network gate, not a new save preference.
-        self.policy.calendar.autosave_disabled=self.policy.scheduler.network_enabled;
-        let autosave_root=&self.autosave_profile_root;
-        let autosave_status=&mut self.autosave_status;
-        let camera_bridge=&mut self.camera_bridge;
-        let ui_camera_source=&self.ui_camera_source;
-        let ui_camera_epoch=session.world.topology.epoch();
-        let interface_ticks=self.interface_ticks;
-        let mut autosave_retired=false;
-        let mut autosave_fatal=None;
+        self.policy.calendar.autosave_disabled = self.policy.scheduler.network_enabled;
+        let autosave_root = &self.autosave_profile_root;
+        let autosave_status = &mut self.autosave_status;
+        let camera_bridge = &mut self.camera_bridge;
+        let ui_camera_source = &self.ui_camera_source;
+        let ui_camera_epoch = session.world.topology.epoch();
+        let interface_ticks = self.interface_ticks;
+        let mut autosave_retired = false;
+        let mut autosave_fatal = None;
         let omitted = &mut self.pending_presentation;
         let transport_audio = self.transport_audio.clone();
         let auction_audio = self.auction_audio.clone();
         let camera = self.policy.camera;
         let block_previous_tick = session.world.clock.timing[0];
-        let block_random_state = openmt2001::startup_rng::Snapshot::from_seed(session.policy.seed)
-            .state(0x8af3ec);
+        let block_random_state =
+            openmt2001::startup_rng::Snapshot::from_seed(session.policy.seed).state(0x8af3ec);
         let mut construction_sounds = [[None; 2]; 4];
         let era_audio = self.era_audio.clone();
         let gameplay_sound = self.gameplay_sound.clone();
@@ -2111,13 +2564,19 @@ impl Host {
                 }
                 if let Err(error) = crate::transport_audio::submit(
                     &transport_audio,
-                    crate::transport_audio::Operation::Blocks(
-                        Box::new(crate::transport_audio::block_audio::Snapshot::from_categories(
-                            &session.world.city.categories, camera, session.world.clock.hour(),
-                            session.world.clock.timing[0], block_previous_tick, block_random_state,
-                        )),
-                    ),
-                ) { self.fail(error); }
+                    crate::transport_audio::Operation::Blocks(Box::new(
+                        crate::transport_audio::block_audio::Snapshot::from_categories(
+                            &session.world.city.categories,
+                            camera,
+                            session.world.clock.hour(),
+                            session.world.clock.timing[0],
+                            block_previous_tick,
+                            block_random_state,
+                        ),
+                    )),
+                ) {
+                    self.fail(error);
+                }
             }
             Err(error) => self.fail(error),
         }
@@ -2169,10 +2628,7 @@ impl Host {
                 &self.gameplay_sound,
                 crate::gameplay_sound::Operation::Reset,
             );
-            let _ = auction_audio::enqueue(
-                &self.auction_audio,
-                auction_audio::Operation::Reset,
-            );
+            let _ = auction_audio::enqueue(&self.auction_audio, auction_audio::Operation::Reset);
             self.result_context = Some(reply.context);
             self.outcome_callback_seen = false;
             self.outcome_context = None;
@@ -2241,12 +2697,23 @@ impl Host {
         if self.failure.is_some() {
             return Err("Stopped result sequence cannot complete campaign".into());
         }
-        let sequence = self.result_request.ok_or("No result sequence is active")?.sequence;
+        let sequence = self
+            .result_request
+            .ok_or("No result sequence is active")?
+            .sequence;
         if self.result_completed {
             return Err("Result sequence already completed".into());
         }
-        let expected_end = if sequence == openmt2001::outcome_notice::Sequence::Lose { 2 } else { 1 };
-        if session.result_presentation().and_then(|result| result.end_requested) != Some(expected_end) {
+        let expected_end = if sequence == openmt2001::outcome_notice::Sequence::Lose {
+            2
+        } else {
+            1
+        };
+        if session
+            .result_presentation()
+            .and_then(|result| result.end_requested)
+            != Some(expected_end)
+        {
             return Err("Original result script has not requested completion".into());
         }
         self.collect_script_prompts(session);
@@ -2276,15 +2743,19 @@ impl Host {
                 match event {
                     Call::CreateSound => {
                         if self.auction_audio.is_some() {
-                            auction_audio::request(&self.auction_audio,
-                                auction_audio::Operation::Create(auction_audio::Kind::Announcement))
+                            auction_audio::request(
+                                &self.auction_audio,
+                                auction_audio::Operation::Create(auction_audio::Kind::Announcement),
+                            )
                         } else {
                             self.pending_presentation.insert(0x4ad760);
                             Ok(0)
                         }
                     }
-                    Call::ReleaseSound(handle) => auction_audio::request(&self.auction_audio,
-                        auction_audio::Operation::Release(handle)),
+                    Call::ReleaseSound(handle) => auction_audio::request(
+                        &self.auction_audio,
+                        auction_audio::Operation::Release(handle),
+                    ),
                     Call::Diagnostic(address) => {
                         eprintln!("Auction announcement diagnostic {address:08x}");
                         Ok(0)
@@ -2311,20 +2782,40 @@ impl Host {
         for _ in 0..self.policy.scheduler.iterations {
             self.notices.tick();
         }
-        let p = session.roster.manager.players.iter()
+        let p = session
+            .roster
+            .manager
+            .players
+            .iter()
             .find(|p| p.reference == session.roster.status.current_player)
             .ok_or("Time current player missing")?;
-        let entry = crate::card_panel::Entry::player(p,
+        let entry = crate::card_panel::Entry::player(
+            p,
             session.world.city.auction.controller.reference != 0
-                && session.world.city.auction.controller.record[0x7c] != 0)?;
-        let debt = *session.world.objective.cash_statuses.get(usize::from(p.bytes[0x1bc]))
-            .ok_or("Time debt status outside roster")? != 0;
+                && session.world.city.auction.controller.record[0x7c] != 0,
+        )?;
+        let debt = *session
+            .world
+            .objective
+            .cash_statuses
+            .get(usize::from(p.bytes[0x1bc]))
+            .ok_or("Time debt status outside roster")?
+            != 0;
         let cash = current_cash(session)?;
-        let mode = if !self.game_active || self.stats.is_some() {4}
-            else{u32::from(self.auction.is_some())};
-        let mut runtime = self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?;
-        for (instance, passes) in crate::time_panel::instance_passes(mode,
-            self.policy.scheduler.iterations).into_iter().enumerate() {
+        let mode = if !self.game_active || self.stats.is_some() {
+            4
+        } else {
+            u32::from(self.auction.is_some())
+        };
+        let mut runtime = self
+            .time_runtime
+            .lock()
+            .map_err(|_| "Time runtime poisoned")?;
+        for (instance, passes) in
+            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)
+                .into_iter()
+                .enumerate()
+        {
             if runtime.widgets[instance].visible {
                 for _ in 0..passes {
                     runtime.chance_visuals[instance].tick(entry);
@@ -2353,15 +2844,21 @@ impl Host {
                             match call {
                                 TimerCall::CreateSound => {
                                     if self.auction_audio.is_some() {
-                                        auction_audio::request(&self.auction_audio,
-                                            auction_audio::Operation::Create(auction_audio::Kind::TurnTimer))
+                                        auction_audio::request(
+                                            &self.auction_audio,
+                                            auction_audio::Operation::Create(
+                                                auction_audio::Kind::TurnTimer,
+                                            ),
+                                        )
                                     } else {
                                         self.pending_presentation.insert(0x4ad760);
                                         Ok(0)
                                     }
                                 }
                                 TimerCall::ReleaseSound(handle) => auction_audio::request(
-                                    &self.auction_audio, auction_audio::Operation::Release(handle)),
+                                    &self.auction_audio,
+                                    auction_audio::Operation::Release(handle),
+                                ),
                                 TimerCall::ClearText => {
                                     controls.timer_text = None;
                                     Ok(0)
@@ -2396,7 +2893,7 @@ impl Host {
                             Ok(Some(bidder_view(session, player)?))
                         }
                         TickCall::Tutorial(control) if session.tutorial_state == 1 => {
-                            self.dispatch_tutorial_callback(session,assets,control)?;
+                            self.dispatch_tutorial_callback(session, assets, control)?;
                             Ok(None)
                         }
                         _ => Ok(None),
@@ -2418,7 +2915,10 @@ impl Host {
         let bid_gate = std::cell::Cell::new(self.policy.ai_event_gate);
         let result = session.apply_auction_action(command, assets, |event| match event {
             openmt2001::live_commands::Event::AuctionTimeShow { cash } => {
-                self.time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
+                self.time_runtime
+                    .lock()
+                    .map_err(|_| "Time runtime poisoned")?
+                    .show(cash, 1)?;
                 Ok(0)
             }
             openmt2001::live_commands::Event::AuctionAction(call) => auction_action(
@@ -2449,19 +2949,23 @@ impl Host {
             return Ok(());
         }
         if button == 5 {
-            if self.policy.scheduler.network_enabled { return Ok(()); }
+            if self.policy.scheduler.network_enabled {
+                return Ok(());
+            }
             // 414730 message12 index5 enters 414a31 and toggles565b9c+858.
             // Its original input child is a textureless 16px title-right strip.
             let next = !self.policy.ai_event_gate;
             if let Some(sender) = &self.auction_actor_events {
-                sender.send(crate::auction_bridge::ActorEvent::BidVoiceGate(next))
+                sender
+                    .send(crate::auction_bridge::ActorEvent::BidVoiceGate(next))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
             self.policy.ai_event_gate = next;
             return Ok(());
         }
-        if self.auction.as_ref().is_none_or(|auction| button > 4
-            || auction.controls.buttons_enabled & (1 << button) == 0) {
+        if self.auction.as_ref().is_none_or(|auction| {
+            button > 4 || auction.controls.buttons_enabled & (1 << button) == 0
+        }) {
             return Ok(());
         }
         let player = local_player(session)?;
@@ -2482,7 +2986,7 @@ impl Host {
                     .apply_auction_action(session, assets, command)
                     .map(|_| true),
                 Call::Tutorial(control) if session.tutorial_state == 1 => {
-                    self.dispatch_tutorial_callback(session,assets,control)?;
+                    self.dispatch_tutorial_callback(session, assets, control)?;
                     Ok(true)
                 }
                 _ => Ok(true),
@@ -2535,7 +3039,9 @@ impl Host {
             }
             self.collect_script_prompts(session);
         }
-        if self.stop_retired_camera() || self.failure.is_some() { return; }
+        if self.stop_retired_camera() || self.failure.is_some() {
+            return;
+        }
         let indices: Vec<_> = session
             .hooks
             .timers
@@ -2549,9 +3055,17 @@ impl Host {
                 .then_some(index)
             })
             .collect();
-        if indices.len() != 2 || [0x4ba580, 0x481680].into_iter().any(|address|
-            indices.iter().filter(|i| u32::from_le_bytes(
-                session.hooks.timers[**i][16..20].try_into().unwrap()) == address).count() != 1)
+        if indices.len() != 2
+            || [0x4ba580, 0x481680].into_iter().any(|address| {
+                indices
+                    .iter()
+                    .filter(|i| {
+                        u32::from_le_bytes(session.hooks.timers[**i][16..20].try_into().unwrap())
+                            == address
+                    })
+                    .count()
+                    != 1
+            })
         {
             self.fail("Missing unique original interface/logic timer registration".into());
             return;
@@ -2559,8 +3073,12 @@ impl Host {
         // The omitted activity/presentation rows do not accumulate or dispatch
         // here. Keep original indices/order and stop on unsupported structural
         // edits rather than silently dropping/reidentifying task registrations.
-        let identities: Vec<[u8; 4]> = session.hooks.timers.iter()
-            .map(|task| task[16..20].try_into().unwrap()).collect();
+        let identities: Vec<[u8; 4]> = session
+            .hooks
+            .timers
+            .iter()
+            .map(|task| task[16..20].try_into().unwrap())
+            .collect();
         // The host's player pause freezes the logic accumulator as before;
         // interface task time continues. Script pauses instead change the
         // actual task enabled byte through the retained native group mask.
@@ -2572,8 +3090,12 @@ impl Host {
                         == 0x4ba580
             })
             .collect();
-        let central = indices.iter().position(|index|
-            u32::from_le_bytes(session.hooks.timers[*index][16..20].try_into().unwrap()) == 0x4ba580)
+        let central = indices
+            .iter()
+            .position(|index| {
+                u32::from_le_bytes(session.hooks.timers[*index][16..20].try_into().unwrap())
+                    == 0x4ba580
+            })
             .expect("unique central registration was validated");
         let mut tasks = indices
             .iter()
@@ -2590,28 +3112,42 @@ impl Host {
             }
             let callback_result = if self.stop_retired_camera() {
                 Err(camera_bridge::RequestError::Retired)
-            } else { match address {
-                // All successful UI early returns converge here. One tail
-                // per actual central callback, never scheduler.iterations.
-                0x4ba580 => self.interface_tick(session, assets)
-                    .map_err(camera_bridge::RequestError::Failed)
-                    .and_then(|()| self.camera_central_tail(session)),
-                0x481680 => {
-                    self.tick(session, assets);
-                    if let Some(error) = &self.failure {
-                        Err(camera_bridge::RequestError::Failed(error.clone()))
-                    } else if self.stop_retired_camera() {
-                        Err(camera_bridge::RequestError::Retired)
-                    } else { Ok(()) }
-                },
-                _ => Err(camera_bridge::RequestError::Failed("Live interface/logic timer callback changed".into())),
-            }};
+            } else {
+                match address {
+                    // All successful UI early returns converge here. One tail
+                    // per actual central callback, never scheduler.iterations.
+                    0x4ba580 => self
+                        .interface_tick(session, assets)
+                        .map_err(camera_bridge::RequestError::Failed)
+                        .and_then(|()| self.camera_central_tail(session)),
+                    0x481680 => {
+                        self.tick(session, assets);
+                        if let Some(error) = &self.failure {
+                            Err(camera_bridge::RequestError::Failed(error.clone()))
+                        } else if self.stop_retired_camera() {
+                            Err(camera_bridge::RequestError::Retired)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ => Err(camera_bridge::RequestError::Failed(
+                        "Live interface/logic timer callback changed".into(),
+                    )),
+                }
+            };
             if session.hooks.timers.len() != identities.len()
-                || session.hooks.timers.iter().zip(&identities)
+                || session
+                    .hooks
+                    .timers
+                    .iter()
+                    .zip(&identities)
                     .any(|(task, address)| task[16..20] != address[..])
             {
                 structural_error = true;
-                return Err("Live two-timer scope cannot remove/reorder/replace/append registrations".into());
+                return Err(
+                    "Live two-timer scope cannot remove/reorder/replace/append registrations"
+                        .into(),
+                );
             }
             for (i, index) in indices.iter().enumerate() {
                 tasks[i] = session.hooks.timers[*index];
@@ -2625,7 +3161,9 @@ impl Host {
                 }
                 Ok(()) => {}
             }
-            if let Some(error) = &self.failure { return Err(error.clone()); }
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
             if self.stop_retired_camera() {
                 cancelled = true;
                 return Err("Explicit camera retirement interrupted timer dispatch".into());
@@ -2638,18 +3176,27 @@ impl Host {
             }
         }
         match result {
-            Err(_) if cancelled => { self.stop_retired_camera(); }
+            Err(_) if cancelled => {
+                self.stop_retired_camera();
+            }
             Err(error) => self.fail(error),
             Ok(ratios) => {
-                if self.stop_retired_camera() { return; }
+                if self.stop_retired_camera() {
+                    return;
+                }
                 // Existing per-logic audio remains unchanged. This is the end
                 // of the currently owned dispatch, not a claim that every
                 // original4afbf0 virtual service has been joined here.
-                let result = self.request_camera(camera_bridge::Operation::CurrentPose)
-                    .and_then(|_| self.request_camera(camera_bridge::Operation::Sample {
-                        ratio_bits: ratios[central].to_bits(),
-                    }));
-                if let Err(error) = result { self.camera_error(error); }
+                let result = self
+                    .request_camera(camera_bridge::Operation::CurrentPose)
+                    .and_then(|_| {
+                        self.request_camera(camera_bridge::Operation::Sample {
+                            ratio_bits: ratios[central].to_bits(),
+                        })
+                    });
+                if let Err(error) = result {
+                    self.camera_error(error);
+                }
             }
         }
     }
@@ -2664,14 +3211,26 @@ fn ledger_ui_post(
     threshold: f32,
 ) -> Result<u32, String> {
     use openmt2001::category_ownership::Seam;
-    if !current { return Ok(0); }
-    let sale = if amount > threshold { true }
-        else if amount < threshold || amount.is_nan() { false }
-        else { return Ok(0); };
-    let pulse = Seam::NativeUiCall { address: if sale { 0x4c6290 } else { 0x4c62d0 },
-        args: [0; 6], argument_count: 0 };
-    let cue = Seam::NativeUiCall { address: 0x4ad760,
-        args: [if sale { 0x541cc8 } else { 0x541cb4 }, 0, 0, 0, 1, 0x3c], argument_count: 6 };
+    if !current {
+        return Ok(0);
+    }
+    let sale = if amount > threshold {
+        true
+    } else if amount < threshold || amount.is_nan() {
+        false
+    } else {
+        return Ok(0);
+    };
+    let pulse = Seam::NativeUiCall {
+        address: if sale { 0x4c6290 } else { 0x4c62d0 },
+        args: [0; 6],
+        argument_count: 0,
+    };
+    let cue = Seam::NativeUiCall {
+        address: 0x4ad760,
+        args: [if sale { 0x541cc8 } else { 0x541cb4 }, 0, 0, 0, 1, 0x3c],
+        argument_count: 6,
+    };
     if sale {
         ledger_ui_call(cash_arrow, sound, cue)?;
         ledger_ui_call(cash_arrow, sound, pulse)
@@ -2688,17 +3247,27 @@ fn ledger_ui_call(
 ) -> Result<u32, String> {
     use openmt2001::category_ownership::Seam;
     match call {
-        Seam::NativeUiCall { address: 0x4ad760, args, argument_count: 6 } => {
+        Seam::NativeUiCall {
+            address: 0x4ad760,
+            args,
+            argument_count: 6,
+        } => {
             let sale = match args {
                 [0x541cc8, 0, 0, 0, 1, 0x3c] => true,
                 [0x541cb4, 0, 0, 0, 1, 0x3c] => false,
                 _ => return Err("property transfer sound call changed".into()),
             };
-            crate::gameplay_sound::enqueue(sound, crate::gameplay_sound::Operation::Ledger { sale })?;
+            crate::gameplay_sound::enqueue(
+                sound,
+                crate::gameplay_sound::Operation::Ledger { sale },
+            )?;
             Ok(0)
         }
-        Seam::NativeUiCall { address: address @ (0x4c6290 | 0x4c62d0),
-            args: [0, 0, 0, 0, 0, 0], argument_count: 0 } => {
+        Seam::NativeUiCall {
+            address: address @ (0x4c6290 | 0x4c62d0),
+            args: [0, 0, 0, 0, 0, 0],
+            argument_count: 0,
+        } => {
             cash_arrow.start(address == 0x4c6290);
             Ok(0)
         }
@@ -2734,10 +3303,19 @@ fn bidder_view(
     })
 }
 fn current_cash(session: &Session<'_>) -> Result<f32, String> {
-    let slot = session.roster.manager.players.iter()
+    let slot = session
+        .roster
+        .manager
+        .players
+        .iter()
         .position(|player| player.reference == session.roster.status.current_player)
         .ok_or("Time current player missing")?;
-    session.world.ledgers.players.get(slot).map(|player| player.cash)
+    session
+        .world
+        .ledgers
+        .players
+        .get(slot)
+        .map(|player| player.cash)
         .ok_or_else(|| "Time current account missing".into())
 }
 
@@ -2759,7 +3337,8 @@ pub(crate) fn auction_action(
             // 4140b0 resets the hidden bid-voice/AI gate on panel reopen.
             bid_gate.set(false);
             if let Some(sender) = actor_events {
-                sender.send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
+                sender
+                    .send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
         }
@@ -2770,7 +3349,8 @@ pub(crate) fn auction_action(
         Call::ShowPanel(address) => return Err(format!("Unmapped auction panel{address:08x}")),
         Call::ParticipantEffect { participant, kind } => {
             if let Some(sender) = actor_events {
-                sender.send(crate::auction_bridge::ActorEvent::Effect { participant, kind })
+                sender
+                    .send(crate::auction_bridge::ActorEvent::Effect { participant, kind })
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             } else {
                 omitted.insert(0x465980);
@@ -2787,7 +3367,10 @@ pub(crate) fn auction_action(
         }
         Call::WithdrawNotice(participant) => {
             if let Some(sender) = actor_events {
-                sender.send(crate::auction_bridge::ActorEvent::WithdrawNotice(participant))
+                sender
+                    .send(crate::auction_bridge::ActorEvent::WithdrawNotice(
+                        participant,
+                    ))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             } else {
                 omitted.insert(0x464769);
@@ -2799,33 +3382,44 @@ pub(crate) fn auction_action(
 
 ///Same source FISTP-low-word conversion using the public portable arithmetic.
 ///Nonfinite/indefinite conversions produce low word0; no private economy API.
-fn picking_ftol(value:f64)->i32{
-    openmt2001::x87::Sum::from_f64(value).map_or(0,|number|number.ftol_low_word())
+fn picking_ftol(value: f64) -> i32 {
+    openmt2001::x87::Sum::from_f64(value).map_or(0, |number| number.ftol_low_word())
 }
-fn apply_source_picking_command(process:&process_runtime::Handle,command:&level_script::Command,arguments:&[Value])->Result<(),String>{
+fn apply_source_picking_command(
+    process: &process_runtime::Handle,
+    command: &level_script::Command,
+    arguments: &[Value],
+) -> Result<(), String> {
     use process_runtime::PickingWrite;
-    let target=||match arguments.first(){Some(Value::Number(value))=>Some(picking_ftol(*value)),_=>None};
-    let write=match command{
-        level_script::Command::TutorialDisableAllPicking=>PickingWrite::DisableAll,
-        level_script::Command::TutorialEnableAllPicking=>PickingWrite::EnableAll,
-        level_script::Command::TutorialDisableCameraControl=>PickingWrite::CameraDisable,
-        level_script::Command::TutorialEnableBlockPicking=>PickingWrite::Block(target()),
-        level_script::Command::TutorialEnableBuildingPicking=>PickingWrite::Building(target()),
-        _=>return Ok(()),
+    let target = || match arguments.first() {
+        Some(Value::Number(value)) => Some(picking_ftol(*value)),
+        _ => None,
     };
-    process.picking_write(write).map_err(|e|e.to_string())
+    let write = match command {
+        level_script::Command::TutorialDisableAllPicking => PickingWrite::DisableAll,
+        level_script::Command::TutorialEnableAllPicking => PickingWrite::EnableAll,
+        level_script::Command::TutorialDisableCameraControl => PickingWrite::CameraDisable,
+        level_script::Command::TutorialEnableBlockPicking => PickingWrite::Block(target()),
+        level_script::Command::TutorialEnableBuildingPicking => PickingWrite::Building(target()),
+        _ => return Ok(()),
+    };
+    process.picking_write(write).map_err(|e| e.to_string())
 }
 fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
-    Ok(match arguments.first(){
-        Some(Value::Number(value))=>match picking_ftol(*value){-1=>None,value=>Some(value as u32)},
-        _=>None,
+    Ok(match arguments.first() {
+        Some(Value::Number(value)) => match picking_ftol(*value) {
+            -1 => None,
+            value => Some(value as u32),
+        },
+        _ => None,
     })
 }
 
 pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, String> {
     let number = |at: usize| match arguments.get(at) {
         Some(Value::Number(value)) => openmt2001::x87::Sum::from_f64(*value)
-            .map(|v| v.ftol_low_word() as u32).map_err(str::to_owned),
+            .map(|v| v.ftol_low_word() as u32)
+            .map_err(str::to_owned),
         None | Some(Value::Nil) if at >= 2 => Ok(0),
         _ => Err("Prompt requires C-coerced numeric context/value".to_owned()),
     };
@@ -2835,14 +3429,22 @@ pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, Str
             // Validate safe formatting now; row0 mapping is deferred to rendering.
             prompt::literal_glyphs(bytes, &(0..224).map(|i| i as u8).collect::<Vec<_>>())?;
             Ok((0, Some(std::sync::Arc::<[u8]>::from(bytes.clone()))))
-        },
+        }
         _ => Err("Prompt title/body must be numeric or convertible to string".to_owned()),
     };
     let (title, literal_title) = field(0)?;
     let (body, literal_body) = field(1)?;
     Ok(prompt::Request {
-        script: Some(prompt::ScriptText { title: literal_title, body: literal_body, format_value: number(3)? }),
-        dialog: None, card: None, title, body, dismissal_id: number(2)?,
+        script: Some(prompt::ScriptText {
+            title: literal_title,
+            body: literal_body,
+            format_value: number(3)?,
+        }),
+        dialog: None,
+        card: None,
+        title,
+        body,
+        dismissal_id: number(2)?,
     })
 }
 
@@ -2854,7 +3456,8 @@ fn human_dialog_ui(
     name: Option<[u8; 96]>,
 ) -> Result<(), String> {
     if address == 0x43be20 && count == 0 {
-        prompts.push(prompt::Request { script: None,
+        prompts.push(prompt::Request {
+            script: None,
             title: 0,
             body: 0,
             dismissal_id: 0,
@@ -2884,10 +3487,17 @@ mod tests {
         let kind = 0x26u32;
         let index = u32::from(image.at(0x48c3ec + kind - 0x22, 1).unwrap()[0]);
         let target = u32::from_le_bytes(
-            image.at(0x48c3d0 + index * 4, 4).unwrap().try_into().unwrap(),
+            image
+                .at(0x48c3d0 + index * 4, 4)
+                .unwrap()
+                .try_into()
+                .unwrap(),
         );
         assert_eq!(target, 0x48c3c6);
-        assert_eq!(image.at(target, 9).unwrap(), &[0xc6, 0x46, 4, 0, 0x5e, 0x5b, 0x83, 0xc4, 0x34]);
+        assert_eq!(
+            image.at(target, 9).unwrap(),
+            &[0xc6, 0x46, 4, 0, 0x5e, 0x5b, 0x83, 0xc4, 0x34]
+        );
         let mut packet = [0u8; 0x30];
         packet[4..8].copy_from_slice(&kind.to_le_bytes());
         assert!(property_refresh_broadcast(&packet));
@@ -2909,99 +3519,164 @@ mod tests {
     #[test]
     fn options_restore_worker_pause_state_and_cannot_resume_a_fault() {
         let mut host = Host::new([0.; 3]);
-        let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x5a;20]);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x5a; 20]);
         for was_running in [false, true] {
             host.set_running(was_running);
-            host.options(&mut pause,&mut timers,true).unwrap();
-            host.options(&mut pause,&mut timers,true).unwrap();
+            host.options(&mut pause, &mut timers, true).unwrap();
+            host.options(&mut pause, &mut timers, true).unwrap();
             host.set_running(true);
-            assert!(!host.running, "Options must retain its pause during other queued input");
-            host.options(&mut pause,&mut timers,false).unwrap();
+            assert!(
+                !host.running,
+                "Options must retain its pause during other queued input"
+            );
+            host.options(&mut pause, &mut timers, false).unwrap();
             assert_eq!(host.running, was_running);
-            host.options(&mut pause,&mut timers,false).unwrap();
+            host.options(&mut pause, &mut timers, false).unwrap();
             assert_eq!(host.running, was_running);
         }
-        host.options(&mut pause,&mut timers,true).unwrap();
+        host.options(&mut pause, &mut timers, true).unwrap();
         host.fail("failure after retained mutation".into());
-        host.options(&mut pause,&mut timers,false).unwrap();
+        host.options(&mut pause, &mut timers, false).unwrap();
         assert!(!host.running);
         host.fail("later stale action".into());
-        assert_eq!(host.failure.as_deref(), Some("failure after retained mutation"));
+        assert_eq!(
+            host.failure.as_deref(),
+            Some("failure after retained mutation")
+        );
     }
     #[test]
     fn options_reason_zero_preserves_other_reason_and_interface_task() {
-        let mut host=Host::new([0.;3]);host.set_running(true);
-        let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
-        for t in &mut timers{t[12..16].copy_from_slice(&37.5f32.to_le_bytes());}
-        let before=timers.clone();
-        host.options(&mut pause,&mut timers,true).unwrap();
-        host.options(&mut pause,&mut timers,true).unwrap();
-        assert_eq!(&pause.bytes[..4],&[1,0,0,0]);assert_eq!(pause.bytes[8],1);
-        assert!(host.options_save_allowed(&pause,&timers));
-        for (i,t) in timers.iter().enumerate(){
-            let mut wanted=before[i];if i==3{wanted[0]=0;}assert_eq!(*t,wanted);
+        let mut host = Host::new([0.; 3]);
+        host.set_running(true);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+        for t in &mut timers {
+            t[12..16].copy_from_slice(&37.5f32.to_le_bytes());
         }
-        assert_eq!(timers[2][0],1,"interface mask1 stays live");
-        pause.pause(1,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
-        host.options(&mut pause,&mut timers,false).unwrap();
-        host.options(&mut pause,&mut timers,false).unwrap();
-        assert_eq!(&pause.bytes[..4],&[0,1,0,0]);assert_eq!(pause.bytes[8],1);
-        assert!(!host.options_save_allowed(&pause,&timers),"another reason cannot impersonate this Options owner");
-        assert_eq!(timers[3][0],0);assert_eq!(timers[2][0],1);assert!(host.running);
-        pause.unpause(1,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
-        assert_eq!(timers,before);assert_eq!(pause.bytes,[0;9]);
+        let before = timers.clone();
+        host.options(&mut pause, &mut timers, true).unwrap();
+        host.options(&mut pause, &mut timers, true).unwrap();
+        assert_eq!(&pause.bytes[..4], &[1, 0, 0, 0]);
+        assert_eq!(pause.bytes[8], 1);
+        assert!(host.options_save_allowed(&pause, &timers));
+        for (i, t) in timers.iter().enumerate() {
+            let mut wanted = before[i];
+            if i == 3 {
+                wanted[0] = 0;
+            }
+            assert_eq!(*t, wanted);
+        }
+        assert_eq!(timers[2][0], 1, "interface mask1 stays live");
+        pause
+            .pause(1, |change, _| {
+                change.apply(&mut timers);
+                Ok(())
+            })
+            .unwrap();
+        host.options(&mut pause, &mut timers, false).unwrap();
+        host.options(&mut pause, &mut timers, false).unwrap();
+        assert_eq!(&pause.bytes[..4], &[0, 1, 0, 0]);
+        assert_eq!(pause.bytes[8], 1);
+        assert!(
+            !host.options_save_allowed(&pause, &timers),
+            "another reason cannot impersonate this Options owner"
+        );
+        assert_eq!(timers[3][0], 0);
+        assert_eq!(timers[2][0], 1);
+        assert!(host.running);
+        pause
+            .unpause(1, |change, _| {
+                change.apply(&mut timers);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(timers, before);
+        assert_eq!(pause.bytes, [0; 9]);
     }
     #[test]
     fn options_close_retains_another_reason_zero_and_rechecks_real_timer_state() {
-        let mut host=Host::new([0.;3]);host.set_running(true);
-        let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
-        pause.pause(0,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();
-        host.options(&mut pause,&mut timers,true).unwrap();assert_eq!(pause.bytes[0],2);
-        assert!(host.options_save_allowed(&pause,&timers));
-        timers[3][0]=1;assert!(!host.options_save_allowed(&pause,&timers));timers[3][0]=0;
-        host.options(&mut pause,&mut timers,false).unwrap();
-        assert_eq!(pause.bytes[0],1);assert_eq!(timers[3][0],0);
-        assert!(!host.options_save_allowed(&pause,&timers));
+        let mut host = Host::new([0.; 3]);
+        host.set_running(true);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+        pause
+            .pause(0, |change, _| {
+                change.apply(&mut timers);
+                Ok(())
+            })
+            .unwrap();
+        host.options(&mut pause, &mut timers, true).unwrap();
+        assert_eq!(pause.bytes[0], 2);
+        assert!(host.options_save_allowed(&pause, &timers));
+        timers[3][0] = 1;
+        assert!(!host.options_save_allowed(&pause, &timers));
+        timers[3][0] = 0;
+        host.options(&mut pause, &mut timers, false).unwrap();
+        assert_eq!(pause.bytes[0], 1);
+        assert_eq!(timers[3][0], 0);
+        assert!(!host.options_save_allowed(&pause, &timers));
     }
     #[test]
     fn options_save_projection_releases_only_the_owned_copy() {
-        for other in [None,Some(0),Some(1)] {
-            let mut host=Host::new([0.;3]);host.set_running(true);
-            let mut pause=openmt2001::pause::State::default();
-            let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);
-            for (i,t) in timers.iter_mut().enumerate(){t[12..16].copy_from_slice(&(13.25+i as f32).to_le_bytes());}
-            if let Some(reason)=other {pause.pause(reason,|change,_|{change.apply(&mut timers);Ok(())}).unwrap();}
-            let expected=(pause.clone(),timers.clone());
-            host.options(&mut pause,&mut timers,true).unwrap();
-            let live=(pause.clone(),timers.clone());
-            let projected=host.options_save_projection(&pause,&timers).unwrap().unwrap();
-            assert_eq!(projected,expected);assert_eq!((pause.clone(),timers.clone()),live);
-            assert!(host.options_save_allowed(&pause,&timers));assert!(!host.running);
-            host.options(&mut pause,&mut timers,false).unwrap();
-            assert_eq!((pause,timers),expected);
+        for other in [None, Some(0), Some(1)] {
+            let mut host = Host::new([0.; 3]);
+            host.set_running(true);
+            let mut pause = openmt2001::pause::State::default();
+            let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+            for (i, t) in timers.iter_mut().enumerate() {
+                t[12..16].copy_from_slice(&(13.25 + i as f32).to_le_bytes());
+            }
+            if let Some(reason) = other {
+                pause
+                    .pause(reason, |change, _| {
+                        change.apply(&mut timers);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            let expected = (pause.clone(), timers.clone());
+            host.options(&mut pause, &mut timers, true).unwrap();
+            let live = (pause.clone(), timers.clone());
+            let projected = host
+                .options_save_projection(&pause, &timers)
+                .unwrap()
+                .unwrap();
+            assert_eq!(projected, expected);
+            assert_eq!((pause.clone(), timers.clone()), live);
+            assert!(host.options_save_allowed(&pause, &timers));
+            assert!(!host.running);
+            host.options(&mut pause, &mut timers, false).unwrap();
+            assert_eq!((pause, timers), expected);
         }
     }
     #[test]
     fn options_save_projection_refuses_unaccountable_owned_counter() {
-        let mut host=Host::new([0.;3]);let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x3c;20]);
-        assert!(host.options_save_projection(&pause,&timers).unwrap().is_none());
-        host.options(&mut pause,&mut timers,true).unwrap();
-        pause.bytes[0]=128;let live=(pause.clone(),timers.clone());
-        assert!(host.options_save_projection(&pause,&timers).is_err());
-        assert_eq!((pause,timers),live);
+        let mut host = Host::new([0.; 3]);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x3c; 20]);
+        assert!(
+            host.options_save_projection(&pause, &timers)
+                .unwrap()
+                .is_none()
+        );
+        host.options(&mut pause, &mut timers, true).unwrap();
+        pause.bytes[0] = 128;
+        let live = (pause.clone(), timers.clone());
+        assert!(host.options_save_projection(&pause, &timers).is_err());
+        assert_eq!((pause, timers), live);
     }
     #[test]
     fn network_options_does_not_mint_local_pause_reason() {
-        let mut host=Host::new([0.;3]);host.policy.scheduler.network_enabled=true;
-        let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x6b;20]);let before=timers.clone();
-        host.options(&mut pause,&mut timers,true).unwrap();
-        host.options(&mut pause,&mut timers,false).unwrap();
-        assert_eq!(pause.bytes,[0;9]);assert_eq!(timers,before);
+        let mut host = Host::new([0.; 3]);
+        host.policy.scheduler.network_enabled = true;
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+        let before = timers.clone();
+        host.options(&mut pause, &mut timers, true).unwrap();
+        host.options(&mut pause, &mut timers, false).unwrap();
+        assert_eq!(pause.bytes, [0; 9]);
+        assert_eq!(timers, before);
     }
     #[test]
     fn scenario_prompt_preserves_callback_identity() {
@@ -3012,7 +3687,12 @@ mod tests {
                 Value::Number(1.)
             ])
             .unwrap(),
-            prompt::Request { script: Some(prompt::ScriptText { title: None, body: None, format_value: 0 }),
+            prompt::Request {
+                script: Some(prompt::ScriptText {
+                    title: None,
+                    body: None,
+                    format_value: 0
+                }),
                 dialog: None,
                 card: None,
                 title: 1898,
@@ -3037,29 +3717,47 @@ mod literal_lua_bridge_tests {
     fn real_lua_to_owned_hooks_to_request() {
         // Same protected adapter signatures as Bindings::register. No PE fixture.
         let mut vm = openmt2001::lua4::Runtime::new().unwrap();
-        vm.register_coerced("CreatePrompt",5,"ppnn").unwrap();
-        vm.register_coerced("CreateMessage",724,"ppnn").unwrap();
+        vm.register_coerced("CreatePrompt", 5, "ppnn").unwrap();
+        vm.register_coerced("CreateMessage", 724, "ppnn").unwrap();
         let mut calls = Vec::new();
         vm.execute("synthetic prompts", b"CreatePrompt('Synthetic Notice','A test zone is available.'); CreatePrompt('12','body','-3.9','7'); CreateMessage('title',13.9); CreatePrompt(16.9,'mixed'); CreatePrompt(14,15,nil,{}); CreatePrompt('drop','buffers')", &mut |id,args| {
             calls.push((id,args.to_vec())); Ok(None)
         }).unwrap();
         // Hooks::command is the production owned argument-copy boundary.
         let mut hooks = fresh_city::Hooks::new();
-        for (id,args) in calls {
-            openmt2001::level_script::Hooks::command(&mut hooks,
-                if id==5 { level_script::Command::Prompt } else { level_script::Command::TutorialMessage }, &args).unwrap();
+        for (id, args) in calls {
+            openmt2001::level_script::Hooks::command(
+                &mut hooks,
+                if id == 5 {
+                    level_script::Command::Prompt
+                } else {
+                    level_script::Command::TutorialMessage
+                },
+                &args,
+            )
+            .unwrap();
         }
         drop(vm);
-        let requests = hooks.commands.iter().map(|(_,args)|prompt_request(args).unwrap()).collect::<Vec<_>>();
-        assert_eq!(requests[0].script.as_ref().unwrap().title.as_deref(),Some(b"Synthetic Notice".as_slice()));
-        assert_eq!(requests[1].title,12);
-        assert_eq!(requests[1].dismissal_id,(-3i32) as u32);
-        assert_eq!(requests[1].script.as_ref().unwrap().format_value,7);
-        assert_eq!(requests[2].body,13);
-        assert_eq!(requests[3].title,16);
-        assert_eq!(requests[3].script.as_ref().unwrap().body.as_deref(),Some(b"mixed".as_slice()));
-        assert_eq!(requests[4].dismissal_id,0);
-        assert_eq!(requests[4].script.as_ref().unwrap().format_value,0);
+        let requests = hooks
+            .commands
+            .iter()
+            .map(|(_, args)| prompt_request(args).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests[0].script.as_ref().unwrap().title.as_deref(),
+            Some(b"Synthetic Notice".as_slice())
+        );
+        assert_eq!(requests[1].title, 12);
+        assert_eq!(requests[1].dismissal_id, (-3i32) as u32);
+        assert_eq!(requests[1].script.as_ref().unwrap().format_value, 7);
+        assert_eq!(requests[2].body, 13);
+        assert_eq!(requests[3].title, 16);
+        assert_eq!(
+            requests[3].script.as_ref().unwrap().body.as_deref(),
+            Some(b"mixed".as_slice())
+        );
+        assert_eq!(requests[4].dismissal_id, 0);
+        assert_eq!(requests[4].script.as_ref().unwrap().format_value, 0);
     }
 }
 
@@ -3068,20 +3766,39 @@ mod camera_error_effect_tests {
     use super::*;
     #[test]
     fn completed_timer_effects_survive_nonfinite_current_eye_rejection() {
-        let mut host=Host::new([1.,2.,3.]);
-        let mut tasks=openmt2001::timers::startup_tasks([0;20]);
-        for task in &mut tasks {task[12..16].copy_from_slice(&7.5f32.to_le_bytes());}
-        let observation=camera_bridge::Observation {raw_capture:None,
-            current:camera_bridge::Pose {eye:[f32::NAN.to_bits(),0,0],target:[0;3],up:[0,1f32.to_bits(),0]},
-            strategic_writeback:None,finalization_fault:None,sampled:None,task_effects:vec![camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false},camera_bridge::TaskEffect::ClearElapsed],
-        };
-        assert!(host.complete_camera_central(&mut tasks,observation).is_err());
-        for task in &tasks {
-            let mask=u32::from_le_bytes(task[4..8].try_into().unwrap());
-            assert_eq!(task[0],u8::from(mask&2==0));
-            assert_eq!(&task[12..16],&[0;4]);
+        let mut host = Host::new([1., 2., 3.]);
+        let mut tasks = openmt2001::timers::startup_tasks([0; 20]);
+        for task in &mut tasks {
+            task[12..16].copy_from_slice(&7.5f32.to_le_bytes());
         }
-        assert_eq!(host.policy.camera,[1.,2.,3.]);
+        let observation = camera_bridge::Observation {
+            raw_capture: None,
+            current: camera_bridge::Pose {
+                eye: [f32::NAN.to_bits(), 0, 0],
+                target: [0; 3],
+                up: [0, 1f32.to_bits(), 0],
+            },
+            strategic_writeback: None,
+            finalization_fault: None,
+            sampled: None,
+            task_effects: vec![
+                camera_bridge::TaskEffect::SetEnabled {
+                    mask: 2,
+                    enabled: false,
+                },
+                camera_bridge::TaskEffect::ClearElapsed,
+            ],
+        };
+        assert!(
+            host.complete_camera_central(&mut tasks, observation)
+                .is_err()
+        );
+        for task in &tasks {
+            let mask = u32::from_le_bytes(task[4..8].try_into().unwrap());
+            assert_eq!(task[0], u8::from(mask & 2 == 0));
+            assert_eq!(&task[12..16], &[0; 4]);
+        }
+        assert_eq!(host.policy.camera, [1., 2., 3.]);
     }
 }
 
@@ -3090,16 +3807,15 @@ mod camera_status_feedback_tests {
     use super::*;
     #[test]
     fn sampled_status_argument_cannot_replace_bridged_current_eye() {
-        let mut host=Host::new([1.,2.,3.]);
-        host.observe_presentation_camera([4.,5.,6.]);
-        assert_eq!(host.policy.camera,[4.,5.,6.]);
-        let (worker,_inbox)=camera_bridge::channel(7);
-        host.camera_bridge=Some(worker);
-        host.observe_presentation_camera([40.,50.,60.]);
-        assert_eq!(host.policy.camera,[4.,5.,6.]);
+        let mut host = Host::new([1., 2., 3.]);
+        host.observe_presentation_camera([4., 5., 6.]);
+        assert_eq!(host.policy.camera, [4., 5., 6.]);
+        let (worker, _inbox) = camera_bridge::channel(7);
+        host.camera_bridge = Some(worker);
+        host.observe_presentation_camera([40., 50., 60.]);
+        assert_eq!(host.policy.camera, [4., 5., 6.]);
     }
 }
-
 
 #[cfg(test)]
 mod camera_retirement_tests {
@@ -3107,20 +3823,22 @@ mod camera_retirement_tests {
     #[test]
     fn retirement_cannot_resume_and_does_not_clear_a_real_failure() {
         let mut host = Host::new([1., 2., 3.]);
-        let mut pause=openmt2001::pause::State::default();
-        let mut timers=openmt2001::timers::startup_tasks([0x5a;20]);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x5a; 20]);
         let (worker, inbox) = camera_bridge::channel(401);
         host.camera_bridge = Some(worker);
         host.set_running(true);
-        host.options(&mut pause,&mut timers,true).unwrap();
+        host.options(&mut pause, &mut timers, true).unwrap();
         inbox.retire();
         assert!(host.stop_retired_camera());
-        assert!(host.options(&mut pause,&mut timers,false).is_err());
+        assert!(host.options(&mut pause, &mut timers, false).is_err());
         host.set_running(true);
         assert!(!host.running);
         assert!(host.failure.is_none());
         assert_eq!(host.policy.camera, [1., 2., 3.]);
-        host.camera_error(camera_bridge::RequestError::Failed("independent real failure".into()));
+        host.camera_error(camera_bridge::RequestError::Failed(
+            "independent real failure".into(),
+        ));
         host.camera_error(camera_bridge::RequestError::Retired);
         assert_eq!(host.failure.as_deref(), Some("independent real failure"));
     }
@@ -3131,19 +3849,38 @@ mod camera_retirement_tests {
         let (worker, inbox) = camera_bridge::channel(402);
         host.camera_bridge = Some(worker);
         let mut tasks = openmt2001::timers::startup_tasks([0; 20]);
-        for task in &mut tasks { task[12..16].copy_from_slice(&7.5f32.to_le_bytes()); }
+        for task in &mut tasks {
+            task[12..16].copy_from_slice(&7.5f32.to_le_bytes());
+        }
         inbox.retire();
-        host.complete_camera_central(&mut tasks, camera_bridge::Observation {raw_capture:None,
-            strategic_writeback:None,finalization_fault:None,
-            current: camera_bridge::Pose { eye: [4f32, 5., 6.].map(f32::to_bits),
-                target: [0; 3], up: [0, 1f32.to_bits(), 0] },
-            sampled: None, task_effects: vec![camera_bridge::TaskEffect::ClearElapsed,
-                camera_bridge::TaskEffect::SetEnabled { mask: 2, enabled: false }],
-        }).unwrap();
+        host.complete_camera_central(
+            &mut tasks,
+            camera_bridge::Observation {
+                raw_capture: None,
+                strategic_writeback: None,
+                finalization_fault: None,
+                current: camera_bridge::Pose {
+                    eye: [4f32, 5., 6.].map(f32::to_bits),
+                    target: [0; 3],
+                    up: [0, 1f32.to_bits(), 0],
+                },
+                sampled: None,
+                task_effects: vec![
+                    camera_bridge::TaskEffect::ClearElapsed,
+                    camera_bridge::TaskEffect::SetEnabled {
+                        mask: 2,
+                        enabled: false,
+                    },
+                ],
+            },
+        )
+        .unwrap();
         assert_eq!(host.policy.camera, [4., 5., 6.]);
         for task in &tasks {
             assert_eq!(&task[12..16], &[0; 4]);
-            if u32::from_le_bytes(task[4..8].try_into().unwrap()) & 2 != 0 { assert_eq!(task[0], 0); }
+            if u32::from_le_bytes(task[4..8].try_into().unwrap()) & 2 != 0 {
+                assert_eq!(task[0], 0);
+            }
         }
         assert!(host.stop_retired_camera());
         assert!(host.failure.is_none());
@@ -3154,37 +3891,91 @@ mod camera_retirement_tests {
 mod camera_finalization_fault_tests {
     use super::*;
     #[test]
-    fn real_host_applies_completed_ack_effects_then_fails_before_projection_and_next_work(){
-        let mut host=Host::new([1.,2.,3.]);let (worker,mut inbox)=camera_bridge::channel(801);
-        host.camera_bridge=Some(worker);
-        let ui=std::thread::spawn(move||{
-            let pose=camera_bridge::Pose{eye:[4f32,5.,6.].map(f32::to_bits),target:[0;3],up:[0,1f32.to_bits(),0]};
-            inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
-                assert!(matches!(operation,camera_bridge::Operation::Install{..}));
-                Ok(camera_bridge::Observation{raw_capture:None,current:pose,sampled:None,task_effects:vec![],strategic_writeback:None,finalization_fault:None})
-            }).unwrap();
-            let result=inbox.wait_service(std::time::Duration::from_secs(2),|operation|{
-                assert!(matches!(operation,camera_bridge::Operation::CentralTail{..}));
-                Ok(camera_bridge::Observation{raw_capture:None,current:pose,sampled:None,strategic_writeback:None,
-                    task_effects:vec![camera_bridge::TaskEffect::ClearElapsed,camera_bridge::TaskEffect::SetEnabled{mask:2,enabled:false}],
-                    finalization_fault:Some("C late completed-boundary fault".into())})
+    fn real_host_applies_completed_ack_effects_then_fails_before_projection_and_next_work() {
+        let mut host = Host::new([1., 2., 3.]);
+        let (worker, mut inbox) = camera_bridge::channel(801);
+        host.camera_bridge = Some(worker);
+        let ui = std::thread::spawn(move || {
+            let pose = camera_bridge::Pose {
+                eye: [4f32, 5., 6.].map(f32::to_bits),
+                target: [0; 3],
+                up: [0, 1f32.to_bits(), 0],
+            };
+            inbox
+                .wait_service(std::time::Duration::from_secs(2), |operation| {
+                    assert!(matches!(
+                        operation,
+                        camera_bridge::Operation::Install { .. }
+                    ));
+                    Ok(camera_bridge::Observation {
+                        raw_capture: None,
+                        current: pose,
+                        sampled: None,
+                        task_effects: vec![],
+                        strategic_writeback: None,
+                        finalization_fault: None,
+                    })
+                })
+                .unwrap();
+            let result = inbox.wait_service(std::time::Duration::from_secs(2), |operation| {
+                assert!(matches!(
+                    operation,
+                    camera_bridge::Operation::CentralTail { .. }
+                ));
+                Ok(camera_bridge::Observation {
+                    raw_capture: None,
+                    current: pose,
+                    sampled: None,
+                    strategic_writeback: None,
+                    task_effects: vec![
+                        camera_bridge::TaskEffect::ClearElapsed,
+                        camera_bridge::TaskEffect::SetEnabled {
+                            mask: 2,
+                            enabled: false,
+                        },
+                    ],
+                    finalization_fault: Some("C late completed-boundary fault".into()),
+                })
             });
-            assert_eq!(result,Err("C late completed-boundary fault".into()));
+            assert_eq!(result, Err("C late completed-boundary fault".into()));
             // A real failure remains Failed even if retirement races its ack.
             inbox.retire();
         });
-        host.exchange_camera(camera_bridge::Operation::Install{
-            property:None,capture:openmt2001::camera::bank::Capture::from_records([[0;196];2]),admission:camera_bridge::Admission::default()}).unwrap().unwrap();
-        let completed=host.exchange_camera(camera_bridge::Operation::CentralTail{admission:camera_bridge::Admission::default()}).unwrap().unwrap();
-        let mut tasks=openmt2001::timers::startup_tasks([0;20]);
-        for task in &mut tasks{task[12..16].copy_from_slice(&7.5f32.to_le_bytes());}
-        let error=host.complete_camera_central(&mut tasks,completed).unwrap_err();
-        assert_eq!(error,"C late completed-boundary fault");assert_eq!(host.policy.camera,[1.,2.,3.]);
-        for task in &tasks{assert_eq!(&task[12..16],&[0;4]);
-            if u32::from_le_bytes(task[4..8].try_into().unwrap())&2!=0{assert_eq!(task[0],0);}}
+        host.exchange_camera(camera_bridge::Operation::Install {
+            property: None,
+            capture: openmt2001::camera::bank::Capture::from_records([[0; 196]; 2]),
+            admission: camera_bridge::Admission::default(),
+        })
+        .unwrap()
+        .unwrap();
+        let completed = host
+            .exchange_camera(camera_bridge::Operation::CentralTail {
+                admission: camera_bridge::Admission::default(),
+            })
+            .unwrap()
+            .unwrap();
+        let mut tasks = openmt2001::timers::startup_tasks([0; 20]);
+        for task in &mut tasks {
+            task[12..16].copy_from_slice(&7.5f32.to_le_bytes());
+        }
+        let error = host
+            .complete_camera_central(&mut tasks, completed)
+            .unwrap_err();
+        assert_eq!(error, "C late completed-boundary fault");
+        assert_eq!(host.policy.camera, [1., 2., 3.]);
+        for task in &tasks {
+            assert_eq!(&task[12..16], &[0; 4]);
+            if u32::from_le_bytes(task[4..8].try_into().unwrap()) & 2 != 0 {
+                assert_eq!(task[0], 0);
+            }
+        }
         host.camera_error(camera_bridge::RequestError::Failed(error.clone()));
-        assert_eq!(host.failure.as_deref(),Some(error.as_str()));assert!(!host.running);
-        assert_eq!(host.exchange_camera(camera_bridge::Operation::CurrentPose),Err(camera_bridge::RequestError::Failed(error)));
+        assert_eq!(host.failure.as_deref(), Some(error.as_str()));
+        assert!(!host.running);
+        assert_eq!(
+            host.exchange_camera(camera_bridge::Operation::CurrentPose),
+            Err(camera_bridge::RequestError::Failed(error))
+        );
         ui.join().unwrap();
     }
 }

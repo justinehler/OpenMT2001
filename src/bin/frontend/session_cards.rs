@@ -128,7 +128,8 @@ impl Session<'_> {
                             )
                             .map(|_| ())
                         },
-                    )? {
+                    )?
+                {
                     return Err("unrecognized human card broadcast".into());
                 }
                 Ok(())

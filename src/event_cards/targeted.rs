@@ -302,7 +302,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECTG01");
         assert_eq!(r.word(), 2);
-        assert_eq!(r.word(),0x037f);
+        assert_eq!(r.word(), 0x037f);
         for _ in 0..r.word() {
             let [kind, variant, ui] = std::array::from_fn::<_, 3, _>(|_| r.word());
             let mut players: Vec<Vec<u8>> =

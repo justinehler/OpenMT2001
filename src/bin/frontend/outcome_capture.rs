@@ -37,7 +37,8 @@ pub fn capture(
             text
         })
         .collect();
-    let panel = crate::prompt::Assets::load(&index, &archive, installer, &strings, assets.image).unwrap();
+    let panel =
+        crate::prompt::Assets::load(&index, &archive, installer, &strings, assets.image).unwrap();
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     if cfg!(windows) {
         descriptor.backends = wgpu::Backends::DX12;
@@ -88,7 +89,8 @@ pub fn capture(
         .unwrap();
         requests.push((
             name,
-            crate::prompt::Request { script: None,
+            crate::prompt::Request {
+                script: None,
                 dialog: Some(dialog),
                 title: 0,
                 body: 0,

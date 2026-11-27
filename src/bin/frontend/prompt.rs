@@ -4,7 +4,11 @@ pub fn wrap(tab: &[u8], text: &[u8], width: i32) -> Result<(Vec<usize>, Vec<u8>)
 }
 /// Original4e7b35..4e7b3f applies font-manager5ec before scaling the advance.
 /// Existing gap-zero native observations retain their explicit contract.
-pub fn wrap_with_gap(tab: &[u8], text: &[u8], width: i32, gap: i32,
+pub fn wrap_with_gap(
+    tab: &[u8],
+    text: &[u8],
+    width: i32,
+    gap: i32,
 ) -> Result<(Vec<usize>, Vec<u8>), String> {
     openmt2001::font::Font::parse(tab)?;
     if width <= 0 {
@@ -24,7 +28,9 @@ pub fn wrap_with_gap(tab: &[u8], text: &[u8], width: i32, gap: i32,
                     .try_into()
                     .unwrap(),
             );
-            advance = advance.checked_add(metric.wrapping_add(gap)).ok_or("prompt width overflow")?;
+            advance = advance
+                .checked_add(metric.wrapping_add(gap))
+                .ok_or("prompt width overflow")?;
             if advance >= width && last_space.is_some() {
                 break;
             }
@@ -91,10 +97,14 @@ pub fn literal_glyphs(raw: &[u8], row: &[u8]) -> Result<Vec<u8>, String> {
     let mut i = 0;
     while i < raw.len() && raw[i] != 0 {
         let b = raw[i];
-        if b < 32 && b != 10 { break; }
+        if b < 32 && b != 10 {
+            break;
+        }
         if b == b'%' {
             if raw.get(i + 1) != Some(&b'%') {
-                return Err("Literal prompt argument-consuming or incomplete format is unsupported".into());
+                return Err(
+                    "Literal prompt argument-consuming or incomplete format is unsupported".into(),
+                );
             }
             i += 1;
         }
@@ -103,7 +113,10 @@ pub fn literal_glyphs(raw: &[u8], row: &[u8]) -> Result<Vec<u8>, String> {
                 bytes.push(*row.get(index).ok_or("prompt language map truncated")?);
             }
         } else {
-            bytes.push(*row.get(usize::from(b - 32)).ok_or("prompt language map truncated")?);
+            bytes.push(
+                *row.get(usize::from(b - 32))
+                    .ok_or("prompt language map truncated")?,
+            );
         }
         i += 1;
     }
@@ -120,30 +133,66 @@ fn resource_integer(text: &[u8], row: &[u8], word: u32) -> Result<Vec<u8>, Strin
     let mut used = false;
     let mut at = 0;
     while at < text.len() {
-        if text[at] != percent { result.push(text[at]); at += 1; continue; }
-        let next = *text.get(at + 1).ok_or("resource prompt trailing percent is unsupported")?;
-        if next != d && next != integer {
-            return Err("resource prompt pointer, escape or unproved directive is unsupported".into());
+        if text[at] != percent {
+            result.push(text[at]);
+            at += 1;
+            continue;
         }
-        if used { return Err("resource prompt consumes more than one word".into()); }
+        let next = *text
+            .get(at + 1)
+            .ok_or("resource prompt trailing percent is unsupported")?;
+        if next != d && next != integer {
+            return Err(
+                "resource prompt pointer, escape or unproved directive is unsupported".into(),
+            );
+        }
+        if used {
+            return Err("resource prompt consumes more than one word".into());
+        }
         used = true;
         for byte in (word as i32).to_string().bytes() {
-            result.push(*row.get(usize::from(byte - 32)).ok_or("prompt decimal glyph missing")?);
+            result.push(
+                *row.get(usize::from(byte - 32))
+                    .ok_or("prompt decimal glyph missing")?,
+            );
         }
         at += 2;
     }
     Ok(result)
 }
 
-fn script_field(request: &Request, field: usize, strings: &[Vec<u8>]) -> Result<Option<Vec<Vec<u8>>>, String> {
-    let Some(script) = &request.script else { return Ok(None) };
-    let raw = if field == 0 { &script.title } else { &script.body };
+fn script_field(
+    request: &Request,
+    field: usize,
+    strings: &[Vec<u8>],
+) -> Result<Option<Vec<Vec<u8>>>, String> {
+    let Some(script) = &request.script else {
+        return Ok(None);
+    };
+    let raw = if field == 0 {
+        &script.title
+    } else {
+        &script.body
+    };
     if let Some(raw) = raw {
-        return Ok(Some(vec![literal_glyphs(raw, strings.first().ok_or("prompt map missing")?)?]));
+        return Ok(Some(vec![literal_glyphs(
+            raw,
+            strings.first().ok_or("prompt map missing")?,
+        )?]));
     }
-    let id = if field == 0 { request.title } else { request.body };
-    let text = strings.get(id as usize).ok_or("prompt language ID out of range")?;
-    Ok(Some(vec![resource_integer(text, strings.first().ok_or("prompt map missing")?, script.format_value)?]))
+    let id = if field == 0 {
+        request.title
+    } else {
+        request.body
+    };
+    let text = strings
+        .get(id as usize)
+        .ok_or("prompt language ID out of range")?;
+    Ok(Some(vec![resource_integer(
+        text,
+        strings.first().ok_or("prompt map missing")?,
+        script.format_value,
+    )?]))
 }
 /// Original41c88f..41c966 presentation data. Names remain original ASCII until
 /// insertion into the encoded language text; the amount preserves its float bits.
@@ -171,7 +220,8 @@ pub fn card_request(
     }
     let row = openmt2001::event_cards::lifecycle::card_row(image, notice.card)?;
     let text = u32::from_le_bytes(row[4..8].try_into().unwrap());
-    Ok(Request { script: None,
+    Ok(Request {
+        script: None,
         dialog: None,
         title: 1488,
         body: text.wrapping_add(1),
@@ -496,18 +546,30 @@ fn card_body(request: &Request, strings: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Str
 /// Original4406a0 styles3/4 and4419f0: retain W's measured line height,
 /// independent integer origins/offsets, and complete glyphs. Prompt text does
 /// not enable the optional renderer clipping rectangle (+1b0 remains zero).
-fn text_quads(tab: &[u8], paragraphs: &[Vec<u8>], bounds: [f32; 4],
-    center: bool, x_margin: i32, y_margin: i32, parent_offset: [f32; 2],
+fn text_quads(
+    tab: &[u8],
+    paragraphs: &[Vec<u8>],
+    bounds: [f32; 4],
+    center: bool,
+    x_margin: i32,
+    y_margin: i32,
+    parent_offset: [f32; 2],
 ) -> Result<Vec<openmt2001::font::GlyphQuad>, String> {
     let font = openmt2001::font::Font::parse(tab)?;
     let height_at = 4 + usize::from(b'W' - 32) * 44 + 36;
-    let height = i32::from_le_bytes(tab.get(height_at..height_at + 4)
-        .ok_or("prompt W metric missing")?.try_into().unwrap(),
+    let height = i32::from_le_bytes(
+        tab.get(height_at..height_at + 4)
+            .ok_or("prompt W metric missing")?
+            .try_into()
+            .unwrap(),
     );
     let mut rows = Vec::new();
     for text in paragraphs {
-        let (offsets, copy) = wrap_with_gap(tab, text,
-            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32, -1,
+        let (offsets, copy) = wrap_with_gap(
+            tab,
+            text,
+            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32,
+            -1,
         )?;
         for pair in offsets.windows(2) {
             let end = pair[1].saturating_sub(1).min(copy.len());
@@ -515,21 +577,36 @@ fn text_quads(tab: &[u8], paragraphs: &[Vec<u8>], bounds: [f32; 4],
         }
     }
     let top = (f64::from(bounds[1]) + f64::from(y_margin)).trunc() as f32
-        + ((f64::from(bounds[3]) - f64::from(bounds[1])
-            - rows.len().max(1) as f64 * f64::from(height)) * 0.5).trunc() as f32;
+        + ((f64::from(bounds[3])
+            - f64::from(bounds[1])
+            - rows.len().max(1) as f64 * f64::from(height))
+            * 0.5)
+            .trunc() as f32;
     let mut quads = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let width = ui::text_width(tab, row, 1.)?;
-        let left = bounds[0].trunc() + if center {
-            ((f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(width)
-                + f64::from(x_margin)) * 0.5 + 0.5).trunc() as f32
-        } else { (x_margin + 2) as f32 };
-        quads.extend(font.layout(row, openmt2001::font::Layout {
-            origin: [left + parent_offset[0].trunc(),
-                top + index as f32 * height as f32 + parent_offset[1].trunc(),
-                ], depth: 0.5,
-            scale: 1., gap: -1, baseline: 0,
-        },
+        let left = bounds[0].trunc()
+            + if center {
+                ((f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(width)
+                    + f64::from(x_margin))
+                    * 0.5
+                    + 0.5)
+                    .trunc() as f32
+            } else {
+                (x_margin + 2) as f32
+            };
+        quads.extend(font.layout(
+            row,
+            openmt2001::font::Layout {
+                origin: [
+                    left + parent_offset[0].trunc(),
+                    top + index as f32 * height as f32 + parent_offset[1].trunc(),
+                ],
+                depth: 0.5,
+                scale: 1.,
+                gap: -1,
+                baseline: 0,
+            },
         )?);
     }
     Ok(quads)
@@ -582,7 +659,8 @@ impl Assets {
         };
         let generic = TextureSet::parse(payload("gamedata2/GenericTextures640/textures.gtd")?)
             .map_err(|e| e.to_string())?;
-        let input_bounds=parent_input_bounds(payload("gamedata2/brand_new_panels/prompt_panel.tm")?)?;
+        let input_bounds =
+            parent_input_bounds(payload("gamedata2/brand_new_panels/prompt_panel.tm")?)?;
         let mut portrait =
             Surface::new(generic.textures.get(302).ok_or("prompt portrait missing")?);
         textured_rect(&mut portrait, regions[3]);
@@ -640,21 +718,25 @@ impl Assets {
     }
     /// 429f03..429f64 starts the tutorial arrow at the prompt widget centre.
     pub fn arrow_origin(&self) -> [f32; 2] {
-        [(self.main[0] + self.main[2]) * 0.5,
+        [
+            (self.main[0] + self.main[2]) * 0.5,
             (self.main[1] + self.main[3]) * 0.5,
         ]
     }
     /// Native 4db740 stores the two PositionPrompt coordinates on the prompt
     /// widget. They translate its button and all rendered prompt surfaces.
     pub fn button_at(&self, offset: [f32; 2]) -> [f32; 4] {
-        [self.button[0] + offset[0], self.button[1] + offset[1],
-            self.button[2] + offset[0], self.button[3] + offset[1],
+        [
+            self.button[0] + offset[0],
+            self.button[1] + offset[1],
+            self.button[2] + offset[0],
+            self.button[3] + offset[1],
         ]
     }
     /// Original5254c0+24→43bca0→43bc70 tests the actual visible prompt
     /// parent's mesh rectangle before looking for an enabled button child.
-    pub fn input_occupied(&self,pointer:[f32;2],offset:[f32;2])->bool{
-        parent_input_hit(self.input_bounds,pointer,offset)
+    pub fn input_occupied(&self, pointer: [f32; 2], offset: [f32; 2]) -> bool {
+        parent_input_hit(self.input_bounds, pointer, offset)
     }
     pub fn prepare(&self, renderer: &Renderer, state: &State) -> Result<PreparedScene, String> {
         self.prepare_positioned(renderer, state, [0.; 2])
@@ -668,7 +750,8 @@ impl Assets {
         message: &str,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request { script: None,
+        state.submit(Request {
+            script: None,
             dialog: None,
             title: 1488,
             body: 0,
@@ -686,7 +769,8 @@ impl Assets {
         pressed_button: Option<usize>,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request { script: None,
+        state.submit(Request {
+            script: None,
             dialog: Some(dialog),
             title: dialog.title,
             body: dialog.body,
@@ -697,49 +781,80 @@ impl Assets {
         state.pressed_dialog = pressed_button;
         self.prepare(renderer, &state)
     }
-    pub fn prepare_positioned(&self, renderer: &Renderer, state: &State,
+    pub fn prepare_positioned(
+        &self,
+        renderer: &Renderer,
+        state: &State,
         offset: [f32; 2],
     ) -> Result<PreparedScene, String> {
         self.prepare_with_button(renderer, state, true, offset)
     }
     /// Interface.CreateMessage shares the prompt body but does not create the
     /// OK control that CreatePrompt appends.
-    pub fn prepare_message(&self, renderer: &Renderer, state: &State,
+    pub fn prepare_message(
+        &self,
+        renderer: &Renderer,
+        state: &State,
     ) -> Result<PreparedScene, String> {
         self.prepare_message_positioned(renderer, state, [0.; 2])
     }
-    pub fn prepare_message_positioned(&self, renderer: &Renderer, state: &State,
+    pub fn prepare_message_positioned(
+        &self,
+        renderer: &Renderer,
+        state: &State,
         offset: [f32; 2],
     ) -> Result<PreparedScene, String> {
         self.prepare_with_button(renderer, state, false, offset)
     }
     pub fn desktop_quit_hit_at(&self, cursor: [f32; 2], right: bool) -> Option<usize> {
         use crate::menu::desktop_quit;
-        if right || !desktop_quit::hit(self.input_bounds, cursor) { return None; }
-        self.dialog_buttons(2).iter().position(|bounds| desktop_quit::hit(*bounds, cursor))
+        if right || !desktop_quit::hit(self.input_bounds, cursor) {
+            return None;
+        }
+        self.dialog_buttons(2)
+            .iter()
+            .position(|bounds| desktop_quit::hit(*bounds, cursor))
     }
     pub fn desktop_quit_hit(&self, modal: &crate::menu::desktop_quit::Modal) -> Option<usize> {
-        modal.pointer().and_then(|p| self.desktop_quit_hit_at(p, modal.blocked_by_right()))
+        modal
+            .pointer()
+            .and_then(|p| self.desktop_quit_hit_at(p, modal.blocked_by_right()))
     }
-    pub fn prepare_desktop_quit(&self, renderer: &Renderer,
+    pub fn prepare_desktop_quit(
+        &self,
+        renderer: &Renderer,
         modal: &crate::menu::desktop_quit::Modal,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request { script: None, dialog: Some(crate::menu::desktop_quit::dialog()),
-            title: 1765, body: 1766, dismissal_id: 0, card: None });
+        state.submit(Request {
+            script: None,
+            dialog: Some(crate::menu::desktop_quit::dialog()),
+            title: 1765,
+            body: 1766,
+            dismissal_id: 0,
+            card: None,
+        });
         state.cursor(modal.pointer().unwrap_or([-1.; 2]));
         state.pressed_dialog = modal.pressed_button();
-        let surfaces = self.message_surfaces(&state, true, crate::menu::desktop_quit::OFFSET,
-            Some(modal))?;
+        let surfaces =
+            self.message_surfaces(&state, true, crate::menu::desktop_quit::OFFSET, Some(modal))?;
         self.prepare_surfaces(renderer, &surfaces)
     }
-    fn prepare_with_button(&self, renderer: &Renderer, state: &State,
-        show_button: bool, offset: [f32; 2],
+    fn prepare_with_button(
+        &self,
+        renderer: &Renderer,
+        state: &State,
+        show_button: bool,
+        offset: [f32; 2],
     ) -> Result<PreparedScene, String> {
         let surfaces = self.message_surfaces(state, show_button, offset, None)?;
         self.prepare_surfaces(renderer, &surfaces)
     }
-    fn message_surfaces(&self, state: &State, show_button: bool, offset: [f32; 2],
+    fn message_surfaces(
+        &self,
+        state: &State,
+        show_button: bool,
+        offset: [f32; 2],
         desktop: Option<&crate::menu::desktop_quit::Modal>,
     ) -> Result<Vec<Surface>, String> {
         let request = state.request().ok_or("no active prompt")?;
@@ -752,14 +867,16 @@ impl Assets {
             .dialog
             .map(|d| d.portrait)
             .or_else(|| request.card.map(|c| c.portrait));
-        if desktop.is_none() { surfaces.push(match portrait {
-            Some(302) | None => self.portrait.clone(),
-            Some(portrait) => self
-                .card_portraits
-                .get(portrait.wrapping_sub(263) as usize)
-                .ok_or("Modal portrait leaves original texture registry")?
-                .clone(),
-        }); }
+        if desktop.is_none() {
+            surfaces.push(match portrait {
+                Some(302) | None => self.portrait.clone(),
+                Some(portrait) => self
+                    .card_portraits
+                    .get(portrait.wrapping_sub(263) as usize)
+                    .ok_or("Modal portrait leaves original texture registry")?
+                    .clone(),
+            });
+        }
         let buttons = if show_button {
             request
                 .dialog
@@ -782,8 +899,12 @@ impl Assets {
             if let Some(modal) = desktop {
                 let hover = self.desktop_quit_hit(modal) == Some(i);
                 let mut button = Surface::solid();
-                ui::button_state(&mut button, bounds, crate::menu::desktop_quit::COLORS[i],
-                    modal.button_state(i, hover))?;
+                ui::button_state(
+                    &mut button,
+                    bounds,
+                    crate::menu::desktop_quit::COLORS[i],
+                    modal.button_state(i, hover),
+                )?;
                 surfaces.push(button);
                 continue;
             }
@@ -810,9 +931,16 @@ impl Assets {
                 0,
                 request.dialog.map_or(request.body, |d| d.body),
                 if desktop.is_some() {
-                    [self.main[0], self.main[1], self.main[2],
-                        ((3. * f64::from(self.main[3]) + f64::from(self.main[1])) * 0.25 + 2.) as f32]
-                } else { self.body },
+                    [
+                        self.main[0],
+                        self.main[1],
+                        self.main[2],
+                        ((3. * f64::from(self.main[3]) + f64::from(self.main[1])) * 0.25 + 2.)
+                            as f32,
+                    ]
+                } else {
+                    self.body
+                },
                 desktop.is_some(), // original no-portrait format(4,4); portrait path unchanged
                 4,
             ),
@@ -835,10 +963,15 @@ impl Assets {
         let mut text_fields = text_fields.into_iter().enumerate().collect::<Vec<_>>();
         text_fields.swap(0, 1);
         let text_surface_start = surfaces.len();
-        for (field_index, (font, id, bounds, center, margin)) in text_fields
-        {
-            let scripted = if field_index < 2 { script_field(&request, field_index, &self.strings)? } else { None };
-            let formatted = if scripted.is_some() { scripted } else if font == 0 && state.literal_body.is_some() {
+        for (field_index, (font, id, bounds, center, margin)) in text_fields {
+            let scripted = if field_index < 2 {
+                script_field(&request, field_index, &self.strings)?
+            } else {
+                None
+            };
+            let formatted = if scripted.is_some() {
+                scripted
+            } else if font == 0 && state.literal_body.is_some() {
                 Some(vec![state.literal_body.clone().unwrap()])
             } else if field_index == 0
                 && let Some(dialog) = request.dialog
@@ -853,13 +986,34 @@ impl Assets {
             } else {
                 None
             };
-            let ordinary = if formatted.is_none() { vec![self.strings.get(id as usize).ok_or("prompt language ID out of range")?.clone()] } else { Vec::new() };
+            let ordinary = if formatted.is_none() {
+                vec![
+                    self.strings
+                        .get(id as usize)
+                        .ok_or("prompt language ID out of range")?
+                        .clone(),
+                ]
+            } else {
+                Vec::new()
+            };
             let paragraphs = formatted.as_ref().unwrap_or(&ordinary);
             let mut pages = self.fonts[font].clone();
-            for quad in text_quads(&self.tabs[font], paragraphs, bounds, center, margin, margin, offset,
+            for quad in text_quads(
+                &self.tabs[font],
+                paragraphs,
+                bounds,
+                center,
+                margin,
+                margin,
+                offset,
             )? {
-                pages.get_mut(quad.page).ok_or("prompt glyph page missing")?
-                    .quad(quad.positions.map(|p| [p[0], p[1]]), quad.uv, [0xffffffff; 4],
+                pages
+                    .get_mut(quad.page)
+                    .ok_or("prompt glyph page missing")?
+                    .quad(
+                        quad.positions.map(|p| [p[0], p[1]]),
+                        quad.uv,
+                        [0xffffffff; 4],
                     );
             }
             surfaces.extend(pages);
@@ -872,7 +1026,11 @@ impl Assets {
         }
         Ok(surfaces)
     }
-    fn prepare_surfaces(&self, renderer: &Renderer, surfaces: &[Surface]) -> Result<PreparedScene, String> {
+    fn prepare_surfaces(
+        &self,
+        renderer: &Renderer,
+        surfaces: &[Surface],
+    ) -> Result<PreparedScene, String> {
         let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
         renderer.prepare(
             &draws,
@@ -986,21 +1144,25 @@ mod tests {
     #[test]
     #[ignore = "original prompt complete glyph streams at037f"]
     fn matches_native_prompt_text_geometry() {
-        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("work/frontend/native-prompt-text.bin"),
-        ).unwrap();
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("work/frontend/native-prompt-text.bin"),
+        )
+        .unwrap();
         assert_eq!(&bytes[..8], b"MTPGTX01");
         let mut at = 8;
         let word = |at: &mut usize| {
             let value = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());
-            *at += 4; value
+            *at += 4;
+            value
         };
         assert_eq!(word(&mut at), 0x037f);
         let mut fonts = std::collections::BTreeMap::new();
         for _ in 0..word(&mut at) {
             let key = word(&mut at);
             let length = word(&mut at) as usize;
-            fonts.insert(key, &bytes[at..at + length]); at += length;
+            fonts.insert(key, &bytes[at..at + length]);
+            at += length;
         }
         for case in 0..word(&mut at) {
             let font = word(&mut at);
@@ -1012,11 +1174,19 @@ mod tests {
             let mut paragraphs = Vec::new();
             for _ in 0..word(&mut at) {
                 let length = word(&mut at) as usize;
-                paragraphs.push(bytes[at..at + length].to_vec()); at += length;
+                paragraphs.push(bytes[at..at + length].to_vec());
+                at += length;
             }
-            let quads = super::text_quads(fonts[&font], &paragraphs, bounds,
-                style == 4, x_margin, y_margin, parent_offset,
-            ).unwrap();
+            let quads = super::text_quads(
+                fonts[&font],
+                &paragraphs,
+                bounds,
+                style == 4,
+                x_margin,
+                y_margin,
+                parent_offset,
+            )
+            .unwrap();
             for page in 0..2 {
                 let count = word(&mut at) as usize;
                 let actual = quads.iter().filter(|q| q.page == page).collect::<Vec<_>>();
@@ -1024,16 +1194,22 @@ mod tests {
                 for (glyph, quad) in actual.iter().enumerate() {
                     for corner in 0..4 {
                         for axis in 0..3 {
-                            assert_eq!(quad.positions[corner][axis].to_bits(), word(&mut at),
-                                "native prompt case{case} glyph{glyph} position{corner}/{axis}");
+                            assert_eq!(
+                                quad.positions[corner][axis].to_bits(),
+                                word(&mut at),
+                                "native prompt case{case} glyph{glyph} position{corner}/{axis}"
+                            );
                         }
                     }
                 }
                 for (glyph, quad) in actual.iter().enumerate() {
                     for corner in 0..4 {
                         for axis in 0..2 {
-                            assert_eq!(quad.uv[corner][axis].to_bits(), word(&mut at),
-                                "native prompt case{case} glyph{glyph} uv{corner}/{axis}");
+                            assert_eq!(
+                                quad.uv[corner][axis].to_bits(),
+                                word(&mut at),
+                                "native prompt case{case} glyph{glyph} uv{corner}/{axis}"
+                            );
                         }
                     }
                 }
@@ -1044,7 +1220,8 @@ mod tests {
     #[test]
     fn deferred_worker_callback_preserves_full_queue_replacement() {
         let mut state = super::State::default();
-        let request = |id| super::Request { script: None,
+        let request = |id| super::Request {
+            script: None,
             title: id,
             body: id,
             dismissal_id: id,
@@ -1128,7 +1305,8 @@ mod tests {
             let expected_steps = read(&mut at);
             let remaining = read(&mut at) as i32;
             let mut state = super::State::default();
-            state.submit(super::Request { script: None,
+            state.submit(super::Request {
+                script: None,
                 title: 1,
                 body: 2,
                 dismissal_id: 3,
@@ -1151,7 +1329,8 @@ mod tests {
     fn dismissal_callback_runs_before_slot_is_freed() {
         let mut state = super::State::default();
         for id in 1..=4 {
-            state.submit(super::Request { script: None,
+            state.submit(super::Request {
+                script: None,
                 title: id,
                 body: id,
                 dismissal_id: id,
@@ -1164,7 +1343,8 @@ mod tests {
                 assert_eq!(id, 1);
                 assert_eq!(s.request().unwrap().dismissal_id, 1);
                 let replaced = s
-                    .submit(super::Request { script: None,
+                    .submit(super::Request {
+                        script: None,
                         title: 5,
                         body: 5,
                         dismissal_id: 5,
@@ -1200,7 +1380,8 @@ mod tests {
                 let command = word(&bytes, &mut at);
                 let event = word(&bytes, &mut at);
                 let actual = if command != 0 {
-                    state.submit(super::Request { script: None,
+                    state.submit(super::Request {
+                        script: None,
                         title: command,
                         body: command,
                         dismissal_id: command,
@@ -1232,7 +1413,8 @@ mod tests {
         let mut state = super::State::default();
         let bounds = [10., 10., 70., 34.];
         for id in [0, 1, u32::MAX] {
-            state.submit(super::Request { script: None,
+            state.submit(super::Request {
+                script: None,
                 title: 1898,
                 body: 1899,
                 dismissal_id: id,
@@ -1257,41 +1439,52 @@ mod tests {
     #[test]
     #[ignore = "private original prompt wrapping fixture"]
     fn matches_native_prompt_wrap() {
-        check_native_prompt_wrap("OPENMT2001_NATIVE_PROMPT_WRAP",0);
+        check_native_prompt_wrap("OPENMT2001_NATIVE_PROMPT_WRAP", 0);
     }
     #[test]
     #[ignore = "private original production prompt font gap−1/037f wrapping fixture"]
     fn matches_native_production_prompt_wrap() {
-        check_native_prompt_wrap("OPENMT2001_NATIVE_PRODUCTION_PROMPT_WRAP",-1);
+        check_native_prompt_wrap("OPENMT2001_NATIVE_PRODUCTION_PROMPT_WRAP", -1);
     }
     #[test]
     #[ignore = "private original prompt mesh and native parent input fixture"]
-    fn matches_native_prompt_parent_input(){
-        let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
-        let bytes=read("OPENMT2001_NATIVE_PROMPT_INPUT");
-        assert_eq!(&bytes[..8],b"MTPINP01");
-        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()),0x037f);
-        let directory=read("OPENMT2001_ARCHIVE_DIR");
-        let archive=read("OPENMT2001_ARCHIVE_BIN");
-        let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-        let entry=index.find("gamedata2/brand_new_panels/prompt_panel.tm").unwrap();
-        let bounds=super::parent_input_bounds(&archive[entry.offset as usize..(entry.offset+entry.length) as usize],
-        ).unwrap();
-        for (i,bound) in bounds.iter().enumerate(){
-            assert_eq!(bound.to_bits(),u32::from_le_bytes(bytes[12+i*4..16+i*4].try_into().unwrap()));
+    fn matches_native_prompt_parent_input() {
+        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let bytes = read("OPENMT2001_NATIVE_PROMPT_INPUT");
+        assert_eq!(&bytes[..8], b"MTPINP01");
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
+        let directory = read("OPENMT2001_ARCHIVE_DIR");
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let entry = index
+            .find("gamedata2/brand_new_panels/prompt_panel.tm")
+            .unwrap();
+        let bounds = super::parent_input_bounds(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
+        for (i, bound) in bounds.iter().enumerate() {
+            assert_eq!(
+                bound.to_bits(),
+                u32::from_le_bytes(bytes[12 + i * 4..16 + i * 4].try_into().unwrap())
+            );
         }
-        let count=u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
-        assert_eq!(bytes.len(),36+count*24);
-        for row in bytes[36..].chunks_exact(24){
-            let word=|at|u32::from_le_bytes(row[at..at+4].try_into().unwrap());
-            let offset=[f32::from_bits(word(0)),f32::from_bits(word(4))];
-            let visible=word(8)!=0;
-            let pointer=[word(12) as i32 as f32,word(16) as i32 as f32];
-            assert_eq!(visible&&super::parent_input_hit(bounds,pointer,offset),word(20)!=0,
-                "native prompt visible={visible} offset={offset:?} pointer={pointer:?}");
+        let count = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
+        assert_eq!(bytes.len(), 36 + count * 24);
+        for row in bytes[36..].chunks_exact(24) {
+            let word = |at| u32::from_le_bytes(row[at..at + 4].try_into().unwrap());
+            let offset = [f32::from_bits(word(0)), f32::from_bits(word(4))];
+            let visible = word(8) != 0;
+            let pointer = [word(12) as i32 as f32, word(16) as i32 as f32];
+            assert_eq!(
+                visible && super::parent_input_hit(bounds, pointer, offset),
+                word(20) != 0,
+                "native prompt visible={visible} offset={offset:?} pointer={pointer:?}"
+            );
         }
     }
-    fn check_native_prompt_wrap(key:&str,gap:i32) {
+    fn check_native_prompt_wrap(key: &str, gap: i32) {
         let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
         assert_eq!(&bytes[..8], b"MTPWRP01");
         let mut at = 8;
@@ -1319,7 +1512,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let copy = &bytes[at..at + len];
             at += len;
-            let actual = super::wrap_with_gap(fonts[font], text, width as i32,gap).unwrap();
+            let actual = super::wrap_with_gap(fonts[font], text, width as i32, gap).unwrap();
             assert_eq!(actual.0, expected, "case{case} id{id} width{width}");
             assert_eq!(actual.1, copy);
         }
@@ -1387,7 +1580,8 @@ fn original_human_dialog_resources() {
         "Dog has made an offer of 1750 for ATLANTIC AVENUE. What would you like to do?"
     );
     let mut state = State::default();
-    state.submit(Request { script: None,
+    state.submit(Request {
+        script: None,
         title: 0,
         body: 0,
         dismissal_id: 0,
@@ -1427,30 +1621,52 @@ fn original_human_dialog_resources() {
         let panel = assets.prepare(&renderer, &state).unwrap();
         crate::capture_test::capture_standalone(&renderer, &panel, &path);
         let mut tip = State::default();
-        tip.submit(Request { script: None, title: 1934, body: 1935, dismissal_id: 1,
-            dialog: None, card: None,
+        tip.submit(Request {
+            script: None,
+            title: 1934,
+            body: 1935,
+            dismissal_id: 1,
+            dialog: None,
+            card: None,
         });
         tip.cursor([-1.; 2]);
         let panel = assets.prepare(&renderer, &tip).unwrap();
-        crate::capture_test::capture_standalone(&renderer, &panel,
+        crate::capture_test::capture_standalone(
+            &renderer,
+            &panel,
             "work/frontend/popup-starting-out-native-text.png",
         );
-        let panel = assets.prepare_message_positioned(&renderer, &tip, [0., -140.]).unwrap();
-        crate::capture_test::capture_standalone(&renderer, &panel,
+        let panel = assets
+            .prepare_message_positioned(&renderer, &tip, [0., -140.])
+            .unwrap();
+        crate::capture_test::capture_standalone(
+            &renderer,
+            &panel,
             "work/frontend/popup-positioned-message-native-text.png",
         );
         let mut actor = vec![0; 0x220];
         actor[0x150..0x154].copy_from_slice(&2u32.to_le_bytes());
         actor[0x158..0x15e].copy_from_slice(b"Justin");
         let mut card = State::default();
-        card.submit(card_request(&image, &actor, openmt2001::event_cards::effects::Notice {
-            player: 0, card: 16, enabled: true, affected: true, amount: -1234.125,
-        },
-            ).unwrap(),
+        card.submit(
+            card_request(
+                &image,
+                &actor,
+                openmt2001::event_cards::effects::Notice {
+                    player: 0,
+                    card: 16,
+                    enabled: true,
+                    affected: true,
+                    amount: -1234.125,
+                },
+            )
+            .unwrap(),
         );
         card.cursor([-1.; 2]);
         let panel = assets.prepare(&renderer, &card).unwrap();
-        crate::capture_test::capture_standalone(&renderer, &panel,
+        crate::capture_test::capture_standalone(
+            &renderer,
+            &panel,
             "work/frontend/popup-card-native-text.png",
         );
     }
@@ -1493,87 +1709,179 @@ mod route_error_text_tests {
 mod owned_script_tests {
     use super::*;
     fn request(id: u32) -> Request {
-        Request { title: 0, body: 0, dismissal_id: id, dialog: None, card: None,
-            script: Some(ScriptText { title: Some(format!("Synthetic {id}").into_bytes().into()),
-                body: Some(b"A test zone is available.".as_slice().into()), format_value: 0 }) }
+        Request {
+            title: 0,
+            body: 0,
+            dismissal_id: id,
+            dialog: None,
+            card: None,
+            script: Some(ScriptText {
+                title: Some(format!("Synthetic {id}").into_bytes().into()),
+                body: Some(b"A test zone is available.".as_slice().into()),
+                format_value: 0,
+            }),
+        }
     }
     #[test]
     fn byte_mapping_and_safe_format_policy() {
         let row: Vec<u8> = (0..224).map(|i| (i as u8).wrapping_add(7)).collect();
-        assert_eq!(literal_glyphs(b"A%%\n\xff\0ignored", &row).unwrap(),
-            vec![row[33],row[5],row[0x3c],row[0x4e],row[223]]);
+        assert_eq!(
+            literal_glyphs(b"A%%\n\xff\0ignored", &row).unwrap(),
+            vec![row[33], row[5], row[0x3c], row[0x4e], row[223]]
+        );
         for end in [b'\r', b'\t', 1] {
-            assert_eq!(literal_glyphs(&[b'A', end, b'B'], &row).unwrap(), vec![row[33]]);
+            assert_eq!(
+                literal_glyphs(&[b'A', end, b'B'], &row).unwrap(),
+                vec![row[33]]
+            );
         }
-        for raw in [b"%s".as_slice(), b"%d", b"%", b"%08x"] { assert!(literal_glyphs(raw, &row).is_err()); }
+        for raw in [b"%s".as_slice(), b"%d", b"%", b"%08x"] {
+            assert!(literal_glyphs(raw, &row).is_err());
+        }
     }
     #[test]
     fn four_owned_slots_replacement_and_deferred_callback() {
         let mut state = State::default();
-        for id in 1..=4 { state.submit(request(id)); }
+        for id in 1..=4 {
+            state.submit(request(id));
+        }
         let retained = state.request().unwrap();
         assert_eq!(state.begin_dismiss(), Some(1));
         state.finish_dismiss(vec![request(5)]);
-        for id in [2,3,5] {
+        for id in [2, 3, 5] {
             let r = state.request().unwrap();
-            assert_eq!(r.script.unwrap().title.unwrap().as_ref(), format!("Synthetic {id}").as_bytes());
-            assert_eq!(state.dismiss_with(|_,_|{}), Some(id));
+            assert_eq!(
+                r.script.unwrap().title.unwrap().as_ref(),
+                format!("Synthetic {id}").as_bytes()
+            );
+            assert_eq!(state.dismiss_with(|_, _| {}), Some(id));
         }
-        assert_eq!(retained.script.unwrap().title.unwrap().as_ref(), b"Synthetic 1");
+        assert_eq!(
+            retained.script.unwrap().title.unwrap().as_ref(),
+            b"Synthetic 1"
+        );
         assert!(state.request().is_none());
     }
     #[test]
     fn render_preparation_bypasses_missing_resource_and_formats_numeric_field() {
         let mut rows = vec![(0..224).map(|i| i as u8).collect::<Vec<_>>()];
-        rows.push(b"%d".iter().map(|b| b-32).collect());
-        rows.push(vec![33,34]);
+        rows.push(b"%d".iter().map(|b| b - 32).collect());
+        rows.push(vec![33, 34]);
         let mut r = request(1);
         r.title = u32::MAX;
-        assert_eq!(script_field(&r,0,&rows).unwrap().unwrap()[0], literal_glyphs(b"Synthetic 1",&rows[0]).unwrap());
-        r.body=1; r.script.as_mut().unwrap().body=None; r.script.as_mut().unwrap().format_value=2;
-        assert_eq!(script_field(&r,1,&rows).unwrap(),Some(vec![vec![18]]));
+        assert_eq!(
+            script_field(&r, 0, &rows).unwrap().unwrap()[0],
+            literal_glyphs(b"Synthetic 1", &rows[0]).unwrap()
+        );
+        r.body = 1;
+        r.script.as_mut().unwrap().body = None;
+        r.script.as_mut().unwrap().format_value = 2;
+        assert_eq!(script_field(&r, 1, &rows).unwrap(), Some(vec![vec![18]]));
     }
 }
 
 #[cfg(test)]
 mod resource_integer_tests {
     use super::*;
-    fn encoded(raw: &[u8], row: &[u8]) -> Vec<u8> { raw.iter().map(|b|row[usize::from(b-32)]).collect() }
+    fn encoded(raw: &[u8], row: &[u8]) -> Vec<u8> {
+        raw.iter().map(|b| row[usize::from(b - 32)]).collect()
+    }
     #[test]
     fn signed_decimal_is_not_a_language_reference() {
-        for shift in [0u8,17] {
-            let row: Vec<u8> = (0..224).map(|i|(i as u8).wrapping_add(shift)).collect();
-            let mut strings=vec![row.clone();8];
-            strings[1]=encoded(b"Count %d",&row); strings[7]=encoded(b"Other",&row);
-            let mut r=Request { title:1,body:1,dismissal_id:0,dialog:None,card:None,
-                script:Some(ScriptText{title:None,body:None,format_value:7}) };
-            assert_eq!(script_field(&r,0,&strings).unwrap(),Some(vec![encoded(b"Count 7",&row)]));
-            for (word,expected) in [(u32::MAX,b"Count -1".as_slice()),(0,b"Count 0")] {
-                r.script.as_mut().unwrap().format_value=word;
-                assert_eq!(script_field(&r,1,&strings).unwrap(),Some(vec![encoded(expected,&row)]));
+        for shift in [0u8, 17] {
+            let row: Vec<u8> = (0..224).map(|i| (i as u8).wrapping_add(shift)).collect();
+            let mut strings = vec![row.clone(); 8];
+            strings[1] = encoded(b"Count %d", &row);
+            strings[7] = encoded(b"Other", &row);
+            let mut r = Request {
+                title: 1,
+                body: 1,
+                dismissal_id: 0,
+                dialog: None,
+                card: None,
+                script: Some(ScriptText {
+                    title: None,
+                    body: None,
+                    format_value: 7,
+                }),
+            };
+            assert_eq!(
+                script_field(&r, 0, &strings).unwrap(),
+                Some(vec![encoded(b"Count 7", &row)])
+            );
+            for (word, expected) in [(u32::MAX, b"Count -1".as_slice()), (0, b"Count 0")] {
+                r.script.as_mut().unwrap().format_value = word;
+                assert_eq!(
+                    script_field(&r, 1, &strings).unwrap(),
+                    Some(vec![encoded(expected, &row)])
+                );
             }
-            assert_eq!(resource_integer(&encoded(b"%i",&row),&row,u32::MAX).unwrap(),encoded(b"-1",&row));
-            for raw in [b"Count %".as_slice(),b"%%",b"%%s",b"%d %i",b"%s",b"%07d"] {
-                assert!(resource_integer(&encoded(raw,&row),&row,7).is_err(),"{raw:?}");
+            assert_eq!(
+                resource_integer(&encoded(b"%i", &row), &row, u32::MAX).unwrap(),
+                encoded(b"-1", &row)
+            );
+            for raw in [
+                b"Count %".as_slice(),
+                b"%%",
+                b"%%s",
+                b"%d %i",
+                b"%s",
+                b"%07d",
+            ] {
+                assert!(
+                    resource_integer(&encoded(raw, &row), &row, 7).is_err(),
+                    "{raw:?}"
+                );
             }
         }
     }
     #[test]
     fn actual_synthetic_font_quads_from_prepared_script_fields() {
-        let row: Vec<u8>=(0..224).map(|i|i as u8).collect();
-        let r=Request{title:u32::MAX,body:u32::MAX,dismissal_id:0,dialog:None,card:None,
-            script:Some(ScriptText{title:Some(b"AB".as_slice().into()),body:Some(b"CD".as_slice().into()),format_value:0})};
-        let mut tab=vec![0;4+224*44]; tab[..4].copy_from_slice(&224u32.to_le_bytes());
+        let row: Vec<u8> = (0..224).map(|i| i as u8).collect();
+        let r = Request {
+            title: u32::MAX,
+            body: u32::MAX,
+            dismissal_id: 0,
+            dialog: None,
+            card: None,
+            script: Some(ScriptText {
+                title: Some(b"AB".as_slice().into()),
+                body: Some(b"CD".as_slice().into()),
+                format_value: 0,
+            }),
+        };
+        let mut tab = vec![0; 4 + 224 * 44];
+        tab[..4].copy_from_slice(&224u32.to_le_bytes());
         for glyph in tab[4..].chunks_exact_mut(44) {
-            glyph[32..36].copy_from_slice(&8i32.to_le_bytes()); glyph[36..40].copy_from_slice(&12i32.to_le_bytes());
+            glyph[32..36].copy_from_slice(&8i32.to_le_bytes());
+            glyph[36..40].copy_from_slice(&12i32.to_le_bytes());
         }
         // Real field resolution -> wrap -> Font::layout, body first, then centered title.
-        let body=text_quads(&tab,&script_field(&r,1,&[row.clone()]).unwrap().unwrap(),[0.,0.,100.,24.],false,0,0,[0.,0.]).unwrap();
-        let title=text_quads(&tab,&script_field(&r,0,&[row]).unwrap().unwrap(),[0.,0.,100.,24.],true,0,0,[0.,0.]).unwrap();
-        assert_eq!(body.len(),2); assert_eq!(title.len(),2);
-        assert_eq!(body[0].positions[0][0],1.5);
-        assert!(title[0].positions[0][0]>body[0].positions[0][0]);
-        assert_eq!(body[1].positions[0][0]-body[0].positions[0][0],7.);
+        let body = text_quads(
+            &tab,
+            &script_field(&r, 1, &[row.clone()]).unwrap().unwrap(),
+            [0., 0., 100., 24.],
+            false,
+            0,
+            0,
+            [0., 0.],
+        )
+        .unwrap();
+        let title = text_quads(
+            &tab,
+            &script_field(&r, 0, &[row]).unwrap().unwrap(),
+            [0., 0., 100., 24.],
+            true,
+            0,
+            0,
+            [0., 0.],
+        )
+        .unwrap();
+        assert_eq!(body.len(), 2);
+        assert_eq!(title.len(), 2);
+        assert_eq!(body[0].positions[0][0], 1.5);
+        assert!(title[0].positions[0][0] > body[0].positions[0][0]);
+        assert_eq!(body[1].positions[0][0] - body[0].positions[0][0], 7.);
     }
 }
 
@@ -1590,78 +1898,179 @@ mod desktop_quit_assets_tests {
         let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
         let installer = parameter.parent().unwrap().parent().unwrap();
         let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let language = exe.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let language = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
         let offsets = fs::read(language.join("tycoon.off")).unwrap();
         let bytes = fs::read(language.join("tycoon.bin")).unwrap();
         let mut at = 0;
-        let strings = offsets.chunks_exact(2).map(|n| {
-            let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
-            let row = &bytes[at..end]; at = end; row
-        }).collect::<Vec<_>>();
+        let strings = offsets
+            .chunks_exact(2)
+            .map(|n| {
+                let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                let row = &bytes[at..end];
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let assets = Assets::load(&index, &archive, installer, &strings, &image).unwrap();
-        let mut modal = crate::menu::desktop_quit::Modal::default(); modal.open(None);
+        let mut modal = crate::menu::desktop_quit::Modal::default();
+        modal.open(None);
         let mut state = State::default();
-        state.submit(Request { script: None, dialog: Some(crate::menu::desktop_quit::dialog()),
-            title: 1765, body: 1766, dismissal_id: 0, card: None });
-        let surfaces = assets.message_surfaces(&state, true, [-40., 0.], Some(&modal)).unwrap();
-        assert_eq!(assets.main.map(f32::to_bits),
-            [224.8000030517578_f32, 180.29209899902344, 505.18377685546875, 303.6317138671875].map(f32::to_bits));
-        assert_eq!(assets.input_bounds[0].to_bits(), 224.00448608398438_f32.to_bits());
+        state.submit(Request {
+            script: None,
+            dialog: Some(crate::menu::desktop_quit::dialog()),
+            title: 1765,
+            body: 1766,
+            dismissal_id: 0,
+            card: None,
+        });
+        let surfaces = assets
+            .message_surfaces(&state, true, [-40., 0.], Some(&modal))
+            .unwrap();
+        assert_eq!(
+            assets.main.map(f32::to_bits),
+            [
+                224.8000030517578_f32,
+                180.29209899902344,
+                505.18377685546875,
+                303.6317138671875
+            ]
+            .map(f32::to_bits)
+        );
+        assert_eq!(
+            assets.input_bounds[0].to_bits(),
+            224.00448608398438_f32.to_bits()
+        );
         // Shared mesh parts retain their authored positions, shifted once.
         for (base, actual) in assets.base.iter().zip(&surfaces) {
             for (before, after) in base.vertices.iter().zip(&actual.vertices) {
-                assert_eq!(after[0], before[0]-40.); assert_eq!(after[1], before[1]);
+                assert_eq!(after[0], before[0] - 40.);
+                assert_eq!(after[1], before[1]);
             }
         }
         let base = assets.base.len();
-        let green = &surfaces[base+1]; let red = &surfaces[base+2];
+        let green = &surfaces[base + 1];
+        let red = &surfaces[base + 2];
         // No portrait surface between title and two SOLID colored backgrounds.
         assert_eq!([green.width, green.height, red.width, red.height], [1; 4]);
-        assert!(green.vertices.iter().any(|v| v[3] == 80. / 255. && v[4] == 148. / 255. && v[5] == 34. / 255.));
-        assert!(red.vertices.iter().any(|v| v[3] == 175. / 255. && v[4] == 6. / 255. && v[5] == 6. / 255.));
-        assert!(assets.desktop_quit_hit_at([250., 274.79681396484375], false).is_some());
-        assert_eq!(assets.desktop_quit_hit_at([250., 274.79681396484375], true), None);
+        assert!(
+            green
+                .vertices
+                .iter()
+                .any(|v| v[3] == 80. / 255. && v[4] == 148. / 255. && v[5] == 34. / 255.)
+        );
+        assert!(
+            red.vertices
+                .iter()
+                .any(|v| v[3] == 175. / 255. && v[4] == 6. / 255. && v[5] == 6. / 255.)
+        );
+        assert!(
+            assets
+                .desktop_quit_hit_at([250., 274.79681396484375], false)
+                .is_some()
+        );
+        assert_eq!(
+            assets.desktop_quit_hit_at([250., 274.79681396484375], true),
+            None
+        );
         // Exact USA language identity prevents accidentally using the unpatched table.
-        let decode = |id: usize| assets.strings[id].iter().map(|b| b+32).collect::<Vec<_>>();
+        let decode = |id: usize| {
+            assets.strings[id]
+                .iter()
+                .map(|b| b + 32)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(decode(1765), b"QUIT TO DESKTOP");
         assert_eq!(decode(1766), b"Do you want to quit Monopoly Tycoon?");
-        assert_eq!(decode(1636), b"Yes"); assert_eq!(decode(1637), b"No");
+        assert_eq!(decode(1636), b"Yes");
+        assert_eq!(decode(1637), b"No");
         // Body spans the whole default main width, centered with original4/4
         // layout, instead of reserving the portrait-right column.
-        let body_bounds = [assets.main[0], assets.main[1], assets.main[2], 274.79681396484375];
-        let body = text_quads(&assets.tabs[0], &[assets.strings[1766].clone()],
-            body_bounds, true, 4, 4, [-40., 0.]).unwrap();
+        let body_bounds = [
+            assets.main[0],
+            assets.main[1],
+            assets.main[2],
+            274.79681396484375,
+        ];
+        let body = text_quads(
+            &assets.tabs[0],
+            &[assets.strings[1766].clone()],
+            body_bounds,
+            true,
+            4,
+            4,
+            [-40., 0.],
+        )
+        .unwrap();
         assert!(!body.is_empty());
-        assert!(body.iter().flat_map(|q| q.positions).any(|p| p[0] < 261.96099853515625));
-        let body_pages = &surfaces[base+3..base+3+assets.fonts[0].len()];
-        assert!(body_pages.iter().flat_map(|s| &s.vertices).any(|v| v[0] < 261.96099853515625));
+        assert!(
+            body.iter()
+                .flat_map(|q| q.positions)
+                .any(|p| p[0] < 261.96099853515625)
+        );
+        let body_pages = &surfaces[base + 3..base + 3 + assets.fonts[0].len()];
+        assert!(
+            body_pages
+                .iter()
+                .flat_map(|s| &s.vertices)
+                .any(|v| v[0] < 261.96099853515625)
+        );
         // Existing ordinary dialog defaults still include portrait302 and keep
         // the historical portrait-column bounds. This variant is not global.
-        let ordinary = assets.message_surfaces(&state, true, [0.; 2], None).err().expect("ordinary sentinel must remain unsupported");
+        let ordinary = assets
+            .message_surfaces(&state, true, [0.; 2], None)
+            .err()
+            .expect("ordinary sentinel must remain unsupported");
         assert!(ordinary.contains("portrait")); // sentinel unsupported outside dedicated variant
         let mut ordinary_state = State::default();
-        ordinary_state.submit(Request { script: None,
-            dialog: Some(crate::human_dialog::Dialog { title:1765, body:1766,
-                buttons:[1636,1637], button_count:2, timeout:false,
-                ..Default::default() }), title:1765, body:1766, dismissal_id:0, card:None });
-        let ordinary = assets.message_surfaces(&ordinary_state, true, [0.;2], None).unwrap();
-        assert_eq!(ordinary[base+1].vertices, assets.portrait.vertices);
+        ordinary_state.submit(Request {
+            script: None,
+            dialog: Some(crate::human_dialog::Dialog {
+                title: 1765,
+                body: 1766,
+                buttons: [1636, 1637],
+                button_count: 2,
+                timeout: false,
+                ..Default::default()
+            }),
+            title: 1765,
+            body: 1766,
+            dismissal_id: 0,
+            card: None,
+        });
+        let ordinary = assets
+            .message_surfaces(&ordinary_state, true, [0.; 2], None)
+            .unwrap();
+        assert_eq!(ordinary[base + 1].vertices, assets.portrait.vertices);
         #[cfg(feature = "capture")]
         if let Ok(path) = std::env::var("OPENMT2001_DESKTOP_QUIT_CAPTURE") {
             let path = std::path::PathBuf::from(path);
             assert!(path.is_dir(), "supply an owned existing output directory");
             let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-            if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+            if cfg!(windows) {
+                descriptor.backends = wgpu::Backends::DX12;
+            }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
             for (name, point, pressed) in [
-                ("idle", None, false), ("yes-hover", Some([250.,280.]), false),
-                ("yes-pressed", Some([250.,280.]), true), ("no-hover", Some([370.,280.]), false),
+                ("idle", None, false),
+                ("yes-hover", Some([250., 280.]), false),
+                ("yes-pressed", Some([250., 280.]), true),
+                ("no-hover", Some([370., 280.]), false),
             ] {
                 modal.cancel_pointer();
-                if let Some(point) = point { modal.cursor(point); }
-                if pressed { let hit = assets.desktop_quit_hit(&modal); modal.left(true, hit); }
+                if let Some(point) = point {
+                    modal.cursor(point);
+                }
+                if pressed {
+                    let hit = assets.desktop_quit_hit(&modal);
+                    modal.left(true, hit);
+                }
                 let panel = assets.prepare_desktop_quit(&renderer, &modal).unwrap();
                 let file = path.join(format!("desktop-quit-{name}.png"));
                 crate::capture_test::capture_standalone(&renderer, &panel, file.to_str().unwrap());

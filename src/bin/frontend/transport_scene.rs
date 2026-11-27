@@ -9,11 +9,23 @@ pub struct Resources {
 }
 
 fn submitted_model(reference: u32) -> bool {
-    matches!(reference,
-        0x6887e0 | 0x6887f0 | 0x688800
-        | 0x688880 | 0x688890 | 0x6888a0
-        | 0x688db0 | 0x688dc0 | 0x688dd0 | 0x688de0
-        | 0x689970 | 0x688b98 | 0x6896e8 | 0x687830)
+    matches!(
+        reference,
+        0x6887e0
+            | 0x6887f0
+            | 0x688800
+            | 0x688880
+            | 0x688890
+            | 0x6888a0
+            | 0x688db0
+            | 0x688dc0
+            | 0x688dd0
+            | 0x688de0
+            | 0x689970
+            | 0x688b98
+            | 0x6896e8
+            | 0x687830
+    )
 }
 
 impl Resources {
@@ -121,11 +133,16 @@ impl Layer {
         sample: openmt2001::flyby::CameraSample,
         detail: u32,
     ) -> Result<Range<usize>, String> {
-        let time = scene.daylight_time()
+        let time = scene
+            .daylight_time()
             .ok_or("moving layer needs original scene daylight")?;
         let light = self.suncolors.sample(time.0, time.1)?;
         let palette = openmt2001::lighting::Palette::new(
-            light.diffuse, light.ambient, light.diffuse, 0, light.scale,
+            light.diffuse,
+            light.ambient,
+            light.diffuse,
+            0,
+            light.scale,
         );
         let draws = scene
             .draws
@@ -186,8 +203,9 @@ impl Layer {
 
     #[cfg(test)]
     pub fn submitted_references(&self) -> impl Iterator<Item = u32> + '_ {
-        self.auxiliaries.iter().map(|auxiliary|
-            u32::from_le_bytes(auxiliary[..4].try_into().unwrap()))
+        self.auxiliaries
+            .iter()
+            .map(|auxiliary| u32::from_le_bytes(auxiliary[..4].try_into().unwrap()))
     }
 
     #[cfg(test)]
@@ -217,23 +235,35 @@ mod tests {
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let catalogue =
             openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap();
-        let animated: Vec<_> = catalogue.registered_meshes()
+        let animated: Vec<_> = catalogue
+            .registered_meshes()
             .filter(|(reference, _)| submitted_model(*reference))
             .filter(|(_, mesh)| mesh.frames != 1)
             .map(|(reference, mesh)| (reference, mesh.frames))
             .collect();
-        assert!(animated.is_empty(), "transport frame selection needs animated meshes: {animated:?}");
-        let textures = openmt2001::scene_assets::transport_textures(
-            &image, &index, &archive, 1280,
-        ).unwrap();
+        assert!(
+            animated.is_empty(),
+            "transport frame selection needs animated meshes: {animated:?}"
+        );
+        let textures =
+            openmt2001::scene_assets::transport_textures(&image, &index, &archive, 1280).unwrap();
         let mut source_groups = std::collections::BTreeSet::new();
-        for (_, mesh) in catalogue.registered_meshes()
-            .filter(|(reference, _)| submitted_model(*reference)) {
+        for (_, mesh) in catalogue
+            .registered_meshes()
+            .filter(|(reference, _)| submitted_model(*reference))
+        {
             for name in &mesh.texture_names {
                 let key = name.rsplit('\\').next().unwrap();
-                let record = textures.iter().find(|texture| texture.name.as_ref().is_some_and(|name| {
-                    name.as_bytes().get(..key.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes()))
-                })).unwrap();
+                let record = textures
+                    .iter()
+                    .find(|texture| {
+                        texture.name.as_ref().is_some_and(|name| {
+                            name.as_bytes()
+                                .get(..key.len())
+                                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes()))
+                        })
+                    })
+                    .unwrap();
                 source_groups.insert(record.group);
             }
         }
@@ -243,12 +273,24 @@ mod tests {
         assert!(!resources.surfaces.is_empty());
         // Derive ship coverage from the actual scheduler table, independently
         // of the renderer admission list. Its fourth entry is the crash model.
-        let ships = std::array::from_fn::<_, 4, _>(|i| u32::from_le_bytes(
-            image.at(0x539d50 + i as u32 * 4, 4).unwrap().try_into().unwrap()));
+        let ships = std::array::from_fn::<_, 4, _>(|i| {
+            u32::from_le_bytes(
+                image
+                    .at(0x539d50 + i as u32 * 4, 4)
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            )
+        });
         assert_eq!(ships[3], 0x687830);
         for reference in [0x6887e0, 0x688880, 0x688db0].into_iter().chain(ships) {
             assert!(resources.models.get(&reference).is_some());
-            assert!(resources.models[&reference].parts.iter().any(|part| !part.vertices.is_empty()));
+            assert!(
+                resources.models[&reference]
+                    .parts
+                    .iter()
+                    .any(|part| !part.vertices.is_empty())
+            );
         }
     }
 }

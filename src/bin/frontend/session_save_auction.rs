@@ -53,12 +53,21 @@ impl AuctionContinuation {
         host: Option<AuctionHostState>,
         prior_mode: u32,
     ) -> Result<Self, String> {
-        Self::capture_state(&session.world.auction,session.tutorial_state,game_mode,host,prior_mode)
+        Self::capture_state(
+            &session.world.auction,
+            session.tutorial_state,
+            game_mode,
+            host,
+            prior_mode,
+        )
     }
     pub(super) fn capture_state(
-        auction:&openmt2001::ai_messages::offers::auction::State,
-        tutorial_state:u8,game_mode:u32,host:Option<AuctionHostState>,prior_mode:u32,
-    )->Result<Self,String> {
+        auction: &openmt2001::ai_messages::offers::auction::State,
+        tutorial_state: u8,
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        prior_mode: u32,
+    ) -> Result<Self, String> {
         let record = auction.controller.record;
         if auction.controller.reference == 0
             || !matches!(prior_mode, 0 | 3)

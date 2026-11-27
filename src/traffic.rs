@@ -368,7 +368,9 @@ pub fn spawn_route(
         [f32::from_bits(0xffc00000); 3]
     } else {
         let mut inverse = Sum::from_f32(1.)?;
-        inverse.div(length).map_err(|e|format!("transport route direction normalization: {e}"))?;
+        inverse
+            .div(length)
+            .map_err(|e| format!("transport route direction normalization: {e}"))?;
         let mut result = [0.; 3];
         for (output, component) in result.iter_mut().zip(direction) {
             let mut value = inverse;

@@ -25,7 +25,10 @@ pub enum EnvironmentCall {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum LogicEvent {
-    Environment { call: EnvironmentCall, position: [f32; 3] },
+    Environment {
+        call: EnvironmentCall,
+        position: [f32; 3],
+    },
     Sound(RouteSound),
 }
 impl Scene {
@@ -111,7 +114,9 @@ impl Scene {
         self.environment_tick(tick, models, |call, scene| {
             let position = match call {
                 EnvironmentCall::Ship(_) => scene.environment.ship_position,
-                EnvironmentCall::Cue(_) | EnvironmentCall::Refresh => scene.environment.crane_position,
+                EnvironmentCall::Cue(_) | EnvironmentCall::Refresh => {
+                    scene.environment.crane_position
+                }
             };
             host(LogicEvent::Environment { call, position })
         })?;

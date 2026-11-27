@@ -4,33 +4,56 @@ use super::super::Inspection;
 use std::time::Instant;
 
 pub fn service_available(view: &mut Inspection) -> Result<(), String> {
-    service_with_music_poll(view,true)
+    service_with_music_poll(view, true)
 }
-pub(crate) fn service_with_music_poll(view:&mut Inspection,allow_music_poll:bool)->Result<(),String>{
-    while let Some(request) = view.auction_audio_requests.as_ref()
+pub(crate) fn service_with_music_poll(
+    view: &mut Inspection,
+    allow_music_poll: bool,
+) -> Result<(), String> {
+    while let Some(request) = view
+        .auction_audio_requests
+        .as_ref()
         .and_then(|receiver| receiver.try_recv().ok())
     {
-        let _ = request.reply.send(view.auction_audio_player.apply(request.operation));
+        let _ = request
+            .reply
+            .send(view.auction_audio_player.apply(request.operation));
     }
-    view.transport_audio_player.set_interface_mode(if view.strategic { 3 } else { 0 });
-    while let Some(request) = view.transport_audio_requests.as_ref()
+    view.transport_audio_player
+        .set_interface_mode(if view.strategic { 3 } else { 0 });
+    while let Some(request) = view
+        .transport_audio_requests
+        .as_ref()
         .and_then(|receiver| receiver.try_recv().ok())
     {
         view.transport_audio_player.apply(request.operation);
     }
-    while let Some(request) = view.era_audio_requests.as_ref()
+    while let Some(request) = view
+        .era_audio_requests
+        .as_ref()
         .and_then(|receiver| receiver.try_recv().ok())
     {
-        let _ = request.reply.send(view.era_audio_player.apply(request.operation));
+        let _ = request
+            .reply
+            .send(view.era_audio_player.apply(request.operation));
     }
-    let admitted=allow_music_poll && view.music_admission.as_ref().is_none_or(|gate|gate.permits_attachment());
+    let admitted = allow_music_poll
+        && view
+            .music_admission
+            .as_ref()
+            .is_none_or(|gate| gate.permits_attachment());
     if admitted && let Err(error) = view.era_audio_player.poll() {
         eprintln!("Era music unavailable: {error}");
     }
-    while let Some(request) = view.gameplay_sound_requests.as_ref()
+    while let Some(request) = view
+        .gameplay_sound_requests
+        .as_ref()
         .and_then(|receiver| receiver.try_recv().ok())
     {
-        if matches!(request.operation, crate::gameplay_sound::Operation::Ledger { .. }) {
+        if matches!(
+            request.operation,
+            crate::gameplay_sound::Operation::Ledger { .. }
+        ) {
             view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
         }
         let result = view.gameplay_sound_player.apply(request.operation);

@@ -3,80 +3,143 @@
 use super::*;
 use crate::fresh_city::{CommandAssets, Inputs, Policy};
 use openmt2001::event_cards::{human, lifecycle};
-use std::{path::Path, sync::{Arc, mpsc}, thread::JoinHandle};
+use std::{
+    path::Path,
+    sync::{Arc, mpsc},
+    thread::JoinHandle,
+};
 
 #[test]
 #[ignore = "requires original assets; mixed card/midnight continuation"]
-fn natural_auction_then_pending_card_across_midnight_reload() { run(23); }
+fn natural_auction_then_pending_card_across_midnight_reload() {
+    run(23);
+}
 
 #[test]
 #[ignore = "requires original assets; mixed card/05-to-06 continuation"]
-fn natural_auction_then_pending_card_across_six_reload() { run(5); }
+fn natural_auction_then_pending_card_across_six_reload() {
+    run(5);
+}
 
-fn presenter(exe: Arc<Vec<u8>>, directory: Arc<Vec<u8>>, archive: Arc<Vec<u8>>)
-    -> (mpsc::Sender<crate::auction_bridge::Request>, JoinHandle<()>)
-{
+fn presenter(
+    exe: Arc<Vec<u8>>,
+    directory: Arc<Vec<u8>>,
+    archive: Arc<Vec<u8>>,
+) -> (mpsc::Sender<crate::auction_bridge::Request>, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel::<crate::auction_bridge::Request>();
-    let worker = std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
-        let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
-        let mut view = crate::auction_bridge::View::default();
-        for request in rx {
-            let result = view.present(request.operation, &renderer, (&exe, &directory, &archive), 0);
-            request.reply.send(result).unwrap();
-        }
-    }).unwrap();
+    let worker = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            if cfg!(windows) {
+                descriptor.backends = wgpu::Backends::DX12;
+            }
+            let renderer =
+                pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
+            let mut view = crate::auction_bridge::View::default();
+            for request in rx {
+                let result = view.present(
+                    request.operation,
+                    &renderer,
+                    (&exe, &directory, &archive),
+                    0,
+                );
+                request.reply.send(result).unwrap();
+            }
+        })
+        .unwrap();
     (tx, worker)
 }
 
-fn step(s: &mut Session<'_>, h: &mut crate::live_host::Host, a: &CommandAssets<'_, '_>) -> Vec<crate::prompt::Request> {
+fn step(
+    s: &mut Session<'_>,
+    h: &mut crate::live_host::Host,
+    a: &CommandAssets<'_, '_>,
+) -> Vec<crate::prompt::Request> {
     h.frame(s, a, 40);
     assert!(h.failure.is_none(), "Host stopped: {:?}", h.failure);
     let prompts = h.take_prompts(s);
     for prompt in prompts.iter().cloned() {
         if let Some(dialog) = prompt.dialog {
-            h.human_dialog_reply(s, a, crate::human_dialog::Reply {
-                callback: dialog.callback, context: dialog.context,
-                button: if dialog.button_count == 2 { 1 } else { 0 },
-            }).unwrap();
+            h.human_dialog_reply(
+                s,
+                a,
+                crate::human_dialog::Reply {
+                    callback: dialog.callback,
+                    context: dialog.context,
+                    button: if dialog.button_count == 2 { 1 } else { 0 },
+                },
+            )
+            .unwrap();
         } else {
-            s.dispatch_session_event("InterfacePromptDismiss", prompt.dismissal_id as i32, a, true).unwrap();
+            s.dispatch_session_event(
+                "InterfacePromptDismiss",
+                prompt.dismissal_id as i32,
+                a,
+                true,
+            )
+            .unwrap();
         }
     }
     prompts
 }
 
 fn accounts(s: &Session<'_>) -> Vec<Vec<u8>> {
-    s.world.ledgers.players.iter().map(|a| {
-        let mut b = vec![0; 0x1b8];
-        a.write_runtime(&mut b).unwrap(); // includes BOTH physical banks and period selector
-        b
-    }).collect()
+    s.world
+        .ledgers
+        .players
+        .iter()
+        .map(|a| {
+            let mut b = vec![0; 0x1b8];
+            a.write_runtime(&mut b).unwrap(); // includes BOTH physical banks and period selector
+            b
+        })
+        .collect()
 }
 
 fn queue(s: &Session<'_>) -> Vec<(u32, u32, u32, bool, Vec<u8>)> {
-    s.live_commands.snapshot().unwrap().into_iter().map(|(domain, outer, admission, direct, c)| {
-        let d = match domain { openmt2001::scheduler::ClockDomain::Total => 0,
-            openmt2001::scheduler::ClockDomain::Normal => 1 };
-        // A comparison projection only; it does not define the production codec.
-        let bytes = match c {
-            Command::CategoryReady { category } => words([0xf000, *category]),
-            Command::EventCard(c) => words([0xf001, c.card, c.player, c.target as u32]),
-            Command::Eliminate { slot } => words([0xf002, *slot as u32]),
-            Command::OutcomeNotice { player, reason } => words([0xf003, *player as u32, *reason]),
-            c => packet(c, admission).unwrap(),
-        };
-        (d, outer, admission, direct, bytes)
-    }).collect()
+    s.live_commands
+        .snapshot()
+        .unwrap()
+        .into_iter()
+        .map(|(domain, outer, admission, direct, c)| {
+            let d = match domain {
+                openmt2001::scheduler::ClockDomain::Total => 0,
+                openmt2001::scheduler::ClockDomain::Normal => 1,
+            };
+            // A comparison projection only; it does not define the production codec.
+            let bytes = match c {
+                Command::CategoryReady { category } => words([0xf000, *category]),
+                Command::EventCard(c) => words([0xf001, c.card, c.player, c.target as u32]),
+                Command::Eliminate { slot } => words([0xf002, *slot as u32]),
+                Command::OutcomeNotice { player, reason } => {
+                    words([0xf003, *player as u32, *reason])
+                }
+                c => packet(c, admission).unwrap(),
+            };
+            (d, outer, admission, direct, bytes)
+        })
+        .collect()
 }
 
 fn equal(a: &mut Session<'_>, b: &mut Session<'_>) {
     let tick = a.world.clock.timing[0];
     assert_eq!(a.world.clock, b.world.clock, "clock at {tick}");
-    assert!(accounts(a) == accounts(b), "cash, BOTH ledger banks and selector at {tick}");
-    assert_eq!(a.roster.manager.players.len(), b.roster.manager.players.len());
-    for (x, y) in a.roster.manager.players.iter().zip(&b.roster.manager.players) {
+    assert!(
+        accounts(a) == accounts(b),
+        "cash, BOTH ledger banks and selector at {tick}"
+    );
+    assert_eq!(
+        a.roster.manager.players.len(),
+        b.roster.manager.players.len()
+    );
+    for (x, y) in a
+        .roster
+        .manager
+        .players
+        .iter()
+        .zip(&b.roster.manager.players)
+    {
         assert!(x.bytes == y.bytes, "complete player at {tick}");
         assert_eq!(x.auxiliaries.len(), y.auxiliaries.len());
         for (x, y) in x.auxiliaries.iter().zip(&y.auxiliaries) {
@@ -84,13 +147,45 @@ fn equal(a: &mut Session<'_>, b: &mut Session<'_>) {
             assert!(x.bytes == y.bytes, "player auxiliary at {tick}");
         }
     }
-    assert!(a.world.ledgers.businesses == b.world.ledgers.businesses, "businesses at {tick}");
-    let residents = |s: &Session<'_>| s.world.ledgers.residents.nodes.iter().map(|r|
-        (r.as_bytes().to_vec(), r.active_byte(), r.auxiliary_reference())).collect::<Vec<_>>();
-    assert_eq!(a.world.ledgers.residents.active_count, b.world.ledgers.residents.active_count);
-    assert!(residents(a) == residents(b), "resident links, allocation and state at {tick}");
-    assert_eq!(a.world.ledgers.residents.accounts.len(), b.world.ledgers.residents.accounts.len());
-    for (x, y) in a.world.ledgers.residents.accounts.iter().zip(&b.world.ledgers.residents.accounts) {
+    assert!(
+        a.world.ledgers.businesses == b.world.ledgers.businesses,
+        "businesses at {tick}"
+    );
+    let residents = |s: &Session<'_>| {
+        s.world
+            .ledgers
+            .residents
+            .nodes
+            .iter()
+            .map(|r| {
+                (
+                    r.as_bytes().to_vec(),
+                    r.active_byte(),
+                    r.auxiliary_reference(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        a.world.ledgers.residents.active_count,
+        b.world.ledgers.residents.active_count
+    );
+    assert!(
+        residents(a) == residents(b),
+        "resident links, allocation and state at {tick}"
+    );
+    assert_eq!(
+        a.world.ledgers.residents.accounts.len(),
+        b.world.ledgers.residents.accounts.len()
+    );
+    for (x, y) in a
+        .world
+        .ledgers
+        .residents
+        .accounts
+        .iter()
+        .zip(&b.world.ledgers.residents.accounts)
+    {
         assert!(x.as_bytes() == y.as_bytes(), "resident account at {tick}");
     }
     for (x, y) in a.world.categories.iter().zip(&b.world.categories) {
@@ -98,14 +193,49 @@ fn equal(a: &mut Session<'_>, b: &mut Session<'_>) {
         assert_eq!(&x[..12], &y[..12]);
         assert_eq!(&x[108..140], &y[108..140]);
     }
-    let chains = |s: &Session<'_>| openmt2001::building_pool::category_chains(
-        &s.world.categories, &s.world.buildings, 0x591318).unwrap();
-    assert!(chains(a) == chains(b), "ordered ownership/business chains at {tick}");
-    assert_eq!(queue(a), queue(b), "Total then Normal, outer/inner deadlines and stable tie order at {tick}");
-    assert_eq!(a.world.pending_world.to_bytes(), b.world.pending_world.to_bytes());
-    let callbacks = |s: &mut Session<'_>| s.scripts.events.pending().iter().map(|e|
-        (e.remaining, e.argument, s.scripts.runtime.event_reference_identity(e.reference).unwrap())).collect::<Vec<_>>();
-    assert_eq!(callbacks(a), callbacks(b), "ordered named callbacks at {tick}");
+    let chains = |s: &Session<'_>| {
+        openmt2001::building_pool::category_chains(
+            &s.world.categories,
+            &s.world.buildings,
+            0x591318,
+        )
+        .unwrap()
+    };
+    assert!(
+        chains(a) == chains(b),
+        "ordered ownership/business chains at {tick}"
+    );
+    assert_eq!(
+        queue(a),
+        queue(b),
+        "Total then Normal, outer/inner deadlines and stable tie order at {tick}"
+    );
+    assert_eq!(
+        a.world.pending_world.to_bytes(),
+        b.world.pending_world.to_bytes()
+    );
+    let callbacks = |s: &mut Session<'_>| {
+        s.scripts
+            .events
+            .pending()
+            .iter()
+            .map(|e| {
+                (
+                    e.remaining,
+                    e.argument,
+                    s.scripts
+                        .runtime
+                        .event_reference_identity(e.reference)
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        callbacks(a),
+        callbacks(b),
+        "ordered named callbacks at {tick}"
+    );
     assert_eq!(a.roster.profiles, b.roster.profiles);
     assert_eq!(a.event_cards.cards, b.event_cards.cards);
     assert_eq!(a.event_cards.used, b.event_cards.used);
@@ -116,18 +246,39 @@ fn equal(a: &mut Session<'_>, b: &mut Session<'_>) {
     assert_eq!(a.credit_random_state, b.credit_random_state);
     assert_eq!(a.particle_random_state, b.particle_random_state);
     assert_eq!(a.build_random_state, b.build_random_state);
-    assert_eq!(a.world.creation.initialization_rng.constructor, b.world.creation.initialization_rng.constructor);
-    assert_eq!(a.world.creation.initialization_rng.movement, b.world.creation.initialization_rng.movement);
-    assert_eq!(a.world.creation.initialization_rng.objective, b.world.creation.initialization_rng.objective);
+    assert_eq!(
+        a.world.creation.initialization_rng.constructor,
+        b.world.creation.initialization_rng.constructor
+    );
+    assert_eq!(
+        a.world.creation.initialization_rng.movement,
+        b.world.creation.initialization_rng.movement
+    );
+    assert_eq!(
+        a.world.creation.initialization_rng.objective,
+        b.world.creation.initialization_rng.objective
+    );
     assert_eq!(a.world.creation.identity_rng, b.world.creation.identity_rng);
-    assert_eq!(a.world.creation.preference_rng, b.world.creation.preference_rng);
-    assert_eq!(a.road_traffic.admission.random, b.road_traffic.admission.random);
+    assert_eq!(
+        a.world.creation.preference_rng,
+        b.world.creation.preference_rng
+    );
+    assert_eq!(
+        a.road_traffic.admission.random,
+        b.road_traffic.admission.random
+    );
 }
 
 fn durable(path: &Path, bytes: &[u8]) -> Vec<u8> {
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path).unwrap();
-    file.write_all(bytes).unwrap(); file.sync_all().unwrap(); drop(file);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .unwrap();
+    file.write_all(bytes).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
     std::fs::read(path).unwrap()
 }
 
@@ -357,16 +508,30 @@ fn run(boundary_hour: u32) {
 fn pending_event_card_has_native_packet_and_restore_consumer() {
     // Independent retained layout: original command1a is32 bytes, class52515c,
     // delayed flag1, card/player/target at20/24/28. No effect helper predicts it.
-    let card = openmt2001::event_cards::lifecycle::Command { card:43, player:2, target:0 };
+    let card = openmt2001::event_cards::lifecycle::Command {
+        card: 43,
+        player: 2,
+        target: 0,
+    };
     let encoded = packet(&Command::EventCard(card), 5650)
         .expect("reachable command1a needs a checked native save encoding");
-    assert_eq!(encoded.len(),32);
-    for (at,value) in [(0,0x52515c),(4,0x1a),(8,32),(12,5650),(20,43),(24,2),(28,0)] {
-        assert_eq!(word(&encoded,at),value,"native command1a word{at}");
+    assert_eq!(encoded.len(), 32);
+    for (at, value) in [
+        (0, 0x52515c),
+        (4, 0x1a),
+        (8, 32),
+        (12, 5650),
+        (20, 43),
+        (24, 2),
+        (28, 0),
+    ] {
+        assert_eq!(word(&encoded, at), value, "native command1a word{at}");
     }
-    assert_eq!(encoded[16],1);
-    match crate::fresh_city::restore::saved_command(&encoded).expect("native command1a restore consumer") {
-        Command::EventCard(decoded) => assert_eq!(decoded,card),
+    assert_eq!(encoded[16], 1);
+    match crate::fresh_city::restore::saved_command(&encoded)
+        .expect("native command1a restore consumer")
+    {
+        Command::EventCard(decoded) => assert_eq!(decoded, card),
         _ => panic!("command1a decoded as another command"),
     }
 }
@@ -374,15 +539,22 @@ fn pending_event_card_has_native_packet_and_restore_consumer() {
 #[test]
 fn event_card_codec_preserves_signed_target_and_rejects_wrong_size() {
     for target in [i32::MIN, -1, 0, i32::MAX] {
-        let card = lifecycle::Command { card: 43, player: 2, target };
+        let card = lifecycle::Command {
+            card: 43,
+            player: 2,
+            target,
+        };
         let encoded = packet(&Command::EventCard(card), u32::MAX - 1).unwrap();
         assert_eq!(word(&encoded, 12), u32::MAX - 1);
-        assert!(matches!(crate::fresh_city::restore::saved_command(&encoded).unwrap(),
-            Command::EventCard(decoded) if decoded == card));
+        assert!(
+            matches!(crate::fresh_city::restore::saved_command(&encoded).unwrap(),
+            Command::EventCard(decoded) if decoded == card)
+        );
         for length in [20, 24, 28, 31] {
             assert!(crate::fresh_city::restore::saved_command(&encoded[..length]).is_err());
         }
-        let mut oversized = encoded; oversized.push(0);
+        let mut oversized = encoded;
+        oversized.push(0);
         assert!(crate::fresh_city::restore::saved_command(&oversized).is_err());
     }
 }

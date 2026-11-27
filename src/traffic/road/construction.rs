@@ -132,7 +132,9 @@ impl RoadNetwork {
         put(&mut self.segments[index], 0x58, bits);
         put(&mut self.segments[index], 4, bits);
         let mut inverse = extended(one)?;
-        inverse.div(extended(f32::from_bits(bits))?).map_err(|e|format!("road vehicle orientation divisor{bits:08x}: {e}"))?;
+        inverse
+            .div(extended(f32::from_bits(bits))?)
+            .map_err(|e| format!("road vehicle orientation divisor{bits:08x}: {e}"))?;
         put(&mut self.segments[index], 0x5c, inverse.to_f32().to_bits());
         Ok(())
     }
@@ -229,7 +231,9 @@ impl RoadNetwork {
                 put(row, 0x58, length);
                 put(row, 4, length);
                 let mut inverse = extended(c[2])?;
-                inverse.div(extended(f32::from_bits(length))?).map_err(|e|format!("road route direction divisor{length:08x}: {e}"))?;
+                inverse
+                    .div(extended(f32::from_bits(length))?)
+                    .map_err(|e| format!("road route direction divisor{length:08x}: {e}"))?;
                 put(row, 0x5c, inverse.to_f32().to_bits());
                 let mut space = extended(f32::from_bits(length))?;
                 space.mul_f32(c[3])?;

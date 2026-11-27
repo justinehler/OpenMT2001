@@ -228,7 +228,8 @@ mod tests {
     #[test]
     #[ignore = "requires original4610d0 PC64 observations"]
     fn matches_native_initial_stock() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_INITIAL_STOCK").unwrap()).unwrap();
+        let bytes =
+            std::fs::read(std::env::var("OPENMT2001_NATIVE_INITIAL_STOCK").unwrap()).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTISTK01");
         assert_eq!(word(8), 0x37f);
@@ -239,10 +240,12 @@ mod tests {
             let count = word(at + 8) as usize;
             let old = f32::from_bits(word(at + 12));
             at += 16;
-            let products: Vec<_> = (0..count).map(|i| super::StockProduct {
-                value: f32::from_bits(word(at + i * 8)),
-                fraction: f32::from_bits(word(at + i * 8 + 4)),
-            }).collect();
+            let products: Vec<_> = (0..count)
+                .map(|i| super::StockProduct {
+                    value: f32::from_bits(word(at + i * 8)),
+                    fraction: f32::from_bits(word(at + i * 8 + 4)),
+                })
+                .collect();
             at += count * 8;
             let expected = f32::from_bits(word(at));
             let expected_wide = f64::from_le_bytes(bytes[at + 4..at + 12].try_into().unwrap());
@@ -250,14 +253,29 @@ mod tests {
             at += 16;
             let result = super::initial_stock_cost(volume, rate, &products);
             if !expected_wide.is_finite() {
-                assert!(result.is_err(), "case {case} nonfinite cost remains explicit");
+                assert!(
+                    result.is_err(),
+                    "case {case} nonfinite cost remains explicit"
+                );
                 continue;
             }
             let mut result = result.unwrap();
-            assert_eq!(result.to_f32().to_bits(), expected.to_bits(), "case {case} f32");
-            assert_eq!(result.to_f64().to_bits(), expected_wide.to_bits(), "case {case} f64");
+            assert_eq!(
+                result.to_f32().to_bits(),
+                expected.to_bits(),
+                "case {case} f32"
+            );
+            assert_eq!(
+                result.to_f64().to_bits(),
+                expected_wide.to_bits(),
+                "case {case} f64"
+            );
             result.add_f32(old).unwrap();
-            assert_eq!(result.to_f32().to_bits(), expected_added, "case {case} caller addition");
+            assert_eq!(
+                result.to_f32().to_bits(),
+                expected_added,
+                "case {case} caller addition"
+            );
         }
         assert_eq!(at, bytes.len());
     }

@@ -66,8 +66,12 @@ unsafe extern "C" {
     ) -> c_int;
     fn mt4_register_properties(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
     fn mt4_calendar_binding(runtime: *mut c_void, name: *const c_char, id: u32) -> c_int;
-    fn mt4_calendar_method(runtime: *mut c_void, table: *const c_char,
-        method: *const c_char, id: u32) -> c_int;
+    fn mt4_calendar_method(
+        runtime: *mut c_void,
+        table: *const c_char,
+        method: *const c_char,
+        id: u32,
+    ) -> c_int;
     fn mt4_number_method(
         runtime: *mut c_void,
         table: *const c_char,
@@ -199,20 +203,29 @@ impl Runtime {
         events: &mut crate::script_events::Events,
         handler: &mut EventHandler<'_>,
     ) -> Result<(), String> {
-        self.tick_events_with_invocation(events,&mut |vm,event,events|{
-            vm.call_reference(event.reference,event.argument,&mut |id,args|handler(id,args,events))
+        self.tick_events_with_invocation(events, &mut |vm, event, events| {
+            vm.call_reference(event.reference, event.argument, &mut |id, args| {
+                handler(id, args, events)
+            })
         })
     }
     /// A retained event invocation boundary, before reference release and the
     /// next due event. The caller owns any audited terminal-call continuation.
     pub fn tick_events_with_invocation(
         &mut self,
-        events:&mut crate::script_events::Events,
-        invoke:&mut impl FnMut(&mut Runtime,crate::script_events::Event,
-            &mut crate::script_events::Events)->Result<Option<f64>,String>,
-    )->Result<(),String>{
-        type Invocation<'a> = dyn FnMut(&mut Runtime, crate::script_events::Event,
-            &mut crate::script_events::Events) -> Result<Option<f64>, String> + 'a;
+        events: &mut crate::script_events::Events,
+        invoke: &mut impl FnMut(
+            &mut Runtime,
+            crate::script_events::Event,
+            &mut crate::script_events::Events,
+        ) -> Result<Option<f64>, String>,
+    ) -> Result<(), String> {
+        type Invocation<'a> = dyn FnMut(
+                &mut Runtime,
+                crate::script_events::Event,
+                &mut crate::script_events::Events,
+            ) -> Result<Option<f64>, String>
+            + 'a;
         struct Host<'a, 'b> {
             vm: &'a mut Runtime,
             invoke: &'b mut Invocation<'b>,
@@ -223,7 +236,7 @@ impl Runtime {
                 event: crate::script_events::Event,
                 events: &mut crate::script_events::Events,
             ) -> Result<Option<f64>, String> {
-                (self.invoke)(self.vm,event,events)
+                (self.invoke)(self.vm, event, events)
             }
             fn release(&mut self, reference: u32) -> Result<(), String> {
                 self.vm.release_reference(reference)
@@ -240,12 +253,18 @@ impl Runtime {
     }
     /// Attach the same protected frequency closure directly to a tagged table.
     /// Lua-level assignment would invoke its numeric property setter.
-    pub fn register_calendar_frequency_method(&mut self, table: &str, method: &str,
-        id: u32) -> Result<(), String> {
+    pub fn register_calendar_frequency_method(
+        &mut self,
+        table: &str,
+        method: &str,
+        id: u32,
+    ) -> Result<(), String> {
         id.checked_add(1).ok_or("calendar callback ID overflow")?;
         let table = CString::new(table).map_err(|_| "NUL in calendar table name")?;
         let method = CString::new(method).map_err(|_| "NUL in calendar method name")?;
-        self.check(unsafe { mt4_calendar_method(self.raw.as_ptr(), table.as_ptr(), method.as_ptr(), id) })
+        self.check(unsafe {
+            mt4_calendar_method(self.raw.as_ptr(), table.as_ptr(), method.as_ptr(), id)
+        })
     }
     /// Register original relative/absolute trigger semantics. `id` requests
     /// the live total clock (no arguments, numeric result); `id+1` admits an
@@ -290,12 +309,22 @@ impl Runtime {
     /// Copy the existing registered global function closure into a table's raw
     /// member. Preserves its identity and the table's numeric-property tag.
     /// This protected operation calls no host callback and opens no library.
-    pub fn alias_function(&mut self, table: &str, member: &str, function: &str) -> Result<(), String> {
+    pub fn alias_function(
+        &mut self,
+        table: &str,
+        member: &str,
+        function: &str,
+    ) -> Result<(), String> {
         let table = CString::new(table).map_err(|_| "Lua alias table contains NUL")?;
         let member = CString::new(member).map_err(|_| "Lua alias member contains NUL")?;
         let function = CString::new(function).map_err(|_| "Lua alias function contains NUL")?;
         self.check(unsafe {
-            mt4_function_alias(self.raw.as_ptr(), table.as_ptr(), member.as_ptr(), function.as_ptr())
+            mt4_function_alias(
+                self.raw.as_ptr(),
+                table.as_ptr(),
+                member.as_ptr(),
+                function.as_ptr(),
+            )
         })
     }
     /// Fixed native signature: `n` uses Lua tonumber and `s` uses tostring.
@@ -305,7 +334,10 @@ impl Runtime {
     /// Failed string conversion is passed as Nil so the owner can reject it safely.
     pub fn register_coerced(&mut self, name: &str, id: u32, shape: &str) -> Result<(), String> {
         if shape.len() > 256
-            || (shape != "S" && !shape.bytes().all(|b| matches!(b, b'n' | b'N' | b's' | b'p')))
+            || (shape != "S"
+                && !shape
+                    .bytes()
+                    .all(|b| matches!(b, b'n' | b'N' | b's' | b'p')))
         {
             return Err("invalid Lua callback signature".into());
         }
@@ -861,7 +893,11 @@ mod tests {
         let second = vm.reference_function("EVENT_Second").unwrap().unwrap();
         let mut events = crate::script_events::Events::default();
         for reference in [first, second] {
-            events.append(crate::script_events::Event { reference, remaining: 1, argument: 0 });
+            events.append(crate::script_events::Event {
+                reference,
+                remaining: 1,
+                argument: 0,
+            });
         }
         let mut order = vec![];
         vm.tick_events_with_invocation(&mut events, &mut |vm, event, _| {
@@ -869,19 +905,33 @@ mod tests {
             if event.reference == second {
                 assert!(vm.event_reference_identity(first)?.is_none());
             }
-            let result = vm.call_reference(event.reference, event.argument, &mut |_, _| Ok(None))?;
+            let result =
+                vm.call_reference(event.reference, event.argument, &mut |_, _| Ok(None))?;
             let observed = vm.number("observed")?.unwrap() as u32;
             if event.reference == second {
-                assert_eq!(vm.number("seen")?, Some(1.), "the second Lua event sees the first producer's completed consumer");
+                assert_eq!(
+                    vm.number("seen")?,
+                    Some(1.),
+                    "the second Lua event sees the first producer's completed consumer"
+                );
             }
             order.push(observed * 10);
             // This is the synchronous terminal producer consumer, after Lua
             // returns but while its event still owns the captured reference.
-            vm.execute("consume terminal producer", if observed == 1 { b"consumed=1" } else { b"consumed=2" }, &mut |_, _| Ok(None))?;
+            vm.execute(
+                "consume terminal producer",
+                if observed == 1 {
+                    b"consumed=1"
+                } else {
+                    b"consumed=2"
+                },
+                &mut |_, _| Ok(None),
+            )?;
             assert!(vm.event_reference_identity(event.reference)?.is_some());
             order.push(observed * 10 + 1);
             Ok(result)
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(order, [10, 11, 20, 21]);
         assert!(events.pending().is_empty());
         assert!(vm.event_reference_identity(second).unwrap().is_none());
@@ -1419,5 +1469,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path="lua4/function_alias_tests.rs"]
+#[path = "lua4/function_alias_tests.rs"]
 mod function_alias_tests;

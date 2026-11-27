@@ -317,7 +317,9 @@ impl Assets {
                     &self.tab1,
                     &ui::formatted_float_money(
                         f32::from_bits(words[2]),
-                        self.strings.get(2243).ok_or("Save currency symbol missing")?,
+                        self.strings
+                            .get(2243)
+                            .ok_or("Save currency symbol missing")?,
                         self.strings.get(2244).and_then(|row| row.first()) != Some(&0x4c),
                     )?,
                     b[19],
@@ -1238,9 +1240,14 @@ mod tests {
                 "work/frontend/save-game-selected-city.png",
             );
             let strings = assets.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
-            let generic =
-                crate::prompt::Assets::load(&index, &archive, installer, &strings,
-                    &openmt2001::pe::PeImage::parse(&exe).unwrap()).unwrap();
+            let generic = crate::prompt::Assets::load(
+                &index,
+                &archive,
+                installer,
+                &strings,
+                &openmt2001::pe::PeImage::parse(&exe).unwrap(),
+            )
+            .unwrap();
             let buttons = generic.dialog_buttons(2);
             assert_eq!(buttons.len(), 2);
             view.modal = Some(Modal::Overwrite);

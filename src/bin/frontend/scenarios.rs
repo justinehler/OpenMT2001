@@ -27,7 +27,11 @@ pub const fn live_tutorial(id: u32) -> bool {
     matches!(id, 100000..=100012)
 }
 const fn tutorial(n: u32, token: &'static str) -> Scenario {
-    Scenario { id: 100000 + n, token, map: None }
+    Scenario {
+        id: 100000 + n,
+        token,
+        map: None,
+    }
 }
 pub const CAMPAIGN: [Scenario; 17] = [
     scenario(3, Some("apartmentrim.lua")),
@@ -78,15 +82,46 @@ const fn scenario(n: u32, map: Option<&'static str>) -> Scenario {
 }
 pub fn find(id: u32) -> Result<Scenario, String> {
     const NET: [Scenario; 7] = [
-        Scenario { id: 300000, token: "NET0", map: Some("empty.lua") },
-        Scenario { id: 300001, token: "NET1", map: Some("empty.lua") },
-        Scenario { id: 300002, token: "NET2", map: Some("empty.lua") },
-        Scenario { id: 300003, token: "NET3", map: Some("empty.lua") },
-        Scenario { id: 300004, token: "NET4", map: Some("empty.lua") },
-        Scenario { id: 300005, token: "NET5", map: Some("empty.lua") },
-        Scenario { id: 300006, token: "NET6", map: Some("empty.lua") },
+        Scenario {
+            id: 300000,
+            token: "NET0",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300001,
+            token: "NET1",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300002,
+            token: "NET2",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300003,
+            token: "NET3",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300004,
+            token: "NET4",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300005,
+            token: "NET5",
+            map: Some("empty.lua"),
+        },
+        Scenario {
+            id: 300006,
+            token: "NET6",
+            map: Some("empty.lua"),
+        },
     ];
-    CAMPAIGN.iter().chain(TUTORIALS.iter()).chain(NET.iter())
+    CAMPAIGN
+        .iter()
+        .chain(TUTORIALS.iter())
+        .chain(NET.iter())
         .copied()
         .find(|s| s.id == id)
         .ok_or_else(|| format!("unknown preview scenario {id}"))
@@ -188,7 +223,8 @@ mod tests {
                 openmt2001::scene::parse_static_map(&input).unwrap();
             }
         }
-        let tutorials: Vec<(u32, String)> = registrations.lines()
+        let tutorials: Vec<(u32, String)> = registrations
+            .lines()
             .map(str::trim)
             .filter(|line| line.starts_with("Frontend.RegisterLevel_Id(1"))
             .filter_map(|line| {
@@ -196,9 +232,15 @@ mod tests {
                 let (id, rest) = row.split_once(',')?;
                 let token = rest.split('"').nth(1)?;
                 Some((id.parse().ok()?, token.to_ascii_uppercase()))
-            }).collect();
-        assert_eq!(tutorials,
-            TUTORIALS.iter().map(|row| (row.id, row.token.to_owned())).collect::<Vec<_>>());
+            })
+            .collect();
+        assert_eq!(
+            tutorials,
+            TUTORIALS
+                .iter()
+                .map(|row| (row.id, row.token.to_owned()))
+                .collect::<Vec<_>>()
+        );
         assert!(root.join("MAPS/tempmap.lua").is_file());
         for tutorial in TUTORIALS {
             assert!(root.join(tutorial.token).join("hub.lua").is_file());

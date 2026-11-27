@@ -6,7 +6,10 @@ use super::{
     submit_business_shape, validate_natural_owned_shoppers, word,
 };
 
-pub(super) fn wealth(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>) -> openmt2001::x87::Sum {
+pub(super) fn wealth(
+    session: &Session<'_>,
+    image: &openmt2001::pe::PeImage<'_>,
+) -> openmt2001::x87::Sum {
     let financial = crate::player_info::State::from_runtime(
         &session.roster.manager,
         &session.world.ledgers.players,

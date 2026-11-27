@@ -1,7 +1,7 @@
 //! Original474f40 liquidation target production and threshold trimming.
 use super::{liquidation_pool, liquidation_score};
 use crate::{
-    player_manager::{put, word, Player},
+    player_manager::{Player, put, word},
     x87::Sum,
 };
 use std::collections::BTreeMap;

@@ -2,27 +2,39 @@
 //! Original 4ad760 accepts a high-sound filename and five playback words.
 use openmt2001::pe::PeImage;
 use rodio::Source;
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::mpsc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     /// Native 4af140 calls the backend's +24 method before releasing retained
     /// city handles. Auction closure releases its murmur handle afterward.
     Reset,
-    Targeted { actor_is_current: bool },
+    Targeted {
+        actor_is_current: bool,
+    },
     AuctionAmbientCreate,
     AuctionAmbientRelease(u32),
     /// Native card-panel callback 41b430 chooses one of two cues from the
     /// original 20-byte card row's fourth word.
-    CardOpen { positive: bool },
+    CardOpen {
+        positive: bool,
+    },
     /// Original result particle 4549a9/453c1c cue, after a 50 Hz firework tick.
     ResultFirework(crate::fresh_city::result::fireworks::Cue),
     /// 465980 dispatches these only when 4ecc20 completes an auction actor
     /// animation, after the producer has stored its participant state.
     AuctionActor(crate::auction_scene::ActorCue),
-    Script { name: String },
+    Script {
+        name: String,
+    },
     /// Native 48a5a0 plays a 60-point buy/sell cue for the local ledger.
-    Ledger { sale: bool },
+    Ledger {
+        sale: bool,
+    },
     /// Original 42f33e/42ca30/4433e8 widget activations.
     UiLightClick,
 }
@@ -85,14 +97,21 @@ fn checked_name(image: &PeImage<'_>, address: u32, expected: &str) -> Result<(),
 
 fn auction_voice_name(image: &PeImage<'_>, character: u32, kind: usize) -> Result<String, String> {
     let suffix = ["_bid.wav", "_win.wav", "_withdraw.wav"]
-        .get(kind).ok_or("Auction voice kind outside original table")?;
+        .get(kind)
+        .ok_or("Auction voice kind outside original table")?;
     let at = 0x53c298 + character * 12 + kind as u32 * 4;
     let address = u32::from_le_bytes(image.at(at, 4)?.try_into().unwrap());
     let bytes = image.at(address, 64)?;
-    let end = bytes.iter().position(|byte| *byte == 0).ok_or("Auction voice name terminator")?;
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .ok_or("Auction voice name terminator")?;
     let name = std::str::from_utf8(&bytes[..end]).map_err(|e| e.to_string())?;
-    if !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
-        || !name.to_ascii_lowercase().ends_with(*suffix) {
+    if !name
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+        || !name.to_ascii_lowercase().ends_with(*suffix)
+    {
         return Err("Original auction voice name is outside its high-sound catalog".into());
     }
     // The v1.4 PE stores `WheelBarrow` while the supplied installer spells
@@ -162,9 +181,21 @@ impl Assets {
         let mut auction_voices = Vec::with_capacity(10);
         for character in 0..10 {
             auction_voices.push([
-                pcm16(&directory.join("auction").join(auction_voice_name(image, character, 0)?))?,
-                pcm16(&directory.join("auction").join(auction_voice_name(image, character, 1)?))?,
-                pcm16(&directory.join("auction").join(auction_voice_name(image, character, 2)?))?,
+                pcm16(
+                    &directory
+                        .join("auction")
+                        .join(auction_voice_name(image, character, 0)?),
+                )?,
+                pcm16(
+                    &directory
+                        .join("auction")
+                        .join(auction_voice_name(image, character, 1)?),
+                )?,
+                pcm16(
+                    &directory
+                        .join("auction")
+                        .join(auction_voice_name(image, character, 2)?),
+                )?,
             ]);
         }
         Ok(Self {
@@ -233,7 +264,9 @@ fn play_bounded(
     gain: f32,
 ) -> bool {
     pool.retain(|sink| !sink.empty());
-    if pool.len() >= capacity { return false }
+    if pool.len() >= capacity {
+        return false;
+    }
     let sink = rodio::Sink::connect_new(mixer);
     sink.set_volume(gain);
     sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
@@ -250,8 +283,12 @@ fn replace_auction_voice(
 ) {
     // Native 465a8b/4647a5 release the previous retained handle before
     // testing panel+858. A muted callback still stops the earlier voice.
-    if let Some(prior) = slot.take() { prior.stop(); }
-    if suppressed { return; }
+    if let Some(prior) = slot.take() {
+        prior.stop();
+    }
+    if suppressed {
+        return;
+    }
     if let Some(mixer) = mixer {
         let sink = rodio::Sink::connect_new(mixer);
         sink.set_volume(gain);
@@ -308,13 +345,21 @@ impl Player {
                 if let Some((_, sink)) = &self.ambient {
                     sink.stop();
                 }
-                for sink in self.firework_bursts.drain(..).chain(self.firework_whistles.drain(..)) {
+                for sink in self
+                    .firework_bursts
+                    .drain(..)
+                    .chain(self.firework_whistles.drain(..))
+                {
                     sink.stop();
                 }
                 for sink in self.auction_bid_sinks.iter_mut().filter_map(Option::take) {
                     sink.stop();
                 }
-                for sink in self.auction_withdraw_sinks.iter_mut().filter_map(Option::take) {
+                for sink in self
+                    .auction_withdraw_sinks
+                    .iter_mut()
+                    .filter_map(Option::take)
+                {
                     sink.stop();
                 }
                 Ok(0)
@@ -387,7 +432,8 @@ impl Player {
                     // The source consumes the current factor through 4ab420/4abad0
                     // before play. Later preference stores do not rewrite it.
                     sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, 100)));
+                        fixed_cue_normalized(factor, 100),
+                    ));
                     sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.one_shots.push(sink);
                 }
@@ -404,8 +450,14 @@ impl Player {
                 };
                 let samples = samples.clone();
                 let gain = self.audio.source_gain(source_level);
-                let Some(mixer) = self.mixer().cloned() else { return Ok(0) };
-                let pool = if whistle { &mut self.firework_whistles } else { &mut self.firework_bursts };
+                let Some(mixer) = self.mixer().cloned() else {
+                    return Ok(0);
+                };
+                let pool = if whistle {
+                    &mut self.firework_whistles
+                } else {
+                    &mut self.firework_bursts
+                };
                 // 453290 scans six burst handles, 454965 scans four whistles;
                 // the original reuses a slot when handle+42c reports inactive.
                 // Sink::empty() is the available backend end-of-playback signal.
@@ -415,27 +467,51 @@ impl Player {
             Operation::AuctionActor(cue) => {
                 use crate::auction_scene::ActorCue;
                 match cue {
-                    ActorCue::Bid { participant, character, suppressed } => {
-                        let samples = self.assets.auction_voices.get(character as usize)
-                            .ok_or("Auction bid character outside original roster")?[0].clone();
+                    ActorCue::Bid {
+                        participant,
+                        character,
+                        suppressed,
+                    } => {
+                        let samples = self
+                            .assets
+                            .auction_voices
+                            .get(character as usize)
+                            .ok_or("Auction bid character outside original roster")?[0]
+                            .clone();
                         let gain = self.audio.source_gain(100);
                         let mixer = self.mixer().cloned();
-                        let slot = self.auction_bid_sinks.get_mut(participant as usize)
+                        let slot = self
+                            .auction_bid_sinks
+                            .get_mut(participant as usize)
                             .ok_or("Auction bid participant outside original roster")?;
                         replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
                     }
-                    ActorCue::Withdraw { participant, character, suppressed } => {
-                        let samples = self.assets.auction_voices.get(character as usize)
-                            .ok_or("Auction withdraw character outside original roster")?[2].clone();
+                    ActorCue::Withdraw {
+                        participant,
+                        character,
+                        suppressed,
+                    } => {
+                        let samples = self
+                            .assets
+                            .auction_voices
+                            .get(character as usize)
+                            .ok_or("Auction withdraw character outside original roster")?[2]
+                            .clone();
                         let gain = self.audio.source_gain(100);
                         let mixer = self.mixer().cloned();
-                        let slot = self.auction_withdraw_sinks.get_mut(participant as usize)
+                        let slot = self
+                            .auction_withdraw_sinks
+                            .get_mut(participant as usize)
                             .ok_or("Auction withdraw participant outside original roster")?;
                         replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
                     }
                     ActorCue::Win { character } => {
-                        let samples = self.assets.auction_voices.get(character as usize)
-                            .ok_or("Auction win character outside original roster")?[1].clone();
+                        let samples = self
+                            .assets
+                            .auction_voices
+                            .get(character as usize)
+                            .ok_or("Auction win character outside original roster")?[1]
+                            .clone();
                         let gain = self.audio.source_gain(100);
                         if let Some(mixer) = self.mixer().cloned() {
                             let sink = rodio::Sink::connect_new(&mixer);
@@ -458,9 +534,11 @@ impl Player {
                 Ok(0)
             }
             Operation::Script { name } => {
-                if name.len() > 128 || !name.ends_with(".wav")
-                    || !name.bytes().all(|byte| byte.is_ascii_alphanumeric()
-                        || matches!(byte, b'_' | b'-' | b'.'))
+                if name.len() > 128
+                    || !name.ends_with(".wav")
+                    || !name.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+                    })
                     || name.contains("..")
                 {
                     return Err("script sound name is outside original high-sound catalog".into());
@@ -480,7 +558,11 @@ impl Player {
                 Ok(0)
             }
             Operation::Ledger { sale } => {
-                let samples = if sale { self.assets.sell.clone() } else { self.assets.buy.clone() };
+                let samples = if sale {
+                    self.assets.sell.clone()
+                } else {
+                    self.assets.buy.clone()
+                };
                 let factor = self.audio.factor();
                 if let Some(mixer) = self.bus.combined_mixer() {
                     let cue = LedgerCue {
@@ -488,9 +570,11 @@ impl Player {
                         sink: rodio::Sink::connect_new(mixer),
                     };
                     cue.sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, cue.source_level)));
+                        fixed_cue_normalized(factor, cue.source_level),
+                    ));
                     // Gain precedes append: initial mute cannot leak full gain.
-                    cue.sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                    cue.sink
+                        .append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.ledger_cues.push(cue);
                 }
                 Ok(0)
@@ -505,9 +589,11 @@ impl Player {
                         sink: rodio::Sink::connect_new(mixer),
                     };
                     cue.sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, cue.source_level)));
+                        fixed_cue_normalized(factor, cue.source_level),
+                    ));
                     // Native +1c precedes play +10; never append at full gain.
-                    cue.sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                    cue.sink
+                        .append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
                     self.ui_click_cues.push(cue);
                 }
                 Ok(0)
@@ -531,8 +617,14 @@ mod tests {
         assert!(!play_bounded(&mixer, &mut bursts, 6, vec![0.05; 64], 1.));
         assert_eq!(bursts.len(), 6);
         assert!(bursts.iter().all(|sink| sink.volume() == 1.));
-        assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
-        for _ in 0..512 { output.next(); }
+        assert!(
+            (0..512)
+                .filter_map(|_| output.next())
+                .any(|sample| sample > 0.)
+        );
+        for _ in 0..512 {
+            output.next();
+        }
         assert!(play_bounded(&mixer, &mut bursts, 6, vec![0.05; 64], 1.));
         assert_eq!(bursts.len(), 1, "finished retained handles must recycle");
 
@@ -542,9 +634,19 @@ mod tests {
         for _ in 0..4 {
             assert!(play_bounded(&mixer, &mut whistles, 4, vec![0.125; 64], 0.8));
         }
-        assert!(!play_bounded(&mixer, &mut whistles, 4, vec![0.125; 64], 0.8));
+        assert!(!play_bounded(
+            &mixer,
+            &mut whistles,
+            4,
+            vec![0.125; 64],
+            0.8
+        ));
         assert!(whistles.iter().all(|sink| sink.volume() == 0.8));
-        assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
+        assert!(
+            (0..512)
+                .filter_map(|_| output.next())
+                .any(|sample| sample > 0.)
+        );
     }
 
     #[test]
@@ -617,17 +719,32 @@ mod tests {
         let (mixer, mut output) = rodio::mixer::mixer(1, 22_050);
         mixer.add(rodio::source::Zero::new(1, 22_050));
         let previous = rodio::Sink::connect_new(&mixer);
-        previous.append(rodio::buffer::SamplesBuffer::new(1, 22_050,
-            vec![0.5; 64]).repeat_infinite());
+        previous
+            .append(rodio::buffer::SamplesBuffer::new(1, 22_050, vec![0.5; 64]).repeat_infinite());
         let mut slot = Some(previous);
-        assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
+        assert!(
+            (0..512)
+                .filter_map(|_| output.next())
+                .any(|sample| sample > 0.)
+        );
         replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], true, 1.);
-        assert!(slot.is_none(), "native 4647a5 releases even when +858 suppresses the new voice");
+        assert!(
+            slot.is_none(),
+            "native 4647a5 releases even when +858 suppresses the new voice"
+        );
         let silent: Vec<_> = (0..8192).map(|_| output.next()).collect();
-        assert!(silent[silent.len()-1024..].iter().all(|sample| *sample == Some(0.)));
+        assert!(
+            silent[silent.len() - 1024..]
+                .iter()
+                .all(|sample| *sample == Some(0.))
+        );
         replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], false, 1.);
         assert!(slot.is_some());
-        assert!((0..512).filter_map(|_| output.next()).any(|sample| sample > 0.));
+        assert!(
+            (0..512)
+                .filter_map(|_| output.next())
+                .any(|sample| sample > 0.)
+        );
     }
 
     #[test]
@@ -653,7 +770,12 @@ mod tests {
         assert_eq!(assets.firework_echo_single.len(), 41_307);
         assert_eq!(assets.firework_whistle.len(), 39_388);
         assert_eq!(assets.auction_voices.len(), 10);
-        assert!(assets.auction_voices.iter().all(|pair| pair.iter().all(|samples| !samples.is_empty())));
+        assert!(
+            assets
+                .auction_voices
+                .iter()
+                .all(|pair| pair.iter().all(|samples| !samples.is_empty()))
+        );
         assert!(!assets.auction_applause.is_empty());
         // Branch-specific filename pushes converge on 453c1c; 4549a9 is
         // the kind-3 emitter whistle. All are original high-sound assets.
@@ -672,7 +794,8 @@ mod tests {
             let call = image.at(call_address, 5).unwrap();
             assert_eq!(call[0], 0xe8);
             assert_eq!(
-                (call_address + 5).wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())),
+                (call_address + 5)
+                    .wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())),
                 0x4ad760
             );
         }
@@ -680,18 +803,28 @@ mod tests {
         assert!(card_open_positive(&image, 65).unwrap());
         assert!(!card_open_positive(&image, 10).unwrap());
         // 41b443 compares the fourth 32-bit word of 20-byte card rows.
-        assert_eq!(image.at(0x41b436, 6).unwrap(), &[0x6a, 0x64, 0x6a, 0, 0x6a, 0]);
-        assert_eq!(image.at(0x41b443, 8).unwrap(), &[0x83, 0x3c, 0x85, 0x14, 0x42, 0x53, 0x00, 6]);
+        assert_eq!(
+            image.at(0x41b436, 6).unwrap(),
+            &[0x6a, 0x64, 0x6a, 0, 0x6a, 0]
+        );
+        assert_eq!(
+            image.at(0x41b443, 8).unwrap(),
+            &[0x83, 0x3c, 0x85, 0x14, 0x42, 0x53, 0x00, 6]
+        );
         for (push, name) in [(0x41b44d, 0x5348f8u32), (0x41b45d, 0x5348e4)] {
             let instruction = image.at(push, 5).unwrap();
             assert_eq!(instruction[0], 0x68);
-            assert_eq!(u32::from_le_bytes(instruction[1..5].try_into().unwrap()), name);
+            assert_eq!(
+                u32::from_le_bytes(instruction[1..5].try_into().unwrap()),
+                name
+            );
         }
         for call_address in [0x41b457, 0x41b467] {
             let call = image.at(call_address, 5).unwrap();
             assert_eq!(call[0], 0xe8);
             assert_eq!(
-                (call_address + 5).wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())),
+                (call_address + 5)
+                    .wrapping_add_signed(i32::from_le_bytes(call[1..5].try_into().unwrap())),
                 0x4ad760
             );
         }
@@ -704,14 +837,20 @@ mod tests {
             assert_eq!(push[0], 0x68);
             assert_eq!(u32::from_le_bytes(push[1..5].try_into().unwrap()), 0x535870);
         }
-        for (address, name_address) in [
-            (0x48a5f0, 0x541cc8u32), (0x48a627, 0x541cb4),
-        ] {
+        for (address, name_address) in [(0x48a5f0, 0x541cc8u32), (0x48a627, 0x541cb4)] {
             let push = image.at(address, 5).unwrap();
             assert_eq!(push[0], 0x68);
-            assert_eq!(u32::from_le_bytes(push[1..5].try_into().unwrap()), name_address);
+            assert_eq!(
+                u32::from_le_bytes(push[1..5].try_into().unwrap()),
+                name_address
+            );
         }
-        assert!(pcm16(&assets.script_directory.join("harpstrum.wav")).unwrap().len() > 20_000);
+        assert!(
+            pcm16(&assets.script_directory.join("harpstrum.wav"))
+                .unwrap()
+                .len()
+                > 20_000
+        );
         // 464abb names auction murmur and 464ac5 calls 4ad760.
         assert_eq!(image.at(0x464abb, 1).unwrap(), &[0x68]);
         assert_eq!(
@@ -734,16 +873,25 @@ mod portable_pcm_tests {
 
     struct Scratch(PathBuf);
     impl Drop for Scratch {
-        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
     fn original_pcm_loads_despite_filename_case() {
         let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from).unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
         std::fs::create_dir_all(&base).unwrap();
-        let root = base.join(format!("pcm-case-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = base.join(format!(
+            "pcm-case-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir(&root).unwrap();
         let _scratch = Scratch(root.clone());
         let mut wav = vec![0u8; 46];
@@ -770,18 +918,33 @@ mod portable_pcm_tests {
     #[test]
     fn sound_lookup_prefers_exact_name_and_rejects_ambiguous_fold() {
         let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from).unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
         std::fs::create_dir_all(&base).unwrap();
-        let root = base.join(format!("pcm-fold-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = base.join(format!(
+            "pcm-fold-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir(&root).unwrap();
         let _scratch = Scratch(root.clone());
-        for name in ["cue.wav", "Cue.wav"] { std::fs::write(root.join(name), []).unwrap(); }
-        assert_eq!(crate::transport_audio::original_case_path(&root.join("cue.wav")).unwrap(), root.join("cue.wav"));
-        assert!(crate::transport_audio::original_case_path(&root.join("CUE.WAV")).unwrap_err().contains("ambiguous"));
+        for name in ["cue.wav", "Cue.wav"] {
+            std::fs::write(root.join(name), []).unwrap();
+        }
+        assert_eq!(
+            crate::transport_audio::original_case_path(&root.join("cue.wav")).unwrap(),
+            root.join("cue.wav")
+        );
+        assert!(
+            crate::transport_audio::original_case_path(&root.join("CUE.WAV"))
+                .unwrap_err()
+                .contains("ambiguous")
+        );
     }
 }
-
 
 // Bounded software-mixer regressions; no hardware output is opened.
 #[cfg(test)]

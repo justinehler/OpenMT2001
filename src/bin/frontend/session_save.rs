@@ -21,14 +21,22 @@ fn put(bytes: &mut [u8], at: usize, value: u32) {
 fn validate_dust_bindings(
     manager: &openmt2001::demolition_effect::Manager,
     pending: &openmt2001::pending_world::State,
-    buildings: &[[u8;916]],
-) -> Result<(),String> {
+    buildings: &[[u8; 916]],
+) -> Result<(), String> {
     for row in &pending.records {
-        if row[2] != 2 || !matches!(row[3],1 | 2) {continue;}
-        let building = buildings.get(row[1] as usize).ok_or("dust building outside pool")?;
-        let effect = manager.slots.get(word(building,0x7c) as usize)
+        if row[2] != 2 || !matches!(row[3], 1 | 2) {
+            continue;
+        }
+        let building = buildings
+            .get(row[1] as usize)
+            .ok_or("dust building outside pool")?;
+        let effect = manager
+            .slots
+            .get(word(building, 0x7c) as usize)
             .ok_or("demolition dust binding outside pool")?;
-        if effect.state != 0 {return Err("demolition binding does not own an emitting dust slot".into());}
+        if effect.state != 0 {
+            return Err("demolition binding does not own an emitting dust slot".into());
+        }
     }
     Ok(())
 }
@@ -161,7 +169,9 @@ fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
 pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<Vec<bool>, String> {
     let native = save.scheduled()?;
     let mut deferred = vec![false; native.len()];
-    let Some(ext) = extension::Extension::parse(save)? else { return Ok(deferred); };
+    let Some(ext) = extension::Extension::parse(save)? else {
+        return Ok(deferred);
+    };
     ext.validate_runtime_section_set()?;
     let modern_presentation = matches!(ext.version, 2..=6);
     let clock = save.clock()?;
@@ -177,9 +187,12 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
         let direct = input.word()?;
         let header = input.blob()?;
         let bytes = input.blob()?;
-        if domain > 1 || direct > 1 || header != event.header
+        if domain > 1
+            || direct > 1
+            || header != event.header
             || bytes != event.packet.unwrap_or(&[])
-            || domain != word(event.header, 4) || outer != word(event.header, 8)
+            || domain != word(event.header, 4)
+            || outer != word(event.header, 8)
         {
             return Err("Extension queue identity differs from native stream".into());
         }
@@ -192,62 +205,76 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
             // it for the first resumed worker drain instead.
             deferred[index] = modern_presentation;
         } else {
-            if word(event.header, 0) != 0 || bytes.len() < 16
-                || admission != word(bytes, 12)
-            {
+            if word(event.header, 0) != 0 || bytes.len() < 16 || admission != word(bytes, 12) {
                 return Err("Extension packet admission differs from native stream".into());
             }
-            let outer_due = outer == u32::MAX || if domain == 0 {
-                outer == clock.timing[0]
-            } else {
-                (outer as i32) <= (clock.timing[1] as i32)
-            };
+            let outer_due = outer == u32::MAX
+                || if domain == 0 {
+                    outer == clock.timing[0]
+                } else {
+                    (outer as i32) <= (clock.timing[1] as i32)
+                };
             let packet_due = admission <= clock.timing[0];
             deferred[index] = if modern_presentation {
                 match crate::fresh_city::restore::saved_command(bytes)? {
-                Command::SellBusiness(_) => true,
-                Command::PropertyTransfer { .. } => true,
-                Command::Terms(_) => true,
-                Command::Takeover(command) => {
-                    // 450a30's unsigned future gate admits every non-sentinel
-                    // deadline at or before the saved total clock. The native
-                    // load stream would dispatch an overdue packet here too.
-                    if outer_due && packet_due {
-                        if save.game_mode()? != 1 || save.auction()?.is_some() {
-                            return Err("V2 due-now takeover requires normal non-auction continuation".into(),
+                    Command::SellBusiness(_) => true,
+                    Command::PropertyTransfer { .. } => true,
+                    Command::Terms(_) => true,
+                    Command::Takeover(command) => {
+                        // 450a30's unsigned future gate admits every non-sentinel
+                        // deadline at or before the saved total clock. The native
+                        // load stream would dispatch an overdue packet here too.
+                        if outer_due && packet_due {
+                            if save.game_mode()? != 1 || save.auction()?.is_some() {
+                                return Err(
+                                    "V2 due-now takeover requires normal non-auction continuation"
+                                        .into(),
                                 );
-                        }
-                        let pool = ext.required(4)?;
-                        if pool.len() != 600*916 {return Err("V2 takeover building pool size differs".into());}
-                        let row = pool.chunks_exact(916).nth(command.building as usize)
-                            .ok_or("V2 takeover target outside building pool")?;
-                        let native = save.buildings()?.into_iter().find(|b|b.slot==command.building as usize)
-                            .ok_or("V2 takeover target is not a retained native building")?;
-                        if &row[..64] != native.bytes {
-                            return Err("V2 takeover target differs from native building prefix".into(),
+                            }
+                            let pool = ext.required(4)?;
+                            if pool.len() != 600 * 916 {
+                                return Err("V2 takeover building pool size differs".into());
+                            }
+                            let row = pool
+                                .chunks_exact(916)
+                                .nth(command.building as usize)
+                                .ok_or("V2 takeover target outside building pool")?;
+                            let native = save
+                                .buildings()?
+                                .into_iter()
+                                .find(|b| b.slot == command.building as usize)
+                                .ok_or("V2 takeover target is not a retained native building")?;
+                            if &row[..64] != native.bytes {
+                                return Err(
+                                    "V2 takeover target differs from native building prefix".into(),
                                 );
+                            }
+                            // Load rebuilds model binding+4c instead of restoring
+                            // that source word. Only the linked structure branch
+                            // suppresses485520 independently of the new binding.
+                            if word(row, 0x24) <= 1 {
+                                return Err("V2 due-now takeover requires unverified synchronous appearance".into());
+                            }
+                            let business = save
+                                .economy()?
+                                .businesses()
+                                .nth(word(row, 0x1c) as usize)
+                                .ok_or("V2 takeover requires a live native business")?;
+                            if business.business_type() >= 45 {
+                                return Err("V2 takeover business leaves retained catalog".into());
+                            }
+                            true
+                        } else {
+                            false
                         }
-                        // Load rebuilds model binding+4c instead of restoring
-                        // that source word. Only the linked structure branch
-                        // suppresses485520 independently of the new binding.
-                        if word(row,0x24)<=1 {
-                            return Err("V2 due-now takeover requires unverified synchronous appearance".into());
-                        }
-                        let business = save.economy()?.businesses().nth(word(row,0x1c) as usize)
-                            .ok_or("V2 takeover requires a live native business")?;
-                        if business.business_type()>=45 {
-                            return Err("V2 takeover business leaves retained catalog".into());
-                        }
-                        true
-                    } else {false}
-                }
-                _ if outer_due && packet_due => {
-                    return Err(format!(
-                        "Cannot save due-now command {:02x}: load-stage continuation is unverified",
-                        word(bytes, 4),
-                    ));
-                }
-                _ => false,
+                    }
+                    _ if outer_due && packet_due => {
+                        return Err(format!(
+                            "Cannot save due-now command {:02x}: load-stage continuation is unverified",
+                            word(bytes, 4),
+                        ));
+                    }
+                    _ => false,
                 }
             } else {
                 false
@@ -300,23 +327,39 @@ impl<'data> Session<'data> {
         host: Option<AuctionHostState>,
         interface_mode: u32,
     ) -> Result<Vec<u8>, String> {
-        self.save_v2_with_auction_view_inner(image,cameras,game_mode,host,interface_mode,None)
+        self.save_v2_with_auction_view_inner(image, cameras, game_mode, host, interface_mode, None)
     }
     /// UI SaveSelected owns the actual worker Host. Serialize its cold-load
     /// continuation without dropping the live Options hold before the cut.
     pub(crate) fn save_v2_with_options_view(
-        &mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],
-        game_mode:u32,host:&crate::live_host::Host,interface_mode:u32,
-    )->Result<Vec<u8>,String> {
-        let continuation=host.options_save_projection(&self.world.pause,&self.hooks.timers)?
-            .map(|(pause,timers)|OptionsContinuation{pause,timers});
-        self.save_v2_with_auction_view_inner(image,cameras,game_mode,
-            host.auction_save_state(),interface_mode,continuation)
+        &mut self,
+        image: &openmt2001::pe::PeImage<'_>,
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: &crate::live_host::Host,
+        interface_mode: u32,
+    ) -> Result<Vec<u8>, String> {
+        let continuation = host
+            .options_save_projection(&self.world.pause, &self.hooks.timers)?
+            .map(|(pause, timers)| OptionsContinuation { pause, timers });
+        self.save_v2_with_auction_view_inner(
+            image,
+            cameras,
+            game_mode,
+            host.auction_save_state(),
+            interface_mode,
+            continuation,
+        )
     }
     fn save_v2_with_auction_view_inner(
-        &mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],game_mode:u32,
-        host:Option<AuctionHostState>,interface_mode:u32,continuation:Option<OptionsContinuation>,
-    )->Result<Vec<u8>,String> {
+        &mut self,
+        image: &openmt2001::pe::PeImage<'_>,
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        interface_mode: u32,
+        continuation: Option<OptionsContinuation>,
+    ) -> Result<Vec<u8>, String> {
         SaveProjection {
             live_commands: &self.live_commands,
             city: &mut self.world.city,
@@ -349,13 +392,23 @@ impl<'data> Session<'data> {
             static_rng_tail_next: self.static_rng_tail_next,
             build_random_state: self.build_random_state,
             building_selection: self.building_selection,
-        }.encode_continuation(image,cameras,game_mode,host,interface_mode,continuation)
+        }
+        .encode_continuation(
+            image,
+            cameras,
+            game_mode,
+            host,
+            interface_mode,
+            continuation,
+        )
     }
 
     /// Apply only after checked native restoration has reconstructed geometry
     /// and original scripts. Host authenticates profile association separately.
     pub fn restore_v2_extension_with_image(
-        &mut self, save: &SaveFile<'_>, image: &openmt2001::pe::PeImage<'_>,
+        &mut self,
+        save: &SaveFile<'_>,
+        image: &openmt2001::pe::PeImage<'_>,
     ) -> Result<Option<Metadata>, String> {
         let metadata = self.restore_v2_extension(save)?;
         self.demolition_points = self.demolition_effects.points(image)?;
@@ -374,46 +427,69 @@ impl<'data> Session<'data> {
         // names the same native queue and packet deadlines.
         verified_modern_presentation_queue(save)?;
         let restored_map = if matches!(ext.version, 5 | 6) {
-            let selection = crate::skirmish_maps::Selection::decode(ext.version, ext.required(18)?)?;
-            let selected = self.catalog.selected_level().ok_or("Skirmish selection absent")?;
-            if selection.level_id != selected.id() || selected.single_player()
+            let selection =
+                crate::skirmish_maps::Selection::decode(ext.version, ext.required(18)?)?;
+            let selected = self
+                .catalog
+                .selected_level()
+                .ok_or("Skirmish selection absent")?;
+            if selection.level_id != selected.id()
+                || selected.single_player()
                 || selection.target.to_bits() != selected.objective_target().to_bits()
-                || !selected.directory().eq_ignore_ascii_case(
-                    format!("net{}", selection.level_id-300000).as_bytes()) {
+                || !selected
+                    .directory()
+                    .eq_ignore_ascii_case(format!("net{}", selection.level_id - 300000).as_bytes())
+            {
                 return Err("Skirmish extension differs from prepared selection".into());
             }
-            if self.skirmish_map.as_ref().is_some_and(|map|
+            if self.skirmish_map.as_ref().is_some_and(|map| {
                 !matches!(map, crate::skirmish_maps::MapIdentity::MaterializedUnknown)
-                    && map != &selection.map) {
+                    && map != &selection.map
+            }) {
                 return Err("Skirmish map differs from prepared provenance".into());
             }
             Some(selection.map)
-        } else { None };
+        } else {
+            None
+        };
         let has_auction = ext.records.contains_key(&14);
         let has_view = ext.records.contains_key(&15);
         ext.validate_runtime_section_set()?;
         let build_random_state = if ext.version >= 3 {
             let mut state = Input::new(ext.required(16)?);
-            let value = state.word()?; state.end()?;
+            let value = state.word()?;
+            state.end()?;
             Some(value)
-        } else { None };
+        } else {
+            None
+        };
         let demolition_effects = if ext.version >= 4 {
             Some(openmt2001::save::demolition::decode(ext.required(17)?)?)
-        } else { None };
+        } else {
+            None
+        };
         let interface_mode = if has_view {
-            if ext.records.contains_key(&14) || save.game_mode()? != 1 || save.auction()?.is_some() {
+            if ext.records.contains_key(&14) || save.game_mode()? != 1 || save.auction()?.is_some()
+            {
                 return Err("V2 normal view disagrees with native game/auction mode".into());
             }
             let mut view = Input::new(ext.required(15)?);
-            let mode = view.word()?; view.end()?;
-            if !matches!(mode, 0 | 3) { return Err("V2 normal view is unsupported".into()); }
+            let mode = view.word()?;
+            view.end()?;
+            if !matches!(mode, 0 | 3) {
+                return Err("V2 normal view is unsupported".into());
+            }
             Some(mode)
-        } else { None };
+        } else {
+            None
+        };
         let mut auction = if has_auction {
             let auction = AuctionContinuation::decode(ext.required(14)?)?;
             auction.validate_native(save)?;
             Some(auction)
-        } else { None };
+        } else {
+            None
+        };
         let profile =
             std::str::from_utf8(ext.required(1)?).map_err(|_| "V2 profile name is not UTF-8")?;
         if !valid_profile(profile) {
@@ -434,8 +510,7 @@ impl<'data> Session<'data> {
             if reference != player.reference || bytes.len() != player.bytes.len() {
                 return Err("V2 player allocation differs from checked native constructor".into());
             }
-            if bytes.get(4..444) != Some(native.bytes.as_slice())
-            {
+            if bytes.get(4..444) != Some(native.bytes.as_slice()) {
                 return Err("V2/native player account records disagree".into());
             }
             player.bytes.copy_from_slice(bytes);
@@ -454,7 +529,13 @@ impl<'data> Session<'data> {
             }
         }
         p.end()?;
-        if !self.roster.manager.players.iter().any(|player| player.reference == self.roster.status.current_player) {
+        if !self
+            .roster
+            .manager
+            .players
+            .iter()
+            .any(|player| player.reference == self.roster.status.current_player)
+        {
             return Err("V2 current player is absent from restored roster".into());
         }
         let mut r = Input::new(ext.required(3)?);
@@ -522,7 +603,10 @@ impl<'data> Session<'data> {
                 .collect(),
             used,
         )?;
-        self.world.creation.auxiliary.replace_with(imported_auxiliary);
+        self.world
+            .creation
+            .auxiliary
+            .replace_with(imported_auxiliary);
         self.world.ledgers.residents.nodes = nodes;
         r.end()?;
         let mut a = Input::new(ext.required(6)?);
@@ -821,15 +905,24 @@ impl<'data> Session<'data> {
         self.roster.collect_accounts(&mut self.world.city)?;
         // Native saves and VERSION1/2 did not retain this stream. Their cold
         // startup state remains authoritative rather than inventing attempts.
-        if let Some(state) = build_random_state { self.build_random_state = state; }
+        if let Some(state) = build_random_state {
+            self.build_random_state = state;
+        }
         if let Some(manager) = demolition_effects {
-            validate_dust_bindings(&manager,&self.world.pending_world,&self.world.buildings)?;
+            validate_dust_bindings(&manager, &self.world.pending_world, &self.world.buildings)?;
             self.demolition_points.clear();
             self.demolition_effects = manager;
         }
-        if let Some(continuation) = &mut auction { continuation.retain_activation_players(self); }
-        if let Some(map) = restored_map { self.skirmish_map = Some(map); }
-        Ok(Some(Metadata { profile_filename, interface_mode, auction,
+        if let Some(continuation) = &mut auction {
+            continuation.retain_activation_players(self);
+        }
+        if let Some(map) = restored_map {
+            self.skirmish_map = Some(map);
+        }
+        Ok(Some(Metadata {
+            profile_filename,
+            interface_mode,
+            auction,
         }))
     }
 }
@@ -855,60 +948,155 @@ mod tests {
     #[test]
     #[ignore = "requires original game assets; owned Options save and cold Clock continuation"]
     fn options_save_cold_load_preserves_independent_pause_owners() {
-        std::thread::Builder::new().stack_size(32*1024*1024).spawn(||{
-            use crate::fresh_city::{Inputs,Policy,CommandAssets};
-            let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
-            let exe=read("OPENMT2001_EXE");let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
-            let board=openmt2001::board::Board::from_v14(&image).unwrap();let build=read("OPENMT2001_BUILD_FILE");let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
-            let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-            let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
-            let default=std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());let scripts=default.parent().unwrap().parent().unwrap();
-            let styles=crate::fresh_city::load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
-            let names=std::array::from_fn(|_|Vec::new());
-            let inputs=||Inputs{tree_locators: None, image:&image,board:&board,file:&file,people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts,parameters:std::str::from_utf8(&parameters).unwrap(),era_styles:styles.clone(),timetable:std::str::from_utf8(&timetable).unwrap(),scenario:"SCENARIO3",difficulty:0,selected_character:4,profile_name:b"Save fixture",character_names:&names};
-            let policy=||Policy{seed:0x12345678,auxiliary_prior_bytes:[0;284]};
-            let mut session=Session::initialize(inputs(),policy()).unwrap();
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                use crate::fresh_city::{CommandAssets, Inputs, Policy};
+                let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+                let exe = read("OPENMT2001_EXE");
+                let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+                let board = openmt2001::board::Board::from_v14(&image).unwrap();
+                let build = read("OPENMT2001_BUILD_FILE");
+                let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+                let directory = read("OPENMT2001_ARCHIVE_DIR");
+                let archive = read("OPENMT2001_ARCHIVE_BIN");
+                let index =
+                    openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
+                        .unwrap();
+                let parameters = read("OPENMT2001_PARAMETERS");
+                let timetable = read("OPENMT2001_TIMETABLE");
+                let default =
+                    std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let scripts = default.parent().unwrap().parent().unwrap();
+                let styles = crate::fresh_city::load_era_styles(
+                    std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                        .parent()
+                        .unwrap(),
+                )
+                .unwrap();
+                let names = std::array::from_fn(|_| Vec::new());
+                let inputs = || Inputs {
+                    tree_locators: None,
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                    people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                        .unwrap(),
+                    vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                        &image, &index, &archive,
+                    )
+                    .unwrap(),
+                    transport_models: openmt2001::traffic::models::Models::from_original(
+                        &image, &index, &archive,
+                    )
+                    .unwrap(),
+                    road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+                    scripts,
+                    parameters: std::str::from_utf8(&parameters).unwrap(),
+                    era_styles: styles.clone(),
+                    timetable: std::str::from_utf8(&timetable).unwrap(),
+                    scenario: "SCENARIO3",
+                    difficulty: 0,
+                    selected_character: 4,
+                    profile_name: b"Save fixture",
+                    character_names: &names,
+                };
+                let policy = || Policy {
+                    seed: 0x12345678,
+                    auxiliary_prior_bytes: [0; 284],
+                };
+                let mut session = Session::initialize(inputs(), policy()).unwrap();
 
-            let assets=CommandAssets{image:&image,board:&board,file:&file};
-            let camera=openmt2001::flyby::CameraSample{eye:[100.,120.,100.],target:[0.,0.,0.],up:[0.,1.,0.],vertical_fov:0.7};
-            let cameras=crate::save_menu::cameras(None,camera).unwrap();
-            // These real Session saves exercise serialization/restore and a fresh
-            // Host's actual registered logic/Clock. Camera/UI admission stays a
-            // separate native containing regression, not a synthetic capture.
-            for other in [None,Some(0usize),Some(1usize)] {
-                if let Some(reason)=other {
-                    session.world.pause.pause(reason,|c,_|{c.apply(&mut session.hooks.timers);Ok(())}).unwrap();
+                let assets = CommandAssets {
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                };
+                let camera = openmt2001::flyby::CameraSample {
+                    eye: [100., 120., 100.],
+                    target: [0., 0., 0.],
+                    up: [0., 1., 0.],
+                    vertical_fov: 0.7,
+                };
+                let cameras = crate::save_menu::cameras(None, camera).unwrap();
+                // These real Session saves exercise serialization/restore and a fresh
+                // Host's actual registered logic/Clock. Camera/UI admission stays a
+                // separate native containing regression, not a synthetic capture.
+                for other in [None, Some(0usize), Some(1usize)] {
+                    if let Some(reason) = other {
+                        session
+                            .world
+                            .pause
+                            .pause(reason, |c, _| {
+                                c.apply(&mut session.hooks.timers);
+                                Ok(())
+                            })
+                            .unwrap();
+                    }
+                    let expected_pause = session.world.pause.clone();
+                    let expected_timers = session.hooks.timers.clone();
+                    let mut host = crate::live_host::Host::new(camera.eye);
+                    host.set_running(true);
+                    host.options(&mut session.world.pause, &mut session.hooks.timers, true)
+                        .unwrap();
+                    assert!(host.options_save_allowed(&session.world.pause, &session.hooks.timers));
+                    let live_pause = session.world.pause.clone();
+                    let live_timers = session.hooks.timers.clone();
+                    let bytes = session
+                        .save_v2_with_options_view(&image, cameras, 1, &host, 0)
+                        .unwrap();
+                    assert_eq!(session.world.pause, live_pause);
+                    assert_eq!(session.hooks.timers, live_timers);
+                    assert!(!host.running);
+                    assert!(host.options_save_allowed(&session.world.pause, &session.hooks.timers));
+                    let save = SaveFile::parse(&bytes).unwrap();
+                    let mut cold = Session::load_original(inputs(), policy(), &bytes).unwrap();
+                    cold.restore_v2_extension_with_image(&save, &image).unwrap();
+                    assert_eq!(cold.saved_cameras, Some(cameras));
+                    assert_eq!(cold.world.pause, expected_pause);
+                    assert_eq!(cold.hooks.timers, expected_timers);
+                    let mut fresh = crate::live_host::Host::new(camera.eye);
+                    fresh.set_running(true);
+                    assert!(!fresh.options_save_allowed(&cold.world.pause, &cold.hooks.timers));
+                    let tick = cold.world.clock.timing[0];
+                    fresh.frame(&mut cold, &assets, 40);
+                    assert!(fresh.failure.is_none(), "{:?}", fresh.failure);
+                    if let Some(reason) = other {
+                        assert_eq!(cold.world.clock.timing[0], tick);
+                        assert_eq!(cold.world.pause, expected_pause);
+                        cold.world
+                            .pause
+                            .unpause(reason, |c, _| {
+                                c.apply(&mut cold.hooks.timers);
+                                Ok(())
+                            })
+                            .unwrap();
+                        fresh.frame(&mut cold, &assets, 40);
+                        assert!(fresh.failure.is_none(), "{:?}", fresh.failure);
+                    }
+                    assert!(
+                        cold.world.clock.timing[0] > tick,
+                        "cold logic must advance without opening/closing a new Options owner"
+                    );
+                    host.options(&mut session.world.pause, &mut session.hooks.timers, false)
+                        .unwrap();
+                    assert_eq!(session.world.pause, expected_pause);
+                    assert_eq!(session.hooks.timers, expected_timers);
+                    if let Some(reason) = other {
+                        session
+                            .world
+                            .pause
+                            .unpause(reason, |c, _| {
+                                c.apply(&mut session.hooks.timers);
+                                Ok(())
+                            })
+                            .unwrap();
+                    }
                 }
-                let expected_pause=session.world.pause.clone();
-                let expected_timers=session.hooks.timers.clone();
-                let mut host=crate::live_host::Host::new(camera.eye);host.set_running(true);
-                host.options(&mut session.world.pause,&mut session.hooks.timers,true).unwrap();
-                assert!(host.options_save_allowed(&session.world.pause,&session.hooks.timers));
-                let live_pause=session.world.pause.clone();let live_timers=session.hooks.timers.clone();
-                let bytes=session.save_v2_with_options_view(&image,cameras,1,&host,0).unwrap();
-                assert_eq!(session.world.pause,live_pause);assert_eq!(session.hooks.timers,live_timers);
-                assert!(!host.running);assert!(host.options_save_allowed(&session.world.pause,&session.hooks.timers));
-                let save=SaveFile::parse(&bytes).unwrap();
-                let mut cold=Session::load_original(inputs(),policy(),&bytes).unwrap();
-                cold.restore_v2_extension_with_image(&save,&image).unwrap();
-                assert_eq!(cold.saved_cameras,Some(cameras));
-                assert_eq!(cold.world.pause,expected_pause);assert_eq!(cold.hooks.timers,expected_timers);
-                let mut fresh=crate::live_host::Host::new(camera.eye);fresh.set_running(true);
-                assert!(!fresh.options_save_allowed(&cold.world.pause,&cold.hooks.timers));
-                let tick=cold.world.clock.timing[0];
-                fresh.frame(&mut cold,&assets,40);assert!(fresh.failure.is_none(),"{:?}",fresh.failure);
-                if let Some(reason)=other {
-                    assert_eq!(cold.world.clock.timing[0],tick);
-                    assert_eq!(cold.world.pause,expected_pause);
-                    cold.world.pause.unpause(reason,|c,_|{c.apply(&mut cold.hooks.timers);Ok(())}).unwrap();
-                    fresh.frame(&mut cold,&assets,40);assert!(fresh.failure.is_none(),"{:?}",fresh.failure);
-                }
-                assert!(cold.world.clock.timing[0]>tick,"cold logic must advance without opening/closing a new Options owner");
-                host.options(&mut session.world.pause,&mut session.hooks.timers,false).unwrap();
-                assert_eq!(session.world.pause,expected_pause);assert_eq!(session.hooks.timers,expected_timers);
-                if let Some(reason)=other {session.world.pause.unpause(reason,|c,_|{c.apply(&mut session.hooks.timers);Ok(())}).unwrap();}
-            }
-        }).unwrap().join().unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
     #[test]
     #[ignore = "requires original v1.4 game assets and audited scripts"]
@@ -1542,7 +1730,7 @@ pub(crate) struct SaveProjection<'a> {
     pub catalog: &'a openmt2001::level_catalog::Catalog,
     pub campaign_profile: &'a Option<std::path::PathBuf>,
     pub skirmish_map: &'a Option<crate::skirmish_maps::MapIdentity>,
-    pub saved_player_metadata: &'a [[u8;48];6],
+    pub saved_player_metadata: &'a [[u8; 48]; 6],
     pub history: &'a openmt2001::player_history::State,
     pub random_registry: &'a openmt2001::player_manager::RandomRegistry,
     pub event_cards: &'a openmt2001::event_cards::Deck,
@@ -1558,29 +1746,34 @@ pub(crate) struct SaveProjection<'a> {
     pub allocation_next: u32,
     pub static_rng_tail_next: u32,
     pub build_random_state: u32,
-    pub building_selection: [u32;2],
+    pub building_selection: [u32; 2],
 }
 // Private serialized projection: produced only by the actual worker Host's
 // owned Options operation. It is not a native owner, saved token or live state.
 struct OptionsContinuation {
-    pause:openmt2001::pause::State,
-    timers:Vec<openmt2001::timers::Task>,
+    pause: openmt2001::pause::State,
+    timers: Vec<openmt2001::timers::Task>,
 }
 impl SaveProjection<'_> {
     pub(crate) fn encode(
         self,
         image: &openmt2001::pe::PeImage<'_>,
-        cameras: [[u8;196];2],
-        game_mode:u32,
-        host:Option<AuctionHostState>,
-        interface_mode:u32,
-    )->Result<Vec<u8>,String> {
-        self.encode_continuation(image,cameras,game_mode,host,interface_mode,None)
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        interface_mode: u32,
+    ) -> Result<Vec<u8>, String> {
+        self.encode_continuation(image, cameras, game_mode, host, interface_mode, None)
     }
     fn encode_continuation(
-        mut self,image:&openmt2001::pe::PeImage<'_>,cameras:[[u8;196];2],game_mode:u32,
-        host:Option<AuctionHostState>,interface_mode:u32,continuation:Option<OptionsContinuation>,
-    )->Result<Vec<u8>,String> {
+        mut self,
+        image: &openmt2001::pe::PeImage<'_>,
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        interface_mode: u32,
+        continuation: Option<OptionsContinuation>,
+    ) -> Result<Vec<u8>, String> {
         if self.tutorial_state != 0 {
             return Err("Saving tutorial script state is not yet supported".into());
         }
@@ -1595,7 +1788,15 @@ impl SaveProjection<'_> {
         if !auction_active && game_mode != 1 {
             return Err("Saving a modal game mode is not yet supported".into());
         }
-        if auction_active { AuctionContinuation::capture_state(&self.city.auction, self.tutorial_state, game_mode, host.clone(), interface_mode)?; }
+        if auction_active {
+            AuctionContinuation::capture_state(
+                &self.city.auction,
+                self.tutorial_state,
+                game_mode,
+                host.clone(),
+                interface_mode,
+            )?;
+        }
         let mut events = Output(vec![]);
         let pending_events = self.scripts.events.pending();
         if pending_events.len() > 4096 {
@@ -1687,7 +1888,8 @@ impl SaveProjection<'_> {
                 packet: (!p.is_empty()).then_some(p.as_slice()),
             })
             .collect();
-        let pending: [u8; 3588] = self.city
+        let pending: [u8; 3588] = self
+            .city
             .pending_world
             .to_bytes()
             .try_into()
@@ -1711,7 +1913,9 @@ impl SaveProjection<'_> {
             pending: &pending,
             resident_accounts: &accounts,
             scheduled: &scheduled,
-            auction: auction_active.then_some(writer::Auction { record: &mut self.city.auction.controller.record, countdown: self.city.auction.presentation.countdown,
+            auction: auction_active.then_some(writer::Auction {
+                record: &mut self.city.auction.controller.record,
+                countdown: self.city.auction.presentation.countdown,
             }),
             objective: &objective,
             business_info: self.city.catalog.info.rows(),
@@ -1725,7 +1929,7 @@ impl SaveProjection<'_> {
         };
         let mut bytes = writer::encode(&mut state, 0x7fffff, [0; 4])?;
         #[cfg(test)]
-        natural_observer::after(&self.city.categories,&self.city.auction.controller.record);
+        natural_observer::after(&self.city.categories, &self.city.auction.controller.record);
         let profile = self
             .campaign_profile
             .as_ref()
@@ -1802,9 +2006,8 @@ impl SaveProjection<'_> {
                 .chain([self.event_cards.remaining]),
         );
         deck.extend_from_slice(&self.event_cards.used);
-        let mut availability = words([self.city
-            .availability_cursor
-            .map_or(u32::MAX, |v| v as u32)]);
+        let mut availability =
+            words([self.city.availability_cursor.map_or(u32::MAX, |v| v as u32)]);
         availability.extend_from_slice(&words(self.city.available.iter().map(|v| *v as u32)));
         let mut runtime = Output(vec![]);
         runtime
@@ -1853,20 +2056,15 @@ impl SaveProjection<'_> {
         economy
             .0
             .extend_from_slice(&words(self.population.properties.totals.map(f32::to_bits)));
-        let (pause,timers)=continuation.as_ref()
-            .map_or((&self.city.pause,self.timers),|c|(&c.pause,c.timers.as_slice()));
+        let (pause, timers) = continuation
+            .as_ref()
+            .map_or((&self.city.pause, self.timers), |c| {
+                (&c.pause, c.timers.as_slice())
+            });
         economy.0.extend_from_slice(&pause.bytes);
         economy.word(self.frequency.frequency.to_bits());
-        economy.word(
-            self.frequency
-                .calendar_timer
-                .map_or(u32::MAX, |v| v as u32),
-        );
-        economy.word(
-            self.frequency
-                .logic_timer
-                .map_or(u32::MAX, |v| v as u32),
-        );
+        economy.word(self.frequency.calendar_timer.map_or(u32::MAX, |v| v as u32));
+        economy.word(self.frequency.logic_timer.map_or(u32::MAX, |v| v as u32));
         economy.blob(&flat(timers))?;
         economy.0.extend_from_slice(&words(self.building_selection));
         economy
@@ -1879,32 +2077,54 @@ impl SaveProjection<'_> {
                 .iter()
                 .map(|v| *v as u32),
         ));
-        let auction = if auction_active { Some(AuctionContinuation::capture_state(&self.city.auction, self.tutorial_state, game_mode, host, interface_mode,
-            )?) } else { None };
+        let auction = if auction_active {
+            Some(AuctionContinuation::capture_state(
+                &self.city.auction,
+                self.tutorial_state,
+                game_mode,
+                host,
+                interface_mode,
+            )?)
+        } else {
+            None
+        };
         let mut records = vec![
-                (1, profile.unwrap_or("").as_bytes().to_vec()),
-                (2, players.0),
-                (3, rng),
-                (4, flat(&self.city.buildings)),
-                (5, resident_runtime.0),
-                (6, ai.0),
-                (7, availability),
-                (8, deck),
-                (9, queue.0),
-                (10, runtime.0),
-                (11, transport::encode_parts(&self.city.road_network, self.road_traffic, self.transport)?),
-                (12, economy.0),
-                (13, events.0),
-            ];
+            (1, profile.unwrap_or("").as_bytes().to_vec()),
+            (2, players.0),
+            (3, rng),
+            (4, flat(&self.city.buildings)),
+            (5, resident_runtime.0),
+            (6, ai.0),
+            (7, availability),
+            (8, deck),
+            (9, queue.0),
+            (10, runtime.0),
+            (
+                11,
+                transport::encode_parts(
+                    &self.city.road_network,
+                    self.road_traffic,
+                    self.transport,
+                )?,
+            ),
+            (12, economy.0),
+            (13, events.0),
+        ];
         // VERSION3 adds the independent native placement RNG (560a08).
         // Older extension records and native serialization retain their layout.
         records.push((16, words([self.build_random_state])));
-        validate_dust_bindings(&self.demolition_effects,&self.city.pending_world,&self.city.buildings,
+        validate_dust_bindings(
+            &self.demolition_effects,
+            &self.city.pending_world,
+            &self.city.buildings,
         )?;
-        records.push((17, openmt2001::save::demolition::encode(&self.demolition_effects)?,
+        records.push((
+            17,
+            openmt2001::save::demolition::encode(&self.demolition_effects)?,
         ));
-        if let Some(auction) = auction { records.push((14, auction.encode())); }
-        else {
+        if let Some(auction) = auction {
+            records.push((14, auction.encode()));
+        } else {
             // Preserve explicit normal as well as strategic UI authority. CityView
             // can leave raw kind4, so absence is not equivalent to explicit mode0.
             // Record15 already admits both values; auction record14 owns its view.
@@ -1915,19 +2135,38 @@ impl SaveProjection<'_> {
             .selected_level()
             .ok_or("save has no selected level")?;
         let version = if (300000..=300006).contains(&selected.id()) {
-            if selected.single_player() || !selected.objective_target().is_finite()
-                || !selected.directory().eq_ignore_ascii_case(format!("net{}", selected.id()-300000).as_bytes()) {
+            if selected.single_player()
+                || !selected.objective_target().is_finite()
+                || !selected
+                    .directory()
+                    .eq_ignore_ascii_case(format!("net{}", selected.id() - 300000).as_bytes())
+            {
                 return Err("unsupported saved Skirmish identity".into());
             }
             // Independent selected+870 and retained map provenance, never inferred
             // from the active objective or a reconstructed materialized city.
-            let map = self.skirmish_map.clone().ok_or("saved Skirmish provenance absent")?;
-            let version = if matches!(map, crate::skirmish_maps::MapIdentity::LegacyEmpty) { 5 } else { 6 };
-            records.push((18, crate::skirmish_maps::Selection {
-                level_id: selected.id(), target: selected.objective_target(), map,
-            }.encode(version)?));
+            let map = self
+                .skirmish_map
+                .clone()
+                .ok_or("saved Skirmish provenance absent")?;
+            let version = if matches!(map, crate::skirmish_maps::MapIdentity::LegacyEmpty) {
+                5
+            } else {
+                6
+            };
+            records.push((
+                18,
+                crate::skirmish_maps::Selection {
+                    level_id: selected.id(),
+                    target: selected.objective_target(),
+                    map,
+                }
+                .encode(version)?,
+            ));
             version
-        } else { 4 };
+        } else {
+            4
+        };
         extension::append_version(&mut bytes, &records, version)?;
         // Check new due-now presentation boundaries before host publication.
         verified_modern_presentation_queue(&SaveFile::parse(&bytes)?)?;
@@ -1938,34 +2177,49 @@ impl SaveProjection<'_> {
 /// Object-safe stack request; consuming the projection makes a second encode
 /// an explicit error. It cannot outlive the synchronous calendar callback.
 pub(crate) trait AutosaveRequest: std::fmt::Debug {
-    fn encode_once(&mut self,cameras:[[u8;196];2],game_mode:u32,
-        host:Option<AuctionHostState>,interface_mode:u32)->Result<Vec<u8>,String>;
+    fn encode_once(
+        &mut self,
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        interface_mode: u32,
+    ) -> Result<Vec<u8>, String>;
 }
-pub(crate) struct SaveRequest<'a,'data> {
-    pub projection:Option<SaveProjection<'a>>,
-    pub image:&'a openmt2001::pe::PeImage<'data>,
+pub(crate) struct SaveRequest<'a, 'data> {
+    pub projection: Option<SaveProjection<'a>>,
+    pub image: &'a openmt2001::pe::PeImage<'data>,
 }
-impl std::fmt::Debug for SaveRequest<'_,'_> {
-    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {
-        f.debug_struct("SaveRequest").field("available",&self.projection.is_some()).finish()
+impl std::fmt::Debug for SaveRequest<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaveRequest")
+            .field("available", &self.projection.is_some())
+            .finish()
     }
 }
-impl AutosaveRequest for SaveRequest<'_,'_> {
-    fn encode_once(&mut self,cameras:[[u8;196];2],game_mode:u32,
-        host:Option<AuctionHostState>,interface_mode:u32)->Result<Vec<u8>,String> {
-        let projection=self.projection.take().ok_or("Autosave request already consumed")?;
+impl AutosaveRequest for SaveRequest<'_, '_> {
+    fn encode_once(
+        &mut self,
+        cameras: [[u8; 196]; 2],
+        game_mode: u32,
+        host: Option<AuctionHostState>,
+        interface_mode: u32,
+    ) -> Result<Vec<u8>, String> {
+        let projection = self
+            .projection
+            .take()
+            .ok_or("Autosave request already consumed")?;
         #[cfg(test)]
-        let mut projection=projection;
+        let mut projection = projection;
         #[cfg(test)]
         natural_observer::before(&mut projection);
-        projection.encode(self.image,cameras,game_mode,host,interface_mode)
+        projection.encode(self.image, cameras, game_mode, host, interface_mode)
     }
 }
 
 #[cfg(test)]
-#[path="session_autosave_live_test.rs"]
+#[path = "session_autosave_live_test.rs"]
 mod autosave_live_tests;
 
 #[cfg(test)]
-#[path="session_autosave_natural_observer.rs"]
+#[path = "session_autosave_natural_observer.rs"]
 pub(crate) mod natural_observer;

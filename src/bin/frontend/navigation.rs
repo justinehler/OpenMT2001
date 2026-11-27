@@ -18,11 +18,20 @@ pub struct Navigation {
 }
 impl Navigation {
     pub fn load(index: &ArchiveIndex, archive: &[u8], executable: &[u8]) -> Result<Self, String> {
-        let images = crate::intro::camera_live::process_images::Images::load(executable,index,archive,[640,480])?;
-        Self::load_shared(index,archive,executable,&images)
+        let images = crate::intro::camera_live::process_images::Images::load(
+            executable,
+            index,
+            archive,
+            [640, 480],
+        )?;
+        Self::load_shared(index, archive, executable, &images)
     }
-    pub(crate) fn load_shared(index:&ArchiveIndex,archive:&[u8],executable:&[u8],
-        images:&crate::intro::camera_live::process_images::Images)->Result<Self,String>{
+    pub(crate) fn load_shared(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        executable: &[u8],
+        images: &crate::intro::camera_live::process_images::Images,
+    ) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
@@ -34,7 +43,10 @@ impl Navigation {
         //425440 fills it at depth0.5 before the three textured controls.
         let mut backing = Surface::solid();
         let color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
-        backing.rect(*regions.first().ok_or("missing navigation backing")?, [color; 4]);
+        backing.rect(
+            *regions.first().ok_or("missing navigation backing")?,
+            [color; 4],
+        );
         surfaces.push(backing);
         let bounds = *regions.get(3).ok_or("missing compass region")?;
         let textures = images.textures()?;
@@ -114,11 +126,16 @@ fn original_navigation_backing() {
     let points = [[l, t], [l, b], [r, b], [r, t]];
     for (vertex, i) in [0, 1, 2, 0, 2, 3].into_iter().enumerate() {
         let color = word(at + 20 + i * 4);
-        assert_eq!(actual.vertices[vertex][..3], [points[i][0], points[i][1],
-            f32::from_bits(word(at + 36))]);
+        assert_eq!(
+            actual.vertices[vertex][..3],
+            [points[i][0], points[i][1], f32::from_bits(word(at + 36))]
+        );
         assert_eq!(actual.alpha[vertex], (color >> 24) as u8);
         for (axis, shift) in [16, 8, 0].into_iter().enumerate() {
-            assert_eq!(actual.vertices[vertex][axis + 3], ((color >> shift) & 255) as f32 / 255.);
+            assert_eq!(
+                actual.vertices[vertex][axis + 3],
+                ((color >> shift) & 255) as f32 / 255.
+            );
         }
     }
 }
@@ -129,26 +146,61 @@ fn capture_native_nav_control_textures() {
     let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
     let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let entry = index.find("gamedata2/GenericTextures640/textures.gtd").unwrap();
-    let set = TextureSet::parse(&archive[entry.offset as usize
-        ..(entry.offset + entry.length) as usize]).unwrap();
+    let entry = index
+        .find("gamedata2/GenericTextures640/textures.gtd")
+        .unwrap();
+    let set =
+        TextureSet::parse(&archive[entry.offset as usize..(entry.offset + entry.length) as usize])
+            .unwrap();
     let mut surfaces = vec![];
     for (cell, id) in [82, 83, 84, 17, 65, 191, 192, 193, 194, 115, 116, 117]
-        .into_iter().enumerate() {
+        .into_iter()
+        .enumerate()
+    {
         let mut surface = Surface::new(&set.textures[id]);
         let x = (cell % 4) as f32 * 160.;
         let y = (cell / 4) as f32 * 160.;
-        surface.quad([[x, y], [x, y + 120.], [x + 150., y + 120.], [x + 150., y]],
-            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]], [0xffffffff; 4]);
+        surface.quad(
+            [[x, y], [x, y + 120.], [x + 150., y + 120.], [x + 150., y]],
+            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+            [0xffffffff; 4],
+        );
         surfaces.push(surface);
     }
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+    if cfg!(windows) {
+        descriptor.backends = wgpu::Backends::DX12;
+    }
     let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-    let prepared = renderer.prepare(&surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-        [2./640.,0.,0.,0.,0.,-2./480.,0.,0.,0.,0.,1.,0.,-1.,1.,0.,1.], None).unwrap();
-    crate::capture_test::capture_standalone(&renderer, &prepared,
-        "work/frontend/nav-control-atlas.png");
+    let prepared = renderer
+        .prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+        .unwrap();
+    crate::capture_test::capture_standalone(
+        &renderer,
+        &prepared,
+        "work/frontend/nav-control-atlas.png",
+    );
 }
 fn prepare_icons(
     renderer: &Renderer,
@@ -228,8 +280,16 @@ pub fn building_entry(
     angle: f32,
     previous_target: f32,
 ) -> Option<(openmt2001::camera::BlockCamera, f32)> {
-    building_entry_with_options(category, building, entrance, landscape, angle,
-        previous_target, [category[0], 0., category[1]], true)
+    building_entry_with_options(
+        category,
+        building,
+        entrance,
+        landscape,
+        angle,
+        previous_target,
+        [category[0], 0., category[1]],
+        true,
+    )
 }
 
 /// 481d01 branches on Gameplay AutoRotate at 9206f0. Disabled mode does not
@@ -247,12 +307,15 @@ pub fn building_entry_with_options(
     auto_rotate: bool,
 ) -> Option<(openmt2001::camera::BlockCamera, f32)> {
     if !auto_rotate {
-        return Some((openmt2001::camera::BlockCamera {
-            center: category_model_center,
+        return Some((
+            openmt2001::camera::BlockCamera {
+                center: category_model_center,
+                angle,
+                height: 90.,
+                radius: 75.,
+            },
             angle,
-            height: 90.,
-            radius: 75.,
-        }, angle));
+        ));
     }
     let vector = if landscape {
         std::array::from_fn(|i| (f64::from(category[i]) - f64::from(building[i])) as f32)
@@ -321,7 +384,7 @@ pub fn building_tick(
     keys: [bool; 4],
     drag: [i32; 2],
 ) -> Result<([f32; 3], [f32; 3]), String> {
-    building_tick_with_options(controls,target_angle,keys,drag,50,false)
+    building_tick_with_options(controls, target_angle, keys, drag, 50, false)
 }
 /// Mode13 camera callback using the live Gameplay Options globals 9206f4/f1.
 pub fn building_tick_with_options(
@@ -334,17 +397,37 @@ pub fn building_tick_with_options(
 ) -> Result<([f32; 3], [f32; 3]), String> {
     // Historical standalone API explicitly uses the zero predicate. Production
     // calls the height-taking entry below with its live process projection.
-    building_tick_with_height(controls,target_angle,keys,drag,sensitivity,invert_vertical,false)
+    building_tick_with_height(
+        controls,
+        target_angle,
+        keys,
+        drag,
+        sensitivity,
+        invert_vertical,
+        false,
+    )
 }
 pub fn building_tick_with_height(
-    controls:&mut openmt2001::camera::BlockCamera,target_angle:&mut f32,
-    keys:[bool;4],drag:[i32;2],sensitivity:i32,invert_vertical:bool,low_height:bool,
-)->Result<([f32;3],[f32;3]),String>{
+    controls: &mut openmt2001::camera::BlockCamera,
+    target_angle: &mut f32,
+    keys: [bool; 4],
+    drag: [i32; 2],
+    sensitivity: i32,
+    invert_vertical: bool,
+    low_height: bool,
+) -> Result<([f32; 3], [f32; 3]), String> {
     let target = controls.center;
     controls.tick(keys);
     let mut pose = ([0.; 3], target);
     if drag != [0; 2] {
-        controls.right_drag(&mut pose, drag, sensitivity, invert_vertical, false, low_height)?;
+        controls.right_drag(
+            &mut pose,
+            drag,
+            sensitivity,
+            invert_vertical,
+            false,
+            low_height,
+        )?;
         if drag[0] != 0 {
             *target_angle = controls.angle;
         }
@@ -540,16 +623,30 @@ mod tests {
         for case in 0..count {
             let at = 12 + case * 56;
             let input = std::array::from_fn::<_, 7, _>(|i| f32::from_bits(word(at + i * 4)));
-            let category_model_center = std::array::from_fn(|i| {
-                (f64::from(input[i]) + f64::from(input[3 + i])) as f32
-            });
+            let category_model_center =
+                std::array::from_fn(|i| (f64::from(input[i]) + f64::from(input[3 + i])) as f32);
             let (controls, goal) = super::building_entry_with_options(
-                [input[0], input[2]], [1000., -1000.], None, false, input[6],
-                123., category_model_center, false).unwrap();
-            let actual = controls.center.into_iter()
+                [input[0], input[2]],
+                [1000., -1000.],
+                None,
+                false,
+                input[6],
+                123.,
+                category_model_center,
+                false,
+            )
+            .unwrap();
+            let actual = controls
+                .center
+                .into_iter()
                 .chain([controls.angle, goal, controls.height, controls.radius])
-                .flat_map(f32::to_le_bytes).collect::<Vec<_>>();
-            assert_eq!(actual, bytes[at + 28..at + 56], "AutoRotate off case {case}");
+                .flat_map(f32::to_le_bytes)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual,
+                bytes[at + 28..at + 56],
+                "AutoRotate off case {case}"
+            );
         }
     }
     #[test]

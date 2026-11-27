@@ -19,15 +19,20 @@ impl Session<'_> {
         let mut responses = Vec::new();
         openmt2001::outcome_notice::respond(
             context,
-            self.catalog.selected_level()
-                .ok_or("outcome selected level identity unresolved")?.id(),
+            self.catalog
+                .selected_level()
+                .ok_or("outcome selected level identity unresolved")?
+                .id(),
             &openmt2001::outcome_notice::World {
                 image: assets.image,
                 players: &self.roster.manager.players,
                 current_reference: self.roster.status.current_player,
                 objective: &self.world.city.objective,
             },
-            |response| { responses.push(response); Ok(()) },
+            |response| {
+                responses.push(response);
+                Ok(())
+            },
         )?;
         let mut characters = None;
         for response in responses {
@@ -168,17 +173,29 @@ impl Session<'_> {
         assets: &CommandAssets<'_, '_>,
     ) -> Result<Inspection, String> {
         if initialize_amount {
-            let row = self.world.city.categories.get(category as usize)
+            let row = self
+                .world
+                .city
+                .categories
+                .get(category as usize)
                 .ok_or("property category outside pool")?;
             panel.amount = property_offer::selected_amount(row, assets.image)?;
         }
         let mut inspection = self.inspect_property_offer_panel(category, panel, assets)?;
-        let current = self.roster.manager.players.iter()
+        let current = self
+            .roster
+            .manager
+            .players
+            .iter()
             .find(|p| p.reference == self.roster.status.current_player)
             .ok_or("property current player unresolved")?;
-        property_offer::display(&mut inspection.panel,
-            &self.world.city.categories[category as usize], current.bytes[0x1bc],
-            auction_visible, assets.image)?;
+        property_offer::display(
+            &mut inspection.panel,
+            &self.world.city.categories[category as usize],
+            current.bytes[0x1bc],
+            auction_visible,
+            assets.image,
+        )?;
         Ok(inspection)
     }
     pub fn submit_property_offer(
@@ -208,8 +225,8 @@ impl Session<'_> {
         }
         // Worker inputs must be representable by the original amount widget.
         if !amount.is_finite()
-            || !inspection.owned && (amount < inspection.panel.minimum
-                || amount > inspection.panel.maximum)
+            || !inspection.owned
+                && (amount < inspection.panel.minimum || amount > inspection.panel.maximum)
         {
             return Err("property offer amount outside native control limits".into());
         }

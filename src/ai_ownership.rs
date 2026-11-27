@@ -113,17 +113,23 @@ pub fn live_entry_value(
     categories: &[[u8; 380]; 52],
     image: &crate::pe::PeImage<'_>,
 ) -> Result<i32, String> {
-    live_entry_value_from_catalog(business,businesses,buildings,categories,&crate::business_pool::BusinessCatalog::from_pe(image)?)
+    live_entry_value_from_catalog(
+        business,
+        businesses,
+        buildings,
+        categories,
+        &crate::business_pool::BusinessCatalog::from_pe(image)?,
+    )
 }
 
 ///4708a0 reads the script-mutable refurbishment cost at BusinessInfo+54.
 pub fn live_entry_value_from_catalog(
-    business:i32,
-    businesses:&[[u8;544]],
-    buildings:&[[u8;916]],
-    categories:&[[u8;380];52],
-    catalog:&crate::business_pool::BusinessCatalog,
-)->Result<i32,String>{
+    business: i32,
+    businesses: &[[u8; 544]],
+    buildings: &[[u8; 916]],
+    categories: &[[u8; 380]; 52],
+    catalog: &crate::business_pool::BusinessCatalog,
+) -> Result<i32, String> {
     use crate::player_manager::word;
     let business = businesses
         .get(business as usize)
@@ -146,7 +152,12 @@ pub fn live_entry_value_from_catalog(
         .get(word(category, 0) as usize)
         .ok_or("AI ownership category identity leaves pool")?;
     let kind = word(business, 4);
-    let cost = word(catalog.row(kind as usize).ok_or("AI ownership kind leaves catalog")?,0x54) as i32;
+    let cost = word(
+        catalog
+            .row(kind as usize)
+            .ok_or("AI ownership kind leaves catalog")?,
+        0x54,
+    ) as i32;
     Ok(entry_value_extended(
         building[..64].try_into().unwrap(),
         f32::from_bits(word(category, 0x84)),
@@ -436,13 +447,13 @@ pub fn entry_value_extended(
 pub fn maintain_player(
     storage: &mut Storage,
     player: &mut crate::player_manager::Player,
-    categories: &[[u8;380];52],
-    buildings: &[[u8;916]],
-    businesses: &[[u8;544]],
+    categories: &[[u8; 380]; 52],
+    buildings: &[[u8; 916]],
+    businesses: &[[u8; 544]],
     image: &crate::pe::PeImage<'_>,
-    catalog:&crate::business_pool::BusinessCatalog,
-    allocate: impl FnMut(usize)->Result<u32,String>,
-)->Result<(),String> {
+    catalog: &crate::business_pool::BusinessCatalog,
+    allocate: impl FnMut(usize) -> Result<u32, String>,
+) -> Result<(), String> {
     use crate::player_manager::word;
     let mapping = crate::ai_ownership::group_mapping(image)?;
     let owned: [u8; 52] = player.bytes[0x178..0x1ac].try_into().unwrap();
@@ -465,30 +476,23 @@ pub fn maintain_player(
         }
         *business_categories
             .get_mut(i)
-            .ok_or("AI ownership business pool exceeds600")? = i16::from_le_bytes(categories[offset as usize / 380][..2].try_into().unwrap());
+            .ok_or("AI ownership business pool exceeds600")? =
+            i16::from_le_bytes(categories[offset as usize / 380][..2].try_into().unwrap());
     }
-    storage.mutate(
-        player,
-        allocate,
-        |state| {
-            state.maintain(
-                slot,
-                &owned,
-                &mapping,
-                businesses,
-                &business_categories,
-                |business| {
-                    crate::ai_ownership::live_entry_value_from_catalog(
-                        business,
-                        businesses,
-                        buildings,
-                        categories,
-                        catalog,
-                    )
-                },
-            )
-        },
-    )
+    storage.mutate(player, allocate, |state| {
+        state.maintain(
+            slot,
+            &owned,
+            &mapping,
+            businesses,
+            &business_categories,
+            |business| {
+                crate::ai_ownership::live_entry_value_from_catalog(
+                    business, businesses, buildings, categories, catalog,
+                )
+            },
+        )
+    })
 }
 
 #[cfg(test)]

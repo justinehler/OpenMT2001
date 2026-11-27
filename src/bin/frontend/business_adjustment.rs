@@ -217,15 +217,31 @@ fn retail_numeric_controls(
     let mut controls = Vec::with_capacity(24);
     //417fa4..4183aa resolve actual arrow parts;416440 keeps their bounds.
     for stock in [false, true] {
-        let family = if stock { "BAP_STOCKIWANT" } else { "BAP_SELLING" };
+        let family = if stock {
+            "BAP_STOCKIWANT"
+        } else {
+            "BAP_SELLING"
+        };
         for slot in 0..6 {
             for increase in [false, true] {
-                let name = format!("{family}_ROW{}_{}", slot + 1,
-                    if increase { "RIGHT" } else { "LEFT" });
-                let bounds = regions.iter().find(|(n, _)| n == &name)
-                    .ok_or_else(|| format!("Missing native adjustment region {name}"))?.1;
-                controls.push((if stock { Action::Stock { slot, increase } }
-                    else { Action::Price { slot, increase } }, bounds));
+                let name = format!(
+                    "{family}_ROW{}_{}",
+                    slot + 1,
+                    if increase { "RIGHT" } else { "LEFT" }
+                );
+                let bounds = regions
+                    .iter()
+                    .find(|(n, _)| n == &name)
+                    .ok_or_else(|| format!("Missing native adjustment region {name}"))?
+                    .1;
+                controls.push((
+                    if stock {
+                        Action::Stock { slot, increase }
+                    } else {
+                        Action::Price { slot, increase }
+                    },
+                    bounds,
+                ));
             }
         }
     }
@@ -235,12 +251,22 @@ fn apartment_numeric_controls(
     regions: &[(String, [f32; 4])],
 ) -> Result<Vec<(crate::business_edit::Action, [f32; 4])>, String> {
     //40bc62/40bc8e ->40af10 preserves these two original rent-arrow parts.
-    [false, true].into_iter().map(|increase| {
-        let name = if increase { "BAP_COM_RENT_ROW1_RIGHT" } else { "BAP_COM_RENT_ROW1_LEFT" };
-        let bounds = regions.iter().find(|(n, _)| n == name)
-            .ok_or_else(|| format!("Missing native adjustment region {name}"))?.1;
-        Ok((crate::business_edit::Action::Rent { increase }, bounds))
-    }).collect()
+    [false, true]
+        .into_iter()
+        .map(|increase| {
+            let name = if increase {
+                "BAP_COM_RENT_ROW1_RIGHT"
+            } else {
+                "BAP_COM_RENT_ROW1_LEFT"
+            };
+            let bounds = regions
+                .iter()
+                .find(|(n, _)| n == name)
+                .ok_or_else(|| format!("Missing native adjustment region {name}"))?
+                .1;
+            Ok((crate::business_edit::Action::Rent { increase }, bounds))
+        })
+        .collect()
 }
 /// Borrowed authoritative refresh inputs; no renderer or retained owner is consumed.
 #[derive(Clone, Copy)]
@@ -251,17 +277,25 @@ pub(crate) struct RefreshScene<'a> {
 }
 impl<'a> From<&'a Scene> for RefreshScene<'a> {
     fn from(scene: &'a Scene) -> Self {
-        Self { buildings: &scene.inspection_buildings,
+        Self {
+            buildings: &scene.inspection_buildings,
             catalog: scene.saved_business_catalog.as_ref(),
-            commodities: scene.saved_commodity_rows.as_ref() }
+            commodities: scene.saved_commodity_rows.as_ref(),
+        }
     }
 }
 /// All fallible decoding is complete. Commit preserves the actual State's
 /// channels, pending edits and control owners unless admission changed.
-pub(crate) struct PreparedRefresh { fresh: State, admission_changed: bool }
+pub(crate) struct PreparedRefresh {
+    fresh: State,
+    admission_changed: bool,
+}
 impl PreparedRefresh {
     pub(crate) fn commit(self, state: &mut State) {
-        let Self { fresh, admission_changed } = self;
+        let Self {
+            fresh,
+            admission_changed,
+        } = self;
         if admission_changed {
             state.cancel_press();
             state.edit_request = None;
@@ -589,10 +623,7 @@ fn inspection_record(
         })
 }
 fn business_navigation(scene: RefreshScene<'_>, owner: u8, kind: u8) -> Vec<usize> {
-    let records = scene
-        .buildings
-        .iter()
-        .filter_map(inspection_record);
+    let records = scene.buildings.iter().filter_map(inspection_record);
     business_order(records, owner, kind)
         .iter()
         .map(|slot| {
@@ -619,7 +650,10 @@ impl Assets {
         self.open_for_owner_view(scene.into(), building, owner)
     }
     pub(crate) fn open_for_owner_view(
-        &self, scene: RefreshScene<'_>, building: usize, owner: Option<u8>,
+        &self,
+        scene: RefreshScene<'_>,
+        building: usize,
+        owner: Option<u8>,
     ) -> Result<Option<State>, String> {
         let mut state = self.open_view(scene, building)?;
         if let Some(state) = &mut state {
@@ -644,13 +678,21 @@ impl Assets {
         state: &mut State,
         owner: Option<u8>,
     ) -> Result<bool, String> {
-        let prepared = self.prepare_refresh(scene.into(), &previous.inspection_buildings, state, owner)?;
-        if let Some(prepared) = prepared { prepared.commit(state); Ok(true) } else { Ok(false) }
+        let prepared =
+            self.prepare_refresh(scene.into(), &previous.inspection_buildings, state, owner)?;
+        if let Some(prepared) = prepared {
+            prepared.commit(state);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
     pub(crate) fn prepare_refresh(
-        &self, scene: RefreshScene<'_>,
+        &self,
+        scene: RefreshScene<'_>,
         previous: &[openmt2001::render_scene::InspectionBuilding],
-        state: &State, owner: Option<u8>,
+        state: &State,
+        owner: Option<u8>,
     ) -> Result<Option<PreparedRefresh>, String> {
         let Some(old) = previous.get(state.building) else {
             return Ok(None);
@@ -680,7 +722,10 @@ impl Assets {
         if let (Some(old), Some(new)) = (&state.apartment, &mut fresh.apartment) {
             *new = Apartment::from_record(new_record, old.modes[0], old.modes[1])?;
         }
-        Ok(Some(PreparedRefresh { fresh, admission_changed }))
+        Ok(Some(PreparedRefresh {
+            fresh,
+            admission_changed,
+        }))
     }
     fn edit_controls(&self, state: &State) -> Vec<(crate::business_edit::Action, [f32; 4])> {
         use crate::business_edit::Action;
@@ -723,11 +768,11 @@ impl Assets {
             };
             let mut icon = match action {
                 Action::Apply => self.buttons[phase].clone(),
-                Action::Price { increase, .. } | Action::Stock { increase, .. }
-                | Action::Rent { increase } => {
-                    self.numeric_arrows[usize::from(increase) * 4
-                        + if disabled { 3 } else { phase }].clone()
-                }
+                Action::Price { increase, .. }
+                | Action::Stock { increase, .. }
+                | Action::Rent { increase } => self.numeric_arrows
+                    [usize::from(increase) * 4 + if disabled { 3 } else { phase }]
+                .clone(),
                 Action::Refresh => unreachable!(),
             };
             icon.quad(
@@ -735,7 +780,9 @@ impl Assets {
                 [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
                 [if disabled && matches!(action, Action::Apply) {
                     0xff888888
-                } else { 0xffffffff }; 4],
+                } else {
+                    0xffffffff
+                }; 4],
             );
             surfaces.push(icon);
             if action == Action::Apply {
@@ -814,8 +861,10 @@ impl Assets {
             .iter()
             .map(|&i| Surface::new(&generic.textures[i]))
             .collect();
-        let numeric_arrows = RETAIL_ARROW_TEXTURES.iter()
-            .map(|&i| Surface::new(&generic.textures[i])).collect();
+        let numeric_arrows = RETAIL_ARROW_TEXTURES
+            .iter()
+            .map(|&i| Surface::new(&generic.textures[i]))
+            .collect();
         let tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
             .map_err(|e| e.to_string())?;
         let image = openmt2001::pe::PeImage::parse(exe)?;
@@ -895,8 +944,14 @@ impl Assets {
             building,
             business: inspection_record(b).unwrap().0,
         });
-        let proprietor_character = b.business().and_then(|business| business.owner_character)
-            .or_else(|| b.initialized_apartment.as_ref().and_then(|business| business.owner_character));
+        let proprietor_character = b
+            .business()
+            .and_then(|business| business.owner_character)
+            .or_else(|| {
+                b.initialized_apartment
+                    .as_ref()
+                    .and_then(|business| business.owner_character)
+            });
         let owner_color = match proprietor_character {
             Some(c) => *self
                 .owner_colors
@@ -946,12 +1001,8 @@ impl Assets {
         if business.record[..4] != [0, 0, 0, 0] {
             return Ok(None);
         }
-        let info = scene
-            .catalog
-            .ok_or("saved BusinessInfo missing")?;
-        let commodities = scene
-            .commodities
-            .ok_or("saved commodities missing")?;
+        let info = scene.catalog.ok_or("saved BusinessInfo missing")?;
+        let commodities = scene.commodities.ok_or("saved commodities missing")?;
         let products = self
             .products
             .get(business.business_type as usize)
@@ -1306,7 +1357,10 @@ impl Assets {
         let symbol = label(2243)?;
         let suffix = label(2244)?.first() != Some(&0x4c);
         let values = [
-            (14, ui::formatted_float_money(apartment.rent, symbol, suffix)?),
+            (
+                14,
+                ui::formatted_float_money(apartment.rent, symbol, suffix)?,
+            ),
             (
                 15,
                 format!("{}/{}", apartment.tenants, apartment.capacity)
@@ -1314,8 +1368,14 @@ impl Assets {
                     .map(|b| b - 32)
                     .collect(),
             ),
-            (16, ui::formatted_float_money(apartment.total_rent, symbol, suffix)?),
-            (17, ui::integer_money(apartment.potential_rent, symbol, suffix)),
+            (
+                16,
+                ui::formatted_float_money(apartment.total_rent, symbol, suffix)?,
+            ),
+            (
+                17,
+                ui::integer_money(apartment.potential_rent, symbol, suffix),
+            ),
         ];
         for (region, value) in values {
             let b = regions[region];
@@ -1481,7 +1541,11 @@ pub fn verify_live_panels(scene: &Scene) {
         assert_eq!(opened.owner_color, assets.owner_colors[3]);
         assert_ne!(opened.owner_color, assets.owner_colors[0]);
         let mut retained = assets.open(scene, index).unwrap().unwrap();
-        assert!(assets.refresh(&transferred, scene, &mut retained, None).unwrap());
+        assert!(
+            assets
+                .refresh(&transferred, scene, &mut retained, None)
+                .unwrap()
+        );
         assert_eq!(retained.owner_color, assets.owner_colors[3]);
         let mut unowned = transferred.clone();
         let selected = &mut unowned.inspection_buildings[index];
@@ -1492,8 +1556,10 @@ pub fn verify_live_panels(scene: &Scene) {
             business.record[0xa] = 0;
             business.owner_character = None;
         }
-        assert_eq!(assets.open(&unowned, index).unwrap().unwrap().owner_color,
-            0x00909090);
+        assert_eq!(
+            assets.open(&unowned, index).unwrap().unwrap().owner_color,
+            0x00909090
+        );
         assert_eq!(
             state.edit_request.take(),
             Some(crate::business_edit::Action::Refresh)
@@ -1516,22 +1582,40 @@ pub fn verify_live_panels(scene: &Scene) {
         }
         // Controlled snapshot adapter checks: reordering render entries must
         // retain the actual pool target; ownership loss must cancel admission.
-        let owner = inspection_record(&scene.inspection_buildings[index]).unwrap().1[10];
-        let mut tracked = assets.open_for_owner(scene, index, Some(owner)).unwrap().unwrap();
+        let owner = inspection_record(&scene.inspection_buildings[index])
+            .unwrap()
+            .1[10];
+        let mut tracked = assets
+            .open_for_owner(scene, index, Some(owner))
+            .unwrap()
+            .unwrap();
         let target = tracked.edit_target.unwrap();
         let (_, bounds) = controls[0];
-        tracked.pointer(&assets, Some([
-            (bounds[0] + bounds[2]) as i32,
-            (bounds[1] + bounds[3]) as i32,
-        ]));
+        tracked.pointer(
+            &assets,
+            Some([
+                (bounds[0] + bounds[2]) as i32,
+                (bounds[1] + bounds[3]) as i32,
+            ]),
+        );
         tracked.mouse(true);
         assert!(tracked.tutorial_control_pressed());
         let mut reordered = scene.clone();
         reordered.inspection_buildings.reverse();
-        assert!(assets.refresh(&reordered, scene, &mut tracked, Some(owner)).unwrap());
-        assert_eq!(tracked.building, scene.inspection_buildings.len() - 1 - index);
+        assert!(
+            assets
+                .refresh(&reordered, scene, &mut tracked, Some(owner))
+                .unwrap()
+        );
+        assert_eq!(
+            tracked.building,
+            scene.inspection_buildings.len() - 1 - index
+        );
         let retained = tracked.edit_target.unwrap();
-        assert_eq!((retained.building, retained.business), (target.building, target.business));
+        assert_eq!(
+            (retained.building, retained.business),
+            (target.building, target.business)
+        );
         assert!(tracked.tutorial_control_pressed());
         let mut changed = reordered.clone();
         let building = &mut changed.inspection_buildings[tracked.building];
@@ -1541,7 +1625,11 @@ pub fn verify_live_panels(scene: &Scene) {
             &mut building.initialized_business.as_mut().unwrap().record
         };
         record[10] = owner.wrapping_add(1);
-        assert!(assets.refresh(&changed, &reordered, &mut tracked, Some(owner)).unwrap());
+        assert!(
+            assets
+                .refresh(&changed, &reordered, &mut tracked, Some(owner))
+                .unwrap()
+        );
         assert!(tracked.edit_target.is_none());
         assert!(tracked.edit_request.is_none());
         assert!(!tracked.tutorial_control_pressed());
@@ -1579,22 +1667,41 @@ mod tests {
         use crate::business_edit::Action;
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let entry = index.find(if apartment {
-            "gamedata2/brand_new_panels/bap_apartments_v2.tm"
-        } else { "gamedata2/brand_new_panels/bap_v2.tm" }).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let entry = index
+            .find(if apartment {
+                "gamedata2/brand_new_panels/bap_apartments_v2.tm"
+            } else {
+                "gamedata2/brand_new_panels/bap_v2.tm"
+            })
+            .unwrap();
         let mesh = openmt2001::mesh::CachedMesh::parse(
             &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
-        ).unwrap();
-        let regions = openmt2001::ui_mesh::regions(&mesh, if apartment { 0 } else { 9 }).unwrap().into_iter()
-            .map(|region| (region.name, region.bounds)).collect::<Vec<_>>();
-        let controls = if apartment { super::apartment_numeric_controls(&regions) }
-            else { super::retail_numeric_controls(&regions) }.unwrap();
-        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(if apartment { "work/frontend/native-apartment-controls.bin" }
-                else { "work/frontend/native-adjustment-controls.bin" })).unwrap();
+        )
+        .unwrap();
+        let regions = openmt2001::ui_mesh::regions(&mesh, if apartment { 0 } else { 9 })
+            .unwrap()
+            .into_iter()
+            .map(|region| (region.name, region.bounds))
+            .collect::<Vec<_>>();
+        let controls = if apartment {
+            super::apartment_numeric_controls(&regions)
+        } else {
+            super::retail_numeric_controls(&regions)
+        }
+        .unwrap();
+        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            if apartment {
+                "work/frontend/native-apartment-controls.bin"
+            } else {
+                "work/frontend/native-adjustment-controls.bin"
+            },
+        ))
+        .unwrap();
         assert_eq!(&bytes[..8], b"MTBAPCTL");
-        let mut words = bytes[8..].chunks_exact(4)
+        let mut words = bytes[8..]
+            .chunks_exact(4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()));
         assert_eq!(words.next(), Some(0x037f));
         assert_eq!(words.next(), Some(if apartment { 2 } else { 24 }));
@@ -1605,12 +1712,20 @@ mod tests {
                 assert!(matches!(id, 8 | 9));
                 Action::Rent { increase }
             } else if id < 22 {
-                Action::Price { slot: ((id - 10) / 2) as usize, increase }
+                Action::Price {
+                    slot: ((id - 10) / 2) as usize,
+                    increase,
+                }
             } else {
-                Action::Stock { slot: ((id - 22) / 2) as usize, increase }
+                Action::Stock {
+                    slot: ((id - 22) / 2) as usize,
+                    increase,
+                }
             };
             assert_eq!(action, native_action);
-            for value in bounds { assert_eq!(words.next(), Some(value.to_bits())); }
+            for value in bounds {
+                assert_eq!(words.next(), Some(value.to_bits()));
+            }
             assert_eq!(words.next(), Some(0.5f32.to_bits()));
             for &texture in &super::RETAIL_ARROW_TEXTURES[usize::from(increase) * 4..][..4] {
                 assert_eq!(words.next(), Some(texture as u32));
@@ -1824,7 +1939,11 @@ mod tests {
                 assert_eq!(word(&bytes, &mut at), 0x2e64 + column as u32 * 6 * 0x1b4);
                 assert_eq!(
                     word(&bytes, &mut at),
-                    match column { 0 => 0, 1 | 2 => 1, _ => 2 },
+                    match column {
+                        0 => 0,
+                        1 | 2 => 1,
+                        _ => 2,
+                    },
                     "business{slot} column{column} native formatter",
                 );
                 assert_eq!(
@@ -1841,10 +1960,24 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn refresh_assets_fixture() -> Assets {
     // The refresh path reads only owner_colors, products and block_names.
-    Assets { base: vec![], retail_bounds: vec![], apartment_bounds: vec![],
-        body_color: 0, owner_colors: [0; 10], apartment_base: vec![],
-        apartment_regions: vec![], fonts: vec![], tab: vec![], strings: vec![],
-        regions: vec![], products: vec![], buttons: vec![], arrows: vec![],
-        retail_numeric: vec![], apartment_numeric: vec![], numeric_arrows: vec![],
-        block_names: vec![0; 52] }
+    Assets {
+        base: vec![],
+        retail_bounds: vec![],
+        apartment_bounds: vec![],
+        body_color: 0,
+        owner_colors: [0; 10],
+        apartment_base: vec![],
+        apartment_regions: vec![],
+        fonts: vec![],
+        tab: vec![],
+        strings: vec![],
+        regions: vec![],
+        products: vec![],
+        buttons: vec![],
+        arrows: vec![],
+        retail_numeric: vec![],
+        apartment_numeric: vec![],
+        numeric_arrows: vec![],
+        block_names: vec![0; 52],
+    }
 }

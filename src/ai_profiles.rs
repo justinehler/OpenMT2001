@@ -34,7 +34,10 @@ pub fn reserve(character: u32) -> i32 {
 ///characters select original525040, while unknown routines are unsupported.
 pub fn factor(image: &PeImage<'_>, address: u32, character: u32) -> Result<f32, String> {
     let rows = match address {
-        0x47d360 => [0x525d20,0x5251dc,0x52505c,0x525d18,0x525d14,0x525d1c,0x52505c,0x525d10,0x525d14,0x5251dc],
+        0x47d360 => [
+            0x525d20, 0x5251dc, 0x52505c, 0x525d18, 0x525d14, 0x525d1c, 0x52505c, 0x525d10,
+            0x525d14, 0x5251dc,
+        ],
         0x47ce90 => [
             0x525cf4, 0x525cf0, 0x525b10, 0x525034, 0x525cf0, 0x525cf4, 0x525cf0, 0x525b10,
             0x525cf0, 0x525cf4,

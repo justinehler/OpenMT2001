@@ -45,17 +45,27 @@ impl Profiles {
     fn delete_chosen(&mut self, index: usize) -> Result<(), String> {
         let name = self.names.remove(index);
         self.current = self.current.and_then(|current| {
-            if current == index { None }
-            else if current > index { Some(current - 1) }
-            else { Some(current) }
+            if current == index {
+                None
+            } else if current > index {
+                Some(current - 1)
+            } else {
+                Some(current)
+            }
         });
         self.save()?;
         // Once the profile list is published, a cleanup error must not roll
         // the in-memory selection back to a deleted profile. Registration
         // retries cleanup before that same encoded identity can be reused.
-        if let Err(error) = self.clear_orphan_progress(&name) { eprintln!("Profile progress cleanup: {error}"); }
-        if let Err(error) = self.clear_orphan_options(&name) { eprintln!("Profile options cleanup: {error}"); }
-        if let Err(error) = self.clear_orphan_saves(&name) { eprintln!("Profile saves cleanup: {error}"); }
+        if let Err(error) = self.clear_orphan_progress(&name) {
+            eprintln!("Profile progress cleanup: {error}");
+        }
+        if let Err(error) = self.clear_orphan_options(&name) {
+            eprintln!("Profile options cleanup: {error}");
+        }
+        if let Err(error) = self.clear_orphan_saves(&name) {
+            eprintln!("Profile saves cleanup: {error}");
+        }
         Ok(())
     }
     fn load(root: PathBuf) -> Result<Self, String> {
@@ -208,8 +218,11 @@ impl Profile {
         let mut slider_textures = vec![Surface::solid(); 109];
         for first in [105, 93] {
             for state in 0..4 {
-                slider_textures[first + state] = Surface::new(generic.textures
-                    .get(first + state).ok_or("original Profile scrollbar arrow missing")?,
+                slider_textures[first + state] = Surface::new(
+                    generic
+                        .textures
+                        .get(first + state)
+                        .ok_or("original Profile scrollbar arrow missing")?,
                 );
             }
         }
@@ -289,7 +302,10 @@ impl Profile {
     /// The four LOGIN_SELECT action children are generic 43ed20 buttons.
     /// Selected-player actions carry the same disabled admission as their art.
     pub fn generic_button_enabled(&self, i: usize) -> bool {
-        action_button_enabled(self.chosen.is_some(), self.name.is_some() || self.deleting, i,
+        action_button_enabled(
+            self.chosen.is_some(),
+            self.name.is_some() || self.deleting,
+            i,
         )
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
@@ -303,7 +319,10 @@ impl Profile {
             }
         }
         if self.store.names.len() > 6 {
-            for (part, bounds) in ui::slider_arrows(PROFILE_SCROLL, true).into_iter().enumerate() {
+            for (part, bounds) in ui::slider_arrows(PROFILE_SCROLL, true)
+                .into_iter()
+                .enumerate()
+            {
                 if hit(bounds) {
                     return Some(4 + self.store.names.len() + part);
                 }
@@ -357,8 +376,8 @@ impl Profile {
         }
     }
     pub fn reveal(&mut self, index: usize) {
-        if self.name.is_none() && !self.deleting && index >= 4
-            && index - 4 < self.store.names.len() {
+        if self.name.is_none() && !self.deleting && index >= 4 && index - 4 < self.store.names.len()
+        {
             let row = index - 4;
             if row < self.first {
                 self.first = row;
@@ -379,20 +398,22 @@ impl Profile {
         self.pointer_position = Some(p);
     }
     pub fn drag_track(&mut self, origin: Option<usize>, p: [f32; 2]) -> bool {
-        if self.name.is_some() || self.deleting || self.store.names.len() <= 6
-            || origin != Some(4 + self.store.names.len() + 2) {
+        if self.name.is_some()
+            || self.deleting
+            || self.store.names.len() <= 6
+            || origin != Some(4 + self.store.names.len() + 2)
+        {
             return false;
         }
         let maximum = self.store.names.len().saturating_sub(6) as i32;
-        let next = ui::slider_selection(
-            ui::slider_track(PROFILE_SCROLL, true), p[1], maximum, true) as usize;
+        let next = ui::slider_selection(ui::slider_track(PROFILE_SCROLL, true), p[1], maximum, true)
+            as usize;
         let changed = next != self.first;
         self.first = next;
         changed
     }
     pub fn is_scroll_track(&self, index: Option<usize>) -> bool {
-        self.store.names.len() > 6
-            && index == Some(4 + self.store.names.len() + 2)
+        self.store.names.len() > 6 && index == Some(4 + self.store.names.len() + 2)
     }
     pub fn activate(&mut self, index: usize) {
         self.error = None;
@@ -441,7 +462,10 @@ impl Profile {
                         if let Some(point) = self.pointer_position {
                             let maximum = self.store.names.len().saturating_sub(6) as i32;
                             self.first = ui::slider_selection(
-                                ui::slider_track(PROFILE_SCROLL, true), point[1], maximum, true,
+                                ui::slider_track(PROFILE_SCROLL, true),
+                                point[1],
+                                maximum,
+                                true,
                             ) as usize;
                         }
                     }
@@ -520,9 +544,15 @@ impl Profile {
             value: self.first as f32,
             range: [0., self.store.names.len().saturating_sub(6) as f32],
             pointer: self.pointer_position,
-            pressed: (pressed && selected.is_some_and(|i| (scroll_base..scroll_base + 3).contains(&i)))
-                .then_some(self.pointer_position).flatten(),
-        }.paint(&mut slider_shapes, &mut slider_controls, &self.assets.slider_textures,
+            pressed: (pressed
+                && selected.is_some_and(|i| (scroll_base..scroll_base + 3).contains(&i)))
+            .then_some(self.pointer_position)
+            .flatten(),
+        }
+        .paint(
+            &mut slider_shapes,
+            &mut slider_controls,
+            &self.assets.slider_textures,
         );
         for (i, part) in [11, 10, 13, 12].iter().enumerate() {
             let bounds = self.assets.bounds[*part];
@@ -683,20 +713,34 @@ mod tests {
 
     #[test]
     fn deleting_a_different_profile_preserves_and_reindexes_the_active_one() {
-        let root = std::env::temp_dir().join(format!("omt2-profile-delete-{}-{}",
-            std::process::id(), std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = std::env::temp_dir().join(format!(
+            "omt2-profile-delete-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let mut store = Profiles {
             names: vec!["Alice".into(), "Bob".into(), "Carol".into()],
-            current: Some(0), path: root.join("profiles.txt"),
+            current: Some(0),
+            path: root.join("profiles.txt"),
         };
         store.delete_chosen(1).unwrap();
         assert_eq!(store.names, ["Alice", "Carol"]);
-        assert_eq!(store.current, Some(0), "deleting Bob must keep active Alice");
+        assert_eq!(
+            store.current,
+            Some(0),
+            "deleting Bob must keep active Alice"
+        );
         store.current = Some(1);
         store.delete_chosen(0).unwrap();
         assert_eq!(store.names, ["Carol"]);
-        assert_eq!(store.current, Some(0), "deleting an earlier row reindexes active Carol");
+        assert_eq!(
+            store.current,
+            Some(0),
+            "deleting an earlier row reindexes active Carol"
+        );
         store.delete_chosen(0).unwrap();
         assert!(store.current.is_none());
         fs::remove_file(root.join("profiles.txt")).unwrap();
@@ -721,15 +765,28 @@ mod tests {
         bounds[5] = [198., 200., 440., 287.];
         let mut profile = Profile {
             assets: Assets {
-                base: vec![], modal: vec![], bounds, confirm: vec![],
-                fonts: vec![], tab: vec![], labels: vec![], slider_textures: vec![],
+                base: vec![],
+                modal: vec![],
+                bounds,
+                confirm: vec![],
+                fonts: vec![],
+                tab: vec![],
+                labels: vec![],
+                slider_textures: vec![],
             },
             store: Profiles {
                 names: (0..9).map(|i| format!("Player {i}")).collect(),
-                current: None, path: PathBuf::from("unused/profiles.txt"),
+                current: None,
+                path: PathBuf::from("unused/profiles.txt"),
             },
-            visible: true, name: None, chosen: None, first: 0, error: None,
-            deleting: false, selected_all: false, pointer_position: None,
+            visible: true,
+            name: None,
+            chosen: None,
+            first: 0,
+            error: None,
+            deleting: false,
+            selected_all: false,
+            pointer_position: None,
         };
         let base = 4 + profile.store.names.len();
         assert_eq!(profile.hit([448., 279.]), Some(base + 1));
@@ -795,31 +852,49 @@ mod tests {
         let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let index = openmt2001::archive::ArchiveIndex::parse(
-            &directory, archive.len() as u64).unwrap();
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let language = executable.parent().unwrap().parent().unwrap().join("US/language/usa");
+        let language = executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
         let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
-            .parent().unwrap().parent().unwrap().to_path_buf();
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let offsets = fs::read(language.join("tycoon.off")).unwrap();
         let glyphs = fs::read(language.join("tycoon.bin")).unwrap();
         let mut at = 0usize;
-        let rows = offsets.chunks_exact(2).map(|length| {
-            let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
-            let row = &glyphs[at..end];
-            at = end;
-            row
-        }).collect::<Vec<_>>();
+        let rows = offsets
+            .chunks_exact(2)
+            .map(|length| {
+                let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
+                let row = &glyphs[at..end];
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
         let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
         let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let root = std::env::temp_dir().join(format!("omt-v2-profile-scroll-{}",
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                .unwrap().as_nanos()));
+        let root = std::env::temp_dir().join(format!(
+            "omt-v2-profile-scroll-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let mut profile = Profile::load(&index, &archive, &installer, &refs, root.clone()).unwrap();
         profile.store.names = vec!["Justin".into()];
         profile.chosen = Some(0);
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let build_file = read("OPENMT2001_BUILD_FILE");
         let suncols = read("OPENMT2001_SUNCOLS");
@@ -829,17 +904,28 @@ mod tests {
             build_file: &build_file,
             source: Source::Map(std::str::from_utf8(&map).unwrap()),
             original: Some(OriginalAssets {
-                executable: &exe, directory: &directory, archive: &archive,
+                executable: &exe,
+                directory: &directory,
+                archive: &archive,
             }),
-            suncols: Some(&suncols), phase: Some(12),
+            suncols: Some(&suncols),
+            phase: Some(12),
             camera: Some(CameraSample {
-                eye: [26., 586., -695.], target: [26., 463., -595.],
-                up: [0., 1., 0.], vertical_fov: 45.,
+                eye: [26., 586., -695.],
+                target: [26., 463., -595.],
+                up: [0., 1., 0.],
+                vertical_fov: 45.,
             }),
-            width: 1280, height: 960, animated: true,
-        }).unwrap();
+            width: 1280,
+            height: 960,
+            animated: true,
+        })
+        .unwrap();
         let panel = profile.draw(&renderer, None, false).unwrap();
-        crate::capture_test::capture_scene_overlays(&renderer, &scene, &[&panel],
+        crate::capture_test::capture_scene_overlays(
+            &renderer,
+            &scene,
+            &[&panel],
             "work/frontend/profile-scrollbar-city.png",
         );
     }

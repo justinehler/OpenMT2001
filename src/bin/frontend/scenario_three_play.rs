@@ -6,18 +6,18 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-#[path = "scenario_twelve_play.rs"]
-mod scenario_twelve_play;
-#[path = "scenario_one_play.rs"]
-mod scenario_one_play;
 #[path = "scenario_eight_play.rs"]
 mod scenario_eight_play;
-#[path = "scenario_seven_play.rs"]
-mod scenario_seven_play;
 #[path = "scenario_eleven_play.rs"]
 mod scenario_eleven_play;
+#[path = "scenario_one_play.rs"]
+mod scenario_one_play;
+#[path = "scenario_seven_play.rs"]
+mod scenario_seven_play;
 #[path = "scenario_six_play.rs"]
 pub(crate) mod scenario_six_play;
+#[path = "scenario_twelve_play.rs"]
+mod scenario_twelve_play;
 fn word(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
 }
@@ -1103,8 +1103,7 @@ fn finish_original_win(
         ended,
         "original result controller did not emit its bypass completion edge"
     );
-    host
-        .dispatch_result_event(session, assets, "CutSceneEnded")
+    host.dispatch_result_event(session, assets, "CutSceneEnded")
         .unwrap();
     assert_eq!(
         session.result_presentation().unwrap().end_requested,

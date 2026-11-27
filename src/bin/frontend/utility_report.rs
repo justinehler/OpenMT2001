@@ -781,27 +781,41 @@ mod tests {
         let mut view = View::default();
         view.open_property_rights(0, 0);
         assert!(!view.take_rights_request().unwrap().activate);
-        view.apply_rights_inspection(0, Ok(openmt2001::property_rights::Inspection {
-            message: Some(1202), activate_visible: true, open: false,
-        }));
+        view.apply_rights_inspection(
+            0,
+            Ok(openmt2001::property_rights::Inspection {
+                message: Some(1202),
+                activate_visible: true,
+                open: false,
+            }),
+        );
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(true, false);
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(false, false);
-        assert!(view.take_rights_request().is_none(),
-            "disabled original tutorial control 91 accepted local child 102");
+        assert!(
+            view.take_rights_request().is_none(),
+            "disabled original tutorial control 91 accepted local child 102"
+        );
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(true, true);
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(false, true);
-        assert_eq!(view.take_rights_request(), Some(RightsRequest {
-            category: 0, panel_mode: 0, activate: true,
-        }));
+        assert_eq!(
+            view.take_rights_request(),
+            Some(RightsRequest {
+                category: 0,
+                panel_mode: 0,
+                activate: true,
+            })
+        );
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(true, true);
         view.property_control_hover = Some(102);
         view.mouse_with_rights_admission(false, false);
-        assert!(view.take_rights_request().is_none(),
-            "a rights child disabled between press and release must not activate");
+        assert!(
+            view.take_rights_request().is_none(),
+            "a rights child disabled between press and release must not activate"
+        );
     }
 }

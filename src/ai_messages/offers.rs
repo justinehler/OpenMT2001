@@ -6,8 +6,8 @@ use crate::{
 };
 pub mod auction;
 pub mod execution;
-pub mod producers;
 pub mod negotiation;
+pub mod producers;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Call {

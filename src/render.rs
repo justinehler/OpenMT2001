@@ -1,7 +1,12 @@
 //! Shared GPU drawing. Host window creation, capture and file I/O live outside.
 //! Prepared lighting and material state are supplied by the scene caller.
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 use wgpu::util::DeviceExt;
-use std::{cell::RefCell, collections::VecDeque, hash::{Hash, Hasher}, sync::Arc};
 
 // A bounded content cache also serves transient GUI scenes: their geometry can
 // change each frame while original texture pages remain identical. Keep owned
@@ -276,7 +281,14 @@ impl Renderer {
                             )
                         {
                             wgpu::CompareFunction::Always
-                        } else if static_lit || matches!(mode, SurfaceMode::UiDepth | SurfaceMode::TreeFoliage | SurfaceMode::ResultFireworks) {
+                        } else if static_lit
+                            || matches!(
+                                mode,
+                                SurfaceMode::UiDepth
+                                    | SurfaceMode::TreeFoliage
+                                    | SurfaceMode::ResultFireworks
+                            )
+                        {
                             wgpu::CompareFunction::LessEqual
                         } else {
                             wgpu::CompareFunction::Less
@@ -425,25 +437,38 @@ impl Renderer {
         camera: [f32; 16],
         fog: Option<EyeFog>,
     ) -> Result<PreparedScene, String> {
-        if draws.is_empty() { return Ok(PreparedScene::default()); }
+        if draws.is_empty() {
+            return Ok(PreparedScene::default());
+        }
         // Static offsets preserve independent per-draw camera semantics while
         // placing their uniforms in one upload allocation. No dynamic shader
         // binding or pipeline layout change is needed.
-        let alignment = self.device.limits().min_uniform_buffer_offset_alignment.max(1) as usize;
+        let alignment = self
+            .device
+            .limits()
+            .min_uniform_buffer_offset_alignment
+            .max(1) as usize;
         let stride = 96usize.div_ceil(alignment) * alignment;
-        let bytes = draws.len().checked_mul(stride).ok_or("camera uniform allocation overflow")?;
+        let bytes = draws
+            .len()
+            .checked_mul(stride)
+            .ok_or("camera uniform allocation overflow")?;
         if bytes as u64 > self.device.limits().max_buffer_size {
             return Err("camera uniform allocation exceeds device limits".into());
         }
         let mut uniforms = vec![0u8; bytes];
         for (index, draw) in draws.iter().enumerate() {
             let values = camera_uniform(draw.view_projection.unwrap_or(camera), fog)?;
-            uniforms[index * stride..index * stride + 96].copy_from_slice(bytemuck::cast_slice(&values));
+            uniforms[index * stride..index * stride + 96]
+                .copy_from_slice(bytemuck::cast_slice(&values));
         }
-        let uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("retained camera and fog slots"), contents: &uniforms,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("retained camera and fog slots"),
+                contents: &uniforms,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let mut prepared = Vec::with_capacity(draws.len());
         for (index, draw) in draws.iter().enumerate() {
             prepared.push(self.upload_draw(draw, uniform.clone(), (index * stride) as u64)?);
@@ -464,8 +489,11 @@ impl Renderer {
     /// unchanged materials. Different textures or modes replace only that draw;
     /// a different draw count prepares the complete new layout.
     pub fn refresh_prepared(
-        &self, scene: &mut PreparedScene, draws: &[TexturedDraw<'_>],
-        camera: [f32; 16], fog: Option<EyeFog>,
+        &self,
+        scene: &mut PreparedScene,
+        draws: &[TexturedDraw<'_>],
+        camera: [f32; 16],
+        fog: Option<EyeFog>,
     ) -> Result<(), String> {
         if scene.draws.len() != draws.len() {
             *scene = self.prepare(draws, camera, fog)?;
@@ -474,25 +502,37 @@ impl Renderer {
         let mut updates = Vec::with_capacity(draws.len());
         for (index, draw) in draws.iter().enumerate() {
             let primary = self.upload_texture(draw.width, draw.height, draw.rgba, draw.mipmaps)?;
-            let secondary = draw.secondary.as_ref().map(|image|
-                self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)).transpose()?;
+            let secondary = draw
+                .secondary
+                .as_ref()
+                .map(|image| {
+                    self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)
+                })
+                .transpose()?;
             let old = &scene.draws[index];
-            if old.mode == draw.mode && old.texture == primary.0
+            if old.mode == draw.mode
+                && old.texture == primary.0
                 && old.secondary.as_ref().map(|image| &image.0)
-                    == secondary.as_ref().map(|image| &image.0) {
+                    == secondary.as_ref().map(|image| &image.0)
+            {
                 updates.push((index, *draw));
             } else {
                 let values = camera_uniform(draw.view_projection.unwrap_or(camera), fog)?;
-                let uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("retained camera and fog"), contents: bytemuck::cast_slice(&values),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("retained camera and fog"),
+                        contents: bytemuck::cast_slice(&values),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
                 scene.draws[index] = self.upload_draw(draw, uniform, 0)?;
             }
         }
         self.update_dynamic_vertices_batch(scene, &updates)?;
-        let cameras = draws.iter().map(|draw|
-            draw.view_projection.unwrap_or(camera)).collect::<Vec<_>>();
+        let cameras = draws
+            .iter()
+            .map(|draw| draw.view_projection.unwrap_or(camera))
+            .collect::<Vec<_>>();
         self.update_cameras(scene, &cameras, fog)?;
         Ok(())
     }
@@ -542,8 +582,11 @@ impl Renderer {
         if let Some(secondary) = self.retained_facade_image(draw)? {
             self.bind_retained_facade(surface, secondary);
         }
-        self.queue
-            .write_buffer(&surface.camera, surface.camera_offset, bytemuck::cast_slice(&values));
+        self.queue.write_buffer(
+            &surface.camera,
+            surface.camera_offset,
+            bytemuck::cast_slice(&values),
+        );
         if !expanded.is_empty() {
             self.queue
                 .write_buffer(&surface.vertices, 0, bytemuck::cast_slice(&expanded));
@@ -585,10 +628,18 @@ impl Renderer {
     /// Update dynamic vertices before one batch camera upload. Primary image,
     /// pipeline and camera slots stay fixed. FacadeBlend can rebind its secondary.
     pub fn update_dynamic_vertices(
-        &self, scene: &mut PreparedScene, index: usize, draw: &TexturedDraw<'_>,
+        &self,
+        scene: &mut PreparedScene,
+        index: usize,
+        draw: &TexturedDraw<'_>,
     ) -> Result<(), String> {
-        let surface = scene.draws.get_mut(index).ok_or("missing retained surface")?;
-        if surface.mode != draw.mode { return Err("dynamic surface material changed".into()); }
+        let surface = scene
+            .draws
+            .get_mut(index)
+            .ok_or("missing retained surface")?;
+        if surface.mode != draw.mode {
+            return Err("dynamic surface material changed".into());
+        }
         let expanded = expand_vertices(draw)?;
         if let Some(secondary) = self.retained_facade_image(draw)? {
             self.bind_retained_facade(surface, secondary);
@@ -596,12 +647,15 @@ impl Renderer {
         let bytes = draw.vertices.len() as u64 * 56;
         if bytes > surface.vertices.size() {
             surface.vertices = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("live population vertices"), size: bytes,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+                label: Some("live population vertices"),
+                size: bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
         }
         if !expanded.is_empty() {
-            self.queue.write_buffer(&surface.vertices, 0, bytemuck::cast_slice(&expanded));
+            self.queue
+                .write_buffer(&surface.vertices, 0, bytemuck::cast_slice(&expanded));
         }
         surface.count = draw.vertices.len() as u32;
         Ok(())
@@ -611,31 +665,43 @@ impl Renderer {
     /// Validate all inputs before changing retained buffers or facade bindings;
     /// camera slots stay fixed. Queue order keeps these copies before draws.
     pub fn update_dynamic_vertices_batch(
-        &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
+        &self,
+        scene: &mut PreparedScene,
+        updates: &[(usize, TexturedDraw<'_>)],
     ) -> Result<(), String> {
         self.update_dynamic_vertices_batch_with_limit(
-            scene, updates, self.device.limits().max_buffer_size)
+            scene,
+            updates,
+            self.device.limits().max_buffer_size,
+        )
     }
 
     fn update_dynamic_vertices_batch_with_limit(
-        &self, scene: &mut PreparedScene, updates: &[(usize, TexturedDraw<'_>)],
+        &self,
+        scene: &mut PreparedScene,
+        updates: &[(usize, TexturedDraw<'_>)],
         upload_limit: u64,
     ) -> Result<(), String> {
-        let oversized = updates.iter().fold(0u64, |bytes, (_, draw)|
-            bytes.saturating_add(draw.vertices.len() as u64 * 56)) > upload_limit;
+        let oversized = updates.iter().fold(0u64, |bytes, (_, draw)| {
+            bytes.saturating_add(draw.vertices.len() as u64 * 56)
+        }) > upload_limit;
         let mut expanded = Vec::<[f32; 14]>::new();
         let mut copies = Vec::with_capacity(updates.len());
         let mut facades = Vec::new();
         for (index, draw) in updates {
             let surface = scene.draws.get(*index).ok_or("missing retained surface")?;
-            if surface.mode != draw.mode { return Err("dynamic surface material changed".into()); }
+            if surface.mode != draw.mode {
+                return Err("dynamic surface material changed".into());
+            }
             let offset = expanded.len() as u64 * 56;
             let vertices = expand_vertices(draw)?;
             if let Some(secondary) = self.retained_facade_image(draw)? {
                 facades.push((*index, secondary));
             }
             let bytes = vertices.len() as u64 * 56;
-            if !oversized { expanded.extend(vertices); }
+            if !oversized {
+                expanded.extend(vertices);
+            }
             copies.push((*index, draw.vertices.len() as u32, offset, bytes));
         }
         // Several individually valid surfaces can exceed the limit for one
@@ -657,24 +723,38 @@ impl Renderer {
             let surface = &mut scene.draws[index];
             if bytes > surface.vertices.size() {
                 surface.vertices = self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("live population vertices"), size: bytes,
+                    label: Some("live population vertices"),
+                    size: bytes,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
             }
             surface.count = count;
         }
-        if expanded.is_empty() { return Ok(()); }
-        let upload = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("batched dynamic vertex upload"),
-            contents: bytemuck::cast_slice(&expanded), usage: wgpu::BufferUsages::COPY_SRC,
-        });
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("batched dynamic vertex copies"),
-        });
+        if expanded.is_empty() {
+            return Ok(());
+        }
+        let upload = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("batched dynamic vertex upload"),
+                contents: bytemuck::cast_slice(&expanded),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("batched dynamic vertex copies"),
+            });
         for &(index, _, offset, bytes) in &copies {
             if bytes != 0 {
-                encoder.copy_buffer_to_buffer(&upload, offset, &scene.draws[index].vertices, 0, bytes);
+                encoder.copy_buffer_to_buffer(
+                    &upload,
+                    offset,
+                    &scene.draws[index].vertices,
+                    0,
+                    bytes,
+                );
             }
         }
         self.queue.submit(Some(encoder.finish()));
@@ -685,12 +765,21 @@ impl Renderer {
     /// material refresh can introduce standalone buffers; retain its individual
     /// update behavior rather than assuming those buffers share this allocation.
     pub fn update_cameras(
-        &self, scene: &PreparedScene, cameras: &[[f32; 16]], fog: Option<EyeFog>,
+        &self,
+        scene: &PreparedScene,
+        cameras: &[[f32; 16]],
+        fog: Option<EyeFog>,
     ) -> Result<(), String> {
-        if cameras.len() != scene.draws.len() { return Err("camera and surface counts differ".into()); }
-        let Some(first) = scene.draws.first() else { return Ok(()); };
+        if cameras.len() != scene.draws.len() {
+            return Err("camera and surface counts differ".into());
+        }
+        let Some(first) = scene.draws.first() else {
+            return Ok(());
+        };
         if scene.draws.iter().any(|draw| draw.camera != first.camera) {
-            for (index, &camera) in cameras.iter().enumerate() { self.update_camera(scene, index, camera, fog)?; }
+            for (index, &camera) in cameras.iter().enumerate() {
+                self.update_camera(scene, index, camera, fog)?;
+            }
             return Ok(());
         }
         let mut bytes = vec![0u8; first.camera.size() as usize];
@@ -712,39 +801,68 @@ impl Renderer {
     ) -> Result<(), String> {
         let surface = scene.draws.get(index).ok_or("missing retained surface")?;
         let values = camera_uniform(camera, fog)?;
-        self.queue
-            .write_buffer(&surface.camera, surface.camera_offset, bytemuck::cast_slice(&values));
+        self.queue.write_buffer(
+            &surface.camera,
+            surface.camera_offset,
+            bytemuck::cast_slice(&values),
+        );
         Ok(())
     }
 
     // Only the existing facade pipeline admits a secondary selector change.
     // The cache resolves the exact retained pixels; primary image, camera slot,
     // sampler and vertex allocation are preserved across a day/night boundary.
-    fn retained_facade_image(&self, draw: &TexturedDraw<'_>)
-        -> Result<Option<(wgpu::Texture, wgpu::TextureView)>, String> {
-        if draw.mode != SurfaceMode::FacadeBlend { return Ok(None); }
-        let image = draw.secondary.as_ref().ok_or("retained facade secondary missing")?;
-        self.upload_texture(image.width, image.height, image.rgba, image.mipmaps).map(Some)
+    fn retained_facade_image(
+        &self,
+        draw: &TexturedDraw<'_>,
+    ) -> Result<Option<(wgpu::Texture, wgpu::TextureView)>, String> {
+        if draw.mode != SurfaceMode::FacadeBlend {
+            return Ok(None);
+        }
+        let image = draw
+            .secondary
+            .as_ref()
+            .ok_or("retained facade secondary missing")?;
+        self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)
+            .map(Some)
     }
 
-    fn bind_retained_facade(&self, surface: &mut GpuDraw,
-        secondary: (wgpu::Texture, wgpu::TextureView)) {
-        if surface.secondary.as_ref().is_some_and(|old| old.0 == secondary.0) { return; }
+    fn bind_retained_facade(
+        &self,
+        surface: &mut GpuDraw,
+        secondary: (wgpu::Texture, wgpu::TextureView),
+    ) {
+        if surface
+            .secondary
+            .as_ref()
+            .is_some_and(|old| old.0 == secondary.0)
+        {
+            return;
+        }
         surface.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("retained facade texture bindings"),
             layout: &self.facade_pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0,
+                wgpu::BindGroupEntry {
+                    binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &surface.camera, offset: surface.camera_offset,
+                        buffer: &surface.camera,
+                        offset: surface.camera_offset,
                         size: std::num::NonZeroU64::new(96),
-                    }) },
-                wgpu::BindGroupEntry { binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&surface.texture_view) },
-                wgpu::BindGroupEntry { binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&surface.sampler) },
-                wgpu::BindGroupEntry { binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&secondary.1) },
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&surface.texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&surface.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&secondary.1),
+                },
             ],
         });
         surface.secondary = Some(secondary);
@@ -776,7 +894,9 @@ impl Renderer {
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &camera, offset: camera_offset, size: std::num::NonZeroU64::new(96),
+                    buffer: &camera,
+                    offset: camera_offset,
+                    size: std::num::NonZeroU64::new(96),
                 }),
             },
             wgpu::BindGroupEntry {
@@ -826,10 +946,11 @@ impl Renderer {
         }
         let source_hint = rgba.as_ptr() as usize;
         let mut cache = self.texture_cache.borrow_mut();
-        if let Some(index) = cache.entries.iter().position(|entry|
+        if let Some(index) = cache.entries.iter().position(|entry| {
             entry.source_hint == source_hint
                 && (entry.key.0, entry.key.1, entry.key.2) == (width, height, mipmaps)
-                && entry.rgba.as_ref() == rgba) {
+                && entry.rgba.as_ref() == rgba
+        }) {
             let entry = cache.entries.remove(index).unwrap();
             let result = (entry.texture.clone(), entry.view.clone());
             cache.entries.push_back(entry);
@@ -838,8 +959,11 @@ impl Renderer {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         rgba.hash(&mut hash);
         let key = (width, height, mipmaps, hash.finish());
-        if let Some(index) = cache.entries.iter().position(|entry|
-            entry.key == key && entry.rgba.as_ref() == rgba) {
+        if let Some(index) = cache
+            .entries
+            .iter()
+            .position(|entry| entry.key == key && entry.rgba.as_ref() == rgba)
+        {
             let mut entry = cache.entries.remove(index).unwrap();
             entry.source_hint = source_hint;
             let result = (entry.texture.clone(), entry.view.clone());
@@ -852,13 +976,18 @@ impl Renderer {
         let resident_bytes = rgba.len().saturating_mul(if mipmaps { 3 } else { 2 });
         if resident_bytes <= TEXTURE_CACHE_BYTES {
             while cache.resident_bytes + resident_bytes > TEXTURE_CACHE_BYTES
-                || cache.entries.len() >= TEXTURE_CACHE_ENTRIES {
+                || cache.entries.len() >= TEXTURE_CACHE_ENTRIES
+            {
                 let oldest = cache.entries.pop_front().unwrap();
                 cache.resident_bytes -= oldest.resident_bytes;
             }
             cache.entries.push_back(CachedTexture {
-                key, source_hint, rgba: Arc::from(rgba), texture: result.0.clone(),
-                view: result.1.clone(), resident_bytes,
+                key,
+                source_hint,
+                rgba: Arc::from(rgba),
+                texture: result.0.clone(),
+                view: result.1.clone(),
+                resident_bytes,
             });
             cache.resident_bytes += resident_bytes;
         }
@@ -1133,67 +1262,148 @@ mod depth_tests {
     #[ignore = "requires GPU"]
     fn tree_cutout_replacement_depth_culling_and_fog() {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        let identity = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
         // Draw full-screen triangles in the supplied order, then read a pixel.
         let pixel = |layers: &[(f32, [f32; 3], u8, u8, bool)], fog| {
-            let vertices: Vec<_> = layers.iter().map(|&(z, rgb, _, _, reverse)| {
-                let mut v = [[-1.,-1.,z,rgb[0],rgb[1],rgb[2],0.,0.],
-                    [3.,-1.,z,rgb[0],rgb[1],rgb[2],0.,0.],
-                    [-1.,3.,z,rgb[0],rgb[1],rgb[2],0.,0.]];
-                if reverse { v.swap(1, 2); }
-                v
-            }).collect();
-            let textures: Vec<_> = layers.iter().map(|l| [255,255,255,l.2]).collect();
+            let vertices: Vec<_> = layers
+                .iter()
+                .map(|&(z, rgb, _, _, reverse)| {
+                    let mut v = [
+                        [-1., -1., z, rgb[0], rgb[1], rgb[2], 0., 0.],
+                        [3., -1., z, rgb[0], rgb[1], rgb[2], 0., 0.],
+                        [-1., 3., z, rgb[0], rgb[1], rgb[2], 0., 0.],
+                    ];
+                    if reverse {
+                        v.swap(1, 2);
+                    }
+                    v
+                })
+                .collect();
+            let textures: Vec<_> = layers.iter().map(|l| [255, 255, 255, l.2]).collect();
             let alpha: Vec<_> = layers.iter().map(|l| [l.3; 3]).collect();
-            let draws: Vec<_> = vertices.iter().enumerate().map(|(i, v)| TexturedDraw {
-                view_projection: None, vertices: v, specular: None,
-                diffuse_alpha: Some(&alpha[i]), mode: SurfaceMode::TreeFoliage,
-                width: 1, height: 1, rgba: &textures[i], mipmaps: false, secondary: None,
-            }).collect();
+            let draws: Vec<_> = vertices
+                .iter()
+                .enumerate()
+                .map(|(i, v)| TexturedDraw {
+                    view_projection: None,
+                    vertices: v,
+                    specular: None,
+                    diffuse_alpha: Some(&alpha[i]),
+                    mode: SurfaceMode::TreeFoliage,
+                    width: 1,
+                    height: 1,
+                    rgba: &textures[i],
+                    mipmaps: false,
+                    secondary: None,
+                })
+                .collect();
             let prepared = renderer.prepare(&draws, identity, fog).unwrap();
-            let size = wgpu::Extent3d { width: 8, height: 8, depth_or_array_layers: 1 };
-            let texture = |format, usage| renderer.device.create_texture(&wgpu::TextureDescriptor {
-                label: None, size, mip_level_count: 1, sample_count: 1,
-                dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[],
-            });
-            let color = texture(COLOR_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+            let size = wgpu::Extent3d {
+                width: 8,
+                height: 8,
+                depth_or_array_layers: 1,
+            };
+            let texture = |format, usage| {
+                renderer.device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+            };
+            let color = texture(
+                COLOR_FORMAT,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            );
             let depth = texture(DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
-            renderer.draw_prepared(&color.create_view(&Default::default()),
-                &depth.create_view(&Default::default()), &prepared);
+            renderer.draw_prepared(
+                &color.create_view(&Default::default()),
+                &depth.create_view(&Default::default()),
+                &prepared,
+            );
             let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
-                label: None, size: 256 * 8,
+                label: None,
+                size: 256 * 8,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
             let mut encoder = renderer.device.create_command_encoder(&Default::default());
-            encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo {
-                texture: &color, mip_level: 0, origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            }, wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
-                offset: 0, bytes_per_row: Some(256), rows_per_image: Some(8),
-            } }, size);
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &color,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(8),
+                    },
+                },
+                size,
+            );
             renderer.queue.submit([encoder.finish()]);
             let (sender, receiver) = std::sync::mpsc::channel();
-            buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| sender.send(result).unwrap());
-            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    sender.send(result).unwrap()
+                });
+            renderer
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
             receiver.recv().unwrap().unwrap();
             let bytes = buffer.slice(..).get_mapped_range().unwrap();
             let at = 4 * 256 + 4 * 4;
-            [bytes[at], bytes[at+1], bytes[at+2], bytes[at+3]]
+            [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
         };
-        let red = (0.8, [1.,0.,0.], 255, 255, false);
-        let green = (0.2, [0.,1.,0.], 65, 255, false);
-        let blue = (0.5, [0.,0.,1.], 255, 255, false);
-        assert_eq!(pixel(&[red, (green.0, green.1, 64, 255, false)], None), [255,0,0,255]);
-        assert_eq!(pixel(&[red, green], None), [0,255,0,65]);
-        assert_eq!(pixel(&[red, green, blue], None), [0,255,0,65]);
-        assert_eq!(pixel(&[red, (green.0, green.1, 64, 255, false), blue], None), [0,0,255,255]);
-        assert_eq!(pixel(&[red, green, (0.2, blue.1, 255, 255, false)], None), [0,0,255,255]);
-        assert_eq!(pixel(&[red, (green.0, green.1, 65, 255, true)], None), [0,255,0,65]);
-        assert_eq!(pixel(&[red, (green.0, green.1, 128, 127, false)], None), [255,0,0,255]);
-        let fogged = pixel(&[green], Some(EyeFog { color: 0xff0000ff, start: 0., end: 2. }));
+        let red = (0.8, [1., 0., 0.], 255, 255, false);
+        let green = (0.2, [0., 1., 0.], 65, 255, false);
+        let blue = (0.5, [0., 0., 1.], 255, 255, false);
+        assert_eq!(
+            pixel(&[red, (green.0, green.1, 64, 255, false)], None),
+            [255, 0, 0, 255]
+        );
+        assert_eq!(pixel(&[red, green], None), [0, 255, 0, 65]);
+        assert_eq!(pixel(&[red, green, blue], None), [0, 255, 0, 65]);
+        assert_eq!(
+            pixel(&[red, (green.0, green.1, 64, 255, false), blue], None),
+            [0, 0, 255, 255]
+        );
+        assert_eq!(
+            pixel(&[red, green, (0.2, blue.1, 255, 255, false)], None),
+            [0, 0, 255, 255]
+        );
+        assert_eq!(
+            pixel(&[red, (green.0, green.1, 65, 255, true)], None),
+            [0, 255, 0, 65]
+        );
+        assert_eq!(
+            pixel(&[red, (green.0, green.1, 128, 127, false)], None),
+            [255, 0, 0, 255]
+        );
+        let fogged = pixel(
+            &[green],
+            Some(EyeFog {
+                color: 0xff0000ff,
+                start: 0.,
+                end: 2.,
+            }),
+        );
         assert_eq!(fogged[0], 0);
         assert!((127..=128).contains(&fogged[1]) && (127..=128).contains(&fogged[2]));
         assert_eq!(fogged[3], 65);
@@ -1203,76 +1413,139 @@ mod depth_tests {
     #[ignore = "requires GPU"]
     fn batched_dynamic_vertex_validation_and_growth() {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
-        let triangle = [[-1.,-1.,0.5,1.,0.,0.,0.,0.],
-            [1.,-1.,0.5,1.,0.,0.,1.,0.], [0.,1.,0.5,1.,0.,0.,0.5,1.]];
+        let identity = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        let triangle = [
+            [-1., -1., 0.5, 1., 0., 0., 0., 0.],
+            [1., -1., 0.5, 1., 0., 0., 1., 0.],
+            [0., 1., 0.5, 1., 0., 0., 0.5, 1.],
+        ];
         fn make(vertices: &[[f32; 8]]) -> TexturedDraw<'_> {
-            TexturedDraw { view_projection: None, vertices,
-                specular: None, diffuse_alpha: None, mode: SurfaceMode::Diagnostic,
-                width:1, height:1, rgba:&[255u8; 4], mipmaps:false, secondary:None }
+            TexturedDraw {
+                view_projection: None,
+                vertices,
+                specular: None,
+                diffuse_alpha: None,
+                mode: SurfaceMode::Diagnostic,
+                width: 1,
+                height: 1,
+                rgba: &[255u8; 4],
+                mipmaps: false,
+                secondary: None,
+            }
         }
         let draws = [make(triangle.as_slice()), make(triangle.as_slice())];
         let mut scene = renderer.prepare(&draws, identity, None).unwrap();
-        let cameras = scene.draws.iter().map(|draw| draw.camera.clone()).collect::<Vec<_>>();
+        let cameras = scene
+            .draws
+            .iter()
+            .map(|draw| draw.camera.clone())
+            .collect::<Vec<_>>();
         let larger = triangle.repeat(3);
-        renderer.update_dynamic_vertices_batch(&mut scene,
-            &[(0, make(&larger)), (1, make(&[]))]).unwrap();
+        renderer
+            .update_dynamic_vertices_batch(&mut scene, &[(0, make(&larger)), (1, make(&[]))])
+            .unwrap();
         assert_eq!(scene.draws[0].count, 9);
         assert_eq!(scene.draws[1].count, 0);
-        assert!(scene.draws[0].vertices.size() >= 9*56);
+        assert!(scene.draws[0].vertices.size() >= 9 * 56);
         for (draw, camera) in scene.draws.iter().zip(&cameras) {
             assert_eq!(&draw.camera, camera);
             assert_eq!(draw.mode, SurfaceMode::Diagnostic);
         }
         let retained = scene.draws[0].vertices.clone();
-        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
-            &[(0, make(triangle.as_slice())), (99, make(&[]))]).is_err());
+        assert!(
+            renderer
+                .update_dynamic_vertices_batch(
+                    &mut scene,
+                    &[(0, make(triangle.as_slice())), (99, make(&[]))]
+                )
+                .is_err()
+        );
         assert_eq!(scene.draws[0].count, 9);
         assert_eq!(scene.draws[0].vertices, retained);
         let mut invalid = make(triangle.as_slice());
         invalid.specular = Some(&[]);
-        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
-            &[(0, make(&[])), (1, invalid)]).is_err());
+        assert!(
+            renderer
+                .update_dynamic_vertices_batch(&mut scene, &[(0, make(&[])), (1, invalid)])
+                .is_err()
+        );
         assert_eq!(scene.draws[0].count, 9);
         assert_eq!(scene.draws[1].count, 0);
         let mut invalid_mode = make(&[]);
         invalid_mode.mode = SurfaceMode::StaticLit;
-        assert!(renderer.update_dynamic_vertices_batch(&mut scene,
-            &[(0, invalid_mode)]).is_err());
-        renderer.update_dynamic_vertices_batch(&mut scene, &[]).unwrap();
+        assert!(
+            renderer
+                .update_dynamic_vertices_batch(&mut scene, &[(0, invalid_mode)])
+                .is_err()
+        );
+        renderer
+            .update_dynamic_vertices_batch(&mut scene, &[])
+            .unwrap();
         assert_eq!(scene.draws[0].count, 9);
         // Match sequential writes when a caller repeats an index: the final
         // prefix and count win, while the already-grown allocation is retained.
-        renderer.update_dynamic_vertices_batch(&mut scene,
-            &[(0, make(&larger)), (0, make(triangle.as_slice()))]).unwrap();
+        renderer
+            .update_dynamic_vertices_batch(
+                &mut scene,
+                &[(0, make(&larger)), (0, make(triangle.as_slice()))],
+            )
+            .unwrap();
         assert_eq!(scene.draws[0].count, 3);
         assert_eq!(scene.draws[0].vertices, retained);
         // Force the upload-size fallback without a large GPU allocation.
-        renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
-            &[(0, make(&larger)), (1, make(&[]))], 0).unwrap();
+        renderer
+            .update_dynamic_vertices_batch_with_limit(
+                &mut scene,
+                &[(0, make(&larger)), (1, make(&[]))],
+                0,
+            )
+            .unwrap();
         assert_eq!(scene.draws[0].count, 9);
         assert_eq!(scene.draws[1].count, 0);
-        assert!(renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
-            &[(0, make(&[])), (99, make(&[]))], 0).is_err());
+        assert!(
+            renderer
+                .update_dynamic_vertices_batch_with_limit(
+                    &mut scene,
+                    &[(0, make(&[])), (99, make(&[]))],
+                    0
+                )
+                .is_err()
+        );
         assert_eq!(scene.draws[0].count, 9);
-        renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
-            &[(0, make(triangle.as_slice()))], 0).unwrap();
+        renderer
+            .update_dynamic_vertices_batch_with_limit(
+                &mut scene,
+                &[(0, make(triangle.as_slice()))],
+                0,
+            )
+            .unwrap();
         assert_eq!(scene.draws[0].count, 3);
         assert_eq!(scene.draws[0].vertices, retained);
         renderer.queue.submit([]);
-        renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        renderer
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
     }
 
     #[test]
     fn texture_cache_reuses_exact_images_and_separates_layouts() {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         let mut image = vec![255; 4 * 4 * 4];
         renderer.upload_texture(4, 4, &image, false).unwrap();
-        renderer.upload_texture(4, 4, &image.clone(), false).unwrap();
+        renderer
+            .upload_texture(4, 4, &image.clone(), false)
+            .unwrap();
         renderer.upload_texture(4, 4, &image, false).unwrap();
         assert_eq!(renderer.texture_cache.borrow().entries.len(), 1);
         image[0] = 0;
@@ -1302,15 +1575,25 @@ mod depth_tests {
         let save = read("OPENMT2001_SAVE_ONE");
         let assemble = |phase, cache: Option<&mut crate::texture::LoaderCache>| {
             let request = crate::render_scene::Request {
-            build_file: &build, source: crate::render_scene::Source::Save(&save),
-            original: Some(crate::render_scene::OriginalAssets {
-                executable: &executable, directory: &directory, archive: &archive,
-            }), suncols: Some(&suncols), phase: Some(phase), camera: None,
-            width: 1280, height: 960, animated: true,
+                build_file: &build,
+                source: crate::render_scene::Source::Save(&save),
+                original: Some(crate::render_scene::OriginalAssets {
+                    executable: &executable,
+                    directory: &directory,
+                    archive: &archive,
+                }),
+                suncols: Some(&suncols),
+                phase: Some(phase),
+                camera: None,
+                width: 1280,
+                height: 960,
+                animated: true,
             };
             if let Some(cache) = cache {
                 crate::render_scene::assemble_with_style_cached(request, None, cache).unwrap()
-            } else { crate::render_scene::assemble(request).unwrap() }
+            } else {
+                crate::render_scene::assemble(request).unwrap()
+            }
         };
         let mut converted = crate::texture::LoaderCache::default();
         let scene = assemble(9, Some(&mut converted));
@@ -1328,35 +1611,60 @@ mod depth_tests {
                 assert_eq!(a.specular, b.specular);
                 assert_eq!(a.diffuse_alpha, b.diffuse_alpha);
                 assert_eq!(a.rgba, b.rgba);
-                assert_eq!((a.width, a.height, a.mipmaps), (b.width, b.height, b.mipmaps));
+                assert_eq!(
+                    (a.width, a.height, a.mipmaps),
+                    (b.width, b.height, b.mipmaps)
+                );
                 if let (Some(a), Some(b)) = (&a.secondary, &b.secondary) {
                     assert_eq!(a.uv, b.uv);
                     assert_eq!(a.rgba, b.rgba);
-                } else { assert_eq!(a.secondary.is_some(), b.secondary.is_some()); }
+                } else {
+                    assert_eq!(a.secondary.is_some(), b.secondary.is_some());
+                }
             }
-            eprintln!("Original city hour {phase} assembly: uncached {uncached:?}, cached original conversions {elapsed:?}; all draw vertices/colors/specular/textures equal");
+            eprintln!(
+                "Original city hour {phase} assembly: uncached {uncached:?}, cached original conversions {elapsed:?}; all draw vertices/colors/specular/textures equal"
+            );
         }
         let started = std::time::Instant::now();
-        for _ in 0..10 { std::hint::black_box(scene.clone()); }
-        eprintln!("Original city full scene clone: {:?} per clone (10 repetitions)", started.elapsed() / 10);
+        for _ in 0..10 {
+            std::hint::black_box(scene.clone());
+        }
+        eprintln!(
+            "Original city full scene clone: {:?} per clone (10 repetitions)",
+            started.elapsed() / 10
+        );
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let draws = scene.draws.iter().map(crate::render_scene::OwnedDraw::borrowed)
+        let draws = scene
+            .draws
+            .iter()
+            .map(crate::render_scene::OwnedDraw::borrowed)
             .collect::<Vec<_>>();
         let started = std::time::Instant::now();
         // Preserve original per-draw uploads for the baseline. Camera/vertex
         // buffers and bind groups take the identical path in both measurements.
         renderer.bypass_texture_cache.set(true);
-        for _ in 0..3 { renderer.prepare(&draws, scene.camera, scene.fog).unwrap(); }
+        for _ in 0..3 {
+            renderer.prepare(&draws, scene.camera, scene.fog).unwrap();
+        }
         let uncached = started.elapsed();
         renderer.bypass_texture_cache.set(false);
         renderer.prepare(&draws, scene.camera, scene.fog).unwrap();
         let started = std::time::Instant::now();
-        for _ in 0..3 { renderer.prepare(&draws, scene.camera, scene.fog).unwrap(); }
+        for _ in 0..3 {
+            renderer.prepare(&draws, scene.camera, scene.fog).unwrap();
+        }
         let cached = started.elapsed();
-        eprintln!("Original city prepare: {} draws, 3 repetitions: cold per-draw {uncached:?}, resident {cached:?}, {} retained texture pages / {} bytes", draws.len(),
-            renderer.texture_cache.borrow().entries.len(), renderer.texture_cache.borrow().resident_bytes);
+        eprintln!(
+            "Original city prepare: {} draws, 3 repetitions: cold per-draw {uncached:?}, resident {cached:?}, {} retained texture pages / {} bytes",
+            draws.len(),
+            renderer.texture_cache.borrow().entries.len(),
+            renderer.texture_cache.borrow().resident_bytes
+        );
     }
 
     #[test]
@@ -1502,9 +1810,13 @@ mod retained_facade_upload_regressions {
         let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
         let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
         let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let entry = index.find("gamedata2/BuildingTextures/textures.gtd").unwrap();
+        let entry = index
+            .find("gamedata2/BuildingTextures/textures.gtd")
+            .unwrap();
         let set = crate::texture::TextureSet::parse(
-            &archive[entry.offset as usize..(entry.offset + entry.length) as usize]).unwrap();
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
         // Original4b7dd4 and4b7e17 choose handles26 and0. Their input
         // representations are pinned separately by the cached-row-zero test.
         let day = &set.textures[0];
@@ -1513,36 +1825,60 @@ mod retained_facade_upload_regressions {
         let vertices = [[0., 0., 0., 0.4, 0.5, 0.6, 0., 0.]; 3];
         let specular = [[0.1, 0.2, 0.3]; 3];
         let uv = [[0., 0.]; 3];
-        let identity = [1.,0.,0.,0., 0.,1.,0.,0., 0.,0.,1.,0., 0.,0.,0.,1.];
+        let identity = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
         let draw_for = |daytime| TexturedDraw {
-            view_projection: None, vertices: &vertices, specular: Some(&specular),
-            diffuse_alpha: None, mode: SurfaceMode::FacadeBlend,
-            width: 1, height: 1, rgba: &[255; 4], mipmaps: false,
-            secondary: Some(SecondaryTexture { uv: &uv, diffuse_alpha: 127,
+            view_projection: None,
+            vertices: &vertices,
+            specular: Some(&specular),
+            diffuse_alpha: None,
+            mode: SurfaceMode::FacadeBlend,
+            width: 1,
+            height: 1,
+            rgba: &[255; 4],
+            mipmaps: false,
+            secondary: Some(SecondaryTexture {
+                uv: &uv,
+                diffuse_alpha: 127,
                 width: if daytime { day.width } else { night.width },
                 height: if daytime { day.height } else { night.height },
-                rgba: if daytime { day.texels } else { &night_pixels }, mipmaps: true }),
+                rgba: if daytime { day.texels } else { &night_pixels },
+                mipmaps: true,
+            }),
         };
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
         let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
         for path in 0..4 {
-            let mut scene = renderer.prepare(&[draw_for(false)], identity, None).unwrap();
+            let mut scene = renderer
+                .prepare(&[draw_for(false)], identity, None)
+                .unwrap();
             let original_camera = scene.draws[0].camera.clone();
             let original_vertices = scene.draws[0].vertices.clone();
             let original_primary = scene.draws[0].texture.clone();
             for daytime in [true, false, true] {
                 let draw = draw_for(daytime);
                 match path {
-                    0 => renderer.update_dynamic_vertices(&mut scene, 0, &draw).unwrap(),
-                    1 => renderer.update_dynamic_surface(&mut scene, 0, &draw, identity, None).unwrap(),
-                    2 => renderer.update_dynamic_vertices_batch(&mut scene, &[(0, draw)]).unwrap(),
-                    _ => renderer.update_dynamic_vertices_batch_with_limit(&mut scene,
-                        &[(0, draw)], 0).unwrap(),
+                    0 => renderer
+                        .update_dynamic_vertices(&mut scene, 0, &draw)
+                        .unwrap(),
+                    1 => renderer
+                        .update_dynamic_surface(&mut scene, 0, &draw, identity, None)
+                        .unwrap(),
+                    2 => renderer
+                        .update_dynamic_vertices_batch(&mut scene, &[(0, draw)])
+                        .unwrap(),
+                    _ => renderer
+                        .update_dynamic_vertices_batch_with_limit(&mut scene, &[(0, draw)], 0)
+                        .unwrap(),
                 }
                 let image = draw.secondary.as_ref().unwrap();
-                let expected = renderer.upload_texture(image.width, image.height,
-                    image.rgba, true).unwrap();
+                let expected = renderer
+                    .upload_texture(image.width, image.height, image.rgba, true)
+                    .unwrap();
                 assert_eq!(scene.draws[0].secondary.as_ref().unwrap().0, expected.0);
                 assert_eq!(scene.draws[0].camera, original_camera);
                 assert_eq!(scene.draws[0].vertices, original_vertices);

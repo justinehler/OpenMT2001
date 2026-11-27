@@ -82,7 +82,9 @@ impl<'a> Models<'a> {
     }
     /// Original registration order, used by the frontend material catalogue.
     pub fn registered_meshes(&self) -> impl Iterator<Item = (u32, &CachedMesh<'a>)> {
-        self.entries.iter().map(|entry| (entry.reference, &entry.mesh))
+        self.entries
+            .iter()
+            .map(|entry| (entry.reference, &entry.mesh))
     }
     fn entry(&self, reference: u32) -> Result<&Entry<'a>, String> {
         self.entries
