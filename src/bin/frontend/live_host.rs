@@ -88,7 +88,7 @@ pub struct TutorialControls {
 pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
     if previous.is_none() {
         eprintln!(
-            "[controls] Space pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
+            "[controls] F1/P (or Space) pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
         );
     }
     if !status.pending_presentation.is_empty()
@@ -217,6 +217,7 @@ pub struct Host {
     pub gameplay_sound: Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
     auction: Option<Auction>,
     pub running: bool,
+    player_paused: bool,
     pub failure: Option<String>,
     /// Saved on the worker, rather than inferred from an asynchronous UI poll.
     options_resume: Option<bool>,
@@ -262,8 +263,10 @@ impl Host {
             .map_err(|_| "Time runtime poisoned")?;
         runtime.bind_panels();
         runtime.show(cash, 0)?;
+        drop(runtime);
         self.presentation_started = true;
         self.game_active = true;
+        self.restore_player_pause(&session.world.pause);
         Ok(())
     }
     #[cfg(test)]
@@ -423,6 +426,7 @@ impl Host {
             gameplay_sound: None,
             auction: None,
             running: false,
+            player_paused: false,
             failure: None,
             options_resume: None,
             commands_seen: 0,
@@ -914,6 +918,55 @@ impl Host {
                 crate::transport_audio::Operation::Construction([[None; 2]; 4]),
             );
         }
+    }
+    /// V2 saves retain the reason bytes. A cold Host must recover the player
+    /// latch before its initial focus snapshot, or the first press adds a second hold.
+    pub(crate) fn restore_player_pause(&mut self, pause: &openmt2001::pause::State) {
+        self.player_paused = pause.bytes[3] != 0;
+    }
+    pub(crate) fn player_paused(&self) -> bool {
+        self.player_paused
+    }
+    /// 43e5f0 toggles only its own reason3, then calls the process audio
+    /// wrapper. Options and script pauses retain their independent counts.
+    pub(crate) fn toggle_player_pause(
+        &mut self,
+        pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task],
+        audio: impl FnOnce(bool, i8) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let network = if let Some(process) = &self.process_runtime {
+            process
+                .byte(process_runtime::Byte::Network93bbb9)
+                .map_err(|e| e.to_string())?
+                != 0
+        } else {
+            self.policy.scheduler.network_enabled
+        };
+        if network
+            || self.options_resume.is_some()
+            || self.stats.is_some()
+            || self.result_request.is_some()
+            || self.failure.is_some()
+            || self.camera_retired()
+        {
+            return Ok(());
+        }
+        self.player_paused = !self.player_paused;
+        let mut apply = |change: openmt2001::pause::Timers, _: &mut openmt2001::pause::State| {
+            change.apply(timers);
+            Ok(())
+        };
+        if self.player_paused {
+            pause.pause(3, &mut apply)?;
+        } else {
+            pause.unpause(3, &mut apply)?;
+        }
+        let result = audio(!self.player_paused, pause.bytes[3] as i8);
+        if let Err(error) = &result {
+            self.fail(error.clone());
+        }
+        result
     }
     /// Apply one received offline host focus operation, before the next frame.
     /// The required provider finishes device/input and guarded frontend-audio
