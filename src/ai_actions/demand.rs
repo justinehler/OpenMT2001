@@ -31,13 +31,14 @@ pub fn housed_demand(
         if word(row, 0) == 4 || i16::from_le_bytes(row[14..16].try_into().unwrap()) == -1 {
             continue;
         }
+        // Nonpositive prices skip spending reads, even when the account is absent.
+        if price.partial_cmp(&0.) != Some(std::cmp::Ordering::Greater) {
+            continue;
+        }
         let account = residents
             .accounts
             .get(resident.account_index() as usize)
             .ok_or("AI housed resident account unresolved")?;
-        if price.partial_cmp(&0.) != Some(std::cmp::Ordering::Greater) {
-            continue;
-        }
         let amount = f32::from_bits(word(account.as_bytes(), 4 + commodity as usize * 4));
         let count = if amount.is_finite() && price.is_finite() {
             let mut amount = Sum::from_f32(amount)?;
@@ -115,6 +116,157 @@ pub fn clamp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        player_manager::put,
+        resident::{Resident, SpendingAccount},
+    };
+
+    fn resident(age: u32, home: i16, account: Option<usize>, active: u8) -> Resident {
+        let mut bytes = [0; 0x14a];
+        put(&mut bytes, 0, age);
+        bytes[14..16].copy_from_slice(&home.to_le_bytes());
+        let mut resident = Resident::from_pool_bytes(bytes, active);
+        resident.set_account_index(account);
+        resident
+    }
+
+    fn missing_account() -> ResidentAccounts {
+        ResidentAccounts {
+            active_count: 1,
+            nodes: vec![resident(0, 0, None, 1)],
+            accounts: vec![],
+        }
+    }
+
+    // Zero demand returns before reading any image constants.
+    fn empty_image() -> [u8; 120] {
+        let mut bytes = [0; 120];
+        bytes[..2].copy_from_slice(b"MZ");
+        put(&mut bytes, 0x3c, 64);
+        bytes[64..68].copy_from_slice(b"PE\0\0");
+        bytes[68..70].copy_from_slice(&0x14cu16.to_le_bytes());
+        bytes[84..86].copy_from_slice(&32u16.to_le_bytes());
+        bytes[88..90].copy_from_slice(&0x10bu16.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn nonpositive_price_skips_missing_account() {
+        let residents = missing_account();
+        for price in [0.0f32, -2.0] {
+            let mut commodities = [[0; 28]; 32];
+            put(&mut commodities[3], 0x14, price.to_bits());
+            assert_eq!(housed_demand(3, &residents, &commodities), Ok(0));
+        }
+    }
+
+    #[test]
+    fn positive_price_still_requires_account() {
+        let mut commodities = [[0; 28]; 32];
+        put(&mut commodities[3], 0x14, 2.0f32.to_bits());
+        assert_eq!(
+            housed_demand(3, &missing_account(), &commodities),
+            Err("AI housed resident account unresolved".into())
+        );
+    }
+
+    #[test]
+    fn positive_price_preserves_resident_prefix_and_filters() {
+        let commodity = 3;
+        let mut commodities = [[0; 28]; 32];
+        put(&mut commodities[commodity], 0x14, 0.1f32.to_bits());
+        let accounts = [3.0f32, -10.0, 1.0]
+            .map(|amount| {
+                let mut bytes = [0; 144];
+                put(&mut bytes, 4 + commodity * 4, amount.to_bits());
+                SpendingAccount::from_bytes(bytes)
+            })
+            .to_vec();
+        let residents = ResidentAccounts {
+            active_count: 5,
+            nodes: vec![
+                resident(0, 0, Some(0), 0),
+                resident(4, 0, None, 1),
+                resident(0, -1, None, 1),
+                resident(0, 0, Some(1), 1),
+                resident(0, 0, Some(2), 1),
+                resident(0, 0, None, 1),
+            ],
+            accounts,
+        };
+        // Each quotient truncates separately; negative demand contributes zero.
+        assert_eq!(
+            housed_demand(commodity as u32, &residents, &commodities),
+            Ok(38)
+        );
+    }
+
+    #[test]
+    fn construction_clamp_clears_dimensions_for_nonpositive_prices() {
+        let bytes = empty_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        let player = Player {
+            reference: 1,
+            bytes: vec![0; 0xb94],
+            auxiliaries: vec![],
+        };
+        let mut rows = [[0; 116]; 45];
+        rows[0][0x4c] = 1;
+        let catalog = BusinessCatalog::from_rows(rows);
+        let mut products = [[[0; 2]; 6]; 45];
+        products[0][0][0] = 3;
+        let residents = missing_account();
+        for price in [0.0f32, -2.0] {
+            let mut commodities = [[0; 28]; 32];
+            put(&mut commodities[3], 0x14, price.to_bits());
+            let (mut area, mut floors) = (8, 5);
+            clamp(
+                &player,
+                &mut area,
+                &mut floors,
+                &[],
+                &catalog,
+                &products,
+                1,
+                &image,
+                |id| housed_demand(id, &residents, &commodities),
+            )
+            .unwrap();
+            assert_eq!((area, floors), (0, 0));
+        }
+    }
+
+    #[test]
+    fn unmet_housed_demand_skips_missing_account_for_nonpositive_prices() {
+        let bytes = empty_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        let catalog = BusinessCatalog::from_rows([[0; 116]; 45]);
+        let residents = missing_account();
+        for price in [0.0f32, -2.0] {
+            let mut commodities = [[0; 28]; 32];
+            for row in &mut commodities {
+                put(row, 0x14, price.to_bits());
+            }
+            let world = crate::ai_business_ranking::World {
+                image: &image,
+                catalog: &catalog,
+                products: &[[[0; 2]; 6]; 45],
+                commodities: &commodities,
+                categories: &[[0; 380]; 52],
+                buildings: &[],
+                businesses: &[],
+                counts: &[0; 52 * 45],
+                demand: &[[0; 264]; 33],
+                residents: &residents,
+                time: crate::ai_selection::Time { hour: 0, year: 0 },
+            };
+            assert_eq!(
+                crate::ai_business_ranking::unmet_housed_demand(&world),
+                Ok(0)
+            );
+        }
+    }
+
     struct Reader<'a>(&'a [u8]);
     impl<'a> Reader<'a> {
         fn take(&mut self, n: usize) -> &'a [u8] {
