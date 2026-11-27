@@ -178,6 +178,9 @@ impl SinglePlayer {
         Ok(())
     }
     pub fn keyboard_enabled(&self, i: usize) -> bool {
+        if self.tutorial_screen && i == 0 && self.tutorial_index.is_none() {
+            return false;
+        }
         let Some(c) = &self.custom else {
             return true;
         };
