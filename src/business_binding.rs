@@ -231,6 +231,35 @@ fn short(bytes: &[u8], at: usize) -> u16 {
 }
 
 impl World<'_> {
+    /// Original461590: recompute the stored land rent from the current linked
+    /// building and district, using the same PC64 calculation as attachment.
+    pub fn refresh_rent(
+        &mut self,
+        business: usize,
+        discount: f32,
+        image: &PeImage<'_>,
+    ) -> Result<u16, String> {
+        self.businesses
+            .get(business)
+            .ok_or("rent refresh business leaves pool")?;
+        let linked = self.linked_building(business)?;
+        let category = self.category(linked)?;
+        // The category's DWORD identity, rather than its slot, selects rate+84.
+        let category_id = word(&self.categories[category], 0) as usize;
+        let value = self
+            .categories
+            .get(category_id)
+            .ok_or("category identity leaves table")?;
+        let rent = crate::building_binding::initial_rent(
+            &self.buildings[linked],
+            f32::from_bits(word(value, 0x84)),
+            discount,
+            image,
+        )?;
+        self.businesses[business][0x18..0x1a].copy_from_slice(&rent.to_le_bytes());
+        Ok(rent)
+    }
+
     /// Binding-time00462070(0): assess utility expenses without debiting cash.
     /// Uses the same live building/catalog records as463560 and the shared
     /// utility accumulator; the following48dfc0 payout is a separate boundary.
@@ -338,20 +367,7 @@ pub fn bind(
         building_pool::capacity(&world.buildings[linked], f32::from_bits(word(info, 0x34)));
     world.businesses[business][0xe..0x10].copy_from_slice(&(capacity as u16).to_le_bytes());
     let category = world.category(linked)?;
-    // The original follows the category's DWORD identity back through the
-    // category array to read value+84, rather than assuming identity==slot.
-    let category_id = word(&world.categories[category], 0) as usize;
-    let value = world
-        .categories
-        .get(category_id)
-        .ok_or("category identity leaves table")?;
-    let rent = crate::building_binding::initial_rent(
-        &world.buildings[linked],
-        f32::from_bits(word(value, 0x84)),
-        input.discount,
-        image,
-    )?;
-    world.businesses[business][0x18..0x1a].copy_from_slice(&rent.to_le_bytes());
+    let rent = world.refresh_rent(business, input.discount, image)?;
     if input.hour >= 6 {
         let owner = world.player(world.categories[category][5])?;
         let tenant = world.player(world.businesses[business][0xa])?;
@@ -470,6 +486,107 @@ pub fn bind(
 
 #[cfg(test)]
 mod tests {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/building_image.rs"
+    ));
+
+    #[test]
+    fn attached_and_refreshed_rent_drives_daily_tenant_and_landlord_transfers() {
+        use crate::economy::{
+            self, BusinessDayParameters, PlayerAccount, ResidentAccounts, Utilities,
+        };
+
+        let bytes = fixture();
+        let image = PeImage::parse(&bytes).unwrap();
+        for (rate, expected) in [(10i32, 60u16), (5, 30)] {
+            let mut buildings = [[0; 0x394]];
+            buildings[0][6..9].copy_from_slice(&[2, 2, 1]);
+            buildings[0][0x1c..0x20].copy_from_slice(&u32::MAX.to_le_bytes());
+            buildings[0][0x28..0x2c].copy_from_slice(&rate.to_le_bytes());
+            buildings[0][0x40..0x44].copy_from_slice(&0x617628u32.to_le_bytes());
+            let mut businesses = vec![[0; 0x220]; 600];
+            businesses[0][0xa] = 1;
+            businesses[0][0x21c] = 1;
+            let mut categories = [[0; 0x17c]; 52];
+            categories[0][5] = 2;
+            let catalog = BusinessCatalog::from_rows([[0; 0x74]; 45]);
+            let mut available = vec![];
+            let mut cursor = None;
+            let identities = [1, 2].map(|identity| Some(Player { identity, kind: 1 }));
+            let mut world = World {
+                buildings: &mut buildings,
+                businesses: &mut businesses,
+                categories: &mut categories,
+                category_base: 0x617628,
+                catalog: &catalog,
+                available: &mut available,
+                availability_cursor: &mut cursor,
+                players: &identities,
+                resident_count: 0,
+            };
+            bind(
+                &mut world,
+                &Inputs {
+                    business: 0,
+                    building: 0,
+                    stock_argument: 0,
+                    hour: 0,
+                    discount: 0.5,
+                    notifications: false,
+                },
+                &image,
+                &mut |call, _| {
+                    assert!(matches!(
+                        call,
+                        Call::RefreshCategory { .. }
+                            | Call::InitializeStock { .. }
+                            | Call::RefreshBuilding { .. }
+                    ));
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(short(&world.businesses[0], 0x18), expected);
+
+            // Refresh must read the current rate/district and overwrite stale rent.
+            world.buildings[0][0x28..0x2c].copy_from_slice(&(rate * 2).to_le_bytes());
+            assert_eq!(world.refresh_rent(0, 0.5, &image).unwrap(), expected * 2);
+            world.buildings[0][0x28..0x2c].copy_from_slice(&rate.to_le_bytes());
+            world.categories[0][0x84..0x88].copy_from_slice(&2f32.to_le_bytes());
+            assert_eq!(world.refresh_rent(0, 0.5, &image).unwrap(), expected * 2);
+            world.categories[0][0x84..0x88].fill(0);
+            world.refresh_rent(0, 0.5, &image).unwrap();
+            assert_eq!(short(&world.businesses[0], 0x18), expected);
+
+            let mut players = [0; 2].map(|_| PlayerAccount::from_runtime(&[0; 0x1b8]).unwrap());
+            let mut parameters: Vec<_> = (0..600).map(|_| None).collect();
+            parameters[0] = Some(BusinessDayParameters {
+                capacity: 0,
+                catalog_mask: 0,
+                prices: vec![],
+                utility_scalar: 9,
+                utility_rates: [0.; 4],
+                landlord: 2,
+            });
+            economy::update_daily_businesses(
+                world.businesses,
+                &parameters,
+                &mut ResidentAccounts::new_pool(),
+                &mut players,
+                &mut Utilities::new([0; 4]),
+            )
+            .unwrap();
+            let rent = f32::from(expected);
+            assert_eq!(players[0].cash, -rent);
+            assert_eq!(players[0].ledger(0x0e), Some(-rent));
+            assert_eq!(players[1].cash, rent);
+            assert_eq!(players[1].ledger(0x22), Some(rent));
+            assert_eq!(f32::from_bits(word(&world.businesses[0], 0x28)), -rent);
+            assert_eq!(f32::from_bits(word(&world.businesses[0], 0x1c)), -rent);
+        }
+    }
+
     #[test]
     #[ignore = "requires original binding utility observations"]
     fn matches_native_binding_utilities() {

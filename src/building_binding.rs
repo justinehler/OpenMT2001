@@ -199,32 +199,105 @@ fn construction_cost_words(
 
 /// Rent calculation at4635d4..46369c, before the hour-dependent accounting
 /// branch. `category_value` is live category+84; `discount` is live53be78.
-/// Preserve the native f32 spills and binary64 x87 arithmetic (control027f).
+/// Shared with rent refresh at461590. Preserve the volume/quality f32 spills
+/// and PC64 x87 intermediates used by normal simulation (control037f).
 pub fn initial_rent(
     building: &[u8; 0x394],
     category_value: f32,
     discount: f32,
     image: &crate::pe::PeImage<'_>,
 ) -> Result<u16, String> {
+    use crate::x87::Sum;
+
     let area = (i32::from(building[7]) - i32::from(building[5]) + 1)
         .wrapping_mul(i32::from(building[6]) - i32::from(building[4]) + 1);
-    let volume = f64::from(area.wrapping_mul(i32::from(building[8])) as f32);
+    let volume = area.wrapping_mul(i32::from(building[8])) as f32;
     let quality = image.f32_at(match building[0x2c] as i8 {
         0 => 0x525034,
         1 => 0x525b10,
         _ => 0x5251e8,
     })?;
-    let category_factor = f64::from(category_value) * f64::from(image.f32_at(0x52502c)?)
-        + f64::from(image.f32_at(0x525034)?);
+    let half = image.f32_at(0x52502c)?;
+    let category_one = image.f32_at(0x525034)?;
     let unit_price = i32::from_le_bytes(building[0x28..0x2c].try_into().unwrap());
-    let base = category_factor * f64::from(unit_price) * f64::from(quality);
     let one = f64::from_le_bytes(image.at(0x525c40, 8)?.try_into().unwrap());
-    let reduction = (one - one / volume.sqrt()) * (f64::from(discount) * base);
-    Ok(crate::economy::ftol_low_word((base - reduction) * volume) as u16)
+    if volume <= 0.
+        || [category_value, half, category_one, quality, discount]
+            .iter()
+            .any(|value| !value.is_finite())
+        || !one.is_finite()
+    {
+        // Masked invalid sqrt/division or a nonfinite final value reaches
+        // FTOL's integer-indefinite result, whose consumed low word is zero.
+        return Ok(0);
+    }
+    let mut base = Sum::from_f32(category_value)?;
+    base.mul_f32(half)?;
+    base.add_f32(category_one)?;
+    base.mul(Sum::from_i32(unit_price));
+    base.mul_f32(quality)?;
+
+    let one = Sum::from_f64(one)?;
+    let mut reciprocal = one;
+    reciprocal.div(Sum::from_f32(volume)?.sqrt()?)?;
+    let mut reduction = one;
+    reduction.add(reciprocal.negated());
+    let mut discounted_base = Sum::from_f32(discount)?;
+    discounted_base.mul(base);
+    reduction.mul(discounted_base);
+    base.add(reduction.negated());
+    base.mul_f32(volume)?;
+    // FTOL truncates toward zero to signed64; the store consumes only AX.
+    Ok(base.ftol_low_word() as u16)
 }
 
 #[cfg(test)]
 mod tests {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/building_image.rs"
+    ));
+
+    #[test]
+    fn initial_rent_retains_extended_precision_until_truncation() {
+        let bytes = fixture();
+        let image = crate::pe::PeImage::parse(&bytes).unwrap();
+        let mut building = [0; 0x394];
+        building[6] = 2;
+        building[7] = 2;
+        building[8] = 1;
+        for (rate, expected) in [(10i32, 60), (5, 30), (-10, (-60i32) as u16), (20000, 54464)] {
+            building[0x28..0x2c].copy_from_slice(&rate.to_le_bytes());
+            assert_eq!(
+                super::initial_rent(&building, 0., 0.5, &image).unwrap(),
+                expected
+            );
+        }
+        building[6] = 0;
+        building[7] = 0;
+        building[0x28..0x2c].copy_from_slice(&10i32.to_le_bytes());
+        // The district factor is just below one in PC64, but rounds to one
+        // in binary64. Neither a binary64 spill nor an epsilon may precede FTOL.
+        assert_eq!(
+            super::initial_rent(&building, -2f32.powi(-60), 0.5, &image).unwrap(),
+            9
+        );
+        for discount in [0.5, f32::INFINITY, f32::NAN] {
+            building[8] = 0;
+            assert_eq!(
+                super::initial_rent(&building, 0., discount, &image).unwrap(),
+                0
+            );
+        }
+        building[8] = 1;
+        assert_eq!(
+            super::initial_rent(&building, f32::INFINITY, 0.5, &image).unwrap(),
+            0
+        );
+        building[4] = 2;
+        assert_eq!(super::initial_rent(&building, 0., 0.5, &image).unwrap(), 0);
+    }
+
     #[test]
     #[ignore = "requires original4610d0 PC64 observations"]
     fn matches_native_initial_stock() {
