@@ -498,7 +498,6 @@ impl Roster {
         ) -> Result<crate::ai_messages::Reply, String>,
     ) -> Result<(), String> {
         self.publish_accounts(city)?;
-        let totals = utilities.totals;
         let mut world = crate::ai_runtime::World {
             building_parameters: city.building_parameters,
             neighbor_cache: &mut city.ai_neighbors,
@@ -532,8 +531,7 @@ impl Roster {
             ownership: &mut self.ai_ownership,
             allocation_next,
             global_reset: &mut city.ai_demand.ready,
-            native_utilities: [totals[2], totals[3], totals[1], totals[0]],
-            properties: properties.totals,
+            income: crate::ai_finance::IncomeTotals::from_economy(properties, utilities),
             auction,
             auction_blocked: auction.is_none().then_some(false),
             auction_guard: None,

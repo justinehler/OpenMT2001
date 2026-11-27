@@ -4,13 +4,36 @@ use crate::{
     x87::Sum,
 };
 
+/// Separate income banks used by AI finance and railroad investment queries.
+#[derive(Clone, Copy, Debug)]
+pub struct IncomeTotals {
+    pub railroads: [f32; 4],
+    pub utilities: [f32; 4],
+}
+
+impl IncomeTotals {
+    /// 0x48def0 reads the railroad bank settled by 0x48df00; 0x48dec0
+    /// reads the utility bank settled by 0x48dfc0. Keep the latter in native
+    /// order (water, electrical, gas, telecom) for the reverse category table.
+    pub fn from_economy(
+        properties: &crate::economy::PropertyIncome,
+        utilities: &crate::economy::Utilities,
+    ) -> Self {
+        let totals = utilities.totals;
+        Self {
+            railroads: properties.totals,
+            utilities: [totals[2], totals[3], totals[1], totals[0]],
+        }
+    }
+}
+
 ///471320 traverses every category, retaining the accumulated owned count but
 /// clearing the subtotal for each utility/transport category encountered.
 pub fn projected_income(
     owner: u8,
     categories: &[[u8; 0x17c]; 52],
-    native_utilities: &[f32; 4],
-    properties: &[f32; 4],
+    railroad_income: &[f32; 4],
+    utility_income: &[f32; 4],
     image: &crate::pe::PeImage<'_>,
 ) -> Result<i32, String> {
     let mut count = 0i32;
@@ -37,9 +60,9 @@ pub fn projected_income(
                 continue;
             }
             let value = if group == 10 {
-                native_utilities[3 - index]
+                railroad_income[3 - index]
             } else {
-                properties[3 - index]
+                utility_income[3 - index]
             };
             let mut amount = Sum::from_i32(count);
             amount.mul_f32(image.f32_at(0x525048)?)?;

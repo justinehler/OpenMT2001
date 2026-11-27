@@ -14,7 +14,7 @@ pub struct World<'a> {
     pub buildings: &'a [[u8; 916]],
     pub businesses: &'a [[u8; 544]],
     pub catalog: &'a crate::business_pool::BusinessCatalog,
-    pub native_utilities: &'a [f32; 4],
+    pub railroad_income: &'a [f32; 4],
     pub loan_status: &'a [u8; 6],
     pub hour: i32,
     pub residents: &'a ResidentAccounts,
@@ -72,7 +72,7 @@ impl World<'_> {
                 self.buildings,
                 self.businesses,
                 self.catalog,
-                self.native_utilities,
+                self.railroad_income,
                 self.image,
             )
         } else {
@@ -613,7 +613,7 @@ fn matches_native_complete_valuation() {
             buildings: &buildings,
             businesses: &businesses,
             catalog: &catalog,
-            native_utilities: &utilities,
+            railroad_income: &utilities,
             loan_status: status,
             hour,
             residents: &residents,
