@@ -187,22 +187,39 @@ fn runtime_shopping_color(
     players: &openmt2001::player_manager::Manager,
     image: &PeImage<'_>,
 ) -> Result<u32, String> {
+    shopping_color(building, buildings, businesses, players, |character| {
+        Ok(u32::from_le_bytes(
+            image.at(0x541af0 + character * 40, 4)?.try_into().unwrap(),
+        ))
+    })
+    .map(|color| color.unwrap_or(0xffffffff))
+}
+
+/// Shared original shopping owner lookup for markers and carried bags.
+/// None is the native -1 state, distinct from an owner's actual colour.
+pub(crate) fn shopping_color(
+    building: i16,
+    buildings: &[[u8; 0x394]],
+    businesses: &[[u8; 0x220]],
+    players: &openmt2001::player_manager::Manager,
+    palette: impl FnOnce(u32) -> Result<u32, String>,
+) -> Result<Option<u32>, String> {
     let row = buildings
         .get(usize::try_from(building).map_err(|_| "fresh marker negative building")?)
         .ok_or("fresh marker building outside pool")?;
     let business = i32::from_le_bytes(row[0x1c..0x20].try_into().unwrap());
     if business == -1 {
-        return Ok(0xffffffff);
+        return Ok(None);
     }
     let row = businesses
         .get(usize::try_from(business).map_err(|_| "fresh marker negative business")?)
         .ok_or("fresh marker business outside pool")?;
     let owner = row[10] as i8;
     if owner == -1 {
-        return Ok(0xffffffff);
+        return Ok(None);
     }
     if owner == 0 {
-        return Ok(0xff888888);
+        return Ok(Some(0xff888888));
     }
     let player = players
         .players
@@ -219,9 +236,7 @@ fn runtime_shopping_color(
     if character >= 10 {
         return Err("fresh marker character outside palette".into());
     }
-    Ok(u32::from_le_bytes(
-        image.at(0x541af0 + character * 40, 4)?.try_into().unwrap(),
-    ))
+    palette(character).map(Some)
 }
 pub fn quad(point: [f32; 2]) -> [[f32; 2]; 4] {
     let left = f64::from(point[0]) - 2.5;

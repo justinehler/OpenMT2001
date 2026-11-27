@@ -271,6 +271,26 @@ pub fn initial_requests(
     Ok(requests)
 }
 
+/// Original 00460390 eligibility and 004603e0 appearance selection. The
+/// palette callback reads the same character colours used by shopping markers.
+fn shopping_bag(
+    resident: &openmt2001::resident::Resident,
+    buildings: &[[u8; 0x394]],
+    businesses: &[[u8; 0x220]],
+    players: &openmt2001::player_manager::Manager,
+    palette: impl FnOnce(u32) -> Result<u32, String>,
+) -> Result<Option<(usize, u32)>, String> {
+    let node = resident.as_bytes();
+    if node[0x54] == 0xff {
+        return Ok(None);
+    }
+    let building = i16::from_le_bytes(node[0x56..0x58].try_into().unwrap());
+    Ok(
+        crate::people_markers::shopping_color(building, buildings, businesses, players, palette)?
+            .map(|color| (usize::from(resident.model_variant() >> 2), color)),
+    )
+}
+
 /// Retained local triangle batch for one original model material.
 struct Part {
     page: usize,
@@ -281,6 +301,7 @@ struct Resident {
     auxiliary: [u8; 284],
     definition: [u8; 116],
     row: usize,
+    bag: Option<(usize, u32)>,
 }
 struct Model {
     parts: Vec<(openmt2001::people::PreparedPart, usize)>,
@@ -291,6 +312,7 @@ struct Model {
 pub struct Resources {
     surfaces: Vec<openmt2001::render_scene::OwnedDraw>,
     models: Vec<Model>,
+    owner_colors: [u32; 10],
 }
 impl Resources {
     pub fn new(
@@ -302,7 +324,7 @@ impl Resources {
         use openmt2001::{render::SurfaceMode, render_scene::OwnedDraw, scene_assets};
         let textures = scene_assets::people_textures(image, index, archive, 1280)?;
         let (pages, regions) = scene_assets::scenery_pages(&textures)?;
-        let surfaces = pages
+        let mut surfaces: Vec<OwnedDraw> = pages
             .into_iter()
             .map(|page| {
                 OwnedDraw::texture_page(
@@ -317,13 +339,25 @@ impl Resources {
                 )
             })
             .collect();
-        let mut models = Vec::with_capacity(64);
-        for row in 0..32 {
+        // Keep bags after all body pages in the GPU submission order. Their
+        // explicit descriptor colour bypasses the body's sunlight palette.
+        let body_pages = surfaces.len();
+        surfaces.extend(surfaces.clone().into_iter().map(|mut surface| {
+            surface.mode = SurfaceMode::StaticOpaque;
+            surface
+        }));
+        let mut models = Vec::with_capacity(72);
+        for row in 0..40 {
             for lod in [false, true] {
-                let source = session
-                    .people
-                    .source(row, lod)
-                    .ok_or("missing people material source")?;
+                if row >= 32 && lod {
+                    continue;
+                }
+                let source = if row < 32 {
+                    session.people.source(row, lod)
+                } else {
+                    session.people.bag_source(row - 32)
+                }
+                .ok_or("missing people material source")?;
                 let material_regions = source
                     .texture_names
                     .iter()
@@ -346,9 +380,12 @@ impl Resources {
                     source,
                     &material_regions.iter().map(|r| r.uv).collect::<Vec<_>>(),
                 )?;
-                let parts = session
-                    .people
-                    .prepare(row, lod)?
+                let prepared = if row < 32 {
+                    session.people.prepare(row, lod)?
+                } else {
+                    openmt2001::people::prepare_mesh(source, source)?
+                };
+                let parts = prepared
                     .parts
                     .into_iter()
                     .map(|part| {
@@ -359,13 +396,26 @@ impl Resources {
                             .get(material)
                             .ok_or("people part material leaves registry")?
                             .page;
-                        Ok((part, page))
+                        Ok((part, page + if row < 32 { 0 } else { body_pages }))
                     })
                     .collect::<Result<_, String>>()?;
                 models.push(Model { parts, uvs });
             }
         }
-        Ok(Self { surfaces, models })
+        let mut owner_colors = [0; 10];
+        for (character, color) in owner_colors.iter_mut().enumerate() {
+            *color = u32::from_le_bytes(
+                image
+                    .at(0x541af0 + character as u32 * 40, 4)?
+                    .try_into()
+                    .unwrap(),
+            );
+        }
+        Ok(Self {
+            surfaces,
+            models,
+            owner_colors,
+        })
     }
 }
 /// Host-owned immutable initialized records/materials; Lua and simulation stay
@@ -446,24 +496,60 @@ impl Layer {
                     auxiliary: *auxiliary,
                     definition: session.resident_models[row].definition,
                     row,
+                    bag: if auxiliary[0xb8] & 1 == 0 {
+                        None
+                    } else {
+                        // The secondary pass uses +38, not the pool ordinal.
+                        let index =
+                            u32::from_le_bytes(auxiliary[0x38..0x3c].try_into().unwrap()) as usize;
+                        let resident = session
+                            .world
+                            .ledgers
+                            .residents
+                            .nodes
+                            .get(index)
+                            .ok_or("shopping bag resident outside pool")?;
+                        shopping_bag(
+                            resident,
+                            &session.world.buildings,
+                            &session.world.ledgers.businesses,
+                            &session.roster.manager,
+                            |character| Ok(resources.owner_colors[character as usize]),
+                        )?
+                    },
                 })
             })
             .collect::<Result<_, String>>()?;
         let mut models = std::collections::BTreeMap::new();
-        for row in 0..32 {
+        for row in 0..40 {
             let frames: std::collections::BTreeSet<i16> = residents
                 .iter()
-                .filter(|resident| resident.row == row)
+                .filter(|resident| {
+                    if row < 32 {
+                        resident.row == row
+                    } else {
+                        resident.bag.is_some_and(|(family, _)| family + 32 == row)
+                    }
+                })
                 .map(|resident| {
                     i16::from_le_bytes(resident.auxiliary[0x2c..0x2e].try_into().unwrap())
                 })
                 .collect();
             for lod in [false, true] {
-                let model = &resources.models[row * 2 + usize::from(lod)];
-                let source = session
-                    .people
-                    .geometry_source(row, lod)
-                    .ok_or("missing people geometry")?;
+                if row >= 32 && lod {
+                    continue;
+                }
+                let model = &resources.models[if row < 32 {
+                    row * 2 + usize::from(lod)
+                } else {
+                    64 + row - 32
+                }];
+                let source = if row < 32 {
+                    session.people.geometry_source(row, lod)
+                } else {
+                    session.people.bag_source(row - 32)
+                }
+                .ok_or("missing people geometry")?;
                 for &frame in &frames {
                     let positions = source.positions(
                         usize::try_from(frame).map_err(|_| "negative resident animation frame")?,
@@ -561,6 +647,31 @@ impl Layer {
                 }
             }
         }
+        // Original 004b5a60 second pass reuses only bodies accepted by the
+        // visibility pass, with their pose and exact animation frame (no LOD).
+        for request in requests {
+            let resident = &self.residents[request.auxiliary_slot];
+            let Some((family, tint)) = resident.bag else {
+                continue;
+            };
+            for part in self
+                .models
+                .get(&(32 + family, false, request.frame))
+                .ok_or("shopping bag frame absent from snapshot geometry")?
+            {
+                let draw = &mut draws[part.page];
+                for vertex in &part.vertices {
+                    let mut vertex = *vertex;
+                    let position = request
+                        .transform
+                        .position([vertex[0], vertex[1], vertex[2]]);
+                    vertex[..3].copy_from_slice(&position);
+                    vertex[3..6].copy_from_slice(&color(tint));
+                    draw.vertices.push(vertex);
+                    draw.specular.as_mut().unwrap().push([0.; 3]);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -571,6 +682,11 @@ impl Layer {
         let mut capacity = vec![0; self.surfaces.len()];
         for resident in &self.residents {
             let frame = i16::from_le_bytes(resident.auxiliary[0x2c..0x2e].try_into().unwrap());
+            if let Some((family, _)) = resident.bag {
+                for part in &self.models[&(32 + family, false, frame)] {
+                    capacity[part.page] += part.vertices.len();
+                }
+            }
             for lod in [false, true] {
                 for part in &self.models[&(resident.row, lod, frame)] {
                     capacity[part.page] += part.vertices.len();
@@ -650,6 +766,184 @@ pub fn initial_draws(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn shopper(age: u32, slot: u16, destination: u8) -> openmt2001::resident::Resident {
+        let mut bytes = [0; 0x14a];
+        bytes[..4].copy_from_slice(&age.to_le_bytes());
+        bytes[0x148..].copy_from_slice(&slot.to_le_bytes());
+        bytes[0x54] = destination;
+        openmt2001::resident::Resident::from_bytes(bytes)
+    }
+
+    fn owners() -> openmt2001::player_manager::Manager {
+        openmt2001::player_manager::Manager {
+            bytes: [0; 0x28],
+            players: [7_u32, 2]
+                .into_iter()
+                .map(|character| {
+                    let mut bytes = vec![0; 0x154];
+                    bytes[0x150..0x154].copy_from_slice(&character.to_le_bytes());
+                    openmt2001::player_manager::Player {
+                        reference: 0,
+                        bytes,
+                        auxiliaries: vec![],
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn shopping_bag_requires_destination_and_linked_owner() {
+        let players = owners();
+        let no_palette = |_| panic!("ineligible or neutral shop must not read player colours");
+        assert_eq!(
+            shopping_bag(&shopper(2, 4, 0xff), &[], &[], &players, no_palette).unwrap(),
+            None
+        );
+        let mut buildings = [[0; 0x394]];
+        let mut businesses = [[0; 0x220]];
+        buildings[0][0x1c..0x20].copy_from_slice(&(-1_i32).to_le_bytes());
+        assert_eq!(
+            shopping_bag(&shopper(2, 4, 0), &buildings, &[], &players, no_palette).unwrap(),
+            None
+        );
+        buildings[0][0x1c..0x20].copy_from_slice(&0_i32.to_le_bytes());
+        businesses[0][10] = 0xff;
+        assert_eq!(
+            shopping_bag(
+                &shopper(2, 4, 0),
+                &buildings,
+                &businesses,
+                &players,
+                no_palette
+            )
+            .unwrap(),
+            None
+        );
+        businesses[0][10] = 0;
+        assert_eq!(
+            shopping_bag(
+                &shopper(2, 4, 0),
+                &buildings,
+                &businesses,
+                &players,
+                no_palette
+            )
+            .unwrap(),
+            Some((2, 0xff888888))
+        );
+    }
+
+    #[test]
+    fn shopping_bag_uses_appearance_and_owner_character() {
+        let players = owners();
+        let buildings = [[0; 0x394]];
+        let mut businesses = [[0; 0x220]];
+        for (owner, color) in [(1, 0xff123456), (2, 0xffabcdef)] {
+            businesses[0][10] = owner;
+            for (age, slot, family) in [
+                (0, 4, 0),
+                (1, 4, 1),
+                (2, 4, 2),
+                (3, 4, 3),
+                (0, 0, 4),
+                (1, 0, 5),
+                (2, 0, 6),
+                (3, 0, 7),
+                (4, 4, 2),
+                (4, 0, 6),
+            ] {
+                let actual = shopping_bag(
+                    &shopper(age, slot, 0),
+                    &buildings,
+                    &businesses,
+                    &players,
+                    |character| {
+                        Ok(match character {
+                            7 => 0xff123456,
+                            2 => 0xffabcdef,
+                            _ => panic!("wrong owner character"),
+                        })
+                    },
+                )
+                .unwrap();
+                assert_eq!(actual, Some((family, color)));
+            }
+        }
+        businesses[0][10] = 3;
+        assert!(
+            shopping_bag(
+                &shopper(2, 4, 0),
+                &buildings,
+                &businesses,
+                &players,
+                |_| Ok(0)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn shopping_bag_pass_reuses_visible_body_frame_pose_and_tint() {
+        use openmt2001::{render::SurfaceMode, render_scene::OwnedDraw};
+        let mut tga = vec![0; 18 + 384 * 161 * 4];
+        tga[2] = 2;
+        tga[12..14].copy_from_slice(&384_u16.to_le_bytes());
+        tga[14..16].copy_from_slice(&161_u16.to_le_bytes());
+        tga[16..18].copy_from_slice(&[32, 8]);
+        let markers = 18 + (161 - 97) * 384 * 4;
+        tga[markers] = 64;
+        tga[markers + 4] = 192;
+        let part = |page| {
+            vec![Part {
+                page,
+                vertices: vec![[1., 2., 3., 1., 1., 1., 0.25, 0.75]; 3],
+                normals: vec![[0.; 3]; 3],
+            }]
+        };
+        let mut auxiliary = [0; 284];
+        for at in [0x1c, 0x20, 0x24] {
+            auxiliary[at..at + 4].copy_from_slice(&1_f32.to_le_bytes());
+        }
+        let layer = Layer {
+            residents: vec![Resident {
+                auxiliary,
+                definition: [0; 116],
+                row: 2,
+                bag: Some((2, 0xff123456)),
+            }],
+            models: [((2, true, 9), part(0)), ((34, false, 9), part(1))].into(),
+            suncolors: openmt2001::lighting::SunColors::parse(&tga).unwrap(),
+            initial_time: (0, 0),
+            surfaces: vec![],
+            range: 0..2,
+        };
+        let mut draws = (0..2)
+            .map(|_| OwnedDraw::texture_page(SurfaceMode::StaticOpaque, 1, 1, vec![255; 4].into()))
+            .collect::<Vec<_>>();
+        let request = DrawRequest {
+            auxiliary_slot: 0,
+            model_row: 2,
+            lod: true,
+            frame: 9,
+            transform: openmt2001::people::PeopleTransform {
+                matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., -1.], [10., 20., 30.]],
+                translation_only: true,
+            },
+        };
+        layer.fill(&mut draws, &[request], (0, 0)).unwrap();
+        assert_eq!(draws[0].vertices.len(), 3);
+        assert_eq!(draws[1].vertices.len(), 3);
+        assert_eq!(draws[1].vertices[0][..3], [11., 22., 27.]);
+        assert_eq!(
+            draws[1].vertices[0][3..6],
+            [0x12, 0x34, 0x56].map(|v| v as f32 / 255.)
+        );
+        assert_eq!(draws[1].vertices[0][6..], [0.25, 0.75]);
+        layer.fill(&mut draws, &[], (0, 0)).unwrap();
+        assert!(draws.iter().all(|draw| draw.vertices.is_empty()));
+    }
+
     #[test]
     fn resident_drawing_distances_are_unchanged() {
         for (detail, expected) in [(0, [50., 80.]), (50, [100., 230.]), (100, [200., 530.])] {
