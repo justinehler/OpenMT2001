@@ -18,6 +18,9 @@ use std::{
 mod custom;
 
 const TUTORIAL_TITLE_COLORS: [u32; 4] = [0xffffb400, 0xffffb400, 0x80ffb400, 0x80ffb400];
+const TUTORIAL_ROW_HEIGHT: f32 = 12.;
+// 49cb18 reads generic texture 297 (68ae28 + 297 * 4).
+const TUTORIAL_COMPLETION_TICK: usize = 297;
 // 499817/49994e call original 43f510 with the Info8/Backing3 mesh bounds.
 const SCENARIO_INFO_SCROLL: [f32; 4] = [588., 202., 604., 396.];
 const SCENARIO_LIST_SCROLL: [f32; 4] = [303., 97., 319., 445.];
@@ -29,6 +32,123 @@ const SCENARIO_CUP_EMPTY: usize = 296;
 pub enum Preview {
     Scenario(u32),
     Sandbox,
+}
+
+#[cfg(test)]
+mod tutorial_progress_tests {
+    use super::{tutorial_preselection, tutorial_tick_rect, tutorial_tick_rows};
+    use openmt2001::level_catalog::{Catalog, Labels, Registration};
+
+    fn catalog() -> Catalog {
+        let mut catalog = Catalog::default();
+        // Deliberately differ from picker order and include a completed scenario.
+        for id in
+            std::iter::once(200003).chain(crate::scenarios::TUTORIALS.iter().rev().map(|t| t.id))
+        {
+            catalog
+                .register(
+                    Registration {
+                        id: id as i32,
+                        directory: format!("level{id}").into_bytes(),
+                        labels: Labels::Localized {
+                            title: 0,
+                            description: 0,
+                        },
+                        checksum: 0,
+                    },
+                    false,
+                    true,
+                )
+                .unwrap();
+        }
+        catalog.set_level_info(200003, 1, [1; 3]);
+        catalog
+    }
+
+    #[test]
+    fn none_done_selects_first_without_ticks() {
+        let catalog = catalog();
+        assert_eq!(tutorial_preselection(&catalog), Some(0));
+        assert_eq!(tutorial_tick_rows(Some(&catalog)).collect::<Vec<_>>(), []);
+        assert_eq!(tutorial_tick_rows(None).collect::<Vec<_>>(), []);
+    }
+
+    #[test]
+    fn some_done_selects_first_gap_and_ticks_only_easy_completions() {
+        let mut catalog = catalog();
+        for (id, flags) in [
+            (100000, [1, 0, 0]),
+            (100001, [0, 1, 0]),
+            (100002, [0, 0, 1]),
+            (100004, [1, 1, 1]),
+            (100012, [1, 0, 0]),
+        ] {
+            catalog.set_level_info(id, 0, flags);
+        }
+        assert_eq!(tutorial_preselection(&catalog), Some(3));
+        assert_eq!(
+            tutorial_tick_rows(Some(&catalog)).collect::<Vec<_>>(),
+            [0, 4, 12]
+        );
+        assert_eq!(tutorial_tick_rect(0), [430., 94., 446., 106.]);
+        assert_eq!(tutorial_tick_rect(4), [430., 142., 446., 154.]);
+        assert_eq!(tutorial_tick_rect(12), [430., 238., 446., 250.]);
+    }
+
+    #[test]
+    fn all_done_leaves_no_visible_selection_and_all_ticks() {
+        let mut catalog = catalog();
+        for tutorial in crate::scenarios::TUTORIALS {
+            catalog.set_level_info(tutorial.id, 0, [1, 0, 0]);
+        }
+        assert_eq!(tutorial_preselection(&catalog), None);
+        assert_eq!(
+            tutorial_tick_rows(Some(&catalog)).collect::<Vec<_>>(),
+            (0..13).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn restart_and_profile_switch_read_saved_tutorial_progress() {
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("tutorial-progress-{}-{nonce}", std::process::id())),
+        );
+        let alice = crate::campaign_store::profile_path(&scratch.0, b"Alice");
+        let bob = crate::campaign_store::profile_path(&scratch.0, b"Bob");
+        let mut active = catalog();
+        for id in [100000, 100001, 100004] {
+            active.set_level_info(id, 0, [1, 0, 0]);
+        }
+        crate::campaign_store::save_progress(&active, &alice).unwrap();
+
+        // Rebuild registrations as a new process would, then load the profile.
+        let mut restarted = catalog();
+        crate::campaign_store::load_progress(&mut restarted, &alice).unwrap();
+        assert_eq!(tutorial_preselection(&restarted), Some(2));
+        assert_eq!(
+            tutorial_tick_rows(Some(&restarted)).collect::<Vec<_>>(),
+            [0, 1, 4]
+        );
+        crate::campaign_store::load_progress(&mut restarted, &bob).unwrap();
+        assert_eq!(tutorial_preselection(&restarted), Some(0));
+        assert_eq!(tutorial_tick_rows(Some(&restarted)).collect::<Vec<_>>(), []);
+        crate::campaign_store::load_progress(&mut restarted, &alice).unwrap();
+        assert_eq!(tutorial_preselection(&restarted), Some(2));
+        assert_eq!(
+            tutorial_tick_rows(Some(&restarted)).collect::<Vec<_>>(),
+            [0, 1, 4]
+        );
+    }
 }
 
 #[cfg(test)]
@@ -425,7 +545,7 @@ pub struct SinglePlayer {
     difficulty: usize,
     scenario_index: usize,
     scenario_rows: Vec<usize>,
-    tutorial_index: usize,
+    tutorial_index: Option<usize>,
     character: usize,
     inspected_slot: usize,
     // Concrete text-control first-line survives clear/repopulate and Back.
@@ -474,6 +594,37 @@ fn scenario_cup_rect(row: usize, cup: usize) -> [f32; 4] {
     let left = 242. + 20. * cup as f32;
     let top = 98. + SCENARIO_ROW_HEIGHT * row as f32;
     [left, top, left + 17., top + 14.]
+}
+
+fn tutorial_completed(catalog: Option<&openmt2001::level_catalog::Catalog>, id: u32) -> [bool; 3] {
+    catalog
+        .and_then(|c| c.find(id).map(|i| c.levels[i].completed()))
+        .unwrap_or([false; 3])
+}
+
+fn tutorial_preselection(catalog: &openmt2001::level_catalog::Catalog) -> Option<usize> {
+    // 49c890 skips tutorials completed at any difficulty. When all are done,
+    // the original requests the row past the list, leaving no visible selection.
+    crate::scenarios::TUTORIALS.iter().position(|t| {
+        !tutorial_completed(Some(catalog), t.id)
+            .into_iter()
+            .any(|done| done)
+    })
+}
+
+fn tutorial_tick_rows(
+    catalog: Option<&openmt2001::level_catalog::Catalog>,
+) -> impl Iterator<Item = usize> {
+    // 49cb0a reads only the Easy flag, unlike the open-time selection rule.
+    crate::scenarios::TUTORIALS
+        .iter()
+        .enumerate()
+        .filter_map(move |(row, t)| tutorial_completed(catalog, t.id)[0].then_some(row))
+}
+
+fn tutorial_tick_rect(row: usize) -> [f32; 4] {
+    let top = 94. + TUTORIAL_ROW_HEIGHT * row as f32;
+    [430., top, 446., top + 12.]
 }
 
 // Ordinary campaign description: 499707..499848 builds a Font2 rich-text
@@ -644,7 +795,7 @@ impl SinglePlayer {
             difficulty: 0,
             scenario_index: 0,
             scenario_rows: vec![],
-            tutorial_index: 0,
+            tutorial_index: None,
             character: 0,
             inspected_slot: 0,
             biography_first: std::cell::Cell::new(0),
@@ -723,7 +874,7 @@ impl SinglePlayer {
         self.difficulty = 0;
         self.character = 0;
         self.name = name.as_bytes().to_vec();
-        self.tutorial_index = 0;
+        self.tutorial_index = tutorial_preselection(&catalog);
         self.catalog = Some(catalog);
         self.profile_path = Some(profile_path);
         self.request = None;
@@ -738,7 +889,10 @@ impl SinglePlayer {
         };
         let catalog = self.catalog.as_mut().ok_or("Campaign catalog missing")?;
         crate::campaign_store::load_progress(catalog, path)?;
-        if self.custom.is_none() {
+        if self.tutorial_screen {
+            self.tutorial_index = tutorial_preselection(catalog);
+            self.description_first = 0;
+        } else if self.custom.is_none() {
             self.scenario_rows = scenario_rows_for(catalog);
             if !self.scenario_rows.contains(&self.scenario_index) {
                 self.scenario_index = self.scenario_rows.first().copied().unwrap_or(0);
@@ -966,7 +1120,10 @@ impl SinglePlayer {
         if self.tutorial_screen {
             match i {
                 0 => {
-                    let tutorial = crate::scenarios::TUTORIALS[self.tutorial_index];
+                    let Some(row) = self.tutorial_index else {
+                        return;
+                    };
+                    let tutorial = crate::scenarios::TUTORIALS[row];
                     if !crate::scenarios::live_tutorial(tutorial.id) {
                         self.message =
                             Some("This tutorial's live session is not yet available.".into());
@@ -993,7 +1150,7 @@ impl SinglePlayer {
                 }
                 1 => self.back(),
                 2.. if i < self.count() => {
-                    self.tutorial_index = i - 2;
+                    self.tutorial_index = Some(i - 2);
                     self.description_first = 0;
                     self.message = None;
                 }
@@ -1118,10 +1275,11 @@ impl SinglePlayer {
             vec![]
         };
         let (text, b) = if self.tutorial_screen {
+            let Some(row) = self.tutorial_index else {
+                return;
+            };
             (
-                &self.strings[level_labels(crate::scenarios::TUTORIALS[self.tutorial_index].id)
-                    .unwrap()
-                    .1],
+                &self.strings[level_labels(crate::scenarios::TUTORIALS[row].id).unwrap().1],
                 self.tutorial_panel.bounds[11],
             )
         } else if self.character_screen {
@@ -1179,7 +1337,8 @@ impl SinglePlayer {
                 }
             }
             if inside(self.tutorial_panel.bounds[8]) {
-                let row = ((p[1] - self.tutorial_panel.bounds[8][1]) / 13.) as usize;
+                let row =
+                    ((p[1] - self.tutorial_panel.bounds[8][1]) / TUTORIAL_ROW_HEIGHT) as usize;
                 return (row < crate::scenarios::TUTORIALS.len()).then_some(2 + row);
             }
         } else if self.character_screen {
@@ -1249,23 +1408,24 @@ impl SinglePlayer {
             0xffffffff,
         )?;
         ui::text_widget_style9(&mut fonts, &self.tab, &self.strings[1668], b[9], 0xffffffff)?;
-        let chosen = crate::scenarios::TUTORIALS[self.tutorial_index];
-        let (title, description) = level_labels(chosen.id).unwrap();
+        let labels = self
+            .tutorial_index
+            .and_then(|row| level_labels(crate::scenarios::TUTORIALS[row].id));
         ui::text(
             &mut fonts,
             &self.tab,
-            &self.strings[title],
+            &self.strings[labels.map_or(1646, |(title, _)| title)],
             b[10],
             true,
             0xffffffff,
         )?;
         let [l, t, r, _] = b[8];
         for (row, tutorial) in crate::scenarios::TUTORIALS.iter().enumerate() {
-            let top = t + row as f32 * 13.;
-            if row == self.tutorial_index || selected == Some(2 + row) {
+            let top = t + row as f32 * TUTORIAL_ROW_HEIGHT;
+            if self.tutorial_index == Some(row) || selected == Some(2 + row) {
                 shapes.rect(
-                    [l, top, r, top + 13.],
-                    [if row == self.tutorial_index {
+                    [l, top, r, top + TUTORIAL_ROW_HEIGHT],
+                    [if self.tutorial_index == Some(row) {
                         0xff008ed0
                     } else {
                         0x99505050
@@ -1276,18 +1436,20 @@ impl SinglePlayer {
                 &mut fonts,
                 &self.tab,
                 &self.strings[level_labels(tutorial.id).unwrap().0],
-                [l + 3., top, r, top + 13.],
+                [l + 3., top, 430., top + TUTORIAL_ROW_HEIGHT],
                 false,
                 0xffffffff,
             )?;
         }
-        wrapped(
-            &mut fonts,
-            &self.tab,
-            &self.strings[description],
-            b[11],
-            self.description_first,
-        )?;
+        if let Some((_, description)) = labels {
+            wrapped(
+                &mut fonts,
+                &self.tab,
+                &self.strings[description],
+                b[11],
+                self.description_first,
+            )?;
+        }
         for (i, part, label, color) in [(0, 13, 1435, [80, 148, 34]), (1, 12, 1439, [175, 6, 6])] {
             ui::button(
                 &mut shapes,
@@ -1295,7 +1457,7 @@ impl SinglePlayer {
                 color,
                 selected == Some(i),
                 pressed && selected == Some(i),
-                self.busy && i == 0,
+                i == 0 && (self.busy || self.tutorial_index.is_none()),
             )?;
             ui::text(
                 &mut fonts,
@@ -1316,6 +1478,13 @@ impl SinglePlayer {
         surfaces.push(shapes);
         surfaces.extend(fonts);
         surfaces.extend(title_fonts);
+        for row in tutorial_tick_rows(self.catalog.as_ref()) {
+            self.image(
+                &mut surfaces,
+                TUTORIAL_COMPLETION_TICK,
+                tutorial_tick_rect(row),
+            )?;
+        }
         renderer.prepare(
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
             [
