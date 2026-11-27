@@ -8,8 +8,8 @@ use openmt2001::camera::{
     bank::{Bank, Capture, RawRecord, StrategicTransition},
 };
 
-/// Existing frontend projection policy, separate from native raw mode identity.
-pub(super) const STRATEGIC_FOV: f32 = 45.;
+/// Saved raw camera records do not store the retained gameplay renderer FOV.
+pub(super) const STRATEGIC_FOV: f32 = crate::navigation::STRATEGIC_VERTICAL_FOV;
 
 pub(super) fn new_process_owner() -> Result<camera_live::owner::Owner, String> {
     // Actual once-only modern UI process raw-storage allocation. The existing

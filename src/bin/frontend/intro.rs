@@ -4151,7 +4151,8 @@ impl Inspection {
             })
     }
     fn over_navigator(&self) -> bool {
-        (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::F))
+        !self.strategic
+            && (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::F))
             && self.pointer.is_some_and(|[x, y]| {
                 let [l, t, r, b] = self.navigator_bounds;
                 let x = x as f32 * 0.5;
@@ -10010,11 +10011,14 @@ impl Intro {
                         &view.detail_icons[usize::from(view.details_visible)],
                     );
                 }
-                if view.ui_graph.is_none()
-                    || view
-                        .ui_graph
-                        .as_ref()
-                        .is_some_and(|g| g.shell(camera_live::ui_graph::PanelId::F))
+                // Mode3 entry4b5370 hides the miniature navigator. Keeping
+                // it over the full map obscures the southeastern properties.
+                if !view.strategic
+                    && (view.ui_graph.is_none()
+                        || view
+                            .ui_graph
+                            .as_ref()
+                            .is_some_and(|g| g.shell(camera_live::ui_graph::PanelId::F)))
                 {
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &view.navigator);
