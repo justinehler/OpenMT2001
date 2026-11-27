@@ -37,6 +37,11 @@ const PATHS: [[u32; 2]; 32] = [
     [0x00548190, 0x00548154],
 ];
 
+// Original 004be8ce: one bag per appearance group; both child groups use boys.
+const BAG_PATHS: [u32; 8] = [
+    0x00548120, 0x005480dc, 0x0054809c, 0x00548064, 0x00548120, 0x0054801c, 0x00547fd8, 0x00547f9c,
+];
+
 pub struct PeopleModels<'a> {
     paths: Vec<String>,
     meshes: Vec<CachedMesh<'a>>,
@@ -121,43 +126,49 @@ impl PreparedPeopleModel<'_, '_> {
 }
 
 impl<'a> PeopleModels<'a> {
-    /// Read-only load of all32 normal/LOD pairs. No native manager IDs are
-    /// invented: the host supplies its opaque references when binding residents.
+    /// Read-only load of all32 normal/LOD pairs and their shopping bags.
+    /// The host supplies opaque references when binding resident bodies.
     pub fn load(
         image: &PeImage<'_>,
         index: &ArchiveIndex,
         archive: &'a [u8],
     ) -> Result<Self, String> {
-        let mut paths = Vec::with_capacity(64);
-        let mut meshes = Vec::with_capacity(64);
-        for pair in PATHS {
-            for address in pair {
-                let bytes = image.at(address, 256)?;
-                let end = bytes
-                    .iter()
-                    .position(|&b| b == 0)
-                    .ok_or("unterminated people path")?;
-                let path = std::str::from_utf8(&bytes[..end]).map_err(|_| "invalid people path")?;
-                let entry = index
-                    .find(path)
-                    .ok_or_else(|| format!("missing people model {path}"))?;
-                let start =
-                    usize::try_from(entry.offset).map_err(|_| "people archive offset overflow")?;
-                let end = usize::try_from(
-                    entry
-                        .offset
-                        .checked_add(entry.length)
-                        .ok_or("people archive range overflow")?,
-                )
-                .map_err(|_| "people archive end overflow")?;
-                let bytes = archive
-                    .get(start..end)
-                    .ok_or("people model outside archive")?;
-                meshes.push(CachedMesh::parse(bytes)?);
-                paths.push(path.to_owned());
-            }
+        let mut paths = Vec::with_capacity(72);
+        let mut meshes = Vec::with_capacity(72);
+        for address in PATHS.into_iter().flatten().chain(BAG_PATHS) {
+            let bytes = image.at(address, 256)?;
+            let end = bytes
+                .iter()
+                .position(|&b| b == 0)
+                .ok_or("unterminated people path")?;
+            let path = std::str::from_utf8(&bytes[..end]).map_err(|_| "invalid people path")?;
+            let entry = index
+                .find(path)
+                .ok_or_else(|| format!("missing people model {path}"))?;
+            let start =
+                usize::try_from(entry.offset).map_err(|_| "people archive offset overflow")?;
+            let end = usize::try_from(
+                entry
+                    .offset
+                    .checked_add(entry.length)
+                    .ok_or("people archive range overflow")?,
+            )
+            .map_err(|_| "people archive end overflow")?;
+            let bytes = archive
+                .get(start..end)
+                .ok_or("people model outside archive")?;
+            meshes.push(CachedMesh::parse(bytes)?);
+            paths.push(path.to_owned());
         }
         Ok(Self { paths, meshes })
+    }
+
+    /// Bag geometry follows appearance >> 2, independently of body LOD.
+    pub fn bag_source(&self, family: usize) -> Option<&CachedMesh<'a>> {
+        if family >= 8 {
+            return None;
+        }
+        self.meshes.get(64 + family)
     }
 
     pub fn source(&self, row: usize, lod: bool) -> Option<&CachedMesh<'a>> {

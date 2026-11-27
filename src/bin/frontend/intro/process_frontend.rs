@@ -27,6 +27,11 @@ pub(crate) enum PhysicalSample {
         down: bool,
         repeat: bool,
     },
+    /// Winit focus reconciliation updates held state without a physical press.
+    SyntheticKey {
+        key: PhysicalKey,
+        down: bool,
+    },
     Button {
         button: MouseButton,
         down: bool,
@@ -37,6 +42,14 @@ pub(crate) enum PhysicalSample {
 impl PhysicalSample {
     pub(crate) fn from_event(event: &WindowEvent) -> Option<Self> {
         Some(match event {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: true,
+                ..
+            } => Self::SyntheticKey {
+                key: event.physical_key,
+                down: event.state == ElementState::Pressed,
+            },
             WindowEvent::KeyboardInput { event, .. } => Self::Key {
                 key: event.physical_key,
                 down: event.state == ElementState::Pressed,
@@ -205,6 +218,11 @@ impl ProcessFrontend {
         } else {
             self.input.focus_loss_cells_after_device_calls();
         }
+        self.audio_pause(focused, reason3)
+    }
+    /// 43e5f0 reaches the same 4ad610/4ad640 audio wrapper as focus,
+    /// without acquiring devices or changing input admission.
+    fn audio_pause(&mut self, focused: bool, reason3: i8) -> Result<Prefix, String> {
         self.frontend.set_guards(self.activation.guards());
         let generation = self.generation;
         let frontend = &mut self.frontend;
@@ -374,7 +392,10 @@ impl ProcessFrontend {
         Ok(())
     }
     fn admit(&mut self, sample: PhysicalSample) {
-        let index = if matches!(sample, PhysicalSample::Key { .. }) {
+        let index = if matches!(
+            sample,
+            PhysicalSample::Key { .. } | PhysicalSample::SyntheticKey { .. }
+        ) {
             1
         } else {
             0
@@ -436,6 +457,19 @@ impl ProcessFrontend {
 }
 pub(super) struct Provider(pub Owner);
 impl Effects for Provider {
+    fn player_pause(
+        &mut self,
+        id: AttachmentId,
+        focused: bool,
+        reason3: i8,
+    ) -> Result<Prefix, String> {
+        let mut p = self.0.borrow_mut();
+        p.live()?;
+        if p.attachment != Some(id.value()) || p.phase != Phase::World {
+            return Err("Player pause attachment retired".into());
+        }
+        p.audio_pause(focused, reason3)
+    }
     fn activate(&mut self, id: AttachmentId) -> Result<(), String> {
         let mut p = self.0.borrow_mut();
         p.live()?;
@@ -509,7 +543,7 @@ pub(crate) fn project_camera_sample(
     sample: PhysicalSample,
 ) {
     match sample {
-        PhysicalSample::Key { key, down, .. } => {
+        PhysicalSample::Key { key, down, .. } | PhysicalSample::SyntheticKey { key, down } => {
             physical.key(key, down);
             if let winit::keyboard::PhysicalKey::Code(code) = key {
                 use winit::keyboard::KeyCode;

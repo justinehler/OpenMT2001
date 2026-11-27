@@ -87,7 +87,7 @@ fn primary_projection_validates_all_operands_and_changes_only_literal_nine_words
 fn cold_kind4_first_return_preserves_full_secondary_and_next_callback_pose() {
     let original = pair();
     let initial = Initial::prepare(Some(original), Some(3), fresh()).unwrap();
-    assert_eq!(initial.active.camera.vertical_fov, 45.);
+    assert_eq!(initial.active.camera.vertical_fov, 53.);
     assert_eq!(initial.active.camera.eye, [-220., 1050., -30.]);
     let mut core = core(original);
     let next = core
@@ -295,7 +295,7 @@ fn absent_metadata_legacy_attachment_is_distinct_from_explicit_city_view_without
     assert_eq!(absent.provenance, Attachment::LegacyRawKind4);
     assert_eq!(absent.metadata, None);
     assert!(absent.strategic());
-    assert_eq!(absent.active.camera.vertical_fov, 45.);
+    assert_eq!(absent.active.camera.vertical_fov, 53.);
     assert_eq!(absent.imported, Some(raw));
     let city = Initial::prepare(Some(raw), Some(0), fresh()).unwrap();
     assert_eq!(city.provenance, Attachment::Explicit(0));

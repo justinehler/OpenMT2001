@@ -334,10 +334,16 @@ impl App {
             .unwrap_or_default();
         let mut fresh = false;
         for sample in samples {
+            if let Some(intro) = &mut self.intro {
+                intro.dialog_physical_sample(sample);
+            }
             fresh |=
                 apply_desktop_sample(&mut self.desktop_keys, &mut self.participant_left, sample);
             if let Some(intro) = &mut self.intro {
-                intro.camera_physical_sample(sample);
+                if let Err(error) = intro.camera_physical_sample(sample) {
+                    self.failure = Some(error);
+                    return false;
+                }
             }
         }
         fresh
@@ -762,6 +768,9 @@ impl App {
                     // One sampled UI event1 per menu redraw; current/previous
                     // survive opening and closing. Camera50Hz is a separate clock.
                     let sample = self.desktop_keys.sample();
+                    if let Some(intro) = &mut self.intro {
+                        intro.dialog_ui_event1();
+                    }
                     if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
                         menu.desktop_ui_event1(sample);
                         if menu.take_desktop_exit() {
@@ -1118,6 +1127,7 @@ pub(crate) fn apply_desktop_sample(
     use crate::intro::process_frontend::PhysicalSample;
     match sample {
         PhysicalSample::Key { key, down, repeat } => keys.physical(key, down, repeat),
+        PhysicalSample::SyntheticKey { key, down } => keys.physical(key, down, false),
         PhysicalSample::Button {
             button: MouseButton::Right,
             down,

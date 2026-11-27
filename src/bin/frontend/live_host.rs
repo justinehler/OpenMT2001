@@ -26,6 +26,7 @@ pub struct Status {
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
+    pub market_share: Option<crate::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
@@ -89,7 +90,7 @@ pub struct TutorialControls {
 pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
     if previous.is_none() {
         eprintln!(
-            "[controls] Space pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
+            "[controls] F1/P pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
         );
     }
     if !status.pending_presentation.is_empty()
@@ -159,6 +160,8 @@ pub struct Auction {
     pub visible: bool,
     /// 414160 disables the textureless title-right child in network mode.
     pub hidden_bid_toggle_enabled: bool,
+    /// Authoritative details858 voice/AI gate published with the live panel.
+    pub bid_voice_gate: bool,
     pub info: Option<crate::auction_panel::Info>,
     pub participants: Vec<crate::auction_labels::Participant>,
 }
@@ -213,6 +216,7 @@ pub struct Host {
     game_active: bool,
     stats: Option<crate::stats_panel::State>,
     comparison: Option<crate::comparison::Runtime>,
+    market_share: crate::market_share_panel::State,
     cash_arrow: crate::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<crate::card_panel::Panel>,
@@ -227,6 +231,7 @@ pub struct Host {
     pub gameplay_sound: Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
     auction: Option<Auction>,
     pub running: bool,
+    player_paused: bool,
     pub failure: Option<String>,
     /// Saved on the worker, rather than inferred from an asynchronous UI poll.
     options_resume: Option<bool>,
@@ -272,8 +277,10 @@ impl Host {
             .map_err(|_| "Time runtime poisoned")?;
         runtime.bind_panels();
         runtime.show(cash, 0)?;
+        drop(runtime);
         self.presentation_started = true;
         self.game_active = true;
+        self.restore_player_pause(&session.world.pause);
         Ok(())
     }
     #[cfg(test)]
@@ -428,6 +435,7 @@ impl Host {
             game_active: false,
             stats: None,
             comparison: None,
+            market_share: Default::default(),
             cash_arrow: crate::cash_arrow::State::default(),
             player_panels: [true; 2],
             card: None,
@@ -442,6 +450,7 @@ impl Host {
             gameplay_sound: None,
             auction: None,
             running: false,
+            player_paused: false,
             failure: None,
             options_resume: None,
             commands_seen: 0,
@@ -935,6 +944,55 @@ impl Host {
             );
         }
     }
+    /// V2 saves retain the reason bytes. A cold Host must recover the player
+    /// latch before its initial focus snapshot, or the first press adds a second hold.
+    pub(crate) fn restore_player_pause(&mut self, pause: &openmt2001::pause::State) {
+        self.player_paused = pause.bytes[3] != 0;
+    }
+    pub(crate) fn player_paused(&self) -> bool {
+        self.player_paused
+    }
+    /// 43e5f0 toggles only its own reason3, then calls the process audio
+    /// wrapper. Options and script pauses retain their independent counts.
+    pub(crate) fn toggle_player_pause(
+        &mut self,
+        pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task],
+        audio: impl FnOnce(bool, i8) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let network = if let Some(process) = &self.process_runtime {
+            process
+                .byte(process_runtime::Byte::Network93bbb9)
+                .map_err(|e| e.to_string())?
+                != 0
+        } else {
+            self.policy.scheduler.network_enabled
+        };
+        if network
+            || self.options_resume.is_some()
+            || self.stats.is_some()
+            || self.result_request.is_some()
+            || self.failure.is_some()
+            || self.camera_retired()
+        {
+            return Ok(());
+        }
+        self.player_paused = !self.player_paused;
+        let mut apply = |change: openmt2001::pause::Timers, _: &mut openmt2001::pause::State| {
+            change.apply(timers);
+            Ok(())
+        };
+        if self.player_paused {
+            pause.pause(3, &mut apply)?;
+        } else {
+            pause.unpause(3, &mut apply)?;
+        }
+        let result = audio(!self.player_paused, pause.bytes[3] as i8);
+        if let Err(error) = &result {
+            self.fail(error.clone());
+        }
+        result
+    }
     /// Apply one received offline host focus operation, before the next frame.
     /// The required provider finishes device/input and guarded frontend-audio
     /// effects first. Player running and all ordinary pause owners stay intact.
@@ -1131,6 +1189,9 @@ impl Host {
         }
         Ok(())
     }
+    pub fn dismiss_market_share(&mut self) {
+        self.market_share.dismiss();
+    }
     pub fn fail(&mut self, error: String) {
         self.running = false;
         let _ = crate::transport_audio::submit(
@@ -1200,6 +1261,7 @@ impl Host {
         let mut auction = self.auction.clone();
         if let Some(auction) = &mut auction {
             auction.hidden_bid_toggle_enabled = !self.policy.scheduler.network_enabled;
+            auction.bid_voice_gate = self.policy.ai_event_gate;
             // Publish names, authoritative cash and the final controller state
             // together, including AI actions and restored auction sessions.
             if let Err(error) = auction.refresh_participants(session) {
@@ -1283,6 +1345,7 @@ impl Host {
             demolition_points: session.demolition_points.clone(),
             stats,
             comparison: self.comparison.as_ref().map(|state| state.snapshot.clone()),
+            market_share: self.market_share.snapshot.clone(),
             result_request: self.result_request,
             player_panels: self.player_panels,
             financial,
@@ -1972,6 +2035,8 @@ impl Host {
         let gameplay_sound = self.gameplay_sound.clone();
         let day_night_flags = &mut self.day_night_flags;
         let player_panels = &mut self.player_panels;
+        let market_share = &mut self.market_share;
+        let objective_kind = session.world.objective.kind;
         let prompts = &mut self.pending_prompts;
         let auction_seconds = &mut self.auction_seconds;
         let auction_renderer = &self.auction_renderer;
@@ -2170,32 +2235,11 @@ impl Host {
                     }
                     Ok(0)
                 }
-                Event::MarketShare(openmt2001::player_share::Call::Refresh) => {
-                    // 43be20 refreshes the live manager widget. The explicit
-                    // Objective branch owns its modal text and button sequence.
-                    omitted.insert(0x43be20);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::Kind1ProfileSelect { index }) => {
-                    // 42c430/42c470 format the selected name in the share
-                    // panel. They do not write the city or player records.
-                    if players.get(index as usize).is_none() {
-                        return Err("market-share profile player leaves roster".into());
-                    }
-                    omitted.insert(0x42c430);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::ProfileSelect { index }) => {
-                    if players.get(index as usize).is_none() {
-                        return Err("market-share profile player leaves roster".into());
-                    }
-                    omitted.insert(0x42c470);
-                    Ok(0)
-                }
-                Event::MarketShare(openmt2001::player_share::Call::PlayerShare { .. }) => {
-                    // Native 42c4b0 updates the manager's visual share bars and
-                    // numeric labels. The accounting records are already live.
-                    omitted.insert(0x42c4b0);
+                Event::MarketShare(call @ (openmt2001::player_share::Call::Refresh
+                    | openmt2001::player_share::Call::Kind1ProfileSelect { .. }
+                    | openmt2001::player_share::Call::ProfileSelect { .. }
+                    | openmt2001::player_share::Call::PlayerShare { .. })) => {
+                    market_share.apply(call, objective_kind, &players)?;
                     Ok(0)
                 }
                 Event::Calendar(openmt2001::level_runtime::CalendarEvent::Clock(
@@ -2523,7 +2567,10 @@ impl Host {
                     omitted.insert(0x407660);
                     Ok(0)
                 }
-                Event::AccountPosted(posting) => account_ui_post(posting, current_slot, |amount| {
+                Event::AccountPosted(posting)
+                | Event::Command(openmt2001::live_commands::Event::EventCardEffect(
+                    openmt2001::event_cards::effects::Call::AccountPosted(posting),
+                )) => account_ui_post(posting, current_slot, |amount| {
                     ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
                         assets.image.f32_at(0x525040)?)
                 }),
@@ -2851,6 +2898,7 @@ impl Host {
         //receive428dc0, and their Chance caches survive subsequent city loads.
         for _ in 0..self.policy.scheduler.iterations {
             self.notices.tick();
+            self.market_share.interface_tick();
         }
         let p = session
             .roster
@@ -3035,6 +3083,7 @@ impl Host {
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
             self.policy.ai_event_gate = next;
+            self.auction.as_mut().unwrap().bid_voice_gate = next;
             return Ok(());
         }
         if self.auction.as_ref().is_none_or(|auction| {
@@ -3445,6 +3494,7 @@ pub(crate) fn auction_action(
             auction.visible = true;
             // 4140b0 resets the hidden bid-voice/AI gate on panel reopen.
             bid_gate.set(false);
+            auction.bid_voice_gate = false;
             if let Some(sender) = actor_events {
                 sender
                     .send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
@@ -3586,6 +3636,33 @@ fn human_dialog_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn auction_toggle_reopen_resets_indicator_and_voice_gate() {
+        use openmt2001::ai_messages::offers::auction::Call;
+        let mut auction = Some(Auction {
+            bid_voice_gate: true,
+            ..Default::default()
+        });
+        let gate = std::cell::Cell::new(true);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        auction_action(
+            Call::ShowPanel(0x565b9c),
+            &mut auction,
+            &mut Default::default(),
+            0,
+            &Some(sender),
+            &gate,
+        )
+        .unwrap();
+        let auction = auction.unwrap();
+        assert!(auction.visible);
+        assert!(!auction.bid_voice_gate);
+        assert!(!gate.get());
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            crate::auction_bridge::ActorEvent::BidVoiceGate(false)
+        ));
+    }
     #[test]
     fn account_post_feedback_filters_and_preserves_each_posting_order() {
         use openmt2001::economy::{
@@ -4182,3 +4259,7 @@ mod camera_finalization_fault_tests {
         ui.join().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "card_account_feedback_test.rs"]
+mod card_account_feedback_test;

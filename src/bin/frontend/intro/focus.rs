@@ -43,6 +43,14 @@ impl AttachmentId {
 pub(crate) trait Effects {
     fn activate(&mut self, attachment: AttachmentId) -> Result<(), String>;
     fn retire(&mut self, attachment: AttachmentId) -> Result<(), String>;
+    fn player_pause(
+        &mut self,
+        _attachment: AttachmentId,
+        _focused: bool,
+        _reason3: i8,
+    ) -> Result<Prefix, String> {
+        Err("Player pause audio provider unavailable".into())
+    }
     fn before_pause(
         &mut self,
         attachment: AttachmentId,
@@ -52,6 +60,7 @@ pub(crate) trait Effects {
 }
 
 struct PrefixRequest {
+    player_pause: bool,
     focused: bool,
     reason3: i8,
     reply: mpsc::Sender<Result<Prefix, String>>,
@@ -78,7 +87,7 @@ impl Mailbox {
             ready: std::sync::Condvar::new(),
         }
     }
-    fn request(&self, focused: bool, reason3: i8) -> Result<Prefix, String> {
+    fn request(&self, focused: bool, reason3: i8, player_pause: bool) -> Result<Prefix, String> {
         let (reply, answer) = mpsc::channel();
         {
             let mut queue = self.queue.lock().map_err(|_| "Focus mailbox poisoned")?;
@@ -86,6 +95,7 @@ impl Mailbox {
                 return Err("Focus attachment retired".into());
             }
             queue.requests.push_back(PrefixRequest {
+                player_pause,
                 focused,
                 reason3,
                 reply,
@@ -135,6 +145,7 @@ impl Mailbox {
 }
 
 pub(crate) struct Event {
+    player_pause: bool,
     focused: bool,
     attachment: bool,
     mailbox: Arc<Mailbox>,
@@ -150,9 +161,18 @@ impl Event {
         pause: &mut openmt2001::pause::State,
         timers: &mut [openmt2001::timers::Task],
     ) -> Result<(), String> {
-        let result = host.focus(pause, timers, self.focused, |reason3| {
-            self.mailbox.request(self.focused, reason3)
-        });
+        let result = if self.player_pause {
+            host.toggle_player_pause(pause, timers, |focused, reason3| {
+                self.mailbox.request(focused, reason3, true).map(|_| ())
+            })
+        } else {
+            if self.attachment && host.player_paused() {
+                self.mailbox.request(false, pause.bytes[3] as i8, true)?;
+            }
+            host.focus(pause, timers, self.focused, |reason3| {
+                self.mailbox.request(self.focused, reason3, false)
+            })
+        };
         let _ = self.reply.send(result.clone());
         result
     }
@@ -223,12 +243,13 @@ impl Route {
     pub(super) fn attachment_id(&self) -> Option<u64> {
         self.binding.as_ref().map(|b| b.mailbox.id.value())
     }
-    fn send(&mut self, focused: bool, attachment: bool) -> Result<(), String> {
+    fn send(&mut self, focused: bool, attachment: bool, player_pause: bool) -> Result<(), String> {
         let binding = self.binding.as_ref().ok_or("Focus Session not attached")?;
         let (reply, result) = mpsc::channel();
         binding
             .target
             .send(FreshRequest::Focus(Event {
+                player_pause,
                 focused,
                 attachment,
                 mailbox: Arc::clone(&binding.mailbox),
@@ -243,10 +264,13 @@ impl Route {
         self.music.0.set(false);
         Ok(())
     }
+    pub(super) fn toggle_player_pause(&mut self) -> Result<(), String> {
+        self.send(false, false, true)
+    }
     pub(super) fn observe(&mut self, focused: bool) -> Result<(), String> {
         self.current = Some(focused);
         if self.binding.is_some() {
-            self.send(focused, false)?;
+            self.send(focused, false, false)?;
         }
         Ok(())
     }
@@ -276,7 +300,7 @@ impl Route {
             return Err(error);
         }
         self.binding = Some(Binding { target, mailbox });
-        if let Err(error) = self.send(current, true) {
+        if let Err(error) = self.send(current, true, false) {
             self.detach();
             return Err(error);
         }
@@ -311,11 +335,12 @@ impl Route {
         let Some(request) = binding.mailbox.take()? else {
             return Ok(false);
         };
-        let result = self
-            .effects
-            .as_mut()
-            .ok_or("Focus effects unavailable")?
-            .before_pause(binding.mailbox.id, request.focused, request.reason3);
+        let effects = self.effects.as_mut().ok_or("Focus effects unavailable")?;
+        let result = if request.player_pause {
+            effects.player_pause(binding.mailbox.id, request.focused, request.reason3)
+        } else {
+            effects.before_pause(binding.mailbox.id, request.focused, request.reason3)
+        };
         let failed = result.as_ref().err().cloned();
         let _ = request.reply.send(result);
         if let Some(error) = failed {

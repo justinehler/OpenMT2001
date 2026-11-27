@@ -238,6 +238,66 @@ pub fn auction_action_event(call: crate::ai_messages::offers::auction::Call, cas
     }
 }
 
+/// Execute the admitted card command against live accounts and targeted pools.
+/// Callbacks observe completed mutations in original order, including postings
+/// before ownership transfer. The caller owns message delivery and notice UI.
+pub fn event_card(
+    command: &crate::event_cards::lifecycle::Command,
+    deck: &mut crate::event_cards::Deck,
+    world: &mut crate::event_cards::effects::World<'_>,
+    context: &mut crate::event_cards::targeted::Context<'_, '_>,
+    utilities: &mut economy::Utilities,
+    mut event: impl FnMut(Event, &mut crate::event_cards::effects::World<'_>) -> Result<(), String>,
+) -> Result<crate::event_cards::effects::Notice, String> {
+    use crate::event_cards::{effects, targeted};
+    effects::apply(
+        command,
+        deck,
+        world,
+        context.image,
+        |call, world, notice| match call {
+            effects::Call::AccountPosted(_) => {
+                event(Event::EventCardEffect(call), world)?;
+                Ok(true)
+            }
+            effects::Call::Utility {
+                kind,
+                amount,
+                player,
+            } => effects::utility_rebate(
+                kind,
+                amount,
+                player,
+                world,
+                utilities,
+                context.catalog,
+                notice,
+            ),
+            effects::Call::Target {
+                kind,
+                target,
+                player,
+            } => targeted::apply(
+                kind,
+                target,
+                player,
+                world,
+                context,
+                notice,
+                |call, world| {
+                    let event_call = match call {
+                        targeted::Call::AccountPosted(posting) => {
+                            Event::EventCardEffect(effects::Call::AccountPosted(posting))
+                        }
+                        call => Event::EventCardTargeted(call),
+                    };
+                    event(event_call, world)
+                },
+            ),
+        },
+    )
+}
+
 /// Apply a locally admitted descriptor to the same city used by shopping,
 /// housing and reports. Derived topology is rebuilt after structural changes.
 pub struct Runtime<'a> {
@@ -965,7 +1025,7 @@ impl Runtime<'_> {
                     .iter()
                     .position(|p| p.reference == self.roster.status.current_player)
                     .ok_or("event current player outside roster")?;
-                let notice = crate::event_cards::effects::apply(
+                let notice = event_card(
                     command,
                     self.event_cards,
                     &mut crate::event_cards::effects::World {
@@ -977,75 +1037,40 @@ impl Runtime<'_> {
                         counts: &mut self.population.business_counts,
                         current,
                     },
-                    context.image,
-                    |call, world, notice| {
-                        if let crate::event_cards::effects::Call::Utility {
-                            kind,
-                            amount,
-                            player,
-                        } = call
+                    &mut crate::event_cards::targeted::Context {
+                        image: context.image,
+                        catalog: &self.city.catalog.info,
+                        products: &self.city.catalog.products,
+                        commodities: &self.city.commodities.rows,
+                        residents: &mut self.city.ledgers.residents,
+                        tick: context.clock.timing[1],
+                        accounting: context.accounting_enabled,
+                        network: context.network_enabled,
+                        network_override: context.network_override,
+                    },
+                    self.utilities,
+                    |call, _| {
+                        if let Event::EventCardTargeted(
+                            crate::event_cards::targeted::Call::Message { from, to, building },
+                        ) = call
                         {
-                            return crate::event_cards::effects::utility_rebate(
-                                kind,
-                                amount,
-                                player,
-                                world,
-                                self.utilities,
-                                &self.city.catalog.info,
-                                notice,
-                            );
-                        }
-                        let crate::event_cards::effects::Call::Target {
-                            kind,
-                            target,
-                            player,
-                        } = call
-                        else {
-                            unreachable!()
-                        };
-                        crate::event_cards::targeted::apply(
-                            kind,
-                            target,
-                            player,
-                            world,
-                            &mut crate::event_cards::targeted::Context {
-                                image: context.image,
-                                catalog: &self.city.catalog.info,
-                                products: &self.city.catalog.products,
-                                commodities: &self.city.commodities.rows,
-                                residents: &mut self.city.ledgers.residents,
-                                tick: context.clock.timing[1],
-                                accounting: context.accounting_enabled,
-                                network: context.network_enabled,
-                                network_override: context.network_override,
-                            },
-                            notice,
-                            |call, _| {
-                                if let crate::event_cards::targeted::Call::Message {
-                                    from,
-                                    to,
-                                    building,
-                                } = call
-                                {
-                                    self.message_context.produce(
-                                        [from as i32, to as i32, 0x2e, building, 0, 0, 0, -999],
-                                        &mut self.roster.manager,
-                                        |route, packet| {
-                                            event(
-                                                Event::PlayerMessageRoute {
-                                                    route,
-                                                    packet: *packet,
-                                                },
-                                                &*context.clock,
-                                            )
+                            self.message_context.produce(
+                                [from as i32, to as i32, 0x2e, building, 0, 0, 0, -999],
+                                &mut self.roster.manager,
+                                |route, packet| {
+                                    event(
+                                        Event::PlayerMessageRoute {
+                                            route,
+                                            packet: *packet,
                                         },
-                                    )?;
-                                    Ok(())
-                                } else {
-                                    event(Event::EventCardTargeted(call), &*context.clock)
-                                }
-                            },
-                        )
+                                        &*context.clock,
+                                    )
+                                },
+                            )?;
+                            Ok(())
+                        } else {
+                            event(call, &*context.clock)
+                        }
                     },
                 )?;
                 if notice.enabled {

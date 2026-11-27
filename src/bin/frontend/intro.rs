@@ -4,12 +4,16 @@ use crate::present::Presenter;
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
+#[path = "intro/dialog_keys.rs"]
+mod dialog_keys;
 #[path = "intro/focus.rs"]
 pub(crate) mod focus;
 #[path = "intro/menu_preferences.rs"]
 pub(crate) mod menu_preferences;
 #[path = "intro/options_ack.rs"]
 mod options_ack;
+#[path = "intro/pause_keys.rs"]
+mod pause_keys;
 #[path = "intro/process_frontend.rs"]
 pub(crate) mod process_frontend;
 #[path = "intro/refresh.rs"]
@@ -943,6 +947,7 @@ enum FreshRequest {
     Card(crate::fresh_city::cards::Action),
     AuctionButton(u32),
     Stats(crate::live_host::StatsAction),
+    DismissMarketShare,
     HumanDialog(
         crate::human_dialog::Reply,
         mpsc::Sender<Vec<crate::prompt::Request>>,
@@ -1786,6 +1791,7 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                                 last_tick = Instant::now();
                             }
+                            FreshRequest::DismissMarketShare => host.dismiss_market_share(),
                             FreshRequest::ToggleSpeed => host.toggle_speed(),
                             FreshRequest::ComparisonMode(mode) => {
                                 if let Err(error) = host.select_comparison(&session, &assets, mode)
@@ -3257,6 +3263,7 @@ struct Inspection {
     tutorial_message: crate::prompt::State,
     event_list: crate::event_list::View,
     stats_panel: crate::stats_panel::View,
+    market_share_panel: crate::market_share_panel::View,
     stats_requested: bool,
     tutorial_camera_seen: usize,
     auction_notice: crate::auction_notice::State,
@@ -4156,7 +4163,8 @@ impl Inspection {
             })
     }
     fn over_navigator(&self) -> bool {
-        (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::F))
+        !self.strategic
+            && (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::F))
             && self.pointer.is_some_and(|[x, y]| {
                 let [l, t, r, b] = self.navigator_bounds;
                 let x = x as f32 * 0.5;
@@ -4296,6 +4304,7 @@ pub struct Intro {
     focus: focus::Route,
     pub(crate) process_frontend: Option<process_frontend::Owner>,
     camera_physical: camera_live::PhysicalInput,
+    pause_keys: pause_keys::Input,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
     renderer: Renderer,
@@ -4328,6 +4337,7 @@ pub struct Intro {
     settings_profile: Option<std::path::PathBuf>,
     saved_settings: crate::profile_settings::Snapshot,
     settings_save_error: Option<String>,
+    dialog_keys: dialog_keys::Input,
 }
 impl Drop for Intro {
     fn drop(&mut self) {
@@ -4338,6 +4348,7 @@ impl Drop for Intro {
 }
 impl Intro {
     pub(crate) fn window_focus(&mut self, focused: bool) -> Result<(), String> {
+        self.dialog_keys.focus(focused);
         self.service_camera_turns();
         if let Some(process) = &self.process_frontend {
             process.borrow_mut().observe(focused)?;
@@ -4347,6 +4358,29 @@ impl Intro {
             process.borrow_mut().note_sent(self.focus.sent());
         }
         Ok(())
+    }
+    pub(crate) fn dialog_physical_sample(&mut self, sample: process_frontend::PhysicalSample) {
+        self.dialog_keys.physical(sample);
+    }
+    pub(crate) fn dialog_ui_event1(&mut self) {
+        let active = !self.focus_pending() && self.loading.is_none();
+        let prompts = self
+            .inspection
+            .as_mut()
+            .filter(|view| {
+                active
+                    && view._fresh_session.is_some()
+                    && !view.save_visible()
+                    && !view.stats_requested
+                    && view.result.is_none()
+                    && view.result_pending.is_none()
+                    && view
+                        .live_status
+                        .as_ref()
+                        .is_none_or(|s| s.stats.is_none() && s.result_request.is_none())
+            })
+            .map(|view| &mut view.prompts);
+        self.dialog_keys.event1(prompts);
     }
     /// Drain before modal/loading early returns and every dependent worker poll.
     /// No call in this service can request work from the suspended Session.
@@ -4696,6 +4730,7 @@ impl Intro {
             refresh_retry: refresh::Retry::default(),
             inspection: None,
             camera_physical: camera_live::PhysicalInput::default(),
+            pause_keys: pause_keys::Input::default(),
             camera_parked: Some(camera_producer::new_process_owner()?),
             audio_levels: crate::settings_menu::Levels::default(),
             graphics_levels: crate::settings_menu::GraphicsLevels::default(),
@@ -4703,6 +4738,7 @@ impl Intro {
             settings_profile: None,
             saved_settings: crate::profile_settings::Snapshot::default(),
             settings_save_error: None,
+            dialog_keys: dialog_keys::Input::default(),
         })
     }
     pub fn open_menu(&mut self) {
@@ -4824,12 +4860,68 @@ impl Intro {
             _ => (),
         }
     }
-    pub(crate) fn camera_physical_sample(&mut self, sample: process_frontend::PhysicalSample) {
+    pub(crate) fn camera_physical_sample(
+        &mut self,
+        sample: process_frontend::PhysicalSample,
+    ) -> Result<(), String> {
+        let mut gates = pause_keys::Gates::default();
+        if matches!(
+            sample,
+            process_frontend::PhysicalSample::Key {
+                key: winit::keyboard::PhysicalKey::Code(
+                    winit::keyboard::KeyCode::F1 | winit::keyboard::KeyCode::KeyP
+                ),
+                down: true,
+                repeat: false,
+            }
+        ) && let Some(view) = &self.inspection
+            && view._fresh_session.is_some()
+        {
+            gates.active = true;
+            gates.modal = view.options_visible()
+                || view.save_visible()
+                || view.stats_requested
+                || view.result.is_some()
+                || view.result_pending.is_some()
+                || view
+                    .live_status
+                    .as_ref()
+                    .is_some_and(|s| s.stats.is_some() || s.result_request.is_some())
+                || view
+                    .camera_navigation
+                    .as_ref()
+                    .is_some_and(|n| n.mode() == 4);
+            if !matches!(
+                sample,
+                process_frontend::PhysicalSample::Key {
+                    key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F1),
+                    ..
+                }
+            ) && let Some(graph) = &view.ui_graph
+            {
+                gates.text_entry = graph.chat_guard57e794_plus345()? != 0;
+            }
+            use crate::live_host::process_runtime::Byte;
+            gates.suppressed = self
+                .assets
+                .process_runtime
+                .byte(Byte::Media8fca98)
+                .map_err(|e| e.to_string())?
+                != 0
+                || self
+                    .assets
+                    .process_runtime
+                    .byte(Byte::Suppressed8b0700)
+                    .map_err(|e| e.to_string())?
+                    != 0;
+        }
+        self.pause_keys.dispatch(sample, gates, &mut self.focus)?;
         process_frontend::project_camera_sample(
             &mut self.camera_physical,
             self.inspection.as_mut(),
             sample,
         );
+        Ok(())
     }
     pub fn inspection_key(
         &mut self,
@@ -4942,19 +5034,6 @@ impl Intro {
                 .is_some_and(|status| status.tutorial_controls.all_disabled)
                 && key != NamedKey::Escape
             {
-                return Ok(());
-            }
-            if key == NamedKey::Space
-                && let Some(sender) = &view._fresh_session
-            {
-                let running = !view.live_status.as_ref().is_some_and(|s| s.running);
-                sender
-                    .send(FreshRequest::Run(running))
-                    .map_err(|e| e.to_string())?;
-                if let Some(status) = &mut view.live_status {
-                    status.running = running && status.failure.is_none();
-                }
-                view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
                 return Ok(());
             }
         }
@@ -5150,6 +5229,10 @@ impl Intro {
                     status.tutorial_controls.camera_disabled
                         || status.tutorial_controls.all_disabled
                 })
+                && !view
+                    .live_status
+                    .as_ref()
+                    .is_some_and(|s| s.market_share.is_some())
                 && view.mouse_buttons[1]
                 && self.process_frontend.is_none()
                 && let Some(previous) = view.cursor
@@ -5162,7 +5245,11 @@ impl Intro {
             }
             view.cursor = Some(position);
             view.pointer = internal_pointer(position, size);
-            let time_input = !view.stats_requested
+            let time_input = !view
+                .live_status
+                .as_ref()
+                .is_some_and(|s| s.market_share.is_some())
+                && !view.stats_requested
                 && !view
                     .live_status
                     .as_ref()
@@ -5409,6 +5496,36 @@ impl Intro {
     }
     fn inspection_mouse_inner(&mut self, button: winit::event::MouseButton, pressed: bool) {
         if let Some(view) = &mut self.inspection {
+            if view
+                .live_status
+                .as_ref()
+                .is_some_and(|s| s.market_share.is_some())
+                && view.prompts.request().is_none()
+                && let Some(menu) = &self.menu
+            {
+                if button == winit::event::MouseButton::Left {
+                    if view.market_share_panel.pointer(
+                        menu.market_share_assets(),
+                        view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        pressed,
+                    ) && let Some(sender) = &view._fresh_session
+                    {
+                        let _ = sender.send(FreshRequest::DismissMarketShare);
+                        view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
+                    }
+                    view.mouse_buttons[0] = pressed;
+                }
+                if button == winit::event::MouseButton::Right {
+                    view.mouse_buttons[1] = pressed;
+                    view.toolbar_right_held = pressed;
+                    view.toolbar_input.cancel();
+                }
+                view.time_panel.cancel_input();
+                view.time_pressed = None;
+                view.auction_panel.cancel_press();
+                view.drag = [0; 2];
+                return;
+            }
             if view.ui_graph.is_some() && button == winit::event::MouseButton::Left {
                 //Read the SAME staged GUI owner; physical/display state
                 //cannot overwrite old current/prior GUI cells before poll.
@@ -7623,7 +7740,7 @@ impl Intro {
         }
         self.commit_menu_settings()?;
         // A host worker reuses the same original byte inputs and shared assembler.
-        // Native startup enables gameplay; Space controls the host pause gate.
+        // Native startup enables gameplay; player pause owns reason3 separately.
         // The worker retains its Lua VM and world until inspection is dismissed.
         if !self.refreshing_fresh
             && self.menu.as_ref().is_some_and(|m| {
@@ -8022,6 +8139,7 @@ impl Intro {
                         tutorial_message: crate::prompt::State::default(),
                         event_list: crate::event_list::View::default(),
                         stats_panel: crate::stats_panel::View::default(),
+                        market_share_panel: crate::market_share_panel::View::default(),
                         stats_requested: false,
                         tutorial_camera_seen: 0,
                         auction_notice: crate::auction_notice::State::default(),
@@ -8245,6 +8363,8 @@ impl Intro {
                                     std::mem::take(&mut previous.tutorial_message);
                                 view.event_list = std::mem::take(&mut previous.event_list);
                                 view.stats_panel = std::mem::take(&mut previous.stats_panel);
+                                view.market_share_panel =
+                                    std::mem::take(&mut previous.market_share_panel);
                                 view.stats_requested = previous.stats_requested;
                                 view.auction_notice = std::mem::take(&mut previous.auction_notice);
                                 view.prompt_reply = previous.prompt_reply.take();
@@ -9364,6 +9484,19 @@ impl Intro {
                         .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
+            if let Some(menu) = &self.menu {
+                view.market_share_panel.update(
+                    menu.market_share_assets(),
+                    &self.renderer,
+                    view.live_status
+                        .as_ref()
+                        .and_then(|s| s.market_share.as_ref()),
+                )?;
+                if let Some(panel) = &view.market_share_panel.prepared {
+                    self.renderer
+                        .draw_overlay(&self.color_view, &self.depth_view, panel);
+                }
+            }
             if view.prompts.request().is_some()
                 && let Some(menu) = &self.menu
             {
@@ -9981,11 +10114,14 @@ impl Intro {
                         &view.detail_icons[usize::from(view.details_visible)],
                     );
                 }
-                if view.ui_graph.is_none()
-                    || view
-                        .ui_graph
-                        .as_ref()
-                        .is_some_and(|g| g.shell(camera_live::ui_graph::PanelId::F))
+                // Mode3 entry4b5370 hides the miniature navigator. Keeping
+                // it over the full map obscures the southeastern properties.
+                if !view.strategic
+                    && (view.ui_graph.is_none()
+                        || view
+                            .ui_graph
+                            .as_ref()
+                            .is_some_and(|g| g.shell(camera_live::ui_graph::PanelId::F)))
                 {
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &view.navigator);
@@ -10168,6 +10304,19 @@ impl Intro {
                             .and_then(|status| status.stats.as_ref()),
                     )?;
                     if let Some(panel) = &view.stats_panel.prepared {
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, panel);
+                    }
+                }
+                if let Some(menu) = &self.menu {
+                    view.market_share_panel.update(
+                        menu.market_share_assets(),
+                        &self.renderer,
+                        view.live_status
+                            .as_ref()
+                            .and_then(|s| s.market_share.as_ref()),
+                    )?;
+                    if let Some(panel) = &view.market_share_panel.prepared {
                         self.renderer
                             .draw_overlay(&self.color_view, &self.depth_view, panel);
                     }

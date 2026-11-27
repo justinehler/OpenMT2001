@@ -245,6 +245,7 @@ struct Slot {
     active: bool,
     next: Option<usize>,
     remaining: i32,
+    keys_armed: bool,
 }
 #[derive(Default)]
 pub struct State {
@@ -297,6 +298,7 @@ impl State {
                 active: true,
                 next: None,
                 remaining: 1000,
+                keys_armed: false,
             };
         }
         if let Some(ticks) = request.dialog.and_then(|d| d.timeout_ticks) {
@@ -314,6 +316,7 @@ impl State {
             self.head = Some(at);
         }
         self.slots[at].request = Some(request);
+        self.slots[at].keys_armed = false;
         replaced
     }
     pub fn cursor(&mut self, point: [f32; 2]) {
@@ -398,6 +401,29 @@ impl State {
     }
     pub fn take_dialog_replies(&mut self) -> Vec<crate::human_dialog::Reply> {
         std::mem::take(&mut self.dialog_replies)
+    }
+    /// Original42a1f0 arms on the first UI event1. Later Return/Backspace
+    /// edges use the same reply path as the corresponding mouse button.
+    pub fn dialog_event1(&mut self, edges: [bool; 2]) {
+        let Some(at) = self.head else {
+            return;
+        };
+        if self.deferred
+            || self.slots[at]
+                .request
+                .as_ref()
+                .is_none_or(|r| r.dialog.is_none())
+        {
+            return;
+        }
+        if !std::mem::replace(&mut self.slots[at].keys_armed, true) {
+            return;
+        }
+        for (button, edge) in edges.into_iter().enumerate() {
+            if edge {
+                self.dialog_button(button);
+            }
+        }
     }
     pub fn dialog_button(&mut self, button: usize) {
         if self.deferred {
