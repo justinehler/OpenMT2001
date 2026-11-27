@@ -1,16 +1,19 @@
 name: Build and test
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
-  CARGO_BUILD_JOBS: 2
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.99.0
 jobs:
   fmt:
     runs-on: ubuntu-24.04
@@ -18,29 +21,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt
+        run: rustup toolchain install $RUST_VERSION --profile minimal --component rustfmt
       - name: Check formatting
-        run: cargo +1.99.0 fmt --all -- --check
-  core:
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        os: [ubuntu-24.04, windows-2025, macos-15]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+        run: cargo +$RUST_VERSION fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        run: rustup toolchain install 1.99.0 --profile minimal
+        run: rustup toolchain install $RUST_VERSION --profile minimal --component clippy
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy within the warning budget
+        run: .github/clippy-budget.sh +$RUST_VERSION
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
-      - name: Test core
-        run: cargo +1.99.0 test --locked --lib
-      - name: Test Lua runtime
-        run: cargo +1.99.0 test --locked --features lua4 --lib
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev mesa-vulkan-drivers
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test core library (default features)
+        run: cargo +${{ env.RUST_VERSION }} test --locked --lib
       - name: Build native game
-        run: cargo +1.99.0 build --locked --features native --bin game
-      - name: Test native host with synthetic inputs
-        run: cargo +1.99.0 test --locked --features native,capture --bin game
+        run: cargo +${{ env.RUST_VERSION }} build --locked --features native --bin game
+      - name: Test library, binaries and integration tests (native, capture)
+        run: cargo +${{ env.RUST_VERSION }} test --locked --features native,capture --lib --bins --tests
