@@ -54,7 +54,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev mesa-vulkan-drivers
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test

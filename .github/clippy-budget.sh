@@ -11,7 +11,7 @@ toolchain=()
 budget=$(tr -dc '0-9' < .github/clippy-budget)
 log=$(mktemp)
 cargo "${toolchain[@]}" clippy --locked --features native,capture --all-targets \
-  --message-format short > "$log" 2>&1
+  --message-format short --color never > "$log" 2>&1
 status=$?
 if ((status != 0)) && ! grep -q 'Finished' "$log"; then
   cat "$log"
