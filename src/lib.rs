@@ -68,7 +68,6 @@ pub mod category_lease;
 #[cfg(feature = "lua4")]
 pub mod commodity_script;
 pub mod consumer_poll;
-pub mod end_transaction;
 #[cfg(feature = "lua4")]
 pub mod initial_conditions;
 #[cfg(feature = "lua4")]

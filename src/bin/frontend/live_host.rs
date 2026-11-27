@@ -2704,24 +2704,16 @@ impl Host {
         if self.result_completed {
             return Err("Result sequence already completed".into());
         }
-        let expected_end = if sequence == openmt2001::outcome_notice::Sequence::Lose {
-            2
-        } else {
-            1
-        };
-        if session
+        let end_requested = session
             .result_presentation()
-            .and_then(|result| result.end_requested)
-            != Some(expected_end)
-        {
-            return Err("Original result script has not requested completion".into());
-        }
+            .and_then(|result| result.end_requested);
         self.collect_script_prompts(session);
         crate::campaign_store::commit_result(
             &mut session.catalog,
             session.campaign_profile.as_deref(),
             &mut self.result_applied,
             sequence,
+            end_requested,
         )?;
         self.result_completed = true;
         self.result_request = None;
@@ -3022,6 +3014,7 @@ impl Host {
                         session.campaign_profile.as_deref(),
                         &mut self.tutorial_applied,
                         openmt2001::outcome_notice::Sequence::Win,
+                        Some(1),
                     ) {
                         self.fail(error);
                     } else {

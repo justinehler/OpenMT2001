@@ -275,18 +275,28 @@ pub fn save_progress(catalog: &Catalog, path: &Path) -> Result<(), String> {
 }
 /// Apply original 4ba2a4 only once, even if writing the V2 profile fails and
 /// the caller retries after fixing host storage. `applied` belongs to one
-/// outcome presentation, never to the profile across launches.
+/// outcome presentation, never to the profile across launches. The authored
+/// Game.End must match the sequence before either progression or I/O occurs.
 pub fn commit_result(
     catalog: &mut Catalog,
     profile: Option<&Path>,
     applied: &mut bool,
     sequence: openmt2001::outcome_notice::Sequence,
+    end_requested: Option<u32>,
 ) -> Result<(), String> {
+    let secondary = if sequence == openmt2001::outcome_notice::Sequence::Lose {
+        2
+    } else {
+        1
+    };
+    if end_requested != Some(secondary) {
+        return Err("Original result script has not requested completion".into());
+    }
     if !*applied {
         if catalog.selected_level().is_none() || catalog.difficulty >= 3 {
             return Err("Result catalog selection or difficulty invalid".into());
         }
-        catalog.finish(true, sequence != openmt2001::outcome_notice::Sequence::Lose)?;
+        catalog.finish(true, secondary as i32)?;
         *applied = true;
     }
     if let Some(path) = profile {
@@ -321,6 +331,84 @@ mod tests {
             fs::remove_dir_all(&self.0).unwrap();
         }
     }
+    #[test]
+    fn result_profile_waits_for_result_sequence_end() {
+        use openmt2001::level_catalog::{Labels, Registration};
+        use openmt2001::outcome_notice::Sequence;
+        let fixture = Fixture::new();
+        for (sequence, secondary, awarded) in [
+            (Sequence::Win, 1, true),
+            (Sequence::Complete, 1, true),
+            (Sequence::Lose, 2, false),
+        ] {
+            let mut catalog = Catalog::default();
+            for id in [200003, 200004] {
+                catalog
+                    .register(
+                        Registration {
+                            id,
+                            directory: b"fixture".to_vec(),
+                            labels: Labels::Literal {
+                                title: vec![],
+                                description: vec![],
+                            },
+                            checksum: 0,
+                        },
+                        false,
+                        true,
+                    )
+                    .unwrap();
+            }
+            catalog.unlock_first();
+            catalog.difficulty = 1;
+            let path = fixture.0.join(format!("{sequence:?}.lua"));
+            let mut applied = false;
+            // These are the same absent/end states read by the live Host.
+            for end in [None, Some(0), Some(3 - secondary), Some(u32::MAX)] {
+                assert!(
+                    commit_result(&mut catalog, Some(&path), &mut applied, sequence, end).is_err()
+                );
+                assert!(!path.exists());
+                assert!(!applied);
+                assert_eq!(catalog.levels[0].attempts(), 0);
+                assert_eq!(catalog.levels[0].completed(), [false; 3]);
+                assert!(!catalog.levels[1].unlocked());
+            }
+            // The live UI dispatches CutSceneEnded only at the controller's
+            // fade-out edge; the result hub then supplies Game.End's pair.
+            let mut controller = crate::result_controller::Controller::new(true, false, 0);
+            for tick in 1..=186 {
+                let ended = controller.tick(tick == 101);
+                assert_eq!(ended, tick == 186);
+                let end = ended.then_some(secondary);
+                let result = commit_result(&mut catalog, Some(&path), &mut applied, sequence, end);
+                if !ended {
+                    assert!(result.is_err());
+                    assert!(!path.exists());
+                    assert_eq!(catalog.levels[0].attempts(), 0);
+                } else {
+                    result.unwrap();
+                }
+            }
+            let saved = fs::read(&path).unwrap();
+            let mut reopened = catalog.clone();
+            load_progress(&mut reopened, &path).unwrap();
+            assert_eq!(reopened.levels[0].attempts(), 1);
+            assert_eq!(reopened.levels[0].completed(), [false, awarded, false]);
+            assert_eq!(reopened.levels[1].unlocked(), awarded);
+            commit_result(
+                &mut catalog,
+                Some(&path),
+                &mut applied,
+                sequence,
+                Some(secondary),
+            )
+            .unwrap();
+            assert_eq!(fs::read(&path).unwrap(), saved);
+            assert_eq!(catalog.levels[0].attempts(), 1);
+        }
+    }
+
     #[test]
     fn custom_result_records_share_profile_and_preserve_campaign_by_id() {
         use openmt2001::level_catalog::{Labels, Registration};
@@ -358,8 +446,22 @@ mod tests {
         catalog.difficulty = 1;
         let mut applied = false;
         // Exercise the persistence boundary, not a simulated gameplay victory.
-        commit_result(&mut catalog, Some(&path), &mut applied, Sequence::Win).unwrap();
-        commit_result(&mut catalog, Some(&path), &mut applied, Sequence::Win).unwrap();
+        commit_result(
+            &mut catalog,
+            Some(&path),
+            &mut applied,
+            Sequence::Win,
+            Some(1),
+        )
+        .unwrap();
+        commit_result(
+            &mut catalog,
+            Some(&path),
+            &mut applied,
+            Sequence::Win,
+            Some(1),
+        )
+        .unwrap();
         assert_eq!(catalog.levels[..2], campaign_before);
         let mut reopened = catalog.clone();
         load_progress(&mut reopened, &path).unwrap();
@@ -373,7 +475,14 @@ mod tests {
         assert!(reopened.levels[reopened.find(500001).unwrap()].unlocked());
         assert!(reopened.select(500000, false));
         reopened.difficulty = 2;
-        commit_result(&mut reopened, Some(&path), &mut false, Sequence::Lose).unwrap();
+        commit_result(
+            &mut reopened,
+            Some(&path),
+            &mut false,
+            Sequence::Lose,
+            Some(2),
+        )
+        .unwrap();
         load_progress(&mut catalog, &path).unwrap();
         let level = &catalog.levels[catalog.find(500000).unwrap()];
         assert_eq!(
@@ -566,7 +675,8 @@ mod tests {
                 &mut catalog,
                 Some(&occupied.join("progress.lua")),
                 &mut applied,
-                openmt2001::outcome_notice::Sequence::Win
+                openmt2001::outcome_notice::Sequence::Win,
+                Some(1)
             )
             .is_err()
         );
@@ -578,6 +688,7 @@ mod tests {
             Some(&path),
             &mut applied,
             openmt2001::outcome_notice::Sequence::Win,
+            Some(1),
         )
         .unwrap();
         assert_eq!(catalog.selected_level().unwrap().attempts(), 1);
@@ -597,6 +708,7 @@ mod tests {
             Some(&path),
             &mut replay_applied,
             openmt2001::outcome_notice::Sequence::Lose,
+            Some(2),
         )
         .unwrap();
         assert_eq!(catalog.levels[0].attempts(), 2);
@@ -611,7 +723,8 @@ mod tests {
                 &mut catalog,
                 None,
                 &mut invalid_applied,
-                openmt2001::outcome_notice::Sequence::Lose
+                openmt2001::outcome_notice::Sequence::Lose,
+                Some(2)
             )
             .is_err()
         );
@@ -671,6 +784,7 @@ mod tests {
             Some(&path),
             &mut applied,
             openmt2001::outcome_notice::Sequence::Win,
+            Some(1),
         )
         .unwrap();
         let mut next_launch = base;
@@ -713,7 +827,7 @@ mod tests {
         catalog.unlock_first();
         assert!(catalog.select(200003, false));
         catalog.difficulty = 1;
-        catalog.finish(true, true).unwrap();
+        catalog.finish(true, 1).unwrap();
         catalog.unlock(400001);
         save_progress(&catalog, &path).unwrap();
         let expected = script::profile_text(&catalog);

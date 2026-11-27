@@ -219,7 +219,8 @@ impl Catalog {
         }
     }
     ///4ba2a4..4ba311, after gameplay teardown and before profile persistence.
-    pub fn finish(&mut self, completed: bool, won: bool) -> Result<(), String> {
+    ///Tutorial completion ignores the secondary result; other wins require 1.
+    pub fn finish(&mut self, completed: bool, secondary: i32) -> Result<(), String> {
         if !completed {
             return Ok(());
         }
@@ -232,7 +233,7 @@ impl Catalog {
         }
         let attempts = self.levels[i].attempts().wrapping_add(1);
         put(&mut self.levels[i].bytes, 0x868, attempts);
-        if won {
+        if secondary == 1 {
             self.mark_completed()?;
             self.unlock_next()?;
         }
@@ -254,6 +255,63 @@ pub mod script;
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn completion_catalog(ids: &[i32]) -> Catalog {
+        let mut catalog = Catalog::default();
+        for &id in ids {
+            catalog
+                .register(
+                    Registration {
+                        id,
+                        directory: b"fixture".to_vec(),
+                        labels: Labels::Literal {
+                            title: vec![],
+                            description: vec![],
+                        },
+                        checksum: 0,
+                    },
+                    false,
+                    true,
+                )
+                .unwrap();
+        }
+        catalog.difficulty = 1;
+        catalog
+    }
+
+    #[test]
+    fn tutorial_completion_ignores_secondary_without_attempts_or_unlocks() {
+        for secondary in [-1, 0, 1, 2] {
+            let mut catalog = completion_catalog(&[100001, 100002, 200003]);
+            catalog.finish(true, secondary).unwrap();
+            assert_eq!(catalog.levels[0].completed(), [false, true, false]);
+            assert_eq!(catalog.levels[0].attempts(), 0);
+            assert!(!catalog.levels[1].unlocked());
+            assert!(!catalog.levels[2].unlocked());
+        }
+        let mut catalog = completion_catalog(&[100001, 100002]);
+        catalog.finish(false, 1).unwrap();
+        assert_eq!(catalog.levels[0].completed(), [false; 3]);
+    }
+
+    #[test]
+    fn non_tutorial_only_exact_secondary_one_awards_and_unlocks() {
+        for (completed, secondary, attempts, awarded) in [
+            (false, 1, 0, false),
+            (false, 2, 0, false),
+            (true, -1, 1, false),
+            (true, 0, 1, false),
+            (true, 2, 1, false),
+            (true, 1, 1, true),
+        ] {
+            let mut catalog = completion_catalog(&[200003, 100001, 200004]);
+            catalog.finish(completed, secondary).unwrap();
+            assert_eq!(catalog.levels[0].attempts(), attempts);
+            assert_eq!(catalog.levels[0].completed(), [false, awarded, false]);
+            assert!(!catalog.levels[1].unlocked());
+            assert_eq!(catalog.levels[2].unlocked(), awarded);
+        }
+    }
+
     #[test]
     #[ignore = "requires original level catalog/progression fixture"]
     fn matches_native_catalog() {
@@ -292,7 +350,7 @@ mod tests {
             let mut actual = decode(blob(&mut at));
             let expected = decode(blob(&mut at));
             let completed = word(at) != 0;
-            let won = word(at + 4) != 0;
+            let secondary = word(at + 4) as i32;
             at += 8;
             let serialized = blob(&mut at);
             match args[0] {
@@ -330,7 +388,7 @@ mod tests {
                     args[8],
                     [args[9] as i32, args[10] as i32, args[11] as i32],
                 ),
-                7 => actual.finish(completed, won).unwrap(),
+                7 => actual.finish(completed, secondary).unwrap(),
                 8 => {
                     actual.select(args[1], false);
                 }
