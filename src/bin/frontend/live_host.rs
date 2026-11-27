@@ -158,6 +158,8 @@ pub struct Auction {
     pub visible: bool,
     /// 414160 disables the textureless title-right child in network mode.
     pub hidden_bid_toggle_enabled: bool,
+    /// Authoritative details858 voice/AI gate published with the live panel.
+    pub bid_voice_gate: bool,
     pub info: Option<crate::auction_panel::Info>,
     pub participants: Vec<crate::auction_labels::Participant>,
 }
@@ -1209,6 +1211,7 @@ impl Host {
         let mut auction = self.auction.clone();
         if let Some(auction) = &mut auction {
             auction.hidden_bid_toggle_enabled = !self.policy.scheduler.network_enabled;
+            auction.bid_voice_gate = self.policy.ai_event_gate;
             // Publish names, authoritative cash and the final controller state
             // together, including AI actions and restored auction sessions.
             if let Err(error) = auction.refresh_participants(session) {
@@ -3046,6 +3049,7 @@ impl Host {
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
             self.policy.ai_event_gate = next;
+            self.auction.as_mut().unwrap().bid_voice_gate = next;
             return Ok(());
         }
         if self.auction.as_ref().is_none_or(|auction| {
@@ -3446,6 +3450,7 @@ pub(crate) fn auction_action(
             auction.visible = true;
             // 4140b0 resets the hidden bid-voice/AI gate on panel reopen.
             bid_gate.set(false);
+            auction.bid_voice_gate = false;
             if let Some(sender) = actor_events {
                 sender
                     .send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
@@ -3587,6 +3592,33 @@ fn human_dialog_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn auction_toggle_reopen_resets_indicator_and_voice_gate() {
+        use openmt2001::ai_messages::offers::auction::Call;
+        let mut auction = Some(Auction {
+            bid_voice_gate: true,
+            ..Default::default()
+        });
+        let gate = std::cell::Cell::new(true);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        auction_action(
+            Call::ShowPanel(0x565b9c),
+            &mut auction,
+            &mut Default::default(),
+            0,
+            &Some(sender),
+            &gate,
+        )
+        .unwrap();
+        let auction = auction.unwrap();
+        assert!(auction.visible);
+        assert!(!auction.bid_voice_gate);
+        assert!(!gate.get());
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            crate::auction_bridge::ActorEvent::BidVoiceGate(false)
+        ));
+    }
     #[test]
     fn account_post_feedback_filters_and_preserves_each_posting_order() {
         use openmt2001::economy::{

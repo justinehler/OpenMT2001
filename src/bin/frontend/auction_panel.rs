@@ -188,15 +188,37 @@ fn original_auction_panel_resources() {
             actor: b"Dog\0".to_vec(),
             price: 1250,
         };
-        let panel = assets
-            .prepare_with_info(&renderer, &state, Some(1), false, Some(&info), &[])
-            .unwrap();
         let scene =
             crate::auction_scene::Assets::load(&PeImage::parse(&exe).unwrap(), &index, &archive)
                 .unwrap()
                 .prepare(&renderer, &[0, 2, 8, 9])
                 .unwrap();
-        crate::capture_test::capture_overlay(&renderer, &scene, &panel, &path);
+        // Exercise the live View cache across state changes as well as the
+        // original draw path, including the network-suppressed presentation.
+        let mut view = View::default();
+        for (suffix, enabled, selected) in [
+            ("", true, false),
+            ("-selected.png", true, true),
+            ("-suppressed.png", false, true),
+            ("-reset.png", true, false),
+        ] {
+            let auction = crate::live_host::Auction {
+                visible: true,
+                controls: state.clone(),
+                hidden_bid_toggle_enabled: enabled,
+                bid_voice_gate: selected,
+                info: Some(info.clone()),
+                ..Default::default()
+            };
+            view.prepare(&assets, &renderer, Some(&auction), None)
+                .unwrap();
+            crate::capture_test::capture_overlay(
+                &renderer,
+                &scene,
+                view.prepared.as_ref().unwrap(),
+                &format!("{path}{suffix}"),
+            );
+        }
     }
 }
 pub struct Assets {
@@ -212,6 +234,7 @@ pub struct Assets {
     // bid-amount title. Its event12 index5 toggles the bidder voice gate.
     hidden_bid_toggle: [f32; 4],
     textures: [[Surface; 3]; 5],
+    toggle_indicators: [Surface; 2],
     fonts: [Vec<Surface>; 2],
     tabs: [Vec<u8>; 2],
     label_font: Vec<Surface>,
@@ -336,6 +359,7 @@ impl View {
                         *p,
                         a.info.as_ref(),
                         &a.participants,
+                        toggle_indicator(a.hidden_bid_toggle_enabled, a.bid_voice_gate),
                     )
                 })
                 .transpose()?;
@@ -474,6 +498,9 @@ impl Assets {
             buttons: [a?, b?, c?, d?, e?],
             hidden_bid_toggle,
             textures,
+            // 4141a0 selects globals68b274/68b278, entries275/276 in
+            // the generic image bank initialized at4c0f9f.
+            toggle_indicators: [275, 276].map(|i| Surface::new(&generic.textures[i])),
             portraits,
             fonts: [
                 font.textures[2..4].iter().map(Surface::new).collect(),
@@ -572,7 +599,15 @@ impl Assets {
         hover: Option<usize>,
         pressed: bool,
     ) -> Result<PreparedScene, String> {
-        self.prepare_with_info(renderer, state, hover, pressed, None, &[])
+        self.prepare_with_info(
+            renderer,
+            state,
+            hover,
+            pressed,
+            None,
+            &[],
+            toggle_indicator(true, false),
+        )
     }
     fn participant_surfaces(
         &self,
@@ -693,6 +728,7 @@ impl Assets {
         pressed: bool,
         info: Option<&Info>,
         participants: &[crate::auction_labels::Participant],
+        toggle: Option<usize>,
     ) -> Result<PreparedScene, String> {
         let mut surfaces = self.bid.base.clone();
         surfaces.push(self.bid.fill.clone());
@@ -777,6 +813,31 @@ impl Assets {
             self.text(&mut surfaces, 0, 1549, self.bid.title, None)?;
         } else if state.ticks == 0 {
             self.text(&mut surfaces, 0, 1550, self.bid.title, None)?;
+        }
+        if let Some(image) = toggle {
+            // 413e55 configures language1551 in font1, style5, inset20,
+            // over the bid title. The indicator uses its final16px strip.
+            let mut bounds = self.bid.title;
+            bounds[2] -= 20.;
+            let mut pages = self.fonts[0].clone();
+            ui::text_widget_style5(
+                &mut pages,
+                &self.tabs[0],
+                self.strings
+                    .get(1551)
+                    .ok_or("Auction toggle language index")?,
+                bounds,
+                u32::MAX,
+            )?;
+            surfaces.extend(pages);
+            let mut indicator = self.toggle_indicators[image - 275].clone();
+            let [l, t, r, b] = self.hidden_bid_toggle;
+            indicator.quad(
+                [[l, t], [l, b], [r, b], [r, t]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [u32::MAX; 4],
+            );
+            surfaces.push(indicator);
         }
         for i in 0..5 {
             let over = hover == Some(i) && state.buttons_enabled & (1 << i) != 0;
@@ -1187,7 +1248,15 @@ mod bid_facing_tests {
                 price: 1250,
             };
             let panel = assets
-                .prepare_with_info(&renderer, &state, None, false, Some(&info), &[])
+                .prepare_with_info(
+                    &renderer,
+                    &state,
+                    None,
+                    false,
+                    Some(&info),
+                    &[],
+                    toggle_indicator(true, false),
+                )
                 .unwrap();
             let mut checker = Surface::solid();
             for row in 0..15 {
@@ -1230,4 +1299,18 @@ mod bid_facing_tests {
             crate::capture_test::capture_overlay(&renderer, &underlay, &panel, &path);
         }
     }
+}
+
+/// 41426c tests the same network flag as414160's input gate. Offline,
+/// details858 selects the checked image; reopening starts with the empty box.
+fn toggle_indicator(enabled: bool, selected: bool) -> Option<usize> {
+    enabled.then_some(if selected { 276 } else { 275 })
+}
+
+#[test]
+fn toggle_indicator_tracks_live_state_and_network_suppression() {
+    assert_eq!(toggle_indicator(true, false), Some(275));
+    assert_eq!(toggle_indicator(true, true), Some(276));
+    assert_eq!(toggle_indicator(false, false), None);
+    assert_eq!(toggle_indicator(false, true), None);
 }
