@@ -21,11 +21,14 @@ rodio = { version = "0.21", default-features = false, features = ["playback"], o
 wgpu = { version = "30.0.1", optional = true }
 winit = { version = "0.30", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Globalization"] }
+
 [features]
 lua4 = []
 graphics = ["dep:wgpu", "dep:bytemuck", "dep:glam"]
 capture = ["graphics", "dep:pollster", "dep:png"]
-native = ["graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:arboard", "dep:chrono"]
+native = ["graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:arboard", "dep:chrono", "dep:windows-sys"]
 
 [build-dependencies]
 cc = "1.4.5"
