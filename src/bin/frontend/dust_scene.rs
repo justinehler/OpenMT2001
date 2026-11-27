@@ -120,7 +120,7 @@ mod tests {
     #[test]
     #[ignore = "full native4eb450/4ec120/4ec270/178 dust adapter oracle"]
     fn original_dust_point_adapter() {
-        let bytes = std::fs::read("work/frontend/native-dust-point-adapter.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_DUST_POINT_ADAPTER")).unwrap();
         let mut at = 0;
         let take = |at: &mut usize, n: usize| {
             let row = &bytes[*at..*at + n];

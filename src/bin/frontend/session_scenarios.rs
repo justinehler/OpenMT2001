@@ -471,7 +471,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         assert_eq!(menu.count(), 15);
         #[cfg(feature = "capture")]
@@ -499,7 +499,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(4);
         menu.activate(0);
@@ -513,7 +513,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(5);
         menu.activate(0);
@@ -527,7 +527,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(0);
         let tutorial_setup = menu
@@ -724,7 +724,7 @@ mod tests {
                 auxiliary_prior_bytes: [0; 0x11c],
             },
             crate::campaign_store::load_catalog(&image, &scripts).unwrap(),
-            std::path::PathBuf::from("work/economy/tutorial2-startup.profile"),
+            openmt2001::fixtures::path("TUTORIAL2_STARTUP"),
         )
         .unwrap();
         assert_eq!(second.catalog.selected_level().unwrap().id(), 100001);

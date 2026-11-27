@@ -1541,7 +1541,7 @@ mod tests {
     #[test]
     #[ignore = "requires original full textured-widget state streams"]
     fn original_time_button_states() {
-        let data = std::fs::read("work/frontend/native-bottom-hud.states.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_BOTTOM_HUD_STATES")).unwrap();
         assert_eq!(&data[..8], b"MTBHST01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x37f, 16));
@@ -1599,7 +1599,7 @@ mod tests {
             }
         }
         assert_eq!(at, data.len());
-        let data = std::fs::read("work/frontend/native-time-bind.options.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_BIND_OPTIONS")).unwrap();
         assert_eq!(&data[..8], b"MTOPST01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x37f, 4));
@@ -1700,7 +1700,7 @@ mod tests {
     #[test]
     #[ignore = "requires original clock text and font2 oracle"]
     fn original_clock_text_draw() {
-        let data = std::fs::read("work/frontend/native-time-text.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_TEXT")).unwrap();
         assert_eq!(&data[..8], b"MTTTXT01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
@@ -1762,7 +1762,7 @@ mod tests {
     #[test]
     #[ignore = "requires original cash interpolation oracle"]
     fn original_cash_display_update() {
-        let data = std::fs::read("work/frontend/native-time-cash.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_CASH")).unwrap();
         assert_eq!(&data[..8], b"MTCASH01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x37f);
@@ -1805,7 +1805,7 @@ mod tests {
     #[test]
     #[ignore = "requires original two-instance UI dispatcher oracle"]
     fn original_time_widget_dispatch() {
-        let data = std::fs::read("work/frontend/native-time-dispatch.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_DISPATCH")).unwrap();
         assert_eq!(&data[..8], b"MTTUPD01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x37f);
@@ -1860,7 +1860,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Time model-bind initializer oracle"]
     fn original_time_widget_bind() {
-        let data = std::fs::read("work/frontend/native-time-bind.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_BIND")).unwrap();
         assert_eq!(&data[..8], b"MTTBND01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x37f);
@@ -1914,7 +1914,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Time show/cache oracle"]
     fn original_time_widget_activation() {
-        let data = std::fs::read("work/frontend/native-time-activation.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_ACTIVATION")).unwrap();
         assert_eq!(&data[..8], b"MTACT001");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x37f);
@@ -1969,7 +1969,7 @@ mod tests {
     #[test]
     #[ignore = "requires original font3 Options caption oracle"]
     fn original_options_caption() {
-        let data = std::fs::read("work/frontend/native-hud-caption.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_HUD_CAPTION")).unwrap();
         assert_eq!(&data[..8], b"MTHCPT01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x37f);
@@ -2005,7 +2005,7 @@ mod tests {
     #[test]
     #[ignore = "requires original base/USA currency refresh oracle"]
     fn original_time_currency_refresh() {
-        let data = std::fs::read("work/frontend/native-time-currency.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_CURRENCY")).unwrap();
         assert_eq!(&data[..8], b"MTTCUR01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 2);
@@ -2039,7 +2039,7 @@ mod tests {
     #[test]
     #[ignore = "requires original bottom HUD constructor/draw oracle"]
     fn original_bottom_control_draw() {
-        let data = std::fs::read("work/frontend/native-bottom-hud.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_BOTTOM_HUD")).unwrap();
         assert_eq!(&data[..8], b"MTBHUD01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x37f);
@@ -2129,7 +2129,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Time controller camera/depth oracle"]
     fn original_time_mesh_occlusion() {
-        let data = std::fs::read("work/frontend/native-time-mesh.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_TIME_MESH")).unwrap();
         assert_eq!(&data[..8], b"MTTMSH01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let scalar = |at| f32::from_bits(word(at));

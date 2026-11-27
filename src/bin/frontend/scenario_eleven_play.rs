@@ -264,7 +264,7 @@ fn run_scenario_eleven(probe_shops: usize) {
             )
             .unwrap();
             let source_profile = PathBuf::from(
-                fs::read_to_string("work/economy/scenario3-natural-win-profile-path.txt")
+                fs::read_to_string(openmt2001::fixtures::path("SCENARIO3_NATURAL_WIN_PROFILE_PATH"))
                     .unwrap(),
             );
             let source_bytes = fs::read(&source_profile).unwrap();

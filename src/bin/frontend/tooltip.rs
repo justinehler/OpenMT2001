@@ -398,11 +398,7 @@ mod tests {
     #[test]
     #[ignore = "original production43e3c0/4406a0 tooltip glyph oracle /037f"]
     fn matches_native_production_tooltip_layout() {
-        let bytes = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/frontend/native-tooltip-layout.bin"),
-        )
-        .unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_TOOLTIP_LAYOUT")).unwrap();
         assert_eq!(&bytes[..8], b"MTTIPL01");
         fn word(bytes: &[u8], at: &mut usize) -> u32 {
             let value = u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap());

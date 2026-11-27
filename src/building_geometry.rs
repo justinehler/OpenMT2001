@@ -315,7 +315,8 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original whole building appearance phase oracle"]
     fn matches_native_appearance_phase() {
-        let data = std::fs::read("work/frontend/native-building-appearance-phase.bin").unwrap();
+        let data =
+            std::fs::read(crate::fixtures::path("NATIVE_BUILDING_APPEARANCE_PHASE")).unwrap();
         assert_eq!(&data[..8], b"MTAPPH01");
         let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
         assert_eq!(data.len(), 12 + count * 20);

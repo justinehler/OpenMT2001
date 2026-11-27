@@ -1283,11 +1283,7 @@ mod tests {
     #[test]
     #[ignore = "original prompt complete glyph streams at037f"]
     fn matches_native_prompt_text_geometry() {
-        let bytes = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/frontend/native-prompt-text.bin"),
-        )
-        .unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PROMPT_TEXT")).unwrap();
         assert_eq!(&bytes[..8], b"MTPGTX01");
         let mut at = 8;
         let word = |at: &mut usize| {

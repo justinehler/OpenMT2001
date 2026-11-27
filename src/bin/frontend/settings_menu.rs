@@ -1210,7 +1210,7 @@ mod graphics_tests {
     fn native_default_parent_submission_does_not_imply_visible_raster() {
         use super::{Assets, Page};
         use std::{fs, path::PathBuf};
-        let data = fs::read("work/frontend/native-settings-base.bin").unwrap();
+        let data = fs::read(openmt2001::fixtures::path("NATIVE_SETTINGS_BASE")).unwrap();
         assert_eq!(&data[..8], b"MTSTBP01");
         let mut cursor = 8usize;
         fn word(data: &[u8], cursor: &mut usize) -> u32 {

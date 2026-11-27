@@ -2766,7 +2766,7 @@ mod caption_tests {
     #[ignore = "requires original v1.4 static planner caption glyph fixture"]
     fn original_static_adjustment_caption_glyphs() {
         assert_native_fixture(
-            "work/frontend/native-construction-static-labels.bin",
+            "NATIVE_CONSTRUCTION_STATIC_LABELS",
             b"MTCLBL01",
             &[1516, 1520, 1518],
             3,
@@ -2777,7 +2777,7 @@ mod caption_tests {
     #[ignore = "requires original v1.4 quality-label glyph fixture"]
     fn original_quality_label_glyphs() {
         assert_native_fixture(
-            "work/frontend/native-construction-quality-labels.bin",
+            "NATIVE_CONSTRUCTION_QUALITY_LABELS",
             b"MTQLBL01",
             &[1656, 1655, 1657],
             0,
@@ -2788,7 +2788,7 @@ mod caption_tests {
     #[ignore = "requires original v1.4 stage-title glyph fixture"]
     fn original_stage_title_glyphs() {
         assert_native_fixture(
-            "work/frontend/native-construction-stage-title.bin",
+            "NATIVE_CONSTRUCTION_STAGE_TITLE",
             b"MTSTTL01",
             &[1512, 1521],
             3,
@@ -2799,7 +2799,7 @@ mod caption_tests {
     #[ignore = "requires original v1.4 numeric-caption glyph fixture"]
     fn original_floor_count_glyphs() {
         assert_native_fixture(
-            "work/frontend/native-construction-floor-count.bin",
+            "NATIVE_CONSTRUCTION_FLOOR_COUNT",
             b"MTFCNT01",
             &[1519],
             3,
@@ -2810,7 +2810,7 @@ mod caption_tests {
     #[ignore = "requires original v1.4 short and wrapped block-title fixture"]
     fn original_block_title_glyphs() {
         assert_native_fixture(
-            "work/frontend/native-construction-block-title.bin",
+            "NATIVE_CONSTRUCTION_BLOCK_TITLE",
             b"MTBTIT01",
             &[1436, 1437, 1438],
             1,
@@ -2818,7 +2818,7 @@ mod caption_tests {
         );
     }
     fn assert_native_fixture(path: &str, magic: &[u8; 8], ids: &[u32], font_id: u32, style: u32) {
-        let data = std::fs::read(path).unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path(path)).unwrap();
         assert_eq!(&data[..8], magic);
         let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x037f);

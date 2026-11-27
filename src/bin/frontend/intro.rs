@@ -12214,8 +12214,8 @@ mod tests {
             "work/frontend/menu-batch-fog.png",
         );
         assert_eq!(
-            fs::read("work/frontend/menu-individual-fog.png").unwrap(),
-            fs::read("work/frontend/menu-batch-fog.png").unwrap()
+            fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_FOG")).unwrap(),
+            fs::read(openmt2001::fixtures::path("MENU_BATCH_FOG")).unwrap()
         );
         // A material replacement introduces a standalone uniform buffer. The
         // batch API must update that live buffer as well as the retained arena.
@@ -12301,8 +12301,8 @@ mod tests {
             "work/frontend/menu-batch-replaced.png",
         );
         assert_eq!(
-            fs::read("work/frontend/menu-individual-replaced.png").unwrap(),
-            fs::read("work/frontend/menu-batch-replaced.png").unwrap()
+            fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_REPLACED")).unwrap(),
+            fs::read(openmt2001::fixtures::path("MENU_BATCH_REPLACED")).unwrap()
         );
         eprintln!(
             "Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}",

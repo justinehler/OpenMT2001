@@ -739,9 +739,8 @@ mod tests {
     }
 
     fn fixture_path() -> std::path::PathBuf {
-        crate::fixtures::optional("NATIVE_POST_ROSTER_OWNERSHIP").unwrap_or_else(|| {
-            std::path::PathBuf::from("work/economy/native-post-roster-ownership.bin")
-        })
+        crate::fixtures::optional("NATIVE_POST_ROSTER_OWNERSHIP")
+            .unwrap_or_else(|| crate::fixtures::path("NATIVE_POST_ROSTER_OWNERSHIP"))
     }
 
     fn live_players(raw: &[[u8; PLAYER_RECORD_BYTES]]) -> Vec<crate::player_manager::Player> {

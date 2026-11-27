@@ -1105,7 +1105,7 @@ mod tests {
             .unwrap()
             .join("US/language/usa");
         let assets = Assets::load(&index, &archive, installer, &language).unwrap();
-        let fixture = fs::read("work/frontend/native-save-dialog.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_SAVE_DIALOG")).unwrap();
         assert_eq!(&fixture[..8], b"MTSAVE01");
         let mut at = 8;
         fn word(fixture: &[u8], at: &mut usize) -> u32 {
@@ -1145,7 +1145,8 @@ mod tests {
             );
         }
         assert_eq!(at, fixture.len());
-        let scroll_fixture = fs::read("work/frontend/native-save-scrollbars.bin").unwrap();
+        let scroll_fixture =
+            fs::read(openmt2001::fixtures::path("NATIVE_SAVE_SCROLLBARS")).unwrap();
         assert_eq!(&scroll_fixture[..8], b"MTSVSL01");
         let mut scroll_at = 8;
         assert_eq!(word(&scroll_fixture, &mut scroll_at), 0x037f);

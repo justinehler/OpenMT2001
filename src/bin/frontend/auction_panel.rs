@@ -80,7 +80,8 @@ fn original_auction_panel_resources() {
         })
         .collect::<Vec<_>>();
     let assets = Assets::load(&index, &archive, installer, &strings, &exe).unwrap();
-    let hidden_fixture = fs::read("work/frontend/native-auction-hidden-button.bin").unwrap();
+    let hidden_fixture =
+        fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_HIDDEN_BUTTON")).unwrap();
     assert_eq!(&hidden_fixture[..8], b"MTAHIT01");
     assert_eq!(hidden_fixture.len(), 8 + 8 + 8 * 4 + 4 * 4);
     let word = |at: usize| u32::from_le_bytes(hidden_fixture[at..at + 4].try_into().unwrap());

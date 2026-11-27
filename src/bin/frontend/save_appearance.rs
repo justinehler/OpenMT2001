@@ -1248,7 +1248,10 @@ mod tests {
     #[test]
     #[ignore = "requires original language/font4 and native valid-ID text-family oracle"]
     fn original_refresh_text_families() {
-        let data = std::fs::read("work/save/native-appearance-label-families.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path(
+            "NATIVE_APPEARANCE_LABEL_FAMILIES",
+        ))
+        .unwrap();
         assert_eq!(&data[..8], b"MTLBLF01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x37f, 40));
@@ -1534,7 +1537,8 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 456440 wrapper fixture and original font4"]
     fn original_vertical_text_signs_match_complete_native_buffers() {
-        let bytes = std::fs::read("work/save/text-sign-constructor-probe.bin").unwrap();
+        let bytes =
+            std::fs::read(openmt2001::fixtures::path("TEXT_SIGN_CONSTRUCTOR_PROBE")).unwrap();
         assert_eq!(&bytes[..8], b"MT456440");
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(40), 0x037f);

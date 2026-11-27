@@ -377,7 +377,7 @@ mod tests {
         let board = Board::from_v14(&image).unwrap();
         let bytes = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = BuildFile::parse(&bytes).unwrap();
-        let native = std::fs::read("work/economy/native-build-variant-count.bin").unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_BUILD_VARIANT_COUNT")).unwrap();
         assert_eq!(&native[..8], b"MTBVAR01");
         let mut words = native[8..]
             .chunks_exact(4)

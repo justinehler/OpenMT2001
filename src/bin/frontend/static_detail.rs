@@ -563,7 +563,8 @@ mod tests {
         assert_eq!(row.descriptor, ROOFTOP11_DESCRIPTOR);
         assert_eq!(word(&row.row, 0), 0);
 
-        let fixture = std::fs::read("work/save/appearance-gap-rooftop-draw.bin").unwrap();
+        let fixture =
+            std::fs::read(openmt2001::fixtures::path("APPEARANCE_GAP_ROOFTOP_DRAW")).unwrap();
         assert_eq!(&fixture[..8], b"MTROOFT1");
         assert_eq!(word(&fixture, 40), 0x037f);
         assert_eq!(word(&fixture, 44), 1059);

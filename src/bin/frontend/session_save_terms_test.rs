@@ -155,7 +155,7 @@ fn modern_overdue_terms_resume_real_tenants() {
             selected_character: 4, profile_name: b"Rental turnover validation", character_names: &names,
         };
         let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 284] };
-        let path = std::fs::read_to_string("work/save/legal-rental68-v3-path.txt").unwrap();
+        let path = std::fs::read_to_string(openmt2001::fixtures::path("LEGAL_RENTAL68_V3_PATH")).unwrap();
         let provenance = std::fs::read(path).unwrap();
         let saved = SaveFile::parse(&provenance).unwrap();
         assert!(matches!(extension::Extension::parse(&saved).unwrap().unwrap().version, 3 | 4));

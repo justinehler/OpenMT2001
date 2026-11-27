@@ -6279,8 +6279,7 @@ mod tests {
             let exe_path=openmt2001::fixtures::path("EXE");
             let names=character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let scripts=settings.parent().unwrap().parent().unwrap();
-            let natural_win_source=openmt2001::fixtures::optional("NATURAL_WIN_PROFILE").unwrap_or_else(||std::path::PathBuf::from(
-                    "work/validation/natural-win-profile-10204-1790118387224499700/campaign/4e61747572616c2057696e2056616c69646174696f6e.lua"));
+            let natural_win_source=openmt2001::fixtures::optional("NATURAL_WIN_PROFILE").unwrap_or_else(||openmt2001::fixtures::path("NATURAL_WIN_PROFILE"));
             let profile_path=(capacity_mode>=3).then(|| {
                 let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
                 let root=std::path::PathBuf::from("work/validation").join(format!("natural-win-profile-{}-{nonce}",std::process::id()));

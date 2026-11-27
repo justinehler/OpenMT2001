@@ -143,7 +143,7 @@ mod tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIEXP1");
         assert_eq!(r.word(), 0x37f);
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         for i in 0..r.word() {
             let expected_identity = r.word();
@@ -503,7 +503,7 @@ mod build_tests {
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIEXB1");
         assert_eq!(r.word(), 0x37f);
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         for case in 0..r.word() {
             let mode = r.word();

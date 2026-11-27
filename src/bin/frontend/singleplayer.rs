@@ -333,7 +333,7 @@ mod scenario_scroll_tests {
     #[test]
     #[ignore = "requires original v1.4 Scenario completion-cup fixture"]
     fn scenario_completion_cups_match_original_painter() {
-        let fixture = std::fs::read("work/frontend/native-scenario-cups.bin").unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path("NATIVE_SCENARIO_CUPS")).unwrap();
         assert_eq!(&fixture[..8], b"MTSCCP01");
         assert_eq!(fixture.len(), 8 + 32 + 12 * 4);
         let values: Vec<u32> = fixture[40..]
@@ -401,7 +401,8 @@ mod scenario_scroll_tests {
     #[test]
     #[ignore = "requires original v1.4 scenario scrollbar fixture"]
     fn scenario_scrollbars_match_original_constructor_geometry() {
-        let fixture = std::fs::read("work/frontend/native-scenario-scrollbars.bin").unwrap();
+        let fixture =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_SCENARIO_SCROLLBARS")).unwrap();
         assert_eq!(&fixture[..8], b"MTSCSL01");
         let mut at = 40usize;
         let mut word = || {
@@ -447,7 +448,8 @@ mod character_biography_tests {
     #[test]
     #[ignore = "requires original v1.4 Character biography fixture and archive"]
     fn original_dog_biography_uses_font2_style0_and_fits() {
-        let fixture = std::fs::read("work/frontend/native-character-biography.bin").unwrap();
+        let fixture =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_CHARACTER_BIOGRAPHY")).unwrap();
         assert_eq!(&fixture[..8], b"MTCHBIO1");
         let mut at = 40;
         let mut word = || {

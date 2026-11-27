@@ -653,7 +653,7 @@ mod tests {
     #[test]
     #[ignore = "requires tools/native_tutorial_owner.py original twiddle fixture"]
     fn original_twiddle_changes_linked_player_once() {
-        let bytes = std::fs::read("work/economy/native-tutorial-twiddle.bin").unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_TUTORIAL_TWIDDLE")).unwrap();
         assert_eq!(&bytes[..8], b"MTTWIDD0");
         let mut player = crate::player_manager::Player {
             reference: 1,
@@ -663,7 +663,7 @@ mod tests {
         let mut script = AiScript::new().unwrap();
         let mut profiles = [[0; 0x650]; 10];
         let original =
-            std::fs::read("work/patch14/payload/Essential/scripts/TUTORIAL3/ai.lua").unwrap();
+            std::fs::read(crate::fixtures::path("SCRIPTS").join("TUTORIAL3/ai.lua")).unwrap();
         script
             .load(
                 &mut profiles,

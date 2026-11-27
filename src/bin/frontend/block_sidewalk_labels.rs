@@ -529,7 +529,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 4b3230 label-alpha oracle"]
     fn matches_native_sidewalk_alpha_and_initial_gate() {
-        let fixture = fs::read("work/frontend/native-sidewalk-alpha.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_SIDEWALK_ALPHA")).unwrap();
         assert_eq!(&fixture[..8], b"MTALPH01");
         let count = u32::from_le_bytes(fixture[8..12].try_into().unwrap()) as usize;
         assert_eq!(fixture.len(), 12 + count * 16);

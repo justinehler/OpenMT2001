@@ -71,7 +71,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 category detail Y-scale oracle"]
     fn matches_native_detail_scale() {
-        let fixture = fs::read("work/frontend/native-category-detail-fade.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_CATEGORY_DETAIL_FADE")).unwrap();
         assert_eq!(&fixture[..8], b"MTYFAD01");
         let count = u32::from_le_bytes(fixture[8..12].try_into().unwrap()) as usize;
         assert_eq!(fixture.len(), 12 + count * 12);
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 category pass-3 row-pose oracle"]
     fn matches_native_detail_row_pose() {
-        let fixture = fs::read("work/frontend/native-category-detail-pose.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_CATEGORY_DETAIL_POSE")).unwrap();
         assert_eq!(&fixture[..8], b"MTDPIV01");
         let count = u32::from_le_bytes(fixture[8..12].try_into().unwrap()) as usize;
         assert_eq!(fixture.len(), 12 + count * 20);

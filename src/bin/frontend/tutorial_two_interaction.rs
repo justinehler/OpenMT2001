@@ -140,8 +140,7 @@ mod tests {
     #[test]
     #[ignore = "requires the supplied original Tutorial 2 script"]
     fn original_tutorial_two_script_requests_match_policy() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("Original Distribution/Monopoly Tycoon ISO 2001 Archive.org/Extracted Installer/scripts/TUTORIAL2/hub.lua");
+        let path = openmt2001::fixtures::path("ORIGINAL_SCRIPTS").join("TUTORIAL2/hub.lua");
         let script = std::fs::read_to_string(path).expect("supplied Tutorial 2 hub.lua");
         for call in [
             "Interface.PositionPrompt(0, 150)",

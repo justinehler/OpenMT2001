@@ -115,7 +115,7 @@ fn detail_icon(open: bool) -> usize {
 #[test]
 #[ignore = "requires original bottom HUD backing oracle"]
 fn original_navigation_backing() {
-    let data = std::fs::read("work/frontend/native-bottom-hud.bin").unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_BOTTOM_HUD")).unwrap();
     assert_eq!(&data[..8], b"MTBHUD01");
     let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
     let at = 20 + word(12) as usize;
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 AutoRotate-off building camera oracle"]
     fn matches_native_auto_rotate_off_camera() {
-        let bytes = std::fs::read("work/frontend/native-auto-rotate-camera.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_AUTO_ROTATE_CAMERA")).unwrap();
         assert_eq!(&bytes[..8], b"MTAUTO01");
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let count = word(8) as usize;

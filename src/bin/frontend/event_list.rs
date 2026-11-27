@@ -260,15 +260,8 @@ mod tests {
     #[ignore = "original EventList constructor/background and full font3 native streams /037f"]
     fn original_event_list_resources() {
         let labels = labels(&original_regions()).unwrap();
-        let read = |name: &str| {
-            fs::read(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("work/frontend")
-                    .join(name),
-            )
-            .unwrap()
-        };
-        let bytes = read("native-tutorial-event-list.bin");
+        let read = |name: &str| fs::read(openmt2001::fixtures::path(name)).unwrap();
+        let bytes = read("EVENTLIST_LAYOUT");
         assert_eq!(&bytes[..8], b"MTEVLST1");
         let mut at = 8;
         assert_eq!(word(&bytes, &mut at), 0x037f);
@@ -303,7 +296,7 @@ mod tests {
             }
         }
         assert_eq!(at, bytes.len());
-        let bytes = read("native-event-list-text.bin");
+        let bytes = read("NATIVE_EVENT_LIST_TEXT");
         assert_eq!(&bytes[..8], b"MTEVTXT1");
         let mut at = 8;
         assert_eq!(word(&bytes, &mut at), 0x037f);
@@ -369,10 +362,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
-        let bytes = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/frontend/native-tutorial-event-list-input.bin"),
-        )
+        let bytes = fs::read(openmt2001::fixtures::path(
+            "NATIVE_TUTORIAL_EVENT_LIST_INPUT",
+        ))
         .unwrap();
         assert_eq!(&bytes[..8], b"MTEVINP1");
         let mut at = 8;

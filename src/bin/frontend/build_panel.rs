@@ -336,7 +336,8 @@ mod tests {
     #[test]
     #[ignore = "requires pinned native424010 completion observations"]
     fn matches_native_placement_choices() {
-        let bytes = std::fs::read("work/economy/native-tutorial-build-drag.bin").unwrap();
+        let bytes =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_TUTORIAL_BUILD_DRAG")).unwrap();
         assert_eq!(&bytes[..8], b"MTBDRG01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x037f);

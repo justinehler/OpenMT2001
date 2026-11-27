@@ -18,7 +18,7 @@ fn original_rights_caption_layout() {
         *bytes = tail;
         u32::from_le_bytes(head.try_into().unwrap())
     }
-    let native = fs::read("work/frontend/native-rights-caption-layout.bin").unwrap();
+    let native = fs::read(openmt2001::fixtures::path("NATIVE_RIGHTS_CAPTION_LAYOUT")).unwrap();
     assert_eq!(&native[..8], b"MTRCPT01");
     let mut bytes = &native[8..];
     assert_eq!(word(&mut bytes), 0x037f);

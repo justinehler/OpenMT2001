@@ -432,7 +432,7 @@ mod tests {
     #[ignore = "requires whole original ownership/count inbox executions"]
     fn matches_native_business_inbox() {
         let data = std::fs::read(crate::fixtures::path("NATIVE_AI_BUSINESS_INBOX")).unwrap();
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIBIN1");

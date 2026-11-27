@@ -1171,7 +1171,7 @@ mod tests {
     #[ignore = "requires original v1.4 Graphics Options style9 fixture"]
     fn graphics_style9_matches_native_glyph_streams() {
         assert_style9_fixture(
-            "work/frontend/native-graphics-style9.bin",
+            "NATIVE_GRAPHICS_STYLE9",
             &[1587, 1656, 1588, 1591, 1594, 1596, 1129, 1130],
         );
     }
@@ -1179,25 +1179,22 @@ mod tests {
     #[ignore = "requires original v1.4 Main Options style9 fixture"]
     fn main_options_style9_matches_native_glyph_streams() {
         assert_style9_fixture(
-            "work/frontend/native-options-main-style9.bin",
+            "NATIVE_OPTIONS_MAIN_STYLE9",
             &[1679, 1607, 1608, 1609, 1610, 1770, 1435, 1139],
         );
     }
     #[test]
     #[ignore = "requires original v1.4 in-game Options style9 fixture"]
     fn game_options_style9_matches_native_glyph_streams() {
-        assert_style9_fixture(
-            "work/frontend/native-game-options-style9.bin",
-            &[1678, 1680, 1679, 1682],
-        );
+        assert_style9_fixture("NATIVE_GAME_OPTIONS_STYLE9", &[1678, 1680, 1679, 1682]);
     }
     #[test]
     #[ignore = "requires original v1.4 Tutorial caption fixture"]
     fn tutorial_captions_match_native_glyph_streams() {
-        assert_style9_fixture("work/frontend/native-tutorial-style9.bin", &[1667, 1668]);
+        assert_style9_fixture("NATIVE_TUTORIAL_STYLE9", &[1667, 1668]);
     }
     fn assert_style9_fixture(path: &str, ids: &[u32]) {
-        let data = std::fs::read(path).unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path(path)).unwrap();
         assert_eq!(&data[..8], b"MTG9TX01");
         let mut at = 8usize;
         let word = |at: &mut usize| {
@@ -1263,7 +1260,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Gameplay Options caption fixture"]
     fn gameplay_captions_match_native_glyph_streams() {
-        let data = std::fs::read("work/frontend/native-gameplay-caption.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_GAMEPLAY_CAPTION")).unwrap();
         assert_eq!(&data[..8], b"MTGPTX01");
         let mut at = 8usize;
         let word = |at: &mut usize| {

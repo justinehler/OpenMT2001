@@ -580,7 +580,7 @@ mod tests {
     #[test]
     #[ignore = "original renderer178 hardware/software vertex oracle /037f"]
     fn original_point_radius_vertices() {
-        let bytes = std::fs::read("work/frontend/native-point-vertices.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_POINT_VERTICES")).unwrap();
         let mut at = 0;
         let take = |at: &mut usize, n: usize| {
             let row = &bytes[*at..*at + n];

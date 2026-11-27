@@ -2161,13 +2161,11 @@ mod tests {
             super::retail_numeric_controls(&regions)
         }
         .unwrap();
-        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            if apartment {
-                "work/frontend/native-apartment-controls.bin"
-            } else {
-                "work/frontend/native-adjustment-controls.bin"
-            },
-        ))
+        let bytes = std::fs::read(openmt2001::fixtures::path(if apartment {
+            "NATIVE_APARTMENT_CONTROLS"
+        } else {
+            "NATIVE_ADJUSTMENT_CONTROLS"
+        }))
         .unwrap();
         assert_eq!(&bytes[..8], b"MTBAPCTL");
         let mut words = bytes[8..]

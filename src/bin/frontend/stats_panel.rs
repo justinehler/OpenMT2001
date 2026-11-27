@@ -1387,7 +1387,7 @@ mod tests {
             history: vec![0; openmt2001::player_history::RECORD_BYTES],
             years_per_day: 1,
         };
-        let bytes = fs::read("work/frontend/native-stats-input.bin").unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_STATS_INPUT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTIN01");
         assert_eq!(r.word(), 0x37f);
@@ -1447,7 +1447,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Stats frontend pose/bind/draw oracle"]
     fn original_stats_mesh_transform() {
-        let bytes = std::fs::read("work/frontend/native-stats-mesh.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_MESH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTMS01");
         assert_eq!(r.word(), 0x37f);
@@ -1477,7 +1477,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Stats wrap/style9/full glyph oracle"]
     fn original_stats_text_layout() {
-        let bytes = std::fs::read("work/frontend/native-stats-text.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_TEXT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTTX01");
         assert_eq!(r.word(), 0x37f);
@@ -1515,7 +1515,7 @@ mod tests {
     #[test]
     #[ignore = "requires whole original42d220 tick/axis producer oracle"]
     fn original_stats_grid_geometry() {
-        let bytes = std::fs::read("work/frontend/native-stats-grid.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_GRID")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTGD01");
         assert_eq!(r.word(), 0x37f);
@@ -1551,7 +1551,7 @@ mod tests {
     #[test]
     #[ignore = "requires original42ce80 linkedCRT/axis fullglyph oracle"]
     fn original_stats_axis_text() {
-        let bytes = std::fs::read("work/frontend/native-stats-axis-text.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_AXIS_TEXT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTAX01");
         assert_eq!(r.word(), 0x37f);
@@ -1601,7 +1601,7 @@ mod tests {
     #[test]
     #[ignore = "requires complete original42d970 polyline geometry oracle"]
     fn original_stats_line_geometry() {
-        let bytes = std::fs::read("work/frontend/native-stats-graph.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_GRAPH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTGR01");
         assert_eq!(r.word(), 0x37f);
@@ -1629,7 +1629,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original Stats constructor/show/action oracle"]
     fn original_stats_controls() {
-        let bytes = std::fs::read("work/frontend/native-stats-panel-graph.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_PANEL_GRAPH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTAT01");
         assert_eq!(r.word(), 0x37f);

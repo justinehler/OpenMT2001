@@ -149,7 +149,7 @@ mod tests {
                 .map(|b| b.try_into().unwrap())
                 .collect();
             let at = at + 0x650 * 10;
-            let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+            let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
             let image = crate::pe::PeImage::parse(&exe).unwrap();
             let value = match entry {
                 0x47b950 => u32::from(

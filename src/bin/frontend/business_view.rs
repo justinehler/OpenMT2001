@@ -1019,8 +1019,10 @@ mod tutorial_two_tests {
         assert!(assets.go_to_block_contains([20., 288.]));
         assert!(!assets.go_to_block_contains([29., 288.]));
         assert!(!assets.go_to_block_contains([20., 270.]));
-        let script = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("Original Distribution/Monopoly Tycoon ISO 2001 Archive.org/Extracted Installer/scripts/TUTORIAL2/hub.lua")).unwrap();
+        let script = std::fs::read_to_string(
+            openmt2001::fixtures::path("ORIGINAL_SCRIPTS").join("TUTORIAL2/hub.lua"),
+        )
+        .unwrap();
         assert!(script.contains("Interface.AddArrow( 29, 288 )"));
         assert!(script.contains("Interface.EnableControl(TUT_MPP_GREENBUTTON_6)"));
     }
@@ -1102,11 +1104,7 @@ mod tests {
     #[test]
     #[ignore = "original Main41e40f/407b07 constructor and icon oracle"]
     fn original_business_information_layout() {
-        let bytes = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/economy/native-main-information-layout.bin"),
-        )
-        .unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_MAIN_INFORMATION_LAYOUT")).unwrap();
         assert_eq!(&bytes[..8], b"MTMAINIF");
         let mut words = bytes[8..]
             .chunks_exact(4)
