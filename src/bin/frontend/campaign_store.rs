@@ -311,11 +311,18 @@ mod tests {
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
+            // macOS clocks can repeat a nanosecond value across back-to-back
+            // calls, so a per-process counter keeps parallel tests apart.
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let nonce = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let root = PathBuf::from(format!("work/custom-import-{}-{nonce}", std::process::id()));
+            let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let root = PathBuf::from(format!(
+                "work/custom-import-{}-{nonce}-{serial}",
+                std::process::id()
+            ));
             fs::create_dir_all(root.join("GAMESTART")).unwrap();
             fs::write(root.join("GAMESTART/hub.lua"), b"-- base").unwrap();
             Self(root)
