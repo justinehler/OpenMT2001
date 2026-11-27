@@ -327,11 +327,23 @@ impl Session<'_> {
                 .result_presentation
                 .as_mut()
                 .ok_or("result state lost")?;
+            let already_ended = presentation.end_requested.is_some();
             for (command, args) in &self.hooks.commands[before..] {
                 presentation.apply(command, args)?;
                 if matches!(command, level_script::Command::ResultFireworks) {
                     presentation.fireworks_seed = Some(self.particle_random_state);
                 }
+            }
+            if !already_ended && presentation.end_requested.is_some() {
+                //4ba1d0 samples all six history series before showing the
+                //stopped graph, including a partial final day.
+                let accounts = self.roster.account_prefixes(&self.world.city)?;
+                self.population.sample_history(
+                    &mut self.history,
+                    &self.world.city,
+                    &accounts,
+                    assets.image,
+                )?;
             }
             Ok(())
         })();
@@ -572,7 +584,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires original v1.4 scripts, archive, model, road and parameter assets"]
-    fn complete_hub_keeps_the_retained_vm_and_game_end_gate() {
+    fn result_hubs_keep_final_history_and_game_end_gate() {
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
@@ -697,6 +709,7 @@ mod tests {
                 assert!(result.fixed_camera);
                 assert!(result.bypass_enabled);
                 assert_eq!(result.end_requested, None);
+                let before = session.history.count(0, 2).unwrap();
                 session
                     .dispatch_result_event("CutSceneEnded", &assets)
                     .unwrap();
@@ -704,6 +717,48 @@ mod tests {
                     session.result_presentation().unwrap().end_requested,
                     Some(1)
                 );
+                assert_eq!(session.history.count(0, 2), Some((before + 1).min(480)));
+                let state = crate::stats_panel::State::show(
+                    session.world.objective.kind,
+                    false,
+                    session.roster.manager.players.len(),
+                )
+                .unwrap();
+                let snapshot =
+                    crate::stats_panel::Snapshot::from_session(&session, &state).unwrap();
+                assert_eq!(snapshot.history, session.history.as_bytes());
+                let history = snapshot.history;
+                session
+                    .dispatch_result_event("CutSceneEnded", &assets)
+                    .unwrap();
+                assert_eq!(
+                    session.history.as_bytes(),
+                    history,
+                    "duplicate end must not sample twice"
+                );
+                for (sequence, expected_end) in [(Sequence::Win, 1), (Sequence::Lose, 2)] {
+                    session.result_presentation = None;
+                    session
+                        .begin_result_sequence(sequence, (0, 1), &assets)
+                        .unwrap();
+                    let count = session.history.count(0, 2).unwrap();
+                    session
+                        .dispatch_result_event("FlybyEnded", &assets)
+                        .unwrap();
+                    session
+                        .dispatch_result_event("CutSceneEnded", &assets)
+                        .unwrap();
+                    assert_eq!(
+                        session.result_presentation().unwrap().end_requested,
+                        Some(expected_end)
+                    );
+                    assert_eq!(session.history.count(0, 2), Some((count + 1).min(480)));
+                    let history = session.history.as_bytes().to_vec();
+                    session
+                        .dispatch_result_event("CutSceneEnded", &assets)
+                        .unwrap();
+                    assert_eq!(session.history.as_bytes(), history);
+                }
             })
             .unwrap()
             .join()

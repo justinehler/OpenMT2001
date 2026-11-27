@@ -27,6 +27,7 @@ pub struct Status {
     pub stats: Option<crate::stats_panel::Snapshot>,
     pub market_share: Option<crate::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
+    pub result_review: Option<ResultReview>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
     /// Current original runtime+4 ledgers for the 412810 player report.
@@ -178,6 +179,28 @@ pub enum StatsAction {
     Close,
     Cycle(bool),
     Toggle(usize),
+}
+
+/// The stopped graph owns the session until its Close action reaches a menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultReview {
+    Statistics,
+    Menu(ResultMenu),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultMenu {
+    Scenarios,
+    Main,
+}
+impl ResultMenu {
+    fn for_level(level: &openmt2001::level_catalog::Level) -> Self {
+        //49e722: the single-player flag without the sandbox flag.
+        if level.single_player() && level.bytes[2] == 0 {
+            Self::Scenarios
+        } else {
+            Self::Main
+        }
+    }
 }
 
 /// Caller chooses the actual install path. CameraOnly does not capture C
@@ -922,7 +945,8 @@ impl Host {
         self.running = running
             && !self.camera_retired()
             && self.failure.is_none()
-            && self.options_resume.is_none();
+            && self.options_resume.is_none()
+            && !self.result_completed;
         if self.running != was_running {
             eprintln!(
                 "[simulation] {}{}",
@@ -1144,7 +1168,7 @@ impl Host {
     ) -> Result<(), String> {
         match action {
             StatsAction::Open => {
-                if self.stats.is_some() {
+                if self.stats.is_some() || self.result_completed {
                     return Ok(());
                 }
                 let state = crate::stats_panel::State::show(
@@ -1162,16 +1186,7 @@ impl Host {
                 self.stats = Some(state);
             }
             StatsAction::Close => {
-                if self.stats.take().is_none() {
-                    return Ok(());
-                }
-                if self.game_active && !self.policy.scheduler.network_enabled {
-                    let timers = &mut session.hooks.timers;
-                    session.world.pause.unpause(0, |change, _| {
-                        change.apply(timers);
-                        Ok(())
-                    })?;
-                }
+                self.close_statistics(&mut session.world.pause, &mut session.hooks.timers)?;
             }
             StatsAction::Cycle(right) => {
                 if let Some(state) = &mut self.stats {
@@ -1183,6 +1198,20 @@ impl Host {
                     state.toggle(slot)?;
                 }
             }
+        }
+        Ok(())
+    }
+    fn close_statistics(
+        &mut self,
+        pause: &mut openmt2001::pause::State,
+        timers: &mut [openmt2001::timers::Task],
+    ) -> Result<(), String> {
+        if self.stats.take().is_some() && self.game_active && !self.policy.scheduler.network_enabled
+        {
+            pause.unpause(0, |change, _| {
+                change.apply(timers);
+                Ok(())
+            })?;
         }
         Ok(())
     }
@@ -1302,6 +1331,7 @@ impl Host {
             stats,
             market_share: self.market_share.snapshot.clone(),
             result_request: self.result_request,
+            result_review: self.result_review(&session.catalog),
             player_panels: self.player_panels,
             financial,
             business_owner: session
@@ -2767,36 +2797,74 @@ impl Host {
         self.collect_script_prompts(session);
         Ok(())
     }
+    fn result_review(&self, catalog: &openmt2001::level_catalog::Catalog) -> Option<ResultReview> {
+        self.result_completed.then(|| {
+            if self.stats.is_some() {
+                ResultReview::Statistics
+            } else {
+                ResultReview::Menu(ResultMenu::for_level(
+                    catalog
+                        .selected_level()
+                        .expect("completed result selection"),
+                ))
+            }
+        })
+    }
     /// Called only after the original result sequence has finished presenting.
-    /// Retain the applied bit across I/O failure so retrying persistence cannot
-    /// increment attempts or unlock the next scenario twice.
     pub fn complete_result_sequence(
         &mut self,
         session: &mut Session<'_>,
     ) -> Result<openmt2001::outcome_notice::Sequence, String> {
+        let end_requested = session
+            .result_presentation()
+            .and_then(|result| result.end_requested);
+        self.collect_script_prompts(session);
+        let stats = crate::stats_panel::State::show(
+            session.world.objective.kind,
+            false,
+            session.roster.manager.players.len(),
+        )?;
+        // Validate the retained graph before committing progression.
+        crate::stats_panel::Snapshot::from_session(session, &stats)?;
+        self.commit_result_review(
+            &mut session.catalog,
+            session.campaign_profile.as_deref(),
+            stats,
+            end_requested,
+        )
+    }
+    /// Retain the applied bit across I/O failure so persistence retries cannot
+    /// increment attempts or unlock the next scenario twice. Closing the graph
+    /// only changes presentation; it never passes through this commit again.
+    fn commit_result_review(
+        &mut self,
+        catalog: &mut openmt2001::level_catalog::Catalog,
+        profile: Option<&std::path::Path>,
+        stats: crate::stats_panel::State,
+        end_requested: Option<u32>,
+    ) -> Result<openmt2001::outcome_notice::Sequence, String> {
         if self.failure.is_some() {
             return Err("Stopped result sequence cannot complete campaign".into());
+        }
+        if self.result_completed {
+            return Err("Result sequence already completed".into());
         }
         let sequence = self
             .result_request
             .ok_or("No result sequence is active")?
             .sequence;
-        if self.result_completed {
-            return Err("Result sequence already completed".into());
-        }
-        let end_requested = session
-            .result_presentation()
-            .and_then(|result| result.end_requested);
-        self.collect_script_prompts(session);
         crate::campaign_store::commit_result(
-            &mut session.catalog,
-            session.campaign_profile.as_deref(),
+            catalog,
+            profile,
             &mut self.result_applied,
             sequence,
             end_requested,
         )?;
         self.result_completed = true;
         self.result_request = None;
+        self.game_active = false;
+        self.running = false;
+        self.stats = Some(stats);
         Ok(sequence)
     }
     fn interface_tick(
@@ -3085,7 +3153,7 @@ impl Host {
         assets: &CommandAssets<'_, '_>,
         elapsed: i32,
     ) {
-        if self.stop_retired_camera() || self.failure.is_some() {
+        if self.stop_retired_camera() || self.failure.is_some() || self.result_completed {
             return;
         }
         if session.tutorial_state == 1 {
@@ -4208,3 +4276,7 @@ mod camera_finalization_fault_tests {
 #[cfg(test)]
 #[path = "card_account_feedback_test.rs"]
 mod card_account_feedback_test;
+
+#[cfg(test)]
+#[path = "live_host/final_statistics_tests.rs"]
+mod final_statistics_tests;

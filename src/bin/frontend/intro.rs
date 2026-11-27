@@ -932,7 +932,7 @@ enum FreshRequest {
         reply: mpsc::Sender<Result<crate::fresh_city::result::ResultPresentation, String>>,
     },
     ResultComplete {
-        reply: mpsc::Sender<Result<openmt2001::outcome_notice::Sequence, String>>,
+        reply: mpsc::Sender<Result<crate::live_host::Status, String>>,
     },
     InspectOperations {
         building: usize,
@@ -1662,7 +1662,10 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                             }
                             FreshRequest::ResultComplete { reply } => {
-                                let _ = reply.send(host.complete_result_sequence(&mut session));
+                                let completed = host
+                                    .complete_result_sequence(&mut session)
+                                    .map(|_| host.status(&session));
+                                let _ = reply.send(completed);
                             }
                             FreshRequest::InspectOperations {
                                 building,
@@ -3366,13 +3369,39 @@ struct ResultView {
         Option<mpsc::Receiver<Result<crate::fresh_city::result::ResultPresentation, String>>>,
     cutscene_pending:
         Option<mpsc::Receiver<Result<crate::fresh_city::result::ResultPresentation, String>>>,
-    completed: Option<mpsc::Receiver<Result<openmt2001::outcome_notice::Sequence, String>>>,
+    completed: Option<mpsc::Receiver<Result<crate::live_host::Status, String>>>,
     actor_light: openmt2001::lighting::SceneLight,
     actors: PreparedScene,
     actor_draws: usize,
     title: Option<(Option<u32>, Option<usize>, u8, PreparedScene)>,
 }
 impl Inspection {
+    fn statistics_mouse(
+        &mut self,
+        assets: &crate::stats_panel::Assets,
+        button: winit::event::MouseButton,
+        pressed: bool,
+    ) -> bool {
+        let Some(snapshot) = self.live_status.as_ref().and_then(|s| s.stats.as_ref()) else {
+            return false;
+        };
+        if button == winit::event::MouseButton::Left {
+            if let Some(action) = self.stats_panel.pointer(
+                assets,
+                self.pointer.map(|point| point.map(|v| v as f32 * 0.5)),
+                pressed,
+                snapshot,
+            ) && let Some(sender) = &self._fresh_session
+            {
+                let _ = sender.send(FreshRequest::Stats(action));
+                self.stats_requested = true;
+                self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
+            }
+            self.mouse_buttons[0] = pressed;
+        }
+        self.drag = [0; 2];
+        true
+    }
     fn apply_status_camera_events(
         &mut self,
         status: &crate::live_host::Status,
@@ -5492,6 +5521,17 @@ impl Intro {
             if view
                 .live_status
                 .as_ref()
+                .is_some_and(|s| s.result_review.is_some())
+            {
+                if let Some(menu) = &self.menu {
+                    view.statistics_mouse(menu.stats_assets(), button, pressed);
+                }
+                return;
+            }
+
+            if view
+                .live_status
+                .as_ref()
                 .is_some_and(|s| s.market_share.is_some())
                 && view.prompts.request().is_none()
                 && let Some(menu) = &self.menu
@@ -5566,27 +5606,9 @@ impl Intro {
                 view.time_panel.cancel_input();
                 view.time_pressed = None;
             }
-            if let (Some(menu), Some(snapshot)) = (
-                &self.menu,
-                view.live_status
-                    .as_ref()
-                    .and_then(|status| status.stats.as_ref()),
-            ) {
-                if button == winit::event::MouseButton::Left {
-                    if let Some(action) = view.stats_panel.pointer(
-                        menu.stats_assets(),
-                        view.pointer.map(|point| point.map(|v| v as f32 * 0.5)),
-                        pressed,
-                        snapshot,
-                    ) && let Some(sender) = &view._fresh_session
-                    {
-                        let _ = sender.send(FreshRequest::Stats(action));
-                        view.stats_requested = true;
-                        view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
-                    }
-                    view.mouse_buttons[0] = pressed;
-                }
-                view.drag = [0; 2];
+            if let Some(menu) = &self.menu
+                && view.statistics_mouse(menu.stats_assets(), button, pressed)
+            {
                 return;
             }
             if stats_modal {
@@ -7199,6 +7221,33 @@ impl Intro {
             return Ok(false);
         };
         if view.result.is_none()
+            && let Some(review) = view.live_status.as_ref().and_then(|s| s.result_review)
+        {
+            match review {
+                crate::live_host::ResultReview::Statistics => {
+                    let menu = self.menu.as_mut().ok_or("Final statistics menu missing")?;
+                    menu.draw(&self.renderer, &self.color_view, &self.depth_view)?;
+                    view.stats_panel.update(
+                        menu.stats_assets(),
+                        &self.renderer,
+                        view.live_status.as_ref().and_then(|s| s.stats.as_ref()),
+                    )?;
+                    if let Some(panel) = &view.stats_panel.prepared {
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, panel);
+                    }
+                    return Ok(true);
+                }
+                crate::live_host::ResultReview::Menu(target) => {
+                    self.retire_inspection();
+                    if let Some(menu) = &mut self.menu {
+                        menu.finish_result(target)?;
+                    }
+                    return Ok(false);
+                }
+            }
+        }
+        if view.result.is_none()
             && view.result_pending.is_none()
             && view
                 .live_status
@@ -7575,13 +7624,19 @@ impl Intro {
         }
         if let Some(receiver) = &result.completed {
             match receiver.try_recv() {
-                Ok(sequence) => {
-                    let _ = sequence?;
-                    self.retire_inspection();
-                    if let Some(menu) = &mut self.menu {
-                        menu.refresh_campaign()?;
-                    }
-                    return Ok(false);
+                Ok(status) => {
+                    let status = status?;
+                    // Discard a status poll queued before completion. Its old
+                    // result request must never restart the presentation.
+                    view.status_pending = None;
+                    view.stats_requested = true;
+                    view.live_status = Some(status);
+                    view.result = None;
+                    view.keys = [false; 4];
+                    view.taps = [false; 4];
+                    view.mouse_buttons = [false; 2];
+                    view.drag = [0; 2];
+                    return self.draw_result(presenter);
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -8669,7 +8724,7 @@ impl Intro {
                 || v.result_pending.is_some()
                 || v.live_status
                     .as_ref()
-                    .is_some_and(|s| s.result_request.is_some())
+                    .is_some_and(|s| s.result_request.is_some() || s.result_review.is_some())
         }) {
             self.inspection_update()?;
         }
