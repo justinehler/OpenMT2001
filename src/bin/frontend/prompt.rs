@@ -84,6 +84,51 @@ pub struct Request {
     pub dismissal_id: u32,
     pub card: Option<CardText>,
 }
+/// Original428b30 reopens the active level's briefing in the generic panel.
+/// Skirmish titles use the selected setup target, rather than the live score.
+pub fn scenario_reminder(
+    level: &openmt2001::level_catalog::Level,
+    network: bool,
+    objective: i32,
+) -> Request {
+    use crate::human_dialog::{Argument, Dialog};
+    let mut dialog = Dialog {
+        buttons: [1437, 0],
+        button_count: 1,
+        ..Default::default()
+    };
+    let mut script = None;
+    match level.labels() {
+        openmt2001::level_catalog::Labels::Localized { title, description } => {
+            dialog.title = title;
+            dialog.body = description;
+            if (network || !level.single_player()) && (1..=6).contains(&objective) {
+                dialog.title = 1820 + objective as u32;
+                let target = level.objective_target() as i32;
+                dialog.title_argument = Some(if matches!(objective, 1 | 4) {
+                    Argument::Currency(target)
+                } else {
+                    Argument::Integer(target)
+                });
+            }
+        }
+        openmt2001::level_catalog::Labels::Literal { title, description } => {
+            script = Some(ScriptText {
+                title: Some(title.into()),
+                body: Some(description.into()),
+                format_value: 0,
+            });
+        }
+    }
+    Request {
+        script,
+        dialog: Some(dialog),
+        title: dialog.title,
+        body: dialog.body,
+        dismissal_id: 0,
+        card: None,
+    }
+}
 /// Owned independently for every queued message; numeric fields retain their IDs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptText {
@@ -1167,6 +1212,74 @@ pub fn verify_card_panel(scene: &openmt2001::render_scene::Scene, player: &[u8; 
 
 #[cfg(test)]
 mod tests {
+    fn reminder_level(
+        labels: openmt2001::level_catalog::Labels,
+        id: i32,
+    ) -> openmt2001::level_catalog::Level {
+        let mut catalog = openmt2001::level_catalog::Catalog::default();
+        catalog
+            .register(
+                openmt2001::level_catalog::Registration {
+                    id,
+                    directory: b"synthetic".to_vec(),
+                    labels,
+                    checksum: 0,
+                },
+                true,
+                true,
+            )
+            .unwrap();
+        catalog.levels.remove(0)
+    }
+    #[test]
+    fn scenario_reminder_uses_active_level_text_and_one_ok_button() {
+        use openmt2001::level_catalog::Labels;
+        let level = reminder_level(
+            Labels::Localized {
+                title: 100,
+                description: 101,
+            },
+            200003,
+        );
+        let request = super::scenario_reminder(&level, false, 6);
+        let dialog = request.dialog.unwrap();
+        assert_eq!(
+            (dialog.title, dialog.body, dialog.portrait),
+            (100, 101, 302)
+        );
+        assert_eq!((dialog.buttons, dialog.button_count), ([1437, 0], 1));
+        assert_eq!((dialog.callback, dialog.context), (0, 0));
+        let custom = reminder_level(
+            Labels::Literal {
+                title: b"Custom title".to_vec(),
+                description: b"Custom objective".to_vec(),
+            },
+            500000,
+        );
+        let custom = super::scenario_reminder(&custom, false, 6);
+        let script = custom.script.unwrap();
+        assert_eq!(script.title.as_deref(), Some(b"Custom title".as_slice()));
+        assert_eq!(script.body.as_deref(), Some(b"Custom objective".as_slice()));
+    }
+    #[test]
+    fn scenario_reminder_skirmish_uses_selected_target() {
+        use openmt2001::level_catalog::Labels;
+        let mut level = reminder_level(
+            Labels::Localized {
+                title: 100,
+                description: 101,
+            },
+            300001,
+        );
+        level.set_objective_target(3500.);
+        let dialog = super::scenario_reminder(&level, false, 6).dialog.unwrap();
+        assert_eq!((dialog.title, dialog.body), (1826, 101));
+        assert_eq!(
+            dialog.title_argument,
+            Some(crate::human_dialog::Argument::Integer(3500))
+        );
+    }
+
     #[test]
     #[ignore = "original prompt complete glyph streams at037f"]
     fn matches_native_prompt_text_geometry() {

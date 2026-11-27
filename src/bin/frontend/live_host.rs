@@ -1138,6 +1138,18 @@ impl Host {
     pub fn toggle_speed(&mut self) {
         self.set_fast(self.policy.scheduler.iterations == 1);
     }
+    /// Original428dc0 child1 ->428b30. This informational prompt changes
+    /// neither GUI/camera mode nor any pause owner;429b50 selects offline1x.
+    pub fn scenario_reminder(&mut self, level: &openmt2001::level_catalog::Level, objective: i32) {
+        self.pending_prompts.push(prompt::scenario_reminder(
+            level,
+            self.policy.scheduler.network_enabled,
+            objective,
+        ));
+        if !self.policy.scheduler.network_enabled {
+            self.policy.scheduler.iterations = 1;
+        }
+    }
     /// Original Manager12/2 reaches49dcb0; local games add pause reason0.
     /// Repeated UI polls cannot reopen the modal or add another pause reason.
     pub fn stats_action(
@@ -3636,6 +3648,50 @@ fn human_dialog_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scenario_reminder_open_and_dismiss_preserve_player_pause() {
+        let mut level = openmt2001::level_catalog::Level {
+            bytes: [0; openmt2001::level_catalog::RECORD_SIZE],
+        };
+        level.bytes[0x87c] = 1;
+        level.bytes[1] = 1;
+        level.bytes[0x44..0x48].copy_from_slice(&100u32.to_le_bytes());
+        level.bytes[0x854..0x858].copy_from_slice(&101u32.to_le_bytes());
+        for paused in [false, true] {
+            let mut host = Host::new([0.; 3]);
+            host.set_running(true);
+            let mut pause = openmt2001::pause::State::default();
+            let mut timers = openmt2001::timers::startup_tasks([0; 20]);
+            if paused {
+                host.toggle_player_pause(&mut pause, &mut timers, |_, _| Ok(()))
+                    .unwrap();
+            }
+            let before = (
+                pause.clone(),
+                timers.clone(),
+                host.running,
+                host.player_paused(),
+            );
+            host.policy.scheduler.iterations = 4;
+            host.scenario_reminder(&level, 6);
+            let mut ui = prompt::State::default();
+            ui.submit(host.pending_prompts.pop().unwrap());
+            assert_eq!(host.policy.scheduler.iterations, 1);
+            ui.dialog_button(0);
+            assert_eq!(
+                ui.take_dialog_replies(),
+                vec![crate::human_dialog::Reply {
+                    callback: 0,
+                    context: 0,
+                    button: 0
+                }]
+            );
+            ui.finish_dismiss(vec![]);
+            assert!(ui.request().is_none());
+            assert_eq!((pause, timers, host.running, host.player_paused()), before);
+        }
+    }
+
     #[test]
     fn auction_toggle_reopen_resets_indicator_and_voice_gate() {
         use openmt2001::ai_messages::offers::auction::Call;

@@ -353,6 +353,7 @@ pub enum Button {
     Speed,
     Options,
     Manager,
+    ScenarioReminder,
 }
 
 pub(crate) struct Display<'a> {
@@ -364,6 +365,26 @@ pub(crate) struct Display<'a> {
     pub cash: Option<f32>,
     pub character: Option<usize>,
     pub cash_icon_phase: i32,
+}
+
+fn button_at(
+    regions: &[[f32; 4]; 14],
+    manager: [f32; 4],
+    speed: [f32; 4],
+    pointer: [f32; 2],
+    auction: bool,
+) -> Option<Button> {
+    if inside(regions[9], pointer) {
+        Some(Button::Options)
+    } else if inside(regions[6], pointer) {
+        Some(Button::ScenarioReminder)
+    } else if auction {
+        None
+    } else if inside(manager, pointer) {
+        Some(Button::Manager)
+    } else {
+        inside(speed, pointer).then_some(Button::Speed)
+    }
 }
 
 fn player(status: &crate::live_host::Status) -> (String, Option<usize>) {
@@ -610,16 +631,15 @@ impl Assets {
         self.button_in_mode(pointer, false)
     }
     pub fn button_in_mode(&self, pointer: [f32; 2], auction: bool) -> Option<Button> {
-        if inside(self.regions[9], pointer) {
-            Some(Button::Options)
-        } else if auction {
-            None
-        } else if inside(self.manager_bounds, pointer) {
-            Some(Button::Manager)
-        } else {
-            inside(self.speed_bounds, pointer).then_some(Button::Speed)
-        }
+        button_at(
+            &self.regions,
+            self.manager_bounds,
+            self.speed_bounds,
+            pointer,
+            auction,
+        )
     }
+
     pub fn contains(&self, pointer: [f32; 2]) -> bool {
         self.contains_in_mode(pointer, false)
     }
@@ -921,6 +941,7 @@ pub struct View {
     graph_speed_disabled: bool,
     graph_speed_blink: u8,
     hover: Option<Button>,
+    hover_started: Option<std::time::Instant>,
     pressed: Option<Button>,
     click_latched: Option<Button>,
     normal: bool,
@@ -942,6 +963,7 @@ impl View {
         }
     }
     pub fn cancel_input(&mut self) {
+        self.hover_started = None;
         if self.hover.take().is_some()
             || self.pressed.take().is_some()
             || self.click_latched.take().is_some()
@@ -951,7 +973,7 @@ impl View {
         self.pressed = None;
         self.click_latched = None;
     }
-    ///Clock Options is57e77c; Speed/Manager are E57e764.
+    ///Clock Options/portrait are57e77c; Speed/Manager are E57e764.
     pub(crate) fn graph_button(
         &self,
         assets: &Assets,
@@ -961,7 +983,7 @@ impl View {
         assets
             .button_in_mode(point, auction)
             .filter(|button| match button {
-                Button::Options => self.graph_clock_visible,
+                Button::Options | Button::ScenarioReminder => self.graph_clock_visible,
                 Button::Speed => self.graph_bottom_visible && !self.graph_speed_disabled,
                 Button::Manager => self.graph_bottom_visible,
             })
@@ -981,6 +1003,14 @@ impl View {
         self.graph_speed_disabled = speed_disabled;
         self.graph_speed_blink = blink;
     }
+    /// Legacy inspection can replace its scene between interface draws.
+    /// Keep the original25/50-second dwell with the retained HUD child.
+    pub(crate) fn tooltip_ready(&self) -> bool {
+        self.hover == Some(Button::ScenarioReminder)
+            && self
+                .hover_started
+                .is_some_and(|start| start.elapsed().as_secs_f64() > 0.5)
+    }
     pub fn cursor(&mut self, assets: &Assets, point: Option<[f32; 2]>, auction: bool) {
         let hit = point.and_then(|point| assets.button_in_mode(point, auction));
         self.hover_held(hit, false);
@@ -991,6 +1021,7 @@ impl View {
             return None;
         }
         self.hover = hit;
+        self.hover_started = hit.map(|_| std::time::Instant::now());
         self.key = None;
         // Event3 clears +330 but leaves the visual pressed flag +334. Keep
         // those states separate so a held re-entry can click without erasing
@@ -1232,6 +1263,27 @@ pub(crate) fn capture_auction_status(status: &crate::live_host::Status, label: &
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn portrait_hit_target_opens_scenario_reminder_separately_from_manager() {
+        let mut regions = [[-10.; 4]; 14];
+        regions[6] = [550., 0., 580., 30.];
+        regions[9] = [580., 0., 610., 30.];
+        let manager = [570., 450., 590., 470.];
+        let speed = [600., 450., 620., 470.];
+        let hit = |point, auction| super::button_at(&regions, manager, speed, point, auction);
+        for auction in [false, true] {
+            assert_eq!(
+                hit([565., 15.], auction),
+                Some(super::Button::ScenarioReminder)
+            );
+            assert_eq!(hit([595., 15.], auction), Some(super::Button::Options));
+            assert_eq!(hit([540., 15.], auction), None);
+        }
+        assert_eq!(hit([580., 460.], false), Some(super::Button::Manager));
+        assert_eq!(hit([610., 460.], false), Some(super::Button::Speed));
+        assert_eq!(hit([580., 460.], true), None);
+    }
+
     #[test]
     #[ignore = "requires original Time button vtable and sound string"]
     fn original_time_press_audio() {
