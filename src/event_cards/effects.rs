@@ -4,7 +4,11 @@ use super::{
     Deck,
     lifecycle::{Command, card_row},
 };
-use crate::{economy::PlayerAccount, pe::PeImage, player_manager::word};
+use crate::{
+    economy::{AccountPosting, PlayerAccount},
+    pe::PeImage,
+    player_manager::word,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Notice {
@@ -17,6 +21,8 @@ pub struct Notice {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Call {
+    /// An account mutation already applied, before the next effect.
+    AccountPosted(AccountPosting),
     ///41bf6c..41c231: subtype0..8, target identity from41ca60.
     Target {
         kind: u32,
@@ -126,6 +132,28 @@ pub fn utility_rebate(
     Ok(true)
 }
 
+/// Report each successful post synchronously; observers must not post it again.
+fn post(
+    world: &mut World<'_>,
+    player: usize,
+    amount: f32,
+    category: usize,
+    notice: &mut Notice,
+    callback: &mut impl FnMut(Call, &mut World<'_>, &mut Notice) -> Result<bool, String>,
+) -> Result<(), String> {
+    world
+        .accounts
+        .get_mut(player)
+        .ok_or("event recipient leaves roster")?
+        .post(amount, category)?;
+    callback(
+        Call::AccountPosted(AccountPosting { player, amount }),
+        world,
+        notice,
+    )?;
+    Ok(())
+}
+
 /// Release the deck flag first, then execute the effect. The returned notice
 /// represents the original notification gate after effects; UI presentation
 /// remains host-owned. Errors preserve preceding stores.
@@ -151,25 +179,32 @@ pub fn apply(
         affected: false,
         amount: 0.,
     };
-    let mut post = |slot: usize, value: f32, event: usize| {
-        world
-            .accounts
-            .get_mut(slot)
-            .ok_or("event recipient leaves roster")?
-            .post(value, event)
-    };
     let kind = word(row, 12);
     match kind {
-        0 => post(actor, amount, 0x24)?,
-        7 => post(actor, -amount, 0x12)?,
+        0 => post(world, actor, amount, 0x24, &mut notice, &mut callback)?,
+        7 => post(world, actor, -amount, 0x12, &mut notice, &mut callback)?,
         1 | 8 => {
             for slot in 0..world.active.len() {
                 if slot == actor || world.active[slot] == 0 {
                     continue;
                 }
                 let other_amount = if kind == 1 { -amount } else { amount };
-                post(slot, other_amount, if kind == 1 { 0x12 } else { 0x24 })?;
-                post(actor, -other_amount, if kind == 1 { 0x24 } else { 0x12 })?;
+                post(
+                    world,
+                    slot,
+                    other_amount,
+                    if kind == 1 { 0x12 } else { 0x24 },
+                    &mut notice,
+                    &mut callback,
+                )?;
+                post(
+                    world,
+                    actor,
+                    -other_amount,
+                    if kind == 1 { 0x24 } else { 0x12 },
+                    &mut notice,
+                    &mut callback,
+                )?;
                 if slot == world.current {
                     notice.affected = true;
                     notice.amount = other_amount;
@@ -199,9 +234,9 @@ pub fn apply(
             if chosen != Some(actor) {
                 notice.enabled = false;
             } else if kind == 2 {
-                world.accounts[actor].post(amount, 0x24)?;
+                post(world, actor, amount, 0x24, &mut notice, &mut callback)?;
             } else {
-                world.accounts[actor].post(-amount, 0x12)?;
+                post(world, actor, -amount, 0x12, &mut notice, &mut callback)?;
                 let mut best = image.f32_at(0x525154)?;
                 let mut poorest = None;
                 for (slot, account) in world.accounts.iter().enumerate() {
@@ -212,7 +247,7 @@ pub fn apply(
                     }
                 }
                 let slot = poorest.ok_or("event poorest-player helper returned null")?;
-                world.accounts[slot].post(amount, 0x24)?;
+                post(world, slot, amount, 0x24, &mut notice, &mut callback)?;
                 if slot == world.current {
                     notice.affected = true;
                     notice.amount = amount;
@@ -237,7 +272,14 @@ pub fn apply(
             if kind != 13 {
                 // Kind3 posts zero too; kind4 suppresses without posting.
                 if kind == 3 || count != 0 {
-                    world.accounts[actor].post(product(count, amount)?, 0x24)?;
+                    post(
+                        world,
+                        actor,
+                        product(count, amount)?,
+                        0x24,
+                        &mut notice,
+                        &mut callback,
+                    )?;
                 }
                 if count == 0 {
                     notice.enabled = false;
@@ -251,13 +293,23 @@ pub fn apply(
                 if count == 0 || i32::from(owner) == actor as i32 + 1 {
                     notice.enabled = false;
                 } else {
-                    world.accounts[actor].post(product(count.wrapping_neg(), amount)?, 0x12)?;
+                    post(
+                        world,
+                        actor,
+                        product(count.wrapping_neg(), amount)?,
+                        0x12,
+                        &mut notice,
+                        &mut callback,
+                    )?;
                     if owner != 0 {
-                        world
-                            .accounts
-                            .get_mut((i32::from(owner) - 1) as usize)
-                            .ok_or("event utility owner outside roster")?
-                            .post(product(count, amount)?, 0x24)?;
+                        post(
+                            world,
+                            (i32::from(owner) - 1) as usize,
+                            product(count, amount)?,
+                            0x24,
+                            &mut notice,
+                            &mut callback,
+                        )?;
                     }
                     if i32::from(owner) == world.current as i32 + 1 {
                         notice.affected = true;
@@ -300,16 +352,26 @@ pub fn apply(
                 let count = world
                     .counts
                     .get(actor, world.accounts.len(), world.businesses)?;
-                world.accounts[actor].post(product(count.wrapping_neg(), amount)?, 0x12)?;
+                post(
+                    world,
+                    actor,
+                    product(count.wrapping_neg(), amount)?,
+                    0x12,
+                    &mut notice,
+                    &mut callback,
+                )?;
                 if owner != 0 {
                     let count = world
                         .counts
                         .get(actor, world.accounts.len(), world.businesses)?;
-                    world
-                        .accounts
-                        .get_mut((i32::from(owner) - 1) as usize)
-                        .ok_or("event utility owner outside roster")?
-                        .post(product(count, amount)?, 0x24)?;
+                    post(
+                        world,
+                        (i32::from(owner) - 1) as usize,
+                        product(count, amount)?,
+                        0x24,
+                        &mut notice,
+                        &mut callback,
+                    )?;
                 }
                 if kind != 9 && i32::from(owner) == world.current as i32 + 1 {
                     notice.affected = true;
@@ -350,7 +412,14 @@ pub fn apply(
             if count == 0 {
                 notice.enabled = false;
             } else {
-                world.accounts[actor].post(-product(count, amount)?, 0x12)?;
+                post(
+                    world,
+                    actor,
+                    -product(count, amount)?,
+                    0x12,
+                    &mut notice,
+                    &mut callback,
+                )?;
             }
         }
         17..=20 => {
@@ -494,6 +563,7 @@ mod tests {
                             notice,
                         )
                     }
+                    Call::AccountPosted(_) => Ok(true),
                     _ => panic!("unexpected target"),
                 },
             )

@@ -2531,7 +2531,10 @@ impl Host {
                     omitted.insert(0x407660);
                     Ok(0)
                 }
-                Event::AccountPosted(posting) => account_ui_post(posting, current_slot, |amount| {
+                Event::AccountPosted(posting)
+                | Event::Command(openmt2001::live_commands::Event::EventCardEffect(
+                    openmt2001::event_cards::effects::Call::AccountPosted(posting),
+                )) => account_ui_post(posting, current_slot, |amount| {
                     ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
                         assets.image.f32_at(0x525040)?)
                 }),
@@ -4180,3 +4183,7 @@ mod camera_finalization_fault_tests {
         ui.join().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "card_account_feedback_test.rs"]
+mod card_account_feedback_test;
