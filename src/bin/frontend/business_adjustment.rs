@@ -806,14 +806,14 @@ impl Assets {
         exe: &[u8],
     ) -> Result<Self, String> {
         let parts = [0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 22, 23, 24, 25, 26, 27];
-        let (base, regions) = ui::panel_frame_base(
+        let (base, regions) = ui::panel_front_base(
             index,
             archive,
             "gamedata2/brand_new_panels/bap_v2.tm",
             &parts,
             9,
         )?;
-        let (apartment_base, apartment_regions) = ui::panel_frame_base(
+        let (apartment_base, apartment_regions) = ui::panel_front_base(
             index,
             archive,
             "gamedata2/brand_new_panels/bap_apartments_v2.tm",
@@ -1495,9 +1495,11 @@ pub fn verify_live_panels(scene: &Scene) {
     let bytes = fs::read(language.join("tycoon.bin")).unwrap();
     let mut at = 0;
     let strings = offsets
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|n| {
-            let end = at + u16::from_le_bytes(n.try_into().unwrap()) as usize;
+            let end = at + u16::from_le_bytes(*n) as usize;
             let text = &bytes[at..end];
             at = end;
             text
@@ -1653,6 +1655,34 @@ pub fn verify_live_panels(scene: &Scene) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_backings_preserve_translucent_stock_and_solid_edit_columns() {
+        let palette = super::retail_palette(0xbb000a28, 0x0000ff00);
+        for name in [
+            "BAP_BOTTOM_AREA",
+            "BAP_COMMODITY_LIST",
+            "BAP_COST_LIST",
+            "BAP_YESTERDAY_LIST",
+            "BAP_STOCK_I_HAVE_LIST",
+            "BAP_TODAY_LIST",
+        ] {
+            assert_eq!(
+                palette.iter().find(|p| p.0 == name).unwrap().1,
+                [0xbb000a28; 4]
+            );
+        }
+        for name in ["BAP_SELLING_LIST", "BAP_STOCK_I_WANT_LIST"] {
+            assert_eq!(
+                palette.iter().find(|p| p.0 == name).unwrap().1,
+                [0xff202a53; 4]
+            );
+        }
+        assert_eq!(
+            palette.iter().find(|p| p.0 == "BAP_TOTAL_LABEL").unwrap().1,
+            [0x6d4f94b0; 4]
+        );
+    }
+
     #[test]
     #[ignore = "original43aca0/416440/44309c numeric geometry and texture oracle"]
     fn matches_native_retail_numeric_controls() {

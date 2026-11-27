@@ -308,12 +308,44 @@ pub fn panel_base(
 ) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
     panel_frame_base(index, archive, name, parts, 0)
 }
+
+/// Original UI CULL_CW in the panel's X/-Y screen pose. Layout regions
+/// have reverse-facing triangles; drawing them would put opaque texture
+/// backings beneath the runtime translucent rectangles.
+fn panel_triangle_visible(points: [[f32; 3]; 3]) -> bool {
+    let [a, b, c] = points.map(|p| [f64::from(p[0]), -f64::from(p[1])]);
+    let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    area.is_finite() && area < 0.
+}
+
 pub fn panel_frame_base(
     index: &openmt2001::archive::ArchiveIndex,
     archive: &[u8],
     name: &str,
     parts: &[usize],
     frame: usize,
+) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
+    panel_frame_base_impl(index, archive, name, parts, frame, false)
+}
+
+/// Panel mesh submission with the original clockwise-face rejection.
+pub fn panel_front_base(
+    index: &openmt2001::archive::ArchiveIndex,
+    archive: &[u8],
+    name: &str,
+    parts: &[usize],
+    frame: usize,
+) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
+    panel_frame_base_impl(index, archive, name, parts, frame, true)
+}
+
+fn panel_frame_base_impl(
+    index: &openmt2001::archive::ArchiveIndex,
+    archive: &[u8],
+    name: &str,
+    parts: &[usize],
+    frame: usize,
+    cull_clockwise: bool,
 ) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
     let payload = |name: &str| -> Result<&[u8], String> {
         let e = index
@@ -338,12 +370,19 @@ pub fn panel_frame_base(
         )?)
         .map_err(|e| e.to_string())?;
         let mut s = Surface::new(&tex.textures[0]);
-        for v in part.vertex_indices() {
-            s.vertices
-                .push([pos[v][0], -pos[v][1], 0.5, 1., 1., 1., uv[v][0], uv[v][1]]);
-            s.alpha.push(255);
+        let indices = part.vertex_indices().collect::<Vec<_>>();
+        for triangle in indices.as_chunks::<3>().0 {
+            if !cull_clockwise || panel_triangle_visible(triangle.map(|v| pos[v])) {
+                for &v in triangle {
+                    s.vertices
+                        .push([pos[v][0], -pos[v][1], 0.5, 1., 1., 1., uv[v][0], uv[v][1]]);
+                    s.alpha.push(255);
+                }
+            }
         }
-        base.push(s);
+        if !cull_clockwise || !s.vertices.is_empty() {
+            base.push(s);
+        }
     }
     Ok((base, bounds))
 }
@@ -1069,6 +1108,83 @@ impl Slider {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_backings_reject_clockwise_layout_faces() {
+        let front = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.]];
+        assert!(super::panel_triangle_visible(front));
+        assert!(!super::panel_triangle_visible([
+            front[0], front[2], front[1]
+        ]));
+        assert!(!super::panel_triangle_visible([front[0]; 3]));
+        let moved = front.map(|p| [p[0] + 42., p[1] - 12., p[2] + 0.3]);
+        assert!(super::panel_triangle_visible(moved));
+        assert!(!super::panel_triangle_visible([[f32::NAN; 3]; 3]));
+    }
+
+    #[test]
+    fn panel_backings_cull_layout_quads_without_losing_texture_alpha_or_bounds() {
+        // A front-facing textured triangle and a reverse-facing layout
+        // triangle share a rectangle, as the original panel meshes do.
+        let mut mesh = vec![0u8; 164];
+        mesh[..8].copy_from_slice(&[3, 0, 2, 0, 1, 0, 9, 0]);
+        mesh[8..12].copy_from_slice(&1u32.to_le_bytes());
+        for point in [[0f32, 0., 0.], [1., 0., 0.], [1., 1., 0.]] {
+            for value in point {
+                mesh.extend(value.to_le_bytes());
+            }
+        }
+        mesh.extend([0u8; 3 * 20]); // UVs and normals.
+        let mut region = [0u8; 35];
+        region[..6].copy_from_slice(b"LAYOUT");
+        region[33] = 1;
+        mesh.extend(region);
+        for _ in 0..2 {
+            let mut part = [0u8; 20];
+            part[6..8].copy_from_slice(&3u16.to_le_bytes());
+            part[16..20].copy_from_slice(&2u32.to_le_bytes());
+            mesh.extend(part);
+        }
+        mesh.extend(6u32.to_le_bytes());
+        for index in [0u16, 1, 2, 0, 2, 1] {
+            mesh.extend(index.to_le_bytes());
+        }
+        mesh.extend(b"alpha.tt\0");
+        let mut texture = vec![0u8; 60];
+        for (offset, value) in [
+            (0, 1u32),
+            (8, 1),
+            (12, 1),
+            (16, 1f32.to_bits()),
+            (20, 1f32.to_bits()),
+        ] {
+            texture[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        texture.extend([80, 90, 100, 128]);
+        let mut archive = mesh.clone();
+        archive.extend(texture);
+        let mut directory = vec![0u8; 32 + 2 * 308];
+        directory[..4].copy_from_slice(&3u32.to_le_bytes());
+        directory[4..8].copy_from_slice(&2u32.to_le_bytes());
+        for (i, name, offset, length) in [
+            (0, "panel.tm", 0, mesh.len()),
+            (1, "alpha.tt", mesh.len(), archive.len() - mesh.len()),
+        ] {
+            let at = 32 + i * 308;
+            directory[at..at + name.len()].copy_from_slice(name.as_bytes());
+            directory[at + 260..at + 264].copy_from_slice(&(offset as u32).to_le_bytes());
+            directory[at + 264..at + 268].copy_from_slice(&(length as u32).to_le_bytes());
+        }
+        let index =
+            openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let (base, bounds) =
+            super::panel_front_base(&index, &archive, "panel.tm", &[0, 1], 0).unwrap();
+        assert_eq!(base.len(), 1);
+        assert_eq!(base[0].vertices.len(), 3);
+        assert_eq!(base[0].alpha, [255; 3]);
+        assert_eq!(base[0].pixels[3], 128);
+        assert_eq!(bounds, [[0., -1., 1., -0.]]);
+    }
+
     #[test]
     #[ignore = "requires original v1.4 Graphics Options style9 fixture"]
     fn graphics_style9_matches_native_glyph_streams() {
