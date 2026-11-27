@@ -1,5 +1,7 @@
 use crate::present::Presenter;
 
+#[path = "intro/camera_keys.rs"]
+mod camera_keys;
 #[path = "intro/camera_live.rs"]
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
@@ -3821,6 +3823,7 @@ impl Inspection {
             self.strategic = true;
         }
         self.commit_camera();
+        self.send_tutorial_control(73);
         self.hovered = None;
         self.title_state = None;
         self.reframe_pending = true;
@@ -4026,6 +4029,34 @@ impl Inspection {
         if let Some(sender) = &self._fresh_session {
             let _ = sender.send(FreshRequest::TutorialPick(pick));
             self.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
+        }
+    }
+    /// Shared by the business panel's parent-block control and Home (manual p49).
+    fn focus_parent_block(&mut self, selection: &crate::selection::Assets) {
+        let Some(hit) = self.selected.filter(|hit| hit.building.is_some()) else {
+            return;
+        };
+        if self.camera_producer.is_some() {
+            let post = self.camera_control_post(14);
+            match self.queue_camera_event(
+                camera_producer::Event::Block {
+                    category: selection.blocks[hit.category].id as u32,
+                    selected: crate::selection::Hit {
+                        category: hit.category,
+                        building: None,
+                    },
+                    origin: camera_producer::BlockOrigin::Selection,
+                },
+                None,
+                None,
+                false,
+            ) {
+                Ok(pending) => pending.posts.extend(post),
+                Err(error) => self.save_dialog.message = Some(error),
+            }
+        } else {
+            self.focus_category(hit.category, selection);
+            self.send_tutorial_control(14);
         }
     }
     fn focus_category(&mut self, category: usize, selection: &crate::selection::Assets) {
@@ -4373,6 +4404,7 @@ pub struct Intro {
     pub(crate) process_frontend: Option<process_frontend::Owner>,
     camera_physical: camera_live::PhysicalInput,
     pause_keys: pause_keys::Input,
+    camera_keys: camera_keys::Input,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
     renderer: Renderer,
@@ -4799,6 +4831,7 @@ impl Intro {
             inspection: None,
             camera_physical: camera_live::PhysicalInput::default(),
             pause_keys: pause_keys::Input::default(),
+            camera_keys: camera_keys::Input::default(),
             camera_parked: Some(camera_producer::new_process_owner()?),
             audio_levels: crate::settings_menu::Levels::default(),
             graphics_levels: crate::settings_menu::GraphicsLevels::default(),
@@ -4983,6 +5016,7 @@ impl Intro {
                     .map_err(|e| e.to_string())?
                     != 0;
         }
+        self.dispatch_camera_shortcut(sample);
         self.pause_keys.dispatch(sample, gates, &mut self.focus)?;
         process_frontend::project_camera_sample(
             &mut self.camera_physical,
@@ -4990,6 +5024,66 @@ impl Intro {
             sample,
         );
         Ok(())
+    }
+    fn dispatch_camera_shortcut(&mut self, sample: process_frontend::PhysicalSample) {
+        let mut gates = camera_keys::Gates::default();
+        if matches!(
+            sample,
+            process_frontend::PhysicalSample::Key {
+                key: winit::keyboard::PhysicalKey::Code(
+                    winit::keyboard::KeyCode::Tab | winit::keyboard::KeyCode::Home
+                ),
+                down: true,
+                repeat: false,
+            }
+        ) && let Some(view) = &self.inspection
+        {
+            gates.active = !self.focus_pending() && self.loading.is_none();
+            gates.modal = view.options_visible()
+                || view.save_visible()
+                || view.settings_visible()
+                || view.prompts.request().is_some()
+                || view.prompt_reply.is_some()
+                || view.auction_visible()
+                || view.stats_requested
+                || view.result.is_some()
+                || view.result_pending.is_some()
+                || view.adjustment.is_some()
+                || view.planning.is_some()
+                || view.planning_pending.is_some()
+                || view.live_status.as_ref().is_some_and(|s| {
+                    s.stats.is_some() || s.result_request.is_some() || s.market_share.is_some()
+                });
+            gates.tutorial = view.live_status.as_ref().is_some_and(|s| {
+                s.tutorial_controls.all_disabled || s.tutorial_controls.camera_disabled
+            });
+            gates.city_view = view
+                .camera_navigation
+                .as_ref()
+                .is_none_or(|n| n.mode() != 1)
+                && (view.ui_graph.is_none() || view.graph_input(camera_live::ui_graph::PanelId::E));
+            if let Some(graph) = &view.ui_graph {
+                // The installed UI owns text focus on this route, including
+                // chat. The native continuation is not the live input route.
+                gates.text_entry = graph.body(camera_live::ui_graph::PanelId::OtherPrimary(3))
+                    || [
+                        camera_live::navigation::Group::Primary,
+                        camera_live::navigation::Group::Secondary,
+                        camera_live::navigation::Group::Tertiary,
+                    ]
+                    .into_iter()
+                    .any(|group| graph.group(group).key_target.is_some());
+            }
+        }
+        if let Some(action) = self.camera_keys.sample(sample, gates)
+            && let Some(view) = &mut self.inspection
+        {
+            match action {
+                // The compass transaction owns both raw records and the return pose.
+                camera_keys::Action::CityView => view.toggle_navigation(&self.assets.navigation),
+                camera_keys::Action::ParentBlock => view.focus_parent_block(&self.assets.selection),
+            }
+        }
     }
     pub fn inspection_key(
         &mut self,
@@ -6004,25 +6098,8 @@ impl Intro {
                 } else {
                     let activate = view.tutorial_go_to_block_pressed && tutorial_go_to_block_hit;
                     view.tutorial_go_to_block_pressed = false;
-                    if activate && let Some(hit) = view.selected {
-                        if view.camera_producer.is_some() {
-                            let post = view.camera_control_post(14);
-                            let event = camera_producer::Event::Block {
-                                category: self.assets.selection.blocks[hit.category].id as u32,
-                                selected: crate::selection::Hit {
-                                    category: hit.category,
-                                    building: None,
-                                },
-                                origin: camera_producer::BlockOrigin::Selection,
-                            };
-                            match view.queue_camera_event(event, None, None, false) {
-                                Ok(pending) => pending.posts.extend(post),
-                                Err(error) => view.save_dialog.message = Some(error),
-                            }
-                        } else {
-                            view.focus_category(hit.category, &self.assets.selection);
-                            view.send_tutorial_control(14);
-                        }
+                    if activate {
+                        view.focus_parent_block(&self.assets.selection);
                     }
                 }
                 view.mouse_buttons[0] = false;
@@ -6783,13 +6860,6 @@ impl Intro {
                         view.navigation_pressed = false;
                         if view.over_navigation() {
                             view.toggle_navigation(&self.assets.navigation);
-                            if view.camera_producer.is_none()
-                                && view.live_status.as_ref().is_some_and(|status| {
-                                    status.tutorial_enabled_controls.contains(&73)
-                                })
-                            {
-                                view.send_tutorial_control(73);
-                            }
                         }
                         return;
                     }

@@ -464,6 +464,62 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
             intro.inspection_unfocus();
             assert_eq!(intro.inspection.as_ref().unwrap().keys, [false; 4]);
             assert_eq!(intro.inspection.as_ref().unwrap().taps, [false; 4]);
+            // Feed the same focus-admitted physical path as App. These view
+            // shortcuts must share the existing compass/parent-block controls.
+            use winit::keyboard::{KeyCode, PhysicalKey};
+            fn sample(intro: &mut Intro, code: KeyCode, down: bool, repeat: bool) {
+                intro.camera_physical_sample(process_frontend::PhysicalSample::Key {
+                    key: PhysicalKey::Code(code), down, repeat,
+                }).unwrap();
+            }
+            for code in [KeyCode::Tab, KeyCode::Home] {
+                let view = intro.inspection.as_mut().unwrap();
+                view.live_status.as_mut().unwrap().tutorial_controls.camera_disabled = true;
+                let before = camera_producer::Controls::read(view);
+                sample(&mut intro, code, true, false);
+                let view = intro.inspection.as_mut().unwrap();
+                assert_eq!(view.camera.eye, before.camera.eye);
+                assert!(!view.strategic);
+                view.live_status.as_mut().unwrap().tutorial_controls.camera_disabled = false;
+                sample(&mut intro, code, true, true);
+                assert!(!intro.inspection.as_ref().unwrap().strategic);
+                sample(&mut intro, code, false, false);
+            }
+            let before = camera_producer::Controls::read(intro.inspection.as_ref().unwrap());
+            sample(&mut intro, KeyCode::Tab, true, false);
+            assert!(intro.inspection.as_ref().unwrap().strategic);
+            sample(&mut intro, KeyCode::Tab, false, false);
+            sample(&mut intro, KeyCode::Tab, true, false);
+            sample(&mut intro, KeyCode::Tab, false, false);
+            let view = intro.inspection.as_ref().unwrap();
+            assert!(!view.strategic);
+            assert_eq!(view.camera.eye, before.camera.eye);
+            assert_eq!(view.camera.target, before.camera.target);
+            assert_eq!(view.controls.center, before.controls.center);
+            assert_eq!(view.controls.angle, before.controls.angle);
+            assert_eq!(view.controls.height, before.controls.height);
+            assert_eq!(view.controls.radius, before.controls.radius);
+            assert_eq!(view.selected, before.selected);
+            let hit = intro.inspection.as_ref().unwrap().scene.inspection_buildings
+                .iter().enumerate().find_map(|(index, building)|
+                    inspection_hit(&intro.assets.selection.blocks, building.category, Some(index)))
+                .expect("supplied snapshot has a building with a parent block");
+            intro.inspection.as_mut().unwrap().selected = Some(hit);
+            intro.inspection.as_mut().unwrap().stats_requested = true;
+            sample(&mut intro, KeyCode::Home, true, false);
+            assert_eq!(intro.inspection.as_ref().unwrap().selected, Some(hit));
+            intro.inspection.as_mut().unwrap().stats_requested = false;
+            sample(&mut intro, KeyCode::Home, true, true);
+            assert_eq!(intro.inspection.as_ref().unwrap().selected, Some(hit));
+            sample(&mut intro, KeyCode::Home, false, false);
+            sample(&mut intro, KeyCode::Home, true, false);
+            sample(&mut intro, KeyCode::Home, false, false);
+            let view = intro.inspection.as_ref().unwrap();
+            assert_eq!(view.selected, Some(crate::selection::Hit { category: hit.category, building: None }));
+            assert_eq!(view.controls.center, intro.assets.selection.center(hit.category));
+            assert_eq!(view.controls.radius, 80.);
+            assert_eq!(view.controls.height, 120.);
+            assert!(!view.building_camera);
             assert_eq!(fs::read(&original).unwrap(), save_bytes);
             drop(intro);
             drop(presenter);
