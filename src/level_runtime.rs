@@ -16,10 +16,11 @@ pub struct HourlyContext<'a> {
     pub income: crate::economy::OwnerIncomeSettings,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CalendarEvent {
     Clock(crate::clock::Event),
     Hourly(crate::hourly::Event),
+    AccountPosted(crate::economy::AccountPosting),
 }
 
 pub struct Population {
@@ -170,6 +171,7 @@ impl Population {
                     city,
                     |event, clock, hourly, city| {
                         std::mem::swap(hourly, &mut context.hourly);
+                        let mut postings = Vec::new();
                         let result = self
                             .hourly_event(
                                 event,
@@ -178,8 +180,18 @@ impl Population {
                                 context.board,
                                 context.utilities,
                                 context.income,
+                                &mut postings,
                             )
                             .and_then(|handled| {
+                                for posting in postings {
+                                    boundary(
+                                        CalendarEvent::AccountPosted(posting),
+                                        clock,
+                                        city,
+                                        self,
+                                        context,
+                                    )?;
+                                }
                                 if handled {
                                     Ok(false)
                                 } else {
@@ -219,6 +231,7 @@ impl Population {
         board: &crate::board::Board,
         utilities: &mut crate::economy::Utilities,
         income: crate::economy::OwnerIncomeSettings,
+        postings: &mut Vec<crate::economy::AccountPosting>,
     ) -> Result<bool, String> {
         use crate::hourly::Event;
         match event {
@@ -255,13 +268,13 @@ impl Population {
                     settings: &business,
                 }
                 .parameters(&city.ledgers.businesses)?;
-                crate::economy::update_daily_businesses(
+                postings.extend(crate::economy::update_daily_businesses(
                     &mut city.ledgers.businesses,
                     &parameters,
                     &mut city.ledgers.residents,
                     &mut city.ledgers.players,
                     utilities,
-                )?;
+                )?);
             }
             Event::Helper(0x48e070) => {
                 // Ownership can change in an earlier callback in this hour.

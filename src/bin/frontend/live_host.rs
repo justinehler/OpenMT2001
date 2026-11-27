@@ -2455,6 +2455,10 @@ impl Host {
                     omitted.insert(0x407660);
                     Ok(0)
                 }
+                Event::AccountPosted(posting) => account_ui_post(posting, current_slot, |amount| {
+                    ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
+                        assets.image.f32_at(0x525040)?)
+                }),
                 Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::Posted { player, amount, .. },
                 )) => {
@@ -3195,6 +3199,19 @@ impl Host {
     }
 }
 
+/// Route an already-applied posting without touching balances or netting amounts.
+fn account_ui_post(
+    posting: openmt2001::economy::AccountPosting,
+    current_slot: Option<u8>,
+    mut post: impl FnMut(f32) -> Result<u32, String>,
+) -> Result<u32, String> {
+    if current_slot.map(usize::from) == Some(posting.player) {
+        post(posting.amount)
+    } else {
+        Ok(0)
+    }
+}
+
 /// Original48a5a0 presentation after the account has already been posted.
 fn ledger_ui_post(
     cash_arrow: &mut crate::cash_arrow::State,
@@ -3202,6 +3219,17 @@ fn ledger_ui_post(
     current: bool,
     amount: f32,
     threshold: f32,
+) -> Result<u32, String> {
+    ledger_ui_post_with(current, amount, threshold, |call| {
+        ledger_ui_call(cash_arrow, sound, call)
+    })
+}
+
+fn ledger_ui_post_with(
+    current: bool,
+    amount: f32,
+    threshold: f32,
+    mut call: impl FnMut(openmt2001::category_ownership::Seam) -> Result<u32, String>,
 ) -> Result<u32, String> {
     use openmt2001::category_ownership::Seam;
     if !current {
@@ -3225,11 +3253,11 @@ fn ledger_ui_post(
         argument_count: 6,
     };
     if sale {
-        ledger_ui_call(cash_arrow, sound, cue)?;
-        ledger_ui_call(cash_arrow, sound, pulse)
+        call(cue)?;
+        call(pulse)
     } else {
-        ledger_ui_call(cash_arrow, sound, pulse)?;
-        ledger_ui_call(cash_arrow, sound, cue)
+        call(pulse)?;
+        call(cue)
     }
 }
 
@@ -3470,6 +3498,100 @@ fn human_dialog_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_post_feedback_filters_and_preserves_each_posting_order() {
+        use openmt2001::economy::{
+            self, BusinessDayParameters, PlayerAccount, ResidentAccounts, Utilities,
+        };
+        use openmt2001::{category_ownership::Seam, economy::AccountPosting};
+        let mut records = vec![[0; 0x220]; 600];
+        let mut parameters: Vec<_> = (0..600).map(|_| None).collect();
+        for (slot, tenant, landlord, rent) in [
+            (0, 1, 2, 75u16),
+            (3, 2, 1, 125),
+            (5, 1, 2, 0),
+            (8, 1, 1, 900),
+            (12, 1, 2, 50),
+        ] {
+            records[slot][..4].copy_from_slice(&2u32.to_le_bytes());
+            records[slot][10] = tenant;
+            records[slot][0x18..0x1a].copy_from_slice(&rent.to_le_bytes());
+            records[slot][0x21c] = 1;
+            parameters[slot] = Some(BusinessDayParameters {
+                capacity: 0,
+                catalog_mask: 0,
+                prices: Vec::new(),
+                utility_scalar: 0,
+                utility_rates: [0.; 4],
+                landlord,
+            });
+        }
+        let mut players: Vec<_> = (0..2)
+            .map(|_| {
+                let mut player = PlayerAccount::from_runtime(&[0; 0x1b8]).unwrap();
+                player.cash = 1000.;
+                player
+            })
+            .collect();
+        let postings = economy::update_daily_businesses(
+            &mut records,
+            &parameters,
+            &mut ResidentAccounts {
+                active_count: 0,
+                nodes: Vec::new(),
+                accounts: Vec::new(),
+            },
+            &mut players,
+            &mut Utilities::new([0; 4]),
+        )
+        .unwrap();
+        let mut calls = Vec::new();
+        for posting in postings.iter().copied() {
+            account_ui_post(posting, Some(0), |amount| {
+                ledger_ui_post_with(true, amount, 0., |call| {
+                    calls.push(call);
+                    Ok(0)
+                })
+            })
+            .unwrap();
+        }
+        let pulse = |credit| Seam::NativeUiCall {
+            address: if credit { 0x4c6290 } else { 0x4c62d0 },
+            args: [0; 6],
+            argument_count: 0,
+        };
+        let sound = |credit| Seam::NativeUiCall {
+            address: 0x4ad760,
+            args: [if credit { 0x541cc8 } else { 0x541cb4 }, 0, 0, 0, 1, 0x3c],
+            argument_count: 6,
+        };
+        assert_eq!(
+            calls,
+            vec![
+                pulse(false),
+                sound(false),
+                sound(true),
+                pulse(true),
+                pulse(false),
+                sound(false),
+            ]
+        );
+        account_ui_post(
+            AccountPosting {
+                player: 0,
+                amount: 100.,
+            },
+            None,
+            |_| panic!("no local account"),
+        )
+        .unwrap();
+        assert_eq!(
+            players.iter().map(|p| p.cash).collect::<Vec<_>>(),
+            [1000., 1000.]
+        );
+        ledger_ui_post_with(false, 100., 0., |_| panic!("other player")).unwrap();
+    }
+
     #[test]
     #[ignore = "requires original v1.4 executable"]
     fn original_property_broadcast_dispatcher_is_inert_after_refresh() {
