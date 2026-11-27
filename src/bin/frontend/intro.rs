@@ -10,6 +10,8 @@ pub(crate) mod focus;
 pub(crate) mod menu_preferences;
 #[path = "intro/options_ack.rs"]
 mod options_ack;
+#[path = "intro/pause_keys.rs"]
+mod pause_keys;
 #[path = "intro/process_frontend.rs"]
 pub(crate) mod process_frontend;
 #[path = "intro/refresh.rs"]
@@ -4289,6 +4291,7 @@ pub struct Intro {
     focus: focus::Route,
     pub(crate) process_frontend: Option<process_frontend::Owner>,
     camera_physical: camera_live::PhysicalInput,
+    pause_keys: pause_keys::Input,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
     renderer: Renderer,
@@ -4689,6 +4692,7 @@ impl Intro {
             refresh_retry: refresh::Retry::default(),
             inspection: None,
             camera_physical: camera_live::PhysicalInput::default(),
+            pause_keys: pause_keys::Input::default(),
             camera_parked: Some(camera_producer::new_process_owner()?),
             audio_levels: crate::settings_menu::Levels::default(),
             graphics_levels: crate::settings_menu::GraphicsLevels::default(),
@@ -4817,12 +4821,68 @@ impl Intro {
             _ => (),
         }
     }
-    pub(crate) fn camera_physical_sample(&mut self, sample: process_frontend::PhysicalSample) {
+    pub(crate) fn camera_physical_sample(
+        &mut self,
+        sample: process_frontend::PhysicalSample,
+    ) -> Result<(), String> {
+        let mut gates = pause_keys::Gates::default();
+        if matches!(
+            sample,
+            process_frontend::PhysicalSample::Key {
+                key: winit::keyboard::PhysicalKey::Code(
+                    winit::keyboard::KeyCode::F1 | winit::keyboard::KeyCode::KeyP
+                ),
+                down: true,
+                repeat: false,
+            }
+        ) && let Some(view) = &self.inspection
+            && view._fresh_session.is_some()
+        {
+            gates.active = true;
+            gates.modal = view.options_visible()
+                || view.save_visible()
+                || view.stats_requested
+                || view.result.is_some()
+                || view.result_pending.is_some()
+                || view
+                    .live_status
+                    .as_ref()
+                    .is_some_and(|s| s.stats.is_some() || s.result_request.is_some())
+                || view
+                    .camera_navigation
+                    .as_ref()
+                    .is_some_and(|n| n.mode() == 4);
+            if !matches!(
+                sample,
+                process_frontend::PhysicalSample::Key {
+                    key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F1),
+                    ..
+                }
+            ) && let Some(graph) = &view.ui_graph
+            {
+                gates.text_entry = graph.chat_guard57e794_plus345()? != 0;
+            }
+            use crate::live_host::process_runtime::Byte;
+            gates.suppressed = self
+                .assets
+                .process_runtime
+                .byte(Byte::Media8fca98)
+                .map_err(|e| e.to_string())?
+                != 0
+                || self
+                    .assets
+                    .process_runtime
+                    .byte(Byte::Suppressed8b0700)
+                    .map_err(|e| e.to_string())?
+                    != 0;
+        }
+        self.pause_keys.dispatch(sample, gates, &mut self.focus)?;
         process_frontend::project_camera_sample(
             &mut self.camera_physical,
             self.inspection.as_mut(),
             sample,
         );
+        Ok(())
     }
     pub fn inspection_key(
         &mut self,
@@ -4935,19 +4995,6 @@ impl Intro {
                 .is_some_and(|status| status.tutorial_controls.all_disabled)
                 && key != NamedKey::Escape
             {
-                return Ok(());
-            }
-            if key == NamedKey::Space
-                && let Some(sender) = &view._fresh_session
-            {
-                let running = !view.live_status.as_ref().is_some_and(|s| s.running);
-                sender
-                    .send(FreshRequest::Run(running))
-                    .map_err(|e| e.to_string())?;
-                if let Some(status) = &mut view.live_status {
-                    status.running = running && status.failure.is_none();
-                }
-                view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
                 return Ok(());
             }
         }
@@ -7610,7 +7657,7 @@ impl Intro {
         }
         self.commit_menu_settings()?;
         // A host worker reuses the same original byte inputs and shared assembler.
-        // Native startup enables gameplay; Space controls the host pause gate.
+        // Native startup enables gameplay; player pause owns reason3 separately.
         // The worker retains its Lua VM and world until inspection is dismissed.
         if !self.refreshing_fresh
             && self.menu.as_ref().is_some_and(|m| {

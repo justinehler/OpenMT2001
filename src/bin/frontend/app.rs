@@ -337,7 +337,10 @@ impl App {
             fresh |=
                 apply_desktop_sample(&mut self.desktop_keys, &mut self.participant_left, sample);
             if let Some(intro) = &mut self.intro {
-                intro.camera_physical_sample(sample);
+                if let Err(error) = intro.camera_physical_sample(sample) {
+                    self.failure = Some(error);
+                    return false;
+                }
             }
         }
         fresh

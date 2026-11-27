@@ -205,6 +205,11 @@ impl ProcessFrontend {
         } else {
             self.input.focus_loss_cells_after_device_calls();
         }
+        self.audio_pause(focused, reason3)
+    }
+    /// 43e5f0 reaches the same 4ad610/4ad640 audio wrapper as focus,
+    /// without acquiring devices or changing input admission.
+    fn audio_pause(&mut self, focused: bool, reason3: i8) -> Result<Prefix, String> {
         self.frontend.set_guards(self.activation.guards());
         let generation = self.generation;
         let frontend = &mut self.frontend;
@@ -436,6 +441,19 @@ impl ProcessFrontend {
 }
 pub(super) struct Provider(pub Owner);
 impl Effects for Provider {
+    fn player_pause(
+        &mut self,
+        id: AttachmentId,
+        focused: bool,
+        reason3: i8,
+    ) -> Result<Prefix, String> {
+        let mut p = self.0.borrow_mut();
+        p.live()?;
+        if p.attachment != Some(id.value()) || p.phase != Phase::World {
+            return Err("Player pause attachment retired".into());
+        }
+        p.audio_pause(focused, reason3)
+    }
     fn activate(&mut self, id: AttachmentId) -> Result<(), String> {
         let mut p = self.0.borrow_mut();
         p.live()?;
