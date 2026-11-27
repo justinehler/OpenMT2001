@@ -58,17 +58,6 @@ fn input() -> Input {
     }
 }
 impl Context for Ui {
-    fn primary_construction(
-        &mut self,
-    ) -> Option<(
-        &mut crate::intro::camera_live::deferred_primary::DeferredPrimary,
-        &mut crate::intro::camera_live::primitive_factory::Primitives,
-        &mut crate::intro::camera_live::ui_text_resources::UiTextResources,
-        &crate::intro::camera_live::process_images::Images,
-    )> {
-        None
-    }
-
     fn save_interface_mode(&self) -> Result<u32, String> {
         Ok(0)
     }

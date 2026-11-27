@@ -332,11 +332,6 @@ pub enum SessionCall {
         source: ResidentSource,
         read: ResidentRead,
     },
-    /// Protected Install-only actual current World categories.
-    PrimaryCategory {
-        source: ResidentSource,
-        row: Option<u8>,
-    },
     ProcessByte(super::process_runtime::Byte),
     Performance8b26cc,
     Count822d38,
@@ -355,7 +350,6 @@ pub enum SessionCall {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionReply {
-    PrimaryCategory(Option<[u32; 3]>),
     Byte(u8),
     Word(u32),
     Signed(i32),
@@ -364,22 +358,12 @@ pub enum SessionReply {
 }
 impl SessionCall {
     fn admitted_on(&self, boundary: Boundary) -> bool {
-        if matches!(self, Self::PrimaryCategory { .. }) {
-            boundary == Boundary::Install
-        } else {
-            boundary == Boundary::CentralTail
-        }
+        boundary == Boundary::CentralTail
     }
     fn accepts(&self, reply: &SessionReply) -> bool {
         matches!(
             (self, reply),
             (
-                Self::PrimaryCategory { row: None, .. },
-                SessionReply::PrimaryCategory(None)
-            ) | (
-                Self::PrimaryCategory { row: Some(_), .. },
-                SessionReply::PrimaryCategory(Some(_))
-            ) | (
                 Self::Resident {
                     read: ResidentRead::Count7a18ec
                         | ResidentRead::Kind30(_)

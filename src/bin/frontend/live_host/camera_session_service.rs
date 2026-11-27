@@ -1,7 +1,5 @@
 //! Actual Host-stack Session handler, invoked by the existing central request.
 //! No copied World/Session, Lua move, clock, FreshRequest or callback replay.
-#[path = "camera_session_service/primary_category.rs"]
-pub(crate) mod primary_category;
 use super::{
     Session,
     camera_bridge::{RequestError, SessionCall, SessionReply},
@@ -11,9 +9,6 @@ pub(super) fn handle(
     session: &mut Session<'_>,
     call: SessionCall,
 ) -> Result<SessionReply, RequestError> {
-    if let SessionCall::PrimaryCategory { source, row } = call {
-        return primary_category::read(&session.world, &source, row);
-    }
     if let SessionCall::Resident { source, read } = call {
         return apply_resident(
             super::camera_bridge::PropertyEpoch::World(session.world.topology.epoch()),
@@ -137,7 +132,6 @@ fn apply(
             })?;
             Ok(SessionReply::Completed)
         }
-        PrimaryCategory { .. } => Err("D category read requires actual World handler".into()),
         Resident { .. } => {
             Err("resident service requires actual Session World/pool handler".into())
         }
