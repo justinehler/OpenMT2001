@@ -17,6 +17,7 @@ pub mod lighting;
 pub mod market;
 pub mod material;
 pub mod mesh;
+pub mod network;
 pub mod panels;
 pub mod pause;
 pub mod pe;
