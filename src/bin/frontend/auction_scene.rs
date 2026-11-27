@@ -308,7 +308,7 @@ impl Assets {
         )
     }
 
-    fn camera_matrix() -> Result<[f32; 16], String> {
+    pub(crate) fn camera_matrix() -> Result<[f32; 16], String> {
         let sample = initial_camera();
         let [near, far] = openmt2001::camera::city_clip(sample.eye[1])?;
         let projection = openmt2001::camera::projection(

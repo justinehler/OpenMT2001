@@ -159,6 +159,14 @@ pub struct Auction {
     /// 414160 disables the textureless title-right child in network mode.
     pub hidden_bid_toggle_enabled: bool,
     pub info: Option<crate::auction_panel::Info>,
+    pub participants: Vec<crate::auction_labels::Participant>,
+}
+
+impl Auction {
+    fn refresh_participants(&mut self, session: &Session<'_>) -> Result<(), String> {
+        self.participants = crate::auction_labels::participants(session)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -387,13 +395,21 @@ impl Host {
                         Ok(0)
                     }
                     Call::RefreshPanel => {
-                        omitted.insert(0x414f90);
+                        auction
+                            .as_mut()
+                            .ok_or("Auction labels have no prepared scene")?
+                            .participants
+                            .clear();
                         Ok(0)
                     }
                     Call::NormalSpeed => Ok(0),
                 }
             },
         )?;
+        self.auction
+            .as_mut()
+            .unwrap()
+            .refresh_participants(session)?;
         Ok(())
     }
 
@@ -866,6 +882,7 @@ impl Host {
                 auction.controls.timer.sound = rebuilt_sound;
                 auction.visible = state.visible;
                 auction.info = Some(crate::auction_panel::Info::from_session(session)?);
+                auction.refresh_participants(session)?;
                 // V2 restores the retained phase-two widget group. Native
                 //464ee0 shows565b9c and565ba8 together (464f0f..464f41).
                 // Vanilla465490/464aa0 only rebuilds the scene/turn labels;
@@ -1139,6 +1156,11 @@ impl Host {
         let mut auction = self.auction.clone();
         if let Some(auction) = &mut auction {
             auction.hidden_bid_toggle_enabled = !self.policy.scheduler.network_enabled;
+            // Publish names, authoritative cash and the final controller state
+            // together, including AI actions and restored auction sessions.
+            if let Err(error) = auction.refresh_participants(session) {
+                self.fail(error);
+            }
             match crate::auction_panel::Info::from_session(session) {
                 Ok(info) => auction.info = Some(info),
                 Err(error) => self.fail(error),
@@ -2199,8 +2221,9 @@ impl Host {
                 Event::Command(openmt2001::live_commands::Event::AuctionActivation(
                     openmt2001::ai_messages::offers::auction::activation::Call::RefreshPanel,
                 )) => {
-                    //414f90 is original participant labels/cash/status text.
-                    omitted.insert(0x414f90);
+                    // Refresh from the completed session below: this callback
+                    // runs while the simulation owns the controller borrow.
+                    auction.as_mut().ok_or("Auction labels have no prepared scene")?.participants.clear();
                     Ok(0)
                 }
                 Event::Command(openmt2001::live_commands::Event::AuctionActivation(
@@ -2536,6 +2559,12 @@ impl Host {
             return;
         }
         self.collect_script_prompts(session);
+        let result = result.and_then(|()| {
+            if let Some(auction) = &mut self.auction {
+                auction.refresh_participants(session)?;
+            }
+            Ok(())
+        });
         match result {
             Ok(()) => {
                 if let Err(error) = crate::transport_audio::submit(
@@ -2928,7 +2957,11 @@ impl Host {
             other => Err(format!("Auction action requires {other:?}")),
         });
         self.policy.ai_event_gate = bid_gate.get();
-        result
+        result?;
+        if let Some(auction) = &mut self.auction {
+            auction.refresh_participants(session)?;
+        }
+        Ok(())
     }
     pub fn auction_button(
         &mut self,
@@ -3382,9 +3415,9 @@ pub(crate) fn auction_action(
         }
         Call::Tutorial(_) => (),
         Call::RefreshTurn(_) => {
-            // Native tail updates selected character X7f9088 and refreshes the
-            // participant text414f90. Controller rotation already completed.
-            omitted.insert(0x4648b9);
+            // Invalidate the old text; the host refreshes from the completed
+            // controller after the simulation releases its mutable borrow.
+            auction.participants.clear();
         }
         Call::WithdrawNotice(participant) => {
             if let Some(sender) = actor_events {

@@ -12,6 +12,49 @@ pub struct Label {
     pub cash: i32,
     pub cash_color: u32,
 }
+
+/// Text inputs retained in the live host snapshot, in auction seat order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Participant {
+    pub name: Vec<u8>,
+    pub character: u32,
+    pub label: Label,
+    pub high_bidder: bool,
+    pub winner: bool,
+}
+
+pub fn participants(session: &crate::fresh_city::Session<'_>) -> Result<Vec<Participant>, String> {
+    let record = &session.world.city.auction.controller.record;
+    let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
+    session
+        .roster
+        .manager
+        .players
+        .iter()
+        .enumerate()
+        .map(|(slot, player)| {
+            let name = &player.bytes[0x158..0x1b8];
+            let end = name
+                .iter()
+                .position(|&b| b == 0)
+                .ok_or("Unterminated auction participant name")?;
+            let cash = session
+                .world
+                .ledgers
+                .players
+                .get(slot)
+                .ok_or("Auction participant account missing")?
+                .cash;
+            Ok(Participant {
+                name: name[..end].to_vec(),
+                character: u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()),
+                label: Label::from_record(record, slot, cash)?,
+                high_bidder: word(0x5c) == slot as u32,
+                winner: word(0x60) == slot as u32,
+            })
+        })
+        .collect()
+}
 impl Label {
     pub fn from_record(record: &[u8; 344], slot: usize, cash: f32) -> Result<Self, String> {
         if slot >= 6 {
@@ -79,6 +122,41 @@ pub fn high_bidder_marker(point: [f32; 2], viewport: [u32; 2]) -> [f32; 4] {
 }
 fn scaled(point: [f32; 2], viewport: [u32; 2]) -> [f32; 2] {
     std::array::from_fn(|i| (f64::from(point[i]) * [640., 480.][i] / f64::from(viewport[i])) as f32)
+}
+
+#[test]
+fn participant_status_priority_and_whole_cash() {
+    let mut record = [0; 344];
+    let slot = 2;
+    record[0x50..0x54].copy_from_slice(&2u32.to_le_bytes());
+    record[0x58..0x5c].copy_from_slice(&u32::MAX.to_le_bytes());
+    record[0x60..0x64].copy_from_slice(&u32::MAX.to_le_bytes());
+    let status = |record: &[u8; 344]| Label::from_record(record, slot, -1234.75).unwrap().status;
+    assert_eq!(status(&record), Text::Language(1557));
+    record[0xc + slot * 12..0x10 + slot * 12].copy_from_slice(&250u32.to_le_bytes());
+    assert_eq!(status(&record), Text::Money(250));
+    record[0x58..0x5c].copy_from_slice(&2u32.to_le_bytes());
+    assert_eq!(status(&record), Text::Language(1558));
+    record[0x10 + slot * 12] = 1;
+    assert_eq!(status(&record), Text::Language(1556));
+    record[0x12 + slot * 12] = 1;
+    assert_eq!(status(&record), Text::Language(1555));
+    record[0x60..0x64].copy_from_slice(&2u32.to_le_bytes());
+    let label = Label::from_record(&record, slot, -1234.75).unwrap();
+    assert_eq!(label.status, Text::Language(1552));
+    assert_eq!((label.cash, label.cash_color), (-1234, 6));
+    let label = Label::from_record(&record, slot, 1234.75).unwrap();
+    assert_eq!((label.cash, label.cash_color), (1234, 0));
+}
+
+#[test]
+fn projected_bounds_keep_original_coordinate_space() {
+    let high = Bounds::from_projected([640., 480.], [1280, 960], true, false);
+    assert_eq!(high.background, [280., 220., 80., 40.]);
+    assert_eq!(high.name_cash, [280., 220., 80., 23.]);
+    assert_eq!(high.status, [280., 245., 80., 45.]);
+    let won = Bounds::from_projected([320., 240.], [640, 480], true, true);
+    assert_eq!(won.status, [280., 245., 80., 15.]);
 }
 
 #[test]

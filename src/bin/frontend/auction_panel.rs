@@ -189,7 +189,7 @@ fn original_auction_panel_resources() {
             price: 1250,
         };
         let panel = assets
-            .prepare_with_info(&renderer, &state, Some(1), false, Some(&info))
+            .prepare_with_info(&renderer, &state, Some(1), false, Some(&info), &[])
             .unwrap();
         let scene =
             crate::auction_scene::Assets::load(&PeImage::parse(&exe).unwrap(), &index, &archive)
@@ -214,6 +214,9 @@ pub struct Assets {
     textures: [[Surface; 3]; 5],
     fonts: [Vec<Surface>; 2],
     tabs: [Vec<u8>; 2],
+    label_font: Vec<Surface>,
+    label_tab: Vec<u8>,
+    text_colors: Vec<u32>,
     strings: Vec<Vec<u8>>,
     timer_labels: [Vec<u8>; 2],
 }
@@ -326,7 +329,14 @@ impl View {
             self.prepared = key
                 .as_ref()
                 .map(|(a, h, p)| {
-                    assets.prepare_with_info(renderer, &a.controls, *h, *p, a.info.as_ref())
+                    assets.prepare_with_info(
+                        renderer,
+                        &a.controls,
+                        *h,
+                        *p,
+                        a.info.as_ref(),
+                        &a.participants,
+                    )
                 })
                 .transpose()?;
             self.key = key;
@@ -470,6 +480,16 @@ impl Assets {
                 font.textures[6..8].iter().map(Surface::new).collect(),
             ],
             tabs: [title?, body?],
+            label_font: font.textures[0..2].iter().map(Surface::new).collect(),
+            label_tab: fs::read(installer.join("Standard/fonts/cust640p.tab"))
+                .map_err(|e| e.to_string())?,
+            text_colors: (0..18)
+                .map(|i| {
+                    image
+                        .at(0x536288 + i * 4, 4)
+                        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                })
+                .collect::<Result<_, _>>()?,
             strings: crate::tooltip::localized_strings(installer, strings)?,
             timer_labels: [waiting?, sold?],
         })
@@ -552,7 +572,118 @@ impl Assets {
         hover: Option<usize>,
         pressed: bool,
     ) -> Result<PreparedScene, String> {
-        self.prepare_with_info(renderer, state, hover, pressed, None)
+        self.prepare_with_info(renderer, state, hover, pressed, None, &[])
+    }
+    fn participant_surfaces(
+        &self,
+        surfaces: &mut Vec<Surface>,
+        participants: &[crate::auction_labels::Participant],
+    ) -> Result<(), String> {
+        if participants.is_empty() {
+            return Ok(());
+        }
+        let characters = participants.iter().map(|p| p.character).collect::<Vec<_>>();
+        let poses = crate::auction_scene::initial_layout(&characters)?;
+        let camera = glam::Mat4::from_cols_array(&crate::auction_scene::Assets::camera_matrix()?);
+        let rect = |[x, y, w, h]: [f32; 4]| [x, y, x + w, y + h];
+        for (participant, pose) in participants.iter().zip(&poses[7..]) {
+            // 414c40 projects the participant anchor one world unit below
+            // their seat, using the same camera and aspect as the scene.
+            let [x, y, z] = pose.position;
+            let clip = camera * glam::Vec4::new(x, y - 1., z, 1.);
+            let projected = [(clip.x / clip.w + 1.) * 320., (1. - clip.y / clip.w) * 240.];
+            let bounds = crate::auction_labels::Bounds::from_projected(
+                projected,
+                [640, 480],
+                participant.high_bidder,
+                participant.winner,
+            );
+            let name_cash = rect(bounds.name_cash);
+            let status = rect(bounds.status);
+            let color = *self
+                .character_colors
+                .get(participant.character as usize)
+                .ok_or("Auction participant character outside palette")?;
+            let gradient = [
+                color | 0xff000000,
+                color | 0xff000000,
+                (color & 0xffffff) | 0x7f000000,
+                (color & 0xffffff) | 0x7f000000,
+            ];
+            let mut fill = Surface::solid();
+            fill.rect(rect(bounds.background), [0x7f000000; 4]);
+            for [l, t, r, b] in [name_cash, status] {
+                fill.rect([l, t, r, b], gradient);
+                for (a, z) in [
+                    ([l, t], [r, t]),
+                    ([r, t], [r, b]),
+                    ([r, b], [l, b]),
+                    ([l, b], [l, t]),
+                ] {
+                    fill.line(a, z, 0xff000000);
+                }
+            }
+            surfaces.push(fill);
+            let [l, t, r, b] = name_cash;
+            let mut portrait = self.portraits[participant.character as usize].clone();
+            portrait.quad(
+                [[l, t], [l, b], [l + 23., b], [l + 23., t]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [u32::MAX; 4],
+            );
+            surfaces.push(portrait);
+            let name = participant
+                .name
+                .iter()
+                .map(|&b| {
+                    b.checked_sub(32)
+                        .filter(|&b| b <= 94)
+                        .ok_or("Auction participant name glyph mapping")
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let money = |value| {
+                ui::integer_money(
+                    value,
+                    &self.strings[2243],
+                    self.strings[2244].first() != Some(&0x4c),
+                )
+            };
+            let mut pages = self.label_font.clone();
+            ui::text_fit(
+                &mut pages,
+                &self.label_tab,
+                &name,
+                [l + 24., t + 2., r - 2., t + 12.],
+                true,
+                self.text_colors[0],
+            )?;
+            ui::text_fit(
+                &mut pages,
+                &self.label_tab,
+                &money(participant.label.cash),
+                [l + 24., t + 12., r - 2., b - 2.],
+                true,
+                self.text_colors[participant.label.cash_color as usize],
+            )?;
+            surfaces.extend(pages);
+            let (text, tab, mut pages) = match participant.label.status {
+                crate::auction_labels::Text::Empty => continue,
+                crate::auction_labels::Text::Language(id) => (
+                    self.strings
+                        .get(id as usize)
+                        .ok_or("Auction participant status language index")?
+                        .clone(),
+                    &self.label_tab,
+                    self.label_font.clone(),
+                ),
+                crate::auction_labels::Text::Money(value) => {
+                    (money(value), &self.tabs[0], self.fonts[0].clone())
+                }
+            };
+            ui::text_widget_style4(&mut pages, tab, &text, status, self.text_colors[0])?;
+            surfaces.extend(pages);
+        }
+        Ok(())
     }
     fn prepare_with_info(
         &self,
@@ -561,9 +692,11 @@ impl Assets {
         hover: Option<usize>,
         pressed: bool,
         info: Option<&Info>,
+        participants: &[crate::auction_labels::Participant],
     ) -> Result<PreparedScene, String> {
         let mut surfaces = self.bid.base.clone();
         surfaces.push(self.bid.fill.clone());
+        self.participant_surfaces(&mut surfaces, participants)?;
         if let Some(info) = info {
             let bounds = |name| {
                 self.top
@@ -1054,7 +1187,7 @@ mod bid_facing_tests {
                 price: 1250,
             };
             let panel = assets
-                .prepare_with_info(&renderer, &state, None, false, Some(&info))
+                .prepare_with_info(&renderer, &state, None, false, Some(&info), &[])
                 .unwrap();
             let mut checker = Surface::solid();
             for row in 0..15 {
