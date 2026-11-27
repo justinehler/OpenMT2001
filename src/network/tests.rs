@@ -360,3 +360,71 @@ fn encode_validates_rows_content_and_session_too() {
         Err(Error::Content)
     );
 }
+
+#[test]
+fn admission_frames_are_strict_and_cannot_consume_application_sequences() {
+    let hello = Frame {
+        session: [0; 16],
+        sequence: 0,
+        message: Message::Hello,
+    };
+    let welcome = frame(Message::Welcome { slot: 5 }, 0);
+    for valid in [hello.clone(), welcome.clone()] {
+        let bytes = codec::encode(&valid).unwrap();
+        assert_eq!(codec::decode(&bytes), Ok(valid.clone()));
+        for end in 0..bytes.len() {
+            assert!(codec::decode(&bytes[..end]).is_err());
+        }
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert_eq!(codec::decode(&trailing), Err(Error::TrailingBytes));
+        let payload_length = (trailing.len() - codec::HEADER) as u32;
+        trailing[8..12].copy_from_slice(&payload_length.to_le_bytes());
+        assert_eq!(codec::decode(&trailing), Err(Error::TrailingBytes));
+        let mut bad_sequence = bytes.clone();
+        bad_sequence[28] = 1;
+        assert_eq!(codec::decode(&bad_sequence), Err(Error::Sequence));
+        let mut bad_session = valid.clone();
+        bad_session.session = if valid == hello { [7; 16] } else { [0; 16] };
+        assert_eq!(codec::encode(&bad_session), Err(Error::Session));
+        let mut bad_bytes = bytes;
+        bad_bytes[12..28].copy_from_slice(&bad_session.session);
+        assert_eq!(codec::decode(&bad_bytes), Err(Error::Session));
+        let mut bad_frame = valid;
+        bad_frame.sequence = 1;
+        assert_eq!(codec::encode(&bad_frame), Err(Error::Sequence));
+    }
+    for slot in [0, SLOTS as u8, u8::MAX] {
+        let invalid = frame(Message::Welcome { slot }, 0);
+        assert_eq!(codec::encode(&invalid), Err(Error::Peer));
+        let mut invalid = codec::encode(&welcome).unwrap();
+        invalid[codec::HEADER] = slot;
+        assert_eq!(codec::decode(&invalid), Err(Error::Peer));
+    }
+    let owner = Owner::new().unwrap();
+    let attempt = lobby(&owner);
+    let connection = owner.adopt(attempt, 0, true).unwrap();
+    let mut decoder = codec::Decoder::new([7; 16]).unwrap();
+    let welcome = codec::encode(&welcome).unwrap();
+    assert_eq!(decoder.decode(&welcome), Err(Error::Tag));
+    assert_eq!(owner.receive(connection, None, &welcome), Err(Error::Tag));
+    assert_eq!(decoder.decode(&bytes(roster(), 0)), Ok(frame(roster(), 0)));
+    assert_eq!(
+        owner.receive(connection, None, &bytes(roster(), 0)),
+        Ok(roster())
+    );
+}
+
+#[test]
+fn old_connection_cannot_receive_through_a_reused_slot_in_the_same_attempt() {
+    let owner = Owner::new().unwrap();
+    let attempt = lobby(&owner);
+    let old = owner.adopt(attempt, 0, true).unwrap();
+    // The transport removes the adopted peer on disconnect, retaining the slot.
+    owner.lock().unwrap().peers[0] = None;
+    let replacement = owner.adopt(attempt, 0, true).unwrap();
+    assert_ne!(old, replacement);
+    let data = bytes(roster(), 0);
+    assert_eq!(owner.receive(old, None, &data), Err(Error::Peer));
+    assert_eq!(owner.receive(replacement, None, &data), Ok(roster()));
+}
