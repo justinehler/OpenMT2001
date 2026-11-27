@@ -60,6 +60,11 @@ fn quad(s: &mut Surface, [l, t, r, b]: [f32; 4], color: u32) {
         [color; 4],
     );
 }
+// 41e6b1 selects font3 (our batch0); 408b50 selects the heading's
+// language entry, then 440ad0 assigns palette16 to its glyphs.
+fn information_heading_style(info: usize) -> (usize, usize, usize) {
+    (0, 16, [30, 1405][info])
+}
 impl Assets {
     pub fn load(
         index: &ArchiveIndex,
@@ -228,6 +233,8 @@ impl Assets {
         let mut buttons = self.fonts[1].clone();
         let mut title_font = self.title_fonts.clone();
         let mut graph_font = self.fonts[2].clone();
+        let (heading_batch, heading_color, heading_text) = information_heading_style(state.info);
+        let mut heading_font = self.fonts[heading_batch].clone();
         let text = |pages: &mut [Surface], bytes: &[u8], rect, right| {
             ui::text_fit(pages, &self.tabs[0], bytes, rect, right, self.color)
         };
@@ -290,11 +297,13 @@ impl Assets {
                     );
                     surfaces.push(icon);
                 }
-                text(
-                    &mut font,
-                    &self.strings[[1162, 1164][state.info]],
+                // 41e6e1 uses style4: center both axes at the native font size.
+                ui::text_widget_style4(
+                    &mut heading_font,
+                    &self.tabs[heading_batch],
+                    &self.strings[heading_text],
                     self.information.header,
-                    false,
+                    self.palette[heading_color],
                 )?;
                 if state.info == 1 {
                     //408c50 uses the separate+8c list: top+40, font3 offset3.
@@ -706,6 +715,7 @@ impl Assets {
             text(&mut font, &glyphs, [32., 285., 184., 313.], false)?;
         }
         surfaces.extend(font);
+        surfaces.extend(heading_font);
         surfaces.extend(buttons);
         surfaces.extend(title_font);
         surfaces.extend(graph_font);
@@ -1050,6 +1060,11 @@ pub fn capture_inspection(data: &Inspection) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn information_heading_uses_native_font_color_and_language() {
+        assert_eq!(information_heading_style(0), (0, 16, 30));
+        assert_eq!(information_heading_style(1), (0, 16, 1405));
+    }
     pub(super) fn original_assets() -> (Assets, Vec<u8>) {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
