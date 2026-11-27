@@ -23,7 +23,7 @@ pub struct Assets {
     order: [u32; 45],
     block_titles: [Option<u32>; 52],
     special_residential_groups: [[i32; 4]; 52],
-    text_color: u32,
+    text_colors: [u32; 17],
     business_list_color: u32,
     pub entry_bounds: [f32; 4],
     input_bounds: [f32; 4],
@@ -131,6 +131,14 @@ fn hit(rect: [f32; 4], p: [f32; 2]) -> bool {
 fn type_text(kind: u32) -> u32 {
     [860, 859, 861][kind as usize]
 }
+// Native 420f20 assigns index16 via 440ad0 to stage titles and the
+// adjustment/cost captions. Selected values and details retain index0.
+fn planner_text_color_index(text_id: u32) -> usize {
+    match text_id {
+        1512 | 1514..=1516 | 1518 | 1520..=1523 => 16,
+        _ => 0,
+    }
+}
 fn word(row: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(row[at..at + 4].try_into().unwrap())
 }
@@ -217,7 +225,10 @@ impl Assets {
             order,
             block_titles,
             special_residential_groups,
-            text_color: word(image.at(0x536288, 4)?, 0),
+            text_colors: {
+                let colors = image.at(0x536288, 17 * 4)?;
+                std::array::from_fn(|i| word(colors, i * 4))
+            },
             // 423156/423160 set color index9 on both native list widgets.
             business_list_color: word(image.at(0x536288 + 9 * 4, 4)?, 0),
             entry_bounds: regions[16],
@@ -249,13 +260,7 @@ impl Assets {
             color,
         )
     }
-    fn heading(
-        &self,
-        pages: &mut [Surface],
-        id: u32,
-        bounds: [f32; 4],
-        color: u32,
-    ) -> Result<(), String> {
+    fn heading(&self, pages: &mut [Surface], id: u32, bounds: [f32; 4]) -> Result<(), String> {
         ui::text_widget_style4(
             pages,
             &self.tabs[1],
@@ -263,7 +268,7 @@ impl Assets {
                 .get(id as usize)
                 .ok_or("Planning heading language ID")?,
             bounds,
-            color,
+            self.text_colors[planner_text_color_index(id)],
         )
     }
     pub fn open(&self, context: Context) -> Result<State, String> {
@@ -406,7 +411,7 @@ impl Assets {
                 .get(block_title as usize)
                 .ok_or("Planning heading")?,
             [40.403656, 5.6, 175.66975, 28.],
-            self.text_color,
+            self.text_colors[0],
         )?;
         // Supplied native captures show only completed/current stage circles:
         // two in Screenshots/4.jpg, all four in Screenshots/3.jpg.
@@ -428,7 +433,12 @@ impl Assets {
             surfaces.push(icon);
         }
         if let Some(id) = state.message {
-            self.label(&mut body, id, [30.4, 43.6, 188.8, 160.], self.text_color)?;
+            self.label(
+                &mut body,
+                id,
+                [30.4, 43.6, 188.8, 160.],
+                self.text_colors[0],
+            )?;
         } else {
             // 422d30/422fd0 enable the text-widget background on every
             // visible stage heading. 4419f0 draws these quads before glyphs.
@@ -441,7 +451,7 @@ impl Assets {
             }
             match state.step {
                 0 => {
-                    self.heading(&mut body, 1512, STEP_TITLES[0], self.text_color)?;
+                    self.heading(&mut body, 1512, STEP_TITLES[0])?;
                     // 4233ad..4233e2 orders Retail, Residential, Landscape.
                     // Native 420f20 creates the three row widgets with all
                     // texture handles set to -1. Their bounds are hit targets,
@@ -453,7 +463,7 @@ impl Assets {
                             id,
                             TYPE[i],
                             if available {
-                                self.text_color
+                                self.text_colors[0]
                             } else {
                                 0xff888888
                             },
@@ -461,14 +471,14 @@ impl Assets {
                     }
                 }
                 1 => {
-                    self.heading(&mut body, 1512, STEP_TITLES[0], self.text_color)?;
+                    self.heading(&mut body, 1512, STEP_TITLES[0])?;
                     self.label(
                         &mut body,
                         type_text(state.kind),
                         STEP_CHOICES[0],
-                        self.text_color,
+                        self.text_colors[0],
                     )?;
-                    self.heading(&mut body, 1522, STEP_TITLES[1], self.text_color)?;
+                    self.heading(&mut body, 1522, STEP_TITLES[1])?;
                     for (n, &row) in state
                         .display_rows
                         .iter()
@@ -522,12 +532,7 @@ impl Assets {
                     }
                     .paint(&mut panel, &mut controls, &self.textures);
                     panel.rect([30.4, 163.6, 188.8, 177.6], [0xff01762f; 4]);
-                    self.heading(
-                        &mut body,
-                        1513,
-                        [30.4, 163.6, 188.8, 177.6],
-                        self.text_color,
-                    )?;
+                    self.heading(&mut body, 1513, [30.4, 163.6, 188.8, 177.6])?;
                     if let Some(business) = state.preview_business {
                         for (i, text_id) in state
                             .context
@@ -540,7 +545,7 @@ impl Assets {
                                 &mut body,
                                 text_id,
                                 [30.4, y, 188.8, y + 12.],
-                                self.text_color,
+                                self.text_colors[0],
                             )?;
                         }
                     }
@@ -549,20 +554,25 @@ impl Assets {
                     // The original planner retains completed stage captions
                     // and choices while the player drags the base plate.
                     for (i, id) in step_titles.into_iter().enumerate().take(3) {
-                        self.heading(&mut body, id, STEP_TITLES[i], self.text_color)?;
+                        self.heading(&mut body, id, STEP_TITLES[i])?;
                     }
                     self.label(
                         &mut body,
                         type_text(state.kind),
                         STEP_CHOICES[0],
-                        self.text_color,
+                        self.text_colors[0],
                     )?;
                     let row = state
                         .context
                         .catalog
                         .row(state.business.ok_or("No planning business")? as usize)
                         .ok_or("Planning catalog")?;
-                    self.label(&mut body, word(row, 4), STEP_CHOICES[1], self.text_color)?;
+                    self.label(
+                        &mut body,
+                        word(row, 4),
+                        STEP_CHOICES[1],
+                        self.text_colors[0],
+                    )?;
                 }
                 _ => {
                     let row = state
@@ -574,15 +584,20 @@ impl Assets {
                     // visible above the adjustment controls. Their sublines show
                     // the choices already made in the first three stages.
                     for (i, id) in step_titles.into_iter().enumerate() {
-                        self.heading(&mut body, id, STEP_TITLES[i], self.text_color)?;
+                        self.heading(&mut body, id, STEP_TITLES[i])?;
                     }
                     self.label(
                         &mut body,
                         type_text(state.kind),
                         STEP_CHOICES[0],
-                        self.text_color,
+                        self.text_colors[0],
                     )?;
-                    self.label(&mut body, word(row, 4), STEP_CHOICES[1], self.text_color)?;
+                    self.label(
+                        &mut body,
+                        word(row, 4),
+                        STEP_CHOICES[1],
+                        self.text_colors[0],
+                    )?;
                     if let Some([x0, y0, x1, y1]) = state.rectangle {
                         ascii(
                             &mut body,
@@ -597,7 +612,7 @@ impl Assets {
                             &self.tabs[1],
                             self.strings.get(1516).ok_or("Planning Floors caption")?,
                             [30.4, 127.6, 188.8038, 141.6],
-                            self.text_color,
+                            self.text_colors[planner_text_color_index(1516)],
                         )?;
                         let floors = formatted_pair(
                             self.strings.get(1519).ok_or("Planning step count text")?,
@@ -609,7 +624,7 @@ impl Assets {
                             &self.tabs[1],
                             &floors,
                             [30.4, 127.6, 188.8, 141.6],
-                            self.text_color,
+                            self.text_colors[0],
                         )?;
                         ui::Slider {
                             bounds: FLOOR_SLIDER,
@@ -627,7 +642,7 @@ impl Assets {
                                 .get(1520)
                                 .ok_or("Planning Build Quality caption")?,
                             [30.4, 157.6, 188.8038, 171.6],
-                            self.text_color,
+                            self.text_colors[planner_text_color_index(1520)],
                         )?;
                         // Native child31 is a filled navy text widget behind
                         // the quality choices, even though its text is empty.
@@ -645,7 +660,7 @@ impl Assets {
                                 &self.tabs[2],
                                 self.strings.get(id).ok_or("Planning quality label")?,
                                 [bounds[2], bounds[1], bounds[2] + 100., bounds[3]],
-                                self.text_color,
+                                self.text_colors[0],
                             )?;
                         }
                         ui::text_widget_style0(
@@ -655,7 +670,7 @@ impl Assets {
                                 .get(1518)
                                 .ok_or("Planning Build Style caption")?,
                             [30.4, 186.6, 188.8038, 200.6],
-                            self.text_color,
+                            self.text_colors[planner_text_color_index(1518)],
                         )?;
                         let count = state.design_count();
                         let style = formatted_pair(
@@ -668,7 +683,7 @@ impl Assets {
                             &self.tabs[1],
                             &style,
                             [30.4, 186.6, 188.8, 200.6],
-                            self.text_color,
+                            self.text_colors[0],
                         )?;
                         ui::Slider {
                             bounds: STYLE_SLIDER,
@@ -684,7 +699,6 @@ impl Assets {
                         &mut body,
                         if state.kind == 2 { 1523 } else { 1521 },
                         [30.4, 213.6, 188.8, 227.6],
-                        self.text_color,
                     )?;
                     if let Some(quote) = &state.quote {
                         // Child39 carries the quoted amount on its own navy
@@ -701,7 +715,7 @@ impl Assets {
                             &amount,
                             [30.4, 229.6, 188.8, 243.6],
                             true,
-                            self.text_color,
+                            self.text_colors[0],
                         )?;
                     }
                     if state.kind != 2
@@ -745,7 +759,7 @@ impl Assets {
                             &label,
                             [30.4, 243.6, 188.8, 257.6],
                             true,
-                            self.text_color,
+                            self.text_colors[0],
                         )?;
                     }
                 }
@@ -792,7 +806,7 @@ impl Assets {
                 if disabled {
                     0xff999999
                 } else {
-                    self.text_color
+                    self.text_colors[0]
                 },
             )?;
         }
@@ -2707,6 +2721,29 @@ pub fn verify_live_context(
 
 #[cfg(test)]
 mod caption_tests {
+    #[test]
+    fn planner_caption_and_value_color_indices() {
+        for (class, ids) in [
+            ("stage headings", &[1512, 1522, 1514, 1515][..]),
+            ("adjustment captions", &[1516, 1520, 1518][..]),
+            ("cost captions", &[1521, 1523][..]),
+        ] {
+            for &id in ids {
+                assert_eq!(super::planner_text_color_index(id), 16, "{class}: {id}");
+            }
+        }
+        for (class, ids) in [
+            ("selected types", &[860, 859, 861][..]),
+            ("floor and style counts", &[1519][..]),
+            ("quality choices", &[1656, 1655, 1657][..]),
+            ("amounts and capacity", &[2243, 2244, 1524, 1525][..]),
+        ] {
+            for &id in ids {
+                assert_eq!(super::planner_text_color_index(id), 0, "{class}: {id}");
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires original v1.4 static planner caption glyph fixture"]
     fn original_static_adjustment_caption_glyphs() {
