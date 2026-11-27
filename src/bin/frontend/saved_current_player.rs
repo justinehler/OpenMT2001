@@ -46,7 +46,7 @@ mod tests {
             let n = word(&mut at);
             let file = ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"]
                 .into_iter()
-                .map(|k| std::path::PathBuf::from(openmt2001::fixtures::path(k)))
+                .map(|k| openmt2001::fixtures::path(k))
                 .find(|p| p.file_name().unwrap() == name)
                 .unwrap_or_else(|| path.parent().unwrap().join(name));
             let bytes = std::fs::read(file).unwrap();

@@ -2608,7 +2608,6 @@ mod tests {
     #[test]
     #[ignore = "private original auxiliary sunlight transform oracle"]
     fn original_building_pose_sunlight() {
-        let path = crate::fixtures::path("NATIVE_BUILDING_POSE");
         let b = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_POSE_LIGHT")).unwrap();
         assert_eq!(&b[..8], b"MTBLIGHT");
         let count = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;

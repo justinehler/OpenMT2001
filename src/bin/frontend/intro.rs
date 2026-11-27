@@ -10829,7 +10829,7 @@ mod tests {
                 for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
                     let (loaded, mut session) = inputs
                         .saved_preview(
-                            &PathBuf::from(openmt2001::fixtures::path(key)),
+                            &openmt2001::fixtures::path(key),
                             camera,
                             &mut SnapshotCache::default(),
                         )
@@ -13102,7 +13102,7 @@ mod tests {
             for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
                 let mut cache = SnapshotCache::default();
                 let (_, mut session) = inputs.saved_preview(
-                    &PathBuf::from(openmt2001::fixtures::path(key)), camera, &mut cache).unwrap();
+                    &openmt2001::fixtures::path(key), camera, &mut cache).unwrap();
                 let state = session.models.tree_state.as_ref().unwrap().clone();
                 let revision = state.borrow().revision();
                 let mut seen = std::collections::BTreeSet::new();

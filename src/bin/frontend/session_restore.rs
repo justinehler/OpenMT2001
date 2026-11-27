@@ -3883,9 +3883,7 @@ mod tests {
             let bytes = session
                 .save_v2(&image, cameras, 1)
                 .expect("supplied-save modern export");
-            let parent = Some(openmt2001::fixtures::scratch("TEST_SCRATCH")).unwrap_or_else(|| {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("work/test-scratch")
-            });
+            let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
             fs::create_dir_all(&parent).unwrap();
             let root = parent.join(format!(
                 "supplied-save-{}-{}",

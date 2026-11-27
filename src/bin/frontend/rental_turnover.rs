@@ -9,10 +9,7 @@ use openmt2001::{
     economy::{BusinessTerms, PlayerAccount, ResidentAccounts},
     housing,
 };
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 fn word(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }

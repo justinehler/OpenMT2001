@@ -1336,7 +1336,7 @@ impl<'data> Session<'data> {
     }
 
     fn initialize_with_catalog(
-        mut input: Inputs<'_, 'data>,
+        input: Inputs<'_, 'data>,
         policy: Policy,
         supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
@@ -7472,7 +7472,7 @@ mod skirmish_session_acceptance {
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let build = read("OPENMT2001_BUILD_FILE");
-        let sun = read("OPENMT2001_SUNCOLS");
+        let _sun = read("OPENMT2001_SUNCOLS");
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
@@ -7859,7 +7859,7 @@ mod skirmish_session_acceptance {
                 let directory = read("OPENMT2001_ARCHIVE_DIR");
                 let archive = read("OPENMT2001_ARCHIVE_BIN");
                 let build = read("OPENMT2001_BUILD_FILE");
-                let sun = read("OPENMT2001_SUNCOLS");
+                let _sun = read("OPENMT2001_SUNCOLS");
                 let parameters = read("OPENMT2001_PARAMETERS");
                 let timetable = read("OPENMT2001_TIMETABLE");
                 let image = openmt2001::pe::PeImage::parse(&executable).unwrap();

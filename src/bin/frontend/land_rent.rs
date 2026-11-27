@@ -263,7 +263,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let path = ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"]
                 .into_iter()
-                .map(|key| std::path::PathBuf::from(openmt2001::fixtures::path(key)))
+                .map(|key| openmt2001::fixtures::path(key))
                 .find(|p| p.file_name().unwrap() == name)
                 .unwrap();
             let bytes = std::fs::read(path).unwrap();

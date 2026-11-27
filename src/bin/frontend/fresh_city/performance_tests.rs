@@ -2,7 +2,7 @@
 use super::*;
 use crate::fresh_city::{Inputs, Policy};
 use crate::live_host::process_runtime::{Handle, OriginalGraphicsPolicy};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // Exercise the actual raw current-camera callback. This does not install a
 // synthetic bank in production, widen camera modes, or admit fresh autosave.

@@ -2,7 +2,6 @@
 //! one-tick midnight alignment. These are component regressions, not natural
 //! rollover, full UI, original-executable, or portable GPU acceptance.
 use crate::intro::camera_live::{
-    self as live,
     endpoint::{Context, Endpoint, PropertyInstall},
     owner::{Input, Owner, Pose},
 };

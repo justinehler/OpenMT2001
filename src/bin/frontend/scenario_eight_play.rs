@@ -1,7 +1,6 @@
 //! Original Scenario8 profit frontier from its sparse-map startup and legal city play.
 use super::{
-    CommandAssets, Inputs, Path, PathBuf, Policy, Session, character_names, fs, load_era_styles,
-    word,
+    CommandAssets, Inputs, Path, Policy, Session, character_names, fs, load_era_styles, word,
 };
 
 #[test]

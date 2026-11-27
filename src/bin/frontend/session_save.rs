@@ -1765,7 +1765,7 @@ impl SaveProjection<'_> {
         self.encode_continuation(image, cameras, game_mode, host, interface_mode, None)
     }
     fn encode_continuation(
-        mut self,
+        self,
         image: &openmt2001::pe::PeImage<'_>,
         cameras: [[u8; 196]; 2],
         game_mode: u32,

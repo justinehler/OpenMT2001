@@ -777,7 +777,7 @@ fn start_source_worker(
         .unwrap();
     run
 }
-fn worker_state(run: &Worker) -> camera_producer::View {
+fn worker_state(_run: &Worker) -> camera_producer::View {
     let fresh = fresh_controls();
     camera_producer::View {
         active: fresh,
@@ -1157,7 +1157,7 @@ fn actual_worker_selection_stale_preflight_cancel_retire_and_new_world_preserve_
     ));
     assert_eq!(fs::read(path).unwrap(), before);
     drop(run);
-    let mut next = start_source_worker(Arc::clone(&inputs), &mut parked, false);
+    let next = start_source_worker(Arc::clone(&inputs), &mut parked, false);
     let next_epoch = next.loaded.as_ref().unwrap().camera_epoch.unwrap();
     assert_ne!(next_epoch, epoch);
     camera_producer::enqueue(

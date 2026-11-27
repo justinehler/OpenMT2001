@@ -189,11 +189,8 @@ fn actual_session_world_capture_handler_and_replacement_are_live() {
         fresh_city::{self, Inputs, Policy},
         live_host::Host,
     };
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
-    let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
+    use std::{fs, path::Path};
+    let path = |key: &str| openmt2001::fixtures::path(key);
     let read = |key: &str| fs::read(path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");

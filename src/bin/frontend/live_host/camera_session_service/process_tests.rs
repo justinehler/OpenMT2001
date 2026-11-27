@@ -31,11 +31,8 @@ fn actual_assets_startup_retained_handle_and_host_service_writers() {
         fresh_city::{self, Inputs, Policy},
         live_host::Host,
     };
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
-    let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
+    use std::{fs, path::Path};
+    let path = |key: &str| openmt2001::fixtures::path(key);
     let read = |key: &str| fs::read(path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -90,7 +87,7 @@ fn actual_assets_startup_retained_handle_and_host_service_writers() {
     host.camera_bridge = Some(worker);
     let (source_tx, source_rx) = std::sync::mpsc::channel();
     let ui = thread::spawn(move || {
-        let path = |key: &str| PathBuf::from(openmt2001::fixtures::path(key));
+        let path = |key: &str| openmt2001::fixtures::path(key);
         let mut assets = crate::intro::Assets::load_with_source_options(
             crate::intro::Paths {
                 compatibility: crate::compatibility::Mode::StrictV14,

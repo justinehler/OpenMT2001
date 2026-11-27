@@ -212,7 +212,7 @@ mod tests {
     fn naturally_housed_live_polls() {
         std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
             use crate::fresh_city::{Session, Inputs, Policy, CommandAssets, character_names, load_era_styles};
-            use std::{fs, path::{Path, PathBuf}};
+            use std::{fs, path::Path};
             let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let archive = read("OPENMT2001_ARCHIVE_BIN");

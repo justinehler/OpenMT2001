@@ -11,10 +11,7 @@ use camera_live::{
     endpoint::{Context, Endpoint, PropertyInstall},
     owner::{Input, Owner, Pose},
 };
-use openmt2001::camera::{
-    bank::{Bank, Capture},
-    primary::CursorRequest,
-};
+use openmt2001::camera::{bank::Bank, primary::CursorRequest};
 use std::{
     path::Path,
     sync::{
@@ -333,7 +330,7 @@ fn run(fixture_key: &'static str, expect_era: bool) {
     thread::Builder::new().stack_size(32*1024*1024).spawn(move||{
         let budget=Instant::now();let scratch=Scratch::new();let observer=probe::Observe::start();
         let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
-        let original=PathBuf::from(openmt2001::fixtures::path(fixture_key));let original_bytes=fs::read(&original).unwrap();
+        let original=openmt2001::fixtures::path(fixture_key);let original_bytes=fs::read(&original).unwrap();
         let parameter=openmt2001::fixtures::path("PARAMETERS");
         let exe_path=openmt2001::fixtures::path("EXE");let executable=read("OPENMT2001_EXE");
         let image=openmt2001::pe::PeImage::parse(&executable).unwrap();

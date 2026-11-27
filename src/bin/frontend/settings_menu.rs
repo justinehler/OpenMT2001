@@ -1209,7 +1209,7 @@ mod graphics_tests {
     #[ignore = "requires original v1.4 Settings parent mesh fixture"]
     fn native_default_parent_submission_does_not_imply_visible_raster() {
         use super::{Assets, Page};
-        use std::{fs, path::PathBuf};
+        use std::fs;
         let data = fs::read(openmt2001::fixtures::path("NATIVE_SETTINGS_BASE")).unwrap();
         assert_eq!(&data[..8], b"MTSTBP01");
         let mut cursor = 8usize;
@@ -1272,7 +1272,7 @@ mod graphics_tests {
     #[ignore = "requires original v1.4 Graphics Options mesh and localization"]
     fn original_graphics_controls_and_visual_state() {
         use super::{Assets, Button, GameplayLevels, GraphicsLevels, Levels, Page, View};
-        use std::{fs, path::PathBuf};
+        use std::fs;
         let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");

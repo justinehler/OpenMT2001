@@ -454,7 +454,7 @@ fn random_zero_to(state: &mut u32, args: &[Value]) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn result_random_uses_the_native_static_stream() {
