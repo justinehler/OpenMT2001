@@ -459,6 +459,30 @@ impl Menu {
         self.dirty = true;
         Ok(())
     }
+    ///49e630 returns the stopped graph to scenarios or the main menu.
+    pub fn finish_result(&mut self, target: crate::live_host::ResultMenu) -> Result<(), String> {
+        self.skirmish.finish(None);
+        self.load.visible = false;
+        self.profile.visible = false;
+        self.single.visible = false;
+        self.single_mode = false;
+        self.pending = None;
+        self.selected = None;
+        self.pressed = false;
+        self.pressed_origin = None;
+        if target == crate::live_host::ResultMenu::Scenarios {
+            let current = self.profile.store.current.ok_or("Result profile missing")?;
+            let name = &self.profile.store.names[current];
+            let path =
+                crate::campaign_store::profile_path(&self.assets.profile_root, name.as_bytes());
+            let mut catalog = self.assets.catalog.clone();
+            crate::campaign_store::load_progress(&mut catalog, &path)?;
+            self.single.open(false, name, catalog, path);
+            self.single_mode = true;
+        }
+        self.dirty = true;
+        Ok(())
+    }
     pub fn planning_assets(&self) -> &crate::build_view::Assets {
         &self.assets.planning
     }
