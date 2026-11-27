@@ -272,6 +272,10 @@ pub fn event_card(
                 utilities,
                 context.catalog,
                 notice,
+                |call, world, _| {
+                    event(Event::EventCardEffect(call), world)?;
+                    Ok(true)
+                },
             ),
             effects::Call::Target {
                 kind,
