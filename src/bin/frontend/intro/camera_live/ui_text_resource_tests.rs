@@ -310,7 +310,8 @@ fn shared_text_partial_failure_preserves_retained_owner_and_actual_error_writer_
     let fonts = resources.fonts_mut();
     let table = fonts.fonts[&0].table.clone();
     let scratch = fonts.scratch.clone();
-    let missing = path("OPENMT2001_TEXT_SCRATCH").join("deliberately-absent-original-font.tab");
+    let missing =
+        openmt2001::fixtures::scratch("TEXT_SCRATCH").join("deliberately-absent-original-font.tab");
     assert!(!missing.exists());
     assert!(fonts.load_table(0, &missing).unwrap_err().contains("font0"));
     assert_eq!(fonts.fonts[&0].table, table);
@@ -356,8 +357,8 @@ fn shared_text_real_intro_asset_load_retains_process_resource_and_default_ret() 
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     };
     let assets = crate::intro::Assets::load(paths).unwrap();
     let pointer = assets.ui_text.fonts() as *const _;

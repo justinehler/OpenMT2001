@@ -2609,7 +2609,7 @@ mod tests {
     #[ignore = "private original auxiliary sunlight transform oracle"]
     fn original_building_pose_sunlight() {
         let path = crate::fixtures::path("NATIVE_BUILDING_POSE");
-        let b = std::fs::read(path.with_file_name("native-building-pose-light.bin")).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_POSE_LIGHT")).unwrap();
         assert_eq!(&b[..8], b"MTBLIGHT");
         let count = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
         assert_eq!(b.len(), 12 + count * 28);
@@ -3697,9 +3697,7 @@ mod temporal_city_lighting_regressions {
         let map = read("OPENMT2001_INTRO_MAP");
         let native_path = crate::fixtures::path("NATIVE_LIGHTING");
         let native = std::fs::read(&native_path).unwrap();
-        let vertices =
-            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
-                .unwrap();
+        let vertices = std::fs::read(crate::fixtures::path("NATIVE_LIGHTING_VERTICES")).unwrap();
         assert_eq!(&native[..8], b"MTLIGHT3");
         assert_eq!(&vertices[..8], b"MTLITV01");
         assert_eq!(word(&native, 8), word(&vertices, 8));
@@ -3840,8 +3838,7 @@ mod temporal_city_lighting_regressions {
         let native_path = crate::fixtures::path("NATIVE_LIGHTING");
         let native = std::fs::read(&native_path).unwrap();
         let observations =
-            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
-                .unwrap();
+            std::fs::read(crate::fixtures::path("NATIVE_LIGHTING_VERTICES")).unwrap();
         let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let board = Board::from_v14(&PeImage::parse(&executable).unwrap()).unwrap();
         let file = BuildFile::parse(&build_file).unwrap();

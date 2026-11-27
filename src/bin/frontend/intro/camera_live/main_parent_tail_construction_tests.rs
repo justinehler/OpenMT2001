@@ -103,8 +103,8 @@ fn paths() -> crate::intro::Paths {
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     }
 }
 #[test]
@@ -719,7 +719,7 @@ fn actual_assets_retains_layout_and_process_runtime_activity_then_rejects_failed
     let runtime = &published.process_runtime as *const _;
     let activity = &published.activity as *const _;
     let mut bad = paths();
-    bad.executable = path("OPENMT2001_TEXT_PROFILE").join("absent-tail-original.exe");
+    bad.executable = openmt2001::fixtures::scratch("TEXT_PROFILE").join("absent-tail-original.exe");
     if let Ok(replacement) = crate::intro::Assets::load(bad) {
         published = Box::new(replacement);
         panic!("missing original published")

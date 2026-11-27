@@ -301,7 +301,7 @@ mod tests {
         let ai = crate::fixtures::path("AI_SCRIPT");
         let root = ai.parent().unwrap().parent().unwrap();
         let hub = std::fs::read(root.join("SCENARIO3/hub.lua")).unwrap();
-        let map = std::fs::read(root.join("maps/apartmentrim.lua")).unwrap();
+        let map = std::fs::read(root.join("MAPS/apartmentrim.lua")).unwrap();
         let prefs = std::fs::read(root.join("SCENARIO3/initialpref.lua")).unwrap();
         let expected_map =
             crate::scene::parse_static_map(std::str::from_utf8(&map).unwrap()).unwrap();

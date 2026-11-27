@@ -81,8 +81,8 @@ fn paths() -> crate::intro::Paths {
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     }
 }
 #[test]
@@ -594,7 +594,8 @@ fn actual_assets_load_keeps_child5_on_same_process_and_rejects_incomplete_main()
             .is_err()
     );
     let mut missing = paths();
-    missing.executable = path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");
+    missing.executable =
+        openmt2001::fixtures::scratch("TEXT_PROFILE").join("intentionally-missing-original.exe");
     assert!(crate::intro::Assets::load(missing).is_err());
     assert_eq!(
         moved.reordered_main().unwrap().node(list).unwrap() as *const Node,

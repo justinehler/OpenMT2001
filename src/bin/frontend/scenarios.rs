@@ -215,7 +215,7 @@ mod tests {
                 .collect();
             assert_eq!(maps, s.map.into_iter().collect::<Vec<_>>(), "{}", s.token);
             if let Some(map) = s.map {
-                let input = std::fs::read_to_string(root.join("maps").join(map)).unwrap();
+                let input = std::fs::read_to_string(root.join("MAPS").join(map)).unwrap();
                 openmt2001::scene::parse_static_map(&input).unwrap();
             }
         }
