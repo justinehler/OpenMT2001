@@ -34,7 +34,13 @@ impl CategoryFrustum {
         let [near, far] = openmt2001::camera::city_clip(camera.eye[1])?;
         Ok(Self {
             view: openmt2001::camera::scene_view_with_up(camera.eye, camera.target, camera.up),
-            projection: openmt2001::picking::QueryProjection::new(1280., 960., 45., near, far)?,
+            projection: openmt2001::picking::QueryProjection::new(
+                1280.,
+                960.,
+                camera.vertical_fov,
+                near,
+                far,
+            )?,
         })
     }
 
@@ -366,6 +372,61 @@ impl Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strategic_categories_pick_at_their_rendered_positions() {
+        use glam::{Mat4, Vec3};
+        use openmt2001::{camera, picking};
+        let sample = crate::navigation::strategic_camera(0.1);
+        let frustum = CategoryFrustum::new(sample).unwrap();
+        // Separated synthetic categories exercise the edges as well as center.
+        let centers = [[-400., -350.], [400., -350.], [-400., 350.], [400., 350.]];
+        let categories = centers
+            .into_iter()
+            .enumerate()
+            .map(|(id, center)| {
+                let (bounds, visible) = frustum.category(id, center, None).unwrap();
+                picking::QueryCategory {
+                    bounds,
+                    visible,
+                    buildings: vec![],
+                }
+            })
+            .collect::<Vec<_>>();
+        let [near, far] = camera::city_clip(sample.eye[1]).unwrap();
+        for [width, height] in [[800, 600], [1024, 768]] {
+            let projection = camera::projection(
+                sample.vertical_fov,
+                near,
+                far,
+                width,
+                height,
+                [0., 1., 0., 1.],
+            )
+            .unwrap();
+            let matrix = Mat4::from_cols_array(&projection)
+                * Mat4::from_cols_array(&camera::view_with_up(
+                    sample.eye,
+                    sample.target,
+                    sample.up,
+                ));
+            for (id, center) in centers.into_iter().enumerate() {
+                let clip = matrix * Vec3::new(center[0], 0., center[1]).extend(1.);
+                let pixel = [
+                    (clip.x / clip.w + 1.) * width as f32 * 0.5,
+                    (1. - clip.y / clip.w) * height as f32 * 0.5,
+                ];
+                let point = [
+                    (pixel[0] * 1280. / width as f32) as i32,
+                    (pixel[1] * 960. / height as f32) as i32,
+                ];
+                let hit = picking::hover(&frustum.projection, &categories, None, point)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(hit.category, id, "category {id} at {width}x{height}");
+            }
+        }
+    }
 
     #[test]
     #[ignore = "requires original v1.4 category-visibility oracle"]

@@ -7,6 +7,10 @@ use openmt2001::{
     render::{PreparedScene, Renderer},
     texture::TextureSet,
 };
+
+// Gameplay reset4b9d40 loads53 degrees (545acc). Strategic entry4b5509
+// changes the pose/mode but retains that renderer projection.
+pub(crate) const STRATEGIC_VERTICAL_FOV: f32 = 53.;
 pub struct Navigation {
     pub bounds: [f32; 4],
     pub camera: CameraSample,
@@ -75,7 +79,7 @@ impl Navigation {
             detail_icons,
             detail_background: Surface::new(&textures.textures[88]),
             bounds,
-            camera: strategic_camera(&image)?,
+            camera: strategic_camera(image.f32_at(0x52508c)?),
             surfaces,
             icons,
         })
@@ -246,18 +250,14 @@ fn prepare_icons(
         })
         .collect()
 }
-fn strategic_camera(image: &PeImage<'_>) -> Result<CameraSample, String> {
+pub(crate) fn strategic_camera(eye_offset: f32) -> CameraSample {
     // Original4b5509 supplies these coordinates to4e0260; mode4 callback is no-op.
-    Ok(CameraSample {
-        eye: [
-            -220.,
-            1050.,
-            (-30f64 - f64::from(image.f32_at(0x52508c)?)) as f32,
-        ],
+    CameraSample {
+        eye: [-220., 1050., (-30f64 - f64::from(eye_offset)) as f32],
         target: [-220., 0., -30.],
         up: [0., 1., 0.],
-        vertical_fov: 45.,
-    })
+        vertical_fov: STRATEGIC_VERTICAL_FOV,
+    }
 }
 /// Original4c3c13..4c3c35 strategic category entry; center is the retained
 /// category translation plus the original pavement model center.
@@ -540,6 +540,78 @@ fn double_click_settings() -> (u32, [i32; 2]) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn strategic_camera_retains_gameplay_projection_at_both_window_sizes() {
+        let sample = super::strategic_camera(0.1);
+        assert_eq!(sample.eye, [-220., 1050., -30.1]);
+        assert_eq!(sample.target, [-220., 0., -30.]);
+        assert_eq!(sample.up, [0., 1., 0.]);
+        assert_eq!(sample.vertical_fov, 53.);
+        let [near, far] = openmt2001::camera::city_clip(sample.eye[1]).unwrap();
+        for [width, height] in [[800, 600], [1024, 768]] {
+            let projection = openmt2001::camera::projection(
+                sample.vertical_fov,
+                near,
+                far,
+                width,
+                height,
+                [0., 1., 0., 1.],
+            )
+            .unwrap();
+            assert!((projection[0] - 1.5042716).abs() < 0.000001);
+            assert!((projection[5] - 2.0056954).abs() < 0.000001);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires supplied v1.4 executable; read-only strategic board framing"]
+    fn supplied_strategic_board_fits_beside_report_panel() {
+        use glam::{Mat4, Vec3};
+        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let camera = super::strategic_camera(image.f32_at(0x52508c).unwrap());
+        assert_eq!(camera.vertical_fov, image.f32_at(0x545acc).unwrap());
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let [near, far] = openmt2001::camera::city_clip(camera.eye[1]).unwrap();
+        for [width, height] in [[800, 600], [1024, 768]] {
+            let projection = openmt2001::camera::projection(
+                camera.vertical_fov,
+                near,
+                far,
+                width,
+                height,
+                [0., 1., 0., 1.],
+            )
+            .unwrap();
+            let matrix = Mat4::from_cols_array(&projection)
+                * Mat4::from_cols_array(&openmt2001::camera::view_with_up(
+                    camera.eye,
+                    camera.target,
+                    camera.up,
+                ));
+            for block in &board.blocks {
+                for dx in [-0.5, 0.5] {
+                    for dz in [-0.5, 0.5] {
+                        let clip = matrix
+                            * Vec3::new(
+                                block.center[0] + block.size[0] * dx,
+                                0.,
+                                block.center[1] + block.size[1] * dz,
+                            )
+                            .extend(1.);
+                        let x = (clip.x / clip.w + 1.) * 0.5;
+                        let y = (1. - clip.y / clip.w) * 0.5;
+                        assert!(
+                            (0.3..=1.).contains(&x) && (0. ..=0.93).contains(&y),
+                            "{} at {width}x{height}: ({x}, {y})",
+                            block.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "requires original both-button camera oracle"]
     fn matches_native_camera_pan() {
         let b =
@@ -776,7 +848,9 @@ mod tests {
                 .unwrap();
         let exe = std::fs::read(std::env::var("OPENMT2001_EXE").expect("executable")).unwrap();
         assert_eq!(&b[..8], b"MTSTRAT1");
-        let pose = super::strategic_camera(&openmt2001::pe::PeImage::parse(&exe).unwrap()).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let pose = super::strategic_camera(image.f32_at(0x52508c).unwrap());
+        assert_eq!(pose.vertical_fov, image.f32_at(0x545acc).unwrap());
         let actual: Vec<_> = pose
             .eye
             .into_iter()
