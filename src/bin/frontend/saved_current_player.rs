@@ -28,8 +28,7 @@ mod tests {
     #[test]
     #[ignore = "private normal-load player oracle"]
     fn matches_native_saved_current_player() {
-        let path =
-            std::path::PathBuf::from(openmt2001::fixtures::path("NATIVE_SAVED_CURRENT_PLAYER"));
+        let path = openmt2001::fixtures::path("NATIVE_SAVED_CURRENT_PLAYER");
         let b = std::fs::read(&path).unwrap();
         assert_eq!(&b[..8], b"MTCURPL1");
         let mut at = 8;

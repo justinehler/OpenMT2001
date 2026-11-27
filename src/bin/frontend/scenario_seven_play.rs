@@ -158,7 +158,7 @@ fn scenario_seven_requires_natural_scenario_eleven_campaign_unlock() {
         .parent()
         .unwrap()
         .join("scripts");
-    let profile = PathBuf::from(openmt2001::fixtures::path("SCENARIO6_WIN_PROFILE"));
+    let profile = openmt2001::fixtures::path("SCENARIO6_WIN_PROFILE");
     let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
     crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
     for id in [200003, 200004, 200005, 200002, 200012, 200001, 200006] {

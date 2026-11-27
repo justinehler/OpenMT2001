@@ -188,7 +188,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original installer scripts"]
     fn original_campaign_registration_and_maps() {
-        let root = std::path::PathBuf::from(openmt2001::fixtures::path("ORIGINAL_SCRIPTS"));
+        let root = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
         let registrations = std::fs::read_to_string(root.join("GAMESTART/hub.lua")).unwrap();
         let ids: Vec<u32> = registrations
             .lines()

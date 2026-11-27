@@ -7,7 +7,7 @@ use std::{cell::RefCell, rc::Rc, thread::JoinHandle, time::Duration};
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(openmt2001::fixtures::scratch("TEST_SCRATCH"));
+        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
         let root = parent.join(format!(

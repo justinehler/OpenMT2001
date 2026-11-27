@@ -6797,7 +6797,7 @@ mod tests {
             assert_eq!(bid.participants[next as usize].label.status, Text::Language(1558));
             #[cfg(feature = "capture")]
             if let Ok(path) = std::env::var("OPENMT2001_LIVE_AUCTION_LABEL_CAPTURE") {
-                let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let installer = openmt2001::fixtures::path("PARAMETERS");
                 let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa/tycoon");
                 let packed = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language).unwrap();
                 let panel_assets = crate::auction_panel::Assets::load(&index, &archive,
