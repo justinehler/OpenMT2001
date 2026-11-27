@@ -29,6 +29,7 @@ pub struct Assets {
     prompts: crate::prompt::Assets,
     event_list: crate::event_list::Assets,
     stats: crate::stats_panel::Assets,
+    market_share: crate::market_share_panel::Assets,
     cards: crate::card_panel::Assets,
     business: crate::business_view::Assets,
     auction_notice: crate::auction_notice::Assets,
@@ -250,6 +251,9 @@ impl Assets {
                 &openmt2001::pe::PeImage::parse(executable)?,
             )?,
             event_list: crate::event_list::Assets::load(index, archive, installer, &strings)?,
+            market_share: crate::market_share_panel::Assets::load(
+                index, archive, installer, &strings, executable,
+            )?,
             stats: crate::stats_panel::Assets::load(
                 index, archive, installer, &strings, executable,
             )?,
@@ -460,6 +464,9 @@ impl Menu {
     }
     pub fn event_list_assets(&self) -> &crate::event_list::Assets {
         &self.assets.event_list
+    }
+    pub fn market_share_assets(&self) -> &crate::market_share_panel::Assets {
+        &self.assets.market_share
     }
     pub fn stats_assets(&self) -> &crate::stats_panel::Assets {
         &self.assets.stats
