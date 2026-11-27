@@ -1721,3 +1721,5 @@ pub fn advance(
 
 #[cfg(test)]
 mod income_tests;
+#[cfg(all(test, feature = "lua4"))]
+mod liquidation_tests;

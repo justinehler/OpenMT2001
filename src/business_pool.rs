@@ -15,6 +15,17 @@ pub const BUSINESS_INFO_COUNT: usize = 45;
 pub const BUSINESS_INFO_SIZE: usize = 0x74;
 const BUSINESS_INFO_BASE: u32 = 0x0053_a960;
 
+/// Resolve an owner read through a building's business link. For the normal
+/// no-business link (-1), v1.4 reads an initialized zero byte before the pool.
+/// Other links must still resolve to an actual business.
+pub(crate) fn owner(id: i32, businesses: &[[u8; BUSINESS_RECORD_SIZE]]) -> Option<i32> {
+    if id == -1 {
+        Some(0)
+    } else {
+        businesses.get(id as usize).map(|b| i32::from(b[10] as i8))
+    }
+}
+
 /// The static BusinessInfo rows read by the original allocator.
 ///
 /// `004634c0` consumes row +0x0c, +0x5c, +0x5d and +0x70.  Keeping the full

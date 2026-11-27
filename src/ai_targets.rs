@@ -125,20 +125,8 @@ pub fn perimeter_preference(
     let mut edge = false;
     visit_chain(category, buildings, |row| {
         let id = word(row, 0x1c) as i32;
-        // 4776fd..47770a unconditionally indexes +0x1c. A pending building
-        // has -1, so the native read is from 0x7a3f92, 0x220 bytes before the
-        // business pool's owner byte at 0x7a41b2. That initialized .data
-        // byte is zero in v1.4; the original does not skip this building.
-        let owner = if id == -1 {
-            0
-        } else {
-            i32::from(
-                businesses
-                    .get(id as usize)
-                    .ok_or("target perimeter business reference unresolved")?[0xa]
-                    as i8,
-            )
-        };
+        let owner = crate::business_pool::owner(id, businesses)
+            .ok_or("target perimeter business reference unresolved")?;
         if owner == i32::from(player.bytes[0x1bc])
             && (row[7] == 6 || row[6] == 6 || row[5] == 0 || row[4] == 0)
         {
