@@ -116,23 +116,6 @@ impl Navigator {
         blocks: &[Block],
         executable: &[u8],
     ) -> Result<Self, String> {
-        Self::load_path(index, archive, blocks, executable, false)
-    }
-    pub(crate) fn load_deferred(
-        index: &ArchiveIndex,
-        archive: &[u8],
-        blocks: &[Block],
-        executable: &[u8],
-    ) -> Result<Self, String> {
-        Self::load_path(index, archive, blocks, executable, true)
-    }
-    fn load_path(
-        index: &ArchiveIndex,
-        archive: &[u8],
-        blocks: &[Block],
-        executable: &[u8],
-        deferred: bool,
-    ) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,
             archive,
@@ -158,15 +141,10 @@ impl Navigator {
             e,
             &mesh,
         )?;
-        let native_primitives = if deferred {
-            crate::intro::camera_live::primitive_factory::Primitives::deferred_allocation(
-                executable, cpu_model,
-            )?
-        } else {
+        let native_primitives =
             crate::intro::camera_live::primitive_factory::Primitives::navigator(
                 executable, cpu_model,
-            )?
-        };
+            )?;
         let upper_shells = (0..mesh.frames)
             .map(|frame| {
                 ui::panel_frame_base(

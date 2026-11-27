@@ -450,14 +450,9 @@ impl Builder {
             );
         }
         Ok(Primitives {
-            provenance: Provenance::Reordered,
             caption_keys: self.caption_keys,
             spans: self.spans,
             construction_identity: super::main_construction::ResourceIdentity::new(),
-            primary_claimed: false,
-            primary_currency_identity: None,
-            primary_pool: None,
-            primary_phase: None,
             main_phase: MainPhase::Unstarted,
             main_node_owner: None,
             cells: Some(self.cells),
@@ -468,23 +463,12 @@ impl Builder {
         })
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Provenance {
-    Reordered,
-    DeferredUnclaimed,
-    DeferredClaimed,
-}
 pub struct Primitives {
-    provenance: Provenance,
     caption_keys: BTreeSet<u32>,
     spans: BTreeMap<u32, u32>,
     //Frozen construction cells after transfer to typed Text. Not exposed for
     //mutation, reset/replay, or use by the old raw descriptor installation.
     pub(super) construction_identity: super::main_construction::ResourceIdentity,
-    pub(super) primary_claimed: bool,
-    pub(super) primary_currency_identity: Option<super::main_construction::ResourceIdentity>,
-    pub(super) primary_pool: Option<[PanelId; 16]>,
-    pub(super) primary_phase: Option<super::primary_d_construction::PrimaryPhase>,
     main_phase: MainPhase,
     main_node_owner: Option<u64>,
     cells: Option<Cells>,
@@ -508,16 +492,6 @@ pub enum MainPhase {
     AwaitingBinding,
     Failed,
 }
-#[path = "chat_primitives.rs"]
-mod chat_primitives;
-#[path = "deferred_primitives.rs"]
-mod deferred_primitives;
-#[path = "eventlist_primitives.rs"]
-mod eventlist_primitives;
-#[path = "primary_d_primitives.rs"]
-mod primary_d_primitives;
-#[path = "voting_primitives.rs"]
-mod voting_primitives;
 impl Primitives {
     ///Actual Navigator asset-load entry calls this with its successfully
     ///parsed retained model. This owner lives with that application's asset
@@ -530,16 +504,10 @@ impl Primitives {
         b.layout(0x58cdb0, Layout::Navigator)?;
         b.finish()
     }
-    pub fn primary_pool(&self) -> Option<&[PanelId; 16]> {
-        self.primary_pool.as_ref()
-    }
     pub fn main_phase(&self) -> MainPhase {
         self.main_phase
     }
     pub(super) fn claim_main(&mut self) -> Result<(), String> {
-        if self.provenance != Provenance::Reordered {
-            return Err("Fresh Main must wait for the real Voting-through-Clock continuation; eager Prefix cannot consume it".into());
-        }
         if self.main_phase != MainPhase::Unstarted {
             return Err("439ae0/41dcf0 A construction phase already claimed; no replay".into());
         }

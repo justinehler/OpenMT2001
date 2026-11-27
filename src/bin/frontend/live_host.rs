@@ -3979,10 +3979,3 @@ mod camera_finalization_fault_tests {
         ui.join().unwrap();
     }
 }
-
-#[cfg(test)]
-pub(crate) use camera_session_service::primary_category::read as test_primary_category_read;
-
-// Private containing-test observation of the actual validated World reader.
-#[cfg(test)]
-pub(crate) use camera_session_service::primary_category::observer as test_primary_category;
