@@ -891,6 +891,8 @@ impl Assets {
     }
     fn welcome_surfaces(&self) -> Result<Vec<Surface>, String> {
         let mut surfaces = self.base.clone();
+        // Mode0 shows the same block icon as mode1 beside its title (41edb0).
+        surfaces.push(self.property_title_icon.clone());
         let mut title = self.property_title_fonts.clone();
         ui::text_widget_style4(
             &mut title,
