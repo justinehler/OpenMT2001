@@ -60,12 +60,12 @@ fn rent(player: &Player, category: u32, owned: bool, w: &World<'_>) -> Result<i3
         if !owned && id <= -1 {
             return Ok(());
         }
-        let b = w
-            .developed
-            .businesses
-            .get(id as usize)
+        let owner = crate::business_pool::owner(id, w.developed.businesses)
             .ok_or("native liquidation rent invalid business")?;
-        if (i32::from(b[10] as i8) == i32::from(player.bytes[0x1bc]) + 1) == owned {
+        // The owned traversal reads owner zero for -1. AI owner IDs are
+        // positive, so an unfinished building contributes no owned rent.
+        if (owner == i32::from(player.bytes[0x1bc]) + 1) == owned {
+            let b = &w.developed.businesses[id as usize];
             total = total.wrapping_add(i32::from(u16::from_le_bytes(
                 b[0x18..0x1a].try_into().unwrap(),
             )));
