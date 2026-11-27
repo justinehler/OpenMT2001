@@ -45,6 +45,7 @@ fn account_bytes(account: &PlayerAccount) -> Vec<u8> {
 }
 
 fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observed> {
+    let rebate = (17..=20).contains(&kind);
     let mut bytes = building_image::fixture();
     let mut image_put = |address: u32, value: &[u8]| {
         let at = 0x200 + (address - 0x525000) as usize;
@@ -78,6 +79,13 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
                 (0, -other, if kind == 1 { 0x24 } else { 0x12 }),
             ]
         }
+        17..=20 if raw == 0 => vec![],
+        17..=20 if zero_price => vec![(0, -0., 0x12)],
+        17..=20 => vec![
+            (1, 2. * raw as f32, 0x24),
+            (2, raw as f32, 0x24),
+            (0, -3. * raw as f32, 0x12),
+        ],
         _ => panic!("unsupported test kind"),
     };
     for &(player, amount, category) in &postings {
@@ -89,7 +97,20 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
         put(&mut business, 0x58 + 3 * 4, 100f32.to_bits());
         put(&mut business, 0x20, 400f32.to_bits());
     }
-    let mut businesses = [business];
+    let mut businesses = if rebate {
+        // Two consuming businesses owned by player 1, one by inactive player 2,
+        // and one by the utility owner (which receives no rebate).
+        [2, 3, 2, 1]
+            .map(|owner| {
+                let mut business = [0; 544];
+                business[0xa] = owner;
+                business[0x21c] = 1;
+                business
+            })
+            .to_vec()
+    } else {
+        vec![business]
+    };
     let mut building = [0; 0x394];
     put(&mut building, 0x24, 1);
     put(&mut building, 0x4c, 1);
@@ -97,7 +118,21 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
         put(&mut building, 0x38, 200f32.to_bits());
     }
     let mut buildings = [building];
-    let catalog = openmt2001::business_pool::BusinessCatalog::from_rows([[0; 0x74]; 45]);
+    let mut catalog_rows = [[0; 0x74]; 45];
+    let mut categories = [[0; 0x17c]; 52];
+    if rebate {
+        let utility = (kind - 17) as usize;
+        categories[[39, 42, 35, 2][utility]][5] = 1;
+        if !zero_price {
+            put(
+                &mut catalog_rows[0],
+                [0x68, 0x6c, 0x64, 0x60][utility],
+                1f32.to_bits(),
+            );
+        }
+    }
+    let catalog = openmt2001::business_pool::BusinessCatalog::from_rows(catalog_rows);
+    let mut utilities = Utilities::new([0; 4]);
     let mut deck = Deck::new([1, 0x343fd, 0x269ec3]);
     deck.used[card as usize] = 1;
     let mut counts = openmt2001::player_metrics::BusinessCounts {
@@ -124,7 +159,7 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
             active: &[1, 1, 0],
             businesses: &mut businesses,
             buildings: &mut buildings,
-            categories: &[[0; 0x17c]; 52],
+            categories: &categories,
             counts: &mut counts,
             current,
         },
@@ -139,7 +174,7 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
             network: false,
             network_override: false,
         },
-        &mut Utilities::new([0; 4]),
+        &mut utilities,
         |event, world| {
             match event {
                 live_commands::Event::EventCardEffect(effects::Call::AccountPosted(posting)) => {
@@ -192,6 +227,23 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
     );
     assert_eq!(deck.used[card as usize], 0);
     assert_eq!(notice.enabled, current != 0);
+    if rebate {
+        let affected = raw != 0 && !zero_price && current != 0;
+        assert_eq!(notice.affected, affected);
+        assert_eq!(
+            notice.amount,
+            if affected {
+                raw as f32 * if current == 1 { 2. } else { 1. }
+            } else {
+                0.
+            }
+        );
+        let mut enabled = [true; 4];
+        if raw == 0 {
+            enabled[[2, 3, 1, 0][(kind - 17) as usize]] = false;
+        }
+        assert_eq!(utilities.enabled, enabled);
+    }
     if kind == 6 {
         assert_eq!(buildings[0][0x2d], 1);
         assert_eq!(counts.age, 100);
@@ -272,4 +324,53 @@ fn cash_cards_report_each_payment_without_netting_or_reposting() {
             sound(false)
         ]
     );
+}
+
+#[test]
+fn utility_rebate_cards_report_recipients_in_slot_order_then_owner_debit() {
+    for kind in 17..=20 {
+        assert_eq!(
+            execute(kind, 50, 1, false),
+            vec![
+                Observed::Posting(1, 100.),
+                sound(true),
+                pulse(true),
+                Observed::Posting(2, 50.),
+                Observed::Posting(0, -150.),
+            ]
+        );
+        assert_eq!(
+            execute(kind, 50, 2, false),
+            vec![
+                Observed::Posting(1, 100.),
+                Observed::Posting(2, 50.),
+                sound(true),
+                pulse(true),
+                Observed::Posting(0, -150.),
+            ]
+        );
+        assert_eq!(
+            execute(kind, 50, 0, false),
+            vec![
+                Observed::Posting(1, 100.),
+                Observed::Posting(2, 50.),
+                Observed::Posting(0, -150.),
+                pulse(false),
+                sound(false),
+            ]
+        );
+    }
+}
+
+#[test]
+fn utility_rebate_cards_keep_zero_amounts_silent() {
+    for kind in 17..=20 {
+        for current in 0..3 {
+            assert!(execute(kind, 0, current, false).is_empty());
+            assert_eq!(
+                execute(kind, 50, current, true),
+                vec![Observed::Posting(0, -0.)]
+            );
+        }
+    }
 }

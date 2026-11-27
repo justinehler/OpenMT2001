@@ -65,6 +65,8 @@ fn volume(business: &[u8; 544], buildings: &[[u8; 0x394]]) -> Result<i32, String
 /// Original41ada0: compensate each rival according to its count of businesses
 /// consuming the specified utility. Counts ignore owner activity. The utility
 /// owner is charged once, after all six rival slots have been visited.
+/// Reports each completed credit and the final debit synchronously.
+#[allow(clippy::too_many_arguments)]
 pub fn utility_rebate(
     kind: u32,
     amount: f32,
@@ -73,6 +75,7 @@ pub fn utility_rebate(
     utilities: &mut crate::economy::Utilities,
     catalog: &crate::business_pool::BusinessCatalog,
     notice: &mut Notice,
+    mut callback: impl FnMut(Call, &mut World<'_>, &mut Notice) -> Result<bool, String>,
 ) -> Result<bool, String> {
     let kind = kind as usize;
     let category = *([39, 42, 35, 2]
@@ -114,11 +117,7 @@ pub fn utility_rebate(
             continue;
         }
         let value = product(count, amount)?;
-        world
-            .accounts
-            .get_mut(slot)
-            .ok_or("event utility recipient outside roster")?
-            .post(value, 0x24)?;
+        post(world, slot, value, 0x24, notice, &mut callback)?;
         if slot == world.current {
             notice.affected = true;
             notice.amount = value;
@@ -128,7 +127,7 @@ pub fn utility_rebate(
         value.add_f32(total)?;
         total = value.to_f32();
     }
-    world.accounts[actor].post(-total, 0x12)?;
+    post(world, actor, -total, 0x12, notice, &mut callback)?;
     Ok(true)
 }
 
@@ -561,6 +560,7 @@ mod tests {
                             &mut utilities,
                             &catalog,
                             notice,
+                            |_, _, _| Ok(true),
                         )
                     }
                     Call::AccountPosted(_) => Ok(true),
