@@ -355,8 +355,14 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
     assert_eq!(owner.borrow().input.cells().input_enabled, 1);
     assert!(audio.same_owner(&owner.borrow().audio));
     assert!(!audio.music_paused());
+    let (reply, probe) = mpsc::channel();
+    run.send(FreshRequest::DispatchProbe(reply));
+    assert_eq!(
+        probe.recv_timeout(Duration::from_secs(15)).unwrap().pause,
+        expected
+    );
     let custody = run.finish().unwrap();
-    assert_eq!(custody.pause.bytes, expected);
+    assert_eq!(custody.pause.bytes, [1, 0, 0, 0, 0, 0xa5, 0x5a, 0xee, 1]);
     assert_eq!(custody.tasks, rows);
     assert_eq!(
         (
@@ -367,6 +373,96 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
         (17., Some(1), Some(2))
     );
     owner.borrow_mut().return_custody(custody).unwrap();
+}
+
+#[test]
+#[ignore = "requires supplied original assets; joined city switches after Options"]
+fn options_quit_then_load_and_start_in_one_process_advances_clock() {
+    let scratch = Scratch::new();
+    let (inputs, owner) = inputs(scratch.0.join("profiles"));
+    let mut save = None;
+    let mut route = focus::Route::default();
+    for city in 0..3 {
+        let start = if city == 1 {
+            WorkerStart::Saved(save.take().unwrap(), None)
+        } else {
+            WorkerStart::Fresh(camera_producer_live_tests::setup(&inputs))
+        };
+        let mut run = Running::start_with_route(inputs.clone(), owner.clone(), start, route);
+        let (reply, probe) = mpsc::channel();
+        run.send(FreshRequest::DispatchProbe(reply));
+        let probe = probe.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert_eq!(
+            &probe.pause[..4],
+            &[0; 4],
+            "no holds from the previous city"
+        );
+        let before = run.clock();
+        std::thread::sleep(Duration::from_millis(120));
+        assert!(
+            run.clock().ticks > before.ticks,
+            "successor city clock must advance"
+        );
+        if city == 0 {
+            run.route.toggle_player_pause().unwrap();
+            owner.borrow_mut().note_sent(run.route.sent());
+            run.route.wait_prefix();
+            run.route.service_one().unwrap();
+            let (reply, probe) = mpsc::channel();
+            run.send(FreshRequest::DispatchProbe(reply));
+            assert_eq!(
+                probe.recv_timeout(Duration::from_secs(15)).unwrap().pause[3],
+                1
+            );
+            run.route.poll().unwrap();
+        }
+        let (reply, opened) = mpsc::channel();
+        run.send(FreshRequest::Options { open: true, reply });
+        opened
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap()
+            .unwrap();
+        let (reply, probe) = mpsc::channel();
+        run.send(FreshRequest::DispatchProbe(reply));
+        assert_eq!(
+            probe.recv_timeout(Duration::from_secs(15)).unwrap().pause[0],
+            1
+        );
+        if city == 0 {
+            let (reply, saved) = mpsc::channel();
+            run.send(FreshRequest::SaveSelected {
+                target: crate::save_menu::Target::NewName("city-switch".into()),
+                capture: Some(run.producer.as_ref().unwrap().capture()),
+                camera: fresh_city_camera().0,
+                game_mode: 1,
+                interface_mode: 0,
+                reply,
+            });
+            let path = saved
+                .recv_timeout(Duration::from_secs(15))
+                .unwrap()
+                .unwrap();
+            // Keep native records, which do not store pause reasons. A modern
+            // record12 would replace inherited bytes and mask the leaked hold.
+            let bytes = fs::read(&path).unwrap();
+            let parsed = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+            let extension = parsed
+                .sections
+                .iter()
+                .find(|section| section.tag == openmt2001::save::extension::TAG)
+                .unwrap();
+            let mut native = bytes[..extension.offset].to_vec();
+            native.extend_from_slice(&u32::MAX.to_le_bytes());
+            native.extend_from_slice(&parsed.terminator_padding);
+            fs::write(&path, native).unwrap();
+            save = Some(path);
+        }
+        // Quit drops this generation without the Continue/close Options path.
+        let custody = run.finish().unwrap();
+        assert_eq!(&custody.pause.bytes[..4], &[1, 0, 0, 0]);
+        owner.borrow_mut().return_custody(custody).unwrap();
+        route = std::mem::take(&mut run.route);
+    }
 }
 #[test]
 #[ignore = "private supplied inputs and owned disk scratch; partial construction has no replacement custody"]
