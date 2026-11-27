@@ -8,7 +8,8 @@ use std::{
 use crate::settings_menu::{GameplayLevels, GraphicsLevels, Levels};
 
 const MAGIC: &[u8; 8] = b"MTOPT001";
-const LENGTH: usize = MAGIC.len() + 9;
+const LEGACY_LENGTH: usize = MAGIC.len() + 9;
+const LENGTH: usize = LEGACY_LENGTH + 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
@@ -34,10 +35,12 @@ impl Snapshot {
             }
             Err(error) => return Err(format!("{}: {error}", path.display())),
         };
-        if bytes.len() != LENGTH || &bytes[..MAGIC.len()] != MAGIC {
+        if ![LEGACY_LENGTH, LENGTH].contains(&bytes.len()) || &bytes[..MAGIC.len()] != MAGIC {
             return Err(format!("{}: unsupported V2 Options file", path.display()));
         }
-        let fields = &bytes[MAGIC.len()..];
+        // Existing nine-field profiles inherit the original enabled default.
+        let water_effects = bytes.get(LEGACY_LENGTH).copied().unwrap_or(1);
+        let fields = &bytes[MAGIC.len()..LEGACY_LENGTH];
         let [
             music,
             effects,
@@ -49,7 +52,8 @@ impl Snapshot {
             cursor,
             sensitivity,
         ]: [u8; 9] = fields.try_into().unwrap();
-        if music > 100
+        if water_effects > 1
+            || music > 100
             || effects > 100
             || detail > 2
             || filtering > 1
@@ -64,6 +68,7 @@ impl Snapshot {
         Ok(Self {
             audio: Levels { music, effects },
             graphics: GraphicsLevels {
+                water_effects: water_effects != 0,
                 detail,
                 filtering,
                 distance,
@@ -88,6 +93,7 @@ impl Snapshot {
             u8::from(self.gameplay.invert_vertical),
             u8::from(self.gameplay.hardware_cursor),
             self.gameplay.mouse_sensitivity,
+            u8::from(self.graphics.water_effects),
         ];
         if fields[0] > 100
             || fields[1] > 100
@@ -141,6 +147,7 @@ mod tests {
                 effects: 91,
             },
             graphics: GraphicsLevels {
+                water_effects: false,
                 detail: 0,
                 filtering: 0,
                 distance: 42,
@@ -161,6 +168,21 @@ mod tests {
         assert_eq!(Snapshot::load(&bob).unwrap(), Snapshot::default());
         Snapshot::default().save(&bob).unwrap();
         assert_eq!(Snapshot::load(&alice).unwrap(), revised);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_options_enable_water_effects() {
+        let root = test_root();
+        let path = profile_path(&root, b"Legacy");
+        Snapshot::default().save(&path).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        fs::write(&path, &bytes[..LEGACY_LENGTH]).unwrap();
+        assert!(Snapshot::load(&path).unwrap().graphics.water_effects);
+        let mut invalid = bytes;
+        invalid[LEGACY_LENGTH] = 2;
+        fs::write(&path, invalid).unwrap();
+        assert!(Snapshot::load(&path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

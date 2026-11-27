@@ -94,6 +94,8 @@ impl Default for Levels {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GraphicsLevels {
+    /// Original SysSetup Multitexture switch; the in-game page exposes detail.
+    pub water_effects: bool,
     pub detail: u8,
     pub filtering: u8,
     pub distance: u8,
@@ -103,6 +105,7 @@ impl Default for GraphicsLevels {
     // runtime 9206ec value initialized to 35 by 4c18e5..4c1920.
     fn default() -> Self {
         Self {
+            water_effects: true,
             detail: 2,
             filtering: 1,
             distance: 35,
@@ -1374,6 +1377,7 @@ mod graphics_tests {
         assert_eq!(
             GraphicsLevels::default(),
             GraphicsLevels {
+                water_effects: true,
                 detail: 2,
                 filtering: 1,
                 distance: 35

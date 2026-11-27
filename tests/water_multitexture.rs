@@ -15,9 +15,8 @@ fn original_five_row_route_contract() {
         (true, false, true, 2, &[16][..]),
         (true, true, true, 1, &[16, 15][..]),
     ] {
-        let facts = RouteFacts::new(e, v15, v16, d, "v14:004c5466-004c5508/literal").unwrap();
+        let facts = RouteFacts::new(e, v15, v16, d);
         assert_eq!(facts.route().modes(), expected);
-        assert_eq!(facts.provenance(), "v14:004c5466-004c5508/literal");
     }
 }
 
@@ -32,40 +31,21 @@ fn detail_sign_and_both_failed_validation_boundaries() {
         (i32::MAX, &[16, 15][..]),
     ] {
         assert_eq!(
-            RouteFacts::new(true, true, true, detail, "literal")
-                .unwrap()
-                .route()
-                .modes(),
+            RouteFacts::new(true, true, true, detail).route().modes(),
             expected
         );
         assert_eq!(
-            RouteFacts::new(true, false, true, detail, "literal")
-                .unwrap()
-                .route()
-                .modes(),
+            RouteFacts::new(true, false, true, detail).route().modes(),
             &[16]
         );
         assert_eq!(
-            RouteFacts::new(true, false, false, detail, "literal")
-                .unwrap()
-                .route()
-                .modes(),
+            RouteFacts::new(true, false, false, detail).route().modes(),
             &[20]
         );
         assert_eq!(
-            RouteFacts::new(false, true, true, detail, "literal")
-                .unwrap()
-                .route()
-                .modes(),
+            RouteFacts::new(false, true, true, detail).route().modes(),
             &[20]
         );
-    }
-}
-
-#[test]
-fn route_facts_require_provenance() {
-    for missing in ["", " ", "\t\n"] {
-        assert!(RouteFacts::new(true, true, true, 2, missing).is_err());
     }
 }
 
@@ -587,14 +567,7 @@ fn both_models_and_independent_phase_owners_follow_route() {
     };
     let positions = [[12.125, 0., 18.7], [-100., 0., 40.], [330., -1., -510.]];
     let models = [&positions[..1], &positions[1..]];
-    let facts = RouteFacts::new(
-        true,
-        true,
-        true,
-        2,
-        "retained native first/quality case inputs",
-    )
-    .unwrap();
+    let facts = RouteFacts::new(true, true, true, 2);
     let prepared = phases
         .prepare(facts, models, [50., 80., 100.], [0., 1., 0.], 333)
         .unwrap();
@@ -617,7 +590,7 @@ fn both_models_and_independent_phase_owners_follow_route() {
         }
     }
     let snapshot = phases;
-    let fallback = RouteFacts::new(false, true, true, 2, "original feature disabled").unwrap();
+    let fallback = RouteFacts::new(false, true, true, 2);
     let prepared = phases
         .prepare(fallback, models, [50., 80., 100.], [0., 1., 0.], 500)
         .unwrap();
@@ -626,7 +599,7 @@ fn both_models_and_independent_phase_owners_follow_route() {
     assert_eq!(phases.first.phase.to_bits(), snapshot.first.phase.to_bits());
     assert_eq!(phases.first.previous_tick, 333);
     assert_eq!(phases.quality.previous_tick, 333);
-    let first_only = RouteFacts::new(true, true, true, 0, "original Detail0").unwrap();
+    let first_only = RouteFacts::new(true, true, true, 0);
     assert_eq!(
         phases
             .prepare(first_only, models, [50., 80., 100.], [0., 1., 0.], 500)
@@ -641,7 +614,7 @@ fn both_models_and_independent_phase_owners_follow_route() {
 
 #[test]
 fn empty_models_advance_but_invalid_input_does_not_partially_commit() {
-    let facts = RouteFacts::new(true, true, true, 1, "literal source protocol").unwrap();
+    let facts = RouteFacts::new(true, true, true, 1);
     let mut phases = Phases::fresh();
     assert_eq!(
         phases

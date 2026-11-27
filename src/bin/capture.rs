@@ -9,6 +9,30 @@ use std::{env, fs, io::BufWriter};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args: Vec<_> = env::args().collect();
+    let water_effects = if let Some(at) = args.iter().position(|s| s == "--water-effects") {
+        let enabled = match args.get(at + 1).map(String::as_str) {
+            Some("on") => true,
+            Some("off") => false,
+            _ => return Err("--water-effects requires on or off".into()),
+        };
+        args.drain(at..at + 2);
+        enabled
+    } else {
+        true
+    };
+    let water_detail = if let Some(at) = args.iter().position(|s| s == "--water-detail") {
+        let detail = args
+            .get(at + 1)
+            .ok_or("--water-detail requires 0..2")?
+            .parse::<u8>()?;
+        if detail > 2 {
+            return Err("--water-detail requires 0..2".into());
+        }
+        args.drain(at..at + 2);
+        detail
+    } else {
+        2
+    };
     // Explicit diagnostic pose also permits inspecting the sky from street
     // height; the overview's distant framing can clip the original100-unit orbit.
     let camera_override = if let Some(at) = args.iter().position(|s| s == "--camera") {
@@ -47,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || !scene_mode
             && (args.len() == 5 || args.len() == 10 && args[5] == "--original-materials"))
     {
-        return Err("usage: capture <BuildFile.dat> <model> <height> <output.png> [--original-materials <mc.exe> <archive.DIR> <archive.bin> <variation>]\n       capture <map|save> <BuildFile.dat> <map.lua|game.sav> <mc.exe> <archive.DIR> <archive.bin> <output.png> [suncols.tga [--phase 0..23] [--camera x y z target-x target-y target-z] (save mode)]".into());
+        return Err("usage: capture <BuildFile.dat> <model> <height> <output.png> [--original-materials <mc.exe> <archive.DIR> <archive.bin> <variation>]\n       capture <map|save> <BuildFile.dat> <map.lua|game.sav> <mc.exe> <archive.DIR> <archive.bin> <output.png> [suncols.tga [--phase 0..23] [--camera x y z target-x target-y target-z] (save mode)] [--water-effects on|off] [--water-detail 0..2]".into());
     }
     let data = fs::read(&args[if scene_mode { 2 } else { 1 }])?;
     let original = if scene_mode {
@@ -87,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let width = 1280u32;
     let height_pixels = 960u32;
-    let scene = render_scene::assemble(Request {
+    let mut scene = render_scene::assemble(Request {
         build_file: &data,
         source,
         original: executable.as_deref().map(|executable| OriginalAssets {
@@ -107,6 +131,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         height: height_pixels,
         animated: false,
     })?;
+    scene.apply_water_options(water_effects, water_detail)?;
+    println!(
+        "Water route: {:?}",
+        openmt2001::water::multitexture::RouteFacts::modern(water_effects, i32::from(water_detail))
+            .route()
+            .modes()
+    );
     for message in &scene.diagnostics {
         println!("{message}");
     }

@@ -77,6 +77,10 @@ pub enum SurfaceMode {
     WaterBase,
     /// Original fallback state20: multiply destination by textured vertex color.
     WaterFallback,
+    /// Original mode 16: two modulated textures, ZERO / SRCCOLOR.
+    WaterFirst,
+    /// Original mode 15: two modulated textures, ONE / ONE.
+    WaterQuality,
 }
 
 /// Vertices contain position xyz, diffuse RGB, then UV. Optional specular RGB
@@ -146,6 +150,8 @@ pub struct Renderer {
     facade_pipeline: wgpu::RenderPipeline,
     water_pipeline: wgpu::RenderPipeline,
     water_fallback_pipeline: wgpu::RenderPipeline,
+    water_first_pipeline: wgpu::RenderPipeline,
+    water_quality_pipeline: wgpu::RenderPipeline,
     texture_cache: RefCell<TextureCache>,
     surface_sampler: wgpu::Sampler,
     #[cfg(any(test, feature = "capture"))]
@@ -188,7 +194,19 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("surface.wgsl").into()),
         });
         let make_pipeline = |mode: SurfaceMode| {
-            let water = matches!(mode, SurfaceMode::WaterBase | SurfaceMode::WaterFallback);
+            let water = matches!(
+                mode,
+                SurfaceMode::WaterBase
+                    | SurfaceMode::WaterFallback
+                    | SurfaceMode::WaterFirst
+                    | SurfaceMode::WaterQuality
+            );
+            use crate::water::multitexture::{Material, Pass};
+            let water_material = match mode {
+                SurfaceMode::WaterFirst => Some(Material::original(Pass::First)),
+                SurfaceMode::WaterQuality => Some(Material::original(Pass::Quality)),
+                _ => None,
+            };
             let static_lit = matches!(
                 mode,
                 SurfaceMode::Sky
@@ -197,7 +215,23 @@ impl Renderer {
                     | SurfaceMode::StaticOpaque
                     | SurfaceMode::FacadeBlend
             );
-            let blend = if matches!(
+            let blend = if let Some(material) = water_material {
+                let factor = |offset| match material.field(offset).unwrap() {
+                    1 => wgpu::BlendFactor::Zero,
+                    2 => wgpu::BlendFactor::One,
+                    4 => wgpu::BlendFactor::Src,
+                    _ => unreachable!("original water blend selector"),
+                };
+                let component = wgpu::BlendComponent {
+                    src_factor: factor(0x3c),
+                    dst_factor: factor(0x40),
+                    operation: wgpu::BlendOperation::Add,
+                };
+                Some(wgpu::BlendState {
+                    color: component,
+                    alpha: component,
+                })
+            } else if matches!(
                 mode,
                 SurfaceMode::Diagnostic | SurfaceMode::StaticOpaque | SurfaceMode::FacadeBlend
             ) {
@@ -303,6 +337,9 @@ impl Renderer {
                     entry_point: Some(match mode {
                         SurfaceMode::WaterBase => "water_fragment",
                         SurfaceMode::WaterFallback => "water_fallback_fragment",
+                        SurfaceMode::WaterFirst | SurfaceMode::WaterQuality => {
+                            "water_multitexture_fragment"
+                        }
                         SurfaceMode::Diagnostic => "fragment_main",
                         SurfaceMode::Sky
                         | SurfaceMode::Celestial
@@ -333,6 +370,8 @@ impl Renderer {
         let pipeline = make_pipeline(SurfaceMode::Diagnostic);
         let water_pipeline = make_pipeline(SurfaceMode::WaterBase);
         let water_fallback_pipeline = make_pipeline(SurfaceMode::WaterFallback);
+        let water_first_pipeline = make_pipeline(SurfaceMode::WaterFirst);
+        let water_quality_pipeline = make_pipeline(SurfaceMode::WaterQuality);
         let static_pipeline = make_pipeline(SurfaceMode::StaticLit);
         let sky_pipeline = make_pipeline(SurfaceMode::Sky);
         let star_pipeline = make_pipeline(SurfaceMode::Stars);
@@ -371,6 +410,8 @@ impl Renderer {
             static_opaque_pipeline,
             facade_pipeline,
             water_fallback_pipeline,
+            water_first_pipeline,
+            water_quality_pipeline,
             water_pipeline,
             device,
             queue,
@@ -1107,6 +1148,8 @@ impl Renderer {
             SurfaceMode::FacadeBlend => &self.facade_pipeline,
             SurfaceMode::WaterBase => &self.water_pipeline,
             SurfaceMode::WaterFallback => &self.water_fallback_pipeline,
+            SurfaceMode::WaterFirst => &self.water_first_pipeline,
+            SurfaceMode::WaterQuality => &self.water_quality_pipeline,
         }
     }
 
@@ -1210,8 +1253,13 @@ fn expand_vertices(draw: &TexturedDraw<'_>) -> Result<Vec<[f32; 14]>, String> {
     {
         return Err("specular and vertex counts differ".into());
     }
-    if matches!(draw.mode, SurfaceMode::FacadeBlend | SurfaceMode::Clouds)
-        != draw.secondary.is_some()
+    if matches!(
+        draw.mode,
+        SurfaceMode::FacadeBlend
+            | SurfaceMode::Clouds
+            | SurfaceMode::WaterFirst
+            | SurfaceMode::WaterQuality
+    ) != draw.secondary.is_some()
     {
         return Err("two-layer material requires its secondary texture".into());
     }
