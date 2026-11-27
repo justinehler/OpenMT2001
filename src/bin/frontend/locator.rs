@@ -48,6 +48,7 @@ impl RuntimeInputs {
 pub struct Assets {
     base: Vec<Surface>,
     property_base: Vec<Surface>,
+    welcome_body_bounds: [f32; 4],
     property_title_bounds: [f32; 4],
     property_title_text_bounds: [f32; 4],
     property_title_icon: Surface,
@@ -359,6 +360,15 @@ impl Assets {
             return Err("MPP button spacing texture differs from button size".into());
         }
         let city_layout = ui::mpp_modes(regions[9], [button.width, button.height])?;
+        //40a950/41f750: the informational list starts five pixels below
+        //the named main window and reserves the indicator image's width.
+        let [l, t, r, b] = regions[9];
+        let welcome_body_bounds = [
+            l,
+            (t + 5.).trunc(),
+            r - generic.textures[105].width as f32,
+            b - 2.,
+        ];
         let people_selector = regions[46];
         let city_tabs = std::array::from_fn(|i| {
             let mut icon = Surface::new(&generic.textures[[290, 75, 21, 70][i]]);
@@ -542,6 +552,7 @@ impl Assets {
             ownership_icons,
             base,
             property_base,
+            welcome_body_bounds,
             property_title_bounds,
             property_title_text_bounds,
             property_title_icon,
@@ -847,6 +858,84 @@ impl Assets {
         } else {
             2
         }
+    }
+    /// Original40a850 enters mode0 whenever the city has no selection.
+    pub fn welcome_panel(&self, renderer: &Renderer) -> Result<(PreparedScene, [f32; 4]), String> {
+        let surfaces = self.welcome_surfaces()?;
+        let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
+        Ok((
+            renderer.prepare(
+                &draws,
+                [
+                    2. / 640.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    -2. / 480.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    1.,
+                    0.,
+                    -1.,
+                    1.,
+                    0.,
+                    1.,
+                ],
+                None,
+            )?,
+            [0., 0., 196., 320.],
+        ))
+    }
+    fn welcome_surfaces(&self) -> Result<Vec<Surface>, String> {
+        let mut surfaces = self.base.clone();
+        let mut title = self.property_title_fonts.clone();
+        ui::text_widget_style4(
+            &mut title,
+            &self.property_title_tab,
+            &self.strings[1417],
+            self.property_title_text_bounds,
+            self.text_palette[0],
+        )?;
+        let mut body = self.fonts.clone();
+        // The packed version caption supplies the localized label and token.
+        let version = &self.strings[1419];
+        let token = [b'%' - 32, b'f' - 32];
+        let at = version
+            .windows(2)
+            .position(|s| s == token)
+            .ok_or("welcome version substitution missing")?;
+        let mut version_text = version[..at].to_vec();
+        version_text.extend(b"1.4".iter().map(|b| b - 32));
+        version_text.extend_from_slice(&version[at + 2..]);
+        let [l, mut y, r, b] = self.welcome_body_bounds;
+        //40a850 appends game name, version, a blank row, then instructions.
+        //The original font3 list keeps its ten-pixel row pitch when wrapping.
+        for text in [
+            &self.strings[1418][..],
+            &version_text,
+            &[0],
+            &self.strings[1420],
+        ] {
+            let (offsets, wrapped) =
+                crate::prompt::wrap_with_gap(&self.tab, text, (r - l).trunc() as i32, -1)?;
+            for row in offsets.windows(2) {
+                let end = row[1].saturating_sub(1).min(wrapped.len());
+                ui::text_widget_style0(
+                    &mut body,
+                    &self.tab,
+                    &wrapped[row[0].min(end)..end],
+                    [l, y, r, b],
+                    self.text_palette[0],
+                )?;
+                y += 10.;
+            }
+        }
+        surfaces.extend(title);
+        surfaces.extend(body);
+        Ok(surfaces)
     }
     pub fn property_panel(
         &self,

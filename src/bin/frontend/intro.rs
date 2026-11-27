@@ -849,6 +849,45 @@ pub(crate) fn building_has_management_link(
 ) -> bool {
     building.business().is_some() || building.initialized_apartment.is_some()
 }
+/// Main-panel mode0 is restored on deselection (41eb40/41f290).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InformationTarget {
+    Welcome,
+    Block(crate::selection::Hit),
+    Business,
+}
+fn information_target(
+    selected: Option<crate::selection::Hit>,
+    buildings: &[openmt2001::render_scene::InspectionBuilding],
+) -> InformationTarget {
+    match selected {
+        None => InformationTarget::Welcome,
+        Some(hit)
+            if hit
+                .building
+                .is_some_and(|i| building_has_management_link(&buildings[i])) =>
+        {
+            InformationTarget::Business
+        }
+        Some(hit) => InformationTarget::Block(hit),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn no_city_selection_restores_welcome_information() {
+    assert_eq!(information_target(None, &[]), InformationTarget::Welcome);
+    let hit = crate::selection::Hit {
+        category: 0,
+        building: None,
+    };
+    assert_eq!(
+        information_target(Some(hit), &[]),
+        InformationTarget::Block(hit)
+    );
+    assert_eq!(information_target(None, &[]), InformationTarget::Welcome);
+}
+
 /// Picking returns a geometry-vector index; reports and transactions use the
 /// native category ID. The original board omits inactive slots 40 and 45.
 pub(crate) fn utility_report_category(
@@ -9760,12 +9799,14 @@ impl Intro {
             });
             if view.title_state != Some((view.selected, hovered)) {
                 if view.title_state.map(|s| s.0) != Some(view.selected) {
-                    view.information = match (view.selected, &self.menu) {
-                        (Some(hit), Some(menu))
-                            if !hit.building.is_some_and(|i| {
-                                building_has_management_link(&view.scene.inspection_buildings[i])
-                            }) =>
-                        {
+                    view.information = match (
+                        information_target(view.selected, &view.scene.inspection_buildings),
+                        &self.menu,
+                    ) {
+                        (InformationTarget::Welcome, Some(menu)) => {
+                            Some(menu.locator_assets().welcome_panel(&self.renderer)?)
+                        }
+                        (InformationTarget::Block(hit), Some(menu)) => {
                             // Original 4c39ed..4c3a09 selects main-panel mode1
                             // for a picked building whose +1c business link is -1.
                             // The building stays picked and retains its camera.
