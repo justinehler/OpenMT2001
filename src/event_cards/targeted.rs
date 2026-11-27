@@ -5,8 +5,9 @@ use crate::{
     player_manager::{put, word},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Call {
+    AccountPosted(crate::economy::AccountPosting),
     Sound {
         actor_is_current: bool,
     },
@@ -235,8 +236,22 @@ pub fn apply(
                     .get_mut((i32::from(owner) - 1) as usize)
                     .ok_or("event buyout owner outside roster")?
                     .post(price, 0x16)?;
+                callback(
+                    Call::AccountPosted(crate::economy::AccountPosting {
+                        player: (i32::from(owner) - 1) as usize,
+                        amount: price,
+                    }),
+                    world,
+                )?;
             }
             world.accounts[actor].post(-price, 3)?;
+            callback(
+                Call::AccountPosted(crate::economy::AccountPosting {
+                    player: actor,
+                    amount: -price,
+                }),
+                world,
+            )?;
             let prefix = world.buildings[building as usize][..64].try_into().unwrap();
             crate::economy::transfer_business_owner(
                 &mut world.businesses[slot],
@@ -429,6 +444,7 @@ mod tests {
                         notice,
                         |call, _| {
                             trace.push(match call {
+                                Call::AccountPosted(_) => return Ok(()),
                                 Call::Sound { actor_is_current } => [
                                     0x4ad760,
                                     0x8af288,
