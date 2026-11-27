@@ -865,7 +865,6 @@ impl Session<'_> {
                                             .ok_or("AI auction Time current player missing")?;
                                         let time_cash=city.ledgers.players.get(time_slot)
                                             .ok_or("AI auction Time current account missing")?.cash;
-                                        let totals=context.utilities.totals;
                                         let mut message_context=messages.borrow_mut();
                                         let mut world=openmt2001::ai_runtime::World{
                                             building_parameters:city.building_parameters,
@@ -904,8 +903,7 @@ impl Session<'_> {
                                             ownership:&mut self.roster.ai_ownership,
                                             allocation_next:&mut message_context.arena.next,
                                             global_reset:&mut city.ai_demand.ready,
-                                            native_utilities:[totals[2],totals[3],totals[1],totals[0]],
-                                            properties:dispatch.population.properties.totals,
+                                            income:openmt2001::ai_finance::IncomeTotals::from_economy(&dispatch.population.properties,context.utilities),
                                             auction:city.auction.message_view(),auction_blocked:Some(city.auction.controller.reference!=0 && city.auction.controller.record[0x7d]!=0),auction_guard:city.auction.guard_view(),offer_auction:city.auction.offer_view(),
                                             auction_state:Some(&mut city.auction.controller),
                                             cash_statuses:&city.objective.cash_statuses,

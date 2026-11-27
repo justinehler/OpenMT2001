@@ -327,7 +327,7 @@ pub fn utility_investment(
     buildings: &[[u8; 916]],
     businesses: &[[u8; 544]],
     catalog: &crate::business_pool::BusinessCatalog,
-    native_utilities: &[f32; 4],
+    railroad_income: &[f32; 4],
     image: &PeImage<'_>,
 ) -> Result<i32, String> {
     let mut totals = [0i32; 4];
@@ -365,7 +365,7 @@ pub fn utility_investment(
             .ok_or("utility investment category table leaves pool")?;
         if i32::from(c[5] as i8) == i32::from(player.bytes[0x1bc]) + 1 {
             let mut value = if image.at(0x5385a4 + id * 88, 1)?[0] == 10 {
-                Sum::from_f32(native_utilities[3 - index])?
+                Sum::from_f32(railroad_income[3 - index])?
             } else {
                 Sum::from_i32(totals[3 - index])
             };
@@ -377,7 +377,7 @@ pub fn utility_investment(
     for index in 0..4 {
         if word(image.at(table - index as u32 * 4, 4)?, 0) == category {
             let mut value = if group == 10 {
-                let mut value = Sum::from_f32(native_utilities[3 - index])?;
+                let mut value = Sum::from_f32(railroad_income[3 - index])?;
                 value.mul_f32(image.f32_at(0x525048)?)?;
                 value
             } else {

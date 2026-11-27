@@ -42,8 +42,7 @@ pub struct World<'a> {
     pub allocation_next: &'a mut u32,
     pub message_routing: Option<crate::player_messages::Routing>,
     pub global_reset: &'a mut u8,
-    pub native_utilities: [f32; 4],
-    pub properties: [f32; 4],
+    pub income: crate::ai_finance::IncomeTotals,
     pub auction: Option<ai_messages::Auction>,
     pub auction_blocked: Option<bool>,
     pub auction_guard: Option<crate::ai_guards::Auction>,
@@ -345,8 +344,8 @@ fn finance(
     let projected = crate::ai_finance::projected_income(
         player.bytes[0x1bc],
         world.categories,
-        &world.native_utilities,
-        &world.properties,
+        &world.income.railroads,
+        &world.income.utilities,
         image,
     )?;
     crate::ai_finance::update_selected(
@@ -466,7 +465,7 @@ fn offer_predecision(
                         buildings: world.buildings,
                         businesses: world.businesses,
                         catalog: world.catalog,
-                        native_utilities: &world.native_utilities,
+                        railroad_income: &world.income.railroads,
                         loan_status: world.cash_statuses,
                         hour: world
                             .strategy_time
@@ -1138,7 +1137,7 @@ fn dispatch(
                     buildings: world.buildings,
                     businesses: world.businesses,
                     catalog: world.catalog,
-                    native_utilities: &world.native_utilities,
+                    railroad_income: &world.income.railroads,
                     loan_status: world.cash_statuses,
                     hour: world
                         .strategy_time
@@ -1419,7 +1418,7 @@ pub fn advance(
                                     0x47aa90=>u32::from(developed_target(player,profiles,image,&peers,world)?),
                                     0x47ab80=>{
                                         let scoring=ai_messages::offers::auction::valuation::scoring::World{image,categories:world.categories,buildings:world.buildings,businesses:world.businesses,catalog:world.catalog,
-                                            native_utilities:&world.native_utilities,loan_status:world.cash_statuses,hour:time.hour,residents:world.residents,commodity_active:&world.commodity_active,before,after};
+                                            railroad_income:&world.income.railroads,loan_status:world.cash_statuses,hour:time.hour,residents:world.residents,commodity_active:&world.commodity_active,before,after};
                                         let auction=world.offer_auction.map(|a|(a.category,a.active!=0));
                                         u32::from(crate::ai_acquisition::select(player,&scoring,auction,world.acquisition_checks)?)
                                     },
@@ -1719,3 +1718,6 @@ pub fn advance(
         },
     ).map_err(|error|format!("normal AI slot{slot}: {error}"))
 }
+
+#[cfg(test)]
+mod income_tests;
