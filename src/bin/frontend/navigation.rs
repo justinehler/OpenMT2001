@@ -566,7 +566,7 @@ mod tests {
     #[ignore = "requires supplied v1.4 executable; read-only strategic board framing"]
     fn supplied_strategic_board_fits_beside_report_panel() {
         use glam::{Mat4, Vec3};
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let camera = super::strategic_camera(image.f32_at(0x52508c).unwrap());
         assert_eq!(camera.vertical_fov, image.f32_at(0x545acc).unwrap());
