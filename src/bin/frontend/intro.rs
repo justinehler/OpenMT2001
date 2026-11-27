@@ -4,6 +4,8 @@ use crate::present::Presenter;
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
+#[path = "intro/dialog_keys.rs"]
+mod dialog_keys;
 #[path = "intro/focus.rs"]
 pub(crate) mod focus;
 #[path = "intro/menu_preferences.rs"]
@@ -4325,6 +4327,7 @@ pub struct Intro {
     settings_profile: Option<std::path::PathBuf>,
     saved_settings: crate::profile_settings::Snapshot,
     settings_save_error: Option<String>,
+    dialog_keys: dialog_keys::Input,
 }
 impl Drop for Intro {
     fn drop(&mut self) {
@@ -4335,6 +4338,7 @@ impl Drop for Intro {
 }
 impl Intro {
     pub(crate) fn window_focus(&mut self, focused: bool) -> Result<(), String> {
+        self.dialog_keys.focus(focused);
         self.service_camera_turns();
         if let Some(process) = &self.process_frontend {
             process.borrow_mut().observe(focused)?;
@@ -4344,6 +4348,29 @@ impl Intro {
             process.borrow_mut().note_sent(self.focus.sent());
         }
         Ok(())
+    }
+    pub(crate) fn dialog_physical_sample(&mut self, sample: process_frontend::PhysicalSample) {
+        self.dialog_keys.physical(sample);
+    }
+    pub(crate) fn dialog_ui_event1(&mut self) {
+        let active = !self.focus_pending() && self.loading.is_none();
+        let prompts = self
+            .inspection
+            .as_mut()
+            .filter(|view| {
+                active
+                    && view._fresh_session.is_some()
+                    && !view.save_visible()
+                    && !view.stats_requested
+                    && view.result.is_none()
+                    && view.result_pending.is_none()
+                    && view
+                        .live_status
+                        .as_ref()
+                        .is_none_or(|s| s.stats.is_none() && s.result_request.is_none())
+            })
+            .map(|view| &mut view.prompts);
+        self.dialog_keys.event1(prompts);
     }
     /// Drain before modal/loading early returns and every dependent worker poll.
     /// No call in this service can request work from the suspended Session.
@@ -4701,6 +4728,7 @@ impl Intro {
             settings_profile: None,
             saved_settings: crate::profile_settings::Snapshot::default(),
             settings_save_error: None,
+            dialog_keys: dialog_keys::Input::default(),
         })
     }
     pub fn open_menu(&mut self) {

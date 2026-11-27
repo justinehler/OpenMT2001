@@ -27,6 +27,11 @@ pub(crate) enum PhysicalSample {
         down: bool,
         repeat: bool,
     },
+    /// Winit focus reconciliation updates held state without a physical press.
+    SyntheticKey {
+        key: PhysicalKey,
+        down: bool,
+    },
     Button {
         button: MouseButton,
         down: bool,
@@ -37,6 +42,14 @@ pub(crate) enum PhysicalSample {
 impl PhysicalSample {
     pub(crate) fn from_event(event: &WindowEvent) -> Option<Self> {
         Some(match event {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: true,
+                ..
+            } => Self::SyntheticKey {
+                key: event.physical_key,
+                down: event.state == ElementState::Pressed,
+            },
             WindowEvent::KeyboardInput { event, .. } => Self::Key {
                 key: event.physical_key,
                 down: event.state == ElementState::Pressed,
@@ -379,7 +392,10 @@ impl ProcessFrontend {
         Ok(())
     }
     fn admit(&mut self, sample: PhysicalSample) {
-        let index = if matches!(sample, PhysicalSample::Key { .. }) {
+        let index = if matches!(
+            sample,
+            PhysicalSample::Key { .. } | PhysicalSample::SyntheticKey { .. }
+        ) {
             1
         } else {
             0
@@ -527,7 +543,7 @@ pub(crate) fn project_camera_sample(
     sample: PhysicalSample,
 ) {
     match sample {
-        PhysicalSample::Key { key, down, .. } => {
+        PhysicalSample::Key { key, down, .. } | PhysicalSample::SyntheticKey { key, down } => {
             physical.key(key, down);
             if let winit::keyboard::PhysicalKey::Code(code) = key {
                 use winit::keyboard::KeyCode;
