@@ -763,10 +763,16 @@ impl SinglePlayer {
                 "gamedata2\\brand_new_panels\\SP_Scenario_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 7],
             )?,
-            tutorial_panel: panel(
-                "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm",
-                &(0..14).collect::<Vec<_>>(),
-            )?,
+            tutorial_panel: {
+                let (base, bounds) = ui::panel_front_base(
+                    index,
+                    archive,
+                    "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm",
+                    &(0..14).collect::<Vec<_>>(),
+                    0,
+                )?;
+                Panel { base, bounds }
+            },
             character_panel: panel(
                 "gamedata2\\brand_new_panels\\sp_token_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
@@ -1398,6 +1404,11 @@ impl SinglePlayer {
         shapes.rect(b[6], TUTORIAL_TITLE_COLORS);
         for part in [8, 11] {
             shapes.rect(b[part], [0xbb000a28; 4]);
+        }
+        // Original 49c9e8..49ca29 paints both caption backings after the
+        // body fills; their reverse-facing mesh quads are layout regions.
+        for part in [9, 10] {
+            shapes.rect(b[part], [0xff909090, 0xff909090, 0x80909090, 0x80909090]);
         }
         // 49c3b6/49c4a1 construct font4 and font1 style9 caption widgets.
         ui::text_widget_style9(
