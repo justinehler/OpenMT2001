@@ -64,7 +64,7 @@ pub fn saved_objective(save: &openmt2001::save::SaveFile<'_>) -> Result<i32, Str
     }
     Ok(i32::from_le_bytes(row.payload[..4].try_into().unwrap()))
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Data {
     pub objective: i32,
     /// Manager index then all nine settled values; reverse manager input order.
@@ -186,6 +186,70 @@ impl Data {
         self.rows.iter().map(|(i, v)| (*i, v[mode])).collect()
     }
 }
+/// 427210/event11 changes direction only when the sampled value changes.
+/// Equality (including signed zero) and unordered comparisons retain it.
+fn trend_up(previous: f32, current: f32, was_up: bool) -> bool {
+    if current < previous {
+        false
+    } else if current > previous {
+        true
+    } else {
+        was_up
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Snapshot {
+    pub data: Data,
+    pub mode: usize,
+    /// Indexed by metric and reverse-manager pair, before rank sorting.
+    pub up: [[bool; 6]; 9],
+}
+
+/// Retained worker state; rendering and status polling never advance history.
+pub struct Runtime {
+    pub snapshot: Snapshot,
+    previous: [[f32; 6]; 9],
+}
+impl Runtime {
+    pub fn new(data: Data) -> Self {
+        let mode = State::new(data.objective).mode;
+        let mut runtime = Self {
+            snapshot: Snapshot {
+                data: data.clone(),
+                mode,
+                up: [[true; 6]; 9],
+            },
+            previous: [[0.; 6]; 9],
+        };
+        // 426ba0 configures labels, then startup43c810 delivers event11.
+        runtime.refresh(data);
+        runtime
+    }
+    pub fn refresh(&mut self, data: Data) {
+        let mode = self.snapshot.mode;
+        for (pair, (_, values)) in data.rows.iter().enumerate() {
+            self.snapshot.up[mode][pair] = trend_up(
+                self.previous[mode][pair],
+                values[mode],
+                self.snapshot.up[mode][pair],
+            );
+            self.previous[mode][pair] = values[mode];
+        }
+        self.snapshot.data = data;
+    }
+    pub fn select(&mut self, mode: usize, data: Data) -> Result<(), String> {
+        if State::new(data.objective).enabled.get(mode) != Some(&true) {
+            return Err("disabled comparison metric".into());
+        }
+        // Mode controls collect labels without event11: retain this metric's
+        // baseline and direction until the next activity refresh.
+        self.snapshot.mode = mode;
+        self.snapshot.data = data;
+        Ok(())
+    }
+}
+
 pub struct View {
     pub data: Data,
     pub state: State,
@@ -193,6 +257,8 @@ pub struct View {
     hover: Option<usize>,
     pressed: Option<usize>,
     dirty: bool,
+    up: [[bool; 6]; 9],
+    live: bool,
 }
 impl View {
     pub fn new(data: Data) -> Self {
@@ -203,6 +269,8 @@ impl View {
             hover: None,
             pressed: None,
             dirty: true,
+            up: [[true; 6]; 9],
+            live: false,
         }
     }
     /// Keep fresh data and enabled metrics; retain only valid user choices.
@@ -211,8 +279,23 @@ impl View {
         if self.state.enabled.get(old.state.mode) == Some(&true) {
             self.state.mode = old.state.mode;
         }
+        self.up = old.up;
+        self.live = old.live;
+        if self.live {
+            self.data = old.data.clone();
+        }
         self.cancel_press();
         self.prepared = None;
+    }
+    pub fn apply_live(&mut self, snapshot: &Snapshot) {
+        // A poll sent before a mode click can arrive after it. Wait for the
+        // worker's selected-mode acknowledgement before accepting its rows.
+        if snapshot.mode == self.state.mode {
+            self.dirty |= self.data != snapshot.data || self.up != snapshot.up;
+            self.data = snapshot.data.clone();
+            self.up = snapshot.up;
+            self.live = true;
+        }
     }
     pub fn contains(&self, point: [i32; 2]) -> bool {
         let [x, y] = point.map(|v| v as f32 * 0.5);
@@ -264,6 +347,7 @@ impl View {
                 &self.state,
                 players,
                 &self.data.values(self.state.mode),
+                &self.up[self.state.mode],
                 self.hover,
                 self.pressed,
             )?);
@@ -441,12 +525,14 @@ impl Assets {
                 x >= l && x <= r && y >= t && y <= b
             })
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &self,
         renderer: &openmt2001::render::Renderer,
         state: &State,
         players: &[[u8; 440]],
         rows: &[(usize, f32)],
+        up: &[bool; 6],
         hover: Option<usize>,
         pressed: Option<usize>,
     ) -> Result<openmt2001::render::PreparedScene, String> {
@@ -566,9 +652,22 @@ impl Assets {
                     } else {
                         amount.extend(integer.to_string().bytes().map(|b| b - 32));
                     }
-                    // Original right alignment reserves trend-icon width. Static saved
-                    // inspection has no observed previous update to fabricate a trend.
-                    text_bounds[2] -= 8.;
+                    // 426d30 uses the original up-image width for both arrows.
+                    // Generic ordinals110/12 are globals68afe0/68ae58.
+                    let mut arrow = self.generic[if up[row] { 110 } else { 12 }].clone();
+                    let [_, top, right, bottom] = text_bounds;
+                    text_bounds[2] -= self.generic[110].width as f32;
+                    arrow.quad(
+                        [
+                            [text_bounds[2], top],
+                            [text_bounds[2], bottom],
+                            [right, bottom],
+                            [right, top],
+                        ],
+                        [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                        [0xffffffff; 4],
+                    );
+                    row_icons.push(arrow);
                     ui::text_fit(
                         &mut fonts,
                         &self.tab,
@@ -644,6 +743,89 @@ impl Assets {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn direction_retains_equal_and_unordered_samples() {
+        for was_up in [false, true] {
+            assert!(super::trend_up(-5., -4., was_up));
+            assert!(!super::trend_up(5., -5., was_up));
+            for (previous, current) in [(0., -0.), (42., 42.), (f32::NAN, 1.), (1., f32::NAN)] {
+                assert_eq!(super::trend_up(previous, current, was_up), was_up);
+            }
+        }
+    }
+
+    #[test]
+    fn live_updates_retain_each_metric_history_across_switches_and_ranking() {
+        let data = |cash, sales, profit| super::Data {
+            objective: 0,
+            rows: vec![
+                (2, [cash, 0., 0., sales, 300., profit, 0., 0., 0.]),
+                (0, [200.; 9]),
+            ],
+        };
+        let mut live = super::Runtime::new(data(100., 0., -50.));
+        assert!(live.snapshot.up.iter().flatten().all(|&up| up));
+        live.refresh(data(80., 1., -60.));
+        assert!(!live.snapshot.up[0][0]);
+        live.refresh(data(80., 2., -70.));
+        assert!(!live.snapshot.up[0][0], "equal cash retains down");
+        live.select(3, data(80., 2., -70.)).unwrap();
+        assert!(live.snapshot.up[3][0], "new metric starts up");
+        live.refresh(data(80., 3., -70.));
+        assert!(live.snapshot.up[3][0], "sales increased from zero baseline");
+        live.refresh(data(80., 4., -70.));
+        assert!(live.snapshot.up[3][0]);
+        live.select(5, data(80., 4., -70.)).unwrap();
+        assert!(live.snapshot.up[5][0], "selection does not advance history");
+        live.refresh(data(80., 4., -70.));
+        assert!(
+            !live.snapshot.up[5][0],
+            "negative profit below initial zero"
+        );
+        live.refresh(data(80., 4., -60.));
+        assert!(live.snapshot.up[5][0], "improving negative profit is up");
+        live.select(0, data(250., 4., -60.)).unwrap();
+        assert!(
+            !live.snapshot.up[0][0],
+            "cash retains last direction on return"
+        );
+        live.refresh(data(250., 4., -60.));
+        assert!(live.snapshot.up[0][0]);
+        live.refresh(data(240., 4., -60.));
+        assert!(!live.snapshot.up[0][0]);
+        assert_eq!(super::order(&[240., 200.]), vec![0, 1]);
+        assert!(
+            live.snapshot.up[0][1],
+            "direction follows manager pair, not rank"
+        );
+        assert!(live.select(2, data(240., 4., -60.)).is_err());
+    }
+
+    #[test]
+    fn live_snapshot_survives_scene_refresh_and_rejects_old_mode_poll() {
+        let data = |value| super::Data {
+            objective: 0,
+            rows: vec![(0, [value; 9])],
+        };
+        let mut runtime = super::Runtime::new(data(100.));
+        runtime.refresh(data(50.));
+        let mut view = super::View::new(data(100.));
+        view.apply_live(&runtime.snapshot);
+        assert!(!view.up[0][0]);
+        let mut refreshed = super::View::new(data(999.));
+        refreshed.retain_ui_from(&view);
+        assert_eq!(refreshed.data.values(0), vec![(0, 50.)]);
+        assert!(!refreshed.up[0][0]);
+        refreshed.state.cycle(true);
+        refreshed.apply_live(&runtime.snapshot);
+        assert_eq!(refreshed.state.mode, 1);
+        assert_eq!(refreshed.data.values(0), vec![(0, 50.)]);
+        runtime.select(1, data(12.)).unwrap();
+        refreshed.apply_live(&runtime.snapshot);
+        assert_eq!(refreshed.data.values(1), vec![(0, 12.)]);
+        assert!(refreshed.up[1][0]);
+    }
+
     #[test]
     #[ignore = "requires supplied original Comparison mesh and UI assets"]
     fn original_comparison_background_materials() {

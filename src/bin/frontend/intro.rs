@@ -973,6 +973,7 @@ enum FreshRequest {
         reply: mpsc::Sender<Result<(), String>>,
     },
     ToggleSpeed,
+    ComparisonMode(usize),
     DismissPrompt(u32, Option<mpsc::Sender<Vec<crate::prompt::Request>>>),
     TutorialControl(u32),
     TutorialProducer {
@@ -1792,6 +1793,12 @@ impl SceneInputs {
                             }
                             FreshRequest::DismissMarketShare => host.dismiss_market_share(),
                             FreshRequest::ToggleSpeed => host.toggle_speed(),
+                            FreshRequest::ComparisonMode(mode) => {
+                                if let Err(error) = host.select_comparison(&session, &assets, mode)
+                                {
+                                    host.fail(error);
+                                }
+                            }
                             FreshRequest::Stats(action) => {
                                 if let Err(error) = host.stats_action(&mut session, action) {
                                     host.fail(error);
@@ -6369,6 +6376,12 @@ impl Intro {
                 if view.pointer.is_some_and(|p| comparison.contains(p)) || comparison.pressed() {
                     if button == winit::event::MouseButton::Left {
                         let activated = comparison.mouse(pressed);
+                        if matches!(activated, Some(1 | 2))
+                            && let Some(sender) = &view._fresh_session
+                        {
+                            let _ =
+                                sender.send(FreshRequest::ComparisonMode(comparison.state.mode));
+                        }
                         if let Some(id) =
                             activated.and_then(|button| [76, 77, 78].get(button).copied())
                             && view.live_status.as_ref().is_some_and(|status| {
@@ -9228,6 +9241,11 @@ impl Intro {
                             (&mut view.locator, status.city_people_rows.take())
                         {
                             locator.apply_people_rows(rows);
+                        }
+                        if let (Some(comparison), Some(snapshot)) =
+                            (&mut view.comparison, &status.comparison)
+                        {
+                            comparison.apply_live(snapshot);
                         }
                         view.pulse_state = Some(status.pulse_lights.clone());
                         view.time_panel
