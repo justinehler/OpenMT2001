@@ -912,7 +912,7 @@ impl Session<'_> {
                                         };
                                         openmt2001::ai_runtime::advance(slot,manager,&mut self.roster.profiles,
                                             &mut openmt2001::ai_tick::Controls{normal_tick:clock.timing[0],day_tick:clock.timing[3],event_gate:policy.ai_event_gate},
-                                            image,&mut world,|call,player,profiles,world|{
+                                            &mut self.roster.scripts,image,&mut world,|call,player,profiles,world|{
                                                 if let openmt2001::ai_runtime::Call::ConstructionCommand{descriptor}=call {
                                                     let command=openmt2001::construction::Command::from_packet(&descriptor)?;
                                                     self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
@@ -991,19 +991,10 @@ impl Session<'_> {
                                                     }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::Strategy(openmt2001::ai_strategy::Call::Script{address,character})=call {
-                                                    let raw=image.at(address,128)?;
-                                                    let len=raw.iter().position(|&b|b==0).ok_or("AI script name unterminated")?;
-                                                    let name=std::str::from_utf8(&raw[..len]).map_err(|e|e.to_string())?;
-                                                    self.roster.scripts.trigger_timetable(profiles,name,character as i32,clock.hour() as i32)?;
-                                                    self.roster.scripts.apply_twiddle_thumbs(player)?;
-                                                    Ok(openmt2001::ai_messages::Reply::default())
-                                                }else{
-                                                    let event=if let openmt2001::ai_runtime::Call::AuctionAction(action)=call {
-                                                        Event::Command(live_commands::auction_action_event(action,time_cash))
-                                                    } else { Event::Ai(call) };
-                                                    boundary(event,clock).map(|value|openmt2001::ai_messages::Reply{value,offer:0})
-                                                }
+                                                let event=if let openmt2001::ai_runtime::Call::AuctionAction(action)=call {
+                                                    Event::Command(live_commands::auction_action_event(action,time_cash))
+                                                } else { Event::Ai(call) };
+                                                boundary(event,clock).map(|value|openmt2001::ai_messages::Reply{value,offer:0})
                                             })
                                     }
                                     other=>boundary(Event::Player(other),clock).map(|_|()),

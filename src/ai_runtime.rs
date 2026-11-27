@@ -1,9 +1,11 @@
 //! Connect the original normal controller to retained financial and inbox state.
 //! Unrecovered decision operations remain synchronous, explicit dependencies.
+#[cfg(feature = "lua4")]
+use crate::player_manager::Manager;
 use crate::{
     ai_messages, ai_tick,
     pe::PeImage,
-    player_manager::{Manager, Player, word},
+    player_manager::{Player, word},
 };
 
 pub struct World<'a> {
@@ -1311,11 +1313,38 @@ fn dispatch(
     result
 }
 
+/// Invoke the roster's AI VM while retaining access to every linked player.
+/// Script writes are immediately visible to the controller and later accounts.
+#[cfg(feature = "lua4")]
+#[allow(clippy::too_many_arguments)]
+fn script_event(
+    scripts: &mut crate::ai_script::AiScript,
+    profiles: &mut [[u8; 0x650]],
+    players: &mut crate::player_messages::SplitPlayers<'_>,
+    image: &PeImage<'_>,
+    address: u32,
+    character: u32,
+    hour: i32,
+) -> Result<u32, String> {
+    let raw = image.at(address, 128)?;
+    let len = raw
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or("AI script name unterminated")?;
+    let name = std::str::from_utf8(&raw[..len]).map_err(|error| error.to_string())?;
+    scripts.trigger_timetable(profiles, players, name, character as i32, hour)?;
+    scripts.apply_twiddle_thumbs(players.current)?;
+    Ok(0)
+}
+
+#[cfg(feature = "lua4")]
+#[allow(clippy::too_many_arguments)]
 pub fn advance(
     slot: usize,
     manager: &mut Manager,
     profiles: &mut [[u8; 0x650]],
     controls: &mut ai_tick::Controls,
+    scripts: &mut crate::ai_script::AiScript,
     image: &PeImage<'_>,
     world: &mut World<'_>,
     mut callback: impl FnMut(
@@ -1348,7 +1377,7 @@ pub fn advance(
                             let result=crate::ai_actions::continuation::advance(address,player,profiles,image,&mut state,|call,player,profiles,state|{
                                 let a=call.arguments;let mut reply=crate::ai_actions::continuation::Reply::default();
                                 reply.value=match call.address {
-                                    0x4d5d00=>callback(Call::Strategy(crate::ai_strategy::Call::Script{address:a[0],character:a[2]}),player,profiles,world)?.value,
+                                    0x4d5d00=>script_event(scripts,profiles,&mut crate::player_messages::SplitPlayers{before,current:player,after},image,a[0],a[2],world.strategy_time.ok_or("AI script clock missing")?.hour)?,
                                     0x46b6c0=>{crate::ai_actions::queries::mark_category(player,a[0]);0},
                                     0x4727d0=>crate::ai_actions::queries::trouble_hours(player,state.cash_statuses,state.hour)? as u32,
                                     0x47d700|0x47d990=>crate::ai_actions::queries::limit(player,profiles,call.address==0x47d990)?,
@@ -1373,10 +1402,10 @@ pub fn advance(
                 Ok(0)
             }
             0x47b240 => {
-                let peers: Vec<_> = before.iter().map(Some).chain(std::iter::once(None)).chain(after.iter().map(Some)).collect();
                 crate::ai_strategy::select(player, image, |call, player| {
                     match (call,world.strategy_time) {
                         (crate::ai_strategy::Call::Select,Some(time))=>{
+                            let peers: Vec<_> = before.iter().map(Some).chain(std::iter::once(None)).chain(after.iter().map(Some)).collect();
                             crate::ai_selection::select(player,profiles,image,time,|call,player,profiles|{
                                 let value=match call.address {
                                     0x466fa0=>{finance(player,&peers,profiles,image,world,controls.normal_tick,call.arguments[0] as u8!=0)?;0},
@@ -1430,10 +1459,13 @@ pub fn advance(
                         (crate::ai_strategy::Call::DevelopmentStrategy,Some(time))=>{
                             let window=crate::ai_selection::windows(player,profiles,time.hour)?;
                             crate::ai_strategy::development_in_window(player,image,window,|call,player|{
-                                callback(Call::Strategy(call),player,profiles,world).map(|r|r.value)
+                                if let crate::ai_strategy::Call::Script{address,character}=call {
+                                    script_event(scripts,profiles,&mut crate::player_messages::SplitPlayers{before,current:player,after},image,address,character,time.hour)
+                                }else{callback(Call::Strategy(call),player,profiles,world).map(|r|r.value)}
                             })
                         },
                         (crate::ai_strategy::Call::PrepareAuction,_)=>portfolio_value(player,profiles,image,world).map(|v|v as u32),
+                        (crate::ai_strategy::Call::Script{address,character},_)=>script_event(scripts,profiles,&mut crate::player_messages::SplitPlayers{before,current:player,after},image,address,character,world.strategy_time.ok_or("AI script clock missing")?.hour),
                         _=>callback(Call::Strategy(call), player, profiles, world).map(|r| r.value),
                     }
                 })?;
@@ -1445,7 +1477,9 @@ pub fn advance(
                 |call, player| {
                     if call==crate::ai_strategy::Call::Finalize {liquidation_finalize(player,profiles,image,world)?;Ok(0)}
                     else if let crate::ai_strategy::Call::CategoryPrice(id)=call {Ok(ai_messages::offers::execution::category_value(world.categories.get(id as usize).ok_or("AI acquisition category missing")?,image)?.ftol_low_word() as u32)}
-                    else {callback(Call::Strategy(call), player, profiles, world).map(|r| r.value)}
+                    else if let crate::ai_strategy::Call::Script{address,character}=call {
+                        script_event(scripts,profiles,&mut crate::player_messages::SplitPlayers{before,current:player,after},image,address,character,world.strategy_time.ok_or("AI script clock missing")?.hour)
+                    }else {callback(Call::Strategy(call), player, profiles, world).map(|r| r.value)}
                 },
             )?)),
             0x4779b0 => {
