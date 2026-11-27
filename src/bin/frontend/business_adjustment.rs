@@ -203,11 +203,55 @@ pub struct Assets {
     regions: Vec<[f32; 4]>,
     products: Vec<Vec<u32>>,
     buttons: Vec<Surface>,
+    apply_buttons: Vec<Surface>,
+    commodity_icons: Vec<Surface>,
     arrows: Vec<Surface>,
     retail_numeric: Vec<(crate::business_edit::Action, [f32; 4])>,
     apartment_numeric: Vec<(crate::business_edit::Action, [f32; 4])>,
     numeric_arrows: Vec<Surface>,
     block_names: Vec<u32>,
+}
+// 4162c0/443080 store normal, hover, down and disabled images separately.
+const APPLY_TEXTURES: [usize; 4] = [85, 87, 86, 143];
+fn apply_presentation(disabled: bool, hover: bool, pressed: bool) -> (usize, u32) {
+    if disabled {
+        (3, 0xffffffff)
+    } else if hover {
+        (if pressed { 2 } else { 1 }, 0xffffffff)
+    } else {
+        (0, 0xffffffff)
+    }
+}
+// Submitted terms can await the delayed command with dirty already cleared.
+// A retail edit that restores all applied terms has nothing left to submit.
+fn pending_terms(record: &[u8; 544]) -> bool {
+    record[0x208] != 0 && (record[..4] != [0; 4] || record[0x1b8..0x1dc] != record[0x1e0..0x204])
+}
+fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
+    openmt2001::economy::stock_capacity(
+        i32::from(lot[2]) * i32::from(lot[3]),
+        height,
+        f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap()),
+    )
+}
+fn retail_totals(rows: &[Row], capacity: i32) -> [String; 4] {
+    let mut totals = [0i32; 4];
+    for row in rows {
+        for (total, value) in totals.iter_mut().zip([
+            i32::from(row.yesterday),
+            i32::from(row.wanted),
+            i32::from(row.stock),
+            i32::from(row.today),
+        ]) {
+            *total += value;
+        }
+    }
+    [
+        totals[0].to_string(),
+        format!("{}/{capacity}", totals[1]),
+        format!("{}/{capacity}", totals[2]),
+        totals[3].to_string(),
+    ]
 }
 const RETAIL_ARROW_TEXTURES: [usize; 8] = [118, 119, 120, 121, 122, 123, 124, 125];
 fn retail_numeric_controls(
@@ -309,6 +353,7 @@ impl PreparedRefresh {
         state.building = fresh.building;
         state.edit_target = fresh.edit_target;
         state.rows = fresh.rows;
+        state.stock_capacity = fresh.stock_capacity;
         state.apartment = fresh.apartment;
         state.name = fresh.name;
         state.block_name = fresh.block_name;
@@ -335,6 +380,7 @@ pub struct State {
     pub initialized: bool,
     pub building: usize,
     pub rows: Vec<Row>,
+    stock_capacity: i32,
     pub apartment: Option<Apartment>,
     pub name: u32,
     block_name: u32,
@@ -526,7 +572,7 @@ impl State {
                     };
                     self.tutorial_producer = control.map(|control| (control, 7));
                 }
-                self.dirty_terms = record[0x208] != 0;
+                self.dirty_terms = pending_terms(&record);
                 let refreshed = if let Some(apartment) = &self.apartment {
                     Apartment::from_record(&record, apartment.modes[0], apartment.modes[1])
                         .map(|value| self.apartment = Some(value))
@@ -766,8 +812,13 @@ impl Assets {
             } else {
                 0
             };
+            let apply = apply_presentation(
+                disabled,
+                state.edit_hover == Some(action),
+                state.edit_pressed == Some(action),
+            );
             let mut icon = match action {
-                Action::Apply => self.buttons[phase].clone(),
+                Action::Apply => self.apply_buttons[apply.0].clone(),
                 Action::Price { increase, .. }
                 | Action::Stock { increase, .. }
                 | Action::Rent { increase } => self.numeric_arrows
@@ -778,11 +829,7 @@ impl Assets {
             icon.quad(
                 [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]]],
                 [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                [if disabled && matches!(action, Action::Apply) {
-                    0xff888888
-                } else {
-                    0xffffffff
-                }; 4],
+                [0xffffffff; 4],
             );
             surfaces.push(icon);
             if action == Action::Apply {
@@ -792,7 +839,7 @@ impl Assets {
                     &b"Apply".map(|b| b - 32),
                     [b[0], b[1] + 7., b[2], b[3]],
                     true,
-                    if disabled { 0xffaaaaaa } else { 0xffffffff },
+                    apply.1,
                 )?;
             }
         }
@@ -857,6 +904,10 @@ impl Assets {
             .collect();
         let generic = TextureSet::parse(payload("gamedata2/GenericTextures640/textures.gtd")?)
             .map_err(|e| e.to_string())?;
+        let apply_buttons = APPLY_TEXTURES
+            .iter()
+            .map(|&i| Surface::new(&generic.textures[i]))
+            .collect();
         let arrows = [97, 98, 99, 101, 102, 103]
             .iter()
             .map(|&i| Surface::new(&generic.textures[i]))
@@ -907,6 +958,18 @@ impl Assets {
                     .collect()
             })
             .collect();
+        let commodity_icons = commodity
+            .rows
+            .iter()
+            .map(|row| {
+                let image = u32::from_le_bytes(row[12..16].try_into().unwrap()) as usize;
+                generic
+                    .textures
+                    .get(image)
+                    .map(Surface::new)
+                    .ok_or("adjustment commodity icon texture".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let strings = crate::tooltip::localized_strings(installer, strings)?;
         Ok(Self {
             base,
@@ -922,6 +985,8 @@ impl Assets {
             regions,
             products,
             buttons,
+            apply_buttons,
+            commodity_icons,
             arrows,
             retail_numeric,
             apartment_numeric,
@@ -967,7 +1032,7 @@ impl Assets {
                 edit_inflight: None,
                 close: false,
                 close_after_apply: false,
-                dirty_terms: record[0x208] != 0,
+                dirty_terms: pending_terms(record),
                 last_refresh: Instant::now(),
                 edit_hover: None,
                 edit_pressed: None,
@@ -975,6 +1040,7 @@ impl Assets {
                 initialized: b.initialized_apartment.is_some(),
                 building,
                 rows: vec![],
+                stock_capacity: 0,
                 apartment: Some(Apartment::from_record(record, false, false)?),
                 name: b
                     .business()
@@ -1014,7 +1080,7 @@ impl Assets {
             edit_inflight: None,
             close: false,
             close_after_apply: false,
-            dirty_terms: record[0x208] != 0,
+            dirty_terms: pending_terms(record),
             last_refresh: Instant::now(),
             edit_hover: None,
             edit_pressed: None,
@@ -1022,6 +1088,12 @@ impl Assets {
             initialized: b.runtime_slot.is_some(),
             building,
             rows: rows(&business.record, info, commodities, products)?,
+            stock_capacity: retail_capacity(
+                b.lot,
+                b.height,
+                info.row(business.business_type as usize)
+                    .ok_or("adjustment business kind")?,
+            ),
             apartment: None,
             name: business.name_text_id,
             block_name: self.block_names[b.category],
@@ -1057,6 +1129,33 @@ impl Assets {
             }
         }
         Ok(next)
+    }
+    fn prepare_commodity_icons(
+        &self,
+        rows: &[Row],
+        surfaces: &mut Vec<Surface>,
+    ) -> Result<(), String> {
+        for (slot, row) in rows.iter().enumerate() {
+            let name = format!("BAP_COMM_ICON_ROW{}", slot + 1);
+            let b = self
+                .retail_bounds
+                .iter()
+                .find(|(n, _)| n == &name)
+                .ok_or_else(|| format!("missing adjustment icon region {name}"))?
+                .1;
+            let mut icon = self
+                .commodity_icons
+                .get(row.commodity as usize)
+                .ok_or("adjustment commodity icon identity")?
+                .clone();
+            icon.quad(
+                [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [0xffffffff; 4],
+            );
+            surfaces.push(icon);
+        }
+        Ok(())
     }
     fn prepare(&self, renderer: &Renderer, state: &State) -> Result<PreparedScene, String> {
         if let Some(apartment) = &state.apartment {
@@ -1134,7 +1233,7 @@ impl Assets {
         }
         let currency = label(2243)?;
         let currency_suffix = label(2244)?.first() != Some(&0x4c);
-        let mut totals = [0i32; 4];
+        self.prepare_commodity_icons(&state.rows, &mut surfaces)?;
         for (row, item) in state.rows.iter().enumerate() {
             let y = self.regions[15][1] + 2. + row as f32 * 17.;
             let numbers = [
@@ -1148,7 +1247,10 @@ impl Assets {
             ];
             for (column, text) in numbers.iter().enumerate() {
                 let b = self.regions[15 + column];
-                let inset = if state.edit_target.is_some() && matches!(column, 2 | 4) {
+                let inset = if column == 0 {
+                    // Original row labels reserve twenty screen units for the icon.
+                    20.
+                } else if state.edit_target.is_some() && matches!(column, 2 | 4) {
                     14.
                 } else {
                     4.
@@ -1162,29 +1264,33 @@ impl Assets {
                     &mut fonts,
                     &self.tab,
                     encoded,
-                    [b[0] + inset, y, b[2] - inset, y + 14.],
+                    [
+                        b[0] + inset,
+                        y,
+                        b[2] - if column == 0 { 4. } else { inset },
+                        y + 14.,
+                    ],
                     column != 0,
                     0xffffffff,
                 )?;
             }
-            for (t, v) in totals.iter_mut().zip([
-                i32::from(item.yesterday),
-                i32::from(item.wanted),
-                i32::from(item.stock),
-                i32::from(item.today),
-            ]) {
-                *t += v;
-            }
         }
-        centered(&mut fonts, label(1476)?, self.regions[22], 0xffffffff)?;
-        for (i, total) in totals.into_iter().enumerate() {
+        let b = self.regions[22];
+        ui::text(
+            &mut fonts,
+            &self.tab,
+            label(1476)?,
+            [b[0] + 2., (b[1] + b[3] - 10.) * 0.5, b[2] - 2., b[3]],
+            false,
+            0xffffffff,
+        )?;
+        for (i, total) in retail_totals(&state.rows, state.stock_capacity)
+            .into_iter()
+            .enumerate()
+        {
             centered(
                 &mut fonts,
-                &total
-                    .to_string()
-                    .bytes()
-                    .map(|b| b - 32)
-                    .collect::<Vec<_>>(),
+                &total.bytes().map(|b| b - 32).collect::<Vec<_>>(),
                 self.regions[23 + i],
                 0xffffffff,
             )?;
@@ -1654,7 +1760,213 @@ pub fn verify_live_panels(scene: &Scene) {
 }
 
 #[cfg(test)]
+pub(crate) fn refresh_assets_fixture() -> Assets {
+    // The refresh path reads only owner_colors, products and block_names.
+    Assets {
+        base: vec![],
+        retail_bounds: vec![],
+        apartment_bounds: vec![],
+        body_color: 0,
+        owner_colors: [0; 10],
+        apartment_base: vec![],
+        apartment_regions: vec![],
+        fonts: vec![],
+        tab: vec![],
+        strings: vec![],
+        regions: vec![],
+        products: vec![],
+        buttons: vec![],
+        apply_buttons: vec![],
+        commodity_icons: vec![],
+        arrows: vec![],
+        retail_numeric: vec![],
+        apartment_numeric: vec![],
+        numeric_arrows: vec![],
+        block_names: vec![0; 52],
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn retail_fixture() -> (Vec<Row>, [u8; 544]) {
+        let mut catalog = [[0; 116]; 45];
+        catalog[0][0x4c] = 2;
+        catalog[0][0x70..0x74].copy_from_slice(&5u32.to_le_bytes());
+        let mut record = [0; 544];
+        for (slot, (wanted, held, yesterday, today)) in [(12u16, 4u16, 3u16, 2u16), (8, 5, 7, 6)]
+            .into_iter()
+            .enumerate()
+        {
+            record[0x1e0 + slot * 2..0x1e2 + slot * 2].copy_from_slice(&wanted.to_le_bytes());
+            record[0x1b8 + slot * 2..0x1ba + slot * 2].copy_from_slice(&wanted.to_le_bytes());
+            let stock = 0x80 + slot * 0x34;
+            record[stock..stock + 2].copy_from_slice(&held.to_le_bytes());
+            record[stock + 2..stock + 4].copy_from_slice(&today.to_le_bytes());
+            record[stock + 8..stock + 10].copy_from_slice(&yesterday.to_le_bytes());
+        }
+        let rows = rows(
+            &record,
+            &BusinessCatalog::from_rows(catalog),
+            &[[0; 28]; 32],
+            &[2, 0],
+        )
+        .unwrap();
+        (rows, record)
+    }
+
+    #[test]
+    fn stock_totals_share_building_capacity_and_refresh_after_apply() {
+        let (mut rows, mut record) = retail_fixture();
+        let mut info = [0; 116];
+        info[0x58..0x5c].copy_from_slice(&1.25f32.to_le_bytes());
+        let capacity = retail_capacity([9, 3, 4, 3], 2, &info);
+        assert_eq!(capacity, 30);
+        assert_eq!(retail_totals(&rows, capacity), ["10", "20/30", "9/30", "8"]);
+        record[0x1e0..0x1e2].copy_from_slice(&15u16.to_le_bytes());
+        record[0x80..0x82].copy_from_slice(&11u16.to_le_bytes());
+        refresh_retail_rows(&mut rows, &record).unwrap();
+        assert_eq!(
+            retail_totals(&rows, capacity),
+            ["10", "23/30", "16/30", "8"]
+        );
+    }
+
+    #[test]
+    fn apply_uses_original_disabled_and_active_images() {
+        for (hover, pressed, phase) in [(false, false, 0), (true, false, 1), (true, true, 2)] {
+            let (image, color) = apply_presentation(false, hover, pressed);
+            assert_eq!(APPLY_TEXTURES[image], [85, 87, 86][phase]);
+            assert_eq!(color, 0xffffffff);
+            let (image, color) = apply_presentation(true, hover, pressed);
+            assert_eq!(APPLY_TEXTURES[image], 143);
+            assert_eq!(color, 0xffffffff);
+        }
+    }
+
+    #[test]
+    fn apply_disables_after_submission_or_reverting_stock_and_price_edits() {
+        let (_, mut record) = retail_fixture();
+        assert!(!pending_terms(&record));
+        record[0x208] = 1;
+        record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
+        assert!(pending_terms(&record));
+        record[0x1e0..0x1e2].copy_from_slice(&12u16.to_le_bytes());
+        assert!(!pending_terms(&record));
+        record[0x1ec..0x1f0].copy_from_slice(&1.5f32.to_le_bytes());
+        assert!(pending_terms(&record));
+        record[0x1ec..0x1f0].copy_from_slice(&0f32.to_le_bytes());
+        assert!(!pending_terms(&record));
+        record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
+        record[0x208] = 0;
+        assert!(!pending_terms(&record));
+    }
+
+    #[test]
+    fn authoritative_edit_replies_refresh_totals_and_apply_admission() {
+        use crate::business_edit::Action;
+        let (rows, mut record) = retail_fixture();
+        let mut state = State {
+            edit_target: Some(crate::business_edit::Target {
+                building: 0,
+                business: 0,
+            }),
+            edit_request: None,
+            edit_pending: None,
+            edit_inflight: None,
+            close: false,
+            close_after_apply: false,
+            dirty_terms: false,
+            last_refresh: Instant::now(),
+            edit_hover: None,
+            edit_pressed: None,
+            diagnostic: None,
+            initialized: true,
+            building: 0,
+            rows,
+            stock_capacity: 30,
+            apartment: None,
+            name: 0,
+            block_name: 0,
+            owner_color: 0,
+            prepared: None,
+            navigation: vec![],
+            requested_building: None,
+            dirty: false,
+            hover: false,
+            pressed: false,
+            arrow_hover: None,
+            arrow_pressed: None,
+            tutorial_control: None,
+            tutorial_producer: None,
+        };
+        let mut assets = refresh_assets_fixture();
+        assets.regions = vec![[0.; 4]; 30];
+        assets.regions[29] = [100., 100., 160., 124.];
+        let apply = |state: &mut State| {
+            state.pointer(&assets, Some([240, 220]));
+            state.mouse(true);
+            state.mouse(false);
+            state.edit_request.take()
+        };
+        assert_eq!(apply(&mut state), None);
+        record[0x208] = 1;
+        record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
+        state.edit_inflight = Some(Action::Stock {
+            slot: 0,
+            increase: true,
+        });
+        state.receive_edit(Ok(record));
+        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "21/30");
+        assert_eq!(apply(&mut state), Some(Action::Apply));
+        let (_sender, pending) = std::sync::mpsc::channel();
+        state.edit_pending = Some(pending);
+        assert_eq!(apply(&mut state), None);
+        state.edit_pending = None;
+        record[0x1e0..0x1e2].copy_from_slice(&12u16.to_le_bytes());
+        state.edit_inflight = Some(Action::Stock {
+            slot: 0,
+            increase: false,
+        });
+        state.receive_edit(Ok(record));
+        assert_eq!(apply(&mut state), None);
+        record[0x1e0..0x1e2].copy_from_slice(&14u16.to_le_bytes());
+        record[0x208] = 0;
+        state.edit_inflight = Some(Action::Apply);
+        state.receive_edit(Ok(record));
+        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "22/30");
+        assert_eq!(apply(&mut state), None);
+    }
+
+    #[test]
+    fn every_commodity_row_submits_its_own_icon_in_the_mesh_region() {
+        let (rows, _) = retail_fixture();
+        let mut assets = refresh_assets_fixture();
+        assets.commodity_icons = (0..3)
+            .map(|i| {
+                let mut surface = Surface::solid();
+                surface.pixels[0] = i;
+                surface
+            })
+            .collect();
+        assets.retail_bounds = vec![
+            ("BAP_COMM_ICON_ROW1".into(), [41., 140., 55., 154.]),
+            ("BAP_COMM_ICON_ROW2".into(), [41., 157., 55., 171.]),
+        ];
+        let mut surfaces = Vec::new();
+        assets
+            .prepare_commodity_icons(&rows, &mut surfaces)
+            .unwrap();
+        assert_eq!(surfaces.len(), rows.len());
+        for (slot, surface) in surfaces.iter().enumerate() {
+            assert_eq!(surface.pixels[0], rows[slot].commodity as u8);
+            assert_eq!(surface.vertices.len(), 6);
+            assert_eq!(surface.vertices[0][..2], assets.retail_bounds[slot].1[..2]);
+            assert_eq!(surface.vertices[2][..2], assets.retail_bounds[slot].1[2..]);
+        }
+    }
+
     #[test]
     fn panel_backings_preserve_translucent_stock_and_solid_edit_columns() {
         let palette = super::retail_palette(0xbb000a28, 0x0000ff00);
@@ -1984,30 +2296,5 @@ mod tests {
             }
         }
         assert_eq!(at, bytes.len());
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn refresh_assets_fixture() -> Assets {
-    // The refresh path reads only owner_colors, products and block_names.
-    Assets {
-        base: vec![],
-        retail_bounds: vec![],
-        apartment_bounds: vec![],
-        body_color: 0,
-        owner_colors: [0; 10],
-        apartment_base: vec![],
-        apartment_regions: vec![],
-        fonts: vec![],
-        tab: vec![],
-        strings: vec![],
-        regions: vec![],
-        products: vec![],
-        buttons: vec![],
-        arrows: vec![],
-        retail_numeric: vec![],
-        apartment_numeric: vec![],
-        numeric_arrows: vec![],
-        block_names: vec![0; 52],
     }
 }
