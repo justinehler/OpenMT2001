@@ -13,27 +13,30 @@ fn load_panel_entries_read_metadata_independently_of_world_payloads() {
             .unwrap()
             .as_nanos()
     ));
-    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(root.join("saves")).unwrap();
     let results = fixtures::cases()
         .into_iter()
         .map(|case| {
             case.check_full_parse();
-            let path = root.join("test.sav");
+            let path = root.join("saves/test.sav");
             fs::write(&path, &case.bytes).unwrap();
+            let save_entries = openmt2001::save_menu::list_slots(&root).unwrap();
+            assert_eq!(save_entries.len(), 1);
             let entry = Entry::read(path, ascii("test"), None, None);
-            (case, entry.metadata)
+            (case, save_entries[0].metadata.clone(), entry.metadata)
         })
         .collect::<Vec<_>>();
     fs::remove_dir_all(root).unwrap();
-    for (case, metadata) in results {
+    for (case, save_metadata, metadata) in results {
         assert_eq!(
-            metadata.is_ok(),
-            case.readable,
-            "{}: {metadata:?}",
+            (save_metadata.is_ok(), metadata.is_ok()),
+            (case.readable, case.readable),
+            "{}: Save {save_metadata:?}, Load {metadata:?}",
             case.name
         );
         if case.readable {
             assert_eq!(metadata.unwrap(), fixtures::WORDS, "{}", case.name);
+            assert_eq!(save_metadata.unwrap(), fixtures::WORDS, "{}", case.name);
         }
     }
 }
