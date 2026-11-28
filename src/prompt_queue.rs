@@ -262,6 +262,9 @@ pub struct State {
     deferred: bool,
     timeout_pending: bool,
     pending_backspace: bool,
+    /// Backspace still owed to a notice that Return's deferred callback
+    /// exposed; applied on the next UI event1.
+    carried_backspace: bool,
 }
 impl State {
     /// Retained same-target left-button capture, released by the actual prompt
@@ -415,7 +418,30 @@ impl State {
         // Resume the independent second branch of the same event only after
         // Return's worker callback and close have exposed the resulting head.
         if std::mem::take(&mut self.pending_backspace) {
+            match self.request() {
+                Some(request) if request.dialog.is_some() => {
+                    self.dialog_reply(1);
+                }
+                // A notice with a script callback needs its id handed to the
+                // worker, which this call can't return; dismiss it on the next
+                // UI event1 instead.
+                Some(request) if request.dismissal_id != 0 => self.carried_backspace = true,
+                Some(_) => {
+                    self.dismiss_with(|_, _| {});
+                }
+                None => {}
+            }
+        }
+    }
+    /// 42a1f0's Backspace test acts on whatever head is current at that point,
+    /// including one Return's dismissal just exposed, without re-arming. With
+    /// no head it does nothing (the original reads a null head there).
+    fn backspace_head(&mut self) -> Option<u32> {
+        if self.request()?.dialog.is_some() {
             self.dialog_reply(1);
+            None
+        } else {
+            self.begin_dismiss()
         }
     }
     pub fn request_left_button(&mut self, down: bool, bounds: [f32; 4]) -> Option<u32> {
@@ -456,20 +482,37 @@ impl State {
     /// Original42a1f0 arms on the first UI event1. Later Return/Backspace
     /// edges reply independently of the number of visible mouse buttons.
     ///
-    /// A notice (a request without a dialog) uses the same armed Return edge
-    /// to dismiss. When that dismissal has a script callback, its id is
-    /// returned and the host sends it to the worker, as for a click.
+    /// A notice (a request without a dialog) is dismissed by the same armed
+    /// Return or Backspace edge, as every prompt kind in 42a1f0 is. When that
+    /// dismissal has a script callback, its id is returned and the host sends
+    /// it to the worker, as for a click.
     pub fn dialog_event1(&mut self, edges: [bool; 2]) -> Option<u32> {
         let at = self.head?;
         if self.deferred {
             return None;
+        }
+        if std::mem::take(&mut self.carried_backspace) {
+            return self.backspace_head();
         }
         let notice = self.slots[at].request.as_ref()?.dialog.is_none();
         if !std::mem::replace(&mut self.slots[at].keys_armed, true) {
             return None;
         }
         if notice {
-            return if edges[0] { self.begin_dismiss() } else { None };
+            if !edges[0] {
+                return if edges[1] { self.begin_dismiss() } else { None };
+            }
+            let callback = self.begin_dismiss();
+            if !edges[1] {
+                return callback;
+            }
+            // Return and Backspace in one event: Backspace then dismisses the
+            // head Return exposed, once Return's callback has finished.
+            if self.deferred {
+                self.pending_backspace = true;
+                return callback;
+            }
+            return self.backspace_head();
         }
         if edges[0] {
             self.pending_backspace = edges[1];

@@ -416,6 +416,88 @@ fn held_return_dismisses_one_notice_per_press() {
 }
 
 #[test]
+fn backspace_dismisses_one_notice_per_press_after_arming() {
+    let mut h = Harness::new();
+    for id in [51, 52] {
+        h.prompts.submit(notice(id));
+    }
+    // 42a1f0's first visit after an open only arms, even with Backspace down.
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), None);
+    h.key(KeyCode::Backspace, false, false);
+    assert_eq!(h.event1(true), None);
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), Some(51));
+    // Held and auto-repeated, it dismisses nothing more.
+    h.prompts.finish_dismiss(vec![]);
+    for _ in 0..4 {
+        h.key(KeyCode::Backspace, true, true);
+        h.key(KeyCode::Backspace, true, false);
+        assert_eq!(h.event1(true), None);
+    }
+    assert_eq!(h.prompts.request().unwrap().dismissal_id, 52);
+    h.key(KeyCode::Backspace, false, false);
+    assert_eq!(h.event1(true), None);
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), Some(52));
+}
+
+#[test]
+fn backspace_dismisses_a_card_notice_on_the_spot() {
+    let mut h = Harness::new();
+    for _ in 0..2 {
+        h.prompts.submit(notice(0));
+    }
+    h.event1(true);
+    h.key(KeyCode::Backspace, true, false);
+    for _ in 0..5 {
+        assert_eq!(h.event1(true), None);
+        h.key(KeyCode::Backspace, true, true);
+    }
+    let remaining = h.prompts.slots.iter().filter(|s| s.active).count();
+    assert_eq!(remaining, 1, "one press dismisses exactly one notice");
+}
+
+#[test]
+fn return_and_backspace_together_dismiss_two_queued_notices() {
+    // Card notices: both go on the spot, in one event.
+    let mut h = Harness::new();
+    for _ in 0..3 {
+        h.prompts.submit(notice(0));
+    }
+    h.event1(true);
+    h.key(KeyCode::Enter, true, false);
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), None);
+    let remaining = h.prompts.slots.iter().filter(|s| s.active).count();
+    assert_eq!(remaining, 1);
+
+    // Script notices: Return's callback goes first; Backspace then dismisses
+    // the exposed head, whose callback is handed over on the next event.
+    let mut h = Harness::new();
+    for id in [61, 62, 63] {
+        h.prompts.submit(notice(id));
+    }
+    h.event1(true);
+    h.key(KeyCode::Enter, true, false);
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), Some(61));
+    h.prompts.finish_dismiss(vec![]);
+    assert_eq!(h.event1(true), Some(62));
+    h.prompts.finish_dismiss(vec![]);
+    assert_eq!(h.prompts.request().unwrap().dismissal_id, 63);
+
+    // Return on the last notice: Backspace finds no head and does nothing.
+    let mut h = Harness::new();
+    h.prompts.submit(notice(0));
+    h.event1(true);
+    h.key(KeyCode::Enter, true, false);
+    h.key(KeyCode::Backspace, true, false);
+    assert_eq!(h.event1(true), None);
+    assert!(h.prompts.request().is_none());
+}
+
+#[test]
 fn held_return_dismisses_one_card_notice_per_press() {
     // Card notices have no script callback and dismiss on the spot.
     let mut h = Harness::new();
