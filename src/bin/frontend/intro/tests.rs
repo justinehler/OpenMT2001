@@ -1664,7 +1664,7 @@ fn capture_mr_monopoly_in_intro_city() {
     save_feedback.open(false);
     save_feedback.set_message("Saved: V2-1790352000000-000.sav".into());
     save_feedback
-        .update(&options_assets, &renderer, None)
+        .update(&options_assets, &renderer, None, 255)
         .unwrap();
     crate::capture_test::capture_prepared_world_overlays(
         &renderer,
@@ -1677,7 +1677,7 @@ fn capture_mr_monopoly_in_intro_city() {
     tutorial_options.open(false);
     tutorial_options.set_save_disabled(true);
     tutorial_options
-        .update(&options_assets, &renderer, None)
+        .update(&options_assets, &renderer, None, 255)
         .unwrap();
     crate::capture_test::capture_prepared_world_overlays(
         &renderer,

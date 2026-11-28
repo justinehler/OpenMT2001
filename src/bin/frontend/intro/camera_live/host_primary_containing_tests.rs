@@ -66,6 +66,7 @@ pub(crate) fn inspection_products(
         time_pressed: None,
         game_options: Default::default(),
         save_dialog: Default::default(),
+        secondary_fade: Default::default(),
         save_pending: None,
         options_ack: Default::default(),
         save_delete_pending: None,
