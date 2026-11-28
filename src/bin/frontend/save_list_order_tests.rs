@@ -37,7 +37,7 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
         tab2: Vec::new(),
         tab4: Vec::new(),
         strings: Vec::new(),
-        level_text: crate::load::LevelTextCatalog::default(),
+        level_text: openmt2001::level_text::LevelTextCatalog::default(),
         slider_textures: Vec::new(),
     };
     let click = |view: &mut View, point| {

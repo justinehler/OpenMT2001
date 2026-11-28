@@ -5,16 +5,12 @@
 //! bitmap metrics are native-checked, but line rasterization is a GPU approximation.
 //! Unimplemented pending screens remain development UI; desktop Quit uses the shared modal.
 use crate::ui::Surface;
-#[path = "desktop_quit.rs"]
-pub(crate) mod desktop_quit;
+// The shared modal and the preferred-profile token sit below the menu (#99).
+pub(crate) use crate::{desktop_quit, modal_frame, preferred_token};
 #[path = "front_main.rs"]
 pub(crate) mod front_main;
-#[path = "modal_frame.rs"]
-pub(crate) mod modal_frame;
 #[path = "multiplayer_route.rs"]
 pub mod multiplayer_route;
-#[path = "preferred_token.rs"]
-pub mod preferred_token;
 #[path = "skirmish_route.rs"]
 pub mod skirmish_route;
 use openmt2001::{

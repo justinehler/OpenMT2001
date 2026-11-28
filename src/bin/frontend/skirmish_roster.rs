@@ -556,7 +556,7 @@ impl RosterPanel {
         let mut out = vec![];
         if view.visible {
             out = self.base.clone();
-            crate::menu::modal_frame::set_alpha(&mut out, panel_alpha);
+            crate::modal_frame::set_alpha(&mut out, panel_alpha);
             let mut shapes = Surface::solid();
             let mut images = vec![];
             let mut pages = self
@@ -823,7 +823,7 @@ mod tests {
                 tab: ui::synthetic_text_font(5, 8),
             })
             .collect();
-        panel.strings[1440] = crate::load::ascii("Start");
+        panel.strings[1440] = openmt2001::level_text::ascii("Start");
         let mut region = |name: &str, bounds| {
             panel.regions.push(Region {
                 name: format!("NETWORK_CHAT_{name}"),
@@ -888,7 +888,7 @@ mod tests {
                 Some(25),
                 true,
                 [&[], &[]],
-                |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
+                |b| Ok(openmt2001::level_text::ascii(&String::from_utf8_lossy(b))),
                 Presentation {
                     chat: None,
                     network_host: None,
@@ -944,7 +944,7 @@ mod tests {
             (1758, "Waiting for Host"),
             (1759, "Waiting for Players"),
         ] {
-            panel.strings[id] = crate::load::ascii(text);
+            panel.strings[id] = openmt2001::level_text::ascii(text);
         }
         for (name, bounds) in [
             ("SESS_LABEL1", [20., 280., 140., 300.]),
@@ -1024,7 +1024,7 @@ mod tests {
                         None,
                         false,
                         [&[], &[]],
-                        |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
+                        |b| Ok(openmt2001::level_text::ascii(&String::from_utf8_lossy(b))),
                         Presentation {
                             chat: None,
                             network_host: Some(host),
@@ -1351,7 +1351,7 @@ mod tests {
         let metadata = [strings[1885], strings[1654]]; // Actual labels; host value formatting is a separate boundary.
         #[cfg(feature = "capture")]
         let encode = |bytes: &[u8]| {
-            Ok(crate::load::ascii(
+            Ok(openmt2001::level_text::ascii(
                 std::str::from_utf8(bytes).map_err(|e| e.to_string())?,
             ))
         };

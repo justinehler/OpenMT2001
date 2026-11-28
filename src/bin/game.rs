@@ -40,6 +40,8 @@ pub mod chimney_smoke_scene;
 pub mod city_pulse_scene;
 #[path = "frontend/cursor.rs"]
 mod cursor;
+#[path = "frontend/desktop_quit.rs"]
+mod desktop_quit;
 #[path = "frontend/dust_scene.rs"]
 pub mod dust_scene;
 #[path = "frontend/event_list.rs"]
@@ -60,6 +62,8 @@ mod locator;
 pub mod market_share_panel;
 #[path = "frontend/menu.rs"]
 mod menu;
+#[path = "frontend/modal_frame.rs"]
+mod modal_frame;
 #[path = "frontend/navigation.rs"]
 mod navigation;
 #[path = "frontend/navigator.rs"]
@@ -70,6 +74,8 @@ pub mod notice_panel;
 pub mod notifications;
 #[path = "frontend/player_info.rs"]
 mod player_info;
+#[path = "frontend/preferred_token.rs"]
+mod preferred_token;
 #[path = "frontend/present.rs"]
 mod present;
 #[path = "frontend/process_dispatch.rs"]

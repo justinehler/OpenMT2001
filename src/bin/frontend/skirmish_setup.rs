@@ -992,7 +992,7 @@ impl SetupPanel {
     ) -> Result<PreparedScene, String> {
         let mut out = self.surfaces(state, pointer, pressed, keyboard)?;
         let model_count = if state.visible { self.base.len() } else { 0 };
-        crate::menu::modal_frame::set_alpha(&mut out[..model_count], panel_alpha);
+        crate::modal_frame::set_alpha(&mut out[..model_count], panel_alpha);
         renderer.prepare(
             &out.iter().map(Surface::draw).collect::<Vec<_>>(),
             [
@@ -1021,7 +1021,7 @@ impl SetupPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::load::ascii;
+    use openmt2001::level_text::ascii;
     #[test]
     fn description_uses_rich_text_width_pitch_and_scroll_capacity() {
         let mut tab = vec![0; 4 + 96 * 44];
@@ -1274,7 +1274,7 @@ mod tests {
         let installer = openmt2001::fixtures::path("INSTALLER");
         let localized = crate::tooltip::localized_strings(&installer, &strings).unwrap();
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        assert_eq!(strings[2243], crate::load::ascii("$"));
+        assert_eq!(strings[2243], openmt2001::level_text::ascii("$"));
         SetupPanel::new(
             &index,
             &archive,
@@ -1614,7 +1614,7 @@ mod map_catalog_state_tests {
             (1883, "Scenario Description"),
             (1884, "Profit"),
         ] {
-            panel.strings[id] = crate::load::ascii(text);
+            panel.strings[id] = openmt2001::level_text::ascii(text);
         }
         for (i, name) in ["LABEL1", "LABEL2", "LABEL4", "LABEL7"]
             .into_iter()

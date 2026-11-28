@@ -217,6 +217,7 @@ pub mod frontend_list;
 pub mod human_messages;
 pub mod human_reply;
 pub mod level_catalog;
+pub mod level_text;
 pub mod skirmish;
 
 pub mod native_input;

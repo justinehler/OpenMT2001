@@ -305,8 +305,8 @@ impl Assets {
         if let Some(message) = message {
             // Save feedback is host presentation text beneath the original menu.
             // Wrap long errors so the complete result remains visible.
-            let text = crate::load::ascii(message);
-            for (i, line) in crate::load::wrap_lines(&self.tab, &text, 480.)?
+            let text = openmt2001::level_text::ascii(message);
+            for (i, line) in openmt2001::level_text::wrap_lines(&self.tab, &text, 480.)?
                 .iter()
                 .enumerate()
             {
