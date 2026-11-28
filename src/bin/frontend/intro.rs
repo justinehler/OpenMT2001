@@ -140,6 +140,8 @@ pub struct Assets {
     pub cursors: Option<crate::cursor::Images>,
     scene: Scene,
     flyby: Playback,
+    flyby_hub: Vec<u8>,
+    flyby_quality: Option<String>,
     opening: opening::Assets,
     opening_logos: bool,
     menu: Option<crate::menu::Assets>,
@@ -377,17 +379,12 @@ impl Assets {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
             .as_secs() as u32;
-        let mut random_state = openmt2001::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
-        let backdrop = openmt2001::flyby_script::select(
-            &hub,
-            paths.quality.as_deref(),
-            &mut random_state,
-            || {
+        let backdrop =
+            openmt2001::flyby_script::select_seeded(&hub, paths.quality.as_deref(), seed, || {
                 process_runtime
                     .performance8b26cc()
                     .map_err(|e| e.to_string())
-            },
-        )?;
+            })?;
         let track = read(
             paths
                 .installer
@@ -452,6 +449,8 @@ impl Assets {
             inputs,
             scene,
             flyby,
+            flyby_hub: hub,
+            flyby_quality: paths.quality,
             opening,
             opening_logos: backdrop.logos,
             selection,

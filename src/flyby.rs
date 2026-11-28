@@ -17,9 +17,7 @@ pub struct Playback {
 }
 impl Playback {
     pub fn new(track: &Flyby<'_>) -> Result<Self, String> {
-        let requests = (1..track.frame_count())
-            .map(|frame| track.sample(frame))
-            .collect::<Result<Vec<_>, _>>()?;
+        let requests = Self::requests(track)?;
         let mut playback = Self {
             requests,
             camera: crate::camera::primary::Primary::flyby([[0.; 3]; 2])?,
@@ -30,6 +28,11 @@ impl Playback {
         playback.advance_to(0)?;
         Ok(playback)
     }
+    fn requests(track: &Flyby<'_>) -> Result<Vec<CameraSample>, String> {
+        (1..track.frame_count())
+            .map(|frame| track.sample(frame))
+            .collect()
+    }
     pub fn duration_ticks(&self) -> usize {
         self.requests.len()
     }
@@ -39,6 +42,15 @@ impl Playback {
         self.camera = crate::camera::primary::Primary::flyby([current.eye, current.target])?;
         self.frame = 0;
         self.advance_to(0)
+    }
+    /// The FLYBY1 hub may choose a different quality track on each entry.
+    pub fn restart_track(
+        &mut self,
+        track: &Flyby<'_>,
+        current: CameraSample,
+    ) -> Result<(), String> {
+        self.requests = Self::requests(track)?;
+        self.restart(current)
     }
     /// Catch up every callback, including those between two rendered frames.
     /// Completion remains the frontend's separate FlybyEnded/menu transition.
@@ -245,6 +257,12 @@ mod tests {
             playback.advance_to(1).unwrap();
             assert_eq!(playback.current(), pose([100.; 3], [-100.; 3]));
         }
+        let alternate = authored_track(&[pose([8.; 3], [4.; 3])]);
+        playback
+            .restart_track(&Flyby::parse(&alternate).unwrap(), pose([6.; 3], [2.; 3]))
+            .unwrap();
+        assert_eq!(playback.duration_ticks(), 1);
+        assert_eq!(playback.current(), pose([7.; 3], [3.; 3]));
     }
     #[test]
     fn startup_flyby_callback_sequence_is_independent_of_render_rate() {

@@ -70,7 +70,48 @@ impl Intro {
                     .as_mut()
                     .ok_or("attract menu camera missing")?
                     .sample(tick, 0.);
-                self.assets.flyby.restart(current)?;
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_secs() as u32;
+                let backdrop = openmt2001::flyby_script::select_seeded(
+                    &self.assets.flyby_hub,
+                    self.assets.flyby_quality.as_deref(),
+                    seed,
+                    || {
+                        self.assets
+                            .process_runtime
+                            .performance8b26cc()
+                            .map_err(|e| e.to_string())
+                    },
+                )?;
+                let bytes = std::fs::read(
+                    self.assets
+                        .inputs
+                        .installer
+                        .join("Standard/Cut_scenes")
+                        .join(&backdrop.track),
+                )
+                .map_err(|e| e.to_string())?;
+                self.assets
+                    .flyby
+                    .restart_track(&Flyby::parse(&bytes)?, current)?;
+                self.assets.opening_logos = backdrop.logos;
+                let camera = self.assets.flyby.current();
+                for index in self
+                    .assets
+                    .scene
+                    .advance_daylight(backdrop.hour, 0, camera)?
+                {
+                    let draw = &self.assets.scene.draws[index];
+                    self.renderer.update_dynamic_surface(
+                        &mut self.prepared,
+                        index,
+                        &draw.borrowed(),
+                        draw.view_projection.unwrap_or(self.assets.scene.camera),
+                        self.assets.scene.fog,
+                    )?;
+                }
                 self.opening = Default::default();
                 self.ended = false;
                 self.attract_menu = self.menu.take();
