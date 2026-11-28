@@ -330,9 +330,11 @@ fn barrier_membership_tracks_live_humans_not_the_startup_roster() {
     );
 }
 
+/// 0x4e2740 during play: a lost client no longer ends the host's game. Once
+/// its connection is gone the barrier stops waiting for it and releases.
 #[cfg(feature = "lua4")]
 #[test]
-fn admitted_loss_is_observed_before_barrier_work() {
+fn barrier_releases_without_a_departed_client_and_the_host_stays_bound() {
     use std::{
         thread,
         time::{Duration, Instant},
@@ -349,26 +351,31 @@ fn admitted_loss_is_observed_before_barrier_work() {
         .barrier
         .open(&mut pause, &mut tasks)
         .unwrap();
+    let both = [true, true, false, false, false, false];
+    // While the client is connected and silent, the barrier holds.
+    for _ in 0..10 {
+        assert!(
+            !synchronization
+                .pump(&host, both, &mut pause, &mut tasks)
+                .unwrap()
+        );
+    }
+    assert!(synchronization.barrier.active);
     drop(client);
-    let until = Instant::now() + Duration::from_secs(3);
-    while host.validate_binding(binding).is_ok() {
-        assert!(Instant::now() < until);
+    let until = Instant::now() + Duration::from_secs(10);
+    while !synchronization
+        .pump(&host, both, &mut pause, &mut tasks)
+        .unwrap()
+    {
+        assert!(
+            Instant::now() < until,
+            "barrier still waits for the departed client"
+        );
         thread::sleep(Duration::from_millis(5));
     }
-    let before = synchronization.barrier.counter;
-    assert!(
-        synchronization
-            .pump(
-                &host,
-                [true, true, false, false, false, false],
-                &mut pause,
-                &mut tasks,
-            )
-            .is_err()
-    );
-    assert_eq!(synchronization.barrier.counter, before);
-    assert!(synchronization.barrier.active);
-    assert_eq!(pause.bytes[2], 1);
+    assert!(host.validate_binding(binding).is_ok());
+    assert!(!synchronization.barrier.active);
+    assert_eq!(pause.bytes[2], 0);
 }
 #[test]
 fn comparisons_record_every_received_sample_in_order() {

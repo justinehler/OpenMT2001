@@ -109,12 +109,21 @@ struct Peer {
     authority: bool,
     decoder: codec::Decoder,
 }
+/// A connection whose link ended in this attempt. Its complete frames received
+/// before the loss are still delivered in order (0x4e2740 drains the receive
+/// FIFO before the disconnect table), so they keep validating against it.
+#[derive(Clone, Copy)]
+struct Departed {
+    identity: u64,
+    authority: bool,
+}
 struct State {
     phase: Phase,
     attempt: Attempt,
     session: Option<[u8; 16]>,
     binding: Option<SessionBinding>,
     peers: [Option<Peer>; SLOTS],
+    departed: [Option<Departed>; SLOTS],
     next_connection: u64,
     transport: Option<transport::Transport>,
 }
@@ -167,6 +176,7 @@ impl State {
             authority,
             decoder,
         });
+        self.departed[index] = None;
         Ok(Connection {
             attempt,
             slot,
@@ -256,6 +266,7 @@ impl Owner {
                 session: None,
                 binding: None,
                 peers: std::array::from_fn(|_| None),
+                departed: [None; SLOTS],
                 next_connection: 0,
                 transport: None,
             }),
@@ -285,6 +296,7 @@ impl Owner {
         state.session = None;
         state.binding = None;
         state.peers = std::array::from_fn(|_| None);
+        state.departed = [None; SLOTS];
         state.next_connection = 0;
         state.transport = None;
         Ok(state.attempt)
@@ -328,12 +340,19 @@ impl Owner {
         let state = self.lock()?;
         state.binding(binding)?;
         state.attempt(connection.attempt)?;
-        let peer = state
-            .peers
-            .get(usize::from(connection.slot))
-            .and_then(Option::as_ref)
-            .ok_or(Error::Peer)?;
-        if peer.identity != connection.identity || peer.authority != authority {
+        let slot = usize::from(connection.slot);
+        let (identity, role) = match state.peers.get(slot).and_then(Option::as_ref) {
+            Some(peer) => (peer.identity, peer.authority),
+            // Frames admitted before this connection ended remain its own.
+            None => state
+                .departed
+                .get(slot)
+                .copied()
+                .flatten()
+                .map(|departed| (departed.identity, departed.authority))
+                .ok_or(Error::Peer)?,
+        };
+        if identity != connection.identity || role != authority {
             return Err(Error::Peer);
         }
         Ok(())
@@ -353,6 +372,7 @@ impl Owner {
         state.binding = None;
         state.session = None;
         state.peers = std::array::from_fn(|_| None);
+        state.departed = [None; SLOTS];
         state.transport = None;
         Ok(())
     }

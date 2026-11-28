@@ -73,6 +73,11 @@ impl Session<'_> {
         let Some(connection) = &mut self.connected else {
             return Ok(());
         };
+        // The ended transport has nothing left to admit; the frontend returns
+        // this client's city to the menu (see `connected_host_lost`).
+        if connection.worker.host_lost() {
+            return Ok(());
+        }
         let tick = self.world.clock.timing[0];
         let targets = crate::network::commands::Targets::new(
             &self.world.city.buildings,
@@ -88,17 +93,31 @@ impl Session<'_> {
             &mut self.world.city.pause,
             &mut self.hooks.timers,
         )?;
+        connection.commands.remove_departed(
+            &connection.worker,
+            &self.roster.manager.players,
+            &mut self.live_commands,
+            &mut self.world.city.categories,
+            tick,
+        )?;
         policy.scheduler.network_enabled = true;
         policy.scheduler.network_override = connection.commands.is_host();
         connection.commands.configure_hourly(&mut policy.hourly);
         policy.scheduler.deadline = connection.commands.deadline();
         Ok(())
     }
+    /// A connected client's authority connection ended (0x4e2740 self/host
+    /// cancellation): its city must stop and return to the menu.
+    pub fn connected_host_lost(&self) -> bool {
+        self.connected
+            .as_ref()
+            .is_some_and(|connection| connection.worker.host_lost())
+    }
     /// Retained group-0 callback 0x450410. Read human activity from the live
     /// manager on each pass; AI and eliminated rows never hold the barrier.
     pub fn pump_connected_synchronization(&mut self, policy: &mut Policy) -> Result<bool, String> {
         self.pump_connected_commands(policy)?;
-        let Some(connection) = &mut self.connected else {
+        let Some(connection) = self.connected.as_mut().filter(|c| !c.worker.host_lost()) else {
             return Ok(false);
         };
         let active = crate::network::synchronization::active_humans(&self.roster.manager.players);
@@ -864,7 +883,9 @@ impl Session<'_> {
                             let mut outgoing_auctions=Vec::new();
                             let mut prepared_room=false;
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)|live_commands::Command::EventCard(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)|live_commands::Command::EventCard(_)
+                                    // Kind 9 status and kind 10 removal of a departed player (0x450670).
+                                    |live_commands::Command::OutcomeNotice{..}|live_commands::Command::Eliminate{..}) {
                                     return Err(crate::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command

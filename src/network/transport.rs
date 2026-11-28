@@ -202,8 +202,13 @@ impl Transport {
             }
             if let Some(error) = failure {
                 let connection = link.connection();
-                if connection.is_some() {
-                    state.peers[slot] = None;
+                if connection.is_some()
+                    && let Some(peer) = state.peers[slot].take()
+                {
+                    state.departed[slot] = Some(super::Departed {
+                        identity: peer.identity,
+                        authority: peer.authority,
+                    });
                 }
                 events.push(Event::Failed { connection, error });
                 // Dropping only this captured link cannot close a later attempt.

@@ -82,8 +82,9 @@ pub struct Handle {
     cancel: std::sync::Arc<AtomicBool>,
     commands: SyncSender<Command>,
     updates: Receiver<Update>,
-    gameplay: Receiver<network::commands::Ingress>,
+    gameplay: Receiver<network::commands::Gameplay>,
     synchronization: Receiver<network::synchronization::Ingress>,
+    host_lost: std::sync::Arc<AtomicBool>,
 }
 impl Handle {
     pub fn open(open: Open) -> Result<Self, String> {
@@ -109,6 +110,8 @@ impl Handle {
         let attempt = owner.begin().map_err(|e| e.to_string())?;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let stopped = cancel.clone();
+        let host_lost = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_host_lost = host_lost.clone();
         let (commands, actions) = mpsc::sync_channel(32);
         let (publish, updates) = mpsc::sync_channel(16);
         let (gameplay_tx, gameplay) = mpsc::sync_channel(64);
@@ -127,6 +130,7 @@ impl Handle {
                         gameplay: &gameplay_tx,
                         synchronization: &synchronization_tx,
                         chat: &worker_chat,
+                        host_lost: &worker_host_lost,
                     },
                     &stopped,
                     network_timeout,
@@ -153,7 +157,14 @@ impl Handle {
             updates,
             gameplay,
             synchronization,
+            host_lost,
         })
+    }
+    /// A playing client's authority connection ended. The worker has ended this
+    /// transport; the connected city returns to the menu (0x4e2740 self/host
+    /// cancellation). Host migration is not available.
+    pub fn host_lost(&self) -> bool {
+        self.host_lost.load(Ordering::Relaxed)
     }
     /// The retained chat lines, named and coloured from the current admitted roster.
     /// `None` until this peer is admitted.
@@ -249,7 +260,7 @@ impl Handle {
     pub fn gameplay_owner(&self) -> &Owner {
         self.owner
     }
-    pub fn poll_gameplay(&self) -> Option<network::commands::Ingress> {
+    pub fn poll_gameplay(&self) -> Option<network::commands::Gameplay> {
         self.gameplay.try_recv().ok()
     }
     /// Send on the same ordered worker channel as all prior commits. `None`
@@ -366,9 +377,10 @@ fn session(owner: &Owner, attempt: Attempt) -> Result<[u8; 16], String> {
 }
 struct Publications<'a> {
     lobby: &'a SyncSender<Update>,
-    gameplay: &'a SyncSender<network::commands::Ingress>,
+    gameplay: &'a SyncSender<network::commands::Gameplay>,
     synchronization: &'a SyncSender<network::synchronization::Ingress>,
     chat: &'a std::sync::Mutex<network::chat::Display>,
+    host_lost: &'a AtomicBool,
 }
 fn run(
     owner: &Owner,
@@ -384,6 +396,7 @@ fn run(
         gameplay,
         synchronization,
         chat,
+        host_lost,
     } = publications;
     if let Open::Probe(address) = &open {
         let (session, snapshot) =
@@ -434,6 +447,9 @@ fn run(
             .map_err(|e| e.to_string())?;
     }
     let mut peers: [Option<Connection>; SLOTS] = [None; SLOTS];
+    // Playing peers whose connection ended; sends to them are dropped, as
+    // the original ignores a failed directed send.
+    let mut departed = [false; SLOTS];
     let mut sent_revisions = [None; SLOTS];
     let mut local_peer = 0;
     let mut requested_join = false;
@@ -546,11 +562,13 @@ fn run(
                     | Message::CommandRejected { .. }
                     | Message::PlayerMessage(_)) => {
                         gameplay
-                            .try_send(network::commands::Ingress {
-                                binding: binding.ok_or("Gameplay without a world")?,
-                                connection,
-                                message,
-                            })
+                            .try_send(network::commands::Gameplay::Frame(Box::new(
+                                network::commands::Ingress {
+                                    binding: binding.ok_or("Gameplay without a world")?,
+                                    connection,
+                                    message,
+                                },
+                            )))
                             .map_err(|_| "Gameplay ingress queue is full or closed".to_string())?;
                     }
                     Message::LobbyRequest(request) if host => {
@@ -662,6 +680,29 @@ fn run(
                     }
                     _ => return Err("Unexpected message in lobby.".into()),
                 },
+                Event::Failed { connection, .. } if committed => {
+                    // 0x4e2740 during play. A client losing its authority ends
+                    // the transport and returns to the menu; host migration
+                    // (0x451ba0) is not available.
+                    if !host {
+                        host_lost.store(true, Ordering::Relaxed);
+                        return Ok(());
+                    }
+                    // The authority schedules the departed player's removal
+                    // after every frame this connection delivered.
+                    if let Some(connection) = connection
+                        && peers[connection.slot() as usize] == Some(connection)
+                    {
+                        peers[connection.slot() as usize] = None;
+                        departed[connection.slot() as usize] = true;
+                        gameplay
+                            .try_send(network::commands::Gameplay::Lost {
+                                binding: binding.ok_or("Peer loss without a world")?,
+                                connection,
+                            })
+                            .map_err(|_| "Gameplay ingress queue is full or closed".to_string())?;
+                    }
+                }
                 Event::Failed { connection, error } => {
                     if starting.as_ref().is_some_and(|ticket| {
                         !host
@@ -740,6 +781,9 @@ fn run(
                         return Err("Gameplay message has wrong local role".into());
                     }
                     let destinations: Vec<_> = if let Some(target) = target {
+                        if departed[target.slot() as usize] {
+                            continue;
+                        }
                         owner
                             .validate_connection(binding, target, false)
                             .map_err(|e| e.to_string())?;
@@ -753,7 +797,7 @@ fn run(
                             .rows
                             .iter()
                             .filter_map(|r| r.peer)
-                            .filter(|&p| p != 0)
+                            .filter(|&p| p != 0 && !departed[p as usize])
                             .map(|p| peers[p as usize].ok_or("Admitted gameplay peer missing"))
                             .collect::<Result<Vec<_>, _>>()?
                     } else {
@@ -770,6 +814,9 @@ fn run(
                     owner.validate_binding(binding).map_err(|e| e.to_string())?;
                     if !host || peer == 0 {
                         return Err("Directed player message needs the authority".into());
+                    }
+                    if departed.get(usize::from(peer)).copied().unwrap_or(false) {
+                        continue;
                     }
                     let connection = peers
                         .get(usize::from(peer))

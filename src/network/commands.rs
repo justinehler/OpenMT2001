@@ -19,7 +19,9 @@
 //! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
 //! | 1a event card | +0 card u32, +4 zero-based player u32, +8 target i32 (12 bytes) | supported; local human or authority-owned AI |
 //! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | supported; client sends to the authority, which routes it and forwards only to the recipient's peer |
-//! | category-ready/elimination/outcome | internal runtime events | unsupported |
+//! | 09 player status | +0 player u32, +4 status u32 (8 bytes) | authority only, status 3 for a departed player (0x450670, 0x489500) |
+//! | 0a player removal | +0 player u32 (4 bytes) | authority only, after a departure status (0x450670, 0x48cc50) |
+//! | category-ready/other outcome | internal runtime events | unsupported |
 //! | other native IDs / shapes | no qualified decoder | unsupported |
 //!
 //! Every other kind/schema returns Unsupported. This is not full multiplayer
@@ -40,7 +42,50 @@ pub struct Request {
     pub kind: u32,
     pub payload: Vec<u8>,
 }
+/// Status 3 of kind 9: the player's connection ended (0x450670).
+pub const DEPARTED: u32 = 3;
 impl Request {
+    /// Kind 9 status `(player, status)` (0x489500, 28 native bytes).
+    pub fn player_status(serial: u64, player: u8, status: u32) -> Self {
+        let mut payload = u32::from(player).to_le_bytes().to_vec();
+        payload.extend_from_slice(&status.to_le_bytes());
+        Self {
+            serial,
+            owner: player.wrapping_add(1),
+            kind: 0x09,
+            payload,
+        }
+    }
+    pub fn player_status_payload(&self) -> Result<(usize, u32)> {
+        if self.kind != 0x09 || self.payload.len() != 8 {
+            return Err(Error::Unsupported);
+        }
+        let player = crate::player_manager::word(&self.payload, 0);
+        let status = crate::player_manager::word(&self.payload, 4);
+        if player >= SLOTS as u32 || u32::from(self.owner) != player + 1 || status != DEPARTED {
+            return Err(Error::Row);
+        }
+        Ok((player as usize, status))
+    }
+    /// Kind 10 removal of one player (0x48cc50, 24 native bytes).
+    pub fn player_removal(serial: u64, player: u8) -> Self {
+        Self {
+            serial,
+            owner: player.wrapping_add(1),
+            kind: 0x0a,
+            payload: u32::from(player).to_le_bytes().to_vec(),
+        }
+    }
+    pub fn player_removal_payload(&self) -> Result<usize> {
+        if self.kind != 0x0a || self.payload.len() != 4 {
+            return Err(Error::Unsupported);
+        }
+        let player = crate::player_manager::word(&self.payload, 0);
+        if player >= SLOTS as u32 || u32::from(self.owner) != player + 1 {
+            return Err(Error::Row);
+        }
+        Ok(player as usize)
+    }
     pub fn demolition(serial: u64, owner: u8, command: &crate::demolition::Command) -> Self {
         Self {
             serial,
@@ -270,6 +315,8 @@ impl Request {
             return self.auction_payload().map(|_| ());
         }
         match self.kind {
+            0x09 => self.player_status_payload().map(|_| ()),
+            0x0a => self.player_removal_payload().map(|_| ()),
             0x0f => self.construction_payload().map(|_| ()),
             0x10 => self.demolition_payload().map(|_| ()),
             0x11 => self.business_open_payload().map(|_| ()),
@@ -331,6 +378,17 @@ pub struct Ingress {
     pub(super) binding: SessionBinding,
     pub(super) connection: Connection,
     pub(super) message: Message,
+}
+/// One item of the worker's ordered gameplay channel.
+#[derive(Debug)]
+pub enum Gameplay {
+    Frame(Box<Ingress>),
+    /// The connection ended. Every complete frame it delivered precedes this,
+    /// as 0x4e2740 drains the receive FIFO before its disconnect table.
+    Lost {
+        binding: SessionBinding,
+        connection: Connection,
+    },
 }
 
 /// Read-only target records borrowed from the actual Session, including when
@@ -500,6 +558,10 @@ pub struct Adapter {
     closed_tick: Option<u32>,
     pending_local: std::collections::VecDeque<(Request, bool)>,
     received_messages: std::collections::VecDeque<crate::player_messages::Packet>,
+    /// Peers whose connection ended; each is removed once.
+    departed: [bool; SLOTS],
+    /// Departed peers whose players still await their status and removal.
+    departures: std::collections::VecDeque<u8>,
 }
 impl Adapter {
     pub fn new(
@@ -540,6 +602,8 @@ impl Adapter {
             closed_tick: Some(0),
             pending_local: Default::default(),
             received_messages: Default::default(),
+            departed: [false; SLOTS],
+            departures: Default::default(),
         })
     }
     pub fn deadline(&self) -> u32 {
@@ -564,6 +628,10 @@ impl Adapter {
     fn authorize(&self, peer: u8, request: &Request) -> Result<()> {
         if request.is_auction() {
             return self.authorize_auction(peer, request);
+        }
+        // Only the authority's disconnect table emits status and removal.
+        if matches!(request.kind, 0x09 | 0x0a) {
+            return Err(Error::Peer);
         }
         let player = usize::from(request.owner)
             .checked_sub(1)
@@ -710,6 +778,75 @@ impl Adapter {
                 if self.host { "Authority" } else { "Client" }
             )),
         }
+    }
+    /// Admit a lost connection into the disconnect table once (0x4e0e00).
+    /// Only the authority emits removals; a client's authority loss ends its
+    /// session in the worker instead.
+    pub fn lose(&mut self, binding: SessionBinding, connection: Connection) -> Result<()> {
+        if binding != self.binding || connection.attempt != binding.attempt() {
+            return Err(Error::World);
+        }
+        let peer = connection.slot();
+        if !self.host || peer == 0 {
+            return Err(Error::Peer);
+        }
+        let seen = self
+            .departed
+            .get_mut(usize::from(peer))
+            .ok_or(Error::Peer)?;
+        if !*seen {
+            *seen = true;
+            self.departures.push_back(peer);
+        }
+        Ok(())
+    }
+    /// 0x4e2740 -> 0x450670 during play: for each departed peer's active
+    /// player, the authority schedules kind 9 status `(player, 3)` and then
+    /// kind 10 removal through the ordinary Total+25 schedule, applying them
+    /// locally and on every remaining peer at the same tick. Removal releases
+    /// ownership and deactivates the player; no computer takes it over.
+    /// A tick whose deadline was already granted waits for the next one.
+    #[cfg(feature = "lua4")]
+    pub fn remove_departed(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        players: &[crate::player_manager::Player],
+        queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        if !self.host || self.departures.is_empty() || self.closed_tick == Some(tick) {
+            return Ok(());
+        }
+        worker.validate_binding(self.binding)?;
+        while let Some(peer) = self.departures.pop_front() {
+            for player in 0..self.owners.len() {
+                // Only a matching active player is cancelled.
+                if self.owners[player] != Some(peer)
+                    || !players
+                        .get(player)
+                        .is_some_and(|p| p.bytes.get(0x10).is_some_and(|active| *active != 0))
+                {
+                    continue;
+                }
+                let status = self.next_serial().map_err(|e| e.to_string())?;
+                let removal = self.next_serial().map_err(|e| e.to_string())?;
+                for request in [
+                    Request::player_status(status, player as u8, DEPARTED),
+                    Request::player_removal(removal, player as u8),
+                ] {
+                    let message = self
+                        .commit_authorized(self.local_peer, request, tick)
+                        .map_err(|e| e.to_string())?;
+                    if let Message::CommandCommit(commit) = &message {
+                        self.enqueue(commit, queue, categories, tick)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    worker.send_gameplay(self.binding, None, message)?;
+                }
+            }
+        }
+        Ok(())
     }
     /// Kind8 shares commit ordering: it may only be published after the host
     /// has emitted every preceding commit to each ordered transport stream.
@@ -983,7 +1120,17 @@ impl Adapter {
                 worker.send_gameplay(self.binding, None, Message::CommandCommit(commit))?;
             }
         }
-        while let Some(ingress) = worker.poll_gameplay() {
+        while let Some(item) = worker.poll_gameplay() {
+            let ingress = match item {
+                Gameplay::Frame(ingress) => *ingress,
+                Gameplay::Lost {
+                    binding,
+                    connection,
+                } => {
+                    self.lose(binding, connection).map_err(|e| e.to_string())?;
+                    continue;
+                }
+            };
             let rejection = self.rejection(&ingress);
             // 0x451720 routes a client's construction through the same
             // 4517f2 admission as a local one: a taken rectangle drops it
@@ -1186,6 +1333,16 @@ impl Adapter {
             self.enqueue_auction(request, commit.due)?
         } else {
             match request.kind {
+                0x09 => {
+                    let (player, reason) = request.player_status_payload()?;
+                    crate::live_commands::Command::OutcomeNotice {
+                        player: player as i32,
+                        reason,
+                    }
+                }
+                0x0a => crate::live_commands::Command::Eliminate {
+                    slot: request.player_removal_payload()?,
+                },
                 0x0f => {
                     let command = request.construction_payload()?;
                     // Original Build0f reserves occupancy before the delayed consumer.

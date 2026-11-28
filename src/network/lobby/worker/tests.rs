@@ -405,6 +405,142 @@ pub(crate) fn playing_pair(with_ai: bool) -> (Handle, Handle, u8) {
     (host, client, view.local_peer)
 }
 
+/// A started host with `count` joined human clients, each with its peer slot.
+pub(crate) fn playing_peers(count: usize) -> (Handle, Vec<(Handle, u8)>) {
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
+    let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
+        panic!()
+    };
+    let mut clients = Vec::new();
+    for token in 1..=count as i8 {
+        let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
+        let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+            panic!()
+        };
+        drop(probe);
+        let client = spawn_worker(
+            owner(),
+            Open::Join {
+                selection,
+                name: format!("Client {token}").into_bytes(),
+                token,
+            },
+        )
+        .unwrap();
+        let Update::Lobby(view) = wait(&client, |u| matches!(u, Update::Lobby(_))) else {
+            panic!()
+        };
+        client.action(Action::Ready).unwrap();
+        clients.push((client, view.local_peer));
+    }
+    wait(&host, |u| {
+        matches!(u, Update::Lobby(v)
+            if v.snapshot.capacity().0 == count + 1 && v.snapshot.start_enabled())
+    });
+    host.action(Action::Start).unwrap();
+    let Update::Prepare(ticket) = wait(&host, |u| matches!(u, Update::Prepare(_))) else {
+        panic!()
+    };
+    let content = network::Content {
+        level: ticket.view.snapshot.settings.level,
+        parameter_bits: ticket.view.snapshot.settings.parameter_bits,
+        difficulty: ticket.view.snapshot.settings.difficulty,
+        fingerprint: [6; 32],
+    };
+    host.prepared(Ok(content)).unwrap();
+    for (client, _) in &clients {
+        wait(client, |u| matches!(u, Update::Prepare(_)));
+        client.prepared(Ok(content)).unwrap();
+    }
+    wait(&host, |u| matches!(u, Update::Validated));
+    for (client, _) in &clients {
+        wait(client, |u| matches!(u, Update::Validated));
+    }
+    (host, clients)
+}
+
+/// 0x450670 before start: losing a client opens its row (kind 6 notice: empty
+/// name, no character, no peer, open, not ready) and republishes the roster.
+#[test]
+fn lobby_peer_loss_reopens_its_row_for_the_remaining_peers() {
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
+    let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
+        panic!()
+    };
+    let mut joined = Vec::new();
+    for token in [1, 2] {
+        let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
+        let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+            panic!()
+        };
+        drop(probe);
+        let client = spawn_worker(
+            owner(),
+            Open::Join {
+                selection,
+                name: format!("Client {token}").into_bytes(),
+                token,
+            },
+        )
+        .unwrap();
+        let Update::Lobby(view) = wait(&client, |u| matches!(u, Update::Lobby(_))) else {
+            panic!()
+        };
+        joined.push((client, view.local_peer));
+    }
+    let Update::Lobby(full) = wait(
+        &host,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.capacity().0 == 3),
+    ) else {
+        panic!()
+    };
+    let (leaving, peer) = joined.remove(0);
+    let row = full.snapshot.local_row(peer).unwrap();
+    drop(leaving);
+    let Update::Lobby(after) = wait(
+        &host,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.capacity().0 == 2),
+    ) else {
+        panic!()
+    };
+    let open = &after.snapshot.rows[row];
+    assert_eq!(open.peer, None);
+    assert_eq!(open.player.kind, network::RowKind::Open);
+    assert_eq!((open.player.token, open.player.ready), (-1, false));
+    assert!(open.player.name.is_empty());
+    assert!(after.snapshot.revision > full.snapshot.revision);
+    // The remaining client sees the same reopened row and stays admitted.
+    let (remaining, _) = &joined[0];
+    let Update::Lobby(seen) = wait(
+        remaining,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.revision == after.snapshot.revision),
+    ) else {
+        panic!()
+    };
+    assert_eq!(seen.snapshot.rows[row], after.snapshot.rows[row]);
+}
+
+/// A playing client that loses its authority ends the transport without a
+/// failure; its connected city returns to the menu (0x4e2740 host cancellation).
+#[test]
+fn playing_client_that_loses_the_host_ends_cleanly_without_failure() {
+    let (host, client, _) = playing_pair(false);
+    host.bind_world(1).unwrap();
+    let binding = client.bind_world(2).unwrap();
+    assert!(!client.host_lost());
+    drop(host);
+    // The worker reports the loss, then retires its own attempt.
+    let deadline = Instant::now() + WAIT;
+    while !client.host_lost() || client.validate_binding(binding).is_ok() {
+        assert!(Instant::now() < deadline, "host loss was not observed");
+        thread::sleep(Duration::from_millis(5));
+    }
+    // No failure is published for this ordinary end of the session.
+    while let Some(update) = client.poll() {
+        assert!(!matches!(update, Update::Failed(_)), "{update:?}");
+    }
+}
+
 #[cfg(feature = "lua4")]
 #[test]
 fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_tasks() {

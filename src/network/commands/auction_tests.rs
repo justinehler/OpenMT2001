@@ -568,7 +568,7 @@ fn auction_closure_deferred_by_a_published_deadline_keeps_its_phase_order() {
     let until = Instant::now() + Duration::from_secs(10);
     let mut commits = vec![];
     while commits.len() < 2 {
-        if let Some(ingress) = client.poll_gameplay()
+        if let Some(Gameplay::Frame(ingress)) = client.poll_gameplay()
             && let Message::CommandCommit(commit) = ingress.message
         {
             commits.push(commit);
