@@ -477,7 +477,7 @@ fn writable_directory(profile_root: &Path) -> Result<PathBuf, String> {
 }
 /// Test and programmatic export helper: allocate a unique V2 slot without a
 /// dialog name. Production Save Game uses `write_target` after confirmation.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn write_new(profile_root: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     crate::save::SaveFile::parse(bytes)?;
     let canonical = writable_directory(profile_root)?;

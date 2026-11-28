@@ -28,9 +28,12 @@ winit = { version = "0.30", optional = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry"] }
 
+[dev-dependencies]
+openmt2001 = { path = "../..", features = ["test-support"] }
+
 [features]
 # Test helpers the game binary's tests use; the game enables it as a dev-dependency.
-test-support = []
+test-support = ["openmt2001/test-support"]
 lua4 = ["openmt2001/lua4"]
 graphics = ["openmt2001/graphics", "dep:wgpu", "dep:bytemuck", "dep:glam"]
 capture = ["openmt2001/capture", "graphics", "dep:pollster", "dep:png"]

@@ -206,7 +206,7 @@ impl Session<'_> {
 }
 
 /// Test driver (the binary's Session tests); not used by the game.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn exercise(
     session: &mut Session<'_>,
     assets: &CommandAssets<'_, '_>,

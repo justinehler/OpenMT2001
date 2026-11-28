@@ -27,6 +27,9 @@ winit = { version = "0.30", optional = true }
 windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry"] }
 
 [features]
+# Test fixtures and constructors the frontend and game tests use (#99). Their
+# dev-dependencies enable it; normal builds never compile these items.
+test-support = []
 lua4 = []
 graphics = ["dep:wgpu", "dep:bytemuck", "dep:glam"]
 capture = ["graphics", "dep:pollster", "dep:png"]
