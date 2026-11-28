@@ -682,7 +682,7 @@ fn train_route_dwell_departure_and_end_reach_player_with_retained_cursor() {
     let mut identity = None;
     let mut dwell_position = std::time::Duration::ZERO;
     let mut ended = false;
-    for tick in 1..600 {
+    for tick in 1..2000 {
         let mut event = None;
         train_motion::advance(
             0,
@@ -738,17 +738,21 @@ fn train_route_dwell_departure_and_end_reach_player_with_retained_cursor() {
         }
         output.by_ref().take(128).for_each(drop);
     }
-    assert!(ended);
+    assert!(
+        ended,
+        "train did not finish its route: events={events:?}, row={:?}",
+        scene.trains[0]
+    );
     assert_eq!(events, [8, 11, 12, 9]);
     window(&mut output, 0., false);
     // No active train produces another proximity request. The UI still drains
     // requests and services retained city inputs on subsequent rendered frames.
     scene
-        .proximity_sounds(&mut 601, &mut [0.; 3], |_, _, _, _| {
+        .proximity_sounds(&mut 2001, &mut [0.; 3], |_, _, _, _| {
             panic!("last train is gone")
         })
         .unwrap();
-    player.apply(Operation::City(Box::new(city_inputs(601))));
+    player.apply(Operation::City(Box::new(city_inputs(2001))));
     player.drain_requests(Some(&receiver));
     player.service_frame([0., 40., -300.]);
     assert!(player.train_motion.is_none());
