@@ -24,7 +24,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
     pub autosave: Option<openmt2001::save_menu::AutosaveStatus>,
-    pub time_display: crate::time_panel::DisplayState,
+    pub time_display: openmt2001::time_panel::DisplayState,
     pub cash_arrow: openmt2001::cash_arrow::State,
     pub window_texture: Option<openmt2001::window_texture::Publication>,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
@@ -343,7 +343,7 @@ pub struct Host {
     /// writes when neither camera owner is installed.
     pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
     camera_suppliers: Option<CameraSuppliers>,
-    pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
+    pub time_runtime: std::sync::Arc<std::sync::Mutex<openmt2001::time_panel::Runtime>>,
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
@@ -3129,7 +3129,7 @@ impl Host {
             u32::from(self.auction.is_some())
         };
         self.prompt_updates = self.prompt_updates.wrapping_add(u64::from(
-            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
+            openmt2001::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
         ));
         //465490 switches GUI8b1050 to1 before any auction widget is shown.
         //Normal GUI0/2/3 share the other manager. Hidden Time widgets do not
@@ -3163,7 +3163,7 @@ impl Host {
             .lock()
             .map_err(|_| "Time runtime poisoned")?;
         for (instance, passes) in
-            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)
+            openmt2001::time_panel::instance_passes(mode, self.policy.scheduler.iterations)
                 .into_iter()
                 .enumerate()
         {
