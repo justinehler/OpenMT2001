@@ -478,6 +478,30 @@ impl Assets {
             self.message_surfaces(&state, true, crate::menu::desktop_quit::OFFSET, Some(modal))?;
         self.prepare_surfaces(renderer, &surfaces)
     }
+    /// In-city Options Quit (49e970) raises the same portrait-free 88c0d4
+    /// owner as desktop Quit: 43b5d0(0,0) and 4295d0 select the full-width
+    /// body and colored buttons, and 429b50 places it at (-40, 0). The
+    /// request stays in the city's prompt state, which owns its reply.
+    pub fn prepare_frontend_prompt(
+        &self,
+        renderer: &Renderer,
+        state: &State,
+    ) -> Result<PreparedScene, String> {
+        let surfaces = self.frontend_prompt_surfaces(state)?;
+        self.prepare_surfaces(renderer, &surfaces)
+    }
+    pub(crate) fn frontend_prompt_surfaces(&self, state: &State) -> Result<Vec<Surface>, String> {
+        let modal = crate::menu::desktop_quit::Modal::presented(state.cursor, state.pressed_dialog);
+        self.message_surfaces(state, true, crate::menu::desktop_quit::OFFSET, Some(&modal))
+    }
+    /// Button bounds of a portrait-free 88c0d4 prompt, translated with it.
+    pub fn frontend_dialog_buttons(&self, count: usize) -> Vec<[f32; 4]> {
+        let [x, y] = crate::menu::desktop_quit::OFFSET;
+        self.dialog_buttons(count)
+            .into_iter()
+            .map(|[l, t, r, b]| [l + x, t + y, r + x, b + y])
+            .collect()
+    }
     fn prepare_with_button(
         &self,
         renderer: &Renderer,
@@ -487,6 +511,22 @@ impl Assets {
     ) -> Result<PreparedScene, String> {
         let surfaces = self.message_surfaces(state, show_button, offset, None)?;
         self.prepare_surfaces(renderer, &surfaces)
+    }
+    /// Portrait drawn in the ordinary prompt's portrait column. A modal with
+    /// `NO_PORTRAIT`, or with a portrait outside the original texture registry,
+    /// is drawn without one; an unknown portrait is logged, never fatal.
+    fn portrait_surface(&self, portrait: Option<u32>) -> Option<Surface> {
+        match portrait {
+            Some(302) | None => Some(self.portrait.clone()),
+            Some(crate::human_dialog::NO_PORTRAIT) => None,
+            Some(id) => {
+                let surface = self.card_portraits.get(id.wrapping_sub(263) as usize);
+                if surface.is_none() {
+                    log_unknown_portrait(id);
+                }
+                surface.cloned()
+            }
+        }
     }
     fn message_surfaces(
         &self,
@@ -505,15 +545,10 @@ impl Assets {
             .dialog
             .map(|d| d.portrait)
             .or_else(|| request.card.map(|c| c.portrait));
-        if desktop.is_none() {
-            surfaces.push(match portrait {
-                Some(302) | None => self.portrait.clone(),
-                Some(portrait) => self
-                    .card_portraits
-                    .get(portrait.wrapping_sub(263) as usize)
-                    .ok_or("Modal portrait leaves original texture registry")?
-                    .clone(),
-            });
+        if desktop.is_none()
+            && let Some(surface) = self.portrait_surface(portrait)
+        {
+            surfaces.push(surface);
         }
         let buttons = if show_button {
             request
@@ -675,6 +710,16 @@ impl Assets {
     ) -> Result<PreparedScene, String> {
         let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
         renderer.prepare(&draws, PROJECTION, None)
+    }
+}
+/// Log each distinct unknown portrait once: prompts are rebuilt every frame.
+fn log_unknown_portrait(id: u32) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static LAST: AtomicU32 = AtomicU32::new(crate::human_dialog::NO_PORTRAIT);
+    if LAST.swap(id, Ordering::Relaxed) != id {
+        eprintln!(
+            "Modal portrait {id} is outside the original texture registry; drawing it without a portrait"
+        );
     }
 }
 // Original 4f093f..4f0957 builds the HUD projection with 640x480 extents.

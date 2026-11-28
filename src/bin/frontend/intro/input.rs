@@ -698,9 +698,10 @@ impl Intro {
                             .map(|p| p.map(|v| v as f32 * 0.5))
                             .unwrap_or([-1.; 2]),
                     );
-                    view.game_options
-                        .quit_prompt
-                        .dialog_mouse(pressed, &menu.prompt_assets().dialog_buttons(2));
+                    view.game_options.quit_prompt.dialog_mouse(
+                        pressed,
+                        &menu.frontend_prompt_assets().frontend_dialog_buttons(2),
+                    );
                 }
                 return;
             }

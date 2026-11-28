@@ -168,3 +168,136 @@ fn original_portrait_layout_and_tutorial_one_three_lines() {
     assert!(frontend.input_bounds[2] < assets.input_bounds[2]);
     assert!(frontend.title[1] > assets.title[1]);
 }
+
+/// Synthetic prompt panel: authored-style regions, a uniform glyph table and
+/// distinguishable portrait textures, enough to build every prompt surface.
+fn synthetic_assets() -> Assets {
+    let regions = [
+        [224., 139., 545., 282.],
+        [225., 140., 544., 157.],
+        [225., 158., 544., 282.],
+        [234., 166., 304., 235.],
+    ];
+    let layout = PanelLayout::from_regions(&regions).unwrap();
+    let mut tab = vec![0; 4 + 224 * 44];
+    tab[..4].copy_from_slice(&224u32.to_le_bytes());
+    for glyph in tab[4..].as_chunks_mut::<44>().0 {
+        glyph[32..36].copy_from_slice(&8i32.to_le_bytes());
+        glyph[36..40].copy_from_slice(&12i32.to_le_bytes());
+    }
+    let texture = |side: u32| Surface {
+        width: side,
+        height: side,
+        pixels: vec![255; (side * side * 4) as usize],
+        ..Surface::solid()
+    };
+    let mut portrait = texture(3);
+    textured_rect(&mut portrait, layout.portrait);
+    let card_portraits = (0..10)
+        .map(|_| {
+            let mut surface = texture(5);
+            textured_rect(&mut surface, layout.portrait);
+            surface
+        })
+        .collect();
+    let mut strings = vec![vec![b'A' - 32; 4]; 1800];
+    strings[1763] = vec![b'Q' - 32; 9];
+    strings[1764] = vec![b'D' - 32; 30];
+    Assets {
+        main: layout.main,
+        input_bounds: regions[0],
+        base: vec![texture(7)],
+        portrait,
+        card_portraits,
+        buttons: vec![texture(2), texture(2), texture(2)],
+        fonts: vec![vec![Surface::solid()], vec![Surface::solid()]],
+        tabs: vec![tab.clone(), tab],
+        strings,
+        title: layout.title,
+        body: layout.body,
+        button: layout.button,
+    }
+}
+
+fn abandonment_state(portrait: u32) -> State {
+    let dialog = crate::human_dialog::Dialog {
+        portrait,
+        ..crate::game_options::quit_dialog()
+    };
+    let mut state = State::default();
+    state.submit(Request {
+        script: None,
+        dialog: Some(dialog),
+        title: dialog.title,
+        body: dialog.body,
+        dismissal_id: 0,
+        card: None,
+    });
+    state
+}
+
+fn portraits_drawn(surfaces: &[Surface]) -> Vec<u32> {
+    surfaces
+        .iter()
+        .map(|s| s.width)
+        .filter(|width| [3, 5].contains(width))
+        .collect()
+}
+
+#[test]
+fn abandonment_prompt_and_unknown_portraits_draw_without_portrait() {
+    let assets = synthetic_assets();
+    assert_eq!(
+        crate::game_options::quit_dialog().portrait,
+        crate::human_dialog::NO_PORTRAIT
+    );
+    // In-city Quit: the portrait-free 88c0d4 owner, shifted once by (-40, 0),
+    // with the two solid colored Yes/No backgrounds and no portrait.
+    let mut state = abandonment_state(crate::human_dialog::NO_PORTRAIT);
+    let buttons = assets.frontend_dialog_buttons(2);
+    assert_eq!(buttons.len(), 2);
+    for (shifted, bounds) in buttons.iter().zip(assets.dialog_buttons(2)) {
+        assert_eq!(
+            *shifted,
+            [bounds[0] - 40., bounds[1], bounds[2] - 40., bounds[3]]
+        );
+    }
+    state.cursor([buttons[1][0] + 1., buttons[1][1] + 1.]);
+    state.dialog_mouse(true, &buttons);
+    let surfaces = assets.frontend_prompt_surfaces(&state).unwrap();
+    assert!(portraits_drawn(&surfaces).is_empty());
+    let title = &surfaces[assets.base.len()];
+    assert_eq!(title.vertices[0][0], assets.title[0] - 40.);
+    let colored = &surfaces[assets.base.len() + 1..assets.base.len() + 3];
+    assert!(
+        colored
+            .iter()
+            .all(|s| s.width == 1 && !s.vertices.is_empty())
+    );
+    state.dialog_mouse(false, &buttons);
+    assert_eq!(
+        state.take_dialog_replies(),
+        vec![crate::human_dialog::Reply {
+            callback: crate::game_options::QUIT_CALLBACK,
+            context: 0,
+            button: 1,
+        }]
+    );
+
+    // The ordinary owner never fails on an absent or out-of-range portrait.
+    for portrait in [crate::human_dialog::NO_PORTRAIT, 0, 262, 273, 9999] {
+        let state = abandonment_state(portrait);
+        let surfaces = assets
+            .message_surfaces(&state, true, [0.; 2], None)
+            .unwrap();
+        assert!(portraits_drawn(&surfaces).is_empty(), "portrait {portrait}");
+        assert!(assets.frontend_prompt_surfaces(&state).is_ok());
+    }
+    // Known portraits are still drawn in the portrait column.
+    for (portrait, width) in [(302, 3), (263, 5), (272, 5)] {
+        let surfaces = assets
+            .message_surfaces(&abandonment_state(portrait), true, [0.; 2], None)
+            .unwrap();
+        assert_eq!(portraits_drawn(&surfaces), [width], "portrait {portrait}");
+    }
+}

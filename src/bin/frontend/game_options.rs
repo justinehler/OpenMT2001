@@ -41,10 +41,11 @@ pub enum Button {
 
 pub const QUIT_CALLBACK: u32 = 0x49e940;
 
-/// Original 49e970's abandonment prompt, distinct from desktop Quit.
+/// Original 49e970's abandonment prompt, distinct from desktop Quit in its
+/// strings (0x6e3/0x6e4) and callback. It never sets a portrait.
 pub fn quit_dialog() -> crate::human_dialog::Dialog {
     crate::human_dialog::Dialog {
-        portrait: u32::MAX,
+        portrait: crate::human_dialog::NO_PORTRAIT,
         title: 1763,
         body: 1764,
         buttons: [1636, 1637],

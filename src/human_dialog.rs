@@ -6,6 +6,10 @@ pub enum Argument {
     Integer(i32),
     Currency(i32),
 }
+/// Portrait word for a modal with no portrait. Original activation 429b50
+/// resets the portrait to 0xffffffff, and producers such as the in-city
+/// (49e970) and desktop (495860) Quit prompts never call the 429af0 setter.
+pub const NO_PORTRAIT: u32 = u32::MAX;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Dialog {
     pub portrait: u32,

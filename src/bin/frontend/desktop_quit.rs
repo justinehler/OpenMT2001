@@ -7,7 +7,7 @@ pub const CALLBACK: u32 = 0x495670;
 
 pub fn dialog() -> Dialog {
     Dialog {
-        portrait: u32::MAX,
+        portrait: crate::human_dialog::NO_PORTRAIT,
         title: 1765,
         body: 1766,
         buttons: [1636, 1637],
@@ -90,6 +90,18 @@ impl Modal {
             right: self.right,
             ..Self::default()
         };
+    }
+    /// Presentation-only view of a portrait-free prompt owned elsewhere (the
+    /// in-city Quit): pointer and held button, with no input or reply role.
+    pub fn presented(cursor: [f32; 2], pressed_button: Option<usize>) -> Self {
+        Self {
+            active: true,
+            blocking: true,
+            cursor: Some(cursor),
+            left: pressed_button.is_some(),
+            origin: pressed_button,
+            ..Self::default()
+        }
     }
     pub fn cursor(&mut self, cursor: [f32; 2]) {
         self.cursor = Some(cursor);
