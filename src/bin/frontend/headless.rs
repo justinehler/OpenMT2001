@@ -679,7 +679,7 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
         Err(error) => Ok(End::Failure(error)),
     };
     let saved = match (&end, &options.write_save) {
-        (Ok(_), Some(path)) => write_save(&mut session, &image, path),
+        (Ok(_), Some(path)) => write_save(&host, &mut session, &image, path),
         _ => Ok(()),
     };
     drop(host);
@@ -690,6 +690,7 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
 }
 
 fn write_save(
+    host: &crate::live_host::Host,
     session: &mut crate::fresh_city::Session<'_>,
     image: &openmt2001::pe::PeImage<'_>,
     path: &Path,
@@ -699,7 +700,9 @@ fn write_save(
         .saved_cameras
         .ok_or("the loaded save has no camera records to write back")?;
     let mode = session.world.clock.timing[5];
-    let bytes = session.save_v2(image, cameras, mode)?;
+    // A save during an auction also carries the Host's auction widgets, as the
+    // live autosave and manual save do.
+    let bytes = session.save_v2_with_auction(image, cameras, mode, host.auction_save_state())?;
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -767,6 +770,7 @@ fn advance(
             if let Some(dir) = &options.checkpoint_saves {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
                 write_save(
+                    host,
                     session,
                     assets.image,
                     &dir.join(format!("checkpoint-{tick}.sav")),
@@ -1009,6 +1013,45 @@ mod tests {
         assert!(with(&["--save", "y", "--checkpoint-saves", "d", "--rng"]).is_ok());
     }
 
+    /// Checkpoint and `--write-save` saves take the Host's auction widgets, as
+    /// the live autosave does. Without them no auction phase can be saved; with
+    /// them each phase the original writes (tag 8000 whenever the controller is
+    /// set and +7c or +7d is nonzero, 0x4657c0) round-trips as the same phase.
+    #[test]
+    fn checkpoint_auction_phases_round_trip_with_host_widgets() {
+        use crate::session_save::AuctionContinuation;
+        use openmt2001::ai_messages::offers::auction::State;
+        // (logic mode, +7c, +7d, active count)
+        let phases = [
+            (1, 0, 1, 1), // announcement countdown
+            (2, 1, 0, 1), // bidding scene, including AI-only bidding
+            (1, 0, 0, 0), // settled, controller kept after closure
+        ];
+        for (mode, bidding, announced, active) in phases {
+            let mut auction = State::default();
+            auction.controller.reference = 0x7f4758;
+            auction.controller.record[0x7c] = bidding;
+            auction.controller.record[0x7d] = announced;
+            auction.controller.record[4] = 17;
+            auction.controller.active_count = active;
+            auction.presentation.countdown = 4321;
+            let host = crate::live_host::Host::new([0.; 3]);
+            let phase = format!("mode {mode} +7c {bidding} +7d {announced}");
+            assert!(
+                AuctionContinuation::capture_state(&auction, 0, mode, None, 0).is_err(),
+                "{phase}: a save without Host widgets is refused"
+            );
+            let saved =
+                AuctionContinuation::capture_state(&auction, 0, mode, host.auction_save_state(), 0)
+                    .unwrap_or_else(|e| panic!("{phase}: {e}"));
+            let loaded = AuctionContinuation::decode(&saved.encode())
+                .unwrap_or_else(|e| panic!("{phase}: {e}"));
+            assert_eq!((loaded.game_mode, loaded.prior_mode), (mode, 0), "{phase}");
+            assert!(loaded.host.is_some(), "{phase}: Host widgets are retained");
+            assert_eq!(loaded.encode(), saved.encode(), "{phase}");
+        }
+    }
+
     #[test]
     fn save_starts_take_a_seed_and_autosave_limits() {
         let options = parse(&[
@@ -1074,22 +1117,23 @@ mod tests {
         }
     }
 
+    fn run_once(options: &Options) -> (End, String) {
+        let options = options.clone();
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let mut out = Vec::new();
+                let end = run(&options, &mut out).unwrap();
+                (end, String::from_utf8(out).unwrap())
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
     fn twice(options: &Options) -> String {
-        let run_once = || {
-            let options = options.clone();
-            std::thread::Builder::new()
-                .stack_size(32 * 1024 * 1024)
-                .spawn(move || {
-                    let mut out = Vec::new();
-                    let end = run(&options, &mut out).unwrap();
-                    (end, String::from_utf8(out).unwrap())
-                })
-                .unwrap()
-                .join()
-                .unwrap()
-        };
-        let (end, first) = run_once();
-        let (_, second) = run_once();
+        let (end, first) = run_once(options);
+        let (_, second) = run_once(options);
         assert_eq!(end, End::Ticks, "{first}");
         assert_eq!(first, second, "headless runs are not deterministic");
         first
@@ -1129,5 +1173,83 @@ mod tests {
             report.ends_with("{\"end\":\"ticks\",\"ticks\":500}\n"),
             "{report}"
         );
+    }
+
+    /// The first midnight digest of a run, without the state hash: a V2 reload
+    /// rebuilds resident movement, so only the clock, cash and owners are
+    /// compared across a reload.
+    fn first_midnight(report: &str) -> String {
+        let line = report
+            .lines()
+            .find(|line| line.contains("\"day\":2,\"hour\":0,"))
+            .unwrap_or_else(|| panic!("no midnight digest in {report}"));
+        line.split(",\"state\"").next().unwrap().to_owned()
+    }
+
+    #[test]
+    #[ignore = "requires original assets and an original day-1 autosave of campaign level 9 (Last Man Standing, Bronze/Easy)"]
+    fn ai_auction_checkpoints_save_and_resume() {
+        let source = openmt2001::fixtures::path("CAMPAIGN_LMS_EASY_DAY1");
+        let root = openmt2001::fixtures::scratch("HEADLESS_AI_AUCTION")
+            .join(format!("ai-auction-{}", std::process::id()));
+        let start = |path: &Path| Start::Save {
+            path: path.to_owned(),
+            seed: 0,
+        };
+        let midnight = |dir: &str| {
+            let mut options = fixture_options(start(&source), u32::MAX);
+            options.every = None;
+            options.auctions = AuctionPolicy::Wait;
+            options.autosave_dir = Some(root.join(dir));
+            options.autosaves = Some(1);
+            options
+        };
+        // Hourly checkpoints through the AI auction the opponents start in the
+        // afternoon of day 1, to the first midnight.
+        let mut straight = midnight("straight");
+        straight.checkpoint_saves = Some(root.join("checkpoints"));
+        let (end, straight_report) = run_once(&straight);
+        assert_eq!(end, End::Autosaves { count: 1 }, "{straight_report}");
+        let mut announcements = 0;
+        for entry in std::fs::read_dir(root.join("checkpoints")).unwrap() {
+            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+            let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+            if let Some(record) = save.auction().unwrap() {
+                assert_eq!(save.clock().unwrap().timing[5], 1);
+                assert_eq!((record[0x7c], record[0x7d]), (0, 1));
+                announcements += 1;
+            }
+        }
+        assert!(announcements > 0, "no checkpoint fell in the AI auction");
+        // The bidding scene freezes the game clock, so no hourly checkpoint
+        // lands in it; save there at the end of a bounded run instead. The
+        // AIs bid between about 13,600 and 15,900 ticks after this load.
+        let mut bidding = fixture_options(start(&source), 14_688);
+        bidding.auctions = AuctionPolicy::Wait;
+        bidding.write_save = Some(root.join("bidding.sav"));
+        let (end, report) = run_once(&bidding);
+        assert_eq!(end, End::Ticks, "{report}");
+        let bytes = std::fs::read(root.join("bidding.sav")).unwrap();
+        let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+        assert_eq!(
+            save.clock().unwrap().timing[5],
+            2,
+            "save is not in the bidding scene"
+        );
+        let record = save
+            .auction()
+            .unwrap()
+            .expect("bidding save has an auction snapshot");
+        assert_eq!((record[0x7c], record[0x7d]), (1, 0));
+        let mut resumed = midnight("resumed");
+        resumed.start = start(&root.join("bidding.sav"));
+        let (end, resumed_report) = run_once(&resumed);
+        assert_eq!(end, End::Autosaves { count: 1 }, "{resumed_report}");
+        assert_eq!(
+            first_midnight(&resumed_report),
+            first_midnight(&straight_report),
+            "the bidding save resumes to a different auction outcome"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
