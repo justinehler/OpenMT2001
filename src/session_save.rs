@@ -304,6 +304,29 @@ pub fn scheduled_record(
     Ok((header, packet))
 }
 
+/// Size of the original object behind an auction-family command kind, as
+/// returned by its class's size method (vtable slot 0). 481010 saves exactly
+/// this many bytes and 4810e0 restores the stated size.
+pub fn auction_command_size(kind: u32) -> Option<usize> {
+    Some(match kind {
+        // Property transfer: 464bf0/48c1c0, vtable 525c60, size 464e20.
+        0x16 => 28,
+        // Category wait: 445cc0, vtable 525b14, size 445d00.
+        0x19 => 24,
+        // Auction admission request: 48b350/48c1c0, vtable 525cb8, size 477da0.
+        0x1d => 52,
+        // Room start: 465330, vtable 525c70, size 465480.
+        0x1e => 20,
+        // Auction action: 4644a0..464580, vtable 525c58, size 4644e0.
+        0x1f => 32,
+        // Auction finish: 464f60, vtable 525c68, size 465220.
+        0x20 => 20,
+        // Auction inbox notifications: vtable 525dc0, size 48a350.
+        0x27..=0x2a => 48,
+        _ => return None,
+    })
+}
+
 pub fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
     let mut bytes = match command {
         // 4896e0 and 489df0 build the result command (kind 9, vtable
@@ -378,23 +401,26 @@ pub fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
             put(&mut b, 28, c.target as u32);
             b
         }
-        // 465330's auction room-start (kind 0x1e, vtable 525c70) is a
-        // header-only object: its size method 465480 returns 0x14. The live
-        // auction adapter pads it to 52 bytes with zeros; only the native
-        // 20 bytes are saved.
-        Command::Auction { descriptor }
-            if word(descriptor, 4) == 0x1e && descriptor[20..].iter().all(|&b| b == 0) =>
-        {
-            descriptor[..20].to_vec()
-        }
-        Command::Auction { descriptor } => descriptor.to_vec(),
+        // The live auction adapter carries every auction-family command as
+        // a zero-padded 52-byte descriptor, but 481010 saves only the
+        // original object, whose size is its class's own size method. A
+        // descriptor with nonzero bytes past that size keeps the padded form
+        // rather than losing them.
+        Command::Auction { descriptor } => match auction_command_size(word(descriptor, 4)) {
+            Some(size) if descriptor[size..].iter().all(|&b| b == 0) => descriptor[..size].to_vec(),
+            _ => descriptor.to_vec(),
+        },
+        // Restored from a native 28-byte transfer; written as 464bf0 and
+        // 48c1c0 build it (vtable 525c60, scheduling flag set).
         Command::PropertyTransfer {
             category,
             owner,
             amount,
         } => {
             let mut b = vec![0; 28];
+            put(&mut b, 0, 0x525c60);
             put(&mut b, 4, 0x16);
+            b[16] = 1;
             put(&mut b, 20, *amount as u32);
             b[24..26].copy_from_slice(&category.to_le_bytes());
             b[26] = *owner;
