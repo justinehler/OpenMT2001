@@ -141,6 +141,7 @@ fn selected_income_survives_between_tick_and_hourly_script_edits() {
                 &image,
                 &session.resident_models,
                 level_startup::HostContext {
+                    precision: openmt2001::x87::Precision::Pc64,
                     difficulty: 0,
                     notifications: false,
                     accounting_enabled: false,

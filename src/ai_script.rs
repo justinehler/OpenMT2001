@@ -13,6 +13,8 @@ pub struct AiScript {
 
 /// State touched by original4d7a80 after the player roster is constructed.
 pub struct Initialization<'a, const N: usize = 64> {
+    /// Incoming control for this invocation; early CRT callers pass PC53.
+    pub precision: crate::x87::Precision,
     pub profiles: &'a mut [[u8; 0x650]],
     pub manager: &'a mut crate::player_manager::Manager,
     pub category_counts: &'a mut [u32; 52 * 45],
@@ -137,7 +139,8 @@ impl AiScript {
         default: &[u8],
         scenario: Option<(&str, &[u8])>,
     ) -> Result<(), String> {
-        self.load(
+        self.load_with_precision(
+            state.precision,
             state.profiles,
             &mut state.manager.players,
             default,
@@ -147,7 +150,8 @@ impl AiScript {
         for player in &mut state.manager.players {
             self.apply_twiddle_thumbs(player)?;
         }
-        self.initialize_players(
+        self.initialize_players_with_precision(
+            state.precision,
             state.profiles,
             state.current_hour,
             state.difficulty,
@@ -163,7 +167,8 @@ impl AiScript {
             state.buildings,
             state.businesses,
         )?;
-        self.call(
+        self.call_with_precision(
+            state.precision,
             state.profiles,
             &mut state.manager.players,
             "EVENT_LoadScoreData",
@@ -195,9 +200,30 @@ impl AiScript {
         scenario: Option<(&str, &[u8])>,
         current_hour: i32,
     ) -> Result<(), String> {
+        self.load_with_precision(
+            crate::x87::Precision::Pc64,
+            profiles,
+            players,
+            default,
+            scenario,
+            current_hour,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_with_precision(
+        &mut self,
+        precision: crate::x87::Precision,
+        profiles: &mut [[u8; 0x650]],
+        players: &mut impl Players,
+        default: &[u8],
+        scenario: Option<(&str, &[u8])>,
+        current_hour: i32,
+    ) -> Result<(), String> {
         self.runtime
             .execute("DEFAULT/ai.lua", default, &mut |id, args| {
                 dispatch(
+                    precision,
                     profiles,
                     players,
                     &mut self.scores,
@@ -210,6 +236,7 @@ impl AiScript {
         if let Some((name, bytes)) = scenario {
             self.runtime.execute(name, bytes, &mut |id, args| {
                 dispatch(
+                    precision,
                     profiles,
                     players,
                     &mut self.scores,
@@ -233,8 +260,29 @@ impl AiScript {
         arguments: &[f64],
         current_hour: i32,
     ) -> Result<(), String> {
+        self.call_with_precision(
+            crate::x87::Precision::Pc64,
+            profiles,
+            players,
+            event,
+            arguments,
+            current_hour,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn call_with_precision(
+        &mut self,
+        precision: crate::x87::Precision,
+        profiles: &mut [[u8; 0x650]],
+        players: &mut impl Players,
+        event: &str,
+        arguments: &[f64],
+        current_hour: i32,
+    ) -> Result<(), String> {
         self.runtime.call(event, arguments, &mut |id, args| {
             dispatch(
+                precision,
                 profiles,
                 players,
                 &mut self.scores,
@@ -263,6 +311,7 @@ impl AiScript {
                 self.runtime
                     .call(&initializer, &[f64::from(argument)], &mut |id, args| {
                         dispatch(
+                            crate::x87::Precision::Pc64,
                             profiles,
                             players,
                             &mut self.scores,
@@ -283,6 +332,7 @@ impl AiScript {
             .runtime
             .call_reference(reference, argument, &mut |id, args| {
                 dispatch(
+                    crate::x87::Precision::Pc64,
                     profiles,
                     players,
                     &mut self.scores,
@@ -345,6 +395,26 @@ impl AiScript {
         manager: &mut crate::player_manager::Manager,
         count_tick: Option<u32>,
     ) -> Result<(), String> {
+        self.initialize_players_with_precision(
+            crate::x87::Precision::Pc64,
+            profiles,
+            current_hour,
+            difficulty,
+            manager,
+            count_tick,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn initialize_players_with_precision(
+        &mut self,
+        precision: crate::x87::Precision,
+        profiles: &mut [[u8; 0x650]],
+        current_hour: i32,
+        difficulty: i32,
+        manager: &mut crate::player_manager::Manager,
+        count_tick: Option<u32>,
+    ) -> Result<(), String> {
         const EVENTS: [&str; 4] = [
             "EVENT_LoadHseKeepingTimetable",
             "EVENT_LoadBuyBlockTimetable",
@@ -356,7 +426,8 @@ impl AiScript {
             difficulty,
             count_tick.is_some(),
             &mut |manager, profiles, index, event| {
-                self.call(
+                self.call_with_precision(
+                    precision,
                     profiles,
                     &mut manager.players,
                     EVENTS[event],
@@ -374,7 +445,9 @@ impl AiScript {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
+    precision: crate::x87::Precision,
     profiles: &mut [[u8; 0x650]],
     players: &mut impl Players,
     scores: &mut crate::ai_parameters::Scores,
@@ -449,7 +522,7 @@ fn dispatch(
             _ => return Err("unknown AI cash binding".into()),
         };
         // 4d6f10/4d6f40/4d6f80 update cash directly, without ledger posts.
-        account.apply_script_money(values[0], operation);
+        account.apply_script_money(values[0], operation, precision);
         account.write_runtime(&mut player.bytes)?;
         return Ok(None);
     }
@@ -885,6 +958,7 @@ mod tests {
         scripts
             .initialize(
                 &mut Initialization::<64> {
+                    precision: crate::x87::Precision::Pc64,
                     profiles: &mut profiles,
                     manager: &mut manager,
                     category_counts: &mut counts,

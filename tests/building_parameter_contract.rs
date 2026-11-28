@@ -28,6 +28,7 @@ fn literal_image_primitives_keep_original_unconfigured_rates() {
         for (hour, expected, rent) in [(5, 20, 0.0f32), (6, 40, 20.0)] {
             let cost = building_binding::construction_cost(
                 &building_binding::ConstructionInputs {
+                    precision: openmt2001::x87::Precision::Pc64,
                     volume: 2,
                     kind,
                     quality: 0,
@@ -199,6 +200,7 @@ fn configured_quote_initializer_and_demolition_have_literal_amounts() {
         ] {
             let cost = building_binding::construction_cost_with_parameters(
                 &building_binding::ConstructionInputs {
+                    precision: openmt2001::x87::Precision::Pc64,
                     volume: 2,
                     kind,
                     quality: 0,
@@ -405,6 +407,7 @@ fn map_producer_quotes_and_materializes_configured_rows() {
     let mut available = Vec::new();
     let mut cursor = None;
     let mut state = map_script::State {
+        precision: openmt2001::x87::Precision::Pc64,
         building_parameters: parameters,
         world: business_binding::World {
             buildings: &mut buildings,

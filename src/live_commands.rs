@@ -92,8 +92,10 @@ pub fn quote(
         }
     }
     let [x0, y0, x1, y1] = command.rectangle.map(i32::from);
-    let cost = crate::building_binding::construction_cost_with_parameters(
+    let cost = quote_components(
+        command,
         &crate::building_binding::ConstructionInputs {
+            precision: crate::x87::Precision::Pc64,
             volume: (x1 - x0 + 1)
                 .wrapping_mul(y1 - y0 + 1)
                 .wrapping_mul(i32::from(command.height)),
@@ -111,8 +113,21 @@ pub fn quote(
         image,
     )?;
     city.construction_components = cost.components;
-    command.components = cost.components;
     Ok(cost.total)
+}
+
+/// Shared command producer boundary: snapshot all four original quote globals
+/// before enqueueing. In-play producers call this with PC64 inputs.
+pub fn quote_components(
+    command: &mut construction::Command,
+    input: &crate::building_binding::ConstructionInputs<'_>,
+    parameters: &crate::building_parameters::BuildingKinds,
+    image: &PeImage<'_>,
+) -> Result<crate::building_binding::ConstructionCost, String> {
+    let cost =
+        crate::building_binding::construction_cost_with_parameters(input, parameters, image)?;
+    command.components = cost.components;
+    Ok(cost)
 }
 pub struct Context<'a, 'image> {
     pub image: &'a PeImage<'image>,

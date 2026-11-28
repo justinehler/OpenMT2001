@@ -1697,6 +1697,7 @@ impl<'data> Session<'data> {
             )?;
             self.roster.scripts.initialize_loaded(
                 &mut openmt2001::ai_script::Initialization {
+                    precision: openmt2001::x87::Precision::Pc64,
                     profiles: &mut self.roster.profiles,
                     manager: &mut self.roster.manager,
                     category_counts: &mut self.roster.category_counts,

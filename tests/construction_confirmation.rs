@@ -29,6 +29,7 @@ fn reprice(command: &mut construction::Command, hour: i32) -> f32 {
     }
     let cost = building_binding::construction_cost(
         &building_binding::ConstructionInputs {
+            precision: openmt2001::x87::Precision::Pc64,
             volume: 2,
             kind: 0,
             quality: 0,

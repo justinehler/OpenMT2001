@@ -26,6 +26,8 @@ pub struct RosterStatus {
 }
 
 pub struct RosterInputs<'a> {
+    /// Incoming control for this invocation; early CRT callers pass PC53.
+    pub precision: crate::x87::Precision,
     /// Connected local compact row, selected before AI reset and script callbacks.
     pub local_slot: Option<usize>,
     pub names: [&'a [u8]; 6],
@@ -110,6 +112,7 @@ impl PendingRoster {
             after_reset(state.manager, reference)?;
         }
         if status.has_ai {
+            state.precision = inputs.precision;
             scripts.initialize(state, inputs.default_ai, inputs.scenario_ai)?;
         }
         //48cdc8: the per-roster difficulty overrides the global difficulty only
@@ -317,6 +320,7 @@ mod tests {
                 let scenario_ai = std::fs::read(root.join(scenario).join("ai.lua")).ok();
                 let mut state: crate::ai_script::Initialization<'_> =
                     crate::ai_script::Initialization {
+                        precision: crate::x87::Precision::Pc64,
                         profiles: &mut profiles,
                         manager: &mut manager,
                         category_counts: &mut counts,
@@ -330,6 +334,7 @@ mod tests {
                 roster
                     .initialize_created(
                         RosterInputs {
+                            precision: crate::x87::Precision::Pc64,
                             local_slot: None,
                             names: [b"Fixture Player"; 6],
                             initial_cash,

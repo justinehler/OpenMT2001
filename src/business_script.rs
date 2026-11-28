@@ -370,6 +370,7 @@ mod tests {
         assert!(!bakery.is_empty());
         assert!(bakery.iter().all(|p| p.value > 0.));
         let input = crate::building_binding::ConstructionInputs {
+            precision: crate::x87::Precision::Pc64,
             volume: 27,
             kind: 0,
             quality: 1,
