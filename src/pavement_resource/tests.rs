@@ -1,7 +1,7 @@
 //! Source regressions; all embedded bytes below are authored fixtures.
 //! No originals, real native manager handle, game or render acceptance is claimed.
 use super::*;
-use openmt2001::mesh::CachedMesh;
+use crate::mesh::CachedMesh;
 
 fn authored_archive() -> (ArchiveIndex, Vec<u8>) {
     // A minimal valid cached mesh, two vertices/one frame/no parts or textures.

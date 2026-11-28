@@ -1,7 +1,7 @@
-//! Finite modern pavement definition resource. No native manager/render facade.
+//! Finite modern pavement definition resource for city selection. No native manager/render facade.
 //! One Directory owns its occupied CPU definition and exact loaded source bytes.
 //! Bindings hold Weak references: possession is never evidence of occupancy.
-use openmt2001::archive::{ArchiveEntry, ArchiveIndex};
+use crate::archive::{ArchiveEntry, ArchiveIndex};
 use std::sync::{
     Arc, Mutex, Weak,
     atomic::{AtomicU64, Ordering},
@@ -9,7 +9,7 @@ use std::sync::{
 
 type Result<T> = std::result::Result<T, String>;
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
-pub(super) const PATH: &str = "gamedata2/New_building stuff/pavement.tm";
+pub const PATH: &str = "gamedata2/New_building stuff/pavement.tm";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DirectoryId(u64);
@@ -22,39 +22,39 @@ enum PavementSlot {
 }
 /// Explicitly local/domain-specific. Cannot be constructed from native integers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LocalPavementHandle {
+pub struct LocalPavementHandle {
     directory: DirectoryId,
     generation: Generation,
     slot: PavementSlot,
 }
 /// Native address identifies a static reference ROLE only, not an allocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ReferenceRole {
+pub enum ReferenceRole {
     NativeStatic688b48,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ArchiveProvenance {
+pub struct ArchiveProvenance {
     pub header_words: [u32; 8],
     pub entry_index: usize,
     pub archive_length: u64,
     pub entry: ArchiveEntry,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Provenance {
+pub enum Provenance {
     Archive(ArchiveProvenance),
-    #[cfg(test)]
+    /// Authored test fixture; never a live resource.
     SyntheticFixture,
 }
 /// Only selection (the parent module) can construct this from its successful
 /// mesh parse/model_definition. No parse, scene lookup or numeric conversion.
-pub(super) struct LoadedPavement {
+pub struct LoadedPavement {
     definition: [u8; 116],
     provenance: Provenance,
     source_bytes: Box<[u8]>,
 }
 impl LoadedPavement {
-    pub(super) fn from_loaded(
+    pub fn from_loaded(
         directory: &ArchiveIndex,
         archive: &[u8],
         entry: &ArchiveEntry,
@@ -92,7 +92,6 @@ impl LoadedPavement {
             }),
         })
     }
-    #[cfg(test)]
     fn synthetic(definition: [u8; 116]) -> Self {
         Self {
             definition,
@@ -140,15 +139,15 @@ impl State {
 /// One retained binding per installed generation. Clones are aliases, not
 /// registrations. The fields are private; callers cannot assert occupancy.
 #[derive(Clone)]
-pub(crate) struct ResolvedBinding {
+pub struct ResolvedBinding {
     handle: LocalPavementHandle,
     directory: Weak<Mutex<State>>,
 }
 impl ResolvedBinding {
-    pub(crate) fn handle(&self) -> LocalPavementHandle {
+    pub fn handle(&self) -> LocalPavementHandle {
         self.handle
     }
-    pub(crate) fn definition(&self) -> Result<[u8; 116]> {
+    pub fn definition(&self) -> Result<[u8; 116]> {
         let directory = self
             .directory
             .upgrade()
@@ -162,12 +161,12 @@ impl ResolvedBinding {
 
 /// Sole strong authority, retained in selection::Assets. No Clone/Default.
 /// The mutex protects real occupied state; an Arc identity alone grants nothing.
-pub(crate) struct Directory {
+pub struct Directory {
     state: Arc<Mutex<State>>,
     binding: Option<ResolvedBinding>, // native role's actually populated slot0 analogue
 }
 impl Directory {
-    pub(super) fn install(loaded: LoadedPavement) -> Result<Self> {
+    pub fn install(loaded: LoadedPavement) -> Result<Self> {
         let id = DirectoryId(
             NEXT_DIRECTORY
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
@@ -216,18 +215,18 @@ impl Directory {
     }
     /// Root must first retire dependent Pool allocations at the actual writer.
     /// This revokes every old binding, including equal-definition replacements.
-    pub(super) fn replace(&mut self, loaded: LoadedPavement) -> Result<()> {
+    pub fn replace(&mut self, loaded: LoadedPavement) -> Result<()> {
         self.retire()?;
         self.populate(loaded)
     }
-    pub(super) fn retire(&mut self) -> Result<()> {
+    pub fn retire(&mut self) -> Result<()> {
         self.binding = None;
         self.state
             .lock()
             .map_err(|_| "pavement resource directory poisoned")?
             .retire()
     }
-    pub(crate) fn binding(&self) -> Result<ResolvedBinding> {
+    pub fn binding(&self) -> Result<ResolvedBinding> {
         let binding = self
             .binding
             .as_ref()
@@ -235,17 +234,17 @@ impl Directory {
         self.resolve(binding)?;
         Ok(binding.clone())
     }
-    pub(crate) fn resolve(&self, binding: &ResolvedBinding) -> Result<[u8; 116]> {
+    pub fn resolve(&self, binding: &ResolvedBinding) -> Result<[u8; 116]> {
         if !Weak::ptr_eq(&binding.directory, &Arc::downgrade(&self.state)) {
             return Err("pavement binding belongs to another directory".into());
         }
         binding.definition()
     }
-    pub(crate) fn reference_role(&self) -> ReferenceRole {
+    pub fn reference_role(&self) -> ReferenceRole {
         ReferenceRole::NativeStatic688b48
     }
     /// Count comes from actual registration, never an authored native word.
-    pub(crate) fn populated_slots(&self) -> Result<usize> {
+    pub fn populated_slots(&self) -> Result<usize> {
         let state = self
             .state
             .lock()
@@ -255,7 +254,7 @@ impl Directory {
             Occupancy::Occupied(_) => 1,
         })
     }
-    pub(crate) fn provenance(&self) -> Result<Provenance> {
+    pub fn provenance(&self) -> Result<Provenance> {
         let binding = self
             .binding
             .as_ref()
@@ -266,7 +265,7 @@ impl Directory {
             .map_err(|_| "pavement resource directory poisoned")?;
         Ok(state.entry(binding.handle)?.resource.provenance.clone())
     }
-    pub(crate) fn retained_source_length(&self) -> Result<usize> {
+    pub fn retained_source_length(&self) -> Result<usize> {
         let binding = self
             .binding
             .as_ref()
@@ -277,16 +276,17 @@ impl Directory {
             .map_err(|_| "pavement resource directory poisoned")?;
         Ok(state.entry(binding.handle)?.resource.source_bytes.len())
     }
-    #[cfg(test)]
-    pub(super) fn synthetic(definition: [u8; 116]) -> Self {
+    /// Test support: a directory holding an authored definition.
+    #[doc(hidden)]
+    pub fn synthetic(definition: [u8; 116]) -> Self {
         Self::install(LoadedPavement::synthetic(definition)).unwrap()
     }
-    #[cfg(test)]
-    pub(super) fn replace_synthetic(&mut self, definition: [u8; 116]) -> Result<()> {
+    /// Test support: replace the definition with an authored one.
+    #[doc(hidden)]
+    pub fn replace_synthetic(&mut self, definition: [u8; 116]) -> Result<()> {
         self.replace(LoadedPavement::synthetic(definition))
     }
 }
 
 #[cfg(test)]
-#[path = "pavement_resource_tests.rs"]
 mod tests;

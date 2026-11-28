@@ -6,8 +6,7 @@ use openmt2001::{
     pe::PeImage,
 };
 
-#[path = "pavement_resource.rs"]
-pub(crate) mod pavement_resource;
+pub(crate) use openmt2001::pavement_resource;
 
 pub struct Assets {
     pub blocks: Vec<Block>,

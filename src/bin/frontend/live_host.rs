@@ -715,7 +715,7 @@ impl Host {
         supplier_policy: CameraSupplierPolicy,
         mut worker: camera_bridge::Worker,
         capture: openmt2001::camera::bank::Capture,
-        pavement: crate::selection::pavement_resource::LocalPavementHandle,
+        pavement: openmt2001::pavement_resource::LocalPavementHandle,
     ) -> Result<(), camera_bridge::RequestError> {
         if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some()
         {
