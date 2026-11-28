@@ -2779,6 +2779,13 @@ impl Host {
         assets: &CommandAssets<'_, '_>,
         reply: crate::human_dialog::Reply,
     ) -> Result<(), String> {
+        if reply.callback == crate::game_options::QUIT_CALLBACK {
+            return self.reply_options_quit(
+                &mut session.catalog,
+                session.campaign_profile.as_deref(),
+                reply.button,
+            );
+        }
         if reply.callback == 0x48b490 {
             // Button and timeout may race for the same modal. The first reply
             // already initialized the original result script and dismissed it.
@@ -2862,6 +2869,31 @@ impl Host {
                 false,
             )?;
         }
+        Ok(())
+    }
+    /// Original 49e940 releases the modal for either answer. Only Yes calls
+    /// 4ba1d0 with completed=0, won=0; it skips results and final statistics.
+    pub(crate) fn reply_options_quit(
+        &mut self,
+        catalog: &mut openmt2001::level_catalog::Catalog,
+        profile: Option<&std::path::Path>,
+        button: u32,
+    ) -> Result<(), String> {
+        if button != 0 || self.result_completed {
+            return Ok(());
+        }
+        if self.options_resume.is_none() || !self.game_active {
+            return Err("Abandonment requires the active city's Options menu".into());
+        }
+        catalog.finish(false, 0)?;
+        if let Some(path) = profile {
+            crate::campaign_store::save_progress(catalog, path)?;
+        }
+        self.stats = None;
+        self.result_request = None;
+        self.result_completed = true;
+        self.game_active = false;
+        self.running = false;
         Ok(())
     }
     #[cfg(test)]
@@ -3760,6 +3792,125 @@ fn human_dialog_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn options_quit_menu_replies_preserve_pause_or_abandon_once() {
+        use crate::{game_options, human_dialog};
+        use openmt2001::level_catalog::{Catalog, Labels, Registration};
+        // Campaign, tutorial, custom and offline skirmish keep their ordinary
+        // end/return route; abandonment never increments attempts or unlocks.
+        for (id, target) in [
+            (200001, ResultMenu::Scenarios),
+            (100001, ResultMenu::Scenarios),
+            (900001, ResultMenu::Main),
+            (500001, ResultMenu::Main),
+        ] {
+            for player_paused in [false, true] {
+                for button in [0, 1] {
+                    let mut catalog = Catalog::default();
+                    catalog
+                        .register(
+                            Registration {
+                                id,
+                                directory: b"fixture".to_vec(),
+                                labels: Labels::Localized {
+                                    title: 1,
+                                    description: 2,
+                                },
+                                checksum: 0,
+                            },
+                            true,
+                            true,
+                        )
+                        .unwrap();
+                    let before_levels = catalog.levels.clone();
+                    let mut host = Host::new([0.; 3]);
+                    host.game_active = true;
+                    host.set_running(true);
+                    let mut pause = openmt2001::pause::State::default();
+                    let mut timers = openmt2001::timers::startup_tasks([0; 20]);
+                    if player_paused {
+                        host.toggle_player_pause(&mut pause, &mut timers, |_, _| Ok(()))
+                            .unwrap();
+                    }
+                    let before_options = (pause.clone(), timers.clone());
+                    host.options(&mut pause, &mut timers, true).unwrap();
+                    host.policy.scheduler.iterations = 4;
+                    let before_quit = (pause.clone(), timers.clone());
+                    let assets = game_options::Assets::test_menu();
+                    let mut menu = game_options::View::default();
+                    menu.open(true);
+                    assert_eq!(menu.mouse(&assets, Some([65., 5.]), true), None);
+                    assert_eq!(
+                        menu.mouse(&assets, Some([65., 5.]), false),
+                        Some(game_options::Button::Quit)
+                    );
+                    assert!(host.game_active && !host.running && menu.open);
+                    let request = menu.quit_prompt.request().unwrap();
+                    assert_eq!((request.title, request.body), (1763, 1764));
+                    assert_eq!(request.dialog.unwrap().buttons, [1636, 1637]);
+                    assert!(!request.dialog.unwrap().timeout);
+                    // Past the original normal prompt's 1000-tick timeout.
+                    for _ in 0..1050 {
+                        assert_eq!(menu.quit_prompt.tick(), None);
+                    }
+                    assert!(menu.quit_prompt.take_dialog_replies().is_empty());
+                    let buttons = [[0., 0., 60., 24.], [80., 0., 140., 24.]];
+                    menu.quit_prompt.cursor([buttons[button][0] + 1., 1.]);
+                    menu.quit_prompt.dialog_mouse(true, &buttons);
+                    menu.quit_prompt.dialog_mouse(false, &buttons);
+                    let replies = menu.quit_prompt.take_dialog_replies();
+                    assert_eq!(
+                        replies,
+                        vec![human_dialog::Reply {
+                            callback: game_options::QUIT_CALLBACK,
+                            context: 0,
+                            button: button as u32,
+                        }]
+                    );
+                    host.reply_options_quit(&mut catalog, None, replies[0].button)
+                        .unwrap();
+                    menu.quit_prompt.finish_dismiss(vec![]);
+                    assert!(menu.quit_prompt.request().is_none());
+                    assert_eq!(catalog.levels, before_levels);
+                    assert_eq!((pause.clone(), timers.clone()), before_quit);
+                    assert_eq!(host.policy.scheduler.iterations, 4);
+                    if button == 1 {
+                        assert!(host.game_active && menu.open);
+                        assert_eq!(host.result_review(&catalog), None);
+                        // Continue remains usable and restores the earlier hold.
+                        assert_eq!(menu.mouse(&assets, Some([5., 5.]), true), None);
+                        assert_eq!(
+                            menu.mouse(&assets, Some([5., 5.]), false),
+                            Some(game_options::Button::Continue)
+                        );
+                        menu.close();
+                        host.options(&mut pause, &mut timers, false).unwrap();
+                        assert!(host.running);
+                        assert_eq!(host.player_paused(), player_paused);
+                        assert_eq!((pause, timers), before_options);
+                    } else {
+                        assert!(!host.game_active && !host.running);
+                        assert_eq!(
+                            host.result_review(&catalog),
+                            Some(ResultReview::Menu(target))
+                        );
+                        // A repeated callback cannot persist, award, or end again.
+                        host.reply_options_quit(&mut catalog, Some(std::path::Path::new("")), 0)
+                            .unwrap();
+                        assert_eq!(catalog.levels, before_levels);
+                        assert!(host.result_request.is_none());
+                        host.set_running(true);
+                        assert!(!host.running);
+                    }
+                }
+            }
+        }
+        let desktop = crate::menu::desktop_quit::dialog();
+        assert_eq!(
+            (desktop.title, desktop.body, desktop.callback),
+            (1765, 1766, 0x495670)
+        );
+    }
     #[test]
     fn scenario_reminder_open_and_dismiss_preserve_player_pause() {
         let mut level = openmt2001::level_catalog::Level {
