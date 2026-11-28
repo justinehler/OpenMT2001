@@ -3061,6 +3061,17 @@ impl Host {
         self.stats = Some(stats);
         Ok(sequence)
     }
+    /// The UI mode 0x4b5370 leaves the interface groups in. Statistics
+    /// (0x49dcb0) and Options (0x49e860) both switch to mode 4, whose
+    /// passes are zero: a prompt under either keeps its timeout and arming
+    /// until the screen closes.
+    fn interface_mode(&self) -> u32 {
+        if !self.game_active || self.stats.is_some() || self.options_resume.is_some() {
+            4
+        } else {
+            u32::from(self.auction.is_some())
+        }
+    }
     fn interface_tick(
         &mut self,
         session: &mut Session<'_>,
@@ -3113,11 +3124,7 @@ impl Host {
         {
             return Ok(());
         }
-        let mode = if !self.game_active || self.stats.is_some() {
-            4
-        } else {
-            u32::from(self.auction.is_some())
-        };
+        let mode = self.interface_mode();
         self.prompt_updates = self.prompt_updates.wrapping_add(u64::from(
             openmt2001::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
         ));
@@ -4156,6 +4163,38 @@ mod tests {
             host.failure.as_deref(),
             Some("failure after retained mutation")
         );
+    }
+    #[test]
+    fn options_over_a_prompt_freezes_its_updates_and_restores_the_pause() {
+        for (network, script_pause) in [(false, false), (false, true), (true, false)] {
+            let mut host = Host::new([0.; 3]);
+            host.policy.scheduler.network_enabled = network;
+            host.game_active = true;
+            host.set_running(true);
+            let mut pause = openmt2001::pause::State::default();
+            let mut timers = openmt2001::timers::startup_tasks([0; 20]);
+            if script_pause {
+                // A scenario tip's own Game.Pause hold.
+                pause
+                    .pause(0, |change, _| {
+                        change.apply(&mut timers);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            let before = (pause.clone(), timers.clone(), host.running);
+            assert_eq!(host.interface_mode(), 0);
+            host.options(&mut pause, &mut timers, true).unwrap();
+            // Mode 4: the prompt's Return arming and timeout get no passes.
+            assert_eq!(host.interface_mode(), 4);
+            assert_eq!(
+                openmt2001::time_panel::instance_passes(host.interface_mode(), 4),
+                [0, 0]
+            );
+            host.options(&mut pause, &mut timers, false).unwrap();
+            assert_eq!(host.interface_mode(), 0);
+            assert_eq!((pause, timers, host.running), before);
+        }
     }
     #[test]
     fn options_reason_zero_preserves_other_reason_and_interface_task() {

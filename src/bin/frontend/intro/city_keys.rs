@@ -64,9 +64,123 @@ pub(super) fn options_key(key: NamedKey, settings_open: bool) -> Option<OptionsK
     }
 }
 
+/// Where an admitted key press goes while In-Game Options or a generic
+/// prompt is shown in a live city.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ModalKey {
+    /// In-Game Options is shown and owns the key.
+    Options(OptionsKey),
+    /// Escape opens In-Game Options over the prompt.
+    OpenOptions,
+    /// The prompt keeps the key; its Return and Backspace are read from the
+    /// physical key history instead.
+    Consumed,
+    /// Neither is shown: the city's other key handlers run.
+    Pass,
+}
+
+/// Whether Escape may call the menu dispatcher 0x491720. The central
+/// callback's Escape test (0x4ba6bc..0x4ba6f8) reads only the new press of
+/// scan 0x01, the pause latch byte 0x8b22d8 and UI mode 4. Nothing in that
+/// test or in 0x491720 looks at the prompt queue, so a portrait prompt, a
+/// choice prompt and a card notice all let Escape through. A held pause
+/// reason (F1/P, a script's Game.Pause, Options itself) sets 0x8b22d8 and
+/// stops it.
+pub(super) fn escape_opens_options(pause_active: bool) -> bool {
+    !pause_active
+}
+
+/// Route a key press past an open Options panel, then past a prompt that
+/// holds the controls. Options is checked first: once it is open over a
+/// prompt, the prompt underneath gets no keys until Continue.
+pub(super) fn modal_key(
+    key: NamedKey,
+    options_open: bool,
+    settings_open: bool,
+    prompt_open: bool,
+    pause_active: bool,
+) -> ModalKey {
+    if options_open {
+        return options_key(key, settings_open).map_or(ModalKey::Consumed, ModalKey::Options);
+    }
+    if !prompt_open {
+        return ModalKey::Pass;
+    }
+    if key == NamedKey::Escape && escape_opens_options(pause_active) {
+        ModalKey::OpenOptions
+    } else {
+        ModalKey::Consumed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_opens_options_over_a_prompt_once_per_press() {
+        let mut input = Input::default();
+        let mut options_open = false;
+        let mut opened = 0;
+        let escape = NamedKey::Escape;
+        // A held Escape over a prompt, then its release.
+        for (pressed, repeat) in [(true, false), (true, true), (true, false), (false, false)] {
+            if !input.admit(escape, pressed, repeat, false) || !pressed {
+                continue;
+            }
+            match modal_key(escape, options_open, false, true, false) {
+                ModalKey::OpenOptions => {
+                    options_open = true;
+                    opened += 1;
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(opened, 1, "a held Escape opens Options once");
+        // With Options open over the prompt, Options owns every key, and the
+        // prompt's own Return never reaches it.
+        assert_eq!(
+            modal_key(NamedKey::Enter, true, false, true, true),
+            ModalKey::Consumed
+        );
+        assert_eq!(
+            modal_key(NamedKey::Backspace, true, false, true, true),
+            ModalKey::Consumed
+        );
+        assert_eq!(
+            modal_key(escape, true, false, true, true),
+            ModalKey::Options(OptionsKey::Close)
+        );
+        assert_eq!(
+            modal_key(escape, true, true, true, true),
+            ModalKey::Options(OptionsKey::Back)
+        );
+    }
+
+    #[test]
+    fn a_held_pause_reason_stops_escape_but_not_the_prompt_keys() {
+        // 0x8b22d8 set: Escape over a prompt does nothing.
+        assert_eq!(
+            modal_key(NamedKey::Escape, false, false, true, true),
+            ModalKey::Consumed
+        );
+        assert!(!escape_opens_options(true));
+        assert!(escape_opens_options(false));
+        // Other keys stay with the prompt whatever the pause state.
+        for pause_active in [false, true] {
+            for key in [NamedKey::Enter, NamedKey::ArrowLeft, NamedKey::Tab] {
+                assert_eq!(
+                    modal_key(key, false, false, true, pause_active),
+                    ModalKey::Consumed
+                );
+            }
+        }
+        // Without a prompt or Options the city's own handlers run.
+        assert_eq!(
+            modal_key(NamedKey::Escape, false, false, false, false),
+            ModalKey::Pass
+        );
+    }
 
     /// One window key event: logical key, pressed, OS repeat, synthetic.
     type Event = (NamedKey, bool, bool, bool);
