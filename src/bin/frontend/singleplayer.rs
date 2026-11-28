@@ -35,6 +35,238 @@ pub enum Preview {
 }
 
 #[cfg(test)]
+mod campaign_picker_tests {
+    use super::*;
+    use openmt2001::level_catalog::{Catalog, Labels, Registration};
+
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            Self(
+                std::env::temp_dir()
+                    .join(format!("campaign-picker-{}-{nonce}", std::process::id())),
+            )
+        }
+        fn profile(&self) -> PathBuf {
+            crate::campaign_store::profile_path(&self.0, b"Player")
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn catalog(ids: &[i32]) -> Catalog {
+        let mut catalog = Catalog::default();
+        for &id in ids {
+            catalog
+                .register(
+                    Registration {
+                        id,
+                        directory: format!("level{id}").into_bytes(),
+                        labels: Labels::Literal {
+                            title: format!("Title {id}").into_bytes(),
+                            description: format!("Description {id}").into_bytes(),
+                        },
+                        checksum: 0,
+                    },
+                    false,
+                    true,
+                )
+                .unwrap();
+            catalog.unlock(id as u32);
+        }
+        catalog
+    }
+
+    // Exercise production open, activation and label resolution with synthetic
+    // panels; these tests need neither original files nor a graphics device.
+    fn panel() -> SinglePlayer {
+        let panel = || Panel {
+            base: vec![],
+            bounds: vec![[0., 0., 640., 480.]; 71],
+        };
+        SinglePlayer {
+            custom: None,
+            scenario: panel(),
+            tutorial_panel: panel(),
+            character_panel: panel(),
+            generic: vec![],
+            characters: vec![],
+            fonts: vec![],
+            tab: vec![],
+            scenario_list_fonts: vec![],
+            scenario_list_tab: vec![],
+            title_fonts: vec![],
+            title_tab: vec![],
+            strings: vec![vec![]; 0x800],
+            visible: false,
+            character_screen: false,
+            tutorial_screen: false,
+            sandbox: false,
+            difficulty: 2,
+            scenario_id: Some(200003),
+            scenario_rows: vec![],
+            tutorial_index: None,
+            character: 0,
+            inspected_slot: 0,
+            biography_first: std::cell::Cell::new(0),
+            name: vec![],
+            catalog: None,
+            profile_path: None,
+            request: None,
+            busy: false,
+            message: None,
+            description_first: 0,
+            pointer_position: None,
+        }
+    }
+
+    #[test]
+    fn native_flags_preserve_registration_order_and_real_ids() {
+        let mut catalog = catalog(&[200901, 300001, 200003, 100000, 500001, 200902, 200900]);
+        catalog.levels[5].bytes[0x86c..0x870].fill(0); // locked
+        // Nonzero native fields are truthy, not limited to the value one.
+        catalog.levels[0].bytes[1] = 7;
+        catalog.levels[0].bytes[0x86c..0x870].copy_from_slice(&256u32.to_le_bytes());
+        catalog.levels[3].bytes[0x85c] = 2;
+        catalog.levels[4].bytes[2] = 2;
+        assert_eq!(scenario_rows_for(&catalog), [200901, 200003, 200900]);
+    }
+
+    #[test]
+    fn saved_profile_selects_first_entirely_unfinished_row_on_easy() {
+        let scratch = Scratch::new();
+        let ids = [300001, 200901, 100000, 200003, 200902, 200900, 200903];
+        let mut saved = catalog(&ids);
+        for (id, completed) in [
+            (200901, [0, 1, 0]),
+            (200003, [0, 0, 2]),
+            (200902, [1, 0, 0]),
+        ] {
+            saved.set_level_info(id, 1, completed);
+        }
+        crate::campaign_store::save_progress(&saved, &scratch.profile()).unwrap();
+        let mut loaded = catalog(&ids);
+        crate::campaign_store::load_progress(&mut loaded, &scratch.profile()).unwrap();
+        loaded.difficulty = 2;
+        let mut picker = panel();
+        picker.open(false, "Player", loaded, scratch.profile());
+        assert!(!picker.busy && picker.message.is_none());
+        assert_eq!(
+            picker.scenario_rows,
+            [200901, 200003, 200902, 200900, 200903]
+        );
+        assert_eq!(picker.scenario_id, Some(200900));
+        assert_eq!(picker.difficulty, 0);
+        assert_eq!(picker.catalog.as_ref().unwrap().difficulty, 0);
+        assert!(picker.keyboard_enabled(0));
+        picker.activate(0);
+        assert!(picker.character_screen);
+        picker.activate(0);
+        let setup = picker.request.unwrap();
+        assert!(matches!(setup.preview, Preview::Scenario(200900)));
+        assert!(matches!(setup.difficulty, Difficulty::Easy));
+    }
+
+    #[test]
+    fn all_completed_or_empty_leaves_no_selection_and_disables_confirmation() {
+        let scratch = Scratch::new();
+        let mut completed = catalog(&[200003, 200900, 200901]);
+        for (id, flags) in [
+            (200003, [1, 0, 0]),
+            (200900, [0, 1, 0]),
+            (200901, [0, 0, 1]),
+        ] {
+            completed.set_level_info(id, 1, flags);
+        }
+        let mut picker = panel();
+        picker.strings[0x66e] = ascii("Scenario information");
+        for catalog in [completed, Catalog::default()] {
+            picker.open(false, "Player", catalog, scratch.profile());
+            assert_eq!(picker.scenario_id, None);
+            assert!(!picker.keyboard_enabled(0));
+            assert!(!picker.generic_click_enabled(0));
+            assert!(picker.keyboard_enabled(1));
+            assert_eq!(
+                picker.scenario_record_text(true),
+                ascii("Scenario information")
+            );
+            assert!(picker.scenario_record_text(false).is_empty());
+            picker.activate(0);
+            assert!(!picker.character_screen);
+            assert!(picker.request.is_none());
+            if let Some(&id) = picker.scenario_rows.first() {
+                // Completed rows remain available for an explicit replay.
+                picker.activate(5);
+                assert_eq!(picker.scenario_id, Some(id));
+                assert!(picker.keyboard_enabled(0));
+                picker.activate(0);
+                assert!(picker.character_screen);
+            }
+        }
+    }
+
+    #[test]
+    fn displayed_non_builtin_registration_reaches_participant_setup_with_own_labels_and_id() {
+        let scratch = Scratch::new();
+        for labels in [
+            Labels::Literal {
+                title: b"New scenario".to_vec(),
+                description: b"New description".to_vec(),
+            },
+            Labels::Localized {
+                title: 17,
+                description: 18,
+            },
+        ] {
+            let mut catalog = catalog(&[200003]);
+            // Register both forms through the real registration path.
+            catalog
+                .register(
+                    Registration {
+                        id: 200900,
+                        directory: b"extra".to_vec(),
+                        labels,
+                        checksum: 0,
+                    },
+                    false,
+                    true,
+                )
+                .unwrap();
+            catalog.unlock(200900);
+            assert!(!crate::scenarios::CAMPAIGN.iter().any(|s| s.id == 200900));
+            let mut picker = panel();
+            picker.strings[17] = ascii("New scenario");
+            picker.strings[18] = ascii("New description");
+            picker.open(false, "Player", catalog, scratch.profile());
+            assert_eq!(picker.scenario_id, Some(200003));
+            picker.activate(6); // displayed second row, through real activation
+            assert_eq!(picker.scenario_id, Some(200900));
+            assert_eq!(picker.scenario_record_text(true), ascii("New scenario"));
+            assert_eq!(picker.scenario_record_text(false), ascii("New description"));
+            picker.activate(0);
+            assert!(picker.character_screen && picker.message.is_none());
+            assert_eq!(picker.scenario_record_text(true), ascii("New scenario"));
+            picker.activate(0);
+            let setup = picker.request.unwrap();
+            assert!(matches!(setup.preview, Preview::Scenario(200900)));
+            let text = crate::load::LevelTextCatalog::new(&setup.catalog, &picker.strings);
+            assert_eq!(text.title(200900, &picker.strings), ascii("New scenario"));
+            assert_eq!(
+                text.description(200900, &picker.strings),
+                Some(ascii("New description").as_slice())
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tutorial_progress_tests {
     use super::{tutorial_preselection, tutorial_tick_rect, tutorial_tick_rows};
     use openmt2001::level_catalog::{Catalog, Labels, Registration};
@@ -374,6 +606,7 @@ mod scenario_scroll_tests {
             (500001, true, false, true),
         ] {
             let mut bytes = [0u8; RECORD_SIZE];
+            bytes[1] = 1;
             bytes[0x44c..0x450].copy_from_slice(&id.to_le_bytes());
             bytes[0x86c] = u8::from(unlocked);
             bytes[0x85c] = u8::from(tutorial);
@@ -382,7 +615,7 @@ mod scenario_scroll_tests {
         }
         // Original 49b1da/49b1e4/49b1eb rejects tutorial, locked and
         // custom records before appending a native list row.
-        assert_eq!(scenario_rows_for(&catalog), vec![0]);
+        assert_eq!(scenario_rows_for(&catalog), vec![200003]);
     }
 
     #[test]
@@ -541,8 +774,8 @@ pub struct SinglePlayer {
     tutorial_screen: bool,
     sandbox: bool,
     difficulty: usize,
-    scenario_index: usize,
-    scenario_rows: Vec<usize>,
+    scenario_id: Option<u32>,
+    scenario_rows: Vec<u32>,
     tutorial_index: Option<usize>,
     character: usize,
     inspected_slot: usize,
@@ -576,17 +809,23 @@ fn scenario_scroll_hit(maximum: usize, rows: usize, point: [f32; 2]) -> Option<u
     }
     inside(ui::slider_track(SCENARIO_INFO_SCROLL, true)).then_some(base + 2)
 }
-fn scenario_rows_for(catalog: &openmt2001::level_catalog::Catalog) -> Vec<usize> {
-    catalog
-        .levels
-        .iter()
-        .filter(|level| !level.tutorial() && level.unlocked() && level.bytes[2] == 0)
-        .filter_map(|level| {
-            crate::scenarios::CAMPAIGN
-                .iter()
-                .position(|scenario| scenario.id == level.id())
-        })
-        .collect()
+fn scenario_levels(
+    catalog: &openmt2001::level_catalog::Catalog,
+) -> impl Iterator<Item = &openmt2001::level_catalog::Level> {
+    // 48d9f0(mode0) supplies single-player records; 49b1b0 then checks
+    // tutorial, unlock and kind flags and associates each row with its real ID.
+    catalog.levels.iter().filter(|level| {
+        level.single_player() && !level.tutorial() && level.unlocked() && level.bytes[2] == 0
+    })
+}
+fn scenario_rows_for(catalog: &openmt2001::level_catalog::Catalog) -> Vec<u32> {
+    scenario_levels(catalog).map(|level| level.id()).collect()
+}
+fn scenario_preselection(catalog: &openmt2001::level_catalog::Catalog) -> Option<u32> {
+    // 49b250 leaves the selection empty if every eligible row has any cup.
+    scenario_levels(catalog)
+        .find(|level| level.completed() == [false; 3])
+        .map(|level| level.id())
 }
 fn scenario_cup_rect(row: usize, cup: usize) -> [f32; 4] {
     let left = 242. + 20. * cup as f32;
@@ -791,7 +1030,7 @@ impl SinglePlayer {
             tutorial_screen: false,
             sandbox: false,
             difficulty: 0,
-            scenario_index: 0,
+            scenario_id: None,
             scenario_rows: vec![],
             tutorial_index: None,
             character: 0,
@@ -811,7 +1050,7 @@ impl SinglePlayer {
         &mut self,
         sandbox: bool,
         name: &str,
-        catalog: openmt2001::level_catalog::Catalog,
+        mut catalog: openmt2001::level_catalog::Catalog,
         profile_path: PathBuf,
     ) {
         self.custom = None;
@@ -825,6 +1064,8 @@ impl SinglePlayer {
         self.request = None;
         self.busy = true;
         self.catalog = None;
+        self.scenario_id = None;
+        self.scenario_rows.clear();
         self.name = name.as_bytes().to_vec();
         self.profile_path = Some(profile_path.clone());
         let root = profile_path.parent().and_then(|p| p.parent());
@@ -849,7 +1090,8 @@ impl SinglePlayer {
         // Original 49b1b0 walks registration order and appends only
         // non-tutorial, unlocked, non-custom scenario records.
         self.scenario_rows = scenario_rows_for(&catalog);
-        self.scenario_index = self.scenario_rows.first().copied().unwrap_or(0);
+        self.scenario_id = scenario_preselection(&catalog);
+        catalog.difficulty = 0;
         self.catalog = Some(catalog);
         self.profile_path = Some(profile_path);
         self.request = None;
@@ -892,8 +1134,11 @@ impl SinglePlayer {
             self.description_first = 0;
         } else if self.custom.is_none() {
             self.scenario_rows = scenario_rows_for(catalog);
-            if !self.scenario_rows.contains(&self.scenario_index) {
-                self.scenario_index = self.scenario_rows.first().copied().unwrap_or(0);
+            if !self
+                .scenario_id
+                .is_some_and(|id| self.scenario_rows.contains(&id))
+            {
+                self.scenario_id = scenario_preselection(catalog);
             }
         }
         self.message = None;
@@ -1037,12 +1282,20 @@ impl SinglePlayer {
         if self.custom.is_some() {
             return self.custom_text(title);
         }
-        self.scenario_record_text_at(self.scenario_index, title)
+        let Some(id) = self.scenario_id else {
+            return if title {
+                self.strings.get(0x66e).cloned().unwrap_or_default()
+            } else {
+                vec![]
+            };
+        };
+        self.scenario_record_text_at(id, title)
     }
-    fn scenario_record_text_at(&self, scenario_index: usize, title: bool) -> Vec<u8> {
-        let id = crate::scenarios::CAMPAIGN[scenario_index].id;
-        let fallback = level_labels(id).unwrap();
-        let fallback = self.strings[if title { fallback.0 } else { fallback.1 }].clone();
+    fn scenario_record_text_at(&self, id: u32, title: bool) -> Vec<u8> {
+        let fallback = level_labels(id)
+            .and_then(|labels| self.strings.get(if title { labels.0 } else { labels.1 }))
+            .cloned()
+            .unwrap_or_default();
         let Some(level) = self
             .catalog
             .as_ref()
@@ -1182,7 +1435,10 @@ impl SinglePlayer {
                         } else if self.sandbox {
                             Preview::Sandbox
                         } else {
-                            Preview::Scenario(crate::scenarios::CAMPAIGN[self.scenario_index].id)
+                            let Some(id) = self.scenario_id else {
+                                return;
+                            };
+                            Preview::Scenario(id)
                         },
                         difficulty: [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard]
                             [self.difficulty],
@@ -1214,7 +1470,9 @@ impl SinglePlayer {
         } else {
             match i {
                 0 => {
-                    let id = crate::scenarios::CAMPAIGN[self.scenario_index].id;
+                    let Some(id) = self.scenario_id else {
+                        return;
+                    };
                     let unlocked = self
                         .catalog
                         .as_ref()
@@ -1223,10 +1481,6 @@ impl SinglePlayer {
                     if !unlocked {
                         self.message =
                             Some("This scenario is locked in the selected profile.".into());
-                        return;
-                    }
-                    if !(200001..=200016).contains(&id) && id != 400001 {
-                        self.message = Some("Scenario initialization is not yet available.".into());
                         return;
                     }
                     self.character_screen = true;
@@ -1243,7 +1497,7 @@ impl SinglePlayer {
                     }
                 }
                 5.. if i - 5 < self.scenario_rows.len() => {
-                    self.scenario_index = self.scenario_rows[i - 5];
+                    self.scenario_id = Some(self.scenario_rows[i - 5]);
                     self.description_first = 0;
                     self.message = None;
                 }
@@ -1555,12 +1809,6 @@ impl SinglePlayer {
             true,
             0xffffffff,
         )?;
-        let level = if self.sandbox {
-            400002
-        } else {
-            crate::scenarios::CAMPAIGN[self.scenario_index].id
-        };
-        let (level_title, _) = level_labels(level).unwrap();
         if self.character_screen {
             for part in [8, 62, 68] {
                 shapes.rect(b[part], [0xee000530; 4]);
@@ -1717,10 +1965,10 @@ impl SinglePlayer {
             ui::text(
                 &mut fonts,
                 &self.tab,
-                &if self.custom.is_some() {
-                    self.custom_text(true)
+                &if self.sandbox {
+                    self.strings[level_labels(400002).unwrap().0].clone()
                 } else {
-                    self.strings[level_title].clone()
+                    self.scenario_record_text(true)
                 },
                 b[65],
                 true,
@@ -1754,17 +2002,17 @@ impl SinglePlayer {
                 self.custom_list_draw(&mut shapes, &mut scenario_list_fonts)?;
                 self.custom_cups_draw(&mut completion_cups)?;
             }
-            for (row, &scenario_index) in self
+            for (row, &id) in self
                 .scenario_rows
                 .iter()
                 .enumerate()
                 .filter(|_| self.custom.is_none())
             {
                 let top = t + row as f32 * SCENARIO_ROW_HEIGHT;
-                if self.scenario_index == scenario_index || selected == Some(5 + row) {
+                if self.scenario_id == Some(id) || selected == Some(5 + row) {
                     shapes.rect(
                         [l, top, r, top + SCENARIO_ROW_HEIGHT],
-                        [if self.scenario_index == scenario_index {
+                        [if self.scenario_id == Some(id) {
                             0xff008ed0
                         } else {
                             0x99505050
@@ -1774,12 +2022,11 @@ impl SinglePlayer {
                 ui::text(
                     &mut scenario_list_fonts,
                     &self.scenario_list_tab,
-                    &self.scenario_record_text_at(scenario_index, true),
+                    &self.scenario_record_text_at(id, true),
                     [l + 3., top, r, top + SCENARIO_ROW_HEIGHT],
                     false,
                     0xffffffff,
                 )?;
-                let id = crate::scenarios::CAMPAIGN[scenario_index].id;
                 let completed = self
                     .catalog
                     .as_ref()
@@ -1912,7 +2159,7 @@ impl SinglePlayer {
                 if i == 0 { [80, 148, 34] } else { [175, 6, 6] },
                 selected == Some(i),
                 pressed && selected == Some(i),
-                i == 0 && (self.busy || self.custom.as_ref().is_some_and(|c| c.selected.is_none())),
+                i == 0 && (self.busy || !self.keyboard_enabled(i)),
             )?;
             let mut text = r;
             text[1] += (r[3] - r[1] - 14.) / 2.;
@@ -2634,7 +2881,8 @@ mod campaign_description_tests {
             // Supplied-component render only: no catalog/script/profile IO,
             // launch or authored progress claim. Production draw uses real assets.
             panel.visible = true;
-            panel.scenario_rows = vec![0];
+            panel.scenario_rows = vec![200003];
+            panel.scenario_id = Some(200003);
             panel.difficulty = 1;
             panel
         }
@@ -2754,7 +3002,7 @@ mod campaign_description_tests {
         panel.scroll(0);
         assert_eq!(panel.description_first, 0);
         assert!(panel.request.is_none() && panel.profile_path.is_none() && panel.catalog.is_none());
-        assert_eq!(panel.scenario_rows, [0]);
+        assert_eq!(panel.scenario_rows, [200003]);
         assert_eq!(panel.difficulty, 1);
     }
 
