@@ -35,7 +35,7 @@ pub struct Presenter {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
+    blit: Blit,
     cached: Option<(wgpu::Texture, wgpu::BindGroup, usize)>,
     profile: Option<RefCell<PresentProfile>>,
 }
@@ -78,35 +78,7 @@ impl Presenter {
         config.present_mode = wgpu::PresentMode::Fifo;
         config.desired_maximum_frame_latency = 2;
         surface.configure(&device, &config);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Boot presentation"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("present.wgsl").into()),
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Boot presentation"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vertex"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fragment"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let blit = Blit::new(&device, config.format);
         eprintln!(
             "Graphics: {} ({:?}); presentation {:?}, requested frame latency {}",
             adapter.get_info().name,
@@ -120,7 +92,7 @@ impl Presenter {
             device,
             queue,
             config,
-            pipeline,
+            blit,
             cached: None,
             profile: std::env::var_os("OPENMT2001_PROFILE_PACE")
                 .map(|_| RefCell::new(PresentProfile::default())),
@@ -230,20 +202,7 @@ impl Presenter {
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
-            let binding = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            });
+            let binding = self.blit.binding(&self.device, &view, &sampler);
             self.cached = Some((texture, binding, 0));
         }
         let (texture, binding, last_pixels) = self.cached.as_mut().unwrap();
@@ -278,20 +237,20 @@ impl Presenter {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Scene presentation"),
-            layout: &self.pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        })
+        self.blit.binding(&self.device, view, &sampler)
+    }
+
+    /// Repaint `binding` exactly as the window shows it, at the surface's
+    /// pixel size with the same letterboxing, and read it back as top-down
+    /// RGBA rows.
+    pub fn capture(&self, binding: &wgpu::BindGroup) -> Result<Capture, String> {
+        self.blit.capture(
+            &self.device,
+            &self.queue,
+            binding,
+            self.config.width,
+            self.config.height,
+        )
     }
 
     pub fn present_binding(
@@ -330,36 +289,14 @@ impl Presenter {
         };
         let target = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            let scale = (self.config.width as f32 / 4.).min(self.config.height as f32 / 3.);
-            pass.set_viewport(
-                (self.config.width as f32 - scale * 4.) / 2.,
-                (self.config.height as f32 - scale * 3.) / 2.,
-                scale * 4.,
-                scale * 3.,
-                0.,
-                1.,
-            );
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, binding, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        self.blit.encode(
+            &mut encoder,
+            &self.blit.surface,
+            &target,
+            binding,
+            self.config.width,
+            self.config.height,
+        );
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(frame);
@@ -382,5 +319,253 @@ impl Presenter {
             });
         }
         Ok(())
+    }
+}
+
+/// Where a 4:3 frame sits on a `width` x `height` target: the largest
+/// centred 4:3 rectangle, as `[x, y, width, height]`. The rest stays black.
+pub fn letterbox(width: u32, height: u32) -> [f32; 4] {
+    let (width, height) = (width as f32, height as f32);
+    let scale = (width / 4.).min(height / 3.);
+    [
+        (width - scale * 4.) / 2.,
+        (height - scale * 3.) / 2.,
+        scale * 4.,
+        scale * 3.,
+    ]
+}
+
+/// A presented frame read back from the GPU.
+pub struct Capture {
+    pub width: u32,
+    pub height: u32,
+    /// Tightly packed top-down RGBA rows.
+    pub rgba: Vec<u8>,
+}
+
+/// The full-screen pass that scales a frame onto the window, plus an
+/// identical pass into an offscreen RGBA target for screenshots. Both
+/// pipelines share one bind group layout, so a frame binding works with
+/// either.
+pub struct Blit {
+    layout: wgpu::BindGroupLayout,
+    surface: wgpu::RenderPipeline,
+    capture: wgpu::RenderPipeline,
+    capture_format: wgpu::TextureFormat,
+}
+impl Blit {
+    pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Boot presentation"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("present.wgsl").into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Boot presentation"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Boot presentation"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |format| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Boot presentation"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vertex"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fragment"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        // Match the surface's transfer: an sRGB surface encodes on write, so
+        // the screenshot target must too for its bytes to match the screen.
+        let capture_format = if surface_format.is_srgb() {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        };
+        Self {
+            surface: pipeline(surface_format),
+            capture: pipeline(capture_format),
+            capture_format,
+            layout,
+        }
+    }
+
+    pub fn binding(
+        &self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Scene presentation"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    /// Clear `target` to black and draw the frame letterboxed into it.
+    fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::RenderPipeline,
+        target: &wgpu::TextureView,
+        binding: &wgpu::BindGroup,
+        width: u32,
+        height: u32,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let [x, y, w, h] = letterbox(width, height);
+        pass.set_viewport(x, y, w, h, 0., 1.);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, binding, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Draw `binding` as the window would at `width` x `height` into an
+    /// offscreen target and read it back.
+    pub fn capture(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        binding: &wgpu::BindGroup,
+        width: u32,
+        height: u32,
+    ) -> Result<Capture, String> {
+        if width == 0 || height == 0 {
+            return Err(format!("display is {width}x{height}"));
+        }
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let limit = device.limits().max_texture_dimension_2d;
+        if width > limit || height > limit {
+            return Err(format!(
+                "display {width}x{height} exceeds the {limit} texture limit"
+            ));
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Screenshot"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.capture_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let row = width * 4;
+        let padded =
+            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Screenshot readback"),
+            size: u64::from(padded) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let view = texture.create_view(&Default::default());
+        self.encode(&mut encoder, &self.capture, &view, binding, width, height);
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            size,
+        );
+        queue.submit([encoder.finish()]);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| e.to_string())?;
+        receiver
+            .recv()
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let mapped = buffer
+            .slice(..)
+            .get_mapped_range()
+            .map_err(|e| e.to_string())?;
+        let mut rgba = Vec::with_capacity(row as usize * height as usize);
+        for line in mapped.chunks(padded as usize) {
+            rgba.extend_from_slice(&line[..row as usize]);
+        }
+        Ok(Capture {
+            width,
+            height,
+            rgba,
+        })
     }
 }

@@ -957,7 +957,7 @@ impl Intro {
             }
             // 0x458af0 captures the fully painted frame, interface included.
             if self.screenshot.take_pending() {
-                screenshot::capture(&self.renderer.device, &self.renderer.queue, &self.color);
+                screenshot::capture(presenter, &self.binding);
             }
             presenter
                 .present_binding(&self.binding)
