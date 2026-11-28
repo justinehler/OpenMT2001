@@ -367,7 +367,8 @@ fn run(controlled_retail: bool) {
                 character_names: &names,
             },
             Policy {
-                seed: 0x12345678,
+                // Exercise auctions, construction and overnight retail after the startup reseed.
+                seed: 2,
                 auxiliary_prior_bytes: [0; 0x11c],
             },
             &with_opponent,
