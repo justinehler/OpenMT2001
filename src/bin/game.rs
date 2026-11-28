@@ -5,12 +5,12 @@ use openmt2001::{
     auction_controls, build_panel, campaign_store, compatibility, human_dialog, result_controller,
     save_menu, session::business_operations, skirmish_maps, tutorial_two_interaction,
 };
+// Panel and report state that moved into the library (#99).
+use openmt2001::{auction_labels, city_people, notifications, people_markers, player_info};
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_bridge.rs"]
 pub mod auction_bridge;
-#[path = "frontend/auction_labels.rs"]
-pub mod auction_labels;
 #[path = "frontend/auction_notice.rs"]
 pub mod auction_notice;
 #[path = "frontend/auction_panel.rs"]
@@ -70,10 +70,6 @@ mod navigation;
 mod navigator;
 #[path = "frontend/notice_panel.rs"]
 pub mod notice_panel;
-#[path = "frontend/notifications.rs"]
-pub mod notifications;
-#[path = "frontend/player_info.rs"]
-mod player_info;
 #[path = "frontend/preferred_token.rs"]
 mod preferred_token;
 #[path = "frontend/present.rs"]
@@ -168,8 +164,6 @@ pub mod vehicle_scene;
 pub mod chat_panel;
 #[path = "frontend/city_ownership.rs"]
 pub mod city_ownership;
-#[path = "frontend/city_people.rs"]
-pub mod city_people;
 #[path = "frontend/city_prestige.rs"]
 pub mod city_prestige;
 #[path = "frontend/comparison.rs"]
@@ -194,9 +188,6 @@ pub mod strategic_labels;
 pub mod strategic_selection;
 #[path = "frontend/utility_report.rs"]
 pub mod utility_report;
-
-#[path = "frontend/people_markers.rs"]
-pub mod people_markers;
 
 #[path = "frontend/build_view.rs"]
 mod build_view;

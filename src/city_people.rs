@@ -1,5 +1,5 @@
 //! Original4112a0 city People report over immutable resident prefixes.
-use openmt2001::{pe::PeImage, save::SaveFile, x87::Sum};
+use crate::{pe::PeImage, save::SaveFile, x87::Sum};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub style: u32,
@@ -14,9 +14,9 @@ pub struct Report {
 }
 impl Report {
     pub fn from_world(
-        world: &openmt2001::level_startup::World,
+        world: &crate::level_startup::World,
         image: &PeImage<'_>,
-        players: &openmt2001::player_manager::Manager,
+        players: &crate::player_manager::Manager,
     ) -> Result<Self, String> {
         let count = world.ledgers.residents.active_count as usize;
         let nodes = world
@@ -43,11 +43,11 @@ impl Report {
     }
     /// Live 4112a0 report values from the authoritative retained population.
     /// The two f32 literals are pinned v1.4 words, checked by the native test.
-    pub fn live_rows(world: &openmt2001::level_startup::World) -> Result<Vec<Row>, String> {
+    pub fn live_rows(world: &crate::level_startup::World) -> Result<Vec<Row>, String> {
         Self::live_rows_from_pool(&world.ledgers.residents)
     }
     fn live_rows_from_pool(
-        residents: &openmt2001::economy::ResidentAccounts,
+        residents: &crate::economy::ResidentAccounts,
     ) -> Result<Vec<Row>, String> {
         let count = residents.active_count as usize;
         let nodes = residents
@@ -157,7 +157,7 @@ mod tests {
     use super::*;
     #[test]
     fn original_resident_allocation_updates_live_city_count() {
-        let mut residents = openmt2001::economy::ResidentAccounts::new_pool();
+        let mut residents = crate::economy::ResidentAccounts::new_pool();
         assert_eq!(Report::live_rows_from_pool(&residents).unwrap()[0].value, 0);
         assert_eq!(residents.allocate_resident_slot().unwrap(), Some(0));
         // The original 45bb80 constructor increments active_count immediately
@@ -168,10 +168,10 @@ mod tests {
     #[test]
     #[ignore = "requires original People report observations"]
     fn matches_native_city_people() {
-        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_CITY_PEOPLE")).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_CITY_PEOPLE")).unwrap();
         assert_eq!(&b[..8], b"MTCPOP01");
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
-        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         assert_eq!(
             image.f32_at(0x5250e0).unwrap().to_bits(),
