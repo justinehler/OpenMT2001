@@ -188,13 +188,7 @@ mod tests {
             import_directory: PathBuf::new(),
             campaign_filename: None,
             profile_root: PathBuf::new(),
-            entries: vec![Entry {
-                path,
-                name: vec![],
-                metadata: Ok([7, 1950, 0, 1]),
-                modified: None,
-                writable_id: None,
-            }],
+            entries: vec![Entry::read(path, vec![], None, None)],
             chosen: Some(0),
             first: 0,
             description_first: 0,
@@ -234,6 +228,7 @@ mod tests {
         ] {
             fs::write(&path, bytes).unwrap();
             let mut load = load(path.clone());
+            assert!(load.entries[0].metadata.is_ok());
             load.activate(0);
             assert_eq!(load.request.take(), Some(path.clone()));
             assert!(load.busy);
@@ -267,7 +262,17 @@ mod tests {
             let row: Vec<_> = (0..=223).collect();
             let glyphs =
                 crate::prompt::literal_glyphs(script.body.as_deref().unwrap(), &row).unwrap();
-            assert!(!glyphs.is_empty());
+            let expected_glyphs = body
+                .iter()
+                .flat_map(|&byte| {
+                    if byte == b'\n' {
+                        vec![0x3c, 0x4e]
+                    } else {
+                        vec![byte - 32]
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(glyphs, expected_glyphs);
             load.activate(3); // The modal cannot select an underlying save.
             assert!(load.prompt_pending() && load.request.is_none());
             load.scroll(1);
@@ -289,6 +294,10 @@ mod tests {
         // List information being readable must not relax full-load parsing.
         fs::write(&path, truncated).unwrap();
         let mut load = load(path.clone());
+        assert!(
+            load.entries[0].metadata.is_ok(),
+            "metadata-only lists admit this row"
+        );
         load.activate(0);
         load.request.take();
         let bytes = fs::read(&path).unwrap();
