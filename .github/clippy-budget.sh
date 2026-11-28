@@ -38,13 +38,28 @@ echo "clippy warnings: $count (budget $budget)"
 if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
   git fetch -q --depth=1 origin "$GITHUB_BASE_REF" || { echo "::error::cannot fetch $GITHUB_BASE_REF"; exit 1; }
   # HEAD is the merge of the PR into the base, so this diff is exactly the PR.
-  added=$(git diff -U0 --no-color FETCH_HEAD HEAD -- '*.rs' | awk '
+  # Lines that only moved (an added line matching a removed line anywhere in
+  # the diff, ignoring whitespace, visibility and trailing commas) don't count:
+  # a pure-move refactor carries its existing warnings with it.
+  added=$(mktemp)
+  git diff -U0 --no-color FETCH_HEAD HEAD -- '*.rs' | awk '
+    function norm(t) {
+      sub(/^[+-]/, "", t); gsub(/[ \t]+/, " ", t); sub(/^ /, "", t); sub(/ $/, "", t)
+      sub(/^pub(\([a-z]+\))? /, "", t); sub(/,$/, "", t); return t
+    }
     /^\+\+\+ b\// { file = substr($0, 7); next }
-    /^@@/ { split($3, r, ","); start = substr(r[1], 2); n = (r[2] == "" ? 1 : r[2]);
-            for (i = 0; i < n; i++) print file ":" start + i }')
-  new_warnings=$(grep -E '^[^ ]+:[0-9]+:[0-9]+: warning: ' "$log" | sort -u | awk -v lines="$added" '
-    BEGIN { n = split(lines, l, "\n"); for (i = 1; i <= n; i++) changed[l[i]] = 1 }
-    { split($0, p, ":"); if ((p[1] ":" p[2]) in changed) print }')
+    /^---/ { next }
+    /^@@/ { split($3, r, ","); line = substr(r[1], 2); next }
+    /^-/ { removed[norm($0)]++; next }
+    /^\+/ { added[++n] = file ":" line; text[n] = norm($0); line++ }
+    END { for (i = 1; i <= n; i++) {
+            if (text[i] != "" && removed[text[i]] > 0) { removed[text[i]]--; continue }
+            print added[i] } }' > "$added" || { echo "::error::cannot attribute warnings to changed lines"; exit 1; }
+  # The changed-line list goes through a file: as an awk -v argument it can
+  # exceed the kernel's per-argument limit on large diffs and fail silently.
+  new_warnings=$(grep -E '^[^ ]+:[0-9]+:[0-9]+: warning: ' "$log" | sort -u | awk '
+    NR == FNR { changed[$0] = 1; next }
+    { split($0, p, ":"); if ((p[1] ":" p[2]) in changed) print }' "$added" -)
   if [[ -n "$new_warnings" ]]; then
     echo "Warnings on lines this change adds or modifies:"
     echo "$new_warnings"
