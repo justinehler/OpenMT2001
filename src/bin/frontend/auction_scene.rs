@@ -115,23 +115,7 @@ pub struct Assets {
     surfaces: Vec<OwnedDraw>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActorCue {
-    Bid {
-        participant: u32,
-        character: u32,
-        suppressed: bool,
-    },
-    Withdraw {
-        participant: u32,
-        character: u32,
-        suppressed: bool,
-    },
-    Win {
-        character: u32,
-    },
-    Applause,
-}
+pub use openmt2001::audio_requests::gameplay::AuctionActorCue as ActorCue;
 
 #[derive(Clone, Copy, Debug)]
 struct FrameRange {

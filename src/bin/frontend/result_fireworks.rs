@@ -20,15 +20,7 @@ pub struct Point {
     pub size: f32,
 }
 
-/// Original 4532c0 branch names and the kind-3 4549a9 launch cue.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cue {
-    Launch1,
-    Launch2,
-    EchoCrackle,
-    EchoSingle,
-    LaunchWhistle,
-}
+pub use openmt2001::audio_requests::gameplay::FireworkCue as Cue;
 
 #[derive(Clone, Copy, Debug)]
 struct Particle {

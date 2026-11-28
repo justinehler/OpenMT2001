@@ -3,3 +3,4 @@
 //! sinks and answers. Keeping the protocol here lets the host build without
 //! the audio stack (#99 step 3).
 pub mod era;
+pub mod gameplay;
