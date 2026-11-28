@@ -314,3 +314,38 @@ fn pause_keys_restore_saved_player_latch_and_keep_focus_ownership_separate() {
     assert_eq!(resumed.timers[0][0], 1);
     assert!(!h.mix.music_paused());
 }
+
+#[test]
+fn pause_gate_admits_f1_and_p_in_a_loaded_city_while_the_media_probe_awaits() {
+    use crate::live_host::process_runtime::{MediaOutcome, MediaProducer, MediaSite};
+    // Production startup leaves 8fca98 awaiting a probe for the whole process:
+    // the state of every city, fresh or restored through Load Game.
+    let (process, _) = crate::live_host::process_runtime::test_frontend_startup();
+    assert!(matches!(
+        process.media_producer().unwrap(),
+        MediaProducer::Awaiting(_)
+    ));
+    let gates = Gates {
+        suppressed: suppressed(&process).unwrap(),
+        ..active()
+    };
+    assert!(!gates.suppressed);
+    // A save written while player-paused restores the reason3 latch.
+    let mut h = Harness::new(false, Some(3));
+    h.key(KeyCode::KeyP, true, false, gates);
+    let resumed = h.finish(true);
+    assert_eq!(resumed.pause.bytes, [0; 9]);
+    assert_eq!(resumed.timers[0][0], 1);
+    h.key(KeyCode::KeyP, false, false, gates);
+    h.key(KeyCode::F1, true, false, gates);
+    let paused = h.finish(true);
+    assert_eq!(&paused.pause.bytes[..4], &[0, 0, 0, 1]);
+    assert_eq!(paused.timers[0][0], 0);
+    // A completed probe that reports the bypass still suppresses the keys.
+    process
+        .validate_media(MediaSite::Startup4b94eb, || {
+            Ok(MediaOutcome::OriginalBypass)
+        })
+        .unwrap();
+    assert!(suppressed(&process).unwrap());
+}

@@ -661,3 +661,69 @@ fn original_save_releases_one_startup_hold_and_advances_after_ready_focus() {
         assert_eq!(&task[12..16], &0f32.to_le_bytes());
     }
 }
+
+#[test]
+#[ignore = "private supplied original save; F1/P player pause in the joined worker"]
+fn original_save_pauses_and_resumes_with_p_and_f1() {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    let scratch = Scratch::new();
+    let (inputs, owner) = inputs(scratch.0.join("profiles"));
+    let process = inputs.process_runtime.clone().unwrap();
+    let save = openmt2001::fixtures::path("SAVE_ONE");
+    let mut run = Running::start(inputs, owner.clone(), WorkerStart::Saved(save, None));
+    let mut keys = pause_keys::Input::default();
+    let banner = |run: &Running| {
+        let (reply, status) = mpsc::channel();
+        run.send(FreshRequest::Status {
+            camera: fresh_city_camera().0.eye,
+            reply,
+        });
+        let status = status.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(status.failure.is_none(), "{status:?}");
+        status.pause_banner
+    };
+    let reason3 = |run: &Running| {
+        let (reply, probe) = mpsc::channel();
+        run.send(FreshRequest::DispatchProbe(reply));
+        probe.recv_timeout(Duration::from_secs(15)).unwrap().pause[3]
+    };
+    let advances = |run: &Running| {
+        let before = run.clock().ticks;
+        std::thread::sleep(Duration::from_millis(200));
+        run.clock().ticks > before
+    };
+    assert_eq!(banner(&run), None);
+    assert!(advances(&run));
+    for (code, paused) in [
+        (KeyCode::KeyP, true),
+        (KeyCode::F1, false),
+        (KeyCode::F1, true),
+        (KeyCode::KeyP, false),
+    ] {
+        // The production gate reads the process runtime the city runs in.
+        let gates = pause_keys::Gates {
+            active: true,
+            suppressed: pause_keys::suppressed(&process).unwrap(),
+            ..Default::default()
+        };
+        for down in [true, false] {
+            let sample = process_frontend::PhysicalSample::Key {
+                key: PhysicalKey::Code(code),
+                down,
+                repeat: false,
+            };
+            keys.dispatch(sample, gates, &mut run.route).unwrap();
+        }
+        run.owner.borrow_mut().note_sent(run.route.sent());
+        run.route.wait_prefix();
+        run.route.service_one().unwrap();
+        assert_eq!(reason3(&run), u8::from(paused), "{code:?}");
+        run.route.poll().unwrap();
+        assert_eq!(run.route.sent(), run.route.completed());
+        // 4bad40 shows text 0x46d while reason3 is held.
+        assert_eq!(banner(&run), paused.then_some(0x46d), "{code:?}");
+        assert_eq!(advances(&run), !paused, "{code:?} clock");
+    }
+    let custody = run.finish().unwrap();
+    owner.borrow_mut().return_custody(custody).unwrap();
+}

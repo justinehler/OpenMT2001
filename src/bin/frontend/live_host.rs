@@ -81,6 +81,8 @@ pub struct Status {
     pub network_enabled: bool,
     pub synchronization: Option<openmt2001::network::synchronization::Status>,
     pub script_paused: bool,
+    /// Text identifier of the 4bad40 pause banner, while the session is active.
+    pub pause_banner: Option<u32>,
     pub ticks: u32,
     pub interface_ticks: u64,
     /// Delivered updates of the normal modal UI group, after the central gate.
@@ -1605,6 +1607,13 @@ impl Host {
                 .map(|c| c.synchronization.samples.status.clone()),
             network_enabled: self.policy.scheduler.network_enabled,
             script_paused: session.world.pause.has_reason(),
+            pause_banner: self
+                .game_active
+                .then(|| {
+                    let [a, b, c, d, ..] = session.world.pause.bytes;
+                    crate::pause_banner::caption([a, b, c, d])
+                })
+                .flatten(),
             ticks: session.world.clock.timing[0],
             interface_ticks: self.interface_ticks,
             prompt_updates: self.prompt_updates,

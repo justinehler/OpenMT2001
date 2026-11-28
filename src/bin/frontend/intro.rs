@@ -155,6 +155,7 @@ pub struct Assets {
     navigation: crate::navigation::Navigation,
     navigator: crate::navigator::Navigator,
     tooltip: crate::tooltip::Tooltip,
+    pause_banner: crate::pause_banner::Assets,
     result_actors: crate::auction_scene::Assets,
     result_text: crate::result_presentation::text::Assets,
     result_firework_texture: crate::result_presentation::particles_gpu::FireworkTexture,
@@ -279,6 +280,7 @@ impl Assets {
             &paths.language,
             &ui_text,
         )?;
+        let pause_banner = crate::pause_banner::Assets::load_shared(&ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &index,
@@ -466,6 +468,7 @@ impl Assets {
             navigation,
             navigator,
             tooltip,
+            pause_banner,
             result_actors,
             result_text,
             result_firework_texture,
@@ -1279,6 +1282,7 @@ struct Inspection {
     tutorial_go_to_block_pressed: bool,
     tooltip: Option<PreparedScene>,
     tooltip_state: Option<(u32, [i32; 2])>,
+    pause_banner: crate::pause_banner::View,
     icon_tooltip_dwell: crate::tooltip::IconDwell,
     navigation: [PreparedScene; 3],
     navigation_bounds: [f32; 4],
@@ -2110,19 +2114,7 @@ impl Intro {
                 gates.text_entry = graph.chat_guard57e794_plus345()? != 0;
             }
             gates.text_entry |= view.chat_panel.open;
-            use crate::live_host::process_runtime::Byte;
-            gates.suppressed = self
-                .assets
-                .process_runtime
-                .byte(Byte::Media8fca98)
-                .map_err(|e| e.to_string())?
-                != 0
-                || self
-                    .assets
-                    .process_runtime
-                    .byte(Byte::Suppressed8b0700)
-                    .map_err(|e| e.to_string())?
-                    != 0;
+            gates.suppressed = pause_keys::suppressed(&self.assets.process_runtime)?;
         }
         self.dispatch_camera_shortcut(sample);
         self.pause_keys.dispatch(sample, gates, &mut self.focus)?;

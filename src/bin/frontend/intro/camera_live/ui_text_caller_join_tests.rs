@@ -155,6 +155,7 @@ fn inspection(assets: &Assets) -> Inspection {
         tutorial_go_to_block_pressed: Default::default(),
         tooltip: None,
         tooltip_state: None,
+        pause_banner: Default::default(),
         icon_tooltip_dwell: Default::default(),
         navigation: Default::default(),
         navigation_bounds: Default::default(),
