@@ -16,39 +16,7 @@ struct Panel {
     regions: Vec<openmt2001::ui_mesh::Region>,
     backing: [f32; 4],
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Info {
-    pub category: u32,
-    pub category_color: u32,
-    pub character: u32,
-    pub actor: Vec<u8>,
-    pub price: u32,
-}
-impl Info {
-    pub fn from_session(session: &openmt2001::session::Session<'_>) -> Result<Self, String> {
-        let record = &session.world.city.auction.controller.record;
-        let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
-        let category = word(4);
-        let row = session
-            .world
-            .categories
-            .get(category as usize)
-            .ok_or("Auction title category outside pool")?;
-        let player = session
-            .roster
-            .manager
-            .players
-            .get(word(0x5c) as usize)
-            .ok_or("Auction high bidder outside roster")?;
-        Ok(Self {
-            category,
-            category_color: u32::from_le_bytes(row[0x94..0x98].try_into().unwrap()),
-            character: u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()),
-            actor: player.bytes[0x158..0x1b8].to_vec(),
-            price: word(0x6c),
-        })
-    }
-}
+pub use openmt2001::auction_panel::Info;
 
 #[test]
 #[ignore = "requires original auction panel resources"]
