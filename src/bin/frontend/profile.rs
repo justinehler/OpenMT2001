@@ -1268,9 +1268,11 @@ mod tests {
         let bytes = fs::read(openmt2001::fixtures::path("LANGUAGE_BIN")).unwrap();
         let mut at = 0;
         let rows = offsets
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|n| {
-                let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                let end = at + usize::from(u16::from_le_bytes(*n));
                 let row = bytes[at..end].to_vec();
                 at = end;
                 row
