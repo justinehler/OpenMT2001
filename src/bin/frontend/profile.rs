@@ -173,6 +173,7 @@ pub struct Profile {
     pub store: Profiles,
     pub visible: bool,
     pub name: Option<String>,
+    first_registration: bool,
     chosen: Option<usize>,
     first: usize,
     error: Option<String>,
@@ -286,9 +287,8 @@ impl Profile {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let store = Profiles::load(root)?;
-        let chosen = store.current;
-        Ok(Self {
-            assets: Assets {
+        Ok(Self::from_store(
+            Assets {
                 base,
                 modal: vec![border],
                 bounds: regions.into_iter().map(|r| r.bounds).collect(),
@@ -302,21 +302,39 @@ impl Profile {
                 slider_textures,
             },
             store,
-            visible: false,
-            name: None,
+        ))
+    }
+    fn from_store(assets: Assets, store: Profiles) -> Self {
+        // 491835..49184d opens registration instead of the main menu when
+        // profile discovery returns no entries. Menu presents this after the intro.
+        let first_registration = store.names.is_empty();
+        let chosen = store.current;
+        Self {
+            assets,
+            store,
+            visible: first_registration,
+            name: first_registration.then(String::new),
+            first_registration,
             chosen,
             first: 0,
             error: None,
             deleting: false,
             selected_all: false,
             pointer_position: None,
-        })
+        }
+    }
+    pub fn open_selection(&mut self) {
+        self.visible = true;
+        self.name = None;
+        self.first_registration = false;
     }
     pub(crate) fn modal_open(&self) -> bool {
         self.name.is_some() || self.deleting
     }
     pub fn count(&self) -> usize {
-        if self.name.is_some() || self.deleting {
+        if self.first_registration {
+            1
+        } else if self.name.is_some() || self.deleting {
             2
         } else {
             4 + self.store.names.len()
@@ -336,10 +354,19 @@ impl Profile {
             i,
         )
     }
+    fn modal_button_enabled(&self, i: usize) -> bool {
+        match i {
+            0 => self.name.as_ref().is_none_or(|name| valid_name(name)),
+            1 => !self.first_registration,
+            _ => false,
+        }
+    }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         let hit = |[l, t, r, b]: [f32; 4]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b;
         if self.name.is_some() || self.deleting {
-            return [4, 6].iter().position(|&i| hit(self.assets.confirm[i]));
+            return [4, 6].iter().enumerate().find_map(|(i, &part)| {
+                (self.modal_button_enabled(i) && hit(self.assets.confirm[part])).then_some(i)
+            });
         }
         for (i, part) in [11, 10, 13, 12].iter().enumerate() {
             if self.generic_button_enabled(i) && hit(self.assets.bounds[*part]) {
@@ -365,6 +392,10 @@ impl Profile {
             .map(|row| 4 + row)
     }
     pub fn back(&mut self) {
+        // 495d1a..495d45 disables Back only for startup registration.
+        if self.first_registration {
+            return;
+        }
         self.error = None;
         if self.name.take().is_none() && !self.deleting {
             self.visible = false;
@@ -464,7 +495,11 @@ impl Profile {
             }
             if let Some(name) = &self.name {
                 if index == 1 {
-                    self.name = None;
+                    self.back();
+                    return Ok(());
+                }
+                // 495ef8/496015 ignores an empty OK and retains input focus.
+                if name.is_empty() {
                     return Ok(());
                 }
                 if !valid_name(name) {
@@ -481,6 +516,12 @@ impl Profile {
                 self.store.current = self.chosen;
                 self.store.save()?;
                 self.name = None;
+                // 495f27..495f5c returns New to Player Selection, but the
+                // first registration admits the new player to the main menu.
+                if self.first_registration {
+                    self.visible = false;
+                    self.first_registration = false;
+                }
                 return Ok(());
             }
             if index < 4 && !self.generic_button_enabled(index) {
@@ -707,7 +748,7 @@ impl Profile {
                     if i == 0 { [80, 148, 34] } else { [175, 6, 6] },
                     selected == Some(i),
                     pressed && selected == Some(i),
-                    i == 0 && self.name.as_ref().is_some_and(|n| !valid_name(n)),
+                    !self.modal_button_enabled(i),
                 )?;
                 let mut text = bounds;
                 text[1] += 5.;
@@ -717,7 +758,11 @@ impl Profile {
                     &self.assets.labels[if i == 0 { 2 } else { 3 }],
                     text,
                     true,
-                    0xffffffff,
+                    if i == 1 && self.first_registration {
+                        0xff808080
+                    } else {
+                        0xffffffff
+                    },
                 )?;
             }
         }
@@ -738,13 +783,16 @@ impl Profile {
             )?;
         }
         let backdrop = crate::menu::modal_frame::Backdrop::new(&self.assets.base[..5], panel_alpha);
-        let mut draws = backdrop.draws();
-        draws.extend(self.assets.base[5..].iter().map(Surface::draw));
-        draws.push(shapes.draw());
-        draws.push(slider_shapes.draw());
-        draws.extend(slider_controls.iter().map(Surface::draw));
-        draws.extend(fonts.iter().map(Surface::draw));
-        draws.extend(list_fonts.iter().map(Surface::draw));
+        let mut draws = Vec::new();
+        if !self.first_registration {
+            draws.extend(backdrop.draws());
+            draws.extend(self.assets.base[5..].iter().map(Surface::draw));
+            draws.push(shapes.draw());
+            draws.push(slider_shapes.draw());
+            draws.extend(slider_controls.iter().map(Surface::draw));
+            draws.extend(fonts.iter().map(Surface::draw));
+            draws.extend(list_fonts.iter().map(Surface::draw));
+        }
         if modal_open {
             draws.extend(self.assets.modal.iter().map(Surface::draw));
             draws.push(modal.draw());
@@ -780,6 +828,143 @@ mod tests {
     use super::{Assets, PROFILE_SCROLL, Profile, Profiles, action_button_enabled};
     use crate::ui;
     use std::{fs, path::PathBuf};
+
+    fn synthetic_assets() -> Assets {
+        let mut confirm = vec![[0.; 4]; 7];
+        confirm[4] = [200., 265., 300., 290.];
+        confirm[6] = [340., 265., 440., 290.];
+        Assets {
+            base: vec![],
+            modal: vec![],
+            bounds: vec![[0.; 4]; 14],
+            confirm,
+            fonts: vec![],
+            tab: vec![],
+            list_fonts: vec![],
+            list_tab: vec![],
+            list_layout: openmt2001::frontend_list::Layout::new([198., 200., 440., 285.], 11., 0.)
+                .unwrap(),
+            labels: vec![],
+            slider_textures: vec![],
+        }
+    }
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "omt-first-registration-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&root).unwrap();
+            Self(root)
+        }
+        fn load(&self) -> Profile {
+            Profile::from_store(synthetic_assets(), Profiles::load(self.0.clone()).unwrap())
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn first_launch_registration_blocks_back_and_requires_a_name() {
+        let scratch = Scratch::new();
+        let mut profile = scratch.load();
+        assert!(profile.visible);
+        assert_eq!(profile.name.as_deref(), Some(""));
+        assert_eq!(profile.count(), 1, "keyboard navigation cannot select Back");
+        assert_eq!(profile.hit([250., 275.]), None, "empty OK is disabled");
+        assert_eq!(profile.hit([390., 275.]), None, "Back is disabled");
+        profile.activate(0);
+        assert!(profile.error.is_none(), "empty OK only retains name entry");
+        assert!(profile.visible && profile.name.is_some());
+        assert!(profile.store.names.is_empty());
+        profile.input("Alice");
+        assert_eq!(profile.hit([250., 275.]), Some(0));
+        profile.back(); // Escape uses this same route from Menu::back.
+        profile.activate(1); // Button activation cannot bypass admission.
+        assert!(profile.visible);
+        assert_eq!(profile.name.as_deref(), Some("Alice"));
+        assert!(!scratch.0.join("profiles.txt").exists());
+    }
+
+    #[test]
+    fn first_registration_selects_and_persists_then_relaunch_opens_normal_menu() {
+        let scratch = Scratch::new();
+        let mut profile = scratch.load();
+        profile.input("Alice");
+        profile.activate(0);
+        assert!(profile.error.is_none());
+        assert!(!profile.visible && profile.name.is_none());
+        assert_eq!(profile.store.names, ["Alice"]);
+        assert_eq!(profile.store.current, Some(0));
+        let mut relaunched = scratch.load();
+        assert!(!relaunched.visible && relaunched.name.is_none());
+        assert_eq!(relaunched.store.current, Some(0));
+        // Discovery uses the profile list, even if no current row was saved.
+        relaunched.store.current = None;
+        relaunched.store.save().unwrap();
+        assert!(!scratch.load().visible);
+    }
+
+    #[test]
+    fn new_registration_returns_to_selection_and_can_cancel_with_zero_profiles() {
+        let scratch = Scratch::new();
+        let mut profile = scratch.load();
+        profile.input("Alice");
+        profile.activate(0);
+        profile.open_selection();
+        profile.activate(0); // New from Player Selection.
+        assert_eq!(profile.count(), 2);
+        assert_eq!(profile.hit([390., 275.]), Some(1));
+        profile.input("Alice");
+        profile.activate(0);
+        assert!(
+            profile.error.is_some(),
+            "duplicate cannot overwrite a player"
+        );
+        assert_eq!(profile.store.names, ["Alice"]);
+        profile.select_all();
+        profile.input("Bob");
+        profile.activate(0);
+        assert!(profile.error.is_none());
+        assert!(profile.visible && profile.name.is_none());
+        assert_eq!(profile.store.current, Some(1));
+        profile.store.delete_chosen(1).unwrap();
+        profile.store.delete_chosen(0).unwrap();
+        profile.chosen = None;
+        profile.activate(0);
+        profile.back();
+        assert!(profile.visible && profile.name.is_none());
+        profile.activate(0);
+        profile.activate(1);
+        assert!(profile.visible && profile.name.is_none());
+        // A new process with this empty stored list must require registration again.
+        let relaunched = scratch.load();
+        assert!(relaunched.visible && relaunched.name.is_some());
+    }
+
+    #[test]
+    fn first_registration_stays_open_when_profile_storage_fails() {
+        let scratch = Scratch::new();
+        let mut profile = scratch.load();
+        fs::create_dir(scratch.0.join("profiles.txt")).unwrap();
+        profile.input("Alice");
+        profile.activate(0);
+        assert!(profile.error.is_some());
+        assert!(profile.visible && profile.first_registration);
+        assert_eq!(profile.name.as_deref(), Some("Alice"));
+        assert!(profile.store.names.is_empty());
+        assert_eq!(profile.store.current, None);
+        profile.back();
+        assert!(profile.name.is_some());
+    }
 
     #[test]
     fn deleting_a_different_profile_preserves_and_reindexes_the_active_one() {
@@ -859,6 +1044,7 @@ mod tests {
             },
             visible: true,
             name: None,
+            first_registration: false,
             chosen: None,
             first: 0,
             error: None,
@@ -968,6 +1154,7 @@ mod tests {
         let mut profile = Profile::load(&index, &archive, &installer, &refs, root.clone()).unwrap();
         profile.store.names = vec!["Justin".into()];
         profile.chosen = Some(0);
+        profile.open_selection();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         if cfg!(windows) {
             descriptor.backends = wgpu::Backends::DX12;
