@@ -1034,12 +1034,13 @@ enum FreshRequest {
         reply: mpsc::Sender<Result<crate::build_panel::Context, String>>,
     },
     BuildDrag {
-        reply: mpsc::Sender<Result<[i32; 3], String>>,
+        category: usize,
+        reply: mpsc::Sender<crate::build_panel::PlacementReply>,
     },
     Build {
         form: crate::build_panel::Request,
         submit: bool,
-        reply: mpsc::Sender<Result<crate::fresh_city::BuildInspection, String>>,
+        reply: mpsc::Sender<crate::fresh_city::BuildReply>,
     },
     Inspect {
         camera: CameraSample,
@@ -1814,7 +1815,7 @@ impl Intro {
         &self,
         form: crate::build_panel::Request,
         submit: bool,
-    ) -> Result<mpsc::Receiver<Result<crate::fresh_city::BuildInspection, String>>, String> {
+    ) -> Result<mpsc::Receiver<crate::fresh_city::BuildReply>, String> {
         let sender = self
             .inspection
             .as_ref()
@@ -3190,7 +3191,12 @@ impl Intro {
                     if planning.take_placement_request() {
                         let (reply, receiver) = mpsc::channel();
                         if view._fresh_session.as_ref().is_some_and(|sender| {
-                            sender.send(FreshRequest::BuildDrag { reply }).is_ok()
+                            sender
+                                .send(FreshRequest::BuildDrag {
+                                    category: planning.context.category,
+                                    reply,
+                                })
+                                .is_ok()
                         }) {
                             planning.placement_pending = Some(receiver);
                         } else {
@@ -6050,7 +6056,9 @@ impl Intro {
                         view.planning_pending = None;
                         match result {
                             Ok(context) => {
-                                if matches!(
+                                if context.entry() == crate::build_panel::Entry::Exit {
+                                    view.planning = None;
+                                } else if matches!(
                                     context.entry(),
                                     crate::build_panel::Entry::Message {
                                         show_rights_action: true,
@@ -6107,7 +6115,8 @@ impl Intro {
                 planning.project_grid(view.camera, block.center)?;
                 if let Some(receiver) = &planning.placement_pending {
                     match receiver.try_recv() {
-                        Ok(Ok(choices)) => planning.apply_placement_choices(choices),
+                        Ok(Ok(Some(choices))) => planning.apply_placement_choices(choices),
+                        Ok(Ok(None)) => planning.close = true,
                         Ok(Err(error)) => {
                             planning.placement_pending = None;
                             planning.diagnostic = Some(error);
@@ -6127,13 +6136,14 @@ impl Intro {
                         Ok(result) => {
                             planning.pending = None;
                             match result {
-                                Ok(quote) if quote.submitted => {
+                                Ok(None) => planning.close = true,
+                                Ok(Some(quote)) if quote.submitted => {
                                     // The native pending-world entry begins at scale zero.
                                     // Show its growth before the idle one-second refresh.
                                     view.construction_active = true;
                                     planning.close = true;
                                 }
-                                Ok(quote) => {
+                                Ok(Some(quote)) => {
                                     if planning.request().ok() == planning.quote_request {
                                         planning.diagnostic = if quote.category_locked {
                                             Some("This block is locked".into())
@@ -6164,7 +6174,10 @@ impl Intro {
                         }
                     }
                 }
-                if planning.pending.is_none() && (planning.needs_quote || planning.submit) {
+                if !planning.close
+                    && planning.pending.is_none()
+                    && (planning.needs_quote || planning.submit)
+                {
                     match planning.request() {
                         Ok(form) => {
                             planning.quote_request = Some(form.clone());
@@ -6361,6 +6374,10 @@ impl Intro {
                             view.planning_pending = None;
                             view.adjustment = None;
                             view.details_visible = false;
+                        }
+                        if !status.current_player_active {
+                            view.planning = None;
+                            view.planning_pending = None;
                         }
                         if view.selected.is_some_and(|selected| {
                             status

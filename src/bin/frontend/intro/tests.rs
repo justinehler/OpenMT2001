@@ -3283,14 +3283,17 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
                     reply,
                 })
                 .unwrap();
-            answer.recv().unwrap().unwrap()
+            answer.recv().unwrap().unwrap().unwrap()
         },
         || {
             let (reply, answer) = mpsc::channel();
             preview_worker
-                .send(FreshRequest::BuildDrag { reply })
+                .send(FreshRequest::BuildDrag {
+                    category: 33,
+                    reply,
+                })
                 .unwrap();
-            answer.recv().unwrap().unwrap()
+            answer.recv().unwrap().unwrap().unwrap()
         },
     );
     drop(preview_worker);
@@ -3320,7 +3323,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
                 reply,
             })
             .unwrap();
-        let quote = answer.recv().unwrap().unwrap();
+        let quote = answer.recv().unwrap().unwrap().unwrap();
         assert!(!quote.submitted);
         assert!(quote.total.is_finite());
         if quote.allowed() {
@@ -3348,7 +3351,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
             reply,
         })
         .unwrap();
-    let submitted = answer.recv().unwrap().unwrap();
+    let submitted = answer.recv().unwrap().unwrap().unwrap();
     assert!(submitted.submitted);
     assert_eq!(
         submitted.total, total,
@@ -4438,8 +4441,13 @@ fn starting_out_early_controls_and_options_remain_live() {
     let planning = answer.recv().unwrap().unwrap();
     assert_eq!(planning.entry(), crate::build_panel::Entry::Open);
     let (reply, answer) = mpsc::channel();
-    sender.send(FreshRequest::BuildDrag { reply }).unwrap();
-    answer.recv().unwrap().unwrap();
+    sender
+        .send(FreshRequest::BuildDrag {
+            category: 33,
+            reply,
+        })
+        .unwrap();
+    answer.recv().unwrap().unwrap().unwrap();
     let floor = u32::from_le_bytes(
         planning.catalog.row(0).unwrap()[0x48..0x4c]
             .try_into()
@@ -4467,7 +4475,7 @@ fn starting_out_early_controls_and_options_remain_live() {
                 reply,
             })
             .unwrap();
-        if answer.recv().unwrap().unwrap().allowed() {
+        if answer.recv().unwrap().unwrap().unwrap().allowed() {
             allowed = true;
             break;
         }
@@ -4481,7 +4489,7 @@ fn starting_out_early_controls_and_options_remain_live() {
             reply,
         })
         .unwrap();
-    assert!(answer.recv().unwrap().unwrap().submitted);
+    assert!(answer.recv().unwrap().unwrap().unwrap().submitted);
     assert!(
         status().failure.is_none(),
         "building before first tip must remain legal"
