@@ -360,6 +360,9 @@ impl<'data> Session<'data> {
         interface_mode: u32,
         continuation: Option<OptionsContinuation>,
     ) -> Result<Vec<u8>, String> {
+        if self.tutorial_state != 0 {
+            return Err("Manual Save is disabled in tutorials".into());
+        }
         SaveProjection {
             live_commands: &self.live_commands,
             city: &mut self.world.city,
@@ -1773,8 +1776,8 @@ impl SaveProjection<'_> {
         interface_mode: u32,
         continuation: Option<OptionsContinuation>,
     ) -> Result<Vec<u8>, String> {
-        if self.tutorial_state != 0 {
-            return Err("Saving tutorial script state is not yet supported".into());
+        if self.tutorial_state > 1 {
+            return Err("Unsupported tutorial state".into());
         }
 
         if self.result_present {
@@ -1797,7 +1800,14 @@ impl SaveProjection<'_> {
             )?;
         }
         let mut events = Output(vec![]);
-        let pending_events = self.scripts.events.pending();
+        // 4bcb90 reloads DEFAULT and the tutorial hub, then enters Level.
+        // Tutorial prompts/globals restart there; old callbacks must not run
+        // alongside that fresh entry. Other runtime extension state is retained.
+        let pending_events = if self.tutorial_state == 1 {
+            Vec::new()
+        } else {
+            self.scripts.events.pending()
+        };
         if pending_events.len() > 4096 {
             return Err("V2 scenario callback queue exceeds retained bound".into());
         }

@@ -275,3 +275,115 @@ fn run(era: bool) {
 
     }).unwrap().join().unwrap();
 }
+#[test]
+#[ignore = "requires original tutorial assets; real Host Autosave and normal Session load"]
+fn tutorial_midnight_publishes_overwrites_and_restarts_original_scripts() {
+    std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let exe = Arc::new(read("OPENMT2001_EXE"));
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let build = read("OPENMT2001_BUILD_FILE");
+        let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+        let directory = Arc::new(read("OPENMT2001_ARCHIVE_DIR"));
+        let archive = Arc::new(read("OPENMT2001_ARCHIVE_BIN"));
+        let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameters = read("OPENMT2001_PARAMETERS");
+        let timetable = read("OPENMT2001_TIMETABLE");
+        let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
+        let scripts = default.parent().unwrap().parent().unwrap();
+        let styles = crate::fresh_city::load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
+        let exe_path = openmt2001::fixtures::path("EXE");
+        let names = crate::fresh_city::character_names(&image, &exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
+        let inputs = || Inputs {
+            tree_locators: None, image: &image, board: &board, file: &file,
+            people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
+            vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
+            transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
+            road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts,
+            parameters: std::str::from_utf8(&parameters).unwrap(), era_styles: styles.clone(),
+            timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "TUTORIAL1", difficulty: 0,
+            selected_character: 4, profile_name: b"Tutorial autosave", character_names: &names,
+        };
+        let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 284] };
+        let assets=CommandAssets{image:&image,board:&board,file:&file};
+        let mut source = Session::initialize(inputs(), policy()).unwrap();
+        assert_eq!(source.tutorial_state, 1);
+        let camera = openmt2001::flyby::CameraSample {
+            eye: [100., 120., 100.], target: [0.; 3], up: [0., 1., 0.], vertical_fov: 0.7,
+        };
+        let cameras = crate::save_menu::cameras(None, camera).unwrap();
+        let scratch = Scratch::new();
+        let root = crate::save_menu::selected_profile_root(&scratch.0, b"Tutorial autosave");
+        source.campaign_profile = Some(crate::campaign_store::profile_path(&scratch.0, b"Tutorial autosave"));
+        let mut host = crate::live_host::Host::new(camera.eye);
+        host.running = true;
+        host.autosave_profile_root = Some(root.clone());
+        // The retained tutorial supplies its zero-year clock and original
+        // hourly/daily query gates; the real Host owns autosave publication.
+        host.frame(&mut source, &assets, 0);
+        assert!(host.failure.is_none(), "{:?}", host.failure);
+        assert!(host.status(&source).tutorial_controls.all_disabled);
+        assert!(!source.scripts.events.pending().is_empty());
+        source.scripts.runtime.execute("progress before autosave",
+            b"g_currentprompt=9; g_counter=123", &mut |_, _| Err("unexpected binding".into())).unwrap();
+        let (mut publisher, reader) = crate::save_menu::camera_source::channel(source.world.topology.epoch());
+        host.install_ui_camera_source(&source, reader).unwrap();
+        publisher.publish(openmt2001::camera::bank::Capture::from_records(cameras), 0).unwrap();
+        source.world.clock.calendar = [23, 0, 0, 23, 0];
+        source.world.clock.timing = [1000, 624, 624, 14999, 0, 1];
+        host.tick(&mut source, &assets);
+        assert!(host.failure.is_none(), "{:?}", host.failure);
+        let destination = root.join("saves/autosave.sav");
+        assert!(matches!(&host.autosave_status, Some(crate::save_menu::AutosaveStatus::Saved(path)) if path == &destination));
+        let bytes = std::fs::read(&destination).unwrap();
+        let saved = SaveFile::parse(&bytes).unwrap();
+        assert_eq!(saved.level_metadata().unwrap()[0], 100000);
+        assert_eq!(saved.clock().unwrap().calendar, [0, 0, 0, 23, 1]);
+        assert_eq!(saved.clock().unwrap().timing, [1001, 625, 0, 0, 0, 1]);
+        assert_eq!(source.world.clock.calendar, [0, 0, 0, 0, 1]);
+        let ext = extension::Extension::parse(&saved).unwrap().unwrap();
+        assert_eq!(ext.required(13).unwrap(), 0u32.to_le_bytes());
+        assert_eq!(source.save_v2(&image, cameras, 1).unwrap_err(), "Manual Save is disabled in tutorials");
+        // Same native initialization and extension restoration as the Load route.
+        let mut loaded = Session::load_original(inputs(), policy(), &bytes).unwrap();
+        let metadata = loaded.restore_v2_extension_with_image(&saved, &image).unwrap().unwrap();
+        assert_eq!(metadata.profile_filename, source.campaign_profile.as_ref().map(|p|p.file_name().unwrap().to_str().unwrap().to_owned()));
+        assert_eq!(loaded.tutorial_state, 1);
+        assert_eq!(loaded.world.clock.calendar, [0, 0, 0, 23, 1]);
+        assert!(loaded.scripts.events.pending().is_empty());
+        loaded.scripts.runtime.execute("read tutorial progress",
+            b"function ReadPrompt() return g_currentprompt end; function ReadCounter() return g_counter end",
+            &mut |_, _| Err("unexpected binding".into())).unwrap();
+        assert_eq!(loaded.scripts.runtime.call_number("ReadPrompt", &[], &mut |_, _| Err("unexpected binding".into())).unwrap(), 0.);
+        assert_eq!(loaded.scripts.runtime.call_number("ReadCounter", &[], &mut |_, _| Err("unexpected binding".into())).unwrap(), 0.);
+        let mut resumed = crate::live_host::Host::new(camera.eye);
+        resumed.running = true;
+        resumed.frame(&mut loaded, &assets, 0);
+        assert!(resumed.failure.is_none(), "{:?}", resumed.failure);
+        let status = resumed.status(&loaded);
+        assert!(status.tutorial_session && status.tutorial_controls.all_disabled);
+        assert!(!status.prompts.is_empty());
+        assert_eq!(loaded.scripts.runtime.call_number("ReadPrompt", &[], &mut |_, _| Err("unexpected binding".into())).unwrap(), 1.);
+        assert!(!loaded.scripts.events.pending().is_empty(), "fresh Level must schedule its camera callback");
+        // A later midnight overwrites the same slot, including zero-year days.
+        source.world.clock.calendar = [23, 0, 0, 23, 1];
+        source.world.clock.timing = [2000, 1249, 624, 14999, 0, 1];
+        host.tick(&mut source, &assets);
+        assert!(host.failure.is_none(), "{:?}", host.failure);
+        assert!(matches!(&host.autosave_status, Some(crate::save_menu::AutosaveStatus::Saved(path)) if path == &destination));
+        let replaced = std::fs::read(&destination).unwrap();
+        assert_ne!(bytes, replaced);
+        assert_eq!(SaveFile::parse(&replaced).unwrap().clock().unwrap().calendar, [0, 0, 0, 23, 2]);
+        assert_eq!(std::fs::read_dir(destination.parent().unwrap()).unwrap().count(), 1);
+        source.world.clock.calendar = [23, 0, 0, 23, 2];
+        source.world.clock.timing = [3000, 1874, 624, 14999, 0, 1];
+        host.policy.scheduler.network_enabled = true;
+        host.autosave_status = None;
+        host.tick(&mut source, &assets);
+        assert!(host.failure.is_none(), "{:?}", host.failure);
+        assert!(host.autosave_status.is_none());
+        assert_eq!(source.world.clock.calendar, [0, 0, 0, 0, 3]);
+        assert_eq!(std::fs::read(&destination).unwrap(), replaced);
+    }).unwrap().join().unwrap();
+}
