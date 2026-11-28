@@ -233,12 +233,8 @@ fn every_unqualified_family_and_auction_transfer_schema_is_explicitly_unsupporte
         1,
         8,
         9,
-        0x12,
-        0x13,
         0x14,
-        0x15,
         0x17,
-        0x18,
         0x19,
         0x1a,
         0x1b,
@@ -598,7 +594,8 @@ fn business_targets_reject_stale_rows_and_check_gameplay_owner_separately_from_c
             assert!(
                 Targets {
                     buildings: &[stale],
-                    businesses: &[]
+                    businesses: &[],
+                    ..Targets::default()
                 }
                 .check(&request)
                 .is_err()
@@ -623,7 +620,8 @@ fn business_targets_reject_stale_rows_and_check_gameplay_owner_separately_from_c
                 100,
                 Targets {
                     buildings: &[building],
-                    businesses: &[]
+                    businesses: &[],
+                    ..Targets::default()
                 }
             ),
             Err(Error::Peer)
@@ -645,7 +643,8 @@ fn business_targets_reject_stale_rows_and_check_gameplay_owner_separately_from_c
                 100,
                 Targets {
                     buildings: &[building],
-                    businesses: &[]
+                    businesses: &[],
+                    ..Targets::default()
                 }
             ),
             Err(Error::World)
@@ -698,6 +697,219 @@ fn both_business_families_authorize_local_humans_and_authority_only_ai() {
                 } else {
                     Err(Error::Peer)
                 }
+            );
+        }
+    }
+}
+
+fn lifecycle_requests(owner: u8) -> [Request; 4] {
+    [
+        Request::conversion(
+            0,
+            &crate::business_conversion::Command {
+                kind: 4,
+                building: 0,
+                owner: u32::from(owner),
+            },
+        ),
+        Request::business_sale(
+            0,
+            &crate::business_sale::Command {
+                business: 0,
+                player: owner - 1,
+            },
+        ),
+        Request::takeover(0, owner, &crate::business_takeover::Command { building: 0 }),
+        Request::terms(
+            0,
+            owner,
+            &crate::economy::PendingBusinessTerms {
+                business_index: 0,
+                terms: crate::economy::BusinessTerms {
+                    stock_targets: [-1, 2, -3, 4, 5, 6],
+                    prices: [1., 2., 3., 4., 5., 6.],
+                    rent: 7.,
+                },
+            },
+        ),
+    ]
+}
+
+#[test]
+fn lifecycle_wire_layouts_keep_native_padding_and_signed_stock() {
+    let requests = lifecycle_requests(2);
+    assert_eq!(
+        requests[0].payload,
+        [4u32, 0, 2]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(requests[1].payload, [0, 0, 0, 0, 1, 0, 0, 0]);
+    assert_eq!(requests[2].payload, [0, 0, 0, 0]);
+    let terms = requests[3].clone();
+    assert_eq!(terms.payload.len(), 44);
+    assert_eq!(&terms.payload[4..8], &[0xff, 0xff, 2, 0]);
+    assert_eq!(&terms.payload[16..20], &1f32.to_le_bytes());
+    assert_eq!(&terms.payload[40..44], &7f32.to_le_bytes());
+    assert_eq!(
+        terms.terms_payload().unwrap().terms.stock_targets,
+        [-1, 2, -3, 4, 5, 6]
+    );
+    let mut sale = requests[1].clone();
+    sale.payload[5..8].fill(0xa5); // Native trailing bytes are unwritten padding.
+    assert_eq!(sale.business_sale_payload().unwrap().player, 1);
+    for request in requests.into_iter().chain([sale]) {
+        assert_eq!(request.validate(), Ok(()));
+        for message in [
+            Message::CommandRequest(request.clone()),
+            Message::CommandCommit(Commit {
+                order: 0,
+                due: 125,
+                request: request.clone(),
+            }),
+        ] {
+            let frame = Frame {
+                session: [7; 16],
+                sequence: 0,
+                message,
+            };
+            assert_eq!(
+                codec::decode(&codec::encode(&frame).unwrap()).unwrap(),
+                frame
+            );
+        }
+        for length in [request.payload.len() - 1, request.payload.len() + 1] {
+            let mut wrong = request.clone();
+            wrong.payload.resize(length, 0);
+            assert_eq!(wrong.validate(), Err(Error::Unsupported));
+        }
+        let mut wrong = request;
+        wrong.owner = 0;
+        assert_eq!(wrong.validate(), Err(Error::Row));
+    }
+    for at in [16, 40] {
+        let mut wrong = terms.clone();
+        wrong.payload[at..at + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert_eq!(wrong.validate(), Err(Error::Row));
+    }
+}
+
+#[test]
+fn lifecycle_targets_require_live_business_owner_or_takeover_landlord_and_connection() {
+    use crate::player_manager::put;
+    let mut building = [0; 916];
+    put(&mut building, 0x14, 4);
+    put(&mut building, 0x40, 0x617628 + 7 * 380);
+    building[0x2d] = 1; // Ownership of the building is insufficient.
+    building[0x3f] = 1;
+    let mut business = [0; 544];
+    business[0xa] = 2;
+    business[0x21c] = 1;
+    let mut categories = [[0; 380]; 52];
+    categories[7][5] = 3;
+    let (owner, binding, peer) = owner();
+    let mut host = Adapter::new(binding, true, 0, vec![Some(0), None, Some(4)]).unwrap();
+    for (sequence, mut request) in lifecycle_requests(2).into_iter().enumerate() {
+        if request.kind == 0x15 {
+            request.owner = 3;
+        }
+        let buildings = [building];
+        let businesses = [business];
+        let targets = Targets::new(&buildings, &businesses, &categories);
+        assert_eq!(targets.check(&request), Ok(()));
+        let retired = Ingress {
+            binding: SessionBinding {
+                world: binding.world + 1,
+                ..binding
+            },
+            connection: peer,
+            message: Message::CommandRequest(request.clone()),
+        };
+        assert_eq!(
+            host.receive(&owner, retired, 100, targets),
+            Err(Error::World)
+        );
+        let mut wrong = request.clone();
+        wrong.owner = 1;
+        if wrong.kind == 0x12 {
+            wrong.payload[8..12].copy_from_slice(&1u32.to_le_bytes());
+        }
+        if wrong.kind == 0x13 {
+            wrong.payload[4] = 0;
+        }
+        assert_eq!(targets.check(&wrong), Err(Error::Peer));
+        for offset in [0, 0x3f, 0x14] {
+            let mut stale = building;
+            stale[offset] = if offset == 0 { 1 } else { 0 };
+            assert!(
+                Targets::new(&[stale], &[business], &categories)
+                    .check(&request)
+                    .is_err()
+            );
+        }
+        let mut stale = business;
+        stale[0x21c] = 0;
+        assert_eq!(
+            Targets::new(&[building], &[stale], &categories).check(&request),
+            Err(Error::Row)
+        );
+        // Only the takeover buyer is connected to peer4 in this mapping.
+        if request.kind != 0x15 {
+            let admitted = ingress(
+                &owner,
+                binding,
+                peer,
+                Message::CommandRequest(request.clone()),
+                sequence as u64,
+            )
+            .unwrap();
+            assert_eq!(
+                host.receive(&owner, admitted, 100, targets),
+                Err(Error::Peer)
+            );
+        } else {
+            let mut changed = categories;
+            changed[7][5] = 0;
+            assert_eq!(
+                Targets::new(&[building], &[business], &changed).check(&request),
+                Err(Error::Row)
+            );
+            let mut wrong_mapping =
+                Adapter::new(binding, true, 0, vec![Some(0), Some(4), None]).unwrap();
+            let admitted = ingress(
+                &owner,
+                binding,
+                peer,
+                Message::CommandRequest(request),
+                sequence as u64,
+            )
+            .unwrap();
+            assert_eq!(
+                wrong_mapping.receive(&owner, admitted, 100, targets),
+                Err(Error::Peer)
+            );
+        }
+    }
+    assert_eq!(host.next_commit, 0);
+}
+
+#[cfg(feature = "lua4")]
+#[test]
+fn lifecycle_local_humans_and_ai_use_the_same_authorization() {
+    let (_, binding, _) = owner();
+    let owners = vec![Some(0), None, Some(4)];
+    let host = Adapter::new(binding, true, 0, owners.clone()).unwrap();
+    let client = Adapter::new(binding, false, 4, owners).unwrap();
+    for owner in 1..=3 {
+        for request in lifecycle_requests(owner) {
+            assert_eq!(
+                host.authorize_local(&request, false),
+                if owner <= 2 { Ok(()) } else { Err(Error::Peer) }
+            );
+            assert_eq!(
+                client.authorize_local(&request, false),
+                if owner == 3 { Ok(()) } else { Err(Error::Peer) }
             );
         }
     }
