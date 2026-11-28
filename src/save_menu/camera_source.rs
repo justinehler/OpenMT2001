@@ -1,7 +1,7 @@
 //! Legacy UI save snapshots, distinct from the native camera bridge.
 //! One UI writer publishes a complete immutable pair/mode; workers never call
 //! back into the UI. A source fence orders file publication against retirement.
-use openmt2001::{
+use crate::{
     camera::bank::{Bank, Capture, StrategicTransition},
     flyby::CameraSample,
     level_startup::SourceEpoch,
@@ -11,30 +11,30 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// UI-owned raw storage. The caller moves a real process Bank here, or restores
 /// supplied records into that storage. No default/fresh initialization policy
 /// is hidden in this adapter; warm refresh moves the same value.
-pub(crate) struct LegacyPair {
+pub struct LegacyPair {
     bank: Bank,
     kind_dirty: u8,
 }
 impl LegacyPair {
-    pub(crate) fn new(bank: Bank, kind_dirty: u8) -> Self {
+    pub fn new(bank: Bank, kind_dirty: u8) -> Self {
         Self { bank, kind_dirty }
     }
-    pub(crate) fn capture(&self) -> Capture {
+    pub fn capture(&self) -> Capture {
         self.bank.capture()
     }
-    pub(crate) fn primary_kind(&self) -> u32 {
+    pub fn primary_kind(&self) -> u32 {
         self.bank.primary_kind()
     }
-    pub(crate) fn kind_dirty(&self) -> u8 {
+    pub fn kind_dirty(&self) -> u8 {
         self.kind_dirty
     }
     /// Transport both raw rows without deriving the separate dirty byte.
-    pub(crate) fn restore(&mut self, capture: Capture) {
+    pub fn restore(&mut self, capture: Capture) {
         self.bank.restore(capture);
     }
     /// Existing legacy presentation projection only. It does not implement
     /// numeric camera callbacks/common/sample state or touch the return record.
-    pub(crate) fn project_primary(&mut self, camera: CameraSample) -> Result<(), String> {
+    pub fn project_primary(&mut self, camera: CameraSample) -> Result<(), String> {
         if camera
             .eye
             .into_iter()
@@ -57,7 +57,7 @@ impl LegacyPair {
     /// The caller completes the real UI clear before this native operation.
     /// RAW primary kind4 chooses return, independently of host metadata/tuples.
     /// Preflight any required return rendering/control work before mutation.
-    pub(crate) fn strategic_after_ui_clear(&mut self) -> StrategicTransition {
+    pub fn strategic_after_ui_clear(&mut self) -> StrategicTransition {
         self.bank.strategic_after_ui_clear(&mut self.kind_dirty)
     }
 }
@@ -96,35 +96,35 @@ fn validate(capture: Capture, mode: u32) -> Result<(), String> {
 }
 
 /// Exactly one publisher; deliberately not Clone. Drop retires its source.
-pub(crate) struct Publisher {
+pub struct Publisher {
     shared: Shared,
 }
 #[derive(Clone)]
-pub(crate) struct Reader {
+pub struct Reader {
     shared: Shared,
 }
 /// By-value cut. The private origin prevents same-epoch channel substitution.
 #[derive(Clone)]
-pub(crate) struct Snapshot {
+pub struct Snapshot {
     origin: Shared,
     epoch: u64,
     capture: Capture,
     interface_mode: u32,
 }
 impl Snapshot {
-    pub(crate) fn epoch(&self) -> u64 {
+    pub fn epoch(&self) -> u64 {
         self.epoch
     }
-    pub(crate) fn capture(&self) -> Capture {
+    pub fn capture(&self) -> Capture {
         self.capture
     }
-    pub(crate) fn interface_mode(&self) -> u32 {
+    pub fn interface_mode(&self) -> u32 {
         self.interface_mode
     }
 }
 
 /// Epoch comes only from the retained Session's actual topology initialization.
-pub(crate) fn channel(epoch: SourceEpoch) -> (Publisher, Reader) {
+pub fn channel(epoch: SourceEpoch) -> (Publisher, Reader) {
     channel_serial(epoch.serial())
 }
 fn channel_serial(epoch: u64) -> (Publisher, Reader) {
@@ -141,7 +141,7 @@ fn channel_serial(epoch: u64) -> (Publisher, Reader) {
     )
 }
 impl Publisher {
-    pub(crate) fn publish(&mut self, capture: Capture, interface_mode: u32) -> Result<(), String> {
+    pub fn publish(&mut self, capture: Capture, interface_mode: u32) -> Result<(), String> {
         let mut state = lock(&self.shared)?;
         live(&state, state.epoch)?;
         if let Err(error) = validate(capture, interface_mode) {
@@ -153,13 +153,13 @@ impl Publisher {
     }
     /// A failed UI projection/unsupported transaction must not leave an older
     /// published sample available as though it described the current UI state.
-    pub(crate) fn invalidate(&mut self) -> Result<(), String> {
+    pub fn invalidate(&mut self) -> Result<(), String> {
         let mut state = lock(&self.shared)?;
         live(&state, state.epoch)?;
         state.latest = None;
         Ok(())
     }
-    pub(crate) fn retire(&mut self) -> Result<(), String> {
+    pub fn retire(&mut self) -> Result<(), String> {
         let mut state = lock(&self.shared)?;
         state.retired = true;
         state.latest = None;
@@ -172,14 +172,14 @@ impl Drop for Publisher {
     }
 }
 impl Reader {
-    pub(crate) fn read(&self, epoch: SourceEpoch) -> Result<Snapshot, String> {
+    pub fn read(&self, epoch: SourceEpoch) -> Result<Snapshot, String> {
         self.read_serial(epoch.serial())
     }
-    pub(crate) fn check_epoch(&self, epoch: SourceEpoch) -> Result<(), String> {
+    pub fn check_epoch(&self, epoch: SourceEpoch) -> Result<(), String> {
         let state = lock(&self.shared)?;
         live(&state, epoch.serial())
     }
-    pub(crate) fn read_serial(&self, epoch: u64) -> Result<Snapshot, String> {
+    pub fn read_serial(&self, epoch: u64) -> Result<Snapshot, String> {
         let state = lock(&self.shared)?;
         live(&state, epoch)?;
         let (capture, interface_mode) =
@@ -194,7 +194,7 @@ impl Reader {
     /// Only final file publication runs under this fence, after encoding and
     /// staging/flush. No UI callback, producer or simulation work may run here.
     /// A newer same-source UI sample does not invalidate an already captured cut.
-    pub(crate) fn with_live<T>(
+    pub fn with_live<T>(
         &self,
         snapshot: &Snapshot,
         publish: impl FnOnce() -> Result<T, String>,
@@ -211,5 +211,5 @@ impl Reader {
 }
 
 #[cfg(test)]
-#[path = "save_camera_tests.rs"]
+#[path = "camera_source_tests.rs"]
 mod tests;

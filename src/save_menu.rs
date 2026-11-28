@@ -1,7 +1,6 @@
 //! Host-only save destination and atomic file publication.
 //! --save-dir is a read source; writes always use the selected V2 profile root.
-#[path = "save_camera.rs"]
-pub(crate) mod camera_source;
+pub mod camera_source;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -84,8 +83,8 @@ pub fn matching_legacy_paths(
             continue;
         }
         let Some(owner) = fs::read(&path).ok().and_then(|bytes| {
-            let save = openmt2001::save::SaveFile::parse(&bytes).ok()?;
-            let extension = openmt2001::save::extension::Extension::parse(&save).ok()??;
+            let save = crate::save::SaveFile::parse(&bytes).ok()?;
+            let extension = crate::save::extension::Extension::parse(&save).ok()??;
             extension.validate_runtime_section_set().ok()?;
             std::str::from_utf8(extension.required(1).ok()?)
                 .ok()
@@ -226,7 +225,7 @@ pub enum Target {
 /// characters such as sharp S into multiple letters. Non-ASCII uses Rust's
 /// single-character upper-case mappings as a deterministic portable fallback
 /// for the original volume's NTFS upper-case table.
-pub(crate) fn compare_save_names(left: &str, right: &str) -> std::cmp::Ordering {
+pub fn compare_save_names(left: &str, right: &str) -> std::cmp::Ordering {
     fn folded(name: &str) -> impl Iterator<Item = u16> + '_ {
         name.chars().flat_map(|character| {
             let mut uppercase = character.to_uppercase();
@@ -299,7 +298,7 @@ pub fn list_slots(profile_root: &Path) -> Result<Vec<Slot>, String> {
             .and_then(|metadata| metadata.modified().ok());
         let metadata = (|| {
             let bytes = fs::read(&path).map_err(|e| format!("Read saved game: {e}"))?;
-            openmt2001::save::SaveFile::parse(&bytes)?.level_metadata()
+            crate::save::SaveFile::parse(&bytes)?.level_metadata()
         })();
         slots.push(Slot {
             id,
@@ -478,9 +477,9 @@ fn writable_directory(profile_root: &Path) -> Result<PathBuf, String> {
 }
 /// Test and programmatic export helper: allocate a unique V2 slot without a
 /// dialog name. Production Save Game uses `write_target` after confirmation.
-#[cfg(test)]
+#[doc(hidden)]
 pub fn write_new(profile_root: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
-    openmt2001::save::SaveFile::parse(bytes)?;
+    crate::save::SaveFile::parse(bytes)?;
     let canonical = writable_directory(profile_root)?;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -569,7 +568,7 @@ fn validate_stem(name: &str, max_bytes: usize) -> Result<(), String> {
 pub fn write_target(profile_root: &Path, target: &Target, bytes: &[u8]) -> Result<PathBuf, String> {
     write_target_inner(profile_root, target, bytes, None)
 }
-pub(crate) fn write_target_from_snapshot(
+pub fn write_target_from_snapshot(
     profile_root: &Path,
     target: &Target,
     bytes: &[u8],
@@ -584,7 +583,7 @@ fn write_target_inner(
     bytes: &[u8],
     source: Option<(&camera_source::Reader, &camera_source::Snapshot)>,
 ) -> Result<PathBuf, String> {
-    openmt2001::save::SaveFile::parse(bytes)?;
+    crate::save::SaveFile::parse(bytes)?;
     let name = match target {
         Target::NewName(name) => name.as_str(),
         Target::ExistingSlot(id) => {
@@ -760,7 +759,7 @@ impl PreparedAutosave {
     pub fn publish(self, bytes: Vec<u8>) -> Result<PathBuf, String> {
         self.publish_inner(bytes, None)
     }
-    pub(crate) fn publish_from_snapshot(
+    pub fn publish_from_snapshot(
         self,
         bytes: Vec<u8>,
         source: &camera_source::Reader,
@@ -773,7 +772,7 @@ impl PreparedAutosave {
         bytes: Vec<u8>,
         source: Option<(&camera_source::Reader, &camera_source::Snapshot)>,
     ) -> Result<PathBuf, String> {
-        openmt2001::save::SaveFile::parse(&bytes)?;
+        crate::save::SaveFile::parse(&bytes)?;
         let mut file = self
             .file
             .take()
@@ -834,7 +833,7 @@ pub fn delete_slot(profile_root: &Path, id: &str) -> Result<(), String> {
 /// recovered view triples 4c/58/64 with the live retained frontend pose.
 pub fn cameras(
     prior: Option<[[u8; 196]; 2]>,
-    camera: openmt2001::flyby::CameraSample,
+    camera: crate::flyby::CameraSample,
 ) -> Result<[[u8; 196]; 2], String> {
     if camera
         .eye
@@ -970,7 +969,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        openmt2001::save::extension::append(&mut legacy, &records).unwrap();
+        crate::save::extension::append(&mut legacy, &records).unwrap();
         let legacy_path = legacy_directory.join("Earlier.sav");
         fs::write(&legacy_path, &legacy).unwrap();
         assert_eq!(
@@ -999,7 +998,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        openmt2001::save::extension::append(&mut bob_legacy, &bob_records).unwrap();
+        crate::save::extension::append(&mut bob_legacy, &bob_records).unwrap();
         let bob_legacy_path = legacy_directory.join("Bob earlier.sav");
         fs::write(&bob_legacy_path, &bob_legacy).unwrap();
         let unattributed = legacy_directory.join("Unattributed.sav");
@@ -1249,5 +1248,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "session_autosave_writer_test.rs"]
 mod autosave_writer_tests;
