@@ -176,7 +176,7 @@ pub struct Assets {
     save_dialog: crate::save_dialog::Assets,
     settings_menu: crate::settings_menu::Assets,
     sidewalk_labels: crate::block_sidewalk_labels::Assets,
-    tutorial_visual: crate::tutorial_visual::Assets,
+    tutorial_visual: crate::tutorial_visual::Overlay,
     city_pulse: crate::city_pulse_scene::Assets,
     strategic_scene: crate::strategic_scene::Assets,
 }
@@ -360,11 +360,7 @@ impl Assets {
             &selection.blocks,
             &style,
         )?;
-        let tutorial_visual = crate::tutorial_visual::Assets::load(
-            &openmt2001::pe::PeImage::parse(&executable)?,
-            &index,
-            &archive,
-        )?;
+        let tutorial_visual = crate::tutorial_visual::Overlay::at_city_start();
         let city_pulse = crate::city_pulse_scene::Assets::load(&index, &archive)?;
         let result_firework_texture =
             crate::result_presentation::particles_gpu::FireworkTexture::load(&index, &archive)?;
@@ -1836,19 +1832,17 @@ impl Intro {
             .ok_or("tutorial prompt assets missing")?
             .prompt_assets()
             .arrow_origin();
-        // Frame 50 is the standing tutor pose in the original 90-frame mesh.
-        // The native transition timing remains to be recovered.
         let offset = view.live_status.as_ref().map_or([0.; 2], |status| {
             status.tutorial_interaction.prompt_offset()
         });
-        let overlay = assets.tutorial_visual.prepare_positioned(
+        if let Some(overlay) = assets.tutorial_visual.prepare(
             renderer,
             origin,
             [target[0] as f32, target[1] as f32],
-            50,
             offset,
-        )?;
-        renderer.draw_overlay(color_view, depth_view, &overlay);
+        )? {
+            renderer.draw_overlay(color_view, depth_view, &overlay);
+        }
         Ok(())
     }
     pub fn new(presenter: &Presenter, assets: Assets) -> Result<Self, String> {
