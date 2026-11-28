@@ -2,8 +2,8 @@
 // Session dependencies that moved into the library (#99); kept nameable as
 // crate::<module> in the binary.
 use openmt2001::{
-    auction_controls, building_models, campaign_store, compatibility, result_controller, save_menu,
-    skirmish_maps,
+    auction_controls, building_models, campaign_store, compatibility, human_dialog,
+    result_controller, save_menu, skirmish_maps,
 };
 #[path = "frontend/app.rs"]
 mod app;
@@ -46,8 +46,6 @@ pub mod event_list;
 mod game_options;
 #[path = "frontend/headless.rs"]
 mod headless;
-#[path = "frontend/human_dialog.rs"]
-pub mod human_dialog;
 #[path = "frontend/intro.rs"]
 mod intro;
 #[path = "frontend/live_host.rs"]

@@ -107,8 +107,8 @@ impl Dialog {
         }
         Ok(())
     }
-    pub fn outcome(&mut self, call: openmt2001::outcome_notice::Call) -> Result<(), String> {
-        use openmt2001::outcome_notice::{Argument as A, Call, Field};
+    pub fn outcome(&mut self, call: crate::outcome_notice::Call) -> Result<(), String> {
+        use crate::outcome_notice::{Argument as A, Call, Field};
         match call {
             Call::Timeout(seconds) => {
                 self.timeout = seconds != 0;
@@ -210,7 +210,7 @@ impl Dialog {
                     .ok_or("Human dialog substitution language missing")?
                     .clone(),
                 Argument::Integer(value) => value.to_string().bytes().map(|b| b - 32).collect(),
-                Argument::Currency(value) => crate::ui::integer_money(
+                Argument::Currency(value) => integer_money(
                     *value,
                     strings.get(2243).ok_or("Outcome currency symbol missing")?,
                     strings
@@ -247,7 +247,7 @@ pub fn buttons(main: [f32; 4], count: usize) -> Vec<[f32; 4]> {
 #[test]
 #[ignore = "requires native429630 button layout"]
 fn original_modal_buttons() {
-    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_HUMAN_DIALOG_LAYOUT")).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_HUMAN_DIALOG_LAYOUT")).unwrap();
     assert_eq!(&bytes[..8], b"MTHDLY01");
     let mut words = bytes[8..]
         .chunks_exact(4)
@@ -265,4 +265,31 @@ fn original_modal_buttons() {
         }
     }
     assert!(words.next().is_none());
+}
+
+/// Original43a8c0. The symbol and result use the game's glyph-byte encoding.
+/// NEG wraps at signed MIN, including the original double-negative rendering.
+pub fn integer_money(value: i32, symbol: &[u8], suffix: bool) -> Vec<u8> {
+    let magnitude = if value < 0 {
+        value.wrapping_neg()
+    } else {
+        value
+    };
+    let digits = magnitude
+        .to_string()
+        .bytes()
+        .map(|b| b - 32)
+        .collect::<Vec<_>>();
+    let mut text = Vec::new();
+    if value < 0 {
+        text.push(b'-' - 32);
+    }
+    if !suffix {
+        text.extend_from_slice(symbol);
+    }
+    text.extend_from_slice(&digits);
+    if suffix {
+        text.extend_from_slice(symbol);
+    }
+    text
 }

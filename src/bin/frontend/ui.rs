@@ -7,32 +7,7 @@ use openmt2001::{
 };
 pub use text_entry::text_entry;
 
-/// Original43a8c0. The symbol and result use the game's glyph-byte encoding.
-/// NEG wraps at signed MIN, including the original double-negative rendering.
-pub fn integer_money(value: i32, symbol: &[u8], suffix: bool) -> Vec<u8> {
-    let magnitude = if value < 0 {
-        value.wrapping_neg()
-    } else {
-        value
-    };
-    let digits = magnitude
-        .to_string()
-        .bytes()
-        .map(|b| b - 32)
-        .collect::<Vec<_>>();
-    let mut text = Vec::new();
-    if value < 0 {
-        text.push(b'-' - 32);
-    }
-    if !suffix {
-        text.extend_from_slice(symbol);
-    }
-    text.extend_from_slice(&digits);
-    if suffix {
-        text.extend_from_slice(symbol);
-    }
-    text
-}
+pub use openmt2001::human_dialog::integer_money;
 
 #[test]
 #[ignore = "requires original integer currency observations"]
