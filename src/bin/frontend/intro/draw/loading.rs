@@ -169,6 +169,7 @@ impl Intro {
                             building: None,
                         }),
                         &scene,
+                        0,
                     )?;
                     let mut draw = capacity.draw();
                     draw.mode = openmt2001::render::SurfaceMode::StaticLit;
@@ -361,6 +362,7 @@ impl Intro {
                         hovered: None,
                         selected: None,
                         title_state: None,
+                        marker_state: None,
                         started: Instant::now(),
                         tick: 0,
                     };

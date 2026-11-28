@@ -16,7 +16,7 @@ pub(crate) fn load_boundary(
         &mut city.creation.auxiliary,
         &assets.board.category_geometry().centers,
     );
-    if save.game_mode().unwrap() != 2 && city.auction.controller.record[0x7d] != 0 {
+    if save.clock().unwrap().timing[5] != 2 && city.auction.controller.record[0x7d] != 0 {
         // 465810/41db40 reopens announcements with whole signed seconds.
         // The queued room-start deadline and controller snapshot stay exact.
         let ticks = word(&city.auction.controller.record, 0x80) as i32;

@@ -492,6 +492,40 @@ pub fn button_state(
     }
     Ok(())
 }
+/// Generic 442b10 switches unavailable captions to palette style 8, also
+/// used by the disabled Save button. Font art retains its embossed edges.
+pub fn button_label(
+    pages: &mut [Surface],
+    tab: &[u8],
+    encoded: &[u8],
+    bounds: [f32; 4],
+    disabled: bool,
+) -> Result<(), String> {
+    text_widget_style9(
+        pages,
+        tab,
+        encoded,
+        bounds,
+        if disabled { 0xff646464 } else { 0xffffffff },
+    )
+}
+
+/// 4a1250 / 4a8730 draw SELECTP before the translucent player backing.
+/// Opaque name, portrait and lower-slot art then mask its interior. The
+/// authored rectangles determine the border width; this is not a line box.
+#[derive(Default)]
+pub struct LobbyHighlight {
+    tick: u32,
+}
+impl LobbyHighlight {
+    pub fn advance(&mut self) {
+        self.tick = self.tick.wrapping_add(1);
+    }
+    pub fn paint(&self, surface: &mut Surface, bounds: [f32; 4]) {
+        let alpha = 255 - (self.tick.wrapping_mul(8) & 255);
+        surface.rect(bounds, [(alpha << 24) | 0x00ff00; 4]);
+    }
+}
 pub fn text(
     pages: &mut [Surface],
     tab: &[u8],
@@ -502,15 +536,17 @@ pub fn text(
 ) -> Result<(), String> {
     text_scaled(pages, tab, encoded, bounds, center, color, 1.)
 }
+/// Character palette entry 16 (440ad0), shared by green section captions.
+pub const SECTION_HEADER_COLOR: u32 = 0xff00ff00;
+
 /// Green section captions shared by the single-player setup screens.
-/// The original widgets select per-character palette entry16 (440ad0).
 pub fn section_header(
     pages: &mut [Surface],
     tab: &[u8],
     encoded: &[u8],
     bounds: [f32; 4],
 ) -> Result<(), String> {
-    text(pages, tab, encoded, bounds, true, 0xff00ff00)
+    text(pages, tab, encoded, bounds, true, SECTION_HEADER_COLOR)
 }
 pub fn text_fit(
     pages: &mut [Surface],

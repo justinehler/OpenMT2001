@@ -556,11 +556,15 @@ impl Intro {
             && let Some(category) = view.utility_category(&self.assets.selection.blocks)
             && let Some(report) = &view.block_information
             && report.categories[category].is_some()
+            && let Some(menu) = &self.menu
         {
             view.utility_report.scroll = (view.utility_report.scroll as i64 - i64::from(delta))
                 .clamp(
                     0,
-                    report.land_rent[category].len().saturating_sub(22) as i64,
+                    report.land_rent[category]
+                        .len()
+                        .saturating_sub(menu.locator_assets().land_rent_visible_rows())
+                        as i64,
                 ) as usize;
             view.utility_report.dirty = true;
             return;
@@ -594,6 +598,23 @@ impl Intro {
                 if let Some(menu) = &self.menu {
                     view.statistics_mouse(menu.stats_assets(), button, pressed);
                 }
+                return;
+            }
+
+            // Capture both edges BEFORE stats/save/settings/prompt/card/auction
+            // returns. Do not move the camera dispatcher's late Right assignment.
+            if button == winit::event::MouseButton::Right && view.toolbar_right_held != pressed {
+                view.toolbar_right_held = pressed;
+                view.toolbar_input.cancel();
+            }
+            // Mode4 captures input before any primary-group hit test, including
+            // the installed navigator path and its staged GUI input owner.
+            if let Some(menu) = &self.menu
+                && view.statistics_mouse(menu.stats_assets(), button, pressed)
+            {
+                return;
+            }
+            if view.city_layers().statistics {
                 return;
             }
 
@@ -643,12 +664,6 @@ impl Intro {
                     return;
                 }
             }
-            // Capture both edges BEFORE stats/save/settings/prompt/card/auction
-            // returns. Do not move the camera dispatcher's late Right assignment.
-            if button == winit::event::MouseButton::Right && view.toolbar_right_held != pressed {
-                view.toolbar_right_held = pressed;
-                view.toolbar_input.cancel();
-            }
             let side_policy = self
                 .menu
                 .as_ref()
@@ -658,29 +673,9 @@ impl Intro {
                 view.toolbar_bounds,
                 view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
             );
-            let stats_modal = view.stats_requested
-                || view
-                    .live_status
-                    .as_ref()
-                    .is_some_and(|status| status.stats.is_some());
-            if stats_modal {
-                view.auction_panel.cancel_press();
-            }
-            if stats_modal
-                || view.settings_visible()
-                || view.options_visible()
-                || view.prompts.blocks_controls()
-            {
+            if view.settings_visible() || view.options_visible() || view.prompts.blocks_controls() {
                 view.time_panel.cancel_input();
                 view.time_pressed = None;
-            }
-            if let Some(menu) = &self.menu
-                && view.statistics_mouse(menu.stats_assets(), button, pressed)
-            {
-                return;
-            }
-            if stats_modal {
-                return;
             }
             if view.game_options.quit_prompt.request().is_some() {
                 if button == winit::event::MouseButton::Left

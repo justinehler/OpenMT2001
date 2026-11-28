@@ -553,6 +553,11 @@ impl SceneInputs {
                                 .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                             last_tick = Instant::now();
                             host.frame(&mut session, &assets, elapsed);
+                            if std::mem::take(&mut host.synchronize_time) {
+                                timing
+                                    .frame
+                                    .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                            }
                         }
                         if host.camera_retired() {
                             break;
@@ -807,6 +812,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }
@@ -818,6 +828,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }
@@ -855,6 +870,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }
@@ -1387,7 +1407,7 @@ impl SceneInputs {
         let saved_prior_mode = saved_interface_mode
             .or_else(|| saved_auction.as_ref().map(|auction| auction.prior_mode))
             .or_else(|| {
-                (session.saved_game_mode == Some(2)
+                (session.saved_logic_mode == Some(2)
                     && session.world.city.auction.controller.reference != 0)
                     .then(|| {
                         u32::from_le_bytes(
@@ -1868,6 +1888,8 @@ impl SceneInputs {
                 // Move the base out while patching: a pose/metadata error can
                 // leave partial writes, and must discard that base. Successful
                 // snapshots clone only once for their actor layers.
+                updated_city_draws
+                    .extend(city.set_street_furniture_era(session.world.clock.calendar[2])?);
                 session.refresh_scene_records(&mut city)?;
                 if let Some(image) = session.window_texture.current() {
                     updated_city_draws.extend(city.set_window_pixels(image.pixels)?);
@@ -1902,7 +1924,7 @@ impl SceneInputs {
             )?;
             assembly_elapsed = assembly_started.elapsed();
             let appearance_started = Instant::now();
-            if session.saved_game_mode.is_some() {
+            if session.saved_logic_mode.is_some() {
                 self.append_saved_appearance(session, &mut scene, &mut detail_visibility, cache)?;
                 self.append_current_appearance(
                     session,
@@ -2066,7 +2088,7 @@ impl SceneInputs {
             )?;
         }
         let board = self.styled_board(&image)?;
-        let runtime_locator = (session.saved_game_mode.is_none())
+        let runtime_locator = (session.saved_logic_mode.is_none())
             .then(|| crate::locator::RuntimeInputs::from_world(&session.world));
         let consumer_polls = Some(crate::consumer_polls::Poll::from_runtime(&session.world)?);
         let city_ownership = Some(crate::city_ownership::Ownership::from_runtime(

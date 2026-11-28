@@ -386,3 +386,161 @@ fn off_ui_join_reports_callback_failure_and_panic_without_releasing_startup() {
         assert!(!startup_ready(&slot, &failure));
     }
 }
+
+#[test]
+fn fresh_mode6_keeps_start_camera_outside_block_pan_bounds() {
+    // The same setup and callback gate used by Intro::draw/inspection_update.
+    let initial = Initial::prepare(None, Some(0), fresh()).unwrap();
+    let mut active = initial.active;
+    let mut owner = new_process_owner().unwrap();
+    owner.reset_yaw();
+    owner.world_reset_final_fields();
+    let mut core = Core::new(owner);
+    core.project(active.camera).unwrap();
+    assert_eq!(core.kind(), 6);
+    for _ in 0..500 {
+        if core.legacy_callback_enabled(false) {
+            let (eye, target) = super::super::mode12_input_tick(
+                &mut active.controls,
+                active.saved,
+                [false; 4],
+                [0; 2],
+                50,
+                false,
+            )
+            .unwrap();
+            active.inertia.tick(eye, target);
+            let (eye, target) = active.inertia.sample(0.5).unwrap();
+            active.camera.eye = eye;
+            active.camera.target = target;
+        }
+        core.project(active.camera).unwrap();
+    }
+    assert_eq!(active.camera.eye, [26., 586., -695.]);
+    assert_eq!(active.camera.target, [26., 463., -595.]);
+    assert_eq!(active.camera.up, [0., 1., 0.]);
+    assert_eq!(active.camera.vertical_fov, 53.);
+    assert_eq!(active.controls.center, [51., 463., -595.]);
+    assert!(active.same_pose(&core.capture().records()[0]));
+    // A subsequent block/district selection still admits normal controls.
+    for kind in [12, 13] {
+        core.owner.set_kind(kind);
+        assert!(core.legacy_callback_enabled(false));
+        assert!(!core.legacy_callback_enabled(true));
+    }
+}
+
+#[cfg(feature = "capture")]
+#[test]
+#[ignore = "requires supplied assets and GPU; writes initial-view comparison captures"]
+fn capture_untouched_campaign_and_skirmish_start() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            use openmt2001::skirmish::roster::{Kind, Participant};
+            let output = openmt2001::fixtures::scratch("INITIAL_CAMERA_CAPTURE");
+            std::fs::create_dir_all(&output).unwrap();
+            let inputs = crate::intro::camera_producer_live_tests::inputs(output.join("profile"));
+            let mut setup = crate::intro::camera_producer_live_tests::setup(&inputs);
+            setup.preview = crate::singleplayer::Preview::Scenario(200001);
+            let skirmish = crate::menu::skirmish_route::Request {
+                catalog: setup.catalog.clone(),
+                save_root: output.join("skirmish"),
+                launch: crate::fresh_city::SkirmishLaunch {
+                    level_id: 300001,
+                    directory: "net1".into(),
+                    map: "empty.lua".into(),
+                    objective_kind: 6,
+                    target: 3500.,
+                    difficulty: 1,
+                    participants: vec![
+                        Participant {
+                            kind: Kind::Human,
+                            token: Some(4),
+                            name: b"Camera human".to_vec(),
+                            ready: true,
+                            difficulty: 1,
+                        },
+                        Participant {
+                            kind: Kind::Ai,
+                            token: Some(1),
+                            name: b"Camera AI".to_vec(),
+                            ready: true,
+                            difficulty: 1,
+                        },
+                    ],
+                },
+            };
+            let camera = super::super::fresh_city_camera().0;
+            let descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+            let renderer =
+                pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
+            for (name, (mut loaded, session)) in [
+                (
+                    "starting-out",
+                    inputs
+                        .fresh_preview(setup, camera, &mut super::super::SnapshotCache::default())
+                        .unwrap(),
+                ),
+                (
+                    "skirmish-empty",
+                    inputs
+                        .fresh_skirmish(
+                            skirmish,
+                            camera,
+                            &mut super::super::SnapshotCache::default(),
+                        )
+                        .unwrap(),
+                ),
+            ] {
+                let (publisher, _reader) =
+                    crate::save_menu::camera_source::channel(session.world.topology.epoch());
+                let initial = Initial::from_loaded(&loaded, fresh()).unwrap();
+                let mut parked = Some(new_process_owner().unwrap());
+                let producer = Producer::attach(&mut parked, publisher, &initial).unwrap();
+                assert!(!producer.legacy_callback_enabled(false));
+                // Replay the former erroneous idle mode12 route for a controlled
+                // before image. The after image retains the production kind6 pose.
+                let mut before = initial.active;
+                for _ in 0..500 {
+                    let pose = super::super::mode12_input_tick(
+                        &mut before.controls,
+                        false,
+                        [false; 4],
+                        [0; 2],
+                        50,
+                        false,
+                    )
+                    .unwrap();
+                    before.inertia.tick(pose.0, pose.1);
+                }
+                let (eye, target) = before.inertia.sample(0.5).unwrap();
+                before.camera.eye = eye;
+                before.camera.target = target;
+                for (suffix, sample) in
+                    [("before", before.camera), ("after", initial.active.camera)]
+                {
+                    let scene = &mut loaded.scene;
+                    scene.reframe(sample).unwrap();
+                    let path = output.join(format!("{name}-{suffix}.png"));
+                    crate::capture_test::capture_scene_at_size(
+                        &renderer,
+                        scene,
+                        path.to_str().unwrap(),
+                        [1024, 768],
+                    );
+                    eprintln!(
+                        "{name}-{suffix}: eye {:?}, target {:?}, FOV {} -> {}",
+                        sample.eye,
+                        sample.target,
+                        sample.vertical_fov,
+                        path.display()
+                    );
+                }
+                producer.retire().1.unwrap();
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

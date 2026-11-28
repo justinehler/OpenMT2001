@@ -8,6 +8,8 @@ mod camera_keys;
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
+#[path = "intro/city_ui.rs"]
+pub(crate) mod city_ui;
 #[path = "intro/dialog_keys.rs"]
 mod dialog_keys;
 #[path = "intro/focus.rs"]
@@ -16,6 +18,8 @@ pub(crate) mod focus;
 mod frontend_draw;
 #[path = "intro/menu_preferences.rs"]
 pub(crate) mod menu_preferences;
+#[path = "intro/opening.rs"]
+mod opening;
 #[path = "intro/options_ack.rs"]
 mod options_ack;
 #[path = "intro/pause_keys.rs"]
@@ -25,7 +29,7 @@ pub(crate) mod process_frontend;
 #[path = "intro/refresh.rs"]
 mod refresh;
 use openmt2001::{
-    flyby::{CameraSample, Flyby},
+    flyby::{CameraSample, Flyby, Playback},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
     render_scene::{self, OriginalAssets, Request, Scene, Source},
 };
@@ -81,6 +85,7 @@ fn normal_city_scene_updates(
 ) -> Result<Vec<usize>, String> {
     if let Some(detail) = detail {
         changed.extend(scene.apply_normal_star_detail(detail, camera)?);
+        changed.extend(scene.set_street_furniture_detail(detail)?);
     }
     changed.sort_unstable();
     changed.dedup();
@@ -132,7 +137,9 @@ pub struct Assets {
     pub(crate) activity: crate::live_host::process_runtime::Activity,
     pub cursors: Option<crate::cursor::Images>,
     scene: Scene,
-    samples: Vec<CameraSample>,
+    flyby: Playback,
+    opening: opening::Assets,
+    opening_logos: bool,
     menu: Option<crate::menu::Assets>,
     inputs: Arc<SceneInputs>,
     selection: crate::selection::Assets,
@@ -386,10 +393,9 @@ impl Assets {
                 .join(&backdrop.track),
         )?;
         let track = Flyby::parse(&track)?;
-        let samples = (1..track.frame_count())
-            .map(|i| track.sample(i))
-            .collect::<Result<Vec<_>, _>>()?;
+        let flyby = Playback::new(&track)?;
         let phase = backdrop.hour;
+        let opening = opening::Assets::load(&ui_images, &ui_text)?;
         let scene = render_scene::assemble_with_style(
             Request {
                 build_file: &build_file,
@@ -401,7 +407,7 @@ impl Assets {
                 }),
                 suncols: Some(&suncols),
                 phase: Some(phase),
-                camera: Some(samples[0]),
+                camera: Some(flyby.sample(0.)?),
                 width: 1280,
                 height: 960,
                 animated: true,
@@ -412,7 +418,7 @@ impl Assets {
             "Intro assembled: {} buildings, {} triangle vertices, {} camera samples; {} track / hour {phase}",
             scene.building_count,
             scene.vertex_count,
-            samples.len(),
+            flyby.duration_ticks(),
             backdrop.track
         );
         let inputs = Arc::new(SceneInputs {
@@ -443,7 +449,9 @@ impl Assets {
             cursors,
             inputs,
             scene,
-            samples,
+            flyby,
+            opening,
+            opening_logos: backdrop.logos,
             selection,
             navigation,
             navigator,
@@ -1156,6 +1164,7 @@ struct Inspection {
     detail_visibility: DetailVisibility,
     prepared: PreparedScene,
     markers: PreparedScene,
+    marker_state: Option<crate::selection::MarkerState>,
     navigator: PreparedScene,
     navigator_owners: Vec<Option<crate::navigator::Owner>>,
     navigator_bounds: [f32; 4],
@@ -1334,6 +1343,7 @@ pub struct Intro {
     started: Instant,
     last_sample: Option<usize>,
     ended: bool,
+    opening: openmt2001::opening_sequence::Controller,
     pub menu: Option<crate::menu::Menu>,
     menu_camera: Option<MenuCamera>,
     loading: Option<mpsc::Receiver<Result<LoadedInspection, crate::load::Failure>>>,
@@ -1666,7 +1676,7 @@ impl Intro {
         Ok(())
     }
     pub fn new(presenter: &Presenter, assets: Assets) -> Result<Self, String> {
-        let sidewalk_camera = assets.samples[0];
+        let sidewalk_camera = assets.flyby.sample(0.)?;
         let renderer = Renderer::from_device(
             presenter.device.clone(),
             presenter.queue.clone(),
@@ -1740,6 +1750,7 @@ impl Intro {
             started: Instant::now(),
             last_sample: None,
             ended: false,
+            opening: Default::default(),
             menu: None,
             menu_camera: None,
             loading: None,
@@ -1765,11 +1776,15 @@ impl Intro {
     }
     pub fn open_menu(&mut self) {
         if let Some(assets) = self.assets.menu.take() {
-            let last = self.last_sample.unwrap_or(0);
-            self.menu_camera = Some(MenuCamera::new(self.assets.samples[last]));
+            self.menu_camera = Some(MenuCamera::new(self.assets.flyby.current()));
             self.menu = Some(crate::menu::Menu::new(assets));
             self.started = Instant::now();
             self.last_sample = None;
+        }
+    }
+    pub fn skip_opening(&mut self, key: winit::keyboard::NamedKey) {
+        if opening::skip_key(key) {
+            self.open_menu();
         }
     }
     pub fn inspection_cursor_presented(&mut self) {
@@ -2227,48 +2242,47 @@ impl Intro {
         let prepare_started = presenter.profile_started();
         let time = self.started.elapsed().as_secs_f64() * 50.;
         let tick = time as usize;
-        let sample = tick.min(self.assets.samples.len() - 1);
-        if self.last_sample != Some(sample) || self.menu.is_some() {
-            let camera = if self.menu.is_some() {
-                // 4952f0 -> 4836e0/483750; 4e02d0 updates the start pose
-                // at 50 Hz and 4e0590 presents its fractional phase. Wall
-                // fraction stands in for the native scheduler's render phase.
-                let phase = (time - tick as f64) as f32;
-                self.menu_camera
-                    .as_mut()
-                    .ok_or("menu camera missing")?
-                    .sample(tick, phase)
-            } else {
-                self.assets.samples[sample]
-            };
-            self.sidewalk_camera = camera;
-            let mut changed = self.assets.scene.reframe(camera)?;
-            if let Some(menu) = &self.menu {
-                changed.extend(
-                    self.assets
-                        .scene
-                        .apply_normal_star_detail(menu.settings.graphics.detail, camera)?,
-                );
-                changed.sort_unstable();
-                changed.dedup();
-            }
-            let updates = changed
-                .into_iter()
-                .map(|index| (index, self.assets.scene.draws[index].borrowed()))
-                .collect::<Vec<_>>();
-            self.renderer
-                .update_dynamic_vertices_batch(&mut self.prepared, &updates)?;
-            let cameras = self
-                .assets
-                .scene
-                .draws
-                .iter()
-                .map(|draw| draw.view_projection.unwrap_or(self.assets.scene.camera))
-                .collect::<Vec<_>>();
-            self.renderer
-                .update_cameras(&self.prepared, &cameras, self.assets.scene.fog)?;
-            self.last_sample = Some(sample);
+        let sample = tick.min(self.assets.flyby.duration_ticks() - 1);
+        let camera = if self.menu.is_some() {
+            // 4952f0 -> 4836e0/483750; 4e02d0 updates the start pose
+            // at 50 Hz and 4e0590 presents its fractional phase. Wall
+            // fraction stands in for the native scheduler's render phase.
+            let phase = (time - tick as f64) as f32;
+            self.menu_camera
+                .as_mut()
+                .ok_or("menu camera missing")?
+                .sample(tick, phase)
+        } else {
+            self.assets.flyby.advance_to(tick)?;
+            self.assets.flyby.sample((time - tick as f64) as f32)?
+        };
+        self.sidewalk_camera = camera;
+        let mut changed = self.assets.scene.reframe(camera)?;
+        if let Some(menu) = &self.menu {
+            changed.extend(
+                self.assets
+                    .scene
+                    .apply_normal_star_detail(menu.settings.graphics.detail, camera)?,
+            );
+            changed.sort_unstable();
+            changed.dedup();
         }
+        let updates = changed
+            .into_iter()
+            .map(|index| (index, self.assets.scene.draws[index].borrowed()))
+            .collect::<Vec<_>>();
+        self.renderer
+            .update_dynamic_vertices_batch(&mut self.prepared, &updates)?;
+        let cameras = self
+            .assets
+            .scene
+            .draws
+            .iter()
+            .map(|draw| draw.view_projection.unwrap_or(self.assets.scene.camera))
+            .collect::<Vec<_>>();
+        self.renderer
+            .update_cameras(&self.prepared, &cameras, self.assets.scene.fog)?;
+        self.last_sample = Some(sample);
         // The shared actor is also drawn by live city inspections. Restore
         // its intro matrix even when the flyby sample has not advanced.
         for index in 0..self.mr_monopoly_draws {
@@ -2287,7 +2301,15 @@ impl Intro {
             self.sidewalk_camera,
             35,
         )?;
-        if tick >= self.assets.samples.len() && !self.ended && self.menu.is_none() {
+        if self.assets.opening_logos && self.menu.is_none() {
+            self.opening.advance_to(tick);
+        }
+        let opening_ended = if self.assets.opening_logos {
+            self.opening.ended()
+        } else {
+            tick >= self.assets.flyby.duration_ticks()
+        };
+        if opening_ended && !self.ended && self.menu.is_none() {
             self.ended = true;
             self.open_menu();
             eprintln!("FlybyEnded: main menu");
@@ -2309,6 +2331,11 @@ impl Intro {
                         &self.depth_view,
                         &self.mr_monopoly,
                     );
+                    if self.menu.is_none() && self.assets.opening_logos {
+                        let overlay = self.assets.opening.prepare(&self.renderer, &self.opening)?;
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, &overlay);
+                    }
                 }
                 frontend_draw::Layer::Menu => {
                     if let Some(menu) = &mut self.menu {

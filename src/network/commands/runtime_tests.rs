@@ -48,6 +48,7 @@ struct TestSession {
     tasks: Vec<[u8; 20]>,
     controls: scheduler::Controls,
     postings: Vec<economy::AccountPosting>,
+    applied: Vec<u8>,
 }
 impl TestSession {
     fn new(image: &crate::pe::PeImage<'_>, board: &crate::board::Board) -> Self {
@@ -161,9 +162,23 @@ impl TestSession {
                 gate_32_offset: false,
             },
             postings: vec![],
+            applied: vec![],
         }
     }
     fn tick(&mut self, image: &crate::pe::PeImage<'_>, board: &crate::board::Board) {
+        self.tick_observing(image, board, |_, _, _, _| Ok(()));
+    }
+    fn tick_observing(
+        &mut self,
+        image: &crate::pe::PeImage<'_>,
+        board: &crate::board::Board,
+        mut observe: impl FnMut(
+            scheduler::Event,
+            &crate::clock::Clock,
+            &mut level_startup::City,
+            &[player_manager::Player],
+        ) -> std::result::Result<(), String>,
+    ) {
         if self.world.pause.has_reason() {
             return;
         }
@@ -180,6 +195,7 @@ impl TestSession {
             &mut self.world.clock,
             &mut self.controls,
             |event, clock, _| {
+                observe(event, clock, city, &self.roster.manager.players)?;
                 if event == scheduler::Event::Helper(0x480ec0) {
                     let mut runtime = live_commands::Runtime {
                         city,
@@ -192,6 +208,12 @@ impl TestSession {
                     };
                     let mut clocks = [clock.timing[0], clock.timing[1]];
                     self.queue.drain(&mut clocks, |command| {
+                        self.applied.push(match command {
+                            live_commands::Command::Demolish(_) => 0x10,
+                            live_commands::Command::Open(_) => 0x11,
+                            live_commands::Command::PropertyTransfer { .. } => 0x16,
+                            _ => 0x0f,
+                        });
                         runtime.apply(
                             command,
                             &mut live_commands::CommandContext {
@@ -241,7 +263,10 @@ fn two_live_runtimes_apply_exact_property_and_cash_once_at_125_and_pause_same_ta
         },
     );
     let admitted = ingress(&owner, binding, peer, Message::CommandRequest(request), 0).unwrap();
-    let Message::CommandCommit(commit) = host.receive(&owner, admitted, 100).unwrap() else {
+    let Message::CommandCommit(commit) = host
+        .receive(&owner, admitted, 100, Targets::default())
+        .unwrap()
+    else {
         panic!()
     };
     host.enqueue(
@@ -338,6 +363,10 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
             live_commands::Command::Build(command.clone()),
             &mut right.queue,
             &mut right.world.city.categories,
+            crate::network::commands::Targets {
+                buildings: &right.world.city.buildings,
+                businesses: &right.world.city.ledgers.businesses,
+            },
             100,
         )
         .unwrap();
@@ -380,6 +409,10 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                         live_commands::Command::Build(ai.clone()),
                         &mut session.queue,
                         &mut session.world.city.categories,
+                        crate::network::commands::Targets {
+                            buildings: &session.world.city.buildings,
+                            businesses: &session.world.city.ledgers.businesses,
+                        },
                         100,
                     )?;
                 }
@@ -397,6 +430,10 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 live_commands::Command::Build(ai.clone()),
                 &mut right.queue,
                 &mut right.world.city.categories,
+                crate::network::commands::Targets {
+                    buildings: &right.world.city.buildings,
+                    businesses: &right.world.city.ledgers.businesses
+                },
                 100
             )
             .is_err()
@@ -415,7 +452,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
         thread::sleep(Duration::from_millis(5));
     };
     let message = authority
-        .receive(host.gameplay_owner(), ingress, 100)
+        .receive(host.gameplay_owner(), ingress, 100, Targets::default())
         .unwrap();
     let Message::CommandCommit(commit) = &message else {
         panic!()
@@ -436,6 +473,10 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 100,
                 &mut left.queue,
                 &mut left.world.city.categories,
+                crate::network::commands::Targets {
+                    buildings: &left.world.city.buildings,
+                    businesses: &left.world.city.ledgers.businesses,
+                },
                 &mut left.world.city.pause,
                 &mut left.tasks,
             )
@@ -446,6 +487,10 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 100,
                 &mut right.queue,
                 &mut right.world.city.categories,
+                crate::network::commands::Targets {
+                    buildings: &right.world.city.buildings,
+                    businesses: &right.world.city.ledgers.businesses,
+                },
                 &mut right.world.city.pause,
                 &mut right.tasks,
             )
@@ -734,5 +779,411 @@ fn connected_hour_boundary_keeps_shared_accounts_and_rng_with_ai_on_both_peers()
     assert_eq!(
         left.world.objective.cash_statuses,
         right.world.objective.cash_statuses
+    );
+}
+
+#[path = "../synchronization/runtime_tests.rs"]
+mod synchronization;
+
+fn ready_building(session: &mut TestSession, id: usize, owner: u8) {
+    let row = &mut session.world.city.buildings[id];
+    put(row, 0, id as u32);
+    row[4..9].copy_from_slice(&[0, 0, 1, 1, 2]);
+    put(row, 0x14, 4);
+    put(row, 0x1c, u32::MAX);
+    put(row, 0x24, 0);
+    row[0x2d] = owner;
+    row[0x3f] = 1;
+    put(row, 0x40, 0x617628 + 7 * 380);
+}
+
+fn business_family_applies_once_at_125(kind: u8) {
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    for session in [&mut left, &mut right] {
+        ready_building(session, 0, if kind == 0x10 { 1 } else { 2 });
+        // The business owner differs from both the building owner and landlord.
+        if kind == 0x10 {
+            put(&mut session.world.city.buildings[0], 0x1c, 0);
+            let business = &mut session.world.city.ledgers.businesses[0];
+            put(business, 0, 0);
+            put(business, 4, 0);
+            business[8..10].copy_from_slice(&0u16.to_le_bytes());
+            business[0xa] = 2;
+            business[0x21c] = 1;
+            session.roster.category_counts[7 * 45] = 1;
+        }
+    }
+    let (owner, binding, peer) = owner();
+    let owners = vec![Some(0), Some(4)];
+    let mut host = Adapter::new(binding, true, 0, owners.clone()).unwrap();
+    let mut client = Adapter::new(binding, false, 4, owners).unwrap();
+    let family = if kind == 0x10 {
+        Request::demolition(
+            1,
+            2,
+            &crate::demolition::Command {
+                category: 7,
+                building: 0,
+                amount: 37.25,
+            },
+        )
+    } else {
+        Request::business_open(
+            1,
+            &crate::business_open::Command {
+                kind: 0,
+                building: 0,
+                owner: 2,
+                stock_argument: 1,
+            },
+        )
+    };
+    // Equal-due ordering spans the existing property-transfer family.
+    for (sequence, request) in [
+        Request::transfer(
+            0,
+            Transfer {
+                owner: 2,
+                amount: 100,
+                category: 8,
+                due: 0,
+            },
+        ),
+        family.clone(),
+        Request::transfer(
+            2,
+            Transfer {
+                owner: 2,
+                amount: 200,
+                category: 9,
+                due: 0,
+            },
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let admitted = ingress(
+            &owner,
+            binding,
+            peer,
+            Message::CommandRequest(request),
+            sequence as u64,
+        )
+        .unwrap();
+        let Message::CommandCommit(commit) = host
+            .receive(
+                &owner,
+                admitted,
+                100,
+                Targets {
+                    buildings: &left.world.city.buildings,
+                    businesses: &left.world.city.ledgers.businesses,
+                },
+            )
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(commit.order, sequence as u64);
+        assert_eq!(commit.due, 125);
+        host.enqueue(
+            &commit,
+            &mut left.queue,
+            &mut left.world.city.categories,
+            100,
+        )
+        .unwrap();
+        // A client receiving two ticks later keeps the authority's due unchanged.
+        client
+            .enqueue(
+                &commit,
+                &mut right.queue,
+                &mut right.world.city.categories,
+                102,
+            )
+            .unwrap();
+        assert_eq!(
+            client.enqueue(
+                &commit,
+                &mut right.queue,
+                &mut right.world.city.categories,
+                102
+            ),
+            Err(Error::Sequence)
+        );
+    }
+    let replay = ingress(
+        &owner,
+        binding,
+        peer,
+        Message::CommandRequest(family.clone()),
+        3,
+    )
+    .unwrap();
+    assert_eq!(
+        host.receive(
+            &owner,
+            replay,
+            100,
+            Targets {
+                buildings: &left.world.city.buildings,
+                businesses: &left.world.city.ledgers.businesses,
+            }
+        ),
+        Err(Error::Sequence)
+    );
+    let mut wrong = family.clone();
+    wrong.serial = 3;
+    wrong.owner = 1;
+    if kind == 0x11 {
+        wrong.payload[8..12].copy_from_slice(&1u32.to_le_bytes());
+    }
+    let wrong = ingress(&owner, binding, peer, Message::CommandRequest(wrong), 4).unwrap();
+    assert_eq!(
+        host.receive(
+            &owner,
+            wrong,
+            100,
+            Targets {
+                buildings: &left.world.city.buildings,
+                businesses: &left.world.city.ledgers.businesses,
+            }
+        ),
+        Err(Error::Peer)
+    );
+    assert_eq!(host.next_commit, 3);
+    for session in [&mut left, &mut right] {
+        let before = session.world.city.buildings[0];
+        while session.world.clock.timing[0] < 124 {
+            session.tick(&image, &board);
+        }
+        assert_eq!(session.world.city.buildings[0], before);
+        assert_eq!(session.world.ledgers.players[1].cash, 10000.);
+        assert!(session.applied.is_empty());
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 125);
+        assert_eq!(session.applied, [0x16, kind, 0x16]);
+        assert_eq!(session.world.ledgers.players[0].cash, 10000.);
+        if kind == 0x10 {
+            assert_eq!(session.world.ledgers.players[1].cash, 9662.75);
+            assert_eq!(player_manager::word(&session.world.buildings[0], 0x14), 0);
+            assert_eq!(
+                player_manager::word(&session.world.buildings[0], 0x1c),
+                u32::MAX
+            );
+            assert_eq!(session.world.ledgers.businesses[0][0x21c], 0);
+            assert_eq!(session.world.pending_world.count, 1);
+            assert_eq!(session.world.pending_world.records[0][2], 2);
+        } else {
+            assert_eq!(session.world.ledgers.players[1].cash, 9700.);
+            assert_eq!(player_manager::word(&session.world.buildings[0], 0x1c), 0);
+            assert_eq!(session.world.ledgers.businesses[0][0xa], 2);
+            assert_eq!(session.world.ledgers.businesses[0][0x21c], 1);
+            assert_eq!(session.population.business_counts.age, 100);
+        }
+        let after = session.world.city.buildings[0];
+        let cash = session.world.ledgers.players[1].cash;
+        session.controls.deadline = 150;
+        session.world.city.pause.bytes[1] = 0;
+        session.tick(&image, &board);
+        assert_eq!(session.world.city.buildings[0], after);
+        assert_eq!(session.world.ledgers.players[1].cash, cash);
+        assert_eq!(session.applied.len(), 3);
+        assert!(session.queue.snapshot().unwrap().is_empty());
+    }
+    let mut stale = family;
+    stale.serial = 3;
+    let stale = ingress(&owner, binding, peer, Message::CommandRequest(stale), 5).unwrap();
+    assert_eq!(
+        host.receive(
+            &owner,
+            stale,
+            126,
+            Targets {
+                buildings: &left.world.city.buildings,
+                businesses: &left.world.city.ledgers.businesses,
+            }
+        ),
+        Err(Error::Row)
+    );
+    assert_eq!(host.next_commit, 3);
+    assert_eq!(left.world.buildings, right.world.buildings);
+    assert_eq!(
+        left.world.ledgers.businesses,
+        right.world.ledgers.businesses
+    );
+}
+
+#[test]
+fn demolition_runtime_charges_linked_owner_and_starts_removal_once_at_125() {
+    business_family_applies_once_at_125(0x10);
+}
+
+#[test]
+fn business_open_runtime_allocates_and_attaches_encoded_owner_once_at_125() {
+    business_family_applies_once_at_125(0x11);
+}
+
+#[test]
+fn loopback_authority_completes_remote_human_building_without_client_rebroadcast() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(false);
+    let hb = host
+        .bind_world(left.world.topology.epoch().serial())
+        .unwrap();
+    let cb = client
+        .bind_world(right.world.topology.epoch().serial())
+        .unwrap();
+    let owners = vec![Some(0), Some(peer)];
+    let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
+    let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    let mut completions = Vec::new();
+    for (session, is_host) in [(&mut left, true), (&mut right, false)] {
+        ready_building(session, 0, 2);
+        session
+            .world
+            .city
+            .pending_world
+            .construct(7, &mut session.world.city.buildings[0], 0, 2)
+            .unwrap();
+        // The final completion stage has finished its visual countdown.
+        session.world.city.pending_world.records[0][3] = 1;
+        session.world.city.pending_world.records[0][4] = u32::MAX;
+        live_commands::PendingRuntime {
+            city: &mut session.world.city,
+            roster: &session.roster,
+            commands: &mut session.queue,
+            selected: &mut [u32::MAX; 2],
+        }
+        .advance_with_submission(
+            99,
+            &mut crate::pending_world::Controls {
+                network_enabled: true,
+                network_override: is_host,
+                effect_model_reference: 0,
+            },
+            &mut TestGeometry,
+            |_, _| Ok(0),
+            |command, _| {
+                assert!(is_host, "client generated a completion request");
+                completions.push(command);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(session.world.pending_world.count, 0);
+        assert_eq!(player_manager::word(&session.world.buildings[0], 0x14), 4);
+        assert!(session.queue.snapshot().unwrap().is_empty());
+    }
+    assert_eq!(completions.len(), 1);
+    let live_commands::Command::Open(command) = &completions[0] else {
+        panic!()
+    };
+    assert_eq!(command.owner, 2);
+    // Ordinary local requests cannot impersonate the remote human.
+    assert!(
+        authority
+            .submit(
+                &host,
+                completions[0].clone(),
+                &mut left.queue,
+                &mut left.world.city.categories,
+                Targets {
+                    buildings: &left.world.city.buildings,
+                    businesses: &left.world.city.ledgers.businesses
+                },
+                99
+            )
+            .is_err()
+    );
+    assert!(
+        replica
+            .submit_completion(
+                &client,
+                command,
+                &mut right.queue,
+                &mut right.world.city.categories,
+                Targets {
+                    buildings: &right.world.city.buildings,
+                    businesses: &right.world.city.ledgers.businesses
+                },
+                99
+            )
+            .is_err()
+    );
+    // A closed authority window defers submission and stamps the next Total+25.
+    authority.closed_tick = Some(99);
+    authority
+        .submit_completion(
+            &host,
+            command,
+            &mut left.queue,
+            &mut left.world.city.categories,
+            Targets {
+                buildings: &left.world.city.buildings,
+                businesses: &left.world.city.ledgers.businesses,
+            },
+            99,
+        )
+        .unwrap();
+    assert!(left.queue.snapshot().unwrap().is_empty());
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        for (adapter, worker, session) in [
+            (&mut authority, &host, &mut left),
+            (&mut replica, &client, &mut right),
+        ] {
+            adapter
+                .pump(
+                    worker,
+                    100,
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    Targets {
+                        buildings: &session.world.city.buildings,
+                        businesses: &session.world.city.ledgers.businesses,
+                    },
+                    &mut session.world.city.pause,
+                    &mut session.tasks,
+                )
+                .unwrap();
+        }
+        if left.queue.snapshot().unwrap().len() == 1 && right.queue.snapshot().unwrap().len() == 1 {
+            break;
+        }
+        assert!(Instant::now() < until);
+        thread::sleep(Duration::from_millis(5));
+    }
+    for session in [&mut left, &mut right] {
+        assert_eq!(session.queue.snapshot().unwrap()[0].1, 125);
+        while session.world.clock.timing[0] < 124 {
+            session.tick(&image, &board);
+        }
+        assert_eq!(session.world.ledgers.businesses[0][0x21c], 0);
+        session.tick(&image, &board);
+        assert_eq!(session.world.ledgers.businesses[0][0xa], 2);
+        assert_eq!(session.world.ledgers.businesses[0][0x21c], 1);
+        assert_eq!(session.applied, [0x11]);
+    }
+    assert!(
+        host.poll_gameplay().is_none(),
+        "client rebroadcast a received commit"
+    );
+    assert_eq!(
+        left.world.ledgers.businesses,
+        right.world.ledgers.businesses
     );
 }

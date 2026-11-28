@@ -1,5 +1,6 @@
-//! UI adapter. Only `spawn`'s worker performs listen/connect/pump/send; the UI
-//! uses bounded try_send/try_recv. Drop retires the captured attempt immediately,
+//! UI adapter. The worker performs listen/connect/pump and command sends; the UI
+//! uses bounded channels. Synchronization queues directly for real send results.
+//! Drop retires the captured attempt immediately,
 //! so a slow connect completion cannot install into or retire its replacement.
 use super::{Action, Request, Snapshot};
 use crate::network::{self, Attempt, Connection, Message, Owner, SLOTS, transport::Event};
@@ -78,6 +79,7 @@ pub struct Handle {
     commands: SyncSender<Command>,
     updates: Receiver<Update>,
     gameplay: Receiver<network::commands::Ingress>,
+    synchronization: Receiver<network::synchronization::Ingress>,
 }
 impl Handle {
     pub fn open(open: Open) -> Result<Self, String> {
@@ -97,6 +99,7 @@ impl Handle {
         let (commands, actions) = mpsc::sync_channel(32);
         let (publish, updates) = mpsc::sync_channel(16);
         let (gameplay_tx, gameplay) = mpsc::sync_channel(64);
+        let (synchronization_tx, synchronization) = mpsc::sync_channel(64);
         if let Err(error) = thread::Builder::new()
             .name("multiplayer lobby".into())
             .spawn(move || {
@@ -109,6 +112,7 @@ impl Handle {
                     Publications {
                         lobby: &publish,
                         gameplay: &gameplay_tx,
+                        synchronization: &synchronization_tx,
                     },
                     &stopped,
                     network_timeout,
@@ -133,6 +137,7 @@ impl Handle {
             commands,
             updates,
             gameplay,
+            synchronization,
         })
     }
     pub fn action(&self, action: Action) -> Result<(), String> {
@@ -214,6 +219,54 @@ impl Handle {
             .try_send(Command::Gameplay(binding, target, Box::new(message)))
             .map_err(|_| "Gameplay worker is busy".into())
     }
+    pub fn poll_synchronization(&self) -> Option<network::synchronization::Ingress> {
+        self.synchronization.try_recv().ok()
+    }
+    /// Return the real bounded transport enqueue result, not acceptance by the
+    /// worker command channel. Owner::send only queues bytes under its lock;
+    /// socket I/O and receive/loss maintenance remain on the worker thread.
+    pub fn send_synchronization(
+        &self,
+        binding: network::SessionBinding,
+        target: Option<u8>,
+        message: Message,
+    ) -> Result<bool, String> {
+        if !matches!(message, Message::Barrier { .. } | Message::StateSample(_)) {
+            return Err(network::Error::Tag.to_string());
+        }
+        let destinations = {
+            let state = self.owner.lock().map_err(|e| e.to_string())?;
+            state.binding(binding).map_err(|e| e.to_string())?;
+            state
+                .peers
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, peer)| {
+                    let peer = peer.as_ref()?;
+                    if target.is_some_and(|target| usize::from(target) != slot) {
+                        return None;
+                    }
+                    Some(Connection {
+                        attempt: self.attempt,
+                        slot: slot as u8,
+                        identity: peer.identity,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        if target.is_some() && destinations.is_empty() {
+            return Ok(false);
+        }
+        let mut sent = true;
+        for connection in destinations {
+            match self.owner.send(connection, message.clone()) {
+                Ok(()) => (),
+                Err(network::transport::Error::QueueFull) => sent = false,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Ok(sent)
+    }
     pub fn poll(&self) -> Option<Update> {
         self.updates.try_recv().ok()
     }
@@ -241,6 +294,7 @@ fn session(owner: &Owner, attempt: Attempt) -> Result<[u8; 16], String> {
 struct Publications<'a> {
     lobby: &'a SyncSender<Update>,
     gameplay: &'a SyncSender<network::commands::Ingress>,
+    synchronization: &'a SyncSender<network::synchronization::Ingress>,
 }
 fn run(
     owner: &Owner,
@@ -254,6 +308,7 @@ fn run(
     let Publications {
         lobby: publish,
         gameplay,
+        synchronization,
     } = publications;
     if let Open::Probe(address) = &open {
         let (session, snapshot) =
@@ -363,6 +418,17 @@ fn run(
                     connection,
                     message,
                 } => match *message {
+                    message @ (Message::Barrier { .. } | Message::StateSample(_)) => {
+                        synchronization
+                            .try_send(network::synchronization::Ingress {
+                                binding: binding.ok_or("Synchronization without a world")?,
+                                connection,
+                                message,
+                            })
+                            .map_err(|_| {
+                                "Synchronization ingress queue is full or closed".to_string()
+                            })?;
+                    }
                     message @ (Message::CommandRequest(_)
                     | Message::CommandCommit(_)
                     | Message::CommandDeadline { .. }

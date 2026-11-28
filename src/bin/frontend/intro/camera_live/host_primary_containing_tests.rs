@@ -149,6 +149,7 @@ pub(crate) fn inspection_products(
         hovered: None,
         selected: None,
         title_state: None,
+        marker_state: None,
         started: now,
         tick: 0,
     }

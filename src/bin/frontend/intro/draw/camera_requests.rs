@@ -42,10 +42,7 @@ impl Intro {
                 }
             }
             camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;
-            camera_live::audio::service_with_music_poll(
-                view,
-                self.focus.sent() == self.focus.completed(),
-            )?;
+            camera_live::audio::service_frame(view, self.focus.sent() == self.focus.completed())?;
             if let Some(mut endpoint) = view.camera_endpoint.take() {
                 let result = (|| {
                     let joins = camera_live::UiJoins {

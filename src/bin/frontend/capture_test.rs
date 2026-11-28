@@ -46,6 +46,15 @@ pub(crate) fn capture_scene_overlays(
 ) {
     capture_impl(renderer, &[], panels, Some(scene), None, path);
 }
+pub(crate) fn capture_scene_overlays_at_size(
+    renderer: &Renderer,
+    scene: &Scene,
+    panels: &[&PreparedScene],
+    path: &str,
+    size: [u32; 2],
+) {
+    capture_impl_at_size(renderer, &[], panels, Some(scene), None, path, size);
+}
 pub(crate) fn capture_scene_world_overlays(
     renderer: &Renderer,
     scene: &Scene,
@@ -72,9 +81,31 @@ fn capture_impl(
     prepared: Option<&PreparedScene>,
     path: &str,
 ) {
+    capture_impl_at_size(renderer, world, panels, scene, prepared, path, [1280, 960]);
+}
+
+pub(crate) fn capture_scene_at_size(
+    renderer: &Renderer,
+    scene: &Scene,
+    path: &str,
+    size: [u32; 2],
+) {
+    capture_impl_at_size(renderer, &[], &[], Some(scene), None, path, size);
+}
+
+fn capture_impl_at_size(
+    renderer: &Renderer,
+    world: &[&PreparedScene],
+    panels: &[&PreparedScene],
+    scene: Option<&Scene>,
+    prepared: Option<&PreparedScene>,
+    path: &str,
+    [width, height]: [u32; 2],
+) {
+    assert_eq!(width % 64, 0, "capture rows must meet GPU copy alignment");
     let size = wgpu::Extent3d {
-        width: 1280,
-        height: 960,
+        width,
+        height,
         depth_or_array_layers: 1,
     };
     let texture = |format, usage| {
@@ -121,7 +152,7 @@ fn capture_impl(
     }
     let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 1280 * 960 * 4,
+        size: u64::from(width) * u64::from(height) * 4,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -137,8 +168,8 @@ fn capture_impl(
             buffer: &buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(1280 * 4),
-                rows_per_image: Some(960),
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
             },
         },
         size,
@@ -159,8 +190,8 @@ fn capture_impl(
     }
     let mut png = png::Encoder::new(
         std::io::BufWriter::new(fs::File::create(path).unwrap()),
-        1280,
-        960,
+        width,
+        height,
     );
     png.set_color(png::ColorType::Rgba);
     png.set_depth(png::BitDepth::Eight);

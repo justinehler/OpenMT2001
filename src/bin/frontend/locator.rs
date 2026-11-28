@@ -1,5 +1,7 @@
 //! Original40f260 Locator business list and live report navigation.
 use crate::ui::{self, Surface};
+#[path = "locator/report_text.rs"]
+mod report_text;
 #[path = "locator/strategic.rs"]
 pub(crate) mod strategic;
 #[path = "toolbar_collapse.rs"]
@@ -425,12 +427,11 @@ impl Assets {
         let bx = (((r - l) * 0.5) - (bw as i32 / 2) as f32).trunc() + l;
         let offer_button_bounds = [bx, 117., bx + bw, 117. + generic.textures[76].height as f32];
         let utility_tabs = [291, 301].map(|i| Surface::new(&generic.textures[i]));
-        let fonts = TextureSet::parse(payload("gamedata2/font640/textures.gtd")?)
-            .map_err(|e| e.to_string())?
-            .textures[6..8]
-            .iter()
-            .map(Surface::new)
-            .collect();
+        let font_textures = TextureSet::parse(payload("gamedata2/font640/textures.gtd")?)
+            .map_err(|e| e.to_string())?;
+        let (fonts, tab) = report_text::load_font(&font_textures.textures, |name| {
+            fs::read(installer.join(name)).map_err(|e| e.to_string())
+        })?;
         let property_title_fonts = TextureSet::parse(payload("gamedata2/font640/textures.gtd")?)
             .map_err(|e| e.to_string())?
             .textures[2..4]
@@ -438,8 +439,6 @@ impl Assets {
             .map(Surface::new)
             .collect();
         let property_title_tab = fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab"))
-            .map_err(|e| e.to_string())?;
-        let tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
             .map_err(|e| e.to_string())?;
         let mut order = [0; 45];
         for (v, b) in order
@@ -720,9 +719,10 @@ impl Assets {
             && x >= self.bounds[0]
             && x <= self.bounds[2]
             && y >= top
-            && y < top + 220.
+            && y < self.bounds[3] - 5.
             && matches!(
-                report.land_rent[category].get(state.scroll + ((y - top) / 10.) as usize),
+                report.land_rent[category]
+                    .get(state.scroll + ((y - top) / report_text::ROW_PITCH) as usize),
                 Some(crate::block_information::land_rent::Row::Business(_))
             )
         {
@@ -824,7 +824,7 @@ impl Assets {
             if x < self.bounds[0] || x > self.bounds[2] || y < top || y >= self.bounds[3] - 5. {
                 return None;
             }
-            let row = state.scroll + ((y - top) / 10.) as usize;
+            let row = state.scroll + ((y - top) / report_text::ROW_PITCH) as usize;
             if state.property_tab == 1 && report.categories[category].is_some() {
                 if let Some(crate::block_information::land_rent::Row::Business(b)) =
                     report.land_rent[category].get(row)
@@ -992,7 +992,11 @@ impl Assets {
         let mut surfaces = self.property_background(report.title_colors[category]);
         let mut fonts = self.fonts.clone();
         let mut title_font = self.property_title_fonts.clone();
-        let mut body = self.ownership_fonts.clone();
+        let mut body = if state.property_offer_open() || state.property_rights_open() {
+            self.ownership_fonts.clone()
+        } else {
+            self.fonts.clone()
+        };
         if include_sides {
             self.property_side_buttons(&mut surfaces, state, report, category);
         }
@@ -1003,9 +1007,8 @@ impl Assets {
                 state,
             );
         }
-        //405744..4057b3 uses font3 for both columns, palette0 for labels
-        //and palette3 for right-aligned values. The list starts40 below the
-        //main window top, with the text object's original10-pixel line step.
+        // 405744..4057b3 configures the shared font3 list; 430480 selects
+        // palette9 for its right-aligned values.
         ui::text_widget_style4(
             &mut title_font,
             &self.property_title_tab,
@@ -1053,18 +1056,18 @@ impl Assets {
         } else if matches!(state.property_tab, 2..=4) {
             self.business_rows(&mut surfaces, &mut body, report, category, state)?;
         } else {
-            for (i, row) in rows.iter().enumerate() {
-                let y = self.bounds[1] + 40. + i as f32 * 10.;
-                ui::text_fit(
-                    &mut body,
-                    &self.ownership_tab,
-                    &self.strings[row.heading as usize],
-                    [32., y, 129., y + 10.],
-                    false,
-                    self.text_palette[0],
-                )?;
-                if let Some(value) = &row.value {
-                    let text = match value {
+            let layout = report_text::Layout {
+                bounds: [
+                    self.bounds[0],
+                    self.bounds[1] + 40.,
+                    self.bounds[2] - 1.,
+                    self.bounds[3],
+                ],
+            };
+            let mut line = 0;
+            for row in rows {
+                let text = if let Some(value) = &row.value {
+                    match value {
                         crate::block_information::Value::Label(n) => {
                             self.strings[*n as usize].clone()
                         }
@@ -1076,16 +1079,18 @@ impl Assets {
                             .get(*n as usize - 1)
                             .ok_or("block landlord missing")?
                             .clone(),
-                    };
-                    ui::text_fit(
-                        &mut body,
-                        &self.ownership_tab,
-                        &text,
-                        [130., y, 184., y + 10.],
-                        true,
-                        self.text_palette[3],
-                    )?;
-                }
+                    }
+                } else {
+                    Vec::new()
+                };
+                line += report_text::paint_information_pair(
+                    &mut body,
+                    &self.tab,
+                    &layout,
+                    line,
+                    [&self.strings[row.heading as usize], &text],
+                    &self.text_palette,
+                )?;
             }
         }
         surfaces.extend(fonts);
@@ -1127,6 +1132,17 @@ impl Assets {
     ) {
         self.property_pointer(state, point, report, category);
     }
+    pub fn land_rent_visible_rows(&self) -> usize {
+        report_text::Layout {
+            bounds: [
+                self.bounds[0],
+                self.bounds[1] + 40.,
+                self.bounds[2] - 2.,
+                self.bounds[3],
+            ],
+        }
+        .visible_rows()
+    }
     fn land_rent_rows(
         &self,
         surfaces: &mut Vec<Surface>,
@@ -1136,7 +1152,7 @@ impl Assets {
         state: &crate::utility_report::View,
     ) -> Result<(), String> {
         use crate::block_information::land_rent::Row;
-        let layout = crate::utility_report::Layout {
+        let layout = report_text::Layout {
             bounds: [
                 self.bounds[0],
                 self.bounds[1] + 40.,
@@ -1153,7 +1169,7 @@ impl Assets {
         for (i, row) in report.land_rent[category]
             .iter()
             .skip(state.scroll)
-            .take(22)
+            .take(self.land_rent_visible_rows())
             .enumerate()
         {
             let mut heading = false;
@@ -1208,36 +1224,23 @@ impl Assets {
                 decoration.rect([l, t - 1., r, t], [0xffe55f49; 4]);
             }
             surfaces.push(decoration);
-            let mut left = layout.line(i, false);
-            let right = layout.line(i, true);
-            if !value.is_empty() {
-                let width = ui::text_width(&self.ownership_tab, &value, 1.)? as f32;
-                left[2] = (right[2] - width - 3.).max(left[0]);
-            }
-            ui::text_fit(
+            report_text::paint_linked_pair(
                 fonts,
-                &self.ownership_tab,
-                &label,
-                left,
-                false,
-                self.text_palette[if heading {
-                    16
-                } else if matches!(row, Row::Business(_)) {
-                    9
-                } else {
-                    0
-                }],
+                &self.tab,
+                &layout,
+                i,
+                [&label, &value],
+                [
+                    self.text_palette[if heading {
+                        16
+                    } else if matches!(row, Row::Business(_)) {
+                        9
+                    } else {
+                        0
+                    }],
+                    self.text_palette[report_text::VALUE_PALETTE],
+                ],
             )?;
-            if !value.is_empty() {
-                ui::text_fit(
-                    fonts,
-                    &self.ownership_tab,
-                    &value,
-                    right,
-                    true,
-                    self.text_palette[3],
-                )?;
-            }
         }
         Ok(())
     }
@@ -1692,10 +1695,10 @@ impl Assets {
             }
             let top = self.bounds[1] + 45.;
             let value = &self.strings[if previous { 34 } else { 33 }];
-            let width = ui::text_width(&self.ownership_tab, value, 1.)? as f32;
+            let width = ui::text_width(&self.tab, value, 1.)? as f32;
             ui::text_fit(
                 fonts,
-                &self.ownership_tab,
+                &self.tab,
                 value,
                 [
                     (self.bounds[0] + self.bounds[2] - width) * 0.5,
@@ -1707,7 +1710,7 @@ impl Assets {
                 self.text_palette[0],
             )?;
         }
-        let layout = crate::utility_report::Layout {
+        let layout = report_text::Layout {
             bounds: [
                 self.bounds[0],
                 self.bounds[1] + if period { 60. } else { 40. },
@@ -1715,12 +1718,12 @@ impl Assets {
                 self.bounds[3],
             ],
         };
-        let count = ((layout.bounds[3] - layout.bounds[1] - 5.) / 10.).max(0.) as usize;
+        let count = layout.visible_rows();
         for (index, row) in rows.iter().skip(state.scroll).take(count).enumerate() {
             let mut heading = false;
             let mut rule = false;
             let mut left_color = self.text_palette[0];
-            let mut right_color = self.text_palette[3];
+            let mut right_color = self.text_palette[report_text::VALUE_PALETTE];
             let (label, value) = match row {
                 Row::Blank => continue,
                 Row::Empty => (self.strings[1137].clone(), Vec::new()),
@@ -1755,7 +1758,7 @@ impl Assets {
                     right_color = self.text_palette[if *negative {
                         if *accent { 2 } else { 0 }
                     } else if *accent {
-                        3
+                        report_text::VALUE_PALETTE
                     } else {
                         0
                     }];
@@ -1782,16 +1785,14 @@ impl Assets {
                 decoration.rect([l, t - 1., r, t], [0xffe55f49; 4]);
             }
             surfaces.push(decoration);
-            let mut left = layout.line(index, false);
-            let right = layout.line(index, true);
-            if !value.is_empty() {
-                left[2] = (right[2] - ui::text_width(&self.ownership_tab, &value, 1.)? as f32 - 3.)
-                    .max(left[0]);
-            }
-            ui::text_fit(fonts, &self.ownership_tab, &label, left, false, left_color)?;
-            if !value.is_empty() {
-                ui::text_fit(fonts, &self.ownership_tab, &value, right, true, right_color)?;
-            }
+            report_text::paint_linked_pair(
+                fonts,
+                &self.tab,
+                &layout,
+                index,
+                [&label, &value],
+                [left_color, right_color],
+            )?;
         }
         Ok(())
     }
@@ -4799,10 +4800,12 @@ mod tests {
                         .unwrap();
                     for (row_index, row) in report.land_rent[block.id].iter().enumerate() {
                         if let crate::block_information::land_rent::Row::Business(b) = row {
-                            view.scroll = row_index.saturating_sub(21);
+                            view.scroll =
+                                row_index.saturating_sub(assets.land_rent_visible_rows() - 1);
                             let y = (assets.bounds[1]
                                 + 43.
-                                + ((row_index - view.scroll) as f32 + 0.5) * 10.)
+                                + ((row_index - view.scroll) as f32 + 0.5)
+                                    * report_text::ROW_PITCH)
                                 * 2.;
                             assets.utility_pointer(&mut view, None);
                             assets.land_rent_pointer(

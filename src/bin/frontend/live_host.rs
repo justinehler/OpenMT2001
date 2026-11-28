@@ -73,6 +73,7 @@ pub struct Status {
     pub running: bool,
     pub speed: u32,
     pub network_enabled: bool,
+    pub synchronization: Option<openmt2001::network::synchronization::Status>,
     pub script_paused: bool,
     pub ticks: u32,
     pub interface_ticks: u64,
@@ -114,6 +115,17 @@ pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
         eprintln!(
             "[presentation] Pending callbacks: {:x?}",
             status.pending_presentation
+        );
+    }
+    if let Some(synchronization) = &status.synchronization
+        && synchronization.mismatch_count
+            != previous
+                .and_then(|s| s.synchronization.as_ref())
+                .map_or(0, |s| s.mismatch_count)
+    {
+        eprintln!(
+            "[network] {} desync differences reported; session continues.",
+            synchronization.mismatch_count
         );
     }
     let key = |s: &Status| {
@@ -285,6 +297,8 @@ enum CameraSuppliers {
 }
 
 pub struct Host {
+    /// Barrier completion requests 0x4ebaa0 on the retained process clock.
+    pub(crate) synchronize_time: bool,
     ai_warnings: AiWarnings,
     //Missing process source is explicit for legacy CPU Hosts. Production binds
     //the SAME Assets-born handle before commands/startup are consumed.
@@ -297,6 +311,9 @@ pub struct Host {
     /// Authority supplied only by Inputs::session_worker selected profile.
     pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
     pub autosave_status: Option<crate::save_menu::AutosaveStatus>,
+    /// Headless only: the camera records and interface view an autosave
+    /// writes when neither camera owner is installed.
+    pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
     camera_suppliers: Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
     presentation_started: bool,
@@ -422,7 +439,7 @@ impl Host {
     /// The renderer exists only after the loaded inspection reaches the UI,
     /// so the worker performs this ordered presentation step at that seam.
     pub fn activate_saved_auction(&mut self, session: &mut Session<'_>) -> Result<(), String> {
-        if session.saved_game_mode != Some(2)
+        if session.saved_logic_mode != Some(2)
             || session.world.city.auction.controller.reference == 0
             || session.world.city.auction.controller.record[0x7d] == 0
         {
@@ -523,12 +540,14 @@ impl Host {
 
     pub fn new(camera: [f32; 3]) -> Self {
         Self {
+            synchronize_time: false,
             ai_warnings: AiWarnings::default(),
             process_runtime: None,
             camera_bridge: None,
             ui_camera_source: None,
             autosave_profile_root: None,
             autosave_status: None,
+            fixed_save_cameras: None,
             camera_suppliers: None,
             time_runtime: Default::default(),
             presentation_started: false,
@@ -988,7 +1007,7 @@ impl Host {
         if let Some(state) = state {
             self.interface_ticks = state.interface_ticks;
             self.auction_seconds = state.announcement_seconds;
-            if session.saved_game_mode == Some(2) {
+            if session.saved_logic_mode == Some(2) {
                 let auction = self
                     .auction
                     .as_mut()
@@ -1045,12 +1064,6 @@ impl Host {
                 } else {
                     ""
                 }
-            );
-        }
-        if !self.running {
-            let _ = crate::transport_audio::submit(
-                &self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
             );
         }
     }
@@ -1529,6 +1542,10 @@ impl Host {
             auction,
             running: self.running,
             speed: self.policy.scheduler.iterations,
+            synchronization: session
+                .connected
+                .as_ref()
+                .map(|c| c.synchronization.samples.status.clone()),
             network_enabled: self.policy.scheduler.network_enabled,
             script_paused: session.world.pause.has_reason(),
             ticks: session.world.clock.timing[0],
@@ -2167,12 +2184,6 @@ impl Host {
             return;
         }
         if !self.running || self.failure.is_some() || session.world.pause.has_reason() {
-            if let Err(error) = crate::transport_audio::submit(
-                &self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
-            ) {
-                self.fail(error);
-            }
             return;
         }
         if let Err(error) = self.request_camera(camera_bridge::Operation::CurrentPose) {
@@ -2189,6 +2200,7 @@ impl Host {
         let ai_warnings = &mut self.ai_warnings;
         let camera_bridge = &mut self.camera_bridge;
         let ui_camera_source = &self.ui_camera_source;
+        let fixed_save_cameras = self.fixed_save_cameras;
         let ui_camera_epoch = session.world.topology.epoch();
         let interface_ticks = self.interface_ticks;
         let mut autosave_retired = false;
@@ -2267,6 +2279,8 @@ impl Host {
                             };
                             let raw=observation.raw_capture.ok_or_else(||Failure::UnsupportedState("Raw camera capture absent".into()))?;
                             (raw.cameras,raw.interface_mode.map_err(Failure::UnsupportedState)?)
+                        } else if let (None,Some((records,mode)))=(ui_camera_source,fixed_save_cameras) {
+                            (openmt2001::camera::bank::Capture::from_records(records),mode)
                         } else {
                             let source=ui_camera_source.as_ref().ok_or(Failure::UnsupportedCamera)?;
                             let snapshot=source.read(ui_camera_epoch).map_err(Failure::UnsupportedState)?;
@@ -2814,43 +2828,17 @@ impl Host {
             Ok(()) => {
                 if let Err(error) = crate::transport_audio::submit(
                     &transport_audio,
-                    crate::transport_audio::Operation::RoadProximity {
-                        reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
-                        nearest: session.road_traffic.proximity.nearest,
-                    },
-                ) {
-                    self.fail(error);
-                }
-                // Native 4afcde updates the resident crowd bed immediately
-                // after 4af860's road ambience from the 52 live categories.
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::ResidentCrowd(
-                        crate::transport_audio::resident_crowd_weight(
-                            &session.world.city.categories,
-                            camera,
-                        ),
-                    ),
-                ) {
-                    self.fail(error);
-                }
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::Construction(construction_sounds),
-                ) {
-                    self.fail(error);
-                }
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::Blocks(Box::new(
-                        crate::transport_audio::block_audio::Snapshot::from_categories(
-                            &session.world.city.categories,
-                            camera,
-                            session.world.clock.hour(),
-                            session.world.clock.timing[0],
-                            block_previous_tick,
-                            block_random_state,
-                        ),
+                    crate::transport_audio::Operation::City(Box::new(
+                        crate::transport_audio::CityInputs {
+                            reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
+                            nearest: session.road_traffic.proximity.nearest,
+                            categories: session.world.city.categories,
+                            construction: construction_sounds,
+                            hour: session.world.clock.hour(),
+                            tick: session.world.clock.timing[0],
+                            previous_tick: block_previous_tick,
+                            initial_random_state: block_random_state,
+                        },
                     )),
                 ) {
                     self.fail(error);
@@ -3418,12 +3406,12 @@ impl Host {
             .filter_map(|(index, task)| {
                 matches!(
                     u32::from_le_bytes(task[16..20].try_into().unwrap()),
-                    0x4baa10 | 0x4ba580 | 0x481680
+                    0x4baa10 | 0x4ba580 | 0x481680 | 0x450410
                 )
                 .then_some(index)
             })
             .collect();
-        if indices.len() != 3
+        if indices.len() != 3 + usize::from(session.connected.is_some())
             || [0x4baa10, 0x4ba580, 0x481680].into_iter().any(|address| {
                 indices
                     .iter()
@@ -3493,6 +3481,14 @@ impl Host {
                         .interface_tick(session, assets)
                         .map_err(camera_bridge::RequestError::Failed)
                         .and_then(|()| self.camera_central_tail(session)),
+                    0x450410 => session
+                        .pump_connected_synchronization(&mut self.policy)
+                        .map(|closed| {
+                            if closed {
+                                self.synchronize_time = true;
+                            }
+                        })
+                        .map_err(camera_bridge::RequestError::Failed),
                     0x481680 => {
                         self.tick(session, assets);
                         if let Some(error) = &self.failure {

@@ -1,15 +1,15 @@
 //! Bounded remote command qualification (0x450490 -> 0x451720 -> 0x450a30).
 //!
 //! Native payload schemas below exclude the common 20-byte header (kind at +4,
-//! size +8, Total due +12, delayed byte +16). Construction and the short
+//! size +8, Total due +12, delayed byte +16). Construction, demolition, business open and the short
 //! command16 transfer are qualified. The 52-byte command16 auction descriptor is
 //! a DIFFERENT schema, not an alternative way to submit a property transfer.
 //!
 //! | Family | Native payload | Remote support |
 //! |---|---|---|
 //! | 0f construction | category i8, rectangle i8[4], height i8, variation/business/kind u32, quality/owner i8, components f32[4] (construction::Command::packet) | supported; quote components retained |
-//! | 10 demolition | category i8, building u16, amount f32 | unsupported |
-//! | 11 business open | kind u32, building u32, owner u32, stock_argument u8 | unsupported |
+//! | 10 demolition | +0 category i8, +1 padding, +2 building u16, +4 amount f32 (8 bytes) | supported; linked business owner authorizes; quote retained |
+//! | 11 business open | +0 kind u32, +4 building u32, +8 owner u32, +12 stock_argument u8, +13 padding[3] (16 bytes) | supported; building owner authorizes; authority generates completions |
 //! | 12 conversion | kind u32, building u32, owner u32 | unsupported |
 //! | 13 business sale | business u32, player u8 | unsupported |
 //! | 15 takeover | building u32 | unsupported |
@@ -36,6 +36,57 @@ pub struct Request {
     pub payload: Vec<u8>,
 }
 impl Request {
+    pub fn demolition(serial: u64, owner: u8, command: &crate::demolition::Command) -> Self {
+        Self {
+            serial,
+            owner,
+            kind: 0x10,
+            payload: command.packet()[20..].to_vec(),
+        }
+    }
+    pub fn demolition_payload(&self) -> Result<crate::demolition::Command> {
+        if self.kind != 0x10 || self.payload.len() != 8 {
+            return Err(Error::Unsupported);
+        }
+        let mut packet = [0; 28];
+        packet[4..8].copy_from_slice(&0x10u32.to_le_bytes());
+        packet[20..].copy_from_slice(&self.payload);
+        let command = crate::demolition::Command::from_packet(&packet).map_err(|_| Error::Row)?;
+        if !(0..52).contains(&command.category)
+            || !(1..=6).contains(&self.owner)
+            || !command.amount.is_finite()
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
+    pub fn business_open(serial: u64, command: &crate::business_open::Command) -> Self {
+        let mut packet = [0; 36];
+        command.write_packet(&mut packet);
+        Self {
+            serial,
+            owner: command.owner as u8,
+            kind: 0x11,
+            payload: packet[20..].to_vec(),
+        }
+    }
+    pub fn business_open_payload(&self) -> Result<crate::business_open::Command> {
+        if self.kind != 0x11 || self.payload.len() != 16 {
+            return Err(Error::Unsupported);
+        }
+        let mut packet = [0; 36];
+        packet[4..8].copy_from_slice(&0x11u32.to_le_bytes());
+        packet[20..].copy_from_slice(&self.payload);
+        let command =
+            crate::business_open::Command::from_packet(&packet).map_err(|_| Error::Row)?;
+        if command.kind >= 45
+            || !(1..=6).contains(&command.owner)
+            || command.owner != u32::from(self.owner)
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
     pub fn construction(serial: u64, command: &crate::construction::Command) -> Self {
         Self {
             serial,
@@ -69,6 +120,8 @@ impl Request {
     pub(super) fn validate(&self) -> Result<()> {
         match self.kind {
             0x0f => self.construction_payload().map(|_| ()),
+            0x10 => self.demolition_payload().map(|_| ()),
+            0x11 => self.business_open_payload().map(|_| ()),
             0x16 => self.transfer_payload().map(|_| ()),
             _ => Err(Error::Unsupported),
         }
@@ -124,6 +177,67 @@ pub struct Ingress {
     pub(super) message: Message,
 }
 
+/// Read-only target records borrowed from the actual Session, including when
+/// AI dispatch already holds the mutable category and business fields separately.
+#[derive(Clone, Copy, Default)]
+pub struct Targets<'a> {
+    pub buildings: &'a [[u8; 0x394]],
+    pub businesses: &'a [[u8; 0x220]],
+}
+impl Targets<'_> {
+    fn building(&self, id: u32) -> Result<&[u8; 0x394]> {
+        let row = self.buildings.get(id as usize).ok_or(Error::Row)?;
+        if row[0x3f] == 0 || crate::player_manager::word(row, 0) != id {
+            return Err(Error::Row);
+        }
+        Ok(row)
+    }
+    fn demolition_owner(&self, command: &crate::demolition::Command) -> Result<u8> {
+        let row = self.building(u32::from(command.building))?;
+        let category = crate::player_manager::word(row, 0x40);
+        if command.category < 0
+            || category != 0x617628 + command.category as u32 * 380
+            || crate::player_manager::word(row, 0x14) != 4
+        {
+            return Err(Error::Row);
+        }
+        // 451458 debits the linked business owner, not the category landlord.
+        let business = crate::player_manager::word(row, 0x1c);
+        if business == u32::MAX {
+            return Ok(row[0x2d]);
+        }
+        let business = self.businesses.get(business as usize).ok_or(Error::Row)?;
+        if business[0x21c] == 0 {
+            return Err(Error::Row);
+        }
+        Ok(business[0xa])
+    }
+    fn check(&self, request: &Request) -> Result<()> {
+        match request.kind {
+            0x10 => {
+                if self.demolition_owner(&request.demolition_payload()?)? != request.owner {
+                    return Err(Error::Peer);
+                }
+            }
+            0x11 => {
+                let command = request.business_open_payload()?;
+                let row = self.building(command.building)?;
+                // Completion/AI opening acts for the building's gameplay owner.
+                if row[0x2d] != request.owner {
+                    return Err(Error::Peer);
+                }
+                if crate::player_manager::word(row, 0x14) != 4
+                    || crate::player_manager::word(row, 0x1c) != u32::MAX
+                {
+                    return Err(Error::Row);
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+}
+
 /// Simulation-thread command adapter. All simulation storage is borrowed from
 /// the actual Session; this object owns neither a shadow queue nor a clock.
 pub struct Adapter {
@@ -137,7 +251,7 @@ pub struct Adapter {
     next_enqueued: u64,
     deadline: u32,
     closed_tick: Option<u32>,
-    pending_local: std::collections::VecDeque<Request>,
+    pending_local: std::collections::VecDeque<(Request, bool)>,
 }
 impl Adapter {
     pub fn new(
@@ -217,9 +331,16 @@ impl Adapter {
     }
     /// Client only sends a request. Authority assigns Total+25 exactly once,
     /// then its local queue consumes the very same commit as every client.
-    pub fn request(&mut self, owner: &Owner, request: Request, tick: u32) -> Result<Message> {
+    pub fn request(
+        &mut self,
+        owner: &Owner,
+        request: Request,
+        tick: u32,
+        targets: Targets<'_>,
+    ) -> Result<Message> {
         owner.validate_binding(self.binding)?;
         self.authorize(self.local_peer, &request)?;
+        targets.check(&request)?;
         if self.host && self.closed_tick == Some(tick) {
             return Err(Error::Phase);
         }
@@ -229,18 +350,24 @@ impl Adapter {
             Ok(Message::CommandRequest(request))
         }
     }
-    pub fn next_transfer(&mut self, transfer: Transfer) -> Result<Request> {
+    fn next_serial(&mut self) -> Result<u64> {
         let serial = self.next_request;
         self.next_request = serial.checked_add(1).ok_or(Error::Exhausted)?;
+        Ok(serial)
+    }
+    pub fn next_transfer(&mut self, transfer: Transfer) -> Result<Request> {
+        let serial = self.next_serial()?;
         Ok(Request::transfer(serial, transfer))
     }
     pub fn next_construction(&mut self, command: &crate::construction::Command) -> Result<Request> {
-        let serial = self.next_request;
-        self.next_request = serial.checked_add(1).ok_or(Error::Exhausted)?;
+        let serial = self.next_serial()?;
         Ok(Request::construction(serial, command))
     }
     fn commit(&mut self, peer: u8, request: Request, tick: u32) -> Result<Message> {
         self.authorize(peer, &request)?;
+        self.commit_authorized(peer, request, tick)
+    }
+    fn commit_authorized(&mut self, peer: u8, request: Request, tick: u32) -> Result<Message> {
         // 451720 adds authority Total+25; clients never call that producer.
         // Reject the unresolved native -1/wrapped deadline instead of applying early.
         let due = tick
@@ -262,13 +389,20 @@ impl Adapter {
             _ => None,
         }
     }
-    pub fn receive(&mut self, owner: &Owner, ingress: Ingress, tick: u32) -> Result<Message> {
+    pub fn receive(
+        &mut self,
+        owner: &Owner,
+        ingress: Ingress,
+        tick: u32,
+        targets: Targets<'_>,
+    ) -> Result<Message> {
         if ingress.binding != self.binding {
             return Err(Error::World);
         }
         owner.validate_connection(self.binding, ingress.connection, !self.host)?;
         match ingress.message {
             Message::CommandRequest(request) if self.host => {
+                targets.check(&request)?;
                 self.commit(ingress.connection.slot(), request, tick)
             }
             message @ (Message::CommandCommit(_)
@@ -319,16 +453,28 @@ impl Adapter {
         Ok(())
     }
     #[cfg(feature = "lua4")]
+    #[allow(clippy::too_many_arguments)]
     pub fn submit(
         &mut self,
         worker: &super::lobby::worker::Handle,
         command: crate::live_commands::Command,
         queue: &mut crate::live_commands::Queue,
         categories: &mut [[u8; 0x17c]; 52],
+        targets: Targets<'_>,
         tick: u32,
     ) -> std::result::Result<(), String> {
         let request = match command {
             crate::live_commands::Command::Build(command) => self.next_construction(&command),
+            crate::live_commands::Command::Demolish(command) => {
+                let owner = targets
+                    .demolition_owner(&command)
+                    .map_err(|e| e.to_string())?;
+                let serial = self.next_serial().map_err(|e| e.to_string())?;
+                Ok(Request::demolition(serial, owner, &command))
+            }
+            crate::live_commands::Command::Open(command) => self
+                .next_serial()
+                .map(|serial| Request::business_open(serial, &command)),
             crate::live_commands::Command::PropertyTransfer {
                 category,
                 owner,
@@ -346,22 +492,84 @@ impl Adapter {
             _ => return Err(Error::Unsupported.to_string()),
         };
         let request = request.map_err(|e| e.to_string())?;
+        self.submit_request(worker, request, false, queue, categories, targets, tick)
+    }
+    /// Only the authority's pending-world transition generates completions,
+    /// including buildings owned by remote humans. Network requests still
+    /// require the sending connection to own the command's gameplay owner.
+    #[cfg(feature = "lua4")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_completion(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        command: &crate::business_open::Command,
+        queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
+        targets: Targets<'_>,
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        let serial = self.next_serial().map_err(|e| e.to_string())?;
+        self.submit_request(
+            worker,
+            Request::business_open(serial, command),
+            true,
+            queue,
+            categories,
+            targets,
+            tick,
+        )
+    }
+    #[cfg(feature = "lua4")]
+    fn authorize_local(&self, request: &Request, completion: bool) -> Result<()> {
+        if !completion {
+            return self.authorize(self.local_peer, request);
+        }
+        if !self.host || request.kind != 0x11 {
+            return Err(Error::Peer);
+        }
+        request.validate()?;
+        if self
+            .owners
+            .get(usize::from(request.owner).wrapping_sub(1))
+            .is_none()
+        {
+            return Err(Error::Row);
+        }
+        if self.requests[0].is_some_and(|last| request.serial <= last) {
+            return Err(Error::Sequence);
+        }
+        Ok(())
+    }
+    #[cfg(feature = "lua4")]
+    #[allow(clippy::too_many_arguments)]
+    fn submit_request(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        request: Request,
+        completion: bool,
+        queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
+        targets: Targets<'_>,
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        worker.validate_binding(self.binding)?;
+        self.authorize_local(&request, completion)
+            .map_err(|e| e.to_string())?;
+        targets.check(&request).map_err(|e| e.to_string())?;
         if self.host && self.closed_tick == Some(tick) {
-            worker.validate_binding(self.binding)?;
-            self.authorize(self.local_peer, &request)
-                .map_err(|e| e.to_string())?;
             if self.pending_local.len() >= 64 {
                 return Err("Authority command queue is full".into());
             }
-            self.pending_local.push_back(request);
+            self.pending_local.push_back((request, completion));
             return Ok(());
         }
-        self.authorize(self.local_peer, &request)
-            .map_err(|e| e.to_string())?;
         check_placement(&request, categories).map_err(|e| e.to_string())?;
-        let message = self
-            .request(worker.gameplay_owner(), request, tick)
-            .map_err(|e| e.to_string())?;
+        let message = if self.host {
+            self.commit_authorized(self.local_peer, request, tick)
+                .map_err(|e| e.to_string())?
+        } else {
+            Message::CommandRequest(request)
+        };
         if let crate::network::Message::CommandCommit(commit) = &message {
             self.enqueue(commit, queue, categories, tick)
                 .map_err(|e| e.to_string())?;
@@ -371,12 +579,14 @@ impl Adapter {
     /// Ordered ingress, kind8 resume and five-Hz authority deadlines. Borrow the
     /// actual Session queue/pause/tasks; no replacement timer records are made.
     #[cfg(feature = "lua4")]
+    #[allow(clippy::too_many_arguments)]
     pub fn pump(
         &mut self,
         worker: &super::lobby::worker::Handle,
         tick: u32,
         queue: &mut crate::live_commands::Queue,
         categories: &mut [[u8; 0x17c]; 52],
+        targets: Targets<'_>,
         pause: &mut crate::pause::State,
         tasks: &mut [[u8; 20]],
     ) -> std::result::Result<(), String> {
@@ -392,10 +602,13 @@ impl Adapter {
         if self.host && self.closed_tick == Some(tick) {
             return Ok(());
         }
-        while let Some(request) = self.pending_local.pop_front() {
+        while let Some((request, completion)) = self.pending_local.pop_front() {
+            self.authorize_local(&request, completion)
+                .map_err(|e| e.to_string())?;
+            targets.check(&request).map_err(|e| e.to_string())?;
             check_placement(&request, categories).map_err(|e| e.to_string())?;
             let message = self
-                .request(worker.gameplay_owner(), request, tick)
+                .commit_authorized(self.local_peer, request, tick)
                 .map_err(|e| e.to_string())?;
             if let Message::CommandCommit(commit) = message {
                 self.enqueue(&commit, queue, categories, tick)
@@ -412,7 +625,7 @@ impl Adapter {
                 _ => Ok(()),
             };
             let message = match placement
-                .and_then(|()| self.receive(worker.gameplay_owner(), ingress, tick))
+                .and_then(|()| self.receive(worker.gameplay_owner(), ingress, tick, targets))
             {
                 Ok(message) => message,
                 Err(error) if self.is_host() => {
@@ -531,6 +744,8 @@ impl Adapter {
                 .map_err(|_| Error::Row)?;
                 crate::live_commands::Command::Build(command)
             }
+            0x10 => crate::live_commands::Command::Demolish(request.demolition_payload()?),
+            0x11 => crate::live_commands::Command::Open(request.business_open_payload()?),
             0x16 => {
                 let t = request.transfer_payload()?;
                 crate::live_commands::Command::PropertyTransfer {

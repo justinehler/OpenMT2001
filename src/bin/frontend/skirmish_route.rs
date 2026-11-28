@@ -136,6 +136,11 @@ impl Route {
         self.error = None;
         Ok(())
     }
+    pub fn advance_highlight(&mut self) {
+        if self.roster.as_ref().is_some_and(|state| state.visible) {
+            self.roster_panel.advance_highlight();
+        }
+    }
     pub fn visible(&self) -> bool {
         self.setup.as_ref().is_some_and(|s| s.visible)
             || self.roster.as_ref().is_some_and(|s| s.visible)

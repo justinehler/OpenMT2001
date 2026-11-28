@@ -32,18 +32,23 @@ trait MusicControl {
     fn volume(&self, level: u8);
     fn stop(&self);
 }
-impl MusicControl for rodio::Sink {
+struct MusicSource {
+    sink: rodio::Sink,
+    level: Cell<u8>,
+}
+impl MusicControl for MusicSource {
     fn pause(&self) {
-        rodio::Sink::pause(self);
+        self.sink.pause();
     }
     fn run(&self) {
-        self.play();
+        self.sink.play();
     }
     fn volume(&self, level: u8) {
-        self.set_volume(crate::music_gain::amplitude(level));
+        self.level.set(level);
+        self.sink.set_volume(crate::music_gain::amplitude(level));
     }
     fn stop(&self) {
-        rodio::Sink::stop(self);
+        self.sink.stop();
     }
 }
 
@@ -224,7 +229,10 @@ impl SharedAudio {
         mixer: &rodio::mixer::Mixer,
         token: MusicToken,
     ) -> Result<Music, String> {
-        let sink = Rc::new(rodio::Sink::connect_new(mixer));
+        let sink = Rc::new(MusicSource {
+            sink: rodio::Sink::connect_new(mixer),
+            level: Cell::new(self.music_level()),
+        });
         let owner = token.owner.upgrade().ok_or("Music owner retired")?;
         self.register(token.clone(), sink.clone())?;
         Ok(Music {
@@ -237,11 +245,18 @@ impl SharedAudio {
 
 /// Retains one existing Sink and its playback position. Drop stops, never detaches.
 pub struct Music {
-    sink: Rc<rodio::Sink>,
+    sink: Rc<MusicSource>,
     token: MusicToken,
     _owner: Rc<Cell<Option<u64>>>,
 }
 impl Music {
+    /// Member level (+0x438), separate from the shared target at 0x544f24.
+    pub fn source_level(&self) -> u8 {
+        self.sink.level.get()
+    }
+    pub fn set_source_level(&self, level: u8) {
+        self.sink.volume(level);
+    }
     pub fn is_current(&self) -> bool {
         self.token.is_current()
     }
@@ -252,14 +267,14 @@ impl Music {
         if !self.is_current() {
             return Err("Stale music generation cannot append".into());
         }
-        self.sink.append(source);
+        self.sink.sink.append(source);
         Ok(())
     }
 }
 impl Deref for Music {
     type Target = rodio::Sink;
     fn deref(&self) -> &Self::Target {
-        &self.sink
+        &self.sink.sink
     }
 }
 impl Drop for Music {

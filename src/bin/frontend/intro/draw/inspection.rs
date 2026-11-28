@@ -318,6 +318,25 @@ impl Intro {
                     .selection
                     .pick(view.camera, &view.scene, point, view.selected)
             });
+            // Host status carries world.clock.timing[0] (00822d40), the
+            // simulation tick read by the original marker renderer at 4b4f40.
+            if let Some(surface) = self.assets.selection.refresh_marker_surface(
+                &mut view.marker_state,
+                [view.selected, hovered],
+                &view.scene,
+                view.live_status.as_ref().map_or(0, |status| status.ticks),
+                view.title_state != Some((view.selected, hovered)),
+            )? {
+                let mut draw = surface.draw();
+                draw.mode = openmt2001::render::SurfaceMode::StaticLit;
+                self.renderer.update_surface(
+                    &mut view.markers,
+                    0,
+                    &draw,
+                    view.scene.camera,
+                    view.scene.fog,
+                )?;
+            }
             if view.title_state != Some((view.selected, hovered)) {
                 if view.title_state.map(|s| s.0) != Some(view.selected) {
                     view.information = match (
@@ -368,19 +387,6 @@ impl Intro {
                 }
                 view.title_state = Some((view.selected, hovered));
                 view.hovered = hovered;
-                let surface =
-                    self.assets
-                        .selection
-                        .marker_surface(view.selected, hovered, &view.scene)?;
-                let mut draw = surface.draw();
-                draw.mode = openmt2001::render::SurfaceMode::StaticLit;
-                self.renderer.update_surface(
-                    &mut view.markers,
-                    0,
-                    &draw,
-                    view.scene.camera,
-                    view.scene.fog,
-                )?;
                 let name = |index: Option<crate::selection::Hit>| {
                     index
                         .map(|i| {
@@ -535,7 +541,9 @@ impl Intro {
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &view.markers);
             }
-            if let (Some(menu), Some(status)) = (&self.menu, &view.live_status) {
+            if view.city_layers().hud_visible()
+                && let (Some(menu), Some(status)) = (&self.menu, &view.live_status)
+            {
                 view.event_list.update(
                     menu.event_list_assets(),
                     &self.renderer,
@@ -548,7 +556,7 @@ impl Intro {
                         .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
-            if !view.options_visible() {
+            if view.city_layers().hud_visible() {
                 // Native 404eb0 closes the current main/Block Information panel
                 // before 43be20 opens the construction planner. Keep its retained
                 // state for dismissal, but do not composite glyphs behind the
@@ -783,19 +791,6 @@ impl Intro {
                     view,
                 )?;
                 if let Some(menu) = &self.menu {
-                    view.stats_panel.update(
-                        menu.stats_assets(),
-                        &self.renderer,
-                        view.live_status
-                            .as_ref()
-                            .and_then(|status| status.stats.as_ref()),
-                    )?;
-                    if let Some(panel) = &view.stats_panel.prepared {
-                        self.renderer
-                            .draw_overlay(&self.color_view, &self.depth_view, panel);
-                    }
-                }
-                if let Some(menu) = &self.menu {
                     view.market_share_panel.update(
                         menu.market_share_assets(),
                         &self.renderer,
@@ -825,6 +820,22 @@ impl Intro {
                     )?;
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &panel);
+                }
+            }
+            // Statistics is a secondary-group screen, like Options. Do not
+            // composite the retained primary HUD underneath its translucent mesh.
+            // 49dcb0/4b5370 retain the city camera and add no fullscreen fade.
+            if let Some(menu) = &self.menu {
+                view.stats_panel.update(
+                    menu.stats_assets(),
+                    &self.renderer,
+                    view.live_status
+                        .as_ref()
+                        .and_then(|status| status.stats.as_ref()),
+                )?;
+                if let Some(panel) = &view.stats_panel.prepared {
+                    self.renderer
+                        .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
             if view.options_visible() {

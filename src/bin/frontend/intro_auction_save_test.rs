@@ -264,7 +264,8 @@ fn saved_auction_worker_rebuilds_and_saves() {
             );
             let bytes = fs::read(&saved).unwrap();
             let parsed = openmt2001::save::SaveFile::parse(&bytes).unwrap();
-            assert_eq!(parsed.game_mode().unwrap(), mode);
+            assert_eq!(parsed.clock().unwrap().timing[5], mode);
+            assert_eq!(parsed.session_option_word().unwrap(), 0);
             assert_eq!(parsed.auction().unwrap().is_some(), phase < 2);
             if phase == 3 {
                 let ext = openmt2001::save::extension::Extension::parse(&parsed)

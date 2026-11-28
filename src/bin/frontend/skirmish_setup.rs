@@ -252,7 +252,6 @@ struct Typeface {
 }
 pub struct SetupPanel {
     headings: [usize; 2],
-    green_headers: bool,
     base: Vec<Surface>,
     regions: Vec<Region>,
     generic: Vec<Surface>,
@@ -279,7 +278,6 @@ impl SetupPanel {
             strings: vec![],
             options,
             headings: [2226, 2228],
-            green_headers: true,
             backing: 0,
         }
     }
@@ -354,7 +352,6 @@ impl SetupPanel {
             .collect();
         let panel = Self {
             headings: [2226, 2228],
-            green_headers: true,
             base,
             regions,
             generic,
@@ -443,7 +440,6 @@ impl SetupPanel {
         Ok(outcome)
     }
     pub fn network_mode(&mut self) {
-        self.green_headers = false;
         self.headings = [1683, 1692]; // Network Game / New Network Session.
     }
     pub fn options(&self) -> &Options {
@@ -710,22 +706,12 @@ impl SetupPanel {
         Ok(())
     }
     fn section_header(&self, pages: &mut [Surface], id: usize, name: &str) -> Result<(), String> {
-        if self.green_headers {
-            ui::section_header(
-                pages,
-                &self.fonts[0].tab,
-                self.label(id)?,
-                self.bounds(name)?,
-            )
-        } else {
-            ui::text_widget_style9(
-                pages,
-                &self.fonts[0].tab,
-                self.label(id)?,
-                self.bounds(name)?,
-                0xffffffff,
-            )
-        }
+        ui::section_header(
+            pages,
+            &self.fonts[0].tab,
+            self.label(id)?,
+            self.bounds(name)?,
+        )
     }
     fn surfaces(
         &self,
@@ -1572,6 +1558,116 @@ mod map_catalog_state_tests {
             name_focused: false,
             first: 7,
             description_first: 9,
+        }
+    }
+    #[test]
+    fn network_host_section_headers_match_skirmish_draw_output() {
+        // A minimal inert PE supplies a synthetic Profit option to the real parser.
+        let mut pe = vec![0u8; 0x200 + 7 * 24];
+        pe[..2].copy_from_slice(b"MZ");
+        pe[0x3c..0x40].copy_from_slice(&0x40u32.to_le_bytes());
+        pe[0x40..0x44].copy_from_slice(b"PE\0\0");
+        pe[0x44..0x46].copy_from_slice(&0x14cu16.to_le_bytes());
+        pe[0x46..0x48].copy_from_slice(&1u16.to_le_bytes());
+        pe[0x54..0x56].copy_from_slice(&32u16.to_le_bytes());
+        pe[0x58..0x5a].copy_from_slice(&0x10bu16.to_le_bytes());
+        pe[0x74..0x78].copy_from_slice(&openmt2001::skirmish::OPTION_BASE.to_le_bytes());
+        pe[0x88..0x8c].copy_from_slice(&(7u32 * 24).to_le_bytes());
+        pe[0x8c..0x90].copy_from_slice(&0x200u32.to_le_bytes());
+        for (i, word) in [3u32, 1884, 100, 10000, 100, 1000].into_iter().enumerate() {
+            pe[0x200 + i * 4..0x204 + i * 4].copy_from_slice(&word.to_le_bytes());
+        }
+        let options = Options::from_pe(&PeImage::parse(&pe).unwrap()).unwrap();
+        let mut panel = SetupPanel::inert(options);
+        panel.fonts = (0..4)
+            .map(|_| Typeface {
+                pages: vec![Surface::solid(); 2],
+                tab: ui::synthetic_text_font(5, 8),
+            })
+            .collect();
+        panel.generic = vec![Surface::solid(); 300];
+        panel.strings = vec![vec![]; 2300];
+        panel.strings[0] = (0..95).collect();
+        for (id, text) in [
+            (1880, "Session Name"),
+            (1879, "Difficulty"),
+            (1883, "Scenario Description"),
+            (1884, "Profit"),
+        ] {
+            panel.strings[id] = crate::load::ascii(text);
+        }
+        for (i, name) in ["LABEL1", "LABEL2", "LABEL4", "LABEL7"]
+            .into_iter()
+            .enumerate()
+        {
+            panel.regions.push(Region {
+                name: format!("NETWORK_HOST_{name}"),
+                part: 0,
+                bounds: [300., 80. + i as f32 * 40., 600., 100. + i as f32 * 40.],
+            });
+        }
+        for name in [
+            "BACKING2",
+            "INFO7",
+            "SESS_LIST",
+            "SESS_TITLE_AREA",
+            "SESS_INFO_TITLE",
+            "TITLE_AREA",
+            "INFO1",
+            "INFO4",
+            "EASY_CUP",
+            "MEDIUM_CUP",
+            "HARD_CUP",
+            "TOGGLE1",
+            "TOGGLE2",
+            "TOGGLE3",
+            "EASY_LABEL",
+            "MEDIUM_LABEL",
+            "HARD_LABEL",
+            "MOD01_MINUS",
+            "MOD01_PLUS",
+            "OK_BUTTON",
+            "BACK_BUTTON",
+        ] {
+            panel.regions.push(Region {
+                name: format!("NETWORK_HOST_{name}"),
+                part: 0,
+                bounds: [20., 20., 200., 240.],
+            });
+        }
+        let mut state = state();
+        state.modifier.select(&panel.options, 3);
+        let offline = panel.surfaces(&state, None, false, None).unwrap();
+        panel.network_mode();
+        assert_eq!(panel.headings, [1683, 1692]);
+        let network = panel.surfaces(&state, None, false, None).unwrap();
+        // Inert title strings isolate the mode change from section captions.
+        assert_eq!(offline.len(), network.len());
+        for (a, b) in offline.iter().zip(&network) {
+            assert_eq!(a.vertices, b.vertices);
+            assert_eq!(a.alpha, b.alpha);
+        }
+        let font = &network[network.len() - 8];
+        for (name, id) in [
+            ("LABEL1", 1880),
+            ("LABEL2", 1879),
+            ("LABEL4", 1884),
+            ("LABEL7", 1883),
+        ] {
+            let mut expected = vec![Surface::solid(); 2];
+            ui::section_header(
+                &mut expected,
+                &panel.fonts[0].tab,
+                &panel.strings[id],
+                panel.bounds(name).unwrap(),
+            )
+            .unwrap();
+            assert!(!expected[0].vertices.is_empty());
+            assert!(
+                font.vertices
+                    .windows(expected[0].vertices.len())
+                    .any(|v| v == expected[0].vertices)
+            );
         }
     }
     #[test]

@@ -755,7 +755,10 @@ fn sound_settings_original_slider_input_and_dispatch() {
     assert!(state.drag(
         &assets,
         Some([
-            native_track[0] + (native_track[2] - native_track[0]) * 0.37,
+            // 432260 truncates the pointer to an integer pixel before
+            // selecting one of maximum+1 bins. Pick the first pixel in
+            // value 37's bin, rather than assuming 37% of any track width.
+            (native_track[0] + (native_track[2] - native_track[0]) * 37. / 101.).ceil(),
             y
         ]),
         &mut levels
@@ -2628,7 +2631,7 @@ fn load_menu_uses_retained_original_session() {
             let page_up_height = page_height(controls.height, true);
             assert!((page_up_height - visible.eye[1]).abs() <= 10.);
             assert!(loaded.fresh_session.is_none());
-            assert!(session.saved_game_mode.is_some(), "{key} did not retain saved mode");
+            assert!(session.saved_logic_mode.is_some(), "{key} did not retain saved mode");
             assert!(!loaded.scene.draws.is_empty(), "{key} did not assemble a live city");
             assert!(session.campaign_profile.is_none(), "arbitrary save attached a V2 profile");
             if key == "OPENMT2001_SAVE_ONE" {
@@ -2637,7 +2640,7 @@ fn load_menu_uses_retained_original_session() {
                 // handoff without requiring a GPU in this loader test.
                 let category = session.world.city.categories.iter()
                     .position(|row| row[5] == 0).unwrap();
-                session.saved_game_mode = Some(2);
+                session.saved_logic_mode = Some(2);
                 let controller = &mut session.world.city.auction.controller;
                 controller.reference = 0x7f4758;
                 controller.record[4..8].copy_from_slice(&(category as u32).to_le_bytes());
@@ -2960,6 +2963,16 @@ fn custom_fresh_save_and_cold_selected_profile_ownership() {
 #[test]
 #[ignore = "requires original fresh scenario and graphics assets"]
 fn fresh_preview_worker_retains_session_until_inspection_closes() {
+    // The retained city records exceed the default debug test-thread stack.
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(fresh_preview_worker_retains_session_until_inspection_closes_body)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let map = openmt2001::fixtures::path("MAP");
     let parameter = openmt2001::fixtures::path("PARAMETERS");
@@ -4023,10 +4036,28 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
             );
             let mut ui = crate::prompt::State::default();
             ui.submit(prompt.clone());
-            let id = ui.begin_dismiss().unwrap();
+            // Script messages share the modal queue. Drive the physical Return
+            // path used by the window, including the first event that arms it.
+            let mut keys = dialog_keys::Input::default();
+            keys.event1(Some(&mut ui));
+            keys.physical(process_frontend::PhysicalSample::Key {
+                key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter),
+                down: true,
+                repeat: false,
+            });
+            keys.event1(Some(&mut ui));
+            let responses = ui.take_dialog_replies();
+            assert_eq!(
+                responses,
+                vec![crate::human_dialog::Reply {
+                    callback: 0,
+                    context: 1,
+                    button: 0,
+                }]
+            );
             let (reply, answer) = mpsc::channel();
             sender
-                .send(FreshRequest::DismissPrompt(id, Some(reply)))
+                .send(FreshRequest::HumanDialog(responses[0], reply))
                 .unwrap();
             assert!(
                 ui.request().is_some(),

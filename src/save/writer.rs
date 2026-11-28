@@ -43,7 +43,8 @@ pub struct State<'a> {
     pub business_info: &'a [[u8; 116]; 45],
     pub commodities: &'a [[u8; 28]; 32],
     pub history: &'a [u8; 0x10f44],
-    pub game_mode: u32,
+    /// Raw original 0x8fca9c, independent of the clock's logic mode.
+    pub session_option_word: u32,
 }
 
 struct Encoder(Vec<u8>);
@@ -219,7 +220,7 @@ pub fn encode(
         out.append(0x20000, state.history)?;
     }
     if mask & 0x400000 != 0 {
-        out.words(0x400000, &[state.game_mode])?;
+        out.words(0x400000, &[state.session_option_word])?;
     }
     // The original counts8 bytes but writes only the terminator DWORD. Preserve
     // explicitly supplied allocation-prior bytes rather than inventing zeros.
@@ -276,7 +277,7 @@ mod tests {
             let calendar = std::array::from_fn(|_| r.word());
             let timing = std::array::from_fn(|_| r.word());
             let countdown = r.word();
-            let game_mode = r.word();
+            let session_option_word = r.word();
             let players_count = r.word();
             let players: Vec<_> = (0..players_count)
                 .map(|_| Player {
@@ -348,7 +349,7 @@ mod tests {
                 business_info: &business_info,
                 commodities: &commodities,
                 history,
-                game_mode,
+                session_option_word,
             };
             let actual = encode(&mut state, mask, prior).unwrap();
             if actual != expected {

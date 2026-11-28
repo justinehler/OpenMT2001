@@ -33,16 +33,21 @@ fn inside(rect: [f32; 4], point: [f32; 2]) -> bool {
 
 /// Original425120 and4254f0 use supplied textured overlays at full bounds.
 fn bottom_controls(manager: [f32; 4], speed: [f32; 4], fast: bool) -> [(usize, [f32; 4]); 4] {
-    bottom_controls_with_state(manager, speed, fast, None, None)
+    bottom_controls_with_state(manager, speed, fast, false, None, None)
 }
 fn bottom_controls_with_state(
     manager: [f32; 4],
     speed: [f32; 4],
     fast: bool,
+    disabled: bool,
     hover: Option<Button>,
     pressed: Option<Button>,
 ) -> [(usize, [f32; 4]); 4] {
-    let speed_texture = if pressed == Some(Button::Speed) {
+    // 4253a0 disables any network session; 425120/443080 use the shared
+    // generic17 background (68ae6c) while retaining the 4x overlay.
+    let speed_texture = if disabled {
+        17
+    } else if pressed == Some(Button::Speed) {
         if fast { 191 } else { 193 }
     } else if hover == Some(Button::Speed) {
         if fast { 194 } else { 192 }
@@ -676,7 +681,7 @@ impl Assets {
         hover: Option<Button>,
         pressed: Option<Button>,
     ) -> Result<PreparedScene, String> {
-        let surfaces = self.surfaces_with_controls(display, normal, hover, pressed)?;
+        let surfaces = self.surfaces_with_controls(display, normal, false, hover, pressed)?;
         renderer.prepare(
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
             VIEW,
@@ -690,7 +695,7 @@ impl Assets {
         prepared: &mut PreparedScene,
         display: Display<'_>,
     ) -> Result<(), String> {
-        let surfaces = self.surfaces_with_controls(display, true, None, None)?;
+        let surfaces = self.surfaces_with_controls(display, true, false, None, None)?;
         renderer.refresh_prepared(
             prepared,
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
@@ -702,17 +707,19 @@ impl Assets {
         &self,
         display: Display<'_>,
         normal: bool,
+        speed_disabled: bool,
         hover: Option<Button>,
         pressed: Option<Button>,
     ) -> Result<(Vec<Surface>, Vec<Surface>), String> {
         let speed = display.speed;
-        let clock = self.surfaces_with_controls(display, false, hover, pressed)?;
+        let clock = self.surfaces_with_controls(display, false, speed_disabled, hover, pressed)?;
         let mut bottom = Vec::new();
         if normal {
             for (texture, bounds) in bottom_controls_with_state(
                 self.manager_bounds,
                 self.speed_bounds,
                 speed == 4,
+                speed_disabled,
                 hover,
                 pressed,
             ) {
@@ -736,6 +743,7 @@ impl Assets {
         &self,
         display: Display<'_>,
         normal: bool,
+        speed_disabled: bool,
         hover: Option<Button>,
         pressed: Option<Button>,
     ) -> Result<Vec<Surface>, String> {
@@ -849,13 +857,14 @@ impl Assets {
             &self.generic[options_texture]
         };
         let mut surfaces = vec![backdrop, icon(options_source, options)];
-        let bottom = if hover.is_none() && pressed.is_none() {
+        let bottom = if !speed_disabled && hover.is_none() && pressed.is_none() {
             bottom_controls(self.manager_bounds, self.speed_bounds, speed == 4)
         } else {
             bottom_controls_with_state(
                 self.manager_bounds,
                 self.speed_bounds,
                 speed == 4,
+                speed_disabled,
                 hover,
                 pressed,
             )
@@ -953,6 +962,7 @@ pub struct View {
     graph_bottom_visible: bool,
     graph_clock_visible: bool,
     graph_speed_disabled: bool,
+    network_enabled: bool,
     graph_speed_blink: u8,
     hover: Option<Button>,
     hover_started: Option<std::time::Instant>,
@@ -961,6 +971,15 @@ pub struct View {
     normal: bool,
 }
 impl View {
+    fn speed_disabled(&self) -> bool {
+        self.network_enabled || self.graph_speed_disabled
+    }
+    fn observe_network(&mut self, network_enabled: bool) {
+        if self.network_enabled != network_enabled {
+            self.network_enabled = network_enabled;
+            self.key = None;
+        }
+    }
     pub(crate) fn displayed_speed(&self) -> Option<u32> {
         self.clock.latest.map(|sample| sample.speed)
     }
@@ -1001,7 +1020,7 @@ impl View {
             .button_in_mode(point, auction)
             .filter(|button| match button {
                 Button::Options | Button::ScenarioReminder => self.graph_clock_visible,
-                Button::Speed => self.graph_bottom_visible && !self.graph_speed_disabled,
+                Button::Speed => self.graph_bottom_visible && !self.speed_disabled(),
                 Button::Manager => self.graph_bottom_visible,
             })
     }
@@ -1084,6 +1103,7 @@ impl View {
         renderer: &Renderer,
         status: &crate::live_host::Status,
     ) -> Result<(), String> {
+        self.observe_network(status.network_enabled);
         if !status.time_display.visible {
             self.prepared = None;
             self.key = None;
@@ -1157,6 +1177,7 @@ impl View {
                 cash_icon_phase: key.7,
             },
             self.normal,
+            self.speed_disabled(),
             self.hover,
             self.pressed.filter(|button| self.hover == Some(*button)),
         )?;
@@ -1199,6 +1220,7 @@ impl View {
                     cash_icon_phase: key.7,
                 },
                 self.normal,
+                self.speed_disabled(),
                 self.hover,
                 self.pressed.filter(|pressed| self.hover == Some(*pressed)),
             )?;
@@ -1338,6 +1360,139 @@ mod tests {
         assert_eq!(focus.caption(), None);
         assert_eq!(legacy.advance(None), None);
         assert_eq!(legacy.advance(Some(1144)), None);
+    }
+
+    fn synthetic_assets() -> super::Assets {
+        use crate::ui::Surface;
+        let mut tab = vec![0; 4 + 256 * 44];
+        tab[..4].copy_from_slice(&256u32.to_le_bytes());
+        for glyph in 0..256 {
+            for offset in [32, 36] {
+                let at = 4 + glyph * 44 + offset;
+                tab[at..at + 4].copy_from_slice(&1i32.to_le_bytes());
+            }
+        }
+        super::Assets {
+            regions: [[0., 0., 100., 30.]; 14],
+            manager_bounds: [570., 450., 590., 470.],
+            speed_bounds: [600., 450., 620., 470.],
+            options_button: Surface::solid(),
+            generic: (0u32..304)
+                .map(|texture| {
+                    let mut surface = Surface::solid();
+                    surface.pixels = texture.to_le_bytes().to_vec();
+                    surface
+                })
+                .collect(),
+            font: vec![Surface::solid(); 2],
+            tab: tab.clone(),
+            button_font: vec![Surface::solid(); 2],
+            button_tab: tab,
+            am_pm: [vec![], vec![]],
+            options: vec![],
+            currency: vec![],
+            currency_left: true,
+            palettes: [0xffffffff; 18],
+            character_colors: [0xffffffff; 10],
+            backing_color: 0xffffffff,
+        }
+    }
+
+    #[test]
+    fn network_speed_draws_disabled_from_first_frame_and_ignores_input() {
+        use super::{Button, Display, View};
+        let assets = synthetic_assets();
+        // Both host and client publish the same network-enabled status before
+        // their first HUD draw. The graph can still carry its offline reset.
+        for network in [false, true] {
+            let mut host = crate::live_host::Host::new([0.; 3]);
+            host.policy.scheduler.network_enabled = network;
+            let mut view = View::default();
+            view.observe_network(network);
+            view.graph_gates(true, true, false, 0);
+            for speed in [1, 4] {
+                host.policy.scheduler.iterations = speed;
+                for hover in [None, Some(Button::Speed)] {
+                    for pressed in [None, Some(Button::Speed)] {
+                        let display = || Display {
+                            year: 1930,
+                            hour: 9,
+                            fraction: 0,
+                            speed,
+                            name: "",
+                            cash: None,
+                            character: None,
+                            cash_icon_phase: 0,
+                        };
+                        let (_, bottom) = assets
+                            .split_surfaces(display(), true, view.speed_disabled(), hover, pressed)
+                            .unwrap();
+                        let full = assets
+                            .surfaces_with_controls(
+                                display(),
+                                true,
+                                view.speed_disabled(),
+                                hover,
+                                pressed,
+                            )
+                            .unwrap();
+                        let expected = if network {
+                            17u32
+                        } else if pressed.is_some() {
+                            if speed == 4 { 191 } else { 193 }
+                        } else if hover.is_some() {
+                            if speed == 4 { 194 } else { 192 }
+                        } else if speed == 4 {
+                            193
+                        } else {
+                            191
+                        };
+                        assert_eq!(bottom.len(), 4);
+                        for surface in [&bottom[0], &full[2]] {
+                            assert_eq!(surface.pixels, expected.to_le_bytes());
+                            assert_eq!(surface.vertices.len(), 6);
+                        }
+                        assert_eq!(bottom[1].pixels, 303u32.to_le_bytes());
+                        assert_eq!(full[3].pixels, 303u32.to_le_bytes());
+                        assert_eq!(bottom[2].pixels, 191u32.to_le_bytes());
+                    }
+                }
+                let hit = view.graph_button(&assets, [610., 460.], false);
+                assert_eq!(hit, (!network).then_some(Button::Speed));
+                view.graph_cursor(hit, false);
+                assert_eq!(view.mouse(true), hit);
+                view.mouse(false);
+                // The worker's speed request also guards against bypassing HUD
+                // hit testing, including any direct local speed-setting input.
+                host.toggle_speed();
+                assert_eq!(
+                    host.policy.scheduler.iterations,
+                    if network { speed } else { 5 - speed }
+                );
+                host.set_fast(true);
+                assert_eq!(
+                    host.policy.scheduler.iterations,
+                    if network { speed } else { 4 }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn network_speed_change_invalidates_cached_hud_and_graph_disable_is_retained() {
+        let mut view = super::View {
+            key: Some((1930, 9, 0, 1, String::new(), None, None, 0)),
+            ..Default::default()
+        };
+        view.observe_network(false);
+        assert!(view.key.is_some());
+        view.observe_network(true);
+        assert!(view.key.is_none());
+        assert!(view.speed_disabled());
+        view.observe_network(false);
+        assert!(!view.speed_disabled());
+        view.graph_gates(true, true, true, 0);
+        assert!(view.speed_disabled());
     }
 
     #[test]
@@ -1546,7 +1701,7 @@ mod tests {
                 cash_icon_phase: if case == 3 { 17 } else { 0 },
             };
             let surfaces = assets
-                .surfaces_with_controls(display, normal, hover, pressed)
+                .surfaces_with_controls(display, normal, false, hover, pressed)
                 .unwrap();
             let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
             let fresh = renderer.prepare(&draws, VIEW, None).unwrap();
@@ -1665,8 +1820,14 @@ mod tests {
             let hover = (word(at + 16) != 0).then_some(button);
             let pressed = (word(at + 8) != 0).then_some(button);
             assert_eq!(word(at + 20), 2);
-            let draws =
-                super::bottom_controls_with_state(shifted(38.), shifted(75.), fast, hover, pressed);
+            let draws = super::bottom_controls_with_state(
+                shifted(38.),
+                shifted(75.),
+                fast,
+                false,
+                hover,
+                pressed,
+            );
             let selected = if button == super::Button::Speed {
                 &draws[..2]
             } else {

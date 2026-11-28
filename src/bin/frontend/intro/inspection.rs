@@ -2,22 +2,35 @@
 use super::*;
 
 impl Inspection {
+    pub(super) fn city_layers(&self) -> city_ui::Layers {
+        city_ui::Layers::new(
+            self.options_visible(),
+            self.stats_requested,
+            self.live_status.as_ref().and_then(|s| s.stats.as_ref()),
+        )
+    }
     pub(super) fn statistics_mouse(
         &mut self,
         assets: &crate::stats_panel::Assets,
         button: winit::event::MouseButton,
         pressed: bool,
     ) -> bool {
-        let Some(snapshot) = self.live_status.as_ref().and_then(|s| s.stats.as_ref()) else {
+        let city_ui::MouseRoute::Statistics(action) = self.city_layers().mouse(
+            &mut self.stats_panel,
+            assets,
+            self.live_status.as_ref().and_then(|s| s.stats.as_ref()),
+            self.pointer.map(|point| point.map(|v| v as f32 * 0.5)),
+            button == winit::event::MouseButton::Left,
+            pressed,
+        ) else {
             return false;
         };
+        self.time_panel.cancel_input();
+        self.time_pressed = None;
+        self.auction_panel.cancel_press();
         if button == winit::event::MouseButton::Left {
-            if let Some(action) = self.stats_panel.pointer(
-                assets,
-                self.pointer.map(|point| point.map(|v| v as f32 * 0.5)),
-                pressed,
-                snapshot,
-            ) && let Some(sender) = &self._fresh_session
+            if let Some(action) = action
+                && let Some(sender) = &self._fresh_session
             {
                 let _ = sender.send(FreshRequest::Stats(action));
                 self.stats_requested = true;
@@ -853,19 +866,26 @@ impl Inspection {
         }
     }
     pub(super) fn main_panel_visible(&self) -> bool {
+        if !self.city_layers().hud_visible() {
+            return false;
+        }
         if self.ui_graph.is_some() {
             return self.graph_body(camera_live::ui_graph::PanelId::A);
         }
         self.live_status.as_ref().is_none_or(|s| s.player_panels[0])
     }
     pub(super) fn statistics_visible(&self) -> bool {
+        if !self.city_layers().hud_visible() {
+            return false;
+        }
         if self.ui_graph.is_some() {
             return self.graph_body(camera_live::ui_graph::PanelId::Comparison);
         }
         self.live_status.as_ref().is_none_or(|s| s.player_panels[1])
     }
     pub(super) fn over_navigation(&self) -> bool {
-        (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::E))
+        self.city_layers().hud_visible()
+            && (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::E))
             && self.pointer.is_some_and(|[x, y]| {
                 let [l, t, r, b] = self.navigation_bounds;
                 let x = x as f32 * 0.5;
@@ -883,7 +903,8 @@ impl Inspection {
             })
     }
     pub(super) fn over_navigator(&self) -> bool {
-        !self.strategic
+        self.city_layers().hud_visible()
+            && !self.strategic
             && (self.ui_graph.is_none() || self.graph_input(camera_live::ui_graph::PanelId::F))
             && self.pointer.is_some_and(|[x, y]| {
                 let [l, t, r, b] = self.navigator_bounds;

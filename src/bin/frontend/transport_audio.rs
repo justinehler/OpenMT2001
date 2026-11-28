@@ -17,6 +17,8 @@ pub enum Operation {
     /// Original 4af140 clears the retained city sound handles when leaving
     /// gameplay for a result or an auction transition.
     Reset,
+    /// Replace simulation-owned inputs without advancing frame presentation.
+    City(Box<CityInputs>),
     Route(RouteSound),
     /// Original 4af860 consumes 650330 and three ranked 63f9c0 rows,
     /// produced together by road::audio::Proximity.
@@ -38,6 +40,24 @@ pub enum Operation {
     Construction([[Option<ConstructionSource>; 2]; 4]),
     /// Original 4afd65 presents block ambience after the construction beds.
     Blocks(Box<block_audio::Snapshot>),
+    /// Original 4afd6c services the retained nonspatial coast loop after blocks.
+    Coast {
+        camera_z: f32,
+    },
+}
+
+/// Produced only when simulation advances; camera-dependent presentation is
+/// evaluated by the audio owner on every draw, including ordinary pause.
+#[derive(Clone, Debug)]
+pub struct CityInputs {
+    pub reciprocal_sum: f32,
+    pub nearest: [[u32; 3]; 3],
+    pub categories: [[u8; 0x17c]; 52],
+    pub construction: [[Option<ConstructionSource>; 2]; 4],
+    pub hour: u32,
+    pub tick: u32,
+    pub previous_tick: u32,
+    pub initial_random_state: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -132,6 +152,7 @@ pub struct Assets {
     road_ambient: Vec<f32>,
     road_motor: Vec<f32>,
     resident_crowd: Vec<f32>,
+    coast: Option<Vec<f32>>,
     near_aircraft: Vec<f32>,
     ship_engine: Vec<f32>,
     ship_horn: Vec<f32>,
@@ -233,10 +254,26 @@ pub(crate) fn original_case_path(path: &Path) -> Result<PathBuf, String> {
     folded.ok_or_else(|| format!("{}: original sound missing", path.display()))
 }
 
+// Missing/unsupported optional coast audio must not disable the other city beds.
+fn load_coast(directory: &Path) -> Option<Vec<f32>> {
+    pcm16(&directory.join("wavcrash2.wav")).ok()
+}
+
+/// 4adbe0 reads camera position Z (93af6c), clips distance before scaling,
+/// stores gain as binary32, then truncates gain * 80 at the source-level setter.
+fn coast_level(camera_z: f32) -> Option<i32> {
+    (camera_z < -150.).then(|| {
+        let distance = (-150. - f64::from(camera_z)).clamp(1., 150.);
+        let gain = (distance * f64::from(1f32 / 150.)) as f32;
+        (f64::from(gain) * 80.).trunc() as i32
+    })
+}
+
 impl Assets {
     pub fn load(image: &PeImage<'_>, installer: &Path) -> Result<Self, String> {
         let directory = installer.join("Standard/sound/high");
         for (address, name) in [
+            (0x5451b0, "wavcrash2.wav"),
             (0x545220, "Block_Sounds\\ambi_factory_1.wav"),
             (0x5451fc, "Block_Sounds\\SchoolPlayground.wav"),
             (0x544ff8, "block_sounds//ambi_park_1.wav"),
@@ -268,6 +305,7 @@ impl Assets {
                 0x5450d0,
                 "ambi_day_peop_busycity.wav",
             )?))?,
+            coast: load_coast(&directory),
             near_aircraft: pcm16(&directory.join(checked_name(
                 image,
                 0x54511c,
@@ -313,8 +351,12 @@ pub struct Player {
     road_ambient: Option<rodio::Sink>,
     road_motors: [Option<rodio::Sink>; 3],
     resident_crowd: Option<rodio::Sink>,
+    coast: Option<rodio::Sink>,
     near_aircraft: Option<rodio::Sink>,
     ship_engine: Option<rodio::Sink>,
+    // The unique fallback request can lose its returned handle while the
+    // cached sample keeps playing. Retain that voice without controlling it.
+    ship_engine_unowned: Option<rodio::Sink>,
     ship_horn: Option<rodio::Sink>,
     crane_start: Option<rodio::Sink>,
     crane_end: Option<rodio::Sink>,
@@ -325,6 +367,7 @@ pub struct Player {
     block_controller: Option<block_audio::Controller>,
     pending_ship_random: u32,
     interface_mode: u32,
+    city: Option<Box<CityInputs>>,
 }
 
 impl Player {
@@ -338,8 +381,10 @@ impl Player {
             road_ambient: None,
             road_motors: std::array::from_fn(|_| None),
             resident_crowd: None,
+            coast: None,
             near_aircraft: None,
             ship_engine: None,
+            ship_engine_unowned: None,
             ship_horn: None,
             crane_start: None,
             crane_end: None,
@@ -350,6 +395,7 @@ impl Player {
             block_controller: None,
             pending_ship_random: 0,
             interface_mode: 0,
+            city: None,
         }
     }
 
@@ -389,6 +435,12 @@ impl Player {
     pub fn apply(&mut self, operation: Operation) {
         match operation {
             Operation::Reset => self.reset(),
+            Operation::City(mut inputs) => {
+                if let Some(previous) = &self.city {
+                    inputs.previous_tick = previous.previous_tick;
+                }
+                self.city = Some(inputs);
+            }
             Operation::Route(call) => self.route(call),
             Operation::RoadProximity {
                 reciprocal_sum,
@@ -396,17 +448,74 @@ impl Player {
             } => self.road(reciprocal_sum, nearest),
             Operation::ResidentCrowd(weight) => self.crowd(weight),
             Operation::Environment { call, distance } => self.environment(call, distance),
-            Operation::Construction(groups) => self.construction(groups),
+            Operation::Construction(groups) => {
+                if let Some(inputs) = &mut self.city {
+                    inputs.construction = groups;
+                }
+                self.construction(groups);
+            }
             Operation::Blocks(snapshot) => self.blocks(*snapshot),
+            Operation::Coast { camera_z } => self.coast(camera_z),
         }
     }
 
+    /// Request polling can happen several times per draw while the worker is
+    /// waiting on other UI services. It must never advance city presentation.
+    pub fn drain_requests(&mut self, receiver: Option<&mpsc::Receiver<Request>>) {
+        while let Some(request) = receiver.and_then(|receiver| receiver.try_recv().ok()) {
+            self.apply(request.operation);
+        }
+    }
+
+    /// Original 4afbf0, called once per rendered iteration before camera
+    /// interpolation (4b9c7e/4b9c94), independently of simulation scheduling.
+    pub fn service_frame(&mut self, camera: [f32; 3]) {
+        let Some(mut inputs) = self.city.take() else {
+            return;
+        };
+        self.road(inputs.reciprocal_sum, inputs.nearest);
+        self.crowd(resident_crowd_weight(&inputs.categories, camera));
+        let groups = if matches!(self.interface_mode, 1 | 3) {
+            [[None; 2]; 4]
+        } else {
+            inputs.construction.map(|group| {
+                group.map(|source| {
+                    source.map(|mut source| {
+                        let delta: [f64; 3] = std::array::from_fn(|axis| {
+                            f64::from(source.position[axis]) - f64::from(camera[axis])
+                        });
+                        source.distance = ((delta[2] * delta[2] + delta[1] * delta[1])
+                            + delta[0] * delta[0])
+                            .sqrt() as f32;
+                        source
+                    })
+                })
+            })
+        };
+        self.construction(groups);
+        self.blocks(block_audio::Snapshot::from_categories(
+            &inputs.categories,
+            camera,
+            inputs.hour,
+            inputs.tick,
+            inputs.previous_tick,
+            inputs.initial_random_state,
+        ));
+        self.coast(camera[2]);
+        // All parks consume the same elapsed simulation ticks, and repeated
+        // renders at the same tick consume zero. Store only after consumers.
+        inputs.previous_tick = inputs.tick;
+        self.city = Some(inputs);
+    }
+
     fn reset(&mut self) {
+        self.city = None;
         for handle in [
             &mut self.train_motion,
             &mut self.train_toot,
             &mut self.road_ambient,
             &mut self.resident_crowd,
+            &mut self.coast,
             &mut self.near_aircraft,
             &mut self.ship_engine,
             &mut self.ship_horn,
@@ -479,6 +588,32 @@ impl Player {
     }
 
     fn construction(&mut self, groups: [[Option<ConstructionSource>; 2]; 4]) {
+        // The current backend is nonspatial. Keep its traversal separate:
+        // 4ad8b0's spatial branch visits both ranked sources instead.
+        let needs_mixer = groups.iter().enumerate().any(|(group, candidates)| {
+            candidates
+                .iter()
+                .enumerate()
+                .find(|(_, source)| {
+                    source.is_some_and(|source| {
+                        source.distance.is_finite() && source.distance <= 250.
+                    })
+                })
+                .is_some_and(|(slot, _)| self.construction[group * 2 + slot].is_none())
+        });
+        let mixer = if needs_mixer {
+            self.mixer().cloned()
+        } else {
+            None
+        };
+        self.construction_fallback(groups, mixer.as_ref());
+    }
+
+    fn construction_fallback(
+        &mut self,
+        groups: [[Option<ConstructionSource>; 2]; 4],
+        mixer: Option<&rodio::mixer::Mixer>,
+    ) {
         for (group, candidates) in groups.into_iter().enumerate() {
             for (slot, candidate) in candidates.into_iter().enumerate() {
                 let index = group * 2 + slot;
@@ -488,7 +623,7 @@ impl Player {
                     }
                     continue;
                 };
-                if !candidate.distance.is_finite() || candidate.distance >= 250. {
+                if !candidate.distance.is_finite() || candidate.distance > 250. {
                     // 4ad8b0 retains an existing handle and silences it while
                     // its ranked source is beyond the audible radius.
                     if let Some(sink) = &self.construction[index] {
@@ -502,7 +637,7 @@ impl Player {
                         2 => self.assets.construction_saw.clone(),
                         _ => self.assets.construction_hammer.clone(),
                     };
-                    if let Some(mixer) = self.mixer() {
+                    if let Some(mixer) = mixer {
                         self.construction[index] = Some(Self::loop_sink(mixer, &samples, 0.));
                     }
                 }
@@ -512,6 +647,9 @@ impl Player {
                             .source_gain(construction_fallback_level(candidate.distance)),
                     );
                 }
+                // Admission ends this phase even when no voice was allocated.
+                // Only far candidates advance to the next ranked source.
+                break;
             }
         }
     }
@@ -540,67 +678,63 @@ impl Player {
             }
             return;
         }
-        // Existing route coverage is 7/8/11. The id11 motion stop remains a
-        // separate lifetime limitation (native silences that retained handle).
-        // Toot volume is refreshed on each supported non-id8 in-range call.
-        if !matches!(call.id, 7 | 8 | 11) {
+        // 4aefc0 routes the full normal train event range to 4af430.
+        if !(7..=18).contains(&call.id) {
             return;
         }
+        // Route retirement precedes distance admission and toot updates.
+        if call.id == 9 {
+            stop(&mut self.train_motion);
+        }
         if !(call.distance.is_finite() && call.distance <= 500.) {
-            if let Some(sink) = self.train_motion.take() {
-                sink.stop();
-            }
-            // 4af5e0..4af5eb silences the existing toot without restarting,
-            // releasing, or rewinding it. Factor stores alone do not do this.
+            stop(&mut self.train_motion);
+            // Far calls silence the existing toot without rewinding it.
             if let Some(sink) = &self.train_toot {
                 sink.set_volume(self.audio.source_gain(0));
             }
-            return;
-        }
-        if call.id == 8 {
+        } else {
             let toot_gain = self
                 .audio
                 .source_gain(train_level(call.distance, 0.05, false));
-            let samples = self.assets.train_toot.clone();
-            if let Some(mixer) = self.mixer() {
-                let sink = Self::one_shot(mixer, &samples, toot_gain);
-                // 4af430 truncates 70 - (distance + 1) * binary32(0.05).
+            if call.id == 8 {
+                let samples = self.assets.train_toot.clone();
+                if let Some(mixer) = self.mixer() {
+                    self.train_toot = Some(Self::one_shot(mixer, &samples, toot_gain));
+                }
+            } else if let Some(sink) = &self.train_toot {
                 sink.set_volume(toot_gain);
-                self.train_toot = Some(sink);
             }
-        } else if let Some(sink) = &self.train_toot {
-            // 4af502..4af50c precedes id7 motion work and consumes the live
-            // effects factor with the freshly computed toot source word.
-            sink.set_volume(
-                self.audio
-                    .source_gain(train_level(call.distance, 0.05, false)),
-            );
-        }
-        if call.id == 11 {
-            if let Some(sink) = self.train_motion.take() {
-                sink.stop();
-            }
-            return;
-        }
-        if call.id == 7 && self.train_motion.is_none() {
-            let samples = self.assets.train_motion.clone();
-            if let Some(mixer) = self.mixer() {
-                self.train_motion = Some(Self::loop_sink(mixer, &samples, 0.));
-            }
-        }
-        if let Some(sink) = &self.train_motion {
-            // 4af430 stores distance + 1 as f32 before this second gain.
-            sink.set_volume(
-                self.audio
-                    .source_gain(train_level(call.distance, 0.1, true)),
-            );
-            if call.id == 7 {
-                let speed = f32::from_bits(call.arguments[0]);
-                // Original frequency: speed * 0.25 * 22050 + 11025 Hz.
-                if speed.is_finite() {
-                    sink.set_speed((0.5 + speed * 0.25).max(0.01));
+            if call.id == 11 {
+                // 4af5ad mutes the retained motion voice and skips the common
+                // level tail. Proximity/departure calls can reuse its cursor.
+                if let Some(sink) = &self.train_motion {
+                    sink.set_volume(self.audio.source_gain(0));
+                }
+            } else {
+                if call.id == 7 && self.train_motion.is_none() {
+                    let samples = self.assets.train_motion.clone();
+                    if let Some(mixer) = self.mixer() {
+                        self.train_motion = Some(Self::loop_sink(mixer, &samples, 0.));
+                    }
+                }
+                if let Some(sink) = &self.train_motion {
+                    // 4af430 stores distance + 1 as f32 for motion gain.
+                    sink.set_volume(
+                        self.audio
+                            .source_gain(train_level(call.distance, 0.1, true)),
+                    );
+                    if call.id == 7 {
+                        let speed = f32::from_bits(call.arguments[0]);
+                        // Original frequency: speed * 0.25 * 22050 + 11025 Hz.
+                        if speed.is_finite() {
+                            sink.set_speed((0.5 + speed * 0.25).max(0.01));
+                        }
+                    }
                 }
             }
+        }
+        if self.train_toot.as_ref().is_some_and(rodio::Sink::empty) {
+            stop(&mut self.train_toot);
         }
     }
 
@@ -696,6 +830,45 @@ impl Player {
         }
     }
 
+    fn coast(&mut self, camera_z: f32) {
+        if matches!(self.interface_mode, 1 | 3) {
+            stop(&mut self.coast);
+            return;
+        }
+        let level = coast_level(camera_z);
+        if self.coast.is_none() && level.is_some() {
+            let Some(samples) = self.assets.coast.clone() else {
+                return;
+            };
+            if let Some(mixer) = self.mixer() {
+                self.coast = Some(Self::loop_sink(mixer, &samples, 0.));
+            }
+        }
+        if let Some(sink) = &self.coast {
+            // Inland updates mute without stopping or rewinding the loop.
+            sink.set_volume(self.audio.source_gain(level.unwrap_or(0)));
+        }
+    }
+
+    /// Local unique-sample admission for the nonspatial ship engine. General
+    /// path-based voice admission belongs in the shared audio backend (#282).
+    fn request_ship_engine(&mut self) -> Option<rodio::Sink> {
+        if let Some(previous) = self.ship_engine.take() {
+            self.ship_engine_unowned = Some(previous);
+        }
+        if self
+            .ship_engine_unowned
+            .as_ref()
+            .is_some_and(|sink| !sink.empty())
+        {
+            return None;
+        }
+        self.ship_engine_unowned = None;
+        let samples = self.assets.ship_engine.clone();
+        self.mixer()
+            .map(|mixer| Self::loop_sink(mixer, &samples, 0.))
+    }
+
     fn environment(&mut self, call: EnvironmentCall, distance: f32) {
         if !distance.is_finite() {
             return;
@@ -703,9 +876,16 @@ impl Player {
         match call {
             EnvironmentCall::Ship(model_choice) => {
                 if distance > 800. || matches!(self.interface_mode, 1 | 3) {
-                    stop(&mut self.ship_engine);
                     stop(&mut self.ship_horn);
+                    stop(&mut self.ship_engine);
                     return;
+                }
+                // Fallback 4ade96 always issues the unique cached request
+                // and stores its result, even when uniqueness returns none.
+                self.ship_engine = self.request_ship_engine();
+                let gain = self.audio.source_gain(positional_level(distance, 800.));
+                if let Some(sink) = &self.ship_engine {
+                    sink.set_volume(gain);
                 }
                 // 4adee2/4ae072 share the park sound manager RNG, including
                 // ship events presented before the first block snapshot.
@@ -713,16 +893,6 @@ impl Player {
                     controller.ship_random();
                 } else {
                     self.pending_ship_random = self.pending_ship_random.wrapping_add(1);
-                }
-                if self.ship_engine.is_none() {
-                    let samples = self.assets.ship_engine.clone();
-                    if let Some(mixer) = self.mixer() {
-                        self.ship_engine = Some(Self::loop_sink(mixer, &samples, 0.));
-                    }
-                }
-                let gain = self.audio.source_gain(positional_level(distance, 800.));
-                if let Some(sink) = &self.ship_engine {
-                    sink.set_volume(gain);
                 }
                 // 4addd0 chooses oceanlin for model 0/2 and shiphorn for 1.
                 // Its conditional random re-trigger tests (tick & 31)>160,
@@ -742,6 +912,14 @@ impl Player {
                 }
             }
             EnvironmentCall::Cue(id) => {
+                if matches!(self.interface_mode, 1 | 3) {
+                    // 4ae2c9..4ae319/4ae731 precedes cue dispatch. The end
+                    // slot is separate and survives this cleanup.
+                    stop(&mut self.crane_start);
+                    stop(&mut self.crane_lift);
+                    stop(&mut self.crane_loop);
+                    return;
+                }
                 if id == 30 {
                     stop(&mut self.crane_lift);
                     return;
@@ -981,6 +1159,7 @@ mod tests {
             road_ambient: samples.clone(),
             road_motor: samples.clone(),
             resident_crowd: samples.clone(),
+            coast: Some(samples.clone()),
             near_aircraft: samples.clone(),
             ship_engine: samples.clone(),
             ship_horn: samples.clone(),
@@ -1098,6 +1277,7 @@ mod tests {
             road_ambient: samples.clone(),
             road_motor: samples.clone(),
             resident_crowd: samples.clone(),
+            coast: Some(samples.clone()),
             near_aircraft: samples.clone(),
             ship_engine: samples.clone(),
             ship_horn: samples.clone(),
@@ -1261,8 +1441,13 @@ mod tests {
         let exe = std::fs::read(exe).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let assets = Assets::load(&image, Path::new(&installer)).unwrap();
-        // 4afcde presents road ambience first, then category crowd ambience.
-        for (callsite, target) in [(0x4afcb5u32, 0x4af860u32), (0x4afcbc, 0x4afa40)] {
+        // Native frame order: road, crowd, then blocks and coast.
+        for (callsite, target) in [
+            (0x4afcb5u32, 0x4af860u32),
+            (0x4afcbc, 0x4afa40),
+            (0x4afd65, 0x4aec00),
+            (0x4afd6c, 0x4adbe0),
+        ] {
             let code = image.at(callsite, 5).unwrap();
             assert_eq!(code[0], 0xe8);
             assert_eq!(
@@ -1271,6 +1456,20 @@ mod tests {
                 target
             );
         }
+        for (address, expected) in [
+            (0x5265b4, -150.),
+            (0x525034, 1.),
+            (0x5265b0, 150.),
+            (0x5265ac, 1f32 / 150.),
+            (0x52505c, 80.),
+        ] {
+            assert_eq!(image.f32_at(address).unwrap(), expected);
+        }
+        // 4adc29 reads position Z, rather than the camera look-at target.
+        assert_eq!(
+            u32::from_le_bytes(image.at(0x4adc2b, 4).unwrap().try_into().unwrap()),
+            0x93af6c
+        );
         assert_eq!(image.f32_at(0x525248).unwrap(), 50.);
         assert_eq!(image.f32_at(0x525094).unwrap(), 30.);
         assert_eq!(image.f32_at(0x525058).unwrap(), 100.);
@@ -1299,6 +1498,7 @@ mod tests {
         assert_eq!(assets.road_ambient.len(), 220_886);
         assert_eq!(assets.road_motor.len(), 31_981);
         assert_eq!(assets.resident_crowd.len(), 84_446);
+        assert_eq!(assets.coast.as_ref().unwrap().len(), 165_184);
         assert_eq!(assets.near_aircraft.len(), 33_604);
         assert_eq!(assets.ship_engine.len(), 16_689);
         assert_eq!(assets.ship_horn.len(), 215_882);

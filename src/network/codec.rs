@@ -5,7 +5,7 @@
 //! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
 //! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe,
 //! 10=validated startup content, 11=start commit, 12=start content failure,
-//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected.
+//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected, 17=barrier, 18=state sample.
 //! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
@@ -53,6 +53,12 @@ impl Decoder {
 
 fn validate(message: &Message) -> Result<()> {
     match message {
+        Message::Barrier { sender, .. } => {
+            if usize::from(*sender) >= SLOTS {
+                return Err(Error::Peer);
+            }
+        }
+        Message::StateSample(sample) => sample.validate()?,
         Message::Lobby(snapshot) => snapshot.validate()?,
         Message::LobbyRequest(request) => request.validate()?,
         Message::Hello
@@ -217,6 +223,20 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
             payload.push(u8::from(*unsupported));
             16
         }
+        Message::Barrier { sender, complete } => {
+            payload.extend_from_slice(&[*sender, *complete]);
+            17
+        }
+        Message::StateSample(sample) => {
+            payload.extend_from_slice(&[sample.sender, sample.available]);
+            payload.extend_from_slice(&sample.tick.to_le_bytes());
+            for sum in sample.sums {
+                payload.extend_from_slice(&sum.to_le_bytes());
+            }
+            payload.extend_from_slice(&sample.round.to_le_bytes());
+            payload.extend_from_slice(&sample.precision.to_le_bytes());
+            18
+        }
         Message::Transfer(transfer) => {
             // category u8, owner u8, amount i32, Total due u32.
             payload.extend_from_slice(&[transfer.category, transfer.owner]);
@@ -367,6 +387,27 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
             after: u64::from_le_bytes(reader.take()?),
             tick: reader.word()?,
         },
+        17 => Message::Barrier {
+            sender: reader.byte()?,
+            complete: reader.byte()?,
+        },
+        18 => {
+            let sender = reader.byte()?;
+            let available = reader.byte()?;
+            let tick = reader.word()?;
+            let mut sums = [0; 5];
+            for sum in &mut sums {
+                *sum = reader.word()?;
+            }
+            Message::StateSample(super::synchronization::Sample {
+                sender,
+                available,
+                tick,
+                sums,
+                round: u16::from_le_bytes(reader.take()?),
+                precision: u16::from_le_bytes(reader.take()?),
+            })
+        }
         16 => Message::CommandRejected {
             serial: u64::from_le_bytes(reader.take()?),
             unsupported: reader.boolean()?,

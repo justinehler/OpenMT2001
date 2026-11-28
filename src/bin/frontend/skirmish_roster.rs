@@ -155,9 +155,12 @@ pub struct RosterPanel {
     strings: Vec<Vec<u8>>,
     characters: Vec<Character>,
     backing: u32,
+    highlight: ui::LobbyHighlight,
 }
 /// Shared original roster art, with route-specific controls and per-row records.
 pub struct Presentation<'a> {
+    /// None for offline Skirmish; network authority determines the ready caption.
+    pub network_host: Option<bool>,
     pub visible: bool,
     pub busy: bool,
     pub rows: &'a [Participant; 6],
@@ -166,7 +169,6 @@ pub struct Presentation<'a> {
     pub local_row: usize,
     pub name_focused: bool,
     pub closed: [bool; 6],
-    pub details: &'a [Vec<u8>],
 }
 fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] > b[0] && p[0] < b[2] && p[1] >= b[1] && p[1] <= b[3]
@@ -182,6 +184,7 @@ impl RosterPanel {
             strings,
             characters: vec![],
             backing: 0,
+            highlight: ui::LobbyHighlight::default(),
         }
     }
 
@@ -276,6 +279,7 @@ impl RosterPanel {
             strings: strings.iter().map(|s| s.to_vec()).collect(),
             characters,
             backing,
+            highlight: ui::LobbyHighlight::default(),
         };
         for id in 1439..=1440 {
             panel.label(id)?;
@@ -383,14 +387,14 @@ impl RosterPanel {
         encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        self.draw_rows_with_headers(
-            true,
+        self.draw_rows(
             renderer,
             selected,
             pressed,
             metadata,
             encode,
             Presentation {
+                network_host: None,
                 visible: state.visible,
                 busy: state.busy,
                 rows: state.roster.slots(),
@@ -399,7 +403,6 @@ impl RosterPanel {
                 local_row: 0,
                 name_focused: state.name_focused,
                 closed: [false; 6],
-                details: &[],
             },
             panel_alpha,
         )
@@ -443,12 +446,12 @@ impl RosterPanel {
                 pressed && selected == Some(*id),
                 !*enabled,
             )?;
-            ui::text_widget_style9(
+            ui::button_label(
                 &mut pages,
                 &self.fonts[0].tab,
                 &encode(label)?,
                 *bounds,
-                if *enabled { 0xffffffff } else { 0xff909090 },
+                !*enabled,
             )?;
         }
         let mut out = vec![shapes];
@@ -476,6 +479,9 @@ impl RosterPanel {
             None,
         )
     }
+    pub fn advance_highlight(&mut self) {
+        self.highlight.advance();
+    }
     pub fn name_bounds(&self, row: usize) -> Result<[f32; 4], String> {
         self.bounds(&format!("NAMESLOT_P{}", row + 1))
     }
@@ -500,29 +506,40 @@ impl RosterPanel {
         view: Presentation<'_>,
         panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        self.draw_rows_with_headers(
-            false,
-            renderer,
-            selected,
-            pressed,
-            metadata,
-            encode,
-            view,
-            panel_alpha,
+        let out = self.row_surfaces(selected, pressed, metadata, encode, view, panel_alpha)?;
+        renderer.prepare(
+            &out.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
-    fn draw_rows_with_headers(
+    fn row_surfaces(
         &self,
-        green_headers: bool,
-        renderer: &Renderer,
         selected: Option<usize>,
         pressed: bool,
         metadata: [&[u8]; 2],
         mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         view: Presentation<'_>,
         panel_alpha: u8,
-    ) -> Result<PreparedScene, String> {
+    ) -> Result<Vec<Surface>, String> {
         let mut out = vec![];
         if view.visible {
             out = self.base.clone();
@@ -534,6 +551,16 @@ impl RosterPanel {
                 .iter()
                 .map(|f| f.pages.clone())
                 .collect::<Vec<_>>();
+            if view
+                .rows
+                .get(view.local_row)
+                .is_some_and(|p| p.kind == Kind::Human)
+            {
+                self.highlight.paint(
+                    &mut shapes,
+                    self.bounds(&format!("SELECTP{}", view.local_row + 1))?,
+                );
+            }
             for name in ["PLAYER_BACKING", "SESS_BACKING", "CHAT_BACKING"] {
                 shapes.rect(self.bounds(name)?, [self.backing; 4]);
             }
@@ -571,22 +598,12 @@ impl RosterPanel {
                 ("SESS_LABEL2", 1879),
                 ("SESS_LABEL3", 1616),
             ] {
-                if green_headers {
-                    ui::section_header(
-                        &mut pages[0],
-                        &self.fonts[0].tab,
-                        self.label(id)?,
-                        self.bounds(name)?,
-                    )?;
-                } else {
-                    ui::text_widget_style9(
-                        &mut pages[0],
-                        &self.fonts[0].tab,
-                        self.label(id)?,
-                        self.bounds(name)?,
-                        0xffffffff,
-                    )?;
-                }
+                ui::section_header(
+                    &mut pages[0],
+                    &self.fonts[0].tab,
+                    self.label(id)?,
+                    self.bounds(name)?,
+                )?;
             }
             for (i, text) in metadata.iter().enumerate() {
                 let b = self.bounds(&format!("SESS_INFO{}", i + 1))?;
@@ -598,8 +615,14 @@ impl RosterPanel {
             let status_text = if view.busy {
                 encode(b"Loading...")?
             } else {
-                self.label(if view.start_enabled { 1757 } else { 1759 })?
-                    .to_vec()
+                self.label(if !view.start_enabled {
+                    1759
+                } else if view.network_host == Some(false) {
+                    1758 // 49ead0: ready clients wait for the host.
+                } else {
+                    1757
+                })?
+                .to_vec()
             };
             ui::text_widget_style9(
                 &mut pages[0],
@@ -608,17 +631,24 @@ impl RosterPanel {
                 status,
                 0xffffffff,
             )?;
-            // Offline component retains the authored chat area as passive art;
-            // no invented network/chat action is exposed.
-            shapes.rect(self.bounds("CHAT_TYPEAREA")?, [0xff1f2f70; 4]);
-            shapes.rect(
-                self.bounds(&format!("SELECTP{}", view.local_row + 1))?,
-                [0xff00ff00; 4],
-            );
+            let chat_input = self.bounds("CHAT_TYPEAREA")?;
+            shapes.rect(chat_input, [0xff1f2f70; 4]);
+            if view.network_host.is_some() {
+                // 4a0ff0 creates the lobby's active, left-aligned chat input.
+                ui::text_entry(
+                    &mut pages[0],
+                    &mut shapes,
+                    &self.fonts[0].tab,
+                    &[],
+                    chat_input,
+                    false,
+                    true,
+                )?;
+            }
             for (i, p) in view.rows.iter().enumerate() {
                 let row = i + 1;
                 let b = self.bounds(&format!("SLOT_{row}BACKING"))?;
-                shapes.rect(b, [self.backing; 4]);
+                shapes.rect(b, [0xff000a4b; 4]);
                 let name = self.bounds(&format!("NAMESLOT_P{row}"))?;
                 shapes.rect(name, [0xff000530; 4]);
                 let text = if view.closed[i] {
@@ -662,6 +692,14 @@ impl RosterPanel {
                         self.bounds(&format!("3DPIC_P{row}"))?,
                     )?;
                     for id in [2 * i, 2 * i + 1] {
+                        // 49f3a0 hides remote human selectors, rather than
+                        // displaying their disabled textures. Keep the AI controls.
+                        if view.network_host.is_some()
+                            && p.kind == Kind::Human
+                            && i != view.local_row
+                        {
+                            continue;
+                        }
                         self.image(
                             &mut images,
                             if id % 2 == 0 { 97 } else { 101 }
@@ -711,27 +749,12 @@ impl RosterPanel {
                     pressed && selected == Some(id),
                     !view.enabled[id],
                 )?;
-                ui::text_widget_style9(
+                ui::button_label(
                     &mut pages[0],
                     &self.fonts[0].tab,
                     self.label(label)?,
                     b,
-                    0xffffffff,
-                )?;
-            }
-            let chat = self.bounds("CHAT_BACKING")?;
-            for (i, line) in view.details.iter().enumerate() {
-                ui::text_widget_style3(
-                    &mut pages[1],
-                    &self.fonts[1].tab,
-                    &encode(line)?,
-                    [
-                        chat[0] + 5.,
-                        chat[1] + 5. + i as f32 * 12.,
-                        chat[2] - 5.,
-                        chat[1] + 17. + i as f32 * 12.,
-                    ],
-                    0xffffffff,
+                    !view.enabled[id],
                 )?;
             }
             out.push(shapes);
@@ -740,34 +763,477 @@ impl RosterPanel {
                 out.extend(p);
             }
         }
-        renderer.prepare(
-            &out.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        Ok(out)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn synthetic_panel() -> RosterPanel {
+        let mut panel = RosterPanel::inert(vec![vec![]; 1900]);
+        panel.backing = 0xbb000a28;
+        panel.generic = vec![Surface::solid(); 263];
+        panel.characters = (0..10)
+            .map(|_| Character {
+                color: 0xffaa2222,
+                token: 0,
+                portrait: 1,
+            })
+            .collect();
+        panel.fonts = (0..3)
+            .map(|_| Font {
+                pages: vec![Surface::solid(); 2],
+                tab: ui::synthetic_text_font(5, 8),
+            })
+            .collect();
+        panel.strings[1440] = crate::load::ascii("Start");
+        let mut region = |name: &str, bounds| {
+            panel.regions.push(Region {
+                name: format!("NETWORK_CHAT_{name}"),
+                part: 0,
+                bounds,
+            })
+        };
+        for name in [
+            "SESS_BACKING",
+            "CHAT_BACKING",
+            "PLAYERS_TITLE_AREA",
+            "SESS_TITLE_AREA",
+            "CHAT_TITLE_AREA",
+            "TITLE_AREA",
+            "SESS_LABEL1",
+            "SESS_LABEL2",
+            "SESS_LABEL3",
+            "SESS_INFO1",
+            "SESS_INFO2",
+            "SESS_INFO3",
+            "CHAT_TYPEAREA",
+            "CANCEL_BUTTON",
+        ] {
+            region(name, [10., 300., 100., 330.]);
+        }
+        region("START_BUTTON", [450., 400., 580., 435.]);
+        region("PLAYER_BACKING", [10., 80., 610., 260.]);
+        for row in 1..=6 {
+            let x = 20. + (row - 1) as f32 * 96.;
+            for (prefix, bounds) in [
+                ("SELECTP", [x, 90., x + 88., 254.]),
+                ("SLOT_", [x + 3., 194., x + 85., 251.]),
+                ("NAMESLOT_P", [x + 3., 93., x + 85., 109.]),
+                ("3DPIC_P", [x + 4., 112., x + 84., 191.]),
+                ("TINT_SLOT", [x + 4., 195., x + 84., 223.]),
+                ("TOKEN_P", [x + 30., 195., x + 58., 223.]),
+                ("LEFT_BUTT_P", [x + 5., 200., x + 20., 215.]),
+                ("RIGHT_BUTT_P", [x + 65., 200., x + 80., 215.]),
+                ("SLOT_TOGGLE_P", [x + 5., 228., x + 20., 243.]),
+                ("CHECKBOX_P", [x + 65., 228., x + 80., 243.]),
+            ] {
+                region(
+                    &if prefix == "SLOT_" {
+                        format!("SLOT_{row}BACKING")
+                    } else {
+                        format!("{prefix}{row}")
+                    },
+                    bounds,
+                );
+            }
+        }
+        panel
+    }
+    fn surfaces(
+        panel: &RosterPanel,
+        rows: &[Participant; 6],
+        enabled: bool,
+        local: usize,
+    ) -> Vec<Surface> {
+        panel
+            .row_surfaces(
+                Some(25),
+                true,
+                [&[], &[]],
+                |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
+                Presentation {
+                    network_host: None,
+                    visible: true,
+                    busy: false,
+                    rows,
+                    enabled: std::array::from_fn(|id| id != 25 || enabled),
+                    start_enabled: enabled,
+                    local_row: local,
+                    name_focused: false,
+                    closed: [false; 6],
+                },
+                255,
+            )
+            .unwrap()
+    }
+    fn assert_start_style(panel: &RosterPanel, rows: &[Participant; 6], enabled: bool) {
+        let out = surfaces(panel, rows, enabled, 0);
+        // The Start label is the only nonempty font0 caption in this fixture.
+        let label = &out[out.len() - 6];
+        let mut expected = vec![Surface::solid(); 2];
+        ui::text_widget_style9(
+            &mut expected,
+            &panel.fonts[0].tab,
+            &panel.strings[1440],
+            panel.action_bounds(25).unwrap(),
+            if enabled { 0xffffffff } else { 0xff646464 },
+        )
+        .unwrap();
+        assert_eq!(label.vertices, expected[0].vertices);
+        let mut button = Surface::solid();
+        ui::button(
+            &mut button,
+            panel.action_bounds(25).unwrap(),
+            [80, 148, 34],
+            true,
+            true,
+            !enabled,
+        )
+        .unwrap();
+        // Shapes end with Cancel then Start; both label and frame use availability.
+        assert!(out[0].vertices.ends_with(&button.vertices));
+    }
+    #[test]
+    fn network_lobby_headers_status_tokens_and_chat_match_host_and_client() {
+        use openmt2001::network::lobby::{Request, Settings, Snapshot};
+        let mut panel = synthetic_panel();
+        for (id, text) in [
+            (1615, "Scenario"),
+            (1879, "Difficulty"),
+            (1616, "Status"),
+            (1757, "Ready!"),
+            (1758, "Waiting for Host"),
+            (1759, "Waiting for Players"),
+        ] {
+            panel.strings[id] = crate::load::ascii(text);
+        }
+        for (name, bounds) in [
+            ("SESS_LABEL1", [20., 280., 140., 300.]),
+            ("SESS_LABEL2", [20., 310., 140., 330.]),
+            ("SESS_LABEL3", [20., 340., 140., 360.]),
+            ("SESS_INFO3", [145., 340., 320., 360.]),
+            ("CHAT_BACKING", [350., 280., 600., 380.]),
+            ("CHAT_TYPEAREA", [350., 390., 600., 415.]),
+        ] {
+            panel
+                .regions
+                .iter_mut()
+                .find(|r| r.name == format!("NETWORK_CHAT_{name}"))
+                .unwrap()
+                .bounds = bounds;
+        }
+        let mut snapshot = Snapshot::host(
+            Settings {
+                name: b"Host session".to_vec(),
+                level: 300001,
+                parameter_bits: 2f32.to_bits(),
+                difficulty: 0,
+                map: b"default".to_vec(),
+            },
+            b"Host".to_vec(),
+            0,
+        )
+        .unwrap();
+        for phase in 0..3 {
+            if phase == 1 {
+                snapshot
+                    .request(
+                        1,
+                        Request::Join {
+                            name: b"Guest".to_vec(),
+                            token: 1,
+                        },
+                    )
+                    .unwrap();
+            } else if phase == 2 {
+                snapshot
+                    .request(
+                        1,
+                        Request::Edit {
+                            token: 1,
+                            ready: true,
+                        },
+                    )
+                    .unwrap();
+            }
+            let rows = std::array::from_fn(|i| {
+                let p = &snapshot.rows[i].player;
+                Participant {
+                    kind: if p.kind == openmt2001::network::RowKind::Human {
+                        Kind::Human
+                    } else {
+                        Kind::Empty
+                    },
+                    token: usize::try_from(p.token).ok(),
+                    name: p.name.clone(),
+                    ready: p.ready,
+                    difficulty: 0,
+                }
+            });
+            for host in [true, false] {
+                if !host && phase == 0 {
+                    continue;
+                }
+                let local = usize::from(!host);
+                let enabled = std::array::from_fn(|id| match id {
+                    0..=11 => id / 2 == local,
+                    25 => host && snapshot.start_enabled(),
+                    _ => true,
+                });
+                let out = panel
+                    .row_surfaces(
+                        None,
+                        false,
+                        [&[], &[]],
+                        |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
+                        Presentation {
+                            network_host: Some(host),
+                            visible: true,
+                            busy: false,
+                            rows: &rows,
+                            enabled,
+                            start_enabled: snapshot.start_enabled(),
+                            local_row: local,
+                            name_focused: false,
+                            closed: [false; 6],
+                        },
+                        255,
+                    )
+                    .unwrap();
+                let font = &out[out.len() - 6];
+                for (name, id) in [
+                    ("SESS_LABEL1", 1615),
+                    ("SESS_LABEL2", 1879),
+                    ("SESS_LABEL3", 1616),
+                ] {
+                    let mut expected = vec![Surface::solid(); 2];
+                    ui::section_header(
+                        &mut expected,
+                        &panel.fonts[0].tab,
+                        &panel.strings[id],
+                        panel.bounds(name).unwrap(),
+                    )
+                    .unwrap();
+                    assert!(
+                        font.vertices
+                            .windows(expected[0].vertices.len())
+                            .any(|v| v == expected[0].vertices)
+                    );
+                }
+                let status = if phase < 2 {
+                    1759
+                } else if host {
+                    1757
+                } else {
+                    1758
+                };
+                let mut expected = vec![Surface::solid(); 2];
+                ui::text_widget_style9(
+                    &mut expected,
+                    &panel.fonts[0].tab,
+                    &panel.strings[status],
+                    panel.bounds("SESS_INFO3").unwrap(),
+                    0xffffffff,
+                )
+                .unwrap();
+                let b = panel.bounds("SESS_INFO3").unwrap();
+                let actual = font
+                    .vertices
+                    .iter()
+                    .filter(|v| v[0] >= b[0] && v[0] <= b[2] && v[1] >= b[1] && v[1] <= b[3])
+                    .copied()
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected[0].vertices, "host={host}, phase={phase}");
+                let images = &out[1..out.len() - 6];
+                let has_image = |b: [f32; 4]| {
+                    images.iter().any(|s| {
+                        s.vertices.first().is_some_and(|v| v[..2] == b[..2])
+                            && s.vertices.get(2).is_some_and(|v| v[..2] == b[2..])
+                    })
+                };
+                for (i, participant) in rows.iter().enumerate() {
+                    for id in [2 * i, 2 * i + 1] {
+                        assert_eq!(has_image(panel.action_bounds(id).unwrap()), i == local);
+                    }
+                    if participant.kind == Kind::Human {
+                        let token = panel.bounds(&format!("TOKEN_P{}", i + 1)).unwrap();
+                        let tint = panel.bounds(&format!("TINT_SLOT{}", i + 1)).unwrap();
+                        assert!(has_image(token));
+                        assert_eq!(token[0] + token[2], tint[0] + tint[2]);
+                    }
+                }
+                let chat = panel.bounds("CHAT_BACKING").unwrap();
+                assert!(
+                    out[out.len() - 6..]
+                        .iter()
+                        .flat_map(|s| &s.vertices)
+                        .all(|v| v[0] < chat[0]
+                            || v[0] > chat[2]
+                            || v[1] < chat[1]
+                            || v[1] > chat[3])
+                );
+                let mut caret = Surface::solid();
+                ui::text_entry(
+                    &mut expected,
+                    &mut caret,
+                    &panel.fonts[0].tab,
+                    &[],
+                    panel.bounds("CHAT_TYPEAREA").unwrap(),
+                    false,
+                    true,
+                )
+                .unwrap();
+                let actual = out[0]
+                    .vertices
+                    .iter()
+                    .zip(&out[0].alpha)
+                    .filter(|(_, a)| **a == 0xaf)
+                    .map(|(v, _)| *v)
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, caret.vertices);
+                assert_eq!(actual.len(), 6);
+            }
+        }
+        // The offline renderer keeps its passive chat input and AI token controls.
+        let mut offline =
+            Roster::new(b"Host", 0, std::array::from_fn(|_| b"AI".to_vec()), [0; 6]).unwrap();
+        offline.toggle_ai(1).unwrap();
+        let out = surfaces(&panel, offline.slots(), true, 0);
+        assert!(!out[0].alpha.contains(&0xaf));
+        for id in 0..4 {
+            let b = panel.action_bounds(id).unwrap();
+            assert!(
+                out[1..out.len() - 6]
+                    .iter()
+                    .any(|s| s.vertices[0][..2] == b[..2])
+            );
+        }
+    }
+    #[test]
+    fn lobby_start_label_and_frame_follow_offline_and_network_availability() {
+        use openmt2001::network::lobby::{Request, Settings, Snapshot};
+        let panel = synthetic_panel();
+        let mut roster =
+            Roster::new(b"Host", 0, std::array::from_fn(|_| b"AI".to_vec()), [0; 6]).unwrap();
+        assert!(!roster.start_enabled());
+        assert_start_style(&panel, roster.slots(), roster.start_enabled());
+        roster.toggle_ai(1).unwrap();
+        assert!(roster.start_enabled());
+        assert_start_style(&panel, roster.slots(), roster.start_enabled());
+        let mut snapshot = Snapshot::host(
+            Settings {
+                name: b"Session".to_vec(),
+                level: 300001,
+                parameter_bits: 2f32.to_bits(),
+                difficulty: 0,
+                map: b"default".to_vec(),
+            },
+            b"Host".to_vec(),
+            0,
+        )
+        .unwrap();
+        for phase in 0..3 {
+            if phase == 1 {
+                snapshot
+                    .request(
+                        1,
+                        Request::Join {
+                            name: b"Guest".to_vec(),
+                            token: 1,
+                        },
+                    )
+                    .unwrap();
+            } else if phase == 2 {
+                snapshot
+                    .request(
+                        1,
+                        Request::Edit {
+                            token: 1,
+                            ready: true,
+                        },
+                    )
+                    .unwrap();
+            }
+            assert_eq!(snapshot.start_enabled(), phase == 2);
+            let rows = std::array::from_fn(|i| {
+                let p = &snapshot.rows[i].player;
+                Participant {
+                    kind: if p.kind == openmt2001::network::RowKind::Human {
+                        Kind::Human
+                    } else {
+                        Kind::Empty
+                    },
+                    token: usize::try_from(p.token).ok(),
+                    name: p.name.clone(),
+                    ready: p.ready,
+                    difficulty: 0,
+                }
+            });
+            for host in [true, false] {
+                assert_start_style(&panel, &rows, host && snapshot.start_enabled());
+            }
+        }
+    }
+    #[test]
+    fn lobby_has_one_dim_full_slot_frame_and_opaque_lower_interiors() {
+        let mut panel = synthetic_panel();
+        let mut rows = Roster::new(b"Host", 0, std::array::from_fn(|_| b"AI".to_vec()), [0; 6])
+            .unwrap()
+            .slots()
+            .clone();
+        rows[1] = Participant {
+            kind: Kind::Human,
+            token: Some(1),
+            name: b"Guest".to_vec(),
+            ready: true,
+            difficulty: 0,
+        };
+        for local in [0, 1, 5] {
+            for phase in 0..33 {
+                let out = surfaces(&panel, &rows, false, local);
+                let shapes = &out[0];
+                // The green title gradient shares the marker colour; exclude it.
+                let title = panel.bounds("TITLE_AREA").unwrap();
+                let markers = shapes
+                    .vertices
+                    .as_chunks::<6>()
+                    .0
+                    .iter()
+                    .filter(|q| q.iter().all(|v| v[3..6] == [0., 1., 0.]))
+                    .filter(|q| !(q[0][..2] == title[..2] && q[2][..2] == title[2..]))
+                    .collect::<Vec<_>>();
+                assert_eq!(markers.len(), usize::from(local != 5));
+                if local != 5 {
+                    let bounds = panel.bounds(&format!("SELECTP{}", local + 1)).unwrap();
+                    assert_eq!(markers[0][0][..2], bounds[..2]);
+                    assert_eq!(markers[0][2][..2], bounds[2..]);
+                    assert!(bounds[1] < panel.name_bounds(local).unwrap()[1]);
+                    assert!(bounds[3] > panel.action_bounds(18 + local).unwrap()[3]);
+                    assert_eq!(shapes.alpha[0], 255 - ((phase * 8) & 255) as u8);
+                    // The very next primitive dims green with the native player backing.
+                    assert_eq!(&shapes.alpha[6..12], &[0xbb; 6]);
+                }
+                for row in 1..=6 {
+                    let b = panel.bounds(&format!("SLOT_{row}BACKING")).unwrap();
+                    let at = shapes
+                        .vertices
+                        .as_chunks::<6>()
+                        .0
+                        .iter()
+                        .position(|q| q[0][..2] == b[..2] && q[2][..2] == b[2..])
+                        .unwrap()
+                        * 6;
+                    assert_eq!(&shapes.alpha[at..at + 6], &[255; 6]);
+                    assert_eq!(shapes.vertices[at][3..6], [0., 10. / 255., 75. / 255.]);
+                }
+                panel.advance_highlight();
+            }
+            // Restart the pulse to check its exact wrapping alpha each time.
+            panel.highlight = ui::LobbyHighlight::default();
+        }
+    }
     #[test]
     #[ignore = "requires supplied original assets, English language and offscreen graphics"]
     fn original_offline_roster_controls_and_rendered_panels() {

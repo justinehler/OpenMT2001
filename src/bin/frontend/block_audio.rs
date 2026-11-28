@@ -89,6 +89,7 @@ pub enum Action {
     Stop(usize),
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub struct Controller {
     pub sources: [Source; 52],
     random_state: u32,
@@ -140,9 +141,9 @@ impl Controller {
             }
         }
         let delta = snapshot.tick.wrapping_sub(self.previous_tick);
-        self.previous_tick = snapshot.tick; // 4afd77 also runs in modes 1/3.
         let mut actions = Vec::new();
         if matches!(interface_mode, 1 | 3) {
+            self.previous_tick = snapshot.tick; // 4afd77 also runs in modes 1/3.
             return actions;
         }
         for category in 0..52 {
@@ -201,6 +202,7 @@ impl Controller {
                 }
             }
         }
+        self.previous_tick = snapshot.tick;
         actions
     }
 }

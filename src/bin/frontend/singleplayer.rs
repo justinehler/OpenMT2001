@@ -93,6 +93,7 @@ mod campaign_picker_tests {
             scenario: panel(),
             tutorial_panel: panel(),
             character_panel: panel(),
+            highlight: ui::LobbyHighlight::default(),
             generic: vec![],
             characters: vec![],
             fonts: vec![],
@@ -126,6 +127,39 @@ mod campaign_picker_tests {
         }
     }
 
+    #[test]
+    fn lobby_campaign_frame_uses_select_region_under_backing_and_slot_interiors() {
+        let mut panel = panel();
+        panel.visible = true;
+        panel.character_screen = true;
+        let b = &mut panel.character_panel.bounds;
+        b[8] = [10., 80., 610., 260.];
+        b[23] = [20., 90., 108., 254.];
+        for slot in 0..6 {
+            let x = 20. + slot as f32 * 96.;
+            b[34 - slot] = [x + 3., 93., x + 85., 109.];
+            b[15 + slot] = [x + 3., 194., x + 85., 251.];
+        }
+        for phase in 0..33 {
+            let mut shapes = Surface::solid();
+            panel.character_slot_backgrounds(&mut shapes);
+            assert_eq!(shapes.vertices.len(), 14 * 6);
+            let quads = shapes.vertices.as_chunks::<6>().0;
+            assert_eq!(quads[0][0][..2], [20., 90.]);
+            assert_eq!(quads[0][2][..2], [108., 254.]);
+            assert_eq!(quads[0][0][3..6], [0., 1., 0.]);
+            assert_eq!(shapes.alpha[0], 255 - ((phase * 8) & 255) as u8);
+            assert_eq!(&shapes.alpha[6..12], &[0xbb; 6]);
+            // All six name bars and lower rows cover the marker completely.
+            for quad in &quads[2..] {
+                assert!(quad.iter().all(|v| v[3..6] == [0., 10. / 255., 75. / 255.]));
+            }
+            assert!(shapes.alpha[12..].iter().all(|&alpha| alpha == 255));
+            assert!(panel.advance_highlight());
+        }
+        panel.character_screen = false;
+        assert!(!panel.advance_highlight());
+    }
     #[test]
     fn singleplayer_text_style_campaign_slots_use_small_font_and_lobby_alignment() {
         let mut panel = panel();
@@ -566,6 +600,25 @@ mod tutorial_title_tests {
             &[&overlay],
             "work/frontend/tutorial-caption-city.png",
         );
+        panel.open(true, "Capture", catalog.clone(), fresh.clone());
+        assert!(panel.character_screen && panel.sandbox);
+        assert_eq!(panel.character, 0); // Racecar on a fresh Sandbox profile.
+        let biography = super::CharacterBiography::new(
+            &panel.scenario_list_tab,
+            &panel.strings[panel.characters[panel.character].description],
+            panel.character_panel.bounds[68],
+        )
+        .unwrap();
+        assert_eq!(biography.pitch, 11.);
+        assert!(biography.lines.len() <= biography.capacity());
+        let racecar = panel.draw(&renderer, None, false).unwrap();
+        crate::capture_test::capture_scene_overlays_at_size(
+            &renderer,
+            &scene,
+            &[&racecar],
+            "work/frontend/sandbox-racecar-biography-city.png",
+            [1024, 768],
+        );
         panel.open(false, "Capture", catalog, fresh);
         let scenario = panel.draw(&renderer, None, false).unwrap();
         crate::capture_test::capture_scene_overlays(
@@ -579,12 +632,22 @@ mod tutorial_title_tests {
         panel.activate(3);
         panel.activate(3); // right arrow reaches Dog from the new-profile Racecar
         assert_eq!(panel.characters[panel.character].name, 1746);
+        assert!(!panel.sandbox);
+        let biography = super::CharacterBiography::new(
+            &panel.scenario_list_tab,
+            &panel.strings[panel.characters[panel.character].description],
+            panel.character_panel.bounds[68],
+        )
+        .unwrap();
+        assert_eq!(biography.pitch, 11.);
+        assert!(biography.lines.len() <= biography.capacity());
         let dog = panel.draw(&renderer, None, false).unwrap();
-        crate::capture_test::capture_scene_overlays(
+        crate::capture_test::capture_scene_overlays_at_size(
             &renderer,
             &scene,
             &[&dog],
             "work/frontend/character-dog-biography-city.png",
+            [1024, 768],
         );
     }
 }
@@ -707,8 +770,72 @@ mod scenario_scroll_tests {
 }
 #[cfg(test)]
 mod character_biography_tests {
-    use super::{ascii, character_biography_lines, ui};
+    use super::{CharacterBiography, Surface, ascii, character_biography_lines, ui};
     use openmt2001::archive::ArchiveIndex;
+
+    fn font() -> Vec<u8> {
+        let mut tab = vec![0; 4 + 96 * 44];
+        tab[..4].copy_from_slice(&96u32.to_le_bytes());
+        for glyph in 0..96 {
+            let at = 4 + glyph * 44;
+            tab[at + 32..at + 36].copy_from_slice(&5i32.to_le_bytes());
+            tab[at + 36..at + 40].copy_from_slice(&10i32.to_le_bytes());
+            tab[at + 40..at + 44].copy_from_slice(&3i32.to_le_bytes());
+        }
+        tab
+    }
+
+    #[test]
+    fn biography_production_paint_keeps_wraps_and_fractional_screen_pitch() {
+        let tab = font();
+        let text = ascii("AA BB CC DD EE FF GG HH II");
+        let layout = CharacterBiography::new(&tab, &text, [10.25, 290.75, 30.75, 400.]).unwrap();
+        assert_eq!(
+            layout.lines,
+            ["AA", "BB", "CC", "DD", "EE", "FF", "GG", "HH", "II"].map(ascii)
+        );
+        assert_eq!(
+            layout.lines,
+            character_biography_lines(&tab, &text, 20.5).unwrap()
+        );
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, 0).unwrap();
+        // Two glyphs, six vertices per glyph. Inspect the real paint output,
+        // including baseline truncation and the callback's half-pixel offset.
+        let tops = pages[0]
+            .vertices
+            .as_chunks::<12>()
+            .0
+            .iter()
+            .map(|row| row.iter().map(|v| v[1]).reduce(f32::min).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tops,
+            [
+                292.5, 303.5, 314.5, 325.5, 336.5, 347.5, 358.5, 369.5, 380.5
+            ]
+        );
+        let screen_tops = tops
+            .iter()
+            .map(|top| (top * 1.6).floor() as i32)
+            .collect::<Vec<_>>();
+        assert_eq!(screen_tops, [468, 485, 503, 520, 538, 556, 573, 591, 608]);
+    }
+
+    #[test]
+    fn biography_scroll_capacity_and_paint_use_measured_height_plus_gap() {
+        let mut tab = font();
+        let at = 4 + usize::from(b'W' - 32) * 44 + 36;
+        tab[at..at + 4].copy_from_slice(&12i32.to_le_bytes());
+        let layout =
+            CharacterBiography::new(&tab, &ascii("AA BB CC DD"), [0., 20., 20., 58.]).unwrap();
+        assert_eq!(layout.capacity(), 2);
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, 2).unwrap();
+        assert_eq!(pages[0].vertices.len(), 24);
+        assert_eq!(pages[0].vertices[2][1], 22.5);
+        assert_eq!(pages[0].vertices[14][1], 35.5);
+    }
 
     #[test]
     #[ignore = "requires original v1.4 Character biography fixture and archive"]
@@ -745,7 +872,9 @@ mod character_biography_tests {
             ascii("Dog gets her name from her favorite pet. She will")
         );
         assert_eq!(lines[10], ascii("shows true compassion for."));
-        assert!(lines.len() as f32 * line_height as f32 <= bounds[3] - bounds[1]);
+        let layout = CharacterBiography::new(&font, dog, bounds).unwrap();
+        assert_eq!(layout.pitch, 11.);
+        assert!(layout.capacity() >= lines.len());
 
         let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
         let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
@@ -776,6 +905,7 @@ pub struct SinglePlayer {
     scenario: Panel,
     tutorial_panel: Panel,
     character_panel: Panel,
+    highlight: ui::LobbyHighlight,
     generic: Vec<Surface>,
     characters: Vec<Character>,
     fonts: Vec<Surface>,
@@ -982,6 +1112,58 @@ fn character_biography_lines(
         })
         .collect())
 }
+
+struct CharacterBiography {
+    lines: Vec<Vec<u8>>,
+    bounds: [f32; 4],
+    pitch: f32,
+}
+impl CharacterBiography {
+    fn new(tab: &[u8], encoded: &[u8], bounds: [f32; 4]) -> Result<Self, String> {
+        let lines = character_biography_lines(tab, encoded, bounds[2] - bounds[0])?;
+        let at = 4 + usize::from(b'W' - 32) * 44 + 36;
+        let height = i32::from_le_bytes(
+            tab.get(at..at + 4)
+                .ok_or("font W height metric")?
+                .try_into()
+                .unwrap(),
+        );
+        // 4a7e7e sets this widget's vertical gap to 1. 4406a0 adds it
+        // to the measured W height (10 for Font2), independently of wrapping.
+        let pitch = height as f32 + 1.;
+        if bounds.iter().any(|v| !v.is_finite()) || bounds[3] <= bounds[1] {
+            return Err("invalid character biography bounds".into());
+        }
+        Ok(Self {
+            lines,
+            bounds,
+            pitch,
+        })
+    }
+
+    fn capacity(&self) -> usize {
+        // 441940 measures whole rows using the same pitch as the painter.
+        (((self.bounds[3] - self.bounds[1]) / self.pitch) as usize).max(1)
+    }
+
+    fn paint(&self, pages: &mut [Surface], tab: &[u8], first: usize) -> Result<(), String> {
+        for (line, text) in self
+            .lines
+            .iter()
+            .skip(first)
+            .take(self.capacity())
+            .enumerate()
+        {
+            let mut bounds = self.bounds;
+            // 440ba0 places each row from the integer baseline and row index.
+            // Retain float coordinates through viewport scaling: 11 units
+            // become 17.6 pixels at 1024x768, without rounding every advance.
+            bounds[1] = self.bounds[1].trunc() + line as f32 * self.pitch;
+            ui::text_widget_style0(pages, tab, text, bounds, 0xffffffff)?;
+        }
+        Ok(())
+    }
+}
 impl SinglePlayer {
     pub fn new(
         index: &ArchiveIndex,
@@ -1038,6 +1220,7 @@ impl SinglePlayer {
                 "gamedata2\\brand_new_panels\\sp_token_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
             )?,
+            highlight: ui::LobbyHighlight::default(),
             generic,
             characters,
             fonts: texture.textures[2..4].iter().map(Surface::new).collect(),
@@ -1581,34 +1764,28 @@ impl SinglePlayer {
         } else {
             &self.scenario_list_tab
         };
+        if self.character_screen {
+            // Keep the modern wheel convenience consistent with paint capacity.
+            if let Ok(layout) = CharacterBiography::new(tab, text, b) {
+                self.biography_first
+                    .set((self.biography_first.get() as i32 + delta).clamp(
+                        0,
+                        layout.lines.len().saturating_sub(layout.capacity()) as i32,
+                    ) as usize);
+            }
+            return;
+        }
         let row_height = if self.tutorial_screen {
             14.
-        } else if self.character_screen {
-            10.
         } else {
             SCENARIO_ROW_HEIGHT
         };
-        let lines = if self.character_screen {
-            character_biography_lines(tab, text, b[2] - b[0])
-        } else {
-            wrap_lines(tab, text, b[2] - b[0])
-        };
+        let lines = wrap_lines(tab, text, b[2] - b[0]);
         if let Ok(lines) = lines {
             let visible = ((b[3] - b[1]) / row_height) as usize;
-            // Existing modern wheel convenience retained, scoped explicitly:
-            // no original Character wheel producer is claimed. It now scrolls
-            // the inspected biography; original paint retention remains separate.
-            if self.character_screen {
-                self.biography_first.set(
-                    (self.biography_first.get() as i32 + delta)
-                        .clamp(0, lines.len().saturating_sub(visible) as i32)
-                        as usize,
-                );
-            } else {
-                self.description_first = (self.description_first as i32 + delta)
-                    .clamp(0, lines.len().saturating_sub(visible) as i32)
-                    as usize;
-            }
+            self.description_first = (self.description_first as i32 + delta)
+                .clamp(0, lines.len().saturating_sub(visible) as i32)
+                as usize;
         }
     }
     fn scenario_list_layout(&self) -> Result<openmt2001::frontend_list::Layout, String> {
@@ -1808,6 +1985,22 @@ impl SinglePlayer {
             None,
         )
     }
+    pub fn advance_highlight(&mut self) -> bool {
+        if !self.visible || !self.character_screen {
+            return false;
+        }
+        self.highlight.advance();
+        true
+    }
+    fn character_slot_backgrounds(&self, shapes: &mut Surface) {
+        let b = &self.character_panel.bounds;
+        self.highlight.paint(shapes, b[23]); // SELECTP1: local campaign slot
+        shapes.rect(b[8], [0xbb000a28; 4]);
+        for slot in 0..6 {
+            shapes.rect(b[34 - slot], [0xff000a4b; 4]);
+            shapes.rect(b[15 + slot], [0xff000a4b; 4]);
+        }
+    }
     fn slot_labels(&self) -> Result<Vec<Surface>, String> {
         let mut pages = self.slot_fonts.clone();
         let profile_glyphs = ascii(&String::from_utf8_lossy(&self.name));
@@ -1882,7 +2075,8 @@ impl SinglePlayer {
             0xffffffff,
         )?;
         if self.character_screen {
-            for part in [8, 62, 68] {
+            self.character_slot_backgrounds(&mut shapes);
+            for part in [62, 68] {
                 shapes.rect(b[part], [0xee000530; 4]);
             }
             for (part, id) in [(22, 0x694), (61, 0x6a7)] {
@@ -1900,8 +2094,6 @@ impl SinglePlayer {
             }
             slot_labels = self.slot_labels()?;
             for slot in 0..6 {
-                let namepart = 34 - slot;
-                shapes.rect(b[namepart], [0xff000530; 4]);
                 let mut tint = b[41 + slot];
                 let authored = self
                     .custom
@@ -1978,27 +2170,15 @@ impl SinglePlayer {
                 0xffffffff,
             )?;
             // Native 4a7e26 creates the biography widget as style0 and
-            // 4a7e4b selects font2. Its W glyph advances each wrapped row.
+            // 4a7e4b selects font2; 4a7e7e adds one unit between rows.
             let biography = b[68];
-            let biography_lines = character_biography_lines(
+            let layout = CharacterBiography::new(
                 &self.scenario_list_tab,
                 &self.strings[c.description],
-                biography[2] - biography[0],
+                biography,
             )?;
-            let first = self.biography_first_for_rows(biography_lines.len());
-            for (line, text) in biography_lines.iter().skip(first).enumerate() {
-                let top = biography[1].trunc() + line as f32 * 10.;
-                if top + 10. > biography[3] {
-                    break;
-                }
-                ui::text_widget_style0(
-                    &mut scenario_list_fonts,
-                    &self.scenario_list_tab,
-                    text,
-                    [biography[0], top, biography[2], biography[3]],
-                    0xffffffff,
-                )?;
-            }
+            let first = self.biography_first_for_rows(layout.lines.len());
+            layout.paint(&mut scenario_list_fonts, &self.scenario_list_tab, first)?;
             for (part, id) in [(63, 0x64f), (64, 0x757)] {
                 shapes.rect(b[part], [0xff01762f; 4]);
                 ui::section_header(&mut fonts, &self.tab, &self.strings[id], b[part])?;
