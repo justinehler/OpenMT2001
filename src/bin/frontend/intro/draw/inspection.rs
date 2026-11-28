@@ -318,6 +318,25 @@ impl Intro {
                     .selection
                     .pick(view.camera, &view.scene, point, view.selected)
             });
+            // Host status carries world.clock.timing[0] (00822d40), the
+            // simulation tick read by the original marker renderer at 4b4f40.
+            if let Some(surface) = self.assets.selection.refresh_marker_surface(
+                &mut view.marker_state,
+                [view.selected, hovered],
+                &view.scene,
+                view.live_status.as_ref().map_or(0, |status| status.ticks),
+                view.title_state != Some((view.selected, hovered)),
+            )? {
+                let mut draw = surface.draw();
+                draw.mode = openmt2001::render::SurfaceMode::StaticLit;
+                self.renderer.update_surface(
+                    &mut view.markers,
+                    0,
+                    &draw,
+                    view.scene.camera,
+                    view.scene.fog,
+                )?;
+            }
             if view.title_state != Some((view.selected, hovered)) {
                 if view.title_state.map(|s| s.0) != Some(view.selected) {
                     view.information = match (
@@ -368,19 +387,6 @@ impl Intro {
                 }
                 view.title_state = Some((view.selected, hovered));
                 view.hovered = hovered;
-                let surface =
-                    self.assets
-                        .selection
-                        .marker_surface(view.selected, hovered, &view.scene)?;
-                let mut draw = surface.draw();
-                draw.mode = openmt2001::render::SurfaceMode::StaticLit;
-                self.renderer.update_surface(
-                    &mut view.markers,
-                    0,
-                    &draw,
-                    view.scene.camera,
-                    view.scene.fog,
-                )?;
                 let name = |index: Option<crate::selection::Hit>| {
                     index
                         .map(|i| {

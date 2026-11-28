@@ -187,6 +187,7 @@ fn inspection(assets: &Assets) -> Inspection {
         hovered: None,
         selected: None,
         title_state: None,
+        marker_state: None,
         started: std::time::Instant::now(),
         tick: Default::default(),
     }

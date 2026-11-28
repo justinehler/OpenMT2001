@@ -1156,6 +1156,7 @@ struct Inspection {
     detail_visibility: DetailVisibility,
     prepared: PreparedScene,
     markers: PreparedScene,
+    marker_state: Option<crate::selection::MarkerState>,
     navigator: PreparedScene,
     navigator_owners: Vec<Option<crate::navigator::Owner>>,
     navigator_bounds: [f32; 4],

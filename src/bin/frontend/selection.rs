@@ -1,4 +1,4 @@
-//! Paused inspection selection using original pavement bounds and box narrow phase.
+//! City inspection selection using original pavement bounds and box narrow phase.
 use openmt2001::{
     archive::ArchiveIndex,
     board::{Block, Board},
@@ -19,6 +19,14 @@ pub struct Assets {
 pub struct Hit {
     pub category: usize,
     pub building: Option<usize>,
+}
+
+/// Geometry is independent of camera frames; only the world pulse phase moves it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MarkerState {
+    selected: Option<Hit>,
+    hovered: Option<Hit>,
+    pulse_phase: u32,
 }
 
 /// Original 4b880c updates each category's dynamic +0xb8 bit1 from 4e0a10.
@@ -181,13 +189,41 @@ impl Assets {
         });
         Ok(())
     }
-    /// Retained allocation has room for selected and hovered boxes. Paused
-    /// inspection holds the shared logic counter at zero.
+    /// Refresh the retained marker geometry only on identity/scene invalidation
+    /// or a new selected pulse phase. A paused world keeps the same tick.
+    pub(crate) fn refresh_marker_surface(
+        &self,
+        state: &mut Option<MarkerState>,
+        hits: [Option<Hit>; 2],
+        scene: &openmt2001::render_scene::Scene,
+        world_tick: u32,
+        invalidated: bool,
+    ) -> Result<Option<crate::ui::Surface>, String> {
+        let [selected, hovered] = hits;
+        let next = MarkerState {
+            selected,
+            hovered,
+            pulse_phase: if selected.is_some() {
+                world_tick & 31
+            } else {
+                0
+            },
+        };
+        if !invalidated && *state == Some(next) {
+            return Ok(None);
+        }
+        let surface = self.marker_surface(selected, hovered, scene, world_tick)?;
+        *state = Some(next);
+        Ok(Some(surface))
+    }
+
+    /// Retained allocation has room for selected and hovered boxes.
     pub fn marker_surface(
         &self,
         selected: Option<Hit>,
         hovered: Option<Hit>,
         scene: &openmt2001::render_scene::Scene,
+        world_tick: u32,
     ) -> Result<crate::ui::Surface, String> {
         let mut surface = self.marker.clone();
         surface.vertices.clear();
@@ -214,7 +250,7 @@ impl Assets {
                 translation,
                 if selected { 0xff00fe00 } else { 0x9f5f5ffe },
                 selected,
-                0,
+                world_tick,
             )?;
             for marker in markers {
                 // 004e0b50 -> 004e3380, specialized to the original corner
@@ -275,6 +311,7 @@ impl Assets {
             }),
             None,
             scene,
+            0,
         )
     }
     /// 482580 consumes actor translation and model center SEPARATELY, with
@@ -372,6 +409,137 @@ impl Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marker_refresh_tracks_world_phase_without_animating_hover_or_render_frames() {
+        // A synthetic square model supplies a real Scene without original assets/GPU.
+        let mut build = [0u8; 204];
+        for (index, word) in [
+            (0, 0x4c6d4266u32),
+            (1, 9),
+            (2, 204),
+            (11, 4),
+            (12, 100), // points
+            (13, 4),
+            (14, 132), // point attributes
+            (15, 1),
+            (16, 136), // polygon
+            (17, 1),
+            (18, 140), // attribute range
+            (19, 1),
+            (20, 144), // layer
+            (21, 1),
+            (22, 176), // model
+        ] {
+            build[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+        }
+        for (i, point) in [[-1f32, -1.], [1., -1.], [1., 1.], [-1., 1.]]
+            .into_iter()
+            .enumerate()
+        {
+            for (axis, value) in point.into_iter().enumerate() {
+                let at = 100 + i * 8 + axis * 4;
+                build[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        build[136..140].copy_from_slice(&(4u32 << 24).to_le_bytes());
+        build[156..160].copy_from_slice(&10f32.to_le_bytes());
+        build[160] = 1; // flat roof
+        build[180..184].copy_from_slice(&1u32.to_le_bytes()); // one model layer
+        let scene = openmt2001::render_scene::assemble(openmt2001::render_scene::Request {
+            build_file: &build,
+            source: openmt2001::render_scene::Source::Model {
+                index: 0,
+                height: 4,
+                variation: 0,
+            },
+            original: None,
+            suncols: None,
+            phase: None,
+            camera: None,
+            width: 1280,
+            height: 960,
+            animated: false,
+        })
+        .unwrap();
+        let blocks = [0., 200.]
+            .into_iter()
+            .enumerate()
+            .map(|(id, x)| Block {
+                id,
+                name: format!("Block {id}"),
+                text_id: 0,
+                kind: 0,
+                center: [x, 0.],
+                size: [82.; 2],
+                pavement_color: 0,
+                flags: 0,
+                street_sides: 0,
+            })
+            .collect();
+        let mut assets = Assets::descriptor_test_assets(blocks, [0; 116]);
+        // One synthetic triangle per corner lets us inspect final draw vertices.
+        assets.marker.vertices = vec![
+            [0., 0., 0., 1., 1., 1., 0., 0.],
+            [1., 0., 0., 1., 1., 1., 1., 0.],
+            [0., 1., 0., 1., 1., 1., 0., 1.],
+        ];
+        assets.marker.alpha = vec![255; 3];
+        let selected = Some(Hit {
+            category: 0,
+            building: None,
+        });
+        let hovered = Some(Hit {
+            category: 1,
+            building: None,
+        });
+        let mut state = None;
+        let mut refresh = |tick, hits, invalidated| {
+            assets
+                .refresh_marker_surface(&mut state, hits, &scene, tick, invalidated)
+                .unwrap()
+        };
+        let first = refresh(0, [selected, hovered], false).unwrap();
+        for _ in 0..100 {
+            assert!(refresh(0, [selected, hovered], false).is_none());
+        }
+        let second = refresh(15, [selected, hovered], false).unwrap();
+        let split = 8 * assets.marker.vertices.len();
+        assert_eq!(first.vertices.len(), split * 2);
+        assert_eq!(second.vertices.len(), split * 2);
+        assert_ne!(&first.vertices[..split], &second.vertices[..split]);
+        for (a, b) in first.vertices[..split]
+            .iter()
+            .zip(&second.vertices[..split])
+        {
+            assert_ne!(&a[..3], &b[..3], "selected bounds must expand with phase");
+            assert_eq!(&a[3..6], &[0., 246. / 255., 0.]);
+            assert_eq!(&b[3..6], &[0., 127. / 255., 0.]);
+        }
+        assert_eq!(&first.vertices[split..], &second.vertices[split..]);
+        assert!(
+            second.vertices[split..]
+                .iter()
+                .all(|v| v[3..6] == [95. / 255., 95. / 255., 254. / 255.])
+        );
+        assert!(second.alpha[..split].iter().all(|&a| a == 255));
+        assert!(second.alpha[split..].iter().all(|&a| a == 159));
+        assert!(refresh(15, [selected, hovered], false).is_none());
+        assert!(
+            refresh(47, [selected, hovered], false).is_none(),
+            "same repeating phase"
+        );
+        assert!(
+            refresh(47, [selected, hovered], true).is_some(),
+            "scene invalidation still refreshes"
+        );
+
+        let duplicate = refresh(15, [selected, selected], false).unwrap();
+        assert_eq!(duplicate.vertices, second.vertices[..split]);
+        let hover_only = refresh(15, [None, hovered], false).unwrap();
+        assert_eq!(hover_only.vertices, second.vertices[split..]);
+        assert!(refresh(16, [None, hovered], false).is_none());
+    }
 
     #[test]
     fn strategic_categories_pick_at_their_rendered_positions() {
