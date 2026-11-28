@@ -580,8 +580,8 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
     // Wait for this request before publishing tick100's deadline. In live play
     // a request that arrives after that publication correctly waits a tick.
     let ingress = loop {
-        if let Some(ingress) = host.poll_gameplay() {
-            break ingress;
+        if let Some(Gameplay::Frame(ingress)) = host.poll_gameplay() {
+            break *ingress;
         }
         assert!(
             Instant::now() < limit,
@@ -1792,6 +1792,8 @@ mod player_message_tests;
 
 #[path = "offer_tests.rs"]
 mod offer_tests;
+#[path = "peer_loss_tests.rs"]
+mod peer_loss_tests;
 
 #[test]
 fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {

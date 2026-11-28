@@ -2168,6 +2168,9 @@ impl Host {
             self.fail(error);
             return;
         }
+        if self.end_lost_connected_city(session) {
+            return;
+        }
         if self.stop_retired_camera() {
             return;
         }
@@ -2943,6 +2946,25 @@ impl Host {
         }
         Ok(())
     }
+    /// 0x4e2740: a client whose authority connection ended has already lost its
+    /// transport; stop the city and present the main menu, skipping results.
+    /// Host migration (0x451ce0/0x451ba0) is not available. Returns true once
+    /// the city has stopped for this reason.
+    fn end_lost_connected_city(&mut self, session: &Session<'_>) -> bool {
+        if !session.connected_host_lost() {
+            return false;
+        }
+        if !self.result_completed {
+            eprintln!("[multiplayer] Host connection ended; returning to the menu.");
+            self.stats = None;
+            self.result_request = None;
+            self.result_completed = true;
+            self.abandoned_menu = Some(ResultMenu::Main);
+            self.game_active = false;
+            self.running = false;
+        }
+        true
+    }
     /// Original 49e940 releases the modal for either answer. Only Yes calls
     /// 4ba1d0 with completed=0, won=0; it skips results and final statistics.
     pub(crate) fn reply_options_quit(
@@ -3369,6 +3391,9 @@ impl Host {
         // Network ingress must remain live while group2 logic timers wait.
         if let Err(error) = session.pump_connected_commands(&mut self.policy) {
             self.fail(error);
+            return;
+        }
+        if self.end_lost_connected_city(session) {
             return;
         }
         if session.tutorial_state == 1 {
