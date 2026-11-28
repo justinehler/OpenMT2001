@@ -2392,3 +2392,154 @@ fn original_tutorial_one_and_four_start_in_pacific_block_view() {
         .join()
         .unwrap();
 }
+
+#[test]
+#[ignore = "requires supplied Tutorial 1 scripts, map and original assets; CPU"]
+fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let scratch = Scratch::new();
+            let inputs = inputs(scratch.0.join("profiles"));
+            let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+            let board = inputs.styled_board(&image).unwrap();
+            let file = openmt2001::build_file::BuildFile::parse(&inputs.build_file).unwrap();
+            let command_assets = crate::fresh_city::CommandAssets {
+                image: &image,
+                board: &board,
+                file: &file,
+            };
+            let index = openmt2001::archive::ArchiveIndex::parse(
+                &inputs.directory,
+                inputs.archive.len() as u64,
+            )
+            .unwrap();
+            let assets =
+                crate::selection::Assets::load(&inputs.executable, &index, &inputs.archive)
+                    .unwrap();
+            let mut launch = setup(&inputs);
+            launch.preview = crate::singleplayer::Preview::Scenario(100000);
+            let (loaded, mut session) = inputs
+                .fresh_preview(
+                    launch,
+                    fresh_controls().camera,
+                    &mut SnapshotCache::default(),
+                )
+                .unwrap();
+            drop(loaded);
+            let epoch = session.world.topology.epoch();
+            let (publisher, _reader) = crate::save_menu::camera_source::channel(epoch);
+            let initial = Initial::prepare(None, Some(0), fresh_controls()).unwrap();
+            let overview = initial.active.camera;
+            let mut slot = Some(camera_producer::new_process_owner().unwrap());
+            let mut producer = Producer::attach(&mut slot, publisher, &initial).unwrap();
+            let mut state = camera_producer::View {
+                active: initial.active,
+                strategic: false,
+                normal_return: None,
+            };
+            let mut host = crate::live_host::Host::new(overview.eye);
+            host.begin_presentation(&session).unwrap();
+            host.set_running(true);
+            host.frame(&mut session, &command_assets, 20);
+            host.frame(&mut session, &command_assets, 80);
+            let status = host.status(&session);
+            assert!(status.failure.is_none(), "{:?}", status.failure);
+            assert_eq!(status.prompts.len(), 1);
+            assert!(status.tutorial_controls.camera_disabled);
+            let pacific = session
+                .scripts
+                .runtime
+                .number("PACIFIC_AVENUE")
+                .unwrap()
+                .unwrap() as u32;
+            let [crate::live_host::TutorialCameraAction::Mode { mode: 12, target }] =
+                status.tutorial_camera_events.as_slice()
+            else {
+                panic!("{:?}", status.tutorial_camera_events);
+            };
+            assert_eq!(*target, pacific);
+            // The overview (mode6) has no callback before BlockCam.
+            assert!(!producer.legacy_callback_enabled(state.strategic));
+            producer
+                .event(
+                    &mut state,
+                    camera_producer::Event::script_block(*target, &assets).unwrap(),
+                    camera_producer::Resolved::Local,
+                    &assets,
+                )
+                .unwrap();
+            let category = state.active.selected.unwrap().category;
+            assert_eq!(assets.blocks[category].id as u32, pacific);
+            let center = assets.center(category);
+            let mut block_view = state.active.controls;
+            let (block_eye, block_target) = block_view.tick([false; 4]);
+            // Advance the Host and the legacy camera callback together, 20 ms
+            // per frame, as the game does (one 50 Hz callback per frame).
+            let mut run = |frames: usize,
+                           host: &mut crate::live_host::Host,
+                           session: &mut crate::fresh_city::Session<'_>,
+                           state: &mut camera_producer::View| {
+                for _ in 0..frames {
+                    host.frame(session, &command_assets, 20);
+                    let status = host.status(session);
+                    assert!(status.failure.is_none(), "{:?}", status.failure);
+                    assert_eq!(status.tutorial_camera_events.len(), 1);
+                    assert!(producer.legacy_callback_enabled(state.strategic));
+                    let disabled = status.tutorial_controls.camera_disabled
+                        || status.tutorial_controls.all_disabled;
+                    assert!(disabled);
+                    let active = &mut state.active;
+                    legacy_camera_callback(
+                        LegacyCamera {
+                            controls: &mut active.controls,
+                            building_angle: &mut active.building_angle,
+                            building_camera: active.building,
+                            saved_camera: active.saved,
+                            inertia: &mut active.inertia,
+                        },
+                        CameraCallbackInput {
+                            keys: [true; 4],
+                            drag: [14, 9],
+                            buttons: [false, true],
+                        }
+                        .gated(disabled),
+                        50,
+                        false,
+                        false,
+                    )
+                    .unwrap();
+                }
+                state.active.inertia.sample(0.).unwrap()
+            };
+            let assert_block_view = |(eye, target): ([f32; 3], [f32; 3])| {
+                for (actual, expected) in eye
+                    .into_iter()
+                    .zip(block_eye)
+                    .chain(target.into_iter().zip(block_target))
+                {
+                    assert!((actual - expected).abs() < 0.01, "{eye:?} {target:?}");
+                }
+                // Close and low over Pacific Avenue, not the high overview.
+                assert!(eye[1] < 200. && eye[1] < overview.eye[1] - 300.);
+                let reach = (target[0] - center[0]).hypot(target[2] - center[2]);
+                assert!(reach < 30., "{target:?} {center:?}");
+            };
+            // First prompt, held for six seconds.
+            assert_block_view(run(300, &mut host, &mut session, &mut state));
+            session
+                .dispatch_session_event("InterfacePromptDismiss", 2, &command_assets, true)
+                .unwrap();
+            let second = host.status(&session);
+            assert!(second.failure.is_none(), "{:?}", second.failure);
+            assert_eq!(second.prompts.len(), 1);
+            assert_eq!(second.prompts[0].dismissal_id, 3);
+            // Second prompt: the camera stays in Pacific's block view.
+            assert_block_view(run(300, &mut host, &mut session, &mut state));
+            assert_eq!(producer.kind(), 12);
+            let _ = producer.retire();
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
