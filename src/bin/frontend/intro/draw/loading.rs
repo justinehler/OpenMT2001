@@ -12,7 +12,7 @@ impl Intro {
             let result = match rx.try_recv() {
                 Ok(r) => Some(r),
                 Err(mpsc::TryRecvError::Empty) => None,
-                Err(e) => Some(Err(e.to_string())),
+                Err(e) => Some(Err(e.to_string().into())),
             };
             if let Some(result) = result {
                 self.loading = None;
@@ -673,17 +673,17 @@ impl Intro {
                                 // Keep the SAME inspection/endpoint running. A
                                 // bounded retry sends the real Inspect request;
                                 // no Intro::draw error reaches AppExit here.
-                                self.refresh_retry.reject(e.clone());
+                                self.refresh_retry.reject(e.to_string());
                                 eprintln!("Scene refresh deferred: {e}");
                             }
                             if self.loading_connected {
-                                menu.multiplayer.finish(Some(e));
+                                menu.multiplayer.finish(Some(e.to_string()));
                             } else if self.loading_skirmish {
-                                menu.skirmish.finish(Some(e));
+                                menu.skirmish.finish(Some(e.to_string()));
                             } else if self.loading_from_setup {
-                                menu.single.message = Some(e)
+                                menu.single.message = Some(e.to_string())
                             } else {
-                                menu.load.message = Some(e)
+                                menu.load.refuse(e)
                             }
                         }
                     }

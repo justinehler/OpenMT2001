@@ -574,7 +574,8 @@ fn options_retirement_cancels_pending_refresh_reply_before_it_can_reject_or_retr
     let (mut old, worker, _edit) = retained(true, &buildings, &assets);
     let raw = old.endpoint.as_ref().unwrap().capture();
     let dirty = old.endpoint.as_ref().unwrap().owner().kind_dirty();
-    let (late, answer) = mpsc::channel::<Result<super::super::LoadedInspection, String>>();
+    let (late, answer) =
+        mpsc::channel::<Result<super::super::LoadedInspection, crate::load::Failure>>();
     let mut loading = Some(answer);
     let mut refreshing = true;
     let mut parked = None;
@@ -605,7 +606,8 @@ fn options_retirement_cancels_pending_refresh_reply_before_it_can_reject_or_retr
 }
 #[test]
 fn retirement_preserves_an_independent_new_load_receiver() {
-    let (sender, answer) = mpsc::channel::<Result<super::super::LoadedInspection, String>>();
+    let (sender, answer) =
+        mpsc::channel::<Result<super::super::LoadedInspection, crate::load::Failure>>();
     let mut loading = Some(answer);
     let mut refreshing = false;
     let mut parked = None;

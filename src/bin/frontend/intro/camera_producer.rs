@@ -1072,7 +1072,7 @@ pub(super) fn spawn_session(
     inputs: std::sync::Arc<super::SceneInputs>,
     start: super::WorkerStart,
     camera: CameraSample,
-    tx: std::sync::mpsc::Sender<Result<super::LoadedInspection, String>>,
+    tx: std::sync::mpsc::Sender<Result<super::LoadedInspection, crate::load::Failure>>,
     pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
     focus: bool,
 ) -> Result<WorkerExit, String> {
@@ -1095,7 +1095,7 @@ pub(super) fn spawn_session_joined(
     inputs: std::sync::Arc<super::SceneInputs>,
     start: super::WorkerStart,
     camera: CameraSample,
-    tx: std::sync::mpsc::Sender<Result<super::LoadedInspection, String>>,
+    tx: std::sync::mpsc::Sender<Result<super::LoadedInspection, crate::load::Failure>>,
     pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
     focus: bool,
     custody: Option<crate::process_dispatch::DispatchCustody>,
@@ -1164,7 +1164,9 @@ pub(super) fn request_refresh(
     mut view: Option<&mut Inspection>,
     selection: &crate::selection::Assets,
     adjustment: Option<&crate::business_adjustment::Assets>,
-    loading: &mut Option<std::sync::mpsc::Receiver<Result<super::LoadedInspection, String>>>,
+    loading: &mut Option<
+        std::sync::mpsc::Receiver<Result<super::LoadedInspection, crate::load::Failure>>,
+    >,
     refreshing: &mut bool,
     retry: &mut super::refresh::Retry,
 ) -> Result<(), String> {

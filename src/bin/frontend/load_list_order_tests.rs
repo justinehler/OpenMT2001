@@ -61,6 +61,8 @@ fn mixed_case_load_rows_target_the_displayed_file_after_refresh() {
         request: None,
         message: None,
         delete_confirmation: None,
+        refusal_messages: refusal::Messages::default(),
+        refusal_prompt: None,
     };
     load.open();
     assert!(load.message.is_none());

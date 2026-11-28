@@ -1057,7 +1057,7 @@ enum FreshRequest {
     },
     Inspect {
         camera: CameraSample,
-        reply: mpsc::Sender<Result<LoadedInspection, String>>,
+        reply: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
     },
 }
 #[path = "intro/scene_inputs.rs"]
@@ -1332,7 +1332,7 @@ pub struct Intro {
     ended: bool,
     pub menu: Option<crate::menu::Menu>,
     menu_camera: Option<MenuCamera>,
-    loading: Option<mpsc::Receiver<Result<LoadedInspection, String>>>,
+    loading: Option<mpsc::Receiver<Result<LoadedInspection, crate::load::Failure>>>,
     loading_from_setup: bool,
     pending_connected: Option<connected_start::Pending>,
     loading_connected: bool,

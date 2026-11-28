@@ -33,7 +33,10 @@ impl Retry {
         &mut self,
         sender: &std::sync::mpsc::Sender<super::FreshRequest>,
         camera: openmt2001::flyby::CameraSample,
-    ) -> Result<std::sync::mpsc::Receiver<Result<super::LoadedInspection, String>>, String> {
+    ) -> Result<
+        std::sync::mpsc::Receiver<Result<super::LoadedInspection, crate::load::Failure>>,
+        String,
+    > {
         let (reply, result) = std::sync::mpsc::channel();
         match sender.send(super::FreshRequest::Inspect { camera, reply }) {
             Ok(()) => {
@@ -54,7 +57,9 @@ impl Retry {
 pub(super) fn retire(
     retry: &mut Retry,
     refreshing: &mut bool,
-    loading: &mut Option<std::sync::mpsc::Receiver<Result<super::LoadedInspection, String>>>,
+    loading: &mut Option<
+        std::sync::mpsc::Receiver<Result<super::LoadedInspection, crate::load::Failure>>,
+    >,
     endpoint: Option<&mut Option<camera_live::endpoint::Endpoint>>,
     parked: &mut Option<camera_live::owner::Owner>,
 ) -> Result<(), String> {
