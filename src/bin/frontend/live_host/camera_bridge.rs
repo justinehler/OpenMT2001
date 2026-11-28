@@ -12,24 +12,10 @@ use std::sync::{
 mod resident_source;
 pub use resident_source::{ResidentRead, ResidentSource};
 
-pub type Generation = u64;
-pub type Sequence = u64;
-///Opaque identity of the next CentralTail on this serial Worker. Constructed
-///from the same checked generation/sequence that the request exchange uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CentralIdentity {
-    generation: Generation,
-    sequence: Sequence,
-}
-impl CentralIdentity {
-    #[cfg(test)]
-    pub(crate) fn synthetic(generation: Generation, sequence: Sequence) -> Self {
-        Self {
-            generation,
-            sequence,
-        }
-    }
-}
+// Moved into the library with the process runtime (#99).
+pub use openmt2001::process_runtime::{
+    CameraGeneration as Generation, CameraSequence as Sequence, CentralIdentity,
+};
 
 /// Synthetic identities exist ONLY in binary test fixtures. Production values
 /// can be obtained only from World::fresh's checked topology writer.
@@ -652,10 +638,7 @@ impl Worker {
         if !self.installed {
             return Err("Central identity requires completed Install".into());
         }
-        Ok(CentralIdentity {
-            generation: self.generation,
-            sequence: self.next,
-        })
+        Ok(CentralIdentity::new(self.generation, self.next))
     }
     pub fn generation(&self) -> Generation {
         self.generation

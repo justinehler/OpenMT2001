@@ -68,8 +68,8 @@ pub(crate) mod navigation;
 pub(crate) mod owner;
 #[path = "camera_live/panel_models.rs"]
 pub(crate) mod panel_models;
-#[path = "camera_live/process_image.rs"]
-pub(crate) mod process_image;
+// Moved into the library with the process runtime (#99).
+pub(crate) use openmt2001::process_image;
 #[path = "camera_live/producer.rs"]
 mod producer;
 #[path = "camera_live/property_child.rs"]

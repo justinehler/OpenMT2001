@@ -1,23 +1,10 @@
 //! Production startup/writer/read code without a parallel model.
 use super::*;
 pub(super) fn loader() -> Vec<u8> {
-    let mut pe = vec![0; 0x200];
-    pe[..2].copy_from_slice(b"MZ");
-    let put =
-        |pe: &mut [u8], at: usize, value: u32| pe[at..at + 4].copy_from_slice(&value.to_le_bytes());
-    put(&mut pe, 0x3c, 0x80);
-    pe[0x80..0x84].copy_from_slice(b"PE\0\0");
-    pe[0x84..0x86].copy_from_slice(&0x14cu16.to_le_bytes());
-    pe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
-    pe[0x94..0x96].copy_from_slice(&0xe0u16.to_le_bytes());
-    pe[0x98..0x9a].copy_from_slice(&0x10bu16.to_le_bytes());
-    put(&mut pe, 0xb4, 0x400000);
-    put(&mut pe, 0x180, 0x150000);
-    put(&mut pe, 0x184, 0x400000);
-    pe
+    synthetic_loader()
 }
 pub(crate) fn fixture() -> Handle {
-    startup(&loader(), "").unwrap().0
+    test_fixture()
 }
 #[test]
 fn actual_startup_loader_defaults_constructors_are_distinct_products() {
@@ -87,9 +74,6 @@ fn count_wraps_once_and_only_recovered_camera_reset_resets_it() {
     assert_eq!(p.count822d38().unwrap(), 0);
     p.increment_count4ba580().unwrap();
     assert_eq!(p.count822d38().unwrap(), 1);
-    let mut host = crate::live_host::Host::new([0.; 3]);
-    host.process_runtime = Some(p.clone());
-    assert_eq!(p.count822d38().unwrap(), 1, "Host birth is no reset");
     p.world_controller_reset4c2b80().unwrap();
     assert_eq!(p.count822d38().unwrap(), 1);
     p.world_reset_post_camera4b9eb1().unwrap();
@@ -114,30 +98,6 @@ fn production_picking_writer_preserves_common_camera_block_building_domains() {
     );
     p.picking_write(PickingWrite::DisableAll).unwrap();
     p.picking_write(PickingWrite::EnableAll).unwrap();
-    assert_eq!(p.byte(Byte::Controller920888).unwrap(), 1);
-}
-#[test]
-fn actual_lua_command_consumer_writes_source_before_projection() {
-    use crate::live_host::apply_source_picking_command as apply;
-    use openmt2001::{level_script::Command as C, lua4::Value};
-    let p = fixture();
-    apply(&p, &C::TutorialDisableAllPicking, &[]).unwrap();
-    assert_eq!(p.byte(Byte::Controller920888).unwrap(), 0);
-    apply(&p, &C::TutorialEnableBlockPicking, &[Value::Number(3.9)]).unwrap();
-    assert_eq!(p.picking_projection().unwrap().block_id, 3);
-    apply(
-        &p,
-        &C::TutorialEnableBuildingPicking,
-        &[Value::Bytes(b"not numeric".to_vec())],
-    )
-    .unwrap();
-    let x = p.picking_projection().unwrap();
-    assert_eq!(
-        (x.common, x.block, x.building, x.building_id),
-        (1, 0, 1, -1)
-    );
-    apply(&p, &C::TutorialDisableAllPicking, &[]).unwrap();
-    apply(&p, &C::TutorialEnableAllPicking, &[]).unwrap();
     assert_eq!(p.byte(Byte::Controller920888).unwrap(), 1);
 }
 #[test]
@@ -203,9 +163,8 @@ fn activity_has_one_ui_owner_survives_world_reset_and_stores_in_source_order() {
 }
 #[test]
 fn quit_is_retained_on_failure_and_is_not_tail_ack() {
-    use crate::live_host::camera_bridge::CentralIdentity;
     let p = fixture();
-    let token = p.begin_central(CentralIdentity::synthetic(1, 1)).unwrap();
+    let token = p.begin_central(CentralIdentity::new(1, 1)).unwrap();
     let old = token.0;
     p.request_quit(QuitWriter::Central).unwrap();
     assert_eq!(p.quit_requested().unwrap(), 1);
@@ -214,7 +173,7 @@ fn quit_is_retained_on_failure_and_is_not_tail_ack() {
     assert!(!p.exit_ready().unwrap());
     p.request_quit(QuitWriter::Window).unwrap();
     assert!(!p.exit_ready().unwrap());
-    let next = p.begin_central(CentralIdentity::synthetic(2, 1)).unwrap();
+    let next = p.begin_central(CentralIdentity::new(2, 1)).unwrap();
     p.complete_central_tail(next).unwrap();
     assert!(
         !p.exit_ready().unwrap(),
@@ -230,16 +189,15 @@ fn quit_is_retained_on_failure_and_is_not_tail_ack() {
 }
 #[test]
 fn only_matching_active_operation_completes_its_quit_tail() {
-    use crate::live_host::camera_bridge::CentralIdentity;
     let p = fixture();
     assert_eq!(
         p.request_quit(QuitWriter::Central),
         Err(Error::NoActiveCentral)
     );
-    let token = p.begin_central(CentralIdentity::synthetic(3, 7)).unwrap();
+    let token = p.begin_central(CentralIdentity::new(3, 7)).unwrap();
     let wrong = CentralToken(CentralId {
         serial: token.0.serial,
-        operation: CentralIdentity::synthetic(3, 8),
+        operation: CentralIdentity::new(3, 8),
     });
     p.request_quit(QuitWriter::Central).unwrap();
     assert_eq!(
@@ -252,11 +210,10 @@ fn only_matching_active_operation_completes_its_quit_tail() {
 }
 #[test]
 fn duplicate_begin_and_internal_lease_exhaustion_do_not_authorize_or_reuse_work() {
-    use crate::live_host::camera_bridge::CentralIdentity;
     let p = fixture();
-    let token = p.begin_central(CentralIdentity::synthetic(4, 2)).unwrap();
+    let token = p.begin_central(CentralIdentity::new(4, 2)).unwrap();
     assert_eq!(
-        p.begin_central(CentralIdentity::synthetic(4, 3)).err(),
+        p.begin_central(CentralIdentity::new(4, 3)).err(),
         Some(Error::CentralAlreadyActive)
     );
     p.fail_central(token).unwrap();
@@ -266,7 +223,7 @@ fn duplicate_begin_and_internal_lease_exhaustion_do_not_authorize_or_reuse_work(
     })
     .unwrap();
     assert_eq!(
-        p.begin_central(CentralIdentity::synthetic(4, 3)).err(),
+        p.begin_central(CentralIdentity::new(4, 3)).err(),
         Some(Error::CentralTokenExhausted)
     );
     assert_eq!(p.quit_requested().unwrap(), 0);
@@ -285,29 +242,6 @@ fn legacy_saved_scene_remains_unavailable_instead_of_mode_inference() {
     );
     p.source_fresh_world().unwrap();
     p.scene_available().unwrap();
-}
-
-#[test]
-fn actual_picking_conversion_keeps_native_low_word_and_indefinite_semantics() {
-    use crate::live_host::{picking_ftol, tutorial_pick_target};
-    use openmt2001::lua4::Value;
-    for (value, expected) in [
-        (3.9, 3),
-        (-2.9, -2),
-        (4294967305.75, 9),
-        (-1.9, -1),
-        (f64::NAN, 0),
-        (f64::INFINITY, 0),
-        (f64::NEG_INFINITY, 0),
-        (9223372036854775808., 0),
-    ] {
-        assert_eq!(picking_ftol(value), expected);
-    }
-    assert_eq!(tutorial_pick_target(&[Value::Number(-1.9)]).unwrap(), None);
-    assert_eq!(
-        tutorial_pick_target(&[Value::Number(-2.9)]).unwrap(),
-        Some((-2i32) as u32)
-    );
 }
 
 #[test]
