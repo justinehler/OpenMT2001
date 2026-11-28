@@ -176,6 +176,12 @@ mod tests {
             bounds: vec![[0.; 4]; 25],
             fonts: vec![],
             tab: vec![],
+            list_fonts: vec![],
+            list_tab: vec![],
+            list_layout: openmt2001::frontend_list::Layout::new([20., 40., 284., 302.], 11., 3.)
+                .unwrap(),
+            info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+                .unwrap(),
             description_fonts: vec![],
             description_tab: vec![],
             slider_textures: vec![],

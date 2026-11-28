@@ -419,7 +419,7 @@ impl Menu {
     fn frontend_modal_open(&self) -> bool {
         self.desktop_quit.active()
             || self.profile.visible && self.profile.modal_open()
-            || self.load.visible && self.load.delete_pending()
+            || self.load.visible && self.load.prompt_pending()
             || self.multiplayer.visible && self.multiplayer.notice.is_some()
             || self.skirmish.error.is_some()
     }
