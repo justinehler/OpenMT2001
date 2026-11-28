@@ -70,10 +70,7 @@ pub fn route(
     context: &mut crate::player_messages::Context,
     mut call: impl FnMut(Dispatch) -> Result<(), String>,
 ) -> Result<bool, String> {
-    use crate::{
-        ai_messages::offers::auction::broadcast,
-        player_messages::{self, Route, Routing},
-    };
+    use crate::player_messages::{self, Route, Routing};
     let routing = Routing {
         current_player: context.current_player,
         network: context.network,
@@ -91,38 +88,67 @@ pub fn route(
             Ok(())
         },
     )?;
-    if let Some((route, mut packet)) = external {
-        if route == Route::Broadcast && matches!(word(&packet, 4), 0x22 | 0x23) {
-            broadcast::dispatch(
-                &mut packet,
-                remaining as i32,
-                [0; 52],
-                |event, packet| match event {
-                    broadcast::Call::Queue { descriptor, size } => {
-                        call(Dispatch::Queue { descriptor, size })
-                    }
-                    broadcast::Call::Reply => player_messages::reply_in(
-                        packet,
-                        0x24,
-                        [0x5f5e0ff; 4],
-                        players,
-                        &mut context.arena,
-                        routing,
-                        |route, packet| {
-                            call(Dispatch::External {
-                                route,
-                                packet: *packet,
-                            })
-                        },
-                    )
-                    .map(|_| ()),
-                },
+    if let Some((route, packet)) = external {
+        if route == Route::Broadcast && is_offer_broadcast(&packet) {
+            broadcast(
+                packet,
+                remaining,
+                players,
+                &mut context.arena,
+                routing,
+                call,
             )?;
         } else {
             call(Dispatch::External { route, packet })?;
         }
     }
     Ok(admitted)
+}
+/// City offers the broadcaster (0x48c1c0) converts into commands: sell to
+/// the city (kind 34) and buy from the city (kind 35, recipient -1).
+pub fn is_offer_broadcast(packet: &crate::player_messages::Packet) -> bool {
+    matches!(word(packet, 4), 0x22 | 0x23)
+}
+/// The authority's broadcaster (0x48c1c0) for a city offer, whether a local
+/// producer or a peer sent it. With signed `remaining > 1` the offer becomes a
+/// scheduled kind-29 auction admission. Otherwise it becomes a scheduled
+/// kind-22 transfer: kind 34 to the city, kind 35 to its sender, after a
+/// kind-36 reply (0x48cb70) to that sender.
+pub fn broadcast(
+    mut packet: crate::player_messages::Packet,
+    remaining: u32,
+    players: &mut impl crate::player_messages::Players,
+    arena: &mut crate::player_messages::Arena,
+    routing: crate::player_messages::Routing,
+    mut call: impl FnMut(Dispatch) -> Result<(), String>,
+) -> Result<(), String> {
+    use crate::ai_messages::offers::auction::broadcast;
+    // Explicit zero prior for the original's unwritten command stack bytes.
+    broadcast::dispatch(
+        &mut packet,
+        remaining as i32,
+        [0; 52],
+        |event, packet| match event {
+            broadcast::Call::Queue { descriptor, size } => {
+                call(Dispatch::Queue { descriptor, size })
+            }
+            broadcast::Call::Reply => crate::player_messages::reply_in(
+                packet,
+                0x24,
+                [0x5f5e0ff; 4],
+                players,
+                arena,
+                routing,
+                |route, packet| {
+                    call(Dispatch::External {
+                        route,
+                        packet: *packet,
+                    })
+                },
+            )
+            .map(|_| ()),
+        },
+    )
 }
 pub struct World<'a> {
     pub categories: &'a mut [[u8; 380]; 52],

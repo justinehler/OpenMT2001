@@ -498,15 +498,19 @@ impl<'data> Session<'data> {
         mut event: impl FnMut(crate::live_commands::Event) -> Result<(), String>,
     ) -> Result<(), String> {
         use crate::{human_reply, live_commands, player_messages};
-        // In a connected game a client's reply leaves for the authority.
+        // In a connected game a client's reply leaves for the authority, and
+        // the authority's reply to a remote human goes to that human's peer.
         let carried = self.connected.is_some();
         let mut outbox = Vec::new();
+        let mut acceptances = Vec::new();
         let mut event = |call: live_commands::Event| match call {
             live_commands::Event::PlayerMessageRoute {
-                route: player_messages::Route::NetworkSend,
+                route:
+                    route @ (player_messages::Route::NetworkSend
+                    | player_messages::Route::NetworkRecipient { .. }),
                 packet,
             } if carried => {
-                outbox.push(packet);
+                outbox.push((route, packet));
                 Ok(())
             }
             other => event(other),
@@ -553,6 +557,11 @@ impl<'data> Session<'data> {
             },
             |call, player, world| {
                 match call {
+                    // A connected peer's acceptance is scheduled by the
+                    // authority for every peer (0x450490 -> 0x451720).
+                    human_reply::Call::Auction { descriptor } if carried => {
+                        acceptances.push(descriptor);
+                    }
                     human_reply::Call::Auction { descriptor } => {
                         if network[0] && !network[1] {
                             return Err("human accepted offer requires network transport".into());
@@ -600,13 +609,22 @@ impl<'data> Session<'data> {
         );
         self.allocation_next = arena.next;
         result?;
-        if let Some(connection) = &self.connected {
-            for packet in outbox {
-                connection.commands.send_player_message(
+        if let Some(connection) = &mut self.connected {
+            let acceptor = u8::try_from(slot).map_err(|_| "human dialog row outside roster")?;
+            for descriptor in acceptances {
+                connection.commands.submit_offer_acceptance(
                     &connection.worker,
-                    player_messages::Route::NetworkSend,
-                    &packet,
+                    descriptor,
+                    acceptor,
+                    &mut self.live_commands,
+                    &mut self.world.city.categories,
+                    self.world.clock.timing[0],
                 )?;
+            }
+            for (route, packet) in outbox {
+                connection
+                    .commands
+                    .send_player_message(&connection.worker, route, &packet)?;
             }
         }
         Ok(())
