@@ -488,6 +488,7 @@ impl<'data> Session<'data> {
                 &connection.worker,
                 command,
                 &mut self.live_commands,
+                &mut self.world.city.categories,
                 self.world.clock.timing[0],
             );
         }

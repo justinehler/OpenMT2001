@@ -29,13 +29,15 @@ fn image_bytes() -> Vec<u8> {
     }
     bytes
 }
-struct NoGeometry;
-impl crate::building_pool::GeometryBinding for NoGeometry {
-    fn prepare(&mut self, _: usize, _: &mut [u8; 916]) -> std::result::Result<(), String> {
-        panic!("transfer requested geometry")
+struct TestGeometry;
+impl crate::building_pool::GeometryBinding for TestGeometry {
+    fn prepare(&mut self, _: usize, record: &mut [u8; 916]) -> std::result::Result<(), String> {
+        // No presentation resources or entrances; retain the real building record.
+        record[0x4c..0x50].fill(0);
+        Ok(())
     }
     fn model_height(&mut self, _: u32) -> std::result::Result<f32, String> {
-        panic!("transfer requested model")
+        Ok(20.)
     }
 }
 struct TestSession {
@@ -202,7 +204,7 @@ impl TestSession {
                                 network_override: false,
                                 utility_factor: 0.,
                             },
-                            &mut NoGeometry,
+                            &mut TestGeometry,
                             |event| {
                                 if let live_commands::Event::AccountPosted(posting) = event {
                                     self.postings.push(posting);
@@ -242,8 +244,21 @@ fn two_live_runtimes_apply_exact_property_and_cash_once_at_125_and_pause_same_ta
     let Message::CommandCommit(commit) = host.receive(&owner, admitted, 100).unwrap() else {
         panic!()
     };
-    host.enqueue(commit, &mut left.queue, 100).unwrap();
-    client.enqueue(commit, &mut right.queue, 100).unwrap();
+    host.enqueue(
+        &commit,
+        &mut left.queue,
+        &mut left.world.city.categories,
+        100,
+    )
+    .unwrap();
+    client
+        .enqueue(
+            &commit,
+            &mut right.queue,
+            &mut right.world.city.categories,
+            100,
+        )
+        .unwrap();
     let before_tasks = right.tasks.clone();
     for session in [&mut left, &mut right] {
         while session.world.clock.timing[0] < 124 {
@@ -270,9 +285,234 @@ fn two_live_runtimes_apply_exact_property_and_cash_once_at_125_and_pause_same_ta
             assert_eq!(paused[0], 0);
         }
     }
-    assert_eq!(left.world.categories, right.world.categories);
+    assert_eq!(left.world.city.categories, right.world.categories);
     assert_eq!(
         left.world.ledgers.players[1].cash,
         right.world.ledgers.players[1].cash
     );
+}
+
+#[test]
+fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quotes() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut bytes = image_bytes();
+    // Synthetic vtable for the periodic player dispatcher.
+    put(&mut bytes, 0x308, 0x466ca0);
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(true);
+    let hb = host
+        .bind_world(left.world.topology.epoch().serial())
+        .unwrap();
+    let cb = client
+        .bind_world(right.world.topology.epoch().serial())
+        .unwrap();
+    // Compact owner1 is the host human, owner2 the client, owner3 the AI.
+    let owners = vec![Some(0), Some(peer), None];
+    let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
+    let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    // Add a real third account for the compact AI owner, on both runtimes.
+    for session in [&mut left, &mut right] {
+        let mut player = player_manager::Player {
+            reference: 0x3000,
+            bytes: session.roster.manager.players[0].bytes.clone(),
+            auxiliaries: vec![],
+        };
+        player.bytes[0x1bc] = 2;
+        put(&mut player.bytes, 0x154, 1);
+        session.roster.manager.players.push(player);
+        session
+            .roster
+            .collect_accounts(&mut session.world.city)
+            .unwrap();
+    }
+    let command = construction(2);
+    replica
+        .submit(
+            &client,
+            live_commands::Command::Build(command.clone()),
+            &mut right.queue,
+            &mut right.world.city.categories,
+            100,
+        )
+        .unwrap();
+    assert!(right.queue.snapshot().unwrap().is_empty());
+    assert_eq!(right.world.categories[7][0x9c], 0);
+    let mut ai = construction(3);
+    ai.category = 8;
+    ai.components = [200., 30., 4., 1.];
+    for session in [&mut left, &mut right] {
+        for player in &mut session.roster.manager.players {
+            put(&mut player.bytes, 0, 0x400100);
+        }
+    }
+    for (session, adapter, worker, expected) in [
+        (&mut left, &mut authority, &host, 1),
+        (&mut right, &mut replica, &client, 0),
+    ] {
+        let mut controls = crate::player_tick::Controls {
+            network_enabled: true,
+            network_override: false,
+            current_player: session.roster.status.current_player,
+        };
+        adapter.configure_players(&mut controls);
+        let mut decisions = 0;
+        crate::player_tick::advance(
+            &mut session.roster.manager,
+            &mut controls,
+            &image,
+            |event, _, _| {
+                if matches!(
+                    event,
+                    crate::player_tick::Event::Controller {
+                        player: 0x3000,
+                        target: 0x466ca0
+                    }
+                ) {
+                    decisions += 1;
+                    adapter.submit(
+                        worker,
+                        live_commands::Command::Build(ai.clone()),
+                        &mut session.queue,
+                        &mut session.world.city.categories,
+                        100,
+                    )?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(decisions, expected);
+    }
+    // The replica cannot submit the same AI owner through its local path.
+    assert!(
+        replica
+            .submit(
+                &client,
+                live_commands::Command::Build(ai.clone()),
+                &mut right.queue,
+                &mut right.world.city.categories,
+                100
+            )
+            .is_err()
+    );
+    let limit = Instant::now() + Duration::from_secs(60);
+    // Wait for this request before publishing tick100's deadline. In live play
+    // a request that arrives after that publication correctly waits a tick.
+    let ingress = loop {
+        if let Some(ingress) = host.poll_gameplay() {
+            break ingress;
+        }
+        assert!(
+            Instant::now() < limit,
+            "client construction request did not arrive"
+        );
+        thread::sleep(Duration::from_millis(5));
+    };
+    let message = authority
+        .receive(host.gameplay_owner(), ingress, 100)
+        .unwrap();
+    let Message::CommandCommit(commit) = &message else {
+        panic!()
+    };
+    authority
+        .enqueue(
+            commit,
+            &mut left.queue,
+            &mut left.world.city.categories,
+            100,
+        )
+        .unwrap();
+    host.send_gameplay(hb, None, message).unwrap();
+    loop {
+        authority
+            .pump(
+                &host,
+                100,
+                &mut left.queue,
+                &mut left.world.city.categories,
+                &mut left.world.city.pause,
+                &mut left.tasks,
+            )
+            .unwrap();
+        replica
+            .pump(
+                &client,
+                100,
+                &mut right.queue,
+                &mut right.world.city.categories,
+                &mut right.world.city.pause,
+                &mut right.tasks,
+            )
+            .unwrap();
+        if left.queue.snapshot().unwrap().len() == 2 && right.queue.snapshot().unwrap().len() == 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < limit,
+            "construction commits did not reach both peers"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    for session in [&mut left, &mut right] {
+        let queued = session.queue.snapshot().unwrap();
+        assert_eq!(queued.len(), 2);
+        for ((_, due, inner, _, queued), expected) in queued.iter().zip([&ai, &command]) {
+            assert_eq!((*due, *inner), (125, 125));
+            let live_commands::Command::Build(build) = queued else {
+                panic!()
+            };
+            assert_eq!(build.packet(), expected.packet());
+        }
+        assert_eq!(session.world.categories[7][0x9c], 2);
+        assert_eq!(session.world.categories[8][0x9c], 2);
+        // Deliberately change each receiver's current quote scratch. Due
+        // application must debit the transmitted quote, never these prices.
+        session.world.city.construction_components = [9999.; 4];
+        while session.world.clock.timing[0] < 124 {
+            session.tick(&image, &board);
+        }
+        assert_eq!(
+            session
+                .world
+                .buildings
+                .iter()
+                .filter(|row| row[0x3f] != 0)
+                .count(),
+            0
+        );
+        assert_eq!(session.world.ledgers.players[1].cash, 10000.);
+        assert_eq!(session.world.ledgers.players[2].cash, 10000.);
+        assert!(session.postings.is_empty());
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 125);
+        assert_eq!(
+            session
+                .world
+                .buildings
+                .iter()
+                .filter(|row| row[0x3f] != 0)
+                .count(),
+            2
+        );
+        assert_eq!(session.world.pending_world.count, 2);
+        assert_eq!(session.world.ledgers.players[1].cash, 9865.);
+        assert_eq!(session.world.ledgers.players[2].cash, 9765.);
+        assert_eq!(session.postings.len(), 8);
+        assert!(session.queue.snapshot().unwrap().is_empty());
+        session.controls.deadline = 150;
+        session.world.city.pause.bytes[1] = 0;
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 126);
+        assert_eq!(session.postings.len(), 8);
+        assert_eq!(session.world.pending_world.count, 2);
+    }
+    assert_eq!(left.world.buildings, right.world.buildings);
+    assert_eq!(left.world.city.categories, right.world.categories);
+    assert_eq!(left.world.pending_world, right.world.pending_world);
 }

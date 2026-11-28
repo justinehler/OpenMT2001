@@ -1,7 +1,7 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
 //! Direct-IP transport is pumped by the lobby worker through this owner.
 //! The lobby worker validates staged startup content before binding an actual
-//! city. The command adapter qualifies short property transfers and deadlines;
+//! city. The adapter qualifies construction, short property transfers and deadlines;
 //! remaining command families explicitly remain unsupported.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{

@@ -73,6 +73,7 @@ impl Session<'_> {
             &connection.worker,
             tick,
             &mut self.live_commands,
+            &mut self.world.city.categories,
             &mut self.world.city.pause,
             &mut self.hooks.timers,
         )?;
@@ -554,6 +555,7 @@ impl Session<'_> {
                                                 &self.roster.manager, city);
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x470b80)) => {
+                                            if self.connected.as_ref().is_some_and(|c| !c.commands.is_host()) { return Ok(false); }
                                             use openmt2001::{ai_hourly,event_cards};
                                             let word=|b:&[u8],at:usize|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
                                             self.roster.publish_accounts(city)?;
@@ -767,7 +769,7 @@ impl Session<'_> {
                                 message_context: &mut messages.borrow_mut(),
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)) {
                                     return Err(openmt2001::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
@@ -878,6 +880,7 @@ impl Session<'_> {
                                 network_override:scheduler.network_override,
                                 current_player:self.roster.status.current_player,
                             };
+                            if let Some(connection) = &self.connected { connection.commands.configure_players(&mut controls); }
                             let result=openmt2001::player_tick::advance(
                                 &mut self.roster.manager,&mut controls,image,
                                 |event,manager,controls|match event {
@@ -954,8 +957,13 @@ impl Session<'_> {
                                             &mut self.roster.scripts,image,&mut world,|call,player,profiles,world|{
                                                 if let openmt2001::ai_runtime::Call::ConstructionCommand{descriptor}=call {
                                                     let command=openmt2001::construction::Command::from_packet(&descriptor)?;
-                                                    self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
-                                                        |_|Err("AI construction delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        connection.commands.submit(&connection.worker,live_commands::Command::Build(command),
+                                                            &mut self.live_commands,world.categories,clock.timing[0])?;
+                                                    } else {
+                                                        self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
+                                                            |_|Err("AI construction delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48ae60,arguments,count:1})=call {
