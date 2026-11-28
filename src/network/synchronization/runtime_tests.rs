@@ -2,53 +2,72 @@
 use super::*;
 
 #[test]
+fn sample_reads_each_resident_through_its_auxiliary_slot() {
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut session = TestSession::new(&image, &board);
+    let roads = empty_roads(&image);
+    // Handles 1..3 are pool slots, not original addresses (#453), and resident
+    // 0 reads slot 2: the sample follows the handle, not the resident index.
+    let people = session.add_residents(&[[12.9, -2.9], [7.5, 3.2], [-0.5, 1000.75]]);
+    assert_eq!(people, 12 - 2 + 7 + 3 + 1000);
+    let city = &mut session.world.city;
+    assert_eq!(city.ledgers.residents.nodes[0].auxiliary_reference(), 3);
+    let players = &session.roster.manager.players;
+    let sample =
+        crate::network::synchronization::sample::capture(0, 200, city, &roads, players).unwrap();
+    assert_eq!(sample.sums[0], people);
+    assert_eq!(sample.available, 0x1f);
+}
+
+#[test]
+fn sample_rejects_a_counted_resident_without_an_auxiliary() {
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut session = TestSession::new(&image, &board);
+    let roads = empty_roads(&image);
+    session.add_residents(&[[1., 2.]]);
+    // The original would fault on the null auxiliary; creation never leaves
+    // such a resident counted, so this is a broken world, not a zero sum.
+    let residents = &mut session.world.city.ledgers.residents;
+    residents.active_count = 2;
+    residents.nodes[1] = resident::Resident::from_runtime_bytes([0; 0x14a], 1, 0);
+    let players = &session.roster.manager.players;
+    let error = crate::network::synchronization::sample::capture(
+        0,
+        200,
+        &mut session.world.city,
+        &roads,
+        players,
+    )
+    .unwrap_err();
+    assert_eq!(error, "sample resident has no auxiliary");
+}
+
+#[test]
 fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() {
     use crate::network::synchronization::Synchronization;
     use std::{
         thread,
         time::{Duration, Instant},
     };
-    struct Models;
-    impl crate::traffic::road::runtime::VehicleModels for Models {
-        fn bind(&mut self, _: u32, _: &mut [u8; 284]) -> std::result::Result<(), String> {
-            Ok(())
-        }
-        fn extent(
-            &self,
-            _: &[u8; 284],
-        ) -> std::result::Result<crate::traffic::road::ModelExtent, String> {
-            unreachable!()
-        }
-    }
     let bytes = image_bytes();
     let image = crate::pe::PeImage::parse(&bytes).unwrap();
     let board = crate::board::Board::from_v14(&image).unwrap();
     let mut left = TestSession::new(&image, &board);
     let mut right = TestSession::new(&image, &board);
-    let mut roads = crate::traffic::road::runtime::RoadTraffic::fresh(
-        &image,
-        0,
-        [0; 3],
-        &mut [0; 284],
-        0x10000000,
-        &mut Models,
-    )
-    .unwrap();
-    // Nonempty suppliers: a resident auxiliary reached through its runtime
-    // reference and one live road actor on a simple synthetic front path.
+    let mut roads = empty_roads(&image);
+    // Nonempty suppliers: residents reached through their auxiliary handles
+    // and one live road actor on a simple synthetic front path.
     use crate::traffic::road::construction::{NODE_BASE, SEGMENT_BASE};
     roads.records[0][0x14] = 1;
     put(&mut roads.records[0], 0xb4, SEGMENT_BASE);
     put(&mut roads.records[0], 0x2c, 0.5f32.to_bits());
     for session in [&mut left, &mut right] {
+        assert_eq!(session.add_residents(&[[12.9, -2.9], [7.5, 3.2]]), 20);
         let city = &mut session.world.city;
-        let mut auxiliary = [0; 0x11c];
-        put(&mut auxiliary, 4, 12.9f32.to_bits());
-        put(&mut auxiliary, 0xc, (-2.9f32).to_bits());
-        assert_eq!(city.creation.auxiliary.allocate(&auxiliary), Some(0));
-        city.ledgers.residents.active_count = 1;
-        city.ledgers.residents.nodes[0] =
-            resident::Resident::from_runtime_bytes([0; 0x14a], 1, 0x6899a0);
         let graph = &mut city.road_network;
         graph.segments[0][0x22] = 1;
         put(&mut graph.segments[0], 0x5c, 1f32.to_bits());
@@ -188,7 +207,8 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
     );
     assert_eq!(left.world.clock.timing[0], 1000);
     assert_eq!(right.world.clock.timing[0], 1000);
-    assert_eq!(hs.samples.retained(200).unwrap().sums[0], 10);
+    assert_eq!(hs.samples.retained(200).unwrap().sums[0], 20);
+    assert_eq!(cs.samples.retained(200).unwrap().sums[0], 20);
     assert_eq!(
         hs.samples.retained(200).unwrap().sums[1],
         1f32.to_bits()
