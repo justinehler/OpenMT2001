@@ -546,7 +546,7 @@ impl Assets {
                 color,
                 pointer.is_some_and(|p| inside(bounds, p)),
                 view.modal_pressed == Some(part),
-                false,
+                !view.name_button_enabled(part),
             )?;
             ui::text_widget_style9(font, &self.tab1, &self.strings[id], bounds, 0xffffffff)?;
         }
@@ -762,15 +762,57 @@ impl View {
             true
         }
     }
+    /// The Save As pop-up's Save is disabled while the name is empty and
+    /// enabled once a character is typed; Cancel is always enabled (0x4965c0,
+    /// text-change event 1).
+    fn name_button_enabled(&self, save: bool) -> bool {
+        !save || !self.name.is_empty()
+    }
     pub fn enter(&mut self) -> Option<Action> {
-        self.confirm()
+        if self.modal == Some(Modal::Name) {
+            self.submit_name(true)
+        } else {
+            self.confirm()
+        }
+    }
+    /// Commits the Save As name (0x4965c0). Both paths ignore an empty name;
+    /// Return leaves the field focused. The Save button writes `name.sav`
+    /// straight away, overwriting a save of that name without asking. Only
+    /// Return checks for a save with exactly that filename (0x4978a0): it
+    /// selects that row and opens the Overwrite prompt (0x497f60), whose Yes
+    /// rewrites the selected save (0x497d80). Otherwise Return writes too.
+    fn submit_name(&mut self, by_return: bool) -> Option<Action> {
+        if self.name.is_empty() {
+            return None;
+        }
+        self.modal = None;
+        self.modal_pressed = None;
+        let file = format!("{}.sav", self.name);
+        if by_return && let Some(index) = self.slots.iter().position(|slot| slot.id == file) {
+            self.selected = Some(index);
+            self.info_first = 0;
+            self.message = None;
+            self.modal = Some(Modal::Overwrite);
+            return None;
+        }
+        // The original's direct write replaces an existing file whose name
+        // differs only in case, since Windows filenames ignore case.
+        Some(
+            match self
+                .slots
+                .iter()
+                .find(|slot| slot.id.eq_ignore_ascii_case(&file))
+            {
+                Some(slot) => Action::ExistingSlot(slot.id.clone()),
+                None => Action::NewName(self.name.clone()),
+            },
+        )
     }
     fn confirm(&mut self) -> Option<Action> {
         let action = match self.modal.as_ref()? {
-            Modal::Name if !self.name.is_empty() => Action::NewName(self.name.clone()),
+            Modal::Name => return self.submit_name(false),
             Modal::Overwrite => Action::ExistingSlot(self.slots.get(self.selected?)?.id.clone()),
             Modal::Delete => Action::DeleteSlot(self.slots.get(self.selected?)?.id.clone()),
-            Modal::Name => return None,
         };
         self.modal = None;
         self.modal_pressed = None;
@@ -798,15 +840,17 @@ impl View {
             return None;
         }
         if self.modal == Some(Modal::Name) {
-            let hit = pointer.and_then(|p| {
-                if inside(NAME_BUTTONS[0], p) {
-                    Some(true)
-                } else if inside(NAME_BUTTONS[1], p) {
-                    Some(false)
-                } else {
-                    None
-                }
-            });
+            let hit = pointer
+                .and_then(|p| {
+                    if inside(NAME_BUTTONS[0], p) {
+                        Some(true)
+                    } else if inside(NAME_BUTTONS[1], p) {
+                        Some(false)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|&save| self.name_button_enabled(save));
             if pressed {
                 self.modal_pressed = hit;
                 return None;
@@ -814,7 +858,7 @@ impl View {
             let activate = (hit == self.modal_pressed).then_some(hit).flatten();
             self.modal_pressed = None;
             return match activate {
-                Some(true) => self.confirm(),
+                Some(true) => self.submit_name(false),
                 Some(false) => {
                     self.modal = None;
                     None
@@ -1166,6 +1210,130 @@ mod tests {
             Some(Action::Back)
         );
         assert!(!view.visible);
+    }
+    /// #560 and 0x4965c0: Save is drawn disabled and ignores clicks until a
+    /// character is typed; the button overwrites an existing save without
+    /// asking, while Return opens the Overwrite prompt for it.
+    #[test]
+    fn save_as_button_state_and_overwrite_rules_follow_the_original() {
+        let (tab1, glyph_map) = ui::text_field::synthetic_font();
+        let mut strings = vec![Vec::new(); 0x5a0];
+        strings[0] = glyph_map;
+        let assets = Assets {
+            base: Vec::new(),
+            info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+                .unwrap(),
+            bounds: vec![[0.; 4]; 26],
+            list_layout: openmt2001::frontend_list::Layout::new([20., 40., 104., 302.], 12., 3.)
+                .unwrap(),
+            font1: Vec::new(),
+            font2: Vec::new(),
+            font4: Vec::new(),
+            tab1,
+            tab2: Vec::new(),
+            tab4: Vec::new(),
+            strings,
+            level_text: openmt2001::level_text::LevelTextCatalog::default(),
+            slider_textures: Vec::new(),
+        };
+        let button_rects = |disabled: bool| {
+            let mut surface = Surface::solid();
+            ui::button(
+                &mut surface,
+                NAME_BUTTONS[0],
+                [80, 148, 34],
+                false,
+                false,
+                disabled,
+            )
+            .unwrap();
+            solid_rects(&surface)
+        };
+        let painted_save = |view: &View| {
+            let mut shapes = Surface::solid();
+            let mut font = vec![Surface::solid(); 4];
+            assets
+                .paint_name_modal(&mut shapes, &mut font, view, None)
+                .unwrap();
+            // Outline lines straddle the bounds by half a pixel.
+            let [l, t, r, b] = NAME_BUTTONS[0];
+            solid_rects(&shapes)
+                .into_iter()
+                .filter(|([x0, y0, x1, y1], _)| {
+                    *x0 >= l - 1. && *y0 >= t - 1. && *x1 <= r + 1. && *y1 <= b + 1.
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(button_rects(true), button_rects(false));
+        let save = [260., 277.];
+        let click = |view: &mut View, point| {
+            assert!(view.mouse(&assets, Some(point), true).is_none());
+            view.mouse(&assets, Some(point), false)
+        };
+        let mut view = View {
+            visible: true,
+            modal: Some(Modal::Name),
+            ..View::default()
+        };
+        view.slots.push(crate::save_menu::Slot {
+            id: "prior.sav".into(),
+            name: "prior".into(),
+            modified: None,
+            metadata: Err("fixture".into()),
+        });
+
+        // Empty name: Save is drawn disabled, ignores a click, and Return
+        // leaves the pop-up open on the field.
+        assert_eq!(painted_save(&view), button_rects(true));
+        assert_eq!(click(&mut view, save), None);
+        assert_eq!(view.modal_pressed, None);
+        assert_eq!(view.enter(), None);
+        assert_eq!(view.modal, Some(Modal::Name));
+
+        // One character enables it.
+        view.input(&assets, "p");
+        assert_eq!(painted_save(&view), button_rects(false));
+        view.erase();
+        assert_eq!(painted_save(&view), button_rects(true));
+
+        // The button writes an existing name straight over it, no prompt.
+        view.input(&assets, "prior");
+        assert_eq!(
+            click(&mut view, save),
+            Some(Action::ExistingSlot("prior.sav".into()))
+        );
+        assert_eq!(view.modal, None);
+        assert_eq!(view.selected, None);
+
+        // Return with the same name selects that save and opens Overwrite.
+        view.modal = Some(Modal::Name);
+        assert_eq!(view.enter(), None);
+        assert_eq!(view.modal, Some(Modal::Overwrite));
+        assert_eq!(view.selected, Some(0));
+        let (dialog, _) = view.generic_prompt().unwrap();
+        assert_eq!((dialog.title, dialog.body), (0x661, 0x65f));
+        assert_eq!(view.enter(), Some(Action::ExistingSlot("prior.sav".into())));
+
+        // A new name saves directly from either path.
+        for by_return in [true, false] {
+            view.modal = Some(Modal::Name);
+            view.name = "fresh".into();
+            let action = if by_return {
+                view.enter()
+            } else {
+                click(&mut view, save)
+            };
+            assert_eq!(action, Some(Action::NewName("fresh".into())));
+            assert_eq!(view.modal, None);
+        }
+
+        // Return's existence test compares the filename exactly; a name that
+        // differs only in case is written over the existing file directly.
+        view.modal = Some(Modal::Name);
+        view.selected = None;
+        view.name = "PRIOR".into();
+        assert_eq!(view.enter(), Some(Action::ExistingSlot("prior.sav".into())));
+        assert_eq!(view.modal, None);
     }
     #[test]
     #[ignore = "requires original v1.4 Save Game mesh, fonts, USA language and a supplied save"]
