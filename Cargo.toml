@@ -3,6 +3,7 @@ name = "openmt2001"
 version = "0.1.0"
 edition = "2024"
 publish = false
+autobins = false
 license = "MIT"
 repository = "https://github.com/justinehler/OpenMT2001"
 
@@ -39,10 +40,10 @@ name = "capture"
 path = "src/bin/capture.rs"
 required-features = ["capture"]
 
-[[bin]]
-name = "game"
-path = "src/bin/game.rs"
-required-features = ["native"]
 
 [dev-dependencies]
 syn = { version = "2", features = ["full", "visit"] }
+
+[workspace]
+members = [".", "crates/game"]
+default-members = [".", "crates/game"]

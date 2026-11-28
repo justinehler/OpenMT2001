@@ -1,0 +1,38 @@
+[package]
+name = "openmt-game"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+repository = "https://github.com/justinehler/OpenMT2001"
+autobins = false
+
+# The native game host. Its sources stay in src/bin/ for now; this package
+# exists so the frontend can build with its own profile settings (#99).
+[[bin]]
+name = "game"
+path = "../../src/bin/game.rs"
+required-features = ["native"]
+
+[dependencies]
+openmt2001 = { path = "../.." }
+sha2 = "0.10"
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"], optional = true }
+bytemuck = { version = "1.25.2", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+glam = { version = "0.33.7", optional = true }
+image = { version = "0.25", default-features = false, features = ["tga"], optional = true }
+png = { version = "0.18.1", optional = true }
+pollster = { version = "1.0.1", optional = true }
+rodio = { version = "0.21", default-features = false, features = ["playback"], optional = true }
+wgpu = { version = "30.0.1", optional = true }
+winit = { version = "0.30", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry"] }
+
+[features]
+lua4 = ["openmt2001/lua4"]
+graphics = ["openmt2001/graphics", "dep:wgpu", "dep:bytemuck", "dep:glam"]
+capture = ["openmt2001/capture", "graphics", "dep:pollster", "dep:png"]
+native = ["openmt2001/native", "graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:arboard", "dep:chrono", "dep:windows-sys"]
