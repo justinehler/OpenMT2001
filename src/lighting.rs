@@ -9,6 +9,7 @@ pub struct SunColors {
     fog_color: [u32; 384],
     fog_start: [f32; 384],
     fog_range: [f32; 384],
+    night_threshold: [u8; 384],
 }
 
 pub struct SceneLight {
@@ -16,6 +17,8 @@ pub struct SceneLight {
     pub diffuse: u32,
     pub ambient: u32,
     pub scale: f32,
+    /// Discrete SUNCOLS night-effect sample (004c5a70), without interpolation.
+    pub night_threshold: u8,
     pub fog: SceneFog,
 }
 
@@ -41,8 +44,8 @@ impl SunColors {
         let daylight = Daylight::from_suncols(bytes)?;
         let width = usize::from(u16::from_le_bytes(bytes[12..14].try_into().unwrap()));
         let height = usize::from(u16::from_le_bytes(bytes[14..16].try_into().unwrap()));
-        if height < 161 {
-            return Err("sun-color image lacks original fog rows".into());
+        if height < 177 {
+            return Err("sun-color image lacks original fog/night rows".into());
         }
         let row = |from_top: usize| {
             let at = 18 + (height - from_top) * width * 4;
@@ -61,6 +64,7 @@ impl SunColors {
             fog_color: row(129).map(|c| c | 0xff000000),
             fog_start: row(145).map(|c| (c & 255) as f32),
             fog_range: row(161).map(|c| (c & 255) as f32),
+            night_threshold: row(177).map(|c| c as u8),
         })
     }
 
@@ -110,6 +114,7 @@ impl SunColors {
             diffuse: interpolate(&self.diffuse),
             ambient: interpolate(&self.ambient),
             scale: self.scale[first],
+            night_threshold: self.night_threshold[first],
             fog: SceneFog {
                 color: interpolate(&self.fog_color),
                 start_fraction: fog_distance(&self.fog_start),

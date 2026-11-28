@@ -9,7 +9,8 @@ use crate::settings_menu::{GameplayLevels, GraphicsLevels, Levels};
 
 const MAGIC: &[u8; 8] = b"MTOPT001";
 const LEGACY_LENGTH: usize = MAGIC.len() + 9;
-const LENGTH: usize = LEGACY_LENGTH + 1;
+const WATER_LENGTH: usize = LEGACY_LENGTH + 1;
+const LENGTH: usize = WATER_LENGTH + 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
@@ -35,11 +36,14 @@ impl Snapshot {
             }
             Err(error) => return Err(format!("{}: {error}", path.display())),
         };
-        if ![LEGACY_LENGTH, LENGTH].contains(&bytes.len()) || &bytes[..MAGIC.len()] != MAGIC {
+        if ![LEGACY_LENGTH, WATER_LENGTH, LENGTH].contains(&bytes.len())
+            || &bytes[..MAGIC.len()] != MAGIC
+        {
             return Err(format!("{}: unsupported V2 Options file", path.display()));
         }
         // Existing nine-field profiles inherit the original enabled default.
         let water_effects = bytes.get(LEGACY_LENGTH).copied().unwrap_or(1);
+        let halos = bytes.get(WATER_LENGTH).copied().unwrap_or(1);
         let fields = &bytes[MAGIC.len()..LEGACY_LENGTH];
         let [
             music,
@@ -52,7 +56,8 @@ impl Snapshot {
             cursor,
             sensitivity,
         ]: [u8; 9] = fields.try_into().unwrap();
-        if water_effects > 1
+        if halos > 1
+            || water_effects > 1
             || music > 100
             || effects > 100
             || detail > 2
@@ -69,6 +74,7 @@ impl Snapshot {
             audio: Levels { music, effects },
             graphics: GraphicsLevels {
                 water_effects: water_effects != 0,
+                halos: halos != 0,
                 detail,
                 filtering,
                 distance,
@@ -94,6 +100,7 @@ impl Snapshot {
             u8::from(self.gameplay.hardware_cursor),
             self.gameplay.mouse_sensitivity,
             u8::from(self.graphics.water_effects),
+            u8::from(self.graphics.halos),
         ];
         if fields[0] > 100
             || fields[1] > 100
@@ -148,6 +155,7 @@ mod tests {
             },
             graphics: GraphicsLevels {
                 water_effects: false,
+                halos: false,
                 detail: 0,
                 filtering: 0,
                 distance: 42,
@@ -179,6 +187,9 @@ mod tests {
         let bytes = fs::read(&path).unwrap();
         fs::write(&path, &bytes[..LEGACY_LENGTH]).unwrap();
         assert!(Snapshot::load(&path).unwrap().graphics.water_effects);
+        assert!(Snapshot::load(&path).unwrap().graphics.halos);
+        fs::write(&path, &bytes[..WATER_LENGTH]).unwrap();
+        assert!(Snapshot::load(&path).unwrap().graphics.halos);
         let mut invalid = bytes;
         invalid[LEGACY_LENGTH] = 2;
         fs::write(&path, invalid).unwrap();

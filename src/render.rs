@@ -61,6 +61,8 @@ pub enum SurfaceMode {
     /// LESSEQUAL with no depth writes; also the city pulse lights' flare.
     /// Shared dust keeps ResultParticles.
     ResultFireworks,
+    /// City state4: SRCALPHA/ONE, LESSEQUAL, no depth writes (004b69f0).
+    LightHalos,
     /// Original mode19 smoke: SRCALPHA/INVSRCALPHA, LESSEQUAL, no depth writes.
     ChimneySmoke,
     /// Original tree state10: two-sided GREATER64 cutout, ONE/ZERO, depth writes and LESSEQUAL.
@@ -152,6 +154,7 @@ pub struct Renderer {
     star_pipeline: wgpu::RenderPipeline,
     result_particle_pipeline: wgpu::RenderPipeline,
     result_firework_pipeline: wgpu::RenderPipeline,
+    halo_pipeline: wgpu::RenderPipeline,
     chimney_smoke_pipeline: wgpu::RenderPipeline,
     tree_foliage_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
@@ -258,7 +261,12 @@ impl Renderer {
                     },
                     dst_factor: if mode == SurfaceMode::TreeFoliage {
                         wgpu::BlendFactor::Zero
-                    } else if matches!(mode, SurfaceMode::Clouds | SurfaceMode::ResultFireworks) {
+                    } else if matches!(
+                        mode,
+                        SurfaceMode::Clouds
+                            | SurfaceMode::ResultFireworks
+                            | SurfaceMode::LightHalos
+                    ) {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
                         wgpu::BlendFactor::OneMinusSrcAlpha
@@ -312,6 +320,7 @@ impl Renderer {
                             | SurfaceMode::Stars
                             | SurfaceMode::ResultParticles
                             | SurfaceMode::ResultFireworks
+                            | SurfaceMode::LightHalos
                             | SurfaceMode::ChimneySmoke
                             | SurfaceMode::Celestial
                             | SurfaceMode::Overlay
@@ -333,6 +342,7 @@ impl Renderer {
                                 SurfaceMode::UiDepth
                                     | SurfaceMode::TreeFoliage
                                     | SurfaceMode::ResultFireworks
+                                    | SurfaceMode::LightHalos
                                     | SurfaceMode::ChimneySmoke
                             )
                         {
@@ -366,7 +376,8 @@ impl Renderer {
                         | SurfaceMode::Overlay
                         | SurfaceMode::UiDepth
                         | SurfaceMode::ResultParticles
-                        | SurfaceMode::ResultFireworks => "star_fragment",
+                        | SurfaceMode::ResultFireworks
+                        | SurfaceMode::LightHalos => "star_fragment",
                     }),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -391,6 +402,7 @@ impl Renderer {
         let star_pipeline = make_pipeline(SurfaceMode::Stars);
         let result_particle_pipeline = make_pipeline(SurfaceMode::ResultParticles);
         let result_firework_pipeline = make_pipeline(SurfaceMode::ResultFireworks);
+        let halo_pipeline = make_pipeline(SurfaceMode::LightHalos);
         let chimney_smoke_pipeline = make_pipeline(SurfaceMode::ChimneySmoke);
         let tree_foliage_pipeline = make_pipeline(SurfaceMode::TreeFoliage);
         let celestial_pipeline = make_pipeline(SurfaceMode::Celestial);
@@ -419,6 +431,7 @@ impl Renderer {
             star_pipeline,
             result_particle_pipeline,
             result_firework_pipeline,
+            halo_pipeline,
             chimney_smoke_pipeline,
             tree_foliage_pipeline,
             celestial_pipeline,
@@ -1217,6 +1230,7 @@ impl Renderer {
             SurfaceMode::Stars => &self.star_pipeline,
             SurfaceMode::ResultParticles => &self.result_particle_pipeline,
             SurfaceMode::ResultFireworks => &self.result_firework_pipeline,
+            SurfaceMode::LightHalos => &self.halo_pipeline,
             SurfaceMode::ChimneySmoke => &self.chimney_smoke_pipeline,
             SurfaceMode::TreeFoliage => &self.tree_foliage_pipeline,
             SurfaceMode::Celestial => &self.celestial_pipeline,

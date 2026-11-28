@@ -32,6 +32,7 @@ fn original_defaults() -> Snapshot {
         },
         graphics: GraphicsLevels {
             water_effects: true,
+            halos: true,
             detail: 2,
             filtering: 1,
             distance: 35,

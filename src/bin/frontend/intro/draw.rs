@@ -526,7 +526,7 @@ impl Intro {
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
         self.service_attract(Instant::now())?;
         if let Some(view) = &mut self.inspection {
-            sync_water_options(
+            sync_graphics_options(
                 &mut view.scene,
                 &self.renderer,
                 &mut view.prepared,
@@ -537,7 +537,7 @@ impl Intro {
             .menu
             .as_ref()
             .map_or(self.graphics_levels, |menu| menu.settings.graphics);
-        sync_water_options(
+        sync_graphics_options(
             &mut self.assets.scene,
             &self.renderer,
             &mut self.prepared,

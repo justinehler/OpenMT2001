@@ -286,6 +286,7 @@ fn settings_reset_actual_menu_commits_defaults_to_process_and_selected_profile()
         },
         graphics: GraphicsLevels {
             water_effects: false,
+            halos: false,
             detail: 0,
             filtering: 0,
             distance: 90,
@@ -339,6 +340,7 @@ fn settings_reset_actual_menu_commits_defaults_to_process_and_selected_profile()
     let expected = Snapshot {
         graphics: GraphicsLevels {
             water_effects: false,
+            halos: false,
             ..GraphicsLevels::default()
         },
         ..Snapshot::default()

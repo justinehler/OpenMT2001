@@ -105,6 +105,9 @@ impl Default for Levels {
 pub struct GraphicsLevels {
     /// Original SysSetup Multitexture switch; the in-game page exposes detail.
     pub water_effects: bool,
+    /// SysSetup Halos (0x8b2335), set only by the original system dialog and
+    /// enabled by default. The in-game Graphics page has no Halos control.
+    pub halos: bool,
     pub detail: u8,
     pub filtering: u8,
     pub distance: u8,
@@ -115,6 +118,7 @@ impl Default for GraphicsLevels {
     fn default() -> Self {
         Self {
             water_effects: true,
+            halos: true,
             detail: 2,
             filtering: 1,
             distance: 35,
@@ -1281,6 +1285,7 @@ impl View {
                 *levels = Levels::default();
                 self.graphics = GraphicsLevels {
                     water_effects: self.graphics.water_effects,
+                    halos: self.graphics.halos,
                     ..GraphicsLevels::default()
                 };
                 self.gameplay = GameplayLevels::default();
@@ -1576,6 +1581,7 @@ mod graphics_tests {
             GraphicsLevels::default(),
             GraphicsLevels {
                 water_effects: true,
+                halos: true,
                 detail: 2,
                 filtering: 1,
                 distance: 35

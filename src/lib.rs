@@ -25,6 +25,7 @@ pub mod geometry;
 pub mod hourly;
 pub mod housing;
 pub mod human_dialog;
+pub mod light_halos;
 pub mod lighting;
 pub mod market;
 pub mod material;
