@@ -1191,7 +1191,9 @@ mod tests {
             wgpu::InstanceDescriptor::new_without_display_handle(),
         ))
         .unwrap();
-        let prepared = panel.draw(&state, &renderer, None, false, None).unwrap();
+        let prepared = panel
+            .draw(&state, &renderer, None, false, None, 255)
+            .unwrap();
         crate::capture_test::capture_standalone(&renderer, &prepared, output.to_str().unwrap());
         println!("Captured {}", output.display());
     }

@@ -498,8 +498,18 @@ impl RosterPanel {
         metadata: [&[u8]; 2],
         encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         view: Presentation<'_>,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        self.draw_rows_with_headers(false, renderer, selected, pressed, metadata, encode, view)
+        self.draw_rows_with_headers(
+            false,
+            renderer,
+            selected,
+            pressed,
+            metadata,
+            encode,
+            view,
+            panel_alpha,
+        )
     }
     #[allow(clippy::too_many_arguments)]
     fn draw_rows_with_headers(
