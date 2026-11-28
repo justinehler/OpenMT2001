@@ -18,6 +18,8 @@ pub(crate) mod focus;
 mod frontend_draw;
 #[path = "intro/menu_preferences.rs"]
 pub(crate) mod menu_preferences;
+#[path = "intro/opening.rs"]
+mod opening;
 #[path = "intro/options_ack.rs"]
 mod options_ack;
 #[path = "intro/pause_keys.rs"]
@@ -135,6 +137,8 @@ pub struct Assets {
     pub cursors: Option<crate::cursor::Images>,
     scene: Scene,
     flyby: Playback,
+    opening: opening::Assets,
+    opening_logos: bool,
     menu: Option<crate::menu::Assets>,
     inputs: Arc<SceneInputs>,
     selection: crate::selection::Assets,
@@ -390,6 +394,7 @@ impl Assets {
         let track = Flyby::parse(&track)?;
         let flyby = Playback::new(&track)?;
         let phase = backdrop.hour;
+        let opening = opening::Assets::load(&ui_images, &ui_text)?;
         let scene = render_scene::assemble_with_style(
             Request {
                 build_file: &build_file,
@@ -444,6 +449,8 @@ impl Assets {
             inputs,
             scene,
             flyby,
+            opening,
+            opening_logos: backdrop.logos,
             selection,
             navigation,
             navigator,
@@ -1335,6 +1342,7 @@ pub struct Intro {
     started: Instant,
     last_sample: Option<usize>,
     ended: bool,
+    opening: openmt2001::opening_sequence::Controller,
     pub menu: Option<crate::menu::Menu>,
     menu_camera: Option<MenuCamera>,
     loading: Option<mpsc::Receiver<Result<LoadedInspection, crate::load::Failure>>>,
@@ -1741,6 +1749,7 @@ impl Intro {
             started: Instant::now(),
             last_sample: None,
             ended: false,
+            opening: Default::default(),
             menu: None,
             menu_camera: None,
             loading: None,
@@ -1770,6 +1779,11 @@ impl Intro {
             self.menu = Some(crate::menu::Menu::new(assets));
             self.started = Instant::now();
             self.last_sample = None;
+        }
+    }
+    pub fn skip_opening(&mut self, key: winit::keyboard::NamedKey) {
+        if opening::skip_key(key) {
+            self.open_menu();
         }
     }
     pub fn inspection_cursor_presented(&mut self) {
@@ -2286,7 +2300,15 @@ impl Intro {
             self.sidewalk_camera,
             35,
         )?;
-        if tick >= self.assets.flyby.duration_ticks() && !self.ended && self.menu.is_none() {
+        if self.assets.opening_logos && self.menu.is_none() {
+            self.opening.advance_to(tick);
+        }
+        let opening_ended = if self.assets.opening_logos {
+            self.opening.ended()
+        } else {
+            tick >= self.assets.flyby.duration_ticks()
+        };
+        if opening_ended && !self.ended && self.menu.is_none() {
             self.ended = true;
             self.open_menu();
             eprintln!("FlybyEnded: main menu");
@@ -2308,6 +2330,11 @@ impl Intro {
                         &self.depth_view,
                         &self.mr_monopoly,
                     );
+                    if self.menu.is_none() && self.assets.opening_logos {
+                        let overlay = self.assets.opening.prepare(&self.renderer, &self.opening)?;
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, &overlay);
+                    }
                 }
                 frontend_draw::Layer::Menu => {
                     if let Some(menu) = &mut self.menu {
