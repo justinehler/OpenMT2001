@@ -25,6 +25,9 @@ pub mod restore;
 pub mod result;
 #[path = "session_scenarios.rs"]
 pub mod scenarios;
+#[cfg(test)]
+#[path = "fresh_city/test_observers.rs"]
+mod test_observers;
 #[path = "session_tick.rs"]
 pub mod tick;
 #[path = "tutorial_announcement.rs"]
