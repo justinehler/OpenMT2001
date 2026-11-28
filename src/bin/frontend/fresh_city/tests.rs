@@ -2374,6 +2374,7 @@ fn exercise_calendar(
     let mut tick_boundaries = std::collections::BTreeSet::new();
     let mut hours = Vec::new();
     let mut transport_submissions = std::collections::BTreeMap::<u32, usize>::new();
+    let pulse_lights = session.pulse_lights.clone();
     let command_slot = session
         .world
         .ledgers
@@ -2453,10 +2454,19 @@ fn exercise_calendar(
             .advance_session(&assets, &mut policy, |event, clock| {
                 match event {
                     tick::Event::ScriptCommands(commands) => {
-                        assert!(commands.iter().all(|(command, args)| matches!(
-                            command,
-                            openmt2001::level_script::Command::Prompt
-                        ) && args.len() == 3));
+                        // Scenario 3's tips call Interface.CreatePrompt with
+                        // three arguments; the fixed native signature (ppnn,
+                        // since 2c2701f) always delivers the fourth format
+                        // value, tonumber(nil) = 0.
+                        assert!(
+                            commands.iter().all(|(command, args)| matches!(
+                                command,
+                                openmt2001::level_script::Command::Prompt
+                            ) && args.len() == 4
+                                && args[3] == openmt2001::lua4::Value::Number(0.)),
+                            "unexpected deferred script commands at tick {}: {commands:?}",
+                            clock.timing[0]
+                        );
                         deferred_prompts += commands.len();
                     }
                     tick::Event::Script { name, argument, .. } => {
@@ -2547,11 +2557,13 @@ fn exercise_calendar(
     assert!(boundaries.is_empty());
     assert_eq!(session.history.count(0, 0), Some(34));
     assert_eq!(session.history.cursor(0, 0), Some(34));
-    assert_eq!(
-        tick_boundaries,
-        [0x4805b0, 0x4eb5b0, 0x450080, 0x4b5db0, 0x4b5d50]
-            .into_iter()
-            .collect()
+    // The Session runs the helpers it owns inside the tick: window lights
+    // 0x4805b0 (#152), demolition effects 0x4eb5b0, chimney smoke 0x4b5db0
+    // (#385) and pulse lights 0x4b5d50. Only 0x450080 reaches the host.
+    assert_eq!(tick_boundaries, [0x450080].into_iter().collect());
+    assert_ne!(
+        session.pulse_lights, pulse_lights,
+        "scheduler helper 0x4b5d50 must advance the pulse lights"
     );
     println!(
         "Full day: 15000 ticks, {} paused host frames, {} explicit tick helper boundaries",

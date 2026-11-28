@@ -6135,7 +6135,10 @@ mod open_facing_fixture {
         )
         .unwrap();
         assert_eq!(closed_bounds.len(), 49);
-        assert_eq!(closed.len(), 12);
+        // Since #146 every panel mesh rejects clockwise faces (UI cull state 3
+        // at 0x459237, D3DCULL_CW at 0x4efa5e) and drops parts with no front
+        // face; three of frame0's twelve parts are reverse-facing layout quads.
+        assert_eq!(closed.len(), 9);
         let closed_regions = openmt2001::ui_mesh::regions(&mesh, 0).unwrap();
         let strip = closed_regions
             .iter()
@@ -6145,7 +6148,7 @@ mod open_facing_fixture {
         let mut fill = Surface::solid();
         fill.rect(strip, [0xff777777, 0x66777777, 0x66777777, 0xff777777]);
         closed.push(fill);
-        assert_eq!(assets.toolbar_closed_base.len(), 13);
+        assert_eq!(assets.toolbar_closed_base.len(), closed.len());
         for (a, b) in assets.toolbar_closed_base.iter().zip(&closed) {
             same(a, b);
         }
@@ -6170,8 +6173,8 @@ mod open_facing_fixture {
         };
         let input = toolbar_collapse::Input::default();
         let collapsed = assets.toolbar_surfaces(q, &input, &state, false);
-        assert_eq!(collapsed.len(), 19);
-        for (a, b) in collapsed[..13].iter().zip(&closed) {
+        assert_eq!(collapsed.len(), closed.len() + 6);
+        for (a, b) in collapsed[..closed.len()].iter().zip(&closed) {
             same(a, b);
         }
         let opened = assets.toolbar_surfaces(q, &input, &state, true);
@@ -6181,7 +6184,10 @@ mod open_facing_fixture {
             "open side overlay adds controls only, no second body/title/base"
         );
         for side in 0..3 {
-            same(&opened[side * 2 + 1], &collapsed[13 + side * 2 + 1]);
+            same(
+                &opened[side * 2 + 1],
+                &collapsed[closed.len() + side * 2 + 1],
+            );
         }
         assert_eq!(
             before,
