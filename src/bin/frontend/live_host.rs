@@ -73,6 +73,7 @@ pub struct Status {
     pub running: bool,
     pub speed: u32,
     pub network_enabled: bool,
+    pub synchronization: Option<openmt2001::network::synchronization::Status>,
     pub script_paused: bool,
     pub ticks: u32,
     pub interface_ticks: u64,
@@ -114,6 +115,17 @@ pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
         eprintln!(
             "[presentation] Pending callbacks: {:x?}",
             status.pending_presentation
+        );
+    }
+    if let Some(synchronization) = &status.synchronization
+        && synchronization.mismatch_count
+            != previous
+                .and_then(|s| s.synchronization.as_ref())
+                .map_or(0, |s| s.mismatch_count)
+    {
+        eprintln!(
+            "[network] {} desync differences reported; session continues.",
+            synchronization.mismatch_count
         );
     }
     let key = |s: &Status| {
@@ -285,6 +297,8 @@ enum CameraSuppliers {
 }
 
 pub struct Host {
+    /// Barrier completion requests 0x4ebaa0 on the retained process clock.
+    pub(crate) synchronize_time: bool,
     ai_warnings: AiWarnings,
     //Missing process source is explicit for legacy CPU Hosts. Production binds
     //the SAME Assets-born handle before commands/startup are consumed.
@@ -523,6 +537,7 @@ impl Host {
 
     pub fn new(camera: [f32; 3]) -> Self {
         Self {
+            synchronize_time: false,
             ai_warnings: AiWarnings::default(),
             process_runtime: None,
             camera_bridge: None,
@@ -1529,6 +1544,10 @@ impl Host {
             auction,
             running: self.running,
             speed: self.policy.scheduler.iterations,
+            synchronization: session
+                .connected
+                .as_ref()
+                .map(|c| c.synchronization.samples.status.clone()),
             network_enabled: self.policy.scheduler.network_enabled,
             script_paused: session.world.pause.has_reason(),
             ticks: session.world.clock.timing[0],
@@ -3418,12 +3437,12 @@ impl Host {
             .filter_map(|(index, task)| {
                 matches!(
                     u32::from_le_bytes(task[16..20].try_into().unwrap()),
-                    0x4baa10 | 0x4ba580 | 0x481680
+                    0x4baa10 | 0x4ba580 | 0x481680 | 0x450410
                 )
                 .then_some(index)
             })
             .collect();
-        if indices.len() != 3
+        if indices.len() != 3 + usize::from(session.connected.is_some())
             || [0x4baa10, 0x4ba580, 0x481680].into_iter().any(|address| {
                 indices
                     .iter()
@@ -3493,6 +3512,14 @@ impl Host {
                         .interface_tick(session, assets)
                         .map_err(camera_bridge::RequestError::Failed)
                         .and_then(|()| self.camera_central_tail(session)),
+                    0x450410 => session
+                        .pump_connected_synchronization(&mut self.policy)
+                        .map(|closed| {
+                            if closed {
+                                self.synchronize_time = true;
+                            }
+                        })
+                        .map_err(camera_bridge::RequestError::Failed),
                     0x481680 => {
                         self.tick(session, assets);
                         if let Some(error) = &self.failure {

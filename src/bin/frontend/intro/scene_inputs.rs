@@ -553,6 +553,11 @@ impl SceneInputs {
                                 .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                             last_tick = Instant::now();
                             host.frame(&mut session, &assets, elapsed);
+                            if std::mem::take(&mut host.synchronize_time) {
+                                timing
+                                    .frame
+                                    .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                            }
                         }
                         if host.camera_retired() {
                             break;
@@ -807,6 +812,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }
@@ -818,6 +828,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }
@@ -855,6 +870,11 @@ impl SceneInputs {
                                     .frame
                                     .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
                                 host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing
+                                        .frame
+                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                }
                                 if host.camera_retired() {
                                     break;
                                 }

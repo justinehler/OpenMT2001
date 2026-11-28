@@ -150,6 +150,26 @@ impl RoadTraffic {
         )?;
         self.update_proximity(tick.camera)
     }
+    /// Original 0x44d2d0 evaluates the live front path at +2c, without the
+    /// render interpolation fraction, and adds all three stored float bits.
+    pub fn position_checksum(&self, network: &mut RoadNetwork) -> Result<u32, String> {
+        let graph = network.graph();
+        let mut sum = 0u32;
+        for auxiliary in &self.auxiliaries.slots()[..self.auxiliaries.used()] {
+            let row = self
+                .records
+                .get(super::word(auxiliary, 0x38) as usize)
+                .ok_or("sample road actor outside pool")?;
+            if row[0x14] == 0 {
+                continue;
+            }
+            let position = graph.position(super::word(row, 0xb4), super::float(row, 0x2c))?;
+            for coordinate in position {
+                sum = sum.wrapping_add(coordinate.to_bits());
+            }
+        }
+        Ok(sum)
+    }
     pub fn project(&mut self, network: &mut RoadNetwork, fraction: f32) -> Result<(), String> {
         let graph = network.graph();
         let used = self.auxiliaries.used();
