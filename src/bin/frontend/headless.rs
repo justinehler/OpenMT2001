@@ -643,6 +643,7 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
             saved_auction = metadata.and_then(|metadata| metadata.auction);
         }
     }
+    session.chimney_smoke.bind_archive(&index, &files.archive)?;
     let assets = crate::fresh_city::CommandAssets {
         image: &image,
         board: &board,

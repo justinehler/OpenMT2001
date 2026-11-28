@@ -162,6 +162,7 @@ pub struct Session<'data> {
     pub build_random_state: u32,
     pub window_texture: crate::window_texture::WindowTexture,
     pub pulse_lights: crate::pulse_lights::PulseLights,
+    pub chimney_smoke: crate::chimney_smoke::Smoke,
     pub allocation_next: u32,
     pub static_rng_tail_next: u32,
     pub event_cards: crate::event_cards::Deck,
@@ -2155,6 +2156,10 @@ impl<'data> Session<'data> {
                 startup.state(crate::window_texture::RNG_REFERENCE),
             ),
             pulse_lights: crate::pulse_lights::PulseLights::from_original(input.image)?,
+            chimney_smoke: crate::chimney_smoke::Smoke::new(
+                startup.state(crate::chimney_smoke::RNG_REFERENCE),
+                &[],
+            ),
             allocation_next,
             static_rng_tail_next,
             event_cards: crate::event_cards::Deck::new([

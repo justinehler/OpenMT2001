@@ -52,7 +52,7 @@ impl Assets {
             pixels: Arc::from(loader_pixels(texture)),
         })
     }
-    fn empty(&self) -> OwnedDraw {
+    pub(crate) fn empty(&self) -> OwnedDraw {
         let mut draw = particles_gpu::empty_draw();
         draw.width = self.width;
         draw.height = self.height;

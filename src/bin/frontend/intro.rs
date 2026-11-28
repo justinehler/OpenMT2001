@@ -1131,6 +1131,8 @@ struct Inspection {
     settings_menu: crate::settings_menu::View,
     pulse_draw: Option<usize>,
     pulse_state: Option<openmt2001::pulse_lights::PulseLights>,
+    smoke_draw: Option<usize>,
+    smoke_state: Option<openmt2001::chimney_smoke::Smoke>,
     status_pending: Option<mpsc::Receiver<crate::live_host::Status>>,
     environment_pending: Option<mpsc::Receiver<crate::time_panel::ClockSample>>,
     environment_tick: u32,
@@ -1234,6 +1236,21 @@ fn update_city_pulse(
     }
     Ok(())
 }
+fn update_city_smoke(
+    renderer: &Renderer,
+    submission: (Option<usize>, Option<&openmt2001::chimney_smoke::Smoke>, u8),
+    camera: CameraSample,
+    scene: &mut Scene,
+    prepared: &mut PreparedScene,
+) -> Result<(), String> {
+    if let (Some(index), Some(state), detail) = submission {
+        let draw = scene.draws.get_mut(index).ok_or("smoke draw missing")?;
+        crate::chimney_smoke_scene::fill(draw, state, detail, camera)?;
+        renderer.update_surface(prepared, index, &draw.borrowed(), scene.camera, None)?;
+    }
+    Ok(())
+}
+
 enum ResultPhase {
     Flyby,
     CutScene,

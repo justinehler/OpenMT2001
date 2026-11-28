@@ -34,6 +34,8 @@ mod business_view;
 pub mod card_panel;
 #[path = "frontend/category_distance.rs"]
 pub mod category_distance;
+#[path = "frontend/chimney_smoke_scene.rs"]
+pub mod chimney_smoke_scene;
 #[path = "frontend/city_pulse_scene.rs"]
 pub mod city_pulse_scene;
 #[path = "frontend/cursor.rs"]
