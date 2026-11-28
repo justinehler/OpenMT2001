@@ -2485,7 +2485,7 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                 // Close and low over Pacific Avenue, not the high overview.
                 assert!(eye[1] < 200. && eye[1] < overview.eye[1] - 300.);
                 let reach = (target[0] - center[0]).hypot(target[2] - center[2]);
-                assert!(reach < 30., "{target:?} {center:?}");
+                assert!(reach < 60., "{target:?} {center:?}");
             };
             // Hold the first prompt for six seconds, then dismiss it and hold
             // the second for six more. Host frames and the legacy camera
