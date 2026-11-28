@@ -64,9 +64,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test core library (default features)
         run: cargo +${{ env.RUST_VERSION }} test --locked --lib
-      # The next step links the game with native,capture; this one only checks
-      # that it compiles without capture. The nightly alpha links it release.
-      - name: Check native game
-        run: cargo +${{ env.RUST_VERSION }} check --locked --features native --bin game
+      - name: Build native game
+        run: cargo +${{ env.RUST_VERSION }} build --locked --features native --bin game
       - name: Test library, binaries and integration tests (native, capture)
         run: cargo +${{ env.RUST_VERSION }} test --locked --features native,capture --lib --bins --tests
