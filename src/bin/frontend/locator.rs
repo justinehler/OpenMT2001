@@ -81,6 +81,9 @@ pub struct Assets {
     pub rights_button_bounds: [f32; 4],
     rights_fonts: Vec<Surface>,
     rights_tab: Vec<u8>,
+    /// Font2 (tahoma11noantip, 4c1380) for the LEASE BLOCK / SELL LEASE label.
+    offer_button_fonts: Vec<Surface>,
+    offer_button_tab: Vec<u8>,
     pub currency_suffix: bool,
     pub property_lease_available: [bool; 52],
     player_buttons: [[Surface; 4]; 10],
@@ -636,6 +639,16 @@ impl Assets {
                 .collect(),
             rights_tab: fs::read(installer.join("Standard/fonts/cust640p.tab"))
                 .map_err(|e| e.to_string())?,
+            offer_button_fonts: TextureSet::parse(payload("gamedata2/font640/textures.gtd")?)
+                .map_err(|e| e.to_string())?
+                .textures
+                .get(4..6)
+                .ok_or("missing offer button font2 pages")?
+                .iter()
+                .map(Surface::new)
+                .collect(),
+            offer_button_tab: fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
+                .map_err(|e| e.to_string())?,
             currency_suffix: names.get(3).and_then(|s| s.first()).copied() != Some(0x4c),
             city_layout,
             people_selector,
@@ -1089,7 +1102,7 @@ impl Assets {
             )?;
         }
         if state.property_rights_open() {
-            self.rights_rows(&mut surfaces, &mut body, state)?;
+            self.rights_rows(&mut surfaces, &mut fonts, state)?;
         } else if state.property_offer_open() {
             self.offer_rows(
                 &mut surfaces,
@@ -1562,49 +1575,43 @@ impl Assets {
         } else {
             report.names[usize::from(owner) - 1].clone()
         };
-        for (row, label, value) in [
-            (0, 54, Some(owner_name)),
-            (1, 55, Some(self.money(panel.minimum)?)),
-            (2, if inspection.owned { 57 } else { 56 }, None),
-        ] {
-            let top = 40. + row as f32 * 12.;
-            ui::text_fit(
-                body,
-                &self.ownership_tab,
+        // Font3 titles in 440540's default colour; the third label heads the
+        // amount and has no value.
+        let page = report_text::LeasePage::new(self.bounds);
+        for ((bounds, align), (label, value)) in page.labels.into_iter().zip([
+            (54, Some(owner_name)),
+            (55, Some(self.money(panel.minimum)?)),
+            (if inspection.owned { 57 } else { 56 }, None),
+        ]) {
+            report_text::paint_title(
+                fonts,
+                &self.tab,
+                bounds,
                 &self.strings[label],
-                [self.bounds[0] + 4., top, self.bounds[2] - 4., top + 20.],
-                false,
+                align,
                 self.text_palette[0],
             )?;
             if let Some(value) = value {
-                ui::text_fit(
-                    body,
-                    &self.ownership_tab,
+                report_text::paint_title(
+                    fonts,
+                    &self.tab,
+                    bounds,
                     &value,
-                    [self.bounds[0] + 4., top, self.bounds[2] - 4., top + 20.],
-                    true,
-                    self.text_palette[3],
+                    report_text::Align::Right,
+                    self.text_palette[0],
                 )?;
             }
         }
         if panel.visible == 1 && panel.action_visible != 0 {
-            let [l, t, r, b] = self.amount_bounds;
             let mut backing = Surface::solid();
-            backing.rect([l + 1., t + 3., r - 1., t + 17.], [0xcc183088; 4]);
+            backing.rect(page.backing, [0xcc183088; 4]);
             surfaces.push(backing);
-            let value = self.money(panel.amount)?;
-            let width = ui::text_width(&self.ownership_tab, &value, 1.)? as f32;
-            ui::text_fit(
-                body,
-                &self.ownership_tab,
-                &value,
-                [
-                    (l + r - width) * 0.5,
-                    t,
-                    l + r - (l + r - width) * 0.5,
-                    b + 4.,
-                ],
-                false,
+            report_text::paint_title(
+                fonts,
+                &self.tab,
+                page.amount,
+                &self.money(panel.amount)?,
+                report_text::Align::Centre,
                 self.text_palette[0],
             )?;
             if panel.amount_visible != 0 {
@@ -1627,22 +1634,18 @@ impl Assets {
                 self.offer_button_bounds,
                 false,
             );
-            let bounds = self.offer_button_bounds;
-            let value = &self.strings[if inspection.owned { 48 } else { 47 }];
-            let width = ui::text_width(&self.tab, value, 1.)? as f32;
-            ui::text_fit(
-                fonts,
-                &self.tab,
-                value,
-                [
-                    (bounds[0] + bounds[2] - width) * 0.5,
-                    bounds[1] + 5.,
-                    bounds[2],
-                    bounds[3],
-                ],
-                false,
-                self.text_palette[4],
+            // 405e8e..405ec0: the button's caption is font2, style4, in the
+            // default colour.
+            let mut caption = self.offer_button_fonts.clone();
+            report_text::paint_title(
+                &mut caption,
+                &self.offer_button_tab,
+                self.offer_button_bounds,
+                &self.strings[if inspection.owned { 48 } else { 47 }],
+                report_text::Align::Middle,
+                self.text_palette[0],
             )?;
+            surfaces.extend(caption);
         }
         Ok(())
     }
@@ -1656,32 +1659,14 @@ impl Assets {
             return Ok(());
         };
         if let Some(message) = inspection.message {
-            let l = self.bounds[0] + 5.;
-            let r = self.bounds[2] - 5.;
-            let top = self.bounds[1] + 80.;
-            let (offsets, text) = openmt2001::prompt_queue::wrap_with_gap(
-                &self.ownership_tab,
+            report_text::paint_title(
+                fonts,
+                &self.tab,
+                report_text::rights_message_bounds(self.bounds),
                 &self.strings[message as usize],
-                (r - l) as i32,
-                -1,
+                report_text::Align::Left,
+                self.text_palette[0],
             )?;
-            for (line, range) in offsets.windows(2).enumerate() {
-                let end = range[1].min(text.len());
-                let value = &text[range[0]..end];
-                let value = value.strip_suffix(&[0]).unwrap_or(value);
-                let y = top + line as f32 * 10.;
-                if y >= top + 100. {
-                    break;
-                }
-                ui::text_fit(
-                    fonts,
-                    &self.ownership_tab,
-                    value,
-                    [l, y, r, y + 10.],
-                    false,
-                    self.text_palette[0],
-                )?;
-            }
         }
         if inspection.activate_visible {
             self.control_surface(
@@ -1698,7 +1683,8 @@ impl Assets {
                 &self.rights_tab,
                 &self.strings[53],
                 self.rights_button_bounds,
-                self.text_palette[4],
+                // 40614e..406181: font0, style4, default colour.
+                self.text_palette[0],
             )?;
             surfaces.extend(caption);
         }
@@ -6152,5 +6138,69 @@ mod main_title_tests {
         // pixels at x 52..167 and y 62..68 (about 82..270 at 1024x768). Its
         // glyph cells, one pixel wider on each side, cover x 51..168, y 61..69.
         assert_eq!(title(28), [50.5, 60.5, 168.5, 69.5]);
+    }
+
+    #[test]
+    #[ignore = "requires the supplied archive, installer fonts and v1.4 language"]
+    fn landlord_lease_and_rights_pages_use_original_titles() {
+        let f = crate::business_view::facing_fixture::Inputs::read();
+        let index = f.index();
+        let strings = f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let assets =
+            Assets::load(&index, &f.archive, &f.installer, &strings, &f.executable).unwrap();
+        // 440540's default row colour is palette0, white.
+        assert_eq!(assets.text_palette[0], 0xffffffff);
+        let draw = |pages: &[Surface], tab: &[u8], bounds, id: Option<usize>, align| {
+            let mut pages = pages.to_vec();
+            let money = assets.money(325.).unwrap();
+            let text = id.map_or(&money, |id| &assets.strings[id]);
+            let rows =
+                report_text::paint_title(&mut pages, tab, bounds, text, align, 0xffffffff).unwrap();
+            (rows, glyph_extent(&pages))
+        };
+        let page = report_text::LeasePage::new(assets.bounds);
+        let font3 = |bounds, id, align| draw(&assets.fonts, &assets.tab, bounds, id, align);
+        // Original v1.4 at 1024x768 (Baltic, Sell Lease): the navy bar covers
+        // about x 84..266, y 162..180, with $325.00 inside it.
+        assert_eq!(
+            page.backing.map(|v| v * 1.6),
+            [83.840004, 161.6, 266.88608, 180.8]
+        );
+        let amount = font3(page.amount, None, report_text::Align::Centre);
+        assert_eq!(amount, (1, [86.5, 101.5, 132.5, 112.5]));
+        // Block owned by / Guide Price: large font3 rows at the panel's left.
+        assert_eq!(
+            font3(page.labels[0].0, Some(54), page.labels[0].1),
+            (1, [35.5, 41.5, 122.5, 53.5])
+        );
+        assert_eq!(page.labels[1].0[1] - page.labels[0].0[1], 12.);
+        // Selling Price is centred in the panel, directly above the bar.
+        let (rows, heading) = font3(page.labels[2].0, Some(57), page.labels[2].1);
+        assert_eq!((rows, heading), (1, [75.5, 85.5, 143.5, 97.5]));
+        let [l, _, r, _] = assets.bounds;
+        assert!(((heading[0] + heading[2]) - (l + r)).abs() <= 1.);
+        assert!(heading[3] <= page.backing[1]);
+        // SELL LEASE: font2, centred in both directions on the button.
+        assert_eq!(
+            draw(
+                &assets.offer_button_fonts,
+                &assets.offer_button_tab,
+                assets.offer_button_bounds,
+                Some(48),
+                report_text::Align::Middle,
+            ),
+            (1, [75.5, 126.5, 141.5, 136.5])
+        );
+        // 1202 under ACTIVATE BUILDING RIGHTS: font3 from about y 180 to 309
+        // at 1024x768, in the nine lines that real Windows shows, wrapped to
+        // the panel.
+        assert_eq!(
+            font3(
+                report_text::rights_message_bounds(assets.bounds),
+                Some(1202),
+                report_text::Align::Left
+            ),
+            (9, [36.5, 110.5, 184.5, 194.5])
+        );
     }
 }
