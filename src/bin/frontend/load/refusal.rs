@@ -194,7 +194,7 @@ mod tests {
             import_directory: PathBuf::new(),
             campaign_filename: None,
             profile_root: PathBuf::new(),
-            entries: vec![Entry::read(path, vec![], None, None)],
+            entries: vec![Entry::read(path, String::new(), None, None)],
             chosen: Some(0),
             first: 0,
             description_first: 0,

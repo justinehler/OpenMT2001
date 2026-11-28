@@ -646,7 +646,7 @@ impl Assets {
                     let dialog = crate::human_dialog::Dialog {
                         body: 9,
                         arguments: [
-                            crate::human_dialog::Argument::Name(data.owner_name),
+                            crate::human_dialog::Argument::name(&data.owner_name),
                             crate::human_dialog::Argument::Language(if state.mode == 4 {
                                 data.demolition_label
                             } else {

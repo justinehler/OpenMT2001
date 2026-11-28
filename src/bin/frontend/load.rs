@@ -19,7 +19,8 @@ const INFO_SCROLL: [f32; 4] = [588., 287., 604., 378.];
 
 struct Entry {
     path: PathBuf,
-    name: Vec<u8>,
+    /// The file's stem, drawn as code-page bytes through language row 0.
+    name: String,
     metadata: Result<[u32; 4], String>,
     modified: Option<SystemTime>,
     /// Only a validated slot in this V2 profile may be removed here.
@@ -28,7 +29,7 @@ struct Entry {
 impl Entry {
     fn read(
         path: PathBuf,
-        name: Vec<u8>,
+        name: String,
         modified: Option<SystemTime>,
         writable_id: Option<String>,
     ) -> Self {
@@ -84,6 +85,15 @@ pub struct Load {
     refusal_prompt: Option<crate::prompt::Request>,
 }
 impl Load {
+    /// Glyphs for a save name in `tab`'s font, mapped through language row 0
+    /// as the Save list does, so é draws rather than `?`.
+    fn name_glyphs(&self, tab: &[u8], name: &str) -> Vec<u8> {
+        ui::text_field::FieldFont {
+            tab,
+            map: self.strings.first().map_or(&[], Vec::as_slice),
+        }
+        .glyphs(name)
+    }
     pub(crate) fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
@@ -266,7 +276,12 @@ impl Load {
                     if !seen.insert(canonical) {
                         continue;
                     }
-                    let name = ascii(&path.file_stem().unwrap_or_default().to_string_lossy());
+                    // 494ac0 lists each file's stem, like the Save list (497660).
+                    let name = path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     let modified = file
                         .metadata()
                         .ok()
@@ -360,21 +375,15 @@ impl Load {
     pub fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
         let id = self.delete_confirmation.as_ref()?;
         let display = id.rsplit_once('.').map_or(id.as_str(), |(name, _)| name);
-        let mut name = [0u8; 96];
-        for (byte, character) in name.iter_mut().take(95).zip(display.chars()) {
-            *byte = if (' '..='~').contains(&character) {
-                character as u8
-            } else {
-                b'?'
-            };
-        }
+        // 4950f0 passes the stem's code-page bytes, drawn through row 0.
+        let name = ui::text_field::code_page(display);
         Some(crate::human_dialog::Dialog {
             // 495191 never sets a portrait on the 88c0d4 owner.
             portrait: crate::human_dialog::NO_PORTRAIT,
             title: 0x65e,
             body: 0x660,
             arguments: [
-                crate::human_dialog::Argument::Name(name),
+                crate::human_dialog::Argument::name(&name),
                 crate::human_dialog::Argument::Integer(0),
                 crate::human_dialog::Argument::Integer(0),
             ],
@@ -663,7 +672,7 @@ impl Load {
             ui::text_fit(
                 &mut list_fonts,
                 &self.list_tab,
-                &e.name,
+                &self.name_glyphs(&self.list_tab, &e.name),
                 name,
                 false,
                 0xffffffff,
@@ -698,7 +707,7 @@ impl Load {
             ui::text(
                 &mut fonts,
                 &self.tab,
-                &entry.name,
+                &self.name_glyphs(&self.tab, &entry.name),
                 self.bounds[13],
                 true,
                 0xffffffff,
@@ -1159,7 +1168,7 @@ mod tests {
         for i in 0..30 {
             load.entries.push(Entry {
                 path: root.join(format!("synthetic{i}.sav")),
-                name: ascii(&format!("synthetic{i}")),
+                name: format!("synthetic{i}"),
                 metadata: Err("input-only row".into()),
                 modified: None,
                 writable_id: None,

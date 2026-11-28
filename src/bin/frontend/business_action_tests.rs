@@ -12,6 +12,8 @@ fn tagged(tag: u8) -> Surface {
 }
 fn assets() -> Assets {
     let mut strings = vec![vec![]; 2245];
+    // Row 0: printable ASCII onto its own glyphs, as the US row maps it.
+    strings[0] = (0..95).collect();
     for (id, text) in [
         (9, "%s: %s"),
         (

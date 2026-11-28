@@ -1,10 +1,27 @@
 //! Presentation fields written by original48bc70 through429xxx modal helpers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Argument {
-    Name([u8; 96]),
+    /// NUL-terminated code-page bytes.
+    Name([u8; NAME_BYTES]),
     Language(u32),
     Integer(i32),
     Currency(i32),
+}
+/// A name argument's capacity: the 128-byte field cap (443aa0) and its
+/// terminator. The original passes a pointer to the stored name (498f15,
+/// 4981d0, 4950f0) and expands the whole body into a 0x400-byte buffer
+/// (4e8410), so no name a field can hold is cut short.
+pub const NAME_BYTES: usize = 129;
+impl Argument {
+    /// A name argument from code-page bytes, ending at the first NUL and
+    /// keeping at most the 128 bytes a name field can hold.
+    pub fn name(bytes: &[u8]) -> Self {
+        let mut name = [0; NAME_BYTES];
+        let text = bytes.split(|&b| b == 0).next().unwrap_or_default();
+        let length = text.len().min(NAME_BYTES - 1);
+        name[..length].copy_from_slice(&text[..length]);
+        Self::Name(name)
+    }
 }
 /// Portrait word for a modal with no portrait. Original activation 429b50
 /// resets the portrait to 0xffffffff, and producers such as the in-city
@@ -85,7 +102,7 @@ impl Dialog {
             (0x440d40, 4) if matches!(arguments[0], 0x6b1 | 0x6b3) => {
                 self.body = arguments[0];
                 self.arguments = [
-                    Argument::Name(name.ok_or("Human dialog sender name unresolved")?),
+                    Argument::name(&name.ok_or("Human dialog sender name unresolved")?),
                     if arguments[0] == 0x6b1 {
                         Argument::Integer(arguments[2] as i32)
                     } else {
@@ -149,7 +166,7 @@ impl Dialog {
             } => {
                 let value = match argument {
                     A::None => None,
-                    A::Name(n) => Some(Argument::Name(n)),
+                    A::Name(n) => Some(Argument::name(&n)),
                     A::Integer(n) => Some(Argument::Integer(n)),
                     A::Currency(n) => Some(Argument::Currency(n)),
                 };
@@ -196,16 +213,15 @@ impl Dialog {
                 .ok_or("Human dialog format placeholder missing")?;
             let value = match argument {
                 Argument::Name(name) => {
-                    let end = name
-                        .iter()
-                        .position(|b| *b == 0)
-                        .ok_or("Human dialog actor name unterminated")?;
-                    name[..end]
-                        .iter()
-                        .map(|b| {
-                            b.checked_sub(32)
-                                .filter(|b| *b <= 94)
-                                .ok_or("Human dialog actor glyph mapping")
+                    // 4e7fe0/4e7690 draw each byte as row0[byte - 32] and end
+                    // the substitution at the first byte below 32.
+                    let row = strings.first().ok_or("Human dialog glyph row missing")?;
+                    name.iter()
+                        .take_while(|&&b| b >= 32)
+                        .map(|&b| {
+                            row.get(usize::from(b - 32))
+                                .copied()
+                                .ok_or("Human dialog name glyph missing")
                         })
                         .collect::<Result<Vec<_>, _>>()?
                 }
@@ -230,6 +246,33 @@ impl Dialog {
         }
         Ok(vec![text])
     }
+}
+
+#[test]
+fn name_arguments_draw_through_row_0_and_hold_a_full_field() {
+    // A row that moves every glyph by one proves the name goes through it.
+    let row: Vec<u8> = (0..224u8).map(|i| i.wrapping_add(1)).collect();
+    let strings = vec![row.clone(), vec![b'%' - 32, b's' - 32]];
+    let paragraph = |name: &[u8]| {
+        let dialog = Dialog {
+            body: 1,
+            arguments: [
+                Argument::name(name),
+                Argument::Integer(0),
+                Argument::Integer(0),
+            ],
+            argument_count: 1,
+            ..Dialog::default()
+        };
+        dialog.paragraphs(&strings).unwrap().remove(0)
+    };
+    let name = [[0xe9; 127].as_slice(), b"Z"].concat();
+    let expected: Vec<u8> = name.iter().map(|&b| row[usize::from(b - 32)]).collect();
+    assert_eq!(paragraph(&name), expected);
+    // A byte below 32 ends the substitution (4e7690), and a field never
+    // holds more than 128 bytes.
+    assert_eq!(paragraph(b"ab\ncd"), [row[65], row[66]]);
+    assert_eq!(paragraph(&[b'x'; 200]).len(), 128);
 }
 
 /// Original429630: equal gaps around count60x24 buttons in the main region.
