@@ -3,7 +3,7 @@ use super::fireworks::{POINT_CAPACITY as RESULT_POINT_CAPACITY, Point};
 use openmt2001::{flyby::CameraSample, render::SurfaceMode, render_scene::OwnedDraw};
 use std::sync::Arc;
 
-// Retained shared dust/pulse/generic admission. Result mode owns750 separately.
+// Retained shared dust/generic admission. Result mode owns750 separately.
 const CAPACITY: usize = 512;
 const CORNERS: [[f32; 2]; 4] = [[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]];
 const UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
@@ -43,6 +43,14 @@ impl FireworkTexture {
             rgba: openmt2001::texture::loader_pixels(image).into(),
         })
     }
+    #[cfg(test)]
+    pub fn synthetic(width: u32, height: u32, rgba: Arc<[u8]>) -> Self {
+        Self {
+            width,
+            height,
+            rgba,
+        }
+    }
     pub fn empty_draw(&self) -> OwnedDraw {
         let mut draw = empty_draw();
         draw.mode = SurfaceMode::ResultFireworks;
@@ -68,8 +76,8 @@ impl FireworkTexture {
 }
 
 pub fn empty_draw() -> OwnedDraw {
-    // Retained shared untextured helper for dust/pulse and generic callers.
-    // Authored result fireworks use FireworkTexture's dedicated material.
+    // Retained shared untextured helper for dust and generic callers.
+    // Result fireworks and city pulse lights use FireworkTexture's material.
     let mut draw = OwnedDraw::texture_page(
         SurfaceMode::ResultParticles,
         1,

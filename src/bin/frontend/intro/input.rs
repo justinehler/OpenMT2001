@@ -42,14 +42,12 @@ impl Intro {
                     .as_ref()
                     .is_some_and(|status| status.result_request.is_some())
         }) {
-            if pressed
-                && key == NamedKey::Escape
-                && let Some(result) = self
-                    .inspection
-                    .as_mut()
-                    .and_then(|view| view.result.as_mut())
+            if let Some(result) = self
+                .inspection
+                .as_mut()
+                .and_then(|view| view.result.as_mut())
             {
-                result.bypass_input = true;
+                result.bypass.key(key, pressed);
             }
             return Ok(());
         }
@@ -606,6 +604,20 @@ impl Intro {
             if button == winit::event::MouseButton::Right && view.toolbar_right_held != pressed {
                 view.toolbar_right_held = pressed;
                 view.toolbar_input.cancel();
+            }
+            // The result sequence replaces city input; 4b1980 tests both
+            // buttons as cut-scene bypass input.
+            if view.result.is_some()
+                || view.result_pending.is_some()
+                || view
+                    .live_status
+                    .as_ref()
+                    .is_some_and(|status| status.result_request.is_some())
+            {
+                if let Some(result) = &mut view.result {
+                    result.bypass.button(button, pressed);
+                }
+                return;
             }
             // Mode4 captures input before any primary-group hit test, including
             // the installed navigator path and its staged GUI input owner.
@@ -2088,6 +2100,9 @@ impl Intro {
             }
             if let Some(locator) = &mut view.locator {
                 locator.cancel_press();
+            }
+            if let Some(result) = &mut view.result {
+                result.bypass.clear();
             }
             view.keys = [false; 4];
             view.navigation_pressed = false;

@@ -54,11 +54,7 @@ impl Assets {
     }
 
     fn surfaces(&self, clock: &Controller) -> Result<Vec<Surface>, String> {
-        let mut bars = Surface::solid();
-        let height = f32::from(clock.height());
-        bars.rect([0., -5., 640., height], [0xff000000; 4]);
-        bars.rect([0., 480. - height, 640., 480.], [0xff000000; 4]);
-        let mut surfaces = vec![bars];
+        let mut surfaces = vec![letterbox_bars(clock.height())];
         let Some((card, alpha)) = clock.card() else {
             return Ok(surfaces);
         };
@@ -115,30 +111,48 @@ impl Assets {
         renderer: &Renderer,
         clock: &Controller,
     ) -> Result<PreparedScene, String> {
-        let surfaces = self.surfaces(clock)?;
-        renderer.prepare(
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        prepare_overlay(renderer, &self.surfaces(clock)?)
     }
+}
+
+/// 4b27e0's black bars for any active sequence clock: the top bar spans
+/// y -5..height and the bottom bar 480-height..480 in 640x480 space. The
+/// opening and the result cut scenes share this clock field (+0x14).
+pub(super) fn letterbox_bars(height: u8) -> Surface {
+    let mut bars = Surface::solid();
+    let height = f32::from(height);
+    bars.rect([0., -5., 640., height], [0xff000000; 4]);
+    bars.rect([0., 480. - height, 640., 480.], [0xff000000; 4]);
+    bars
+}
+
+/// Prepares sequence overlay surfaces in the original 640x480 space.
+pub(super) fn prepare_overlay(
+    renderer: &Renderer,
+    surfaces: &[Surface],
+) -> Result<PreparedScene, String> {
+    renderer.prepare(
+        &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+        [
+            2. / 640.,
+            0.,
+            0.,
+            0.,
+            0.,
+            -2. / 480.,
+            0.,
+            0.,
+            0.,
+            0.,
+            1.,
+            0.,
+            -1.,
+            1.,
+            0.,
+            1.,
+        ],
+        None,
+    )
 }
 
 fn centered(

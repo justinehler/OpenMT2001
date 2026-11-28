@@ -4,7 +4,10 @@ use openmt2001::{
     render_scene::OwnedDraw,
 };
 
-use crate::result_presentation::{fireworks::Point, particles_gpu};
+use crate::result_presentation::{
+    fireworks::Point,
+    particles_gpu::{self, FireworkTexture},
+};
 
 pub struct Assets {
     positions: [[f32; 3]; 4],
@@ -66,8 +69,12 @@ impl Assets {
         })
     }
 
-    pub fn empty_draw(&self) -> OwnedDraw {
-        particles_gpu::empty_draw()
+    /// 004b5930 selects texture handle 00687c7c for all four submissions:
+    /// the same black-edged billboard flare the result fireworks select at
+    /// 004b16d0. It is opaque, so it shows as a glow only with additive
+    /// blending; a flat white page draws each light as a solid square.
+    pub fn empty_draw(&self, flare: &FireworkTexture) -> OwnedDraw {
+        flare.empty_draw()
     }
 
     pub fn fill(
@@ -83,7 +90,58 @@ impl Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openmt2001::pe::PeImage;
+    use openmt2001::{pe::PeImage, render::SurfaceMode};
+
+    #[test]
+    fn pulse_lights_draw_as_textured_flares_not_flat_squares() {
+        let flare: std::sync::Arc<[u8]> = (0..16u8).flat_map(|i| [i, 0, 0, 255]).collect();
+        let flare = FireworkTexture::synthetic(4, 4, flare);
+        let assets = Assets {
+            positions: [
+                [0., 0., 10.],
+                [5., 0., 10.],
+                [-219., 105.7, -394.5],
+                [0., 5., 10.],
+            ],
+        };
+        let mut rows = [0u8; 96];
+        for (i, color) in [0xff0000u32, 0xff0000, 0x0000ff, 0xffffff]
+            .into_iter()
+            .enumerate()
+        {
+            let row = &mut rows[i * 24..i * 24 + 24];
+            row[4..8].copy_from_slice(&5u32.to_le_bytes());
+            row[8..12].copy_from_slice(&(200i32).to_le_bytes());
+            row[16..20].copy_from_slice(&(0xc8 << 24 | color).to_le_bytes());
+            row[20..24].copy_from_slice(&7u32.to_le_bytes());
+        }
+        let state = PulseLights::from_bytes(&rows).unwrap();
+        let mut draw = assets.empty_draw(&flare);
+        assert_eq!(draw.mode, SurfaceMode::ResultFireworks);
+        assert_eq!((draw.width, draw.height), (4, 4));
+        assert!(draw.mipmaps);
+        let camera = CameraSample {
+            eye: [0., 0., 0.],
+            target: [0., 0., -1.],
+            up: [0., 1., 0.],
+            vertical_fov: 1.,
+        };
+        assets.fill(&mut draw, &state, camera).unwrap();
+        // Four camera-facing quads, each sampling the whole flare page.
+        assert_eq!(draw.vertices.len(), 24);
+        for quad in draw.vertices.chunks(6) {
+            let uv = quad.iter().map(|v| [v[6], v[7]]).collect::<Vec<_>>();
+            for corner in [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] {
+                assert!(uv.contains(&corner));
+            }
+        }
+        let blue = &draw.vertices[12..18];
+        assert!(blue.iter().all(|v| v[3..6] == [0., 0., 1.]));
+        assert!(
+            draw.rgba.chunks(4).any(|t| t[0] != t[1]),
+            "flare texels kept"
+        );
+    }
 
     #[test]
     #[ignore = "requires original v1.4 archive and executable"]
@@ -131,6 +189,7 @@ mod tests {
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let assets = Assets::load(&index, &archive).unwrap();
+        let flare = FireworkTexture::load(&index, &archive).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let mut state = PulseLights::from_original(&image).unwrap();
@@ -156,7 +215,7 @@ mod tests {
                 up: [0., 1., 0.],
                 vertical_fov: 45.,
             };
-            let mut draw = assets.empty_draw();
+            let mut draw = assets.empty_draw(&flare);
             assets.fill(&mut draw, &state, camera).unwrap();
             let [near, far] = camera::city_clip(eye[1]).unwrap();
             let projection =

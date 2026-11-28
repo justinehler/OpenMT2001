@@ -30,6 +30,8 @@ mod pause_keys;
 pub(crate) mod process_frontend;
 #[path = "intro/refresh.rs"]
 mod refresh;
+#[path = "intro/result_cut_scene.rs"]
+mod result_cut_scene;
 use openmt2001::{
     flyby::{CameraSample, Flyby, Playback},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
@@ -1267,7 +1269,7 @@ struct ResultView {
     phase: ResultPhase,
     controller: crate::result_controller::Controller,
     serviced_ticks: usize,
-    bypass_input: bool,
+    bypass: result_cut_scene::BypassInputs,
     pending: Option<mpsc::Receiver<Result<crate::fresh_city::result::ResultPresentation, String>>>,
     credit_pending:
         Option<mpsc::Receiver<Result<crate::fresh_city::result::ResultPresentation, String>>>,
@@ -1278,6 +1280,7 @@ struct ResultView {
     actors: PreparedScene,
     actor_draws: usize,
     title: Option<(Option<u32>, Option<usize>, u8, PreparedScene)>,
+    letterbox: Option<(u8, PreparedScene)>,
 }
 #[path = "intro/inspection.rs"]
 mod inspection;
