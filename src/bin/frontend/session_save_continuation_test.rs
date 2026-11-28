@@ -41,6 +41,18 @@ pub(crate) fn load_boundary(
     assert_eq!(session.world.pause, loaded.world.pause);
     assert_eq!(session.hooks.timers, loaded.hooks.timers);
     residents_match(session, loaded);
+    // #537: a load clears every transport effect row and restarts the ship
+    // frame at one, so a ship that was mid-route at the save does not return.
+    // Everything else in the transport record must still continue exactly.
+    session.transport.clear_effects_for_load();
+    assert_eq!(
+        session.transport.hourly.effects,
+        loaded.transport.hourly.effects
+    );
+    assert_eq!(
+        session.transport.environment.frame,
+        loaded.transport.environment.frame
+    );
     assert_eq!(
         session.road_traffic.admission.random, loaded.road_traffic.admission.random,
         "load movement does not draw from the traffic RNG"
