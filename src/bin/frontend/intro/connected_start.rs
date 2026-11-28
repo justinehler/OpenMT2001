@@ -478,6 +478,15 @@ pub(crate) fn shared_state(
                 // controllers run on the authority alone (0x481680), so a
                 // client's copy is never advanced (and the authority's grows).
                 6 => record.clear(),
+                // The AI neighbour cache (52 rows of 56 bytes, six owned and
+                // six completed-group counts) and the ownership/business count
+                // caches with their ages and six counts. Only the authority's
+                // computer strategy rebuilds them on use; elsewhere they only
+                // age. The market runtime after them stays compared.
+                10 => record
+                    .get_mut(..52 * 56 + 48 + 8 + 24)
+                    .ok_or("V2 runtime record too short")?
+                    .fill(0),
                 // The timed command queue. The authority enqueues a commit
                 // when it schedules it (Total+25, 0x451720) and a client when
                 // the commit arrives, so an hour can catch one in flight. Its

@@ -64,6 +64,22 @@ def first_byte(summary, out, names):
     )
 
 
+def drop_when_reached(drop, peers, out):
+    """Kill the named client once its hourly lines reach the tick."""
+    name, _, tick = drop
+    try:
+        with open(os.path.join(out, f"{name}.log")) as log:
+            ticks = [int(m.group(1)) for m in re.finditer(r'"tick":(\d+)', log.read())]
+    except OSError:
+        return False
+    if not ticks or max(ticks) < tick:
+        return False
+    process = next(process for peer, process, _, _ in peers if peer == name)
+    print(f"dropping {name} (pid {process.pid}) at tick {max(ticks)}", file=sys.stderr)
+    process.kill()
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run a headless connected soak and compare the peers.",
@@ -84,6 +100,11 @@ def main():
         help="minimum wall ms per frame on every peer (default 2, about 30 s per "
         "game day; 0 runs as fast as the CPU allows, but the host may then run "
         "more than its 2000-tick sample window ahead and skip comparisons)",
+    )
+    parser.add_argument(
+        "--drop-client", metavar="N:TICK",
+        help="kill client N (SIGKILL) once its log reaches Total tick TICK, to "
+        "check peer loss: the others must stay in sync and finish",
     )
     parser.add_argument("--out", help="directory for the peer logs")
     parser.add_argument("--timeout", type=float, help="stop the peers after SECONDS")
@@ -128,10 +149,20 @@ def main():
         peers.append((name, process, stdout, stderr))
         print(f"started {name} (pid {process.pid}): {' '.join(command)}", file=sys.stderr)
 
+    drop = None
+    if args.drop_client:
+        client, tick = (int(part) for part in args.drop_client.split(":"))
+        if not 1 <= client < args.players:
+            parser.error("--drop-client names a client from 1 to players-1")
+        drop = (f"client{client}", client, tick)
+    dropped = False
+
     failed = False
     try:
         running = list(peers)
         while running:
+            if drop and not dropped:
+                dropped = drop_when_reached(drop, peers, out)
             for peer in list(running):
                 name, process = peer[0], peer[1]
                 status = process.poll()
@@ -139,7 +170,7 @@ def main():
                     continue
                 running.remove(peer)
                 print(f"{name} exited with status {status}", file=sys.stderr)
-                if status != 0:
+                if status != 0 and not (dropped and name == drop[0]):
                     failed = True
             if failed or (args.timeout and time.monotonic() - started > args.timeout):
                 if not failed:
@@ -167,8 +198,12 @@ def main():
             stderr.close()
 
     logs = [os.path.join(out, f"{name}.log") for name, _ in commands]
+    if drop and not dropped:
+        print(f"{drop[0]} never reached tick {drop[2]}", file=sys.stderr)
+        failed = True
+    lost = ["--lost", str(drop[1])] if dropped else []
     compare = subprocess.run(
-        [args.game, "headless", "--compare", *logs], capture_output=True, text=True
+        [args.game, "headless", "--compare", *lost, *logs], capture_output=True, text=True
     )
     print(compare.stdout, end="")
     first_byte(compare.stdout, out, [name for name, _ in commands])
