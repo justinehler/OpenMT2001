@@ -2,10 +2,12 @@
 //! The worker supplies the retained route sound call; no audio handle enters the
 //! shared simulation. Source WAVs are read in place from the user's installer.
 pub mod block_audio;
+use crate::audio_bus::effects::{Handle, Request as VoiceRequest};
 use openmt2001::{
     pe::PeImage,
     traffic::{RouteSound, scene::EnvironmentCall},
 };
+#[cfg(test)]
 use rodio::Source;
 use std::{
     path::{Path, PathBuf},
@@ -346,24 +348,21 @@ pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
     audio: crate::audio_bus::focus::SharedAudio,
-    train_motion: Option<rodio::Sink>,
-    train_toot: Option<rodio::Sink>,
-    road_ambient: Option<rodio::Sink>,
-    road_motors: [Option<rodio::Sink>; 3],
-    resident_crowd: Option<rodio::Sink>,
-    coast: Option<rodio::Sink>,
-    near_aircraft: Option<rodio::Sink>,
-    ship_engine: Option<rodio::Sink>,
-    // The unique fallback request can lose its returned handle while the
-    // cached sample keeps playing. Retain that voice without controlling it.
-    ship_engine_unowned: Option<rodio::Sink>,
-    ship_horn: Option<rodio::Sink>,
-    crane_start: Option<rodio::Sink>,
-    crane_end: Option<rodio::Sink>,
-    crane_lift: Option<rodio::Sink>,
-    crane_loop: Option<rodio::Sink>,
-    construction: [Option<rodio::Sink>; 8],
-    block_sinks: [Option<rodio::Sink>; 52],
+    train_motion: Option<Handle>,
+    train_toot: Option<Handle>,
+    road_ambient: Option<Handle>,
+    road_motors: [Option<Handle>; 3],
+    resident_crowd: Option<Handle>,
+    coast: Option<Handle>,
+    near_aircraft: Option<Handle>,
+    ship_engine: Option<Handle>,
+    ship_horn: Option<Handle>,
+    crane_start: Option<Handle>,
+    crane_end: Option<Handle>,
+    crane_lift: Option<Handle>,
+    crane_loop: Option<Handle>,
+    construction: [Option<Handle>; 8],
+    block_sinks: [Option<Handle>; 52],
     block_controller: Option<block_audio::Controller>,
     pending_ship_random: u32,
     interface_mode: u32,
@@ -384,7 +383,6 @@ impl Player {
             coast: None,
             near_aircraft: None,
             ship_engine: None,
-            ship_engine_unowned: None,
             ship_horn: None,
             crane_start: None,
             crane_end: None,
@@ -412,6 +410,7 @@ impl Player {
         self.interface_mode = mode;
     }
 
+    #[cfg(test)]
     fn loop_sink(mixer: &rodio::mixer::Mixer, samples: &[f32], gain: f32) -> rodio::Sink {
         let sink = rodio::Sink::connect_new(mixer);
         sink.set_volume(gain);
@@ -421,15 +420,27 @@ impl Player {
         sink
     }
 
-    fn one_shot(mixer: &rodio::mixer::Mixer, samples: &[f32], gain: f32) -> rodio::Sink {
-        let sink = rodio::Sink::connect_new(mixer);
-        sink.set_volume(gain);
-        sink.append(rodio::buffer::SamplesBuffer::new(
-            1,
-            22_050,
-            samples.to_vec(),
-        ));
-        sink
+    fn voice(
+        &mut self,
+        name: &str,
+        samples: &[f32],
+        streamed: bool,
+        looping: bool,
+        unique: bool,
+        gain: f32,
+    ) -> Option<Handle> {
+        let mixer = self.mixer()?.clone();
+        self.audio.effect(
+            &mixer,
+            VoiceRequest {
+                name,
+                streamed,
+                looping,
+                unique,
+            },
+            samples,
+            gain,
+        )
     }
 
     pub fn apply(&mut self, operation: Operation) {
@@ -470,6 +481,7 @@ impl Player {
     /// Original 4afbf0, called once per rendered iteration before camera
     /// interpolation (4b9c7e/4b9c94), independently of simulation scheduling.
     pub fn service_frame(&mut self, camera: [f32; 3]) {
+        self.audio.service_effects();
         let Some(mut inputs) = self.city.take() else {
             return;
         };
@@ -509,6 +521,7 @@ impl Player {
     }
 
     fn reset(&mut self) {
+        self.audio.reset_effects();
         self.city = None;
         for handle in [
             &mut self.train_motion,
@@ -571,13 +584,21 @@ impl Player {
                             block_audio::Kind::ParkTwo => self.assets.block_park_two.clone(),
                             block_audio::Kind::Owl => self.assets.block_owl.clone(),
                         };
-                        if let Some(mixer) = self.mixer() {
-                            self.block_sinks[category] = Some(if kind.looping() {
-                                Self::loop_sink(mixer, &samples, 0.)
-                            } else {
-                                Self::one_shot(mixer, &samples, 0.)
-                            });
-                        }
+                        let name = match kind {
+                            block_audio::Kind::Factory => "Block_Sounds\\ambi_factory_1.wav",
+                            block_audio::Kind::School => "Block_Sounds\\SchoolPlayground.wav",
+                            block_audio::Kind::ParkOne => "block_sounds//ambi_park_1.wav",
+                            block_audio::Kind::ParkTwo => "block_sounds//ambi_park_2.wav",
+                            block_audio::Kind::Owl => "block_sounds//owl6.wav",
+                        };
+                        self.block_sinks[category] = self.voice(
+                            name,
+                            &samples,
+                            matches!(kind, block_audio::Kind::School | block_audio::Kind::Owl),
+                            kind.looping(),
+                            true,
+                            0.,
+                        );
                     }
                     if let Some(sink) = &self.block_sinks[category] {
                         sink.set_volume(self.audio.source_gain(source.level(snapshot.camera)));
@@ -638,7 +659,22 @@ impl Player {
                         _ => self.assets.construction_hammer.clone(),
                     };
                     if let Some(mixer) = mixer {
-                        self.construction[index] = Some(Self::loop_sink(mixer, &samples, 0.));
+                        let name = match group {
+                            0 | 1 => "ambi_any_altbuild_scaffold.wav",
+                            2 => "rand_any_altbuild_saw.wav",
+                            _ => "rand_any_altbuild_hammer002.wav",
+                        };
+                        self.construction[index] = self.audio.effect(
+                            mixer,
+                            VoiceRequest {
+                                name,
+                                streamed: false,
+                                looping: true,
+                                unique: false,
+                            },
+                            &samples,
+                            0.,
+                        );
                     }
                 }
                 if let Some(sink) = &self.construction[index] {
@@ -666,9 +702,14 @@ impl Player {
             }
             if self.near_aircraft.is_none() {
                 let samples = self.assets.near_aircraft.clone();
-                if let Some(mixer) = self.mixer() {
-                    self.near_aircraft = Some(Self::loop_sink(mixer, &samples, 0.));
-                }
+                self.near_aircraft = self.voice(
+                    "ambi_any_traff_carengine006.wav",
+                    &samples,
+                    false,
+                    true,
+                    true,
+                    0.,
+                );
                 return;
             }
             if let Some(sink) = &self.near_aircraft {
@@ -698,9 +739,14 @@ impl Player {
                 .source_gain(train_level(call.distance, 0.05, false));
             if call.id == 8 {
                 let samples = self.assets.train_toot.clone();
-                if let Some(mixer) = self.mixer() {
-                    self.train_toot = Some(Self::one_shot(mixer, &samples, toot_gain));
-                }
+                self.train_toot = self.voice(
+                    "spot_any_train_toot30.wav",
+                    &samples,
+                    true,
+                    false,
+                    true,
+                    toot_gain,
+                );
             } else if let Some(sink) = &self.train_toot {
                 sink.set_volume(toot_gain);
             }
@@ -713,9 +759,14 @@ impl Player {
             } else {
                 if call.id == 7 && self.train_motion.is_none() {
                     let samples = self.assets.train_motion.clone();
-                    if let Some(mixer) = self.mixer() {
-                        self.train_motion = Some(Self::loop_sink(mixer, &samples, 0.));
-                    }
+                    self.train_motion = self.voice(
+                        "ambi_any_traff_trainmotion30.wav",
+                        &samples,
+                        false,
+                        true,
+                        true,
+                        0.,
+                    );
                 }
                 if let Some(sink) = &self.train_motion {
                     // 4af430 stores distance + 1 as f32 for motion gain.
@@ -733,7 +784,7 @@ impl Player {
                 }
             }
         }
-        if self.train_toot.as_ref().is_some_and(rodio::Sink::empty) {
+        if self.train_toot.as_ref().is_some_and(Handle::empty) {
             stop(&mut self.train_toot);
         }
     }
@@ -761,9 +812,14 @@ impl Player {
         }
         if self.road_ambient.is_none() {
             let samples = self.assets.road_ambient.clone();
-            if let Some(mixer) = self.mixer() {
-                self.road_ambient = Some(Self::loop_sink(mixer, &samples, 0.));
-            }
+            self.road_ambient = self.voice(
+                "ambi_day_traff_busycity.wav",
+                &samples,
+                false,
+                true,
+                true,
+                0.,
+            );
         }
         if let Some(sink) = &self.road_ambient {
             sink.set_volume(self.audio.source_gain(road_level(reciprocal_sum)));
@@ -790,8 +846,17 @@ impl Player {
             }
             if self.road_motors[slot].is_none() {
                 if let Some(mixer) = mixer {
-                    self.road_motors[slot] =
-                        Some(Self::loop_sink(mixer, &self.assets.road_motor, 0.));
+                    self.road_motors[slot] = self.audio.effect(
+                        mixer,
+                        VoiceRequest {
+                            name: "motor2.wav",
+                            streamed: false,
+                            looping: true,
+                            unique: false,
+                        },
+                        &self.assets.road_motor,
+                        0.,
+                    );
                 }
                 // 4af9b5 jumps past both setters on the creation frame.
                 continue;
@@ -821,9 +886,14 @@ impl Player {
         let gain = self.audio.source_gain(level);
         if self.resident_crowd.is_none() {
             let samples = self.assets.resident_crowd.clone();
-            if let Some(mixer) = self.mixer() {
-                self.resident_crowd = Some(Self::loop_sink(mixer, &samples, 0.));
-            }
+            self.resident_crowd = self.voice(
+                "ambi_day_peop_busycity.wav",
+                &samples,
+                false,
+                true,
+                true,
+                0.,
+            );
         }
         if let Some(sink) = &self.resident_crowd {
             sink.set_volume(gain);
@@ -840,33 +910,12 @@ impl Player {
             let Some(samples) = self.assets.coast.clone() else {
                 return;
             };
-            if let Some(mixer) = self.mixer() {
-                self.coast = Some(Self::loop_sink(mixer, &samples, 0.));
-            }
+            self.coast = self.voice("wavcrash2.wav", &samples, false, true, true, 0.);
         }
         if let Some(sink) = &self.coast {
             // Inland updates mute without stopping or rewinding the loop.
             sink.set_volume(self.audio.source_gain(level.unwrap_or(0)));
         }
-    }
-
-    /// Local unique-sample admission for the nonspatial ship engine. General
-    /// path-based voice admission belongs in the shared audio backend (#282).
-    fn request_ship_engine(&mut self) -> Option<rodio::Sink> {
-        if let Some(previous) = self.ship_engine.take() {
-            self.ship_engine_unowned = Some(previous);
-        }
-        if self
-            .ship_engine_unowned
-            .as_ref()
-            .is_some_and(|sink| !sink.empty())
-        {
-            return None;
-        }
-        self.ship_engine_unowned = None;
-        let samples = self.assets.ship_engine.clone();
-        self.mixer()
-            .map(|mixer| Self::loop_sink(mixer, &samples, 0.))
     }
 
     fn environment(&mut self, call: EnvironmentCall, distance: f32) {
@@ -882,7 +931,8 @@ impl Player {
                 }
                 // Fallback 4ade96 always issues the unique cached request
                 // and stores its result, even when uniqueness returns none.
-                self.ship_engine = self.request_ship_engine();
+                let samples = self.assets.ship_engine.clone();
+                self.ship_engine = self.voice("shipengine.wav", &samples, false, true, true, 0.);
                 let gain = self.audio.source_gain(positional_level(distance, 800.));
                 if let Some(sink) = &self.ship_engine {
                     sink.set_volume(gain);
@@ -903,9 +953,12 @@ impl Player {
                     } else {
                         self.assets.ship_horn.clone()
                     };
-                    if let Some(mixer) = self.mixer() {
-                        self.ship_horn = Some(Self::one_shot(mixer, &samples, 0.));
-                    }
+                    let name = if matches!(model_choice, 0 | 2) {
+                        "oceanlin.wav"
+                    } else {
+                        "shiphorn.wav"
+                    };
+                    self.ship_horn = self.voice(name, &samples, true, false, true, 0.);
                 }
                 if let Some(sink) = &self.ship_horn {
                     sink.set_volume(gain);
@@ -957,19 +1010,20 @@ impl Player {
                 if has_handle {
                     return;
                 }
-                let Some(mixer) = self.mixer() else { return };
-                let sink = if looping {
-                    Self::loop_sink(mixer, &samples, 0.)
-                } else {
-                    Self::one_shot(mixer, &samples, 0.)
+                let name = match id {
+                    27 => "cranestart.wav",
+                    28 => "craneend.wav",
+                    29 => "cranelift.wav",
+                    _ => "craneloop.wav",
                 };
+                let sink = self.voice(name, &samples, false, looping, true, 0.);
                 // Nonspatial 4ae2b0 creates at source0 and returns. Only the
                 // separate 4ae1f0 Refresh path applies positional level/factor.
                 match id {
-                    27 => self.crane_start = Some(sink),
-                    28 => self.crane_end = Some(sink),
-                    29 => self.crane_lift = Some(sink),
-                    31 => self.crane_loop = Some(sink),
+                    27 => self.crane_start = sink,
+                    28 => self.crane_end = sink,
+                    29 => self.crane_lift = sink,
+                    31 => self.crane_loop = sink,
                     _ => unreachable!(),
                 }
             }
@@ -999,7 +1053,7 @@ impl Player {
     }
 }
 
-fn stop(handle: &mut Option<rodio::Sink>) {
+fn stop(handle: &mut Option<Handle>) {
     if let Some(sink) = handle.take() {
         sink.stop();
     }
@@ -1183,15 +1237,15 @@ mod tests {
             assert_eq!(output.next(), Some(0.));
         }
         let mut player = Player::new(assets);
-        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.));
-        player.resident_crowd = Some(Player::loop_sink(&mixer, &samples, 1.));
-        player.construction[0] = Some(Player::loop_sink(&mixer, &samples, 1.));
+        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.).into());
+        player.resident_crowd = Some(Player::loop_sink(&mixer, &samples, 1.).into());
+        player.construction[0] = Some(Player::loop_sink(&mixer, &samples, 1.).into());
         assert!(
             (0..512)
                 .filter_map(|_| output.next())
                 .any(|sample| sample > 0.)
         );
-        let retained = player.construction[0].as_ref().unwrap() as *const rodio::Sink;
+        let retained = &**player.construction[0].as_ref().unwrap() as *const rodio::Sink;
         let mut construction = [[None; 2]; 4];
         construction[0][0] = Some(ConstructionSource {
             distance: 300.,
@@ -1199,19 +1253,19 @@ mod tests {
         });
         player.construction(construction);
         let sink = player.construction[0].as_ref().unwrap();
-        assert_eq!(sink as *const rodio::Sink, retained);
+        assert_eq!(&**sink as *const rodio::Sink, retained);
         assert_eq!(sink.volume(), 0.);
         construction[0][0].as_mut().unwrap().distance = 100.;
         player.construction(construction);
         let sink = player.construction[0].as_ref().unwrap();
-        assert_eq!(sink as *const rodio::Sink, retained);
+        assert_eq!(&**sink as *const rodio::Sink, retained);
         assert!((sink.volume() - 0.14723125).abs() < 1e-7);
-        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.));
-        let road = player.road_ambient.as_ref().unwrap() as *const rodio::Sink;
+        player.road_ambient = Some(Player::loop_sink(&mixer, &samples, 1.).into());
+        let road = &**player.road_ambient.as_ref().unwrap() as *const rodio::Sink;
         player.set_interface_mode(3);
         player.road(0.1, [[101f32.to_bits(), 0, 0]; 3]);
         assert_eq!(
-            player.road_ambient.as_ref().unwrap() as *const rodio::Sink,
+            &**player.road_ambient.as_ref().unwrap() as *const rodio::Sink,
             road
         );
         assert_eq!(player.road_ambient.as_ref().unwrap().volume(), 1.);

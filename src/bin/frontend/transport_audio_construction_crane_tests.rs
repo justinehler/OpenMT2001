@@ -102,13 +102,13 @@ fn construction_fallback_mutes_far_handles_and_skips_to_near_source() {
     groups[0][0] = source(10.);
     player.apply(Operation::Construction(groups));
     let retained: [_; 2] = std::array::from_fn(|slot| {
-        player.construction[slot].as_ref().unwrap() as *const rodio::Sink
+        &**player.construction[slot].as_ref().unwrap() as *const rodio::Sink
     });
     groups[0] = [source(250.001), source(400.)];
     player.apply(Operation::Construction(groups));
     for (slot, retained) in retained.into_iter().enumerate() {
         let sink = player.construction[slot].as_ref().unwrap();
-        assert_eq!(sink as *const rodio::Sink, retained);
+        assert_eq!(&**sink as *const rodio::Sink, retained);
         assert_eq!(sink.volume(), 0.);
     }
     groups[0][1] = source(20.);
@@ -138,20 +138,20 @@ fn crane_strategic_cues_clear_beds_before_dispatch_and_preserve_end() {
                 crane_call(&mut player, EnvironmentCall::Cue(id), 50.);
             }
             crane_call(&mut player, EnvironmentCall::Refresh, 50.);
-            let end = player.crane_end.as_ref().unwrap() as *const rodio::Sink;
+            let end = &**player.crane_end.as_ref().unwrap() as *const rodio::Sink;
             let end_gain = player.crane_end.as_ref().unwrap().volume();
             player.set_interface_mode(mode);
             crane_call(&mut player, EnvironmentCall::Cue(cue), 50.);
             assert_crane_beds_cleared(&player);
             assert_eq!(
-                player.crane_end.as_ref().unwrap() as *const rodio::Sink,
+                &**player.crane_end.as_ref().unwrap() as *const rodio::Sink,
                 end
             );
             assert_eq!(player.crane_end.as_ref().unwrap().volume(), end_gain);
             crane_call(&mut player, EnvironmentCall::Refresh, 20.);
             assert_crane_beds_cleared(&player);
             assert_eq!(
-                player.crane_end.as_ref().unwrap() as *const rodio::Sink,
+                &**player.crane_end.as_ref().unwrap() as *const rodio::Sink,
                 end
             );
             assert!(player.crane_end.as_ref().unwrap().volume() > end_gain);
@@ -200,11 +200,11 @@ fn crane_far_refresh_still_clears_only_start_lift_and_loop() {
     for id in [27, 28, 29, 31] {
         crane_call(&mut player, EnvironmentCall::Cue(id), 50.);
     }
-    let end = player.crane_end.as_ref().unwrap() as *const rodio::Sink;
+    let end = &**player.crane_end.as_ref().unwrap() as *const rodio::Sink;
     crane_call(&mut player, EnvironmentCall::Refresh, 400.);
     assert_crane_beds_cleared(&player);
     assert_eq!(
-        player.crane_end.as_ref().unwrap() as *const rodio::Sink,
+        &**player.crane_end.as_ref().unwrap() as *const rodio::Sink,
         end
     );
     crane_call(&mut player, EnvironmentCall::Refresh, 50.);

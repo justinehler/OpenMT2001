@@ -56,7 +56,7 @@ fn ui_click_actual_owner_pcm_rejects_old_linear_preference() {
 }
 
 #[test]
-fn ui_click_new_creation_consumes_preference_without_rewriting_prior_click() {
+fn ui_click_suppression_preserves_prior_gain_and_next_admission_consumes_preference() {
     let (mut player, mut output) = owner(100);
     player.apply(Operation::UiLightClick).unwrap();
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.5));
@@ -69,21 +69,21 @@ fn ui_click_new_creation_consumes_preference_without_rewriting_prior_click() {
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.5),
         "factor setter does not rewrite the existing click");
     player.apply(Operation::UiLightClick).unwrap();
-    assert_eq!(player.ui_click_cues.len(), 2);
-    assert_eq!(player.ui_click_cues[1].source_level, 100);
-    assert_eq!(player.ui_click_cues[1].sink.volume(), 0.);
+    assert_eq!(player.ui_click_cues.len(), 1, "active unique click is suppressed");
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.5));
 
     player.ui_click_cues[0].sink.stop();
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.));
+    player.apply(Operation::UiLightClick).unwrap();
     player.set_level(100);
     assert_eq!(player.ui_click_cues.last().unwrap().source_level, 100);
     assert_eq!(player.ui_click_cues.last().unwrap().sink.volume(), 0.);
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.),
         "the prior muted click cannot revive when preference is restored");
+    player.ui_click_cues.last().unwrap().sink.stop();
     player.apply(Operation::UiLightClick).unwrap();
     assert!(tail(&window(&mut output)).iter().all(|sample| *sample == 0.5),
-        "a subsequent click consumes the restored factor");
+        "a subsequent admitted click consumes the restored factor");
 }
 
 #[test]

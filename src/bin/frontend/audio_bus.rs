@@ -4,6 +4,9 @@
 //! until combined preference/source gain and application timing are implemented.
 use rodio::{mixer::Mixer, source::Zero};
 
+#[path = "effect_voices.rs"]
+pub mod effects;
+
 #[path = "audio_focus.rs"]
 pub mod focus;
 
