@@ -677,6 +677,104 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires GPU adapter; city lamp pool material readback"]
+    fn city_light_pools_preserve_original_blend_depth_and_culling() {
+        let renderer = pollster::block_on(Renderer::new(
+            wgpu::InstanceDescriptor::new_without_display_handle(),
+        ))
+        .unwrap();
+        let background = || {
+            material_quad(
+                SurfaceMode::UiDepth,
+                [-1., -1., 1., 1.],
+                0.9,
+                [20, 30, 40, 255],
+            )
+        };
+        let volume = |rgb: u8, alpha: u8| {
+            // The volume's texture stage is disabled, even with a black texture.
+            let mut draw = material_quad(
+                SurfaceMode::LightPoolVolume,
+                [-1., -1., 1., 1.],
+                0.5,
+                [0, 0, 0, 0],
+            );
+            for v in &mut draw.vertices {
+                v[3..6].fill(f32::from(rgb) / 255.);
+            }
+            draw.diffuse_alpha = Some(vec![alpha; 6]);
+            draw
+        };
+        let center = |bytes: Vec<u8>| {
+            <[u8; 3]>::try_from(&bytes[(32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 3]).unwrap()
+        };
+        let dim = center(material_readback(
+            &renderer,
+            &[background(), volume(128, 0)],
+        ));
+        for (actual, expected) in dim.into_iter().zip([10_u8, 15, 20]) {
+            assert!(actual.abs_diff(expected) <= 1, "{dim:?}");
+        }
+        assert_eq!(
+            center(material_readback(
+                &renderer,
+                &[background(), volume(255, 255)]
+            )),
+            [40, 60, 80]
+        );
+        let glow = || {
+            material_quad(
+                SurfaceMode::LightPoolGlow,
+                [-1., -1., 1., 1.],
+                0.5,
+                [64, 32, 16, 255],
+            )
+        };
+        assert_eq!(
+            center(material_readback(&renderer, &[background(), glow()])),
+            [84, 62, 56]
+        );
+        for draw in [volume(255, 255), glow()] {
+            let behind = material_quad(
+                SurfaceMode::UiDepth,
+                [-1., -1., 1., 1.],
+                0.6,
+                [7, 11, 17, 255],
+            );
+            assert_eq!(
+                center(material_readback(
+                    &renderer,
+                    &[background(), draw.clone(), behind.clone()]
+                )),
+                [7, 11, 17],
+                "pool must not write depth"
+            );
+            let mut front = behind;
+            for v in &mut front.vertices {
+                v[2] = 0.25;
+            }
+            assert_eq!(
+                center(material_readback(
+                    &renderer,
+                    &[background(), front, draw.clone()]
+                )),
+                [7, 11, 17],
+                "pool must respect occlusion"
+            );
+            let mut reversed = draw;
+            for triangle in reversed.vertices.as_chunks_mut::<3>().0 {
+                triangle.swap(1, 2);
+            }
+            assert_eq!(
+                center(material_readback(&renderer, &[background(), reversed])),
+                [20, 30, 40],
+                "opposite cone face must be culled"
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "original renderer178 hardware/software vertex oracle /037f"]
     fn original_point_radius_vertices() {
         let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_POINT_VERTICES")).unwrap();

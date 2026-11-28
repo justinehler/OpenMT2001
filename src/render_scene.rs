@@ -1769,6 +1769,8 @@ fn assemble_with_style_internal(
         SurfaceMode::ResultParticles
         | SurfaceMode::ResultFireworks
         | SurfaceMode::LightHalos
+        | SurfaceMode::LightPoolVolume
+        | SurfaceMode::LightPoolGlow
         | SurfaceMode::ChimneySmoke => 10,
         SurfaceMode::Overlay | SurfaceMode::UiDepth => 10,
     });
