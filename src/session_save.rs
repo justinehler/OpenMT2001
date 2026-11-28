@@ -81,6 +81,10 @@ impl<'a> Input<'a> {
         let n = self.word()? as usize;
         self.take(n)
     }
+    /// Bytes consumed so far.
+    pub fn position(&self) -> usize {
+        self.at
+    }
     pub fn end(self) -> Result<(), String> {
         if self.at != self.bytes.len() {
             Err("trailing V2 runtime bytes".into())

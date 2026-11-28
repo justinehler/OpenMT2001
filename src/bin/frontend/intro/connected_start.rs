@@ -14,7 +14,7 @@ pub struct Request {
     pub ticket: Ticket,
     pub worker: Handle,
 }
-pub(super) struct Prepared {
+pub(crate) struct Prepared {
     request: Request,
     stage: Staged,
 }
@@ -287,6 +287,18 @@ impl SceneInputs {
         cache: &mut SnapshotCache,
         dispatch: Option<crate::process_dispatch::Seed>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+        let mut session = self.connect_joined(prepared, dispatch)?;
+        let loaded = self.inspect_fresh(&mut session, camera, cache)?;
+        Ok((loaded, session))
+    }
+    /// Construct the validated connected city and attach its network link:
+    /// command adapter, 5 Hz synchronization task and the startup barrier.
+    /// The windowed session worker and `game headless` both start here.
+    fn connect_joined(
+        &self,
+        prepared: Prepared,
+        dispatch: Option<crate::process_dispatch::Seed>,
+    ) -> Result<crate::fresh_city::Session<'_>, String> {
         let Prepared { request, stage } = prepared;
         request.worker.validate()?;
         let mut session = self.construct_connected(&request.ticket, &stage, dispatch)?;
@@ -321,7 +333,6 @@ impl SceneInputs {
             binding,
             worker: request.worker,
         });
-        let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         eprintln!(
             "Connected city initialized: level {}, local compact slot {}, players {}, seed {}, initial deadline 25. Construction/property-transfer commands qualified; other command families remain unsupported.",
             stage.launch.level_id,
@@ -329,7 +340,7 @@ impl SceneInputs {
             session.roster.manager.players.len(),
             request.ticket.seed
         );
-        Ok((loaded, session))
+        Ok(session)
     }
     fn construct_connected<'s>(
         &'s self,
@@ -388,6 +399,194 @@ impl SceneInputs {
         )?;
         Ok(session)
     }
+}
+
+/// Save extension tags that hold the portable gameplay records every peer of
+/// a connected game must agree on (V2 save, `shared_state`).
+pub(crate) const SHARED_TAGS: [u16; 15] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18];
+
+/// The shared gameplay records of `session`, one per `SHARED_TAGS` entry.
+/// The local current-player selection, the camera pose and the local
+/// cash-arrow display cache (player +1c0, `player_tick`) are outside the
+/// shared contract, so they are normalized for the capture and restored.
+/// State each peer keeps for itself in the original too is blanked in the
+/// captured records (`per_peer_players`, tag 3 allocator, tag 8 deck, tag 12
+/// dispatch block).
+pub(crate) fn shared_state(
+    session: &mut crate::fresh_city::Session<'_>,
+    image: &openmt2001::pe::PeImage<'_>,
+) -> Result<Vec<Vec<u8>>, String> {
+    let current = session.roster.status.current_player;
+    let first = session
+        .roster
+        .manager
+        .players
+        .first()
+        .ok_or("Connected city has no players")?
+        .reference;
+    let cash_display: Vec<[u8; 4]> = session
+        .roster
+        .manager
+        .players
+        .iter_mut()
+        .map(|p| {
+            let mut old = [0; 4];
+            old.copy_from_slice(&p.bytes[0x1c0..0x1c4]);
+            p.bytes[0x1c0..0x1c4].fill(0);
+            old
+        })
+        .collect();
+    session.roster.status.current_player = first;
+    let (camera, _) = fresh_city_camera();
+    let bytes = crate::save_menu::cameras(None, camera)
+        .and_then(|cameras| session.save_v2(image, cameras, 1));
+    session.roster.status.current_player = current;
+    for (player, cache) in session.roster.manager.players.iter_mut().zip(cash_display) {
+        player.bytes[0x1c0..0x1c4].copy_from_slice(&cache);
+    }
+    let bytes = bytes?;
+    let save = openmt2001::save::SaveFile::parse(&bytes)?;
+    let extension = openmt2001::save::extension::Extension::parse(&save)?
+        .ok_or("Connected save has no V2 extension")?;
+    // Tag 12 embeds the process-owned pause bytes and activity-timer records
+    // (`skip_saved_dispatch`): wall-clock scheduler state each process keeps
+    // for itself, which a load never restores. Blank that block.
+    let utilities = &session.hooks.utilities;
+    let properties = &session.population.properties;
+    let dispatch = 4
+        * (utilities.owners.len()
+            + utilities.enabled.len()
+            + utilities.totals.len()
+            + properties.owners.len()
+            + properties.totals.len());
+    SHARED_TAGS
+        .iter()
+        .map(|&tag| {
+            let mut record = extension.required(u32::from(tag))?.to_vec();
+            match tag {
+                2 => per_peer_players(&mut record)?,
+                // The emulated allocation cursor: peers allocate different
+                // inbox descriptors (see `per_peer_players`).
+                3 => record
+                    .get_mut(32..36)
+                    .ok_or("V2 random registry record too short")?
+                    .fill(0),
+                // Only the authority draws event cards (broadcast 0x31 goes
+                // to its 0x48c1c0 broadcaster); a client's deck copy is unused.
+                8 => record.fill(0),
+                _ => {}
+            }
+            if tag == 12 {
+                let rest = record
+                    .get(dispatch..)
+                    .ok_or("V2 economy record too short")?;
+                let mut input = openmt2001::session_save::Input::new(rest);
+                openmt2001::session_save::skip_saved_dispatch(&mut input)?;
+                let end = dispatch + input.position();
+                record[dispatch..end].fill(0);
+            }
+            Ok(record)
+        })
+        .collect()
+}
+
+/// Blank, in a captured tag-2 player roster, what each peer keeps for its own
+/// players only. A message for a human is queued only on that human's peer and
+/// computer rows' messages only on the authority (0x451720, 0x450a30), and
+/// each peer ticks only its local player's event receiver (0x47f4b0 ->
+/// 0x41cd70). So the inbox words (+0x20c message, +0x210 current, +0x214
+/// count, +0x218 head), the held event card (+0x1b8, until it is played as a
+/// replicated command) and the auxiliary descriptors differ between peers in
+/// the original as well, and its state sample (0x481340) reads none of them.
+fn per_peer_players(record: &mut Vec<u8>) -> Result<(), String> {
+    const SHORT: &str = "V2 player roster record too short";
+    let word = |record: &[u8], at: usize| -> Result<usize, String> {
+        let bytes = record.get(at..at + 4).ok_or(SHORT)?;
+        Ok(u32::from_le_bytes(bytes.try_into().map_err(|_| SHORT)?) as usize)
+    };
+    let count = word(record, 0)?;
+    let mut normalized = record.get(..48).ok_or(SHORT)?.to_vec();
+    let mut at = 48;
+    for _ in 0..count {
+        let length = word(record, at + 4)?;
+        let mut player = record.get(at..at + 8 + length).ok_or(SHORT)?.to_vec();
+        for range in [0x1b8..0x1bc, 0x20c..0x21c] {
+            if let Some(bytes) = player.get_mut(8 + range.start..8 + range.end) {
+                bytes.fill(0);
+            }
+        }
+        normalized.extend_from_slice(&player);
+        at += 8 + length;
+        let auxiliaries = word(record, at)?;
+        at += 4 + auxiliaries * 52;
+        normalized.extend_from_slice(&0u32.to_le_bytes());
+    }
+    if at != record.len() {
+        return Err("V2 player roster record has trailing bytes".into());
+    }
+    *record = normalized;
+    Ok(())
+}
+
+/// Original files a connected city is staged and built from, for
+/// `game headless --host/--join`. The same `SceneInputs` the windowed game
+/// loads, without its intro scene.
+pub(crate) fn headless_inputs(
+    installer: &std::path::Path,
+    scene: &std::path::Path,
+    executable: &std::path::Path,
+    scripts: &std::path::Path,
+    language: &std::path::Path,
+    process: crate::live_host::process_runtime::Handle,
+) -> Result<Arc<SceneInputs>, String> {
+    let read = |path: PathBuf| fs::read(&path).map_err(|e| format!("{}: {e}", path.display()));
+    let executable = read(executable.to_path_buf())?;
+    let image = openmt2001::pe::PeImage::parse(&executable)?;
+    let style = crate::block_sidewalk_labels::load_style(&image, installer)?;
+    let character_names = crate::fresh_city::character_names(&image, language)?;
+    Ok(Arc::new(SceneInputs {
+        process_runtime: Some(process),
+        compatibility: crate::compatibility::Mode::default(),
+        style,
+        time_runtime: Default::default(),
+        // A connected city has no profile and never saves.
+        profile_root: PathBuf::new(),
+        character_names,
+        installer: installer.to_path_buf(),
+        language: language.to_path_buf(),
+        maps: scripts.join("MAPS"),
+        build_file: read(scene.join("BuildEditorModels/BuildFile.dat"))?,
+        directory: read(scene.join("archive.DIR"))?,
+        archive: read(scene.join("archive.bin"))?,
+        suncols: read(installer.join("Standard/SUNCOLS.tga"))?,
+        executable,
+    }))
+}
+
+/// Stage the admitted roster on its lobby worker and wait until every peer
+/// has validated the same content, as the windowed start route does
+/// (`start_routes.rs`), without a frame loop to poll from.
+pub(crate) fn stage_headless(
+    inputs: &Arc<SceneInputs>,
+    request: Request,
+) -> Result<Prepared, String> {
+    let mut pending = Pending::start(request, inputs.clone())?;
+    loop {
+        pending.poll()?;
+        if let Some(prepared) = pending.take_ready() {
+            return Ok(prepared);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// Construct a validated connected city and attach its link (`connect_joined`).
+pub(crate) fn connect_headless(
+    inputs: &SceneInputs,
+    prepared: Prepared,
+    dispatch: Option<crate::process_dispatch::Seed>,
+) -> Result<crate::fresh_city::Session<'_>, String> {
+    inputs.connect_joined(prepared, dispatch)
 }
 
 #[cfg(test)]

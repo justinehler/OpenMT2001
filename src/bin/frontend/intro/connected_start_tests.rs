@@ -61,37 +61,7 @@ fn shared_state(
     session: &mut crate::fresh_city::Session<'_>,
     image: &openmt2001::pe::PeImage<'_>,
 ) -> Vec<Vec<u8>> {
-    // Capture the full portable gameplay records; local current-player selection
-    // and camera pose are deliberately outside the shared gameplay contract.
-    let current = session.roster.status.current_player;
-    // Player+1c0 is the local cash-arrow display cache (player_tick), not cash.
-    let cash_display: Vec<_> = session
-        .roster
-        .manager
-        .players
-        .iter_mut()
-        .map(|p| {
-            let old: [u8; 4] = p.bytes[0x1c0..0x1c4].try_into().unwrap();
-            p.bytes[0x1c0..0x1c4].fill(0);
-            old
-        })
-        .collect();
-    session.roster.status.current_player = session.roster.manager.players[0].reference;
-    let (camera, _) = fresh_city_camera();
-    let cameras = crate::save_menu::cameras(None, camera).unwrap();
-    let bytes = session.save_v2(image, cameras, 1).unwrap();
-    session.roster.status.current_player = current;
-    for (player, cache) in session.roster.manager.players.iter_mut().zip(cash_display) {
-        player.bytes[0x1c0..0x1c4].copy_from_slice(&cache);
-    }
-    let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
-    let extension = openmt2001::save::extension::Extension::parse(&save)
-        .unwrap()
-        .unwrap();
-    (2..=13)
-        .chain([16, 17, 18])
-        .map(|tag| extension.required(tag).unwrap().to_vec())
-        .collect()
+    super::shared_state(session, image).unwrap()
 }
 #[test]
 #[ignore = "requires original assets; real two-Session connected constructor and frame schedules"]
@@ -436,4 +406,38 @@ fn open_options_keeps_both_connected_cities_ticking_and_never_saves() {
         .unwrap()
         .join()
         .unwrap();
+}
+/// Two peers' tag-2 rosters that differ only in what the original keeps per
+/// peer (inbox words, held card, auxiliary descriptors) normalize to the same
+/// bytes; any other player byte still differs.
+#[test]
+fn per_peer_player_state_is_blanked_and_shared_state_is_kept() {
+    let roster = |held: u8, inbox: u8, auxiliaries: u32, cash: u8| {
+        let mut record = 1u32.to_le_bytes().to_vec();
+        record.extend_from_slice(&[0; 44]);
+        let mut player = vec![0u8; 0x238];
+        player[0x1b8] = held;
+        player[0x214] = inbox;
+        player[0x10] = cash;
+        record.extend_from_slice(&7u32.to_le_bytes());
+        record.extend_from_slice(&(player.len() as u32).to_le_bytes());
+        record.extend_from_slice(&player);
+        record.extend_from_slice(&auxiliaries.to_le_bytes());
+        for index in 0..auxiliaries {
+            record.extend_from_slice(&(0x2000_5000 + index).to_le_bytes());
+            record.extend_from_slice(&[0x33; 48]);
+        }
+        record
+    };
+    let mut host = roster(0, 0, 1, 5);
+    let mut client = roster(0x21, 2, 3, 5);
+    per_peer_players(&mut host).unwrap();
+    per_peer_players(&mut client).unwrap();
+    assert_eq!(host, client);
+    let mut other = roster(0, 0, 1, 6);
+    per_peer_players(&mut other).unwrap();
+    assert_ne!(host, other);
+    let mut truncated = roster(0, 0, 1, 5);
+    truncated.pop();
+    assert!(per_peer_players(&mut truncated).is_err());
 }

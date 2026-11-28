@@ -89,6 +89,13 @@ impl Handle {
     pub fn open(open: Open) -> Result<Self, String> {
         Self::spawn(network::process(), open)
     }
+    /// Open on a transport owner of its own rather than the process owner,
+    /// so several peers can share one process (in-process soak tests). Each
+    /// call leaks one small owner.
+    pub fn open_isolated(open: Open) -> Result<Self, String> {
+        let owner = Owner::new().map_err(|e| e.to_string())?;
+        Self::spawn(Box::leak(Box::new(owner)), open)
+    }
     fn spawn(owner: &'static Owner, open: Open) -> Result<Self, String> {
         Self::spawn_with_timeout(owner, open, Duration::from_secs(3))
     }
