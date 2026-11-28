@@ -188,8 +188,11 @@ fn property_reports_and_offer_input() {
     let original_buildings = std::mem::take(&mut scene.inspection_buildings);
     let matrix = openmt2001::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
     let [near, far] = openmt2001::camera::city_clip(camera.eye[1]).unwrap();
+    // Since #103 the category picker projects with the camera's own FOV
+    // (gameplay 0x545acc), so aim with the same projection.
     let projection =
-        openmt2001::picking::QueryProjection::new(1280., 960., 45., near, far).unwrap();
+        openmt2001::picking::QueryProjection::new(1280., 960., camera.vertical_fov, near, far)
+            .unwrap();
     let (hit, native) = selection
         .blocks
         .iter()

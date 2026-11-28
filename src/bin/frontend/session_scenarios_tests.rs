@@ -142,6 +142,29 @@ fn compare_native_auction_announcement_order(
     session.world.city.auction = auction;
     session.world.city.categories[3][0x6c] = lock;
 }
+
+/// The newly collected requests are exactly the zero-button tutorial message
+/// with this dismissal id.
+fn assert_tutorial_message_only(status: &crate::live_host::Status, dismissal_id: u32) {
+    let ids = status
+        .prompts
+        .iter()
+        .map(|p| p.dismissal_id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, [dismissal_id], "new prompt requests");
+    assert!(
+        status.prompts[0]
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.button_count == 0),
+        "tutorial message has no buttons"
+    );
+    assert_eq!(
+        status.tutorial_message.as_ref().map(|m| m.dismissal_id),
+        Some(dismissal_id)
+    );
+}
+
 #[test]
 #[ignore = "requires supplied v1.4 bonus scripts and original assets"]
 fn original_bonus_initializes_at_all_difficulties() {
@@ -203,11 +226,23 @@ fn original_bonus_initializes_at_all_difficulties() {
     let mut menu =
         crate::singleplayer::SinglePlayer::new(&index, &archive, &installer, &strings, &executable)
             .unwrap();
+    // Since bb775e1 the character screen starts from the profile's preferred
+    // character token (absent: 0, the 4c1c50 profile default) instead of a
+    // fixed 4. Store token 4 for this profile so launch carries it through.
+    let profile_root = openmt2001::fixtures::scratch("BONUS_MENU_PROFILE");
+    let profile_name = "Bonus initialization";
+    crate::menu::preferred_token::Token::new(4)
+        .unwrap()
+        .save(&crate::menu::preferred_token::path(
+            &profile_root,
+            profile_name.as_bytes(),
+        ))
+        .unwrap();
     menu.open(
         false,
-        "Bonus initialization",
+        profile_name,
         catalog,
-        std::path::PathBuf::from("work/economy/bonus-menu-launch.profile"),
+        profile_root.join("economy/bonus-menu-launch.profile"),
     );
     let bonus_row = crate::scenarios::CAMPAIGN
         .iter()
@@ -576,8 +611,9 @@ fn original_bonus_initializes_at_all_difficulties() {
         if id < 5 {
             assert_eq!(current.prompts[0].dismissal_id, (id + 1) as u32);
         } else {
-            assert!(current.prompts.is_empty());
-            assert_eq!(current.tutorial_message.unwrap().dismissal_id, 6);
+            // Since #225 CreateMessage queues a zero-button record in the
+            // shared modal queue, so the message is the only new request.
+            assert_tutorial_message_only(&current, 6);
             assert_eq!(current.tutorial_enabled_controls, vec![103]);
             assert_eq!(current.tutorial_arrows, vec![[547, 355]]);
         }
@@ -597,8 +633,7 @@ fn original_bonus_initializes_at_all_difficulties() {
         if id < 10 {
             assert_eq!(current.prompts[0].dismissal_id, (id + 1) as u32);
         } else {
-            assert!(current.prompts.is_empty());
-            assert_eq!(current.tutorial_message.unwrap().dismissal_id, 11);
+            assert_tutorial_message_only(&current, 11);
             assert_eq!(current.tutorial_enabled_controls, vec![77, 78]);
         }
     }
@@ -962,11 +997,18 @@ fn original_bonus_initializes_at_all_difficulties() {
         selected_block.tutorial_interaction.prompt_offset(),
         [0., 0.]
     );
-    assert_eq!(
-        selected_block
-            .tutorial_interaction
-            .callback(crate::tutorial_two_interaction::Pick::Block { category_id: 8 }),
-        None
+    // The script's Picked3D handler calls DisableAll3DPicking, which clears
+    // only the common picking gate (controller 0x920888) and keeps the block
+    // policy for EnableAll3DPicking (59ae299). Check the effective gate.
+    assert!(selected_block.tutorial_controls.picking_disabled);
+    assert!(
+        !second_host
+            .tutorial_pick(
+                &mut second,
+                &assets,
+                crate::tutorial_two_interaction::Pick::Block { category_id: 8 }
+            )
+            .unwrap()
     );
 
     second
@@ -1038,11 +1080,15 @@ fn original_bonus_initializes_at_all_difficulties() {
         selected_building.failure
     );
     assert_eq!(selected_building.prompts[0].dismissal_id, 9);
-    assert_eq!(
-        selected_building
-            .tutorial_interaction
-            .callback(crate::tutorial_two_interaction::Pick::Building { slot: 0 }),
-        None
+    assert!(selected_building.tutorial_controls.picking_disabled);
+    assert!(
+        !second_host
+            .tutorial_pick(
+                &mut second,
+                &assets,
+                crate::tutorial_two_interaction::Pick::Building { slot: 0 }
+            )
+            .unwrap()
     );
     for dismissal in 9..=11 {
         second

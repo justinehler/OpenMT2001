@@ -69,6 +69,12 @@ fn live_building_records_match_map_scene() {
             &mut geometry,
         )
         .unwrap();
+        // The map follows every AddBuilding with AddBusiness, and business
+        // binding (0x463560) stores completed status 4 at building+0x14.
+        // This geometry-only fixture has no business pool, so it applies that
+        // final status itself; initialization alone leaves status 6, whose
+        // pose takes the zero growth scale at +0x70.
+        records[slot][0x14..0x18].copy_from_slice(&4_u32.to_le_bytes());
     }
     let request = |source| Request {
         build_file: &build_bytes,
