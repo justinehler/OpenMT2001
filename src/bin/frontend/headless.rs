@@ -39,9 +39,11 @@ run:
   --autosave-dir DIR    save starts: write each midnight autosave, as the
                         original does, and copy it to DIR/autosave-N.sav
   --autosaves N         stop after the Nth autosave (needs --autosave-dir)
+  --checkpoint-saves DIR  save starts: also write a V2 save at every checkpoint
+                        to DIR/checkpoint-<tick>.sav
   --rng                 print the live RNG stream states, keyed by original
-                        registry address, at the start, at each autosave and
-                        at the end
+                        registry address, at the start, at each checkpoint,
+                        at each autosave and at the end
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +92,7 @@ pub struct Options {
     pub autosave_dir: Option<PathBuf>,
     pub autosaves: Option<u32>,
     pub rng: bool,
+    pub checkpoint_saves: Option<PathBuf>,
 }
 
 impl Paths {
@@ -179,6 +182,7 @@ impl Options {
             autosave_dir: None,
             autosaves: None,
             rng: false,
+            checkpoint_saves: None,
         };
         while let Some(arg) = args.next() {
             let mut value = || args.next().ok_or(format!("{arg} requires a value"));
@@ -237,6 +241,7 @@ impl Options {
                 }
                 "--write-save" => options.write_save = Some(PathBuf::from(value()?)),
                 "--rng" => options.rng = true,
+                "--checkpoint-saves" => options.checkpoint_saves = Some(PathBuf::from(value()?)),
                 "--autosave-dir" => options.autosave_dir = Some(PathBuf::from(value()?)),
                 "--autosaves" => {
                     let count = number(&value()?)?;
@@ -272,6 +277,9 @@ impl Options {
         }
         if options.autosave_dir.is_some() && !save_start {
             return Err("--autosave-dir needs a run started with --save".into());
+        }
+        if options.checkpoint_saves.is_some() && !save_start {
+            return Err("--checkpoint-saves needs a run started with --save".into());
         }
         if options.autosaves.is_some() && options.autosave_dir.is_none() {
             return Err("--autosaves needs --autosave-dir".into());
@@ -752,6 +760,17 @@ fn advance(
         last_hour = session.world.clock.hour();
         if report {
             line(out, &digest(session))?;
+            if options.rng {
+                line(out, &rng_report(session, tick))?;
+            }
+            if let Some(dir) = &options.checkpoint_saves {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                write_save(
+                    session,
+                    assets.image,
+                    &dir.join(format!("checkpoint-{tick}.sav")),
+                )?;
+            }
         }
     };
     line(out, &digest(session))?;
@@ -985,6 +1004,8 @@ mod tests {
         assert!(with(&["--scenario", "x", "--autosave-dir", "d"]).is_err());
         assert!(with(&["--save", "y", "--autosaves", "1"]).is_err());
         assert!(with(&["--save", "y", "--autosave-dir", "d", "--autosaves", "0"]).is_err());
+        assert!(with(&["--scenario", "x", "--checkpoint-saves", "d"]).is_err());
+        assert!(with(&["--save", "y", "--checkpoint-saves", "d", "--rng"]).is_ok());
     }
 
     #[test]
@@ -1048,6 +1069,7 @@ mod tests {
             autosave_dir: None,
             autosaves: None,
             rng: false,
+            checkpoint_saves: None,
         }
     }
 

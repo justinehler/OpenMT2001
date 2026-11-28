@@ -125,7 +125,7 @@ pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
     audio: crate::audio_bus::focus::SharedAudio,
-    sinks: BTreeMap<u32, rodio::Sink>,
+    sinks: BTreeMap<u32, crate::audio_bus::effects::Handle>,
     next_handle: u32,
 }
 impl Player {
@@ -165,9 +165,23 @@ impl Player {
                     return Err("auction audio handle space exhausted".into());
                 }
                 self.next_handle = handle.checked_add(1).unwrap_or(0);
-                let sink = rodio::Sink::connect_new(mixer);
-                sink.set_volume(gain);
-                sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                let name = match kind {
+                    Kind::Announcement => "ambi_any_build_hospitalbeep.wav",
+                    Kind::TurnTimer => "auction\\dynam_auctioncounter.wav",
+                };
+                let Some(sink) = self.audio.effect(
+                    mixer,
+                    crate::audio_bus::effects::Request {
+                        name,
+                        streamed: false,
+                        looping: false,
+                        unique: true,
+                    },
+                    &samples,
+                    gain,
+                ) else {
+                    return Ok(0);
+                };
                 self.sinks.insert(handle, sink);
                 Ok(handle)
             }
@@ -273,7 +287,7 @@ mod tests {
             announcement: vec![],
             turn_timer: vec![],
         });
-        player.sinks.insert(7, sink);
+        player.sinks.insert(7, sink.into());
         assert!(
             (0..512)
                 .filter_map(|_| output.next())

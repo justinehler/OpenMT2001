@@ -1,6 +1,8 @@
 //! UI owner for v1.4 card/ledger cues and the auction ambient handle.
 //! Original 4ad760 accepts a high-sound filename and five playback words.
+use crate::audio_bus::effects::{Handle, Request as VoiceRequest};
 use openmt2001::pe::PeImage;
+#[cfg(test)]
 use rodio::Source;
 use std::{
     collections::HashMap,
@@ -219,32 +221,55 @@ impl Assets {
     }
 }
 
+// v1.4 53c298 roster spelling is part of the case-sensitive request key.
+fn actor_voice_name(character: u32, kind: usize) -> String {
+    let names = [
+        "car",
+        "WheelBarrow",
+        "Dog",
+        "Gun",
+        "Hat",
+        "Horse",
+        "Iron",
+        "Ship",
+        "Shoe",
+        "Thimble",
+    ];
+    format!(
+        "auction\\{}_{}.wav",
+        names[character as usize],
+        ["bid", "win", "withdraw"][kind]
+    )
+}
+
 pub struct Player {
     assets: Assets,
     bus: crate::audio_bus::Bus,
-    one_shots: Vec<rodio::Sink>,
+    one_shots: Vec<Handle>,
     ledger_cues: Vec<LedgerCue>,
     ui_click_cues: Vec<UiClickCue>,
     audio: crate::audio_bus::focus::SharedAudio,
     scripted: HashMap<String, Vec<f32>>,
-    ambient: Option<(u32, rodio::Sink)>,
-    firework_bursts: Vec<rodio::Sink>,
-    firework_whistles: Vec<rodio::Sink>,
-    auction_bid_sinks: [Option<rodio::Sink>; 6],
-    auction_withdraw_sinks: [Option<rodio::Sink>; 6],
+    ambient: Option<(u32, Handle)>,
+    firework_bursts: Vec<Handle>,
+    firework_whistles: Vec<Handle>,
+    auction_bid_sinks: [Option<Handle>; 6],
+    auction_withdraw_sinks: [Option<Handle>; 6],
     next_handle: u32,
 }
 
 /// Raw original +438 source word remains separate from applied Sink gain.
 struct LedgerCue {
+    #[cfg(test)]
     source_level: i32,
-    sink: rodio::Sink,
+    sink: Handle,
 }
 
 /// Raw UI source word, independent of the applied gain just like +438.
 struct UiClickCue {
+    #[cfg(test)]
     source_level: i32,
-    sink: rodio::Sink,
+    sink: Handle,
 }
 
 /// 4ab420/4abad0: factor was already stored binary32 by 4aa750.
@@ -257,8 +282,10 @@ fn fixed_cue_normalized(factor: f32, source_level: i32) -> f32 {
 }
 
 fn play_bounded(
+    audio: &crate::audio_bus::focus::SharedAudio,
+    request: VoiceRequest<'_>,
     mixer: &rodio::mixer::Mixer,
-    pool: &mut Vec<rodio::Sink>,
+    pool: &mut Vec<Handle>,
     capacity: usize,
     samples: Vec<f32>,
     gain: f32,
@@ -267,15 +294,17 @@ fn play_bounded(
     if pool.len() >= capacity {
         return false;
     }
-    let sink = rodio::Sink::connect_new(mixer);
-    sink.set_volume(gain);
-    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+    let Some(sink) = audio.effect(mixer, request, &samples, gain) else {
+        return false;
+    };
     pool.push(sink);
     true
 }
 
 fn replace_auction_voice(
-    slot: &mut Option<rodio::Sink>,
+    slot: &mut Option<Handle>,
+    audio: &crate::audio_bus::focus::SharedAudio,
+    request: VoiceRequest<'_>,
     mixer: Option<&rodio::mixer::Mixer>,
     samples: Vec<f32>,
     suppressed: bool,
@@ -290,10 +319,7 @@ fn replace_auction_voice(
         return;
     }
     if let Some(mixer) = mixer {
-        let sink = rodio::Sink::connect_new(mixer);
-        sink.set_volume(gain);
-        sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
-        *slot = Some(sink);
+        *slot = audio.effect(mixer, request, &samples, gain);
     }
 }
 
@@ -320,6 +346,28 @@ impl Player {
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
         self.bus.combined_mixer()
     }
+    fn voice(
+        &mut self,
+        name: &str,
+        samples: &[f32],
+        streamed: bool,
+        looping: bool,
+        unique: bool,
+        gain: f32,
+    ) -> Option<Handle> {
+        let mixer = self.mixer()?.clone();
+        self.audio.effect(
+            &mixer,
+            VoiceRequest {
+                name,
+                streamed,
+                looping,
+                unique,
+            },
+            samples,
+            gain,
+        )
+    }
     pub fn bind_audio(&mut self, audio: crate::audio_bus::focus::SharedAudio) {
         self.audio = audio;
     }
@@ -333,6 +381,7 @@ impl Player {
         self.ui_click_cues.retain(|cue| !cue.sink.empty());
         match operation {
             Operation::Reset => {
+                self.audio.reset_effects();
                 for cue in self.ui_click_cues.drain(..) {
                     cue.sink.stop();
                 }
@@ -371,10 +420,12 @@ impl Player {
                     self.assets.spell.clone()
                 };
                 let gain = self.audio.source_gain(100);
-                if let Some(mixer) = self.mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    sink.set_volume(gain);
-                    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                let name = if actor_is_current {
+                    "weaponfired.wav"
+                } else {
+                    "spell.wav"
+                };
+                if let Some(sink) = self.voice(name, &samples, true, false, false, gain) {
                     self.one_shots.push(sink);
                 }
                 // The 41bf6c caller discards the returned 4ad760 handle.
@@ -386,16 +437,16 @@ impl Player {
                 }
                 let samples = self.assets.auction_murmur.clone();
                 let gain = self.audio.source_gain(100);
-                let Some(mixer) = self.mixer() else {
+                let Some(sink) = self.voice(
+                    "auction\\auctionmurmer.wav",
+                    &samples,
+                    true,
+                    true,
+                    true,
+                    gain,
+                ) else {
                     return Ok(0);
                 };
-                let sink = rodio::Sink::connect_new(mixer);
-                sink.set_volume(gain);
-                // 464aa0 supplies playback words (1,1,0,1,100); the retained
-                // ambient handle is released by admission or closure.
-                sink.append(
-                    rodio::buffer::SamplesBuffer::new(1, 22_050, samples).repeat_infinite(),
-                );
                 let handle = self.next_handle;
                 self.next_handle = handle
                     .checked_add(1)
@@ -426,15 +477,14 @@ impl Player {
                     self.assets.negative_boing.clone()
                 };
                 let factor = self.audio.factor();
-                if let Some(mixer) = self.bus.combined_mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    // 41b436..41b467 supplies (1,0,0,0,100), with no retained handle.
-                    // The source consumes the current factor through 4ab420/4abad0
-                    // before play. Later preference stores do not rewrite it.
-                    sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, 100),
-                    ));
-                    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                let name = if positive {
+                    "Positivepluck.wav"
+                } else {
+                    "Negativeboing.wav"
+                };
+                let gain =
+                    crate::music_gain::normalized_amplitude(fixed_cue_normalized(factor, 100));
+                if let Some(sink) = self.voice(name, &samples, true, false, false, gain) {
                     self.one_shots.push(sink);
                 }
                 Ok(0)
@@ -461,7 +511,27 @@ impl Player {
                 // 453290 scans six burst handles, 454965 scans four whistles;
                 // the original reuses a slot when handle+42c reports inactive.
                 // Sink::empty() is the available backend end-of-playback signal.
-                play_bounded(&mixer, pool, if whistle { 4 } else { 6 }, samples, gain);
+                let name = match cue {
+                    Cue::Launch1 => "launch1.wav",
+                    Cue::Launch2 => "launch2.wav",
+                    Cue::EchoCrackle => "echocrackle.wav",
+                    Cue::EchoSingle => "echosingle.wav",
+                    Cue::LaunchWhistle => "launchwhistle.wav",
+                };
+                play_bounded(
+                    &self.audio,
+                    VoiceRequest {
+                        name,
+                        streamed: false,
+                        looping: false,
+                        unique: false,
+                    },
+                    &mixer,
+                    pool,
+                    if whistle { 4 } else { 6 },
+                    samples,
+                    gain,
+                );
                 Ok(0)
             }
             Operation::AuctionActor(cue) => {
@@ -484,7 +554,20 @@ impl Player {
                             .auction_bid_sinks
                             .get_mut(participant as usize)
                             .ok_or("Auction bid participant outside original roster")?;
-                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
+                        replace_auction_voice(
+                            slot,
+                            &self.audio,
+                            VoiceRequest {
+                                name: &actor_voice_name(character, 0),
+                                streamed: true,
+                                looping: false,
+                                unique: false,
+                            },
+                            mixer.as_ref(),
+                            samples,
+                            suppressed,
+                            gain,
+                        );
                     }
                     ActorCue::Withdraw {
                         participant,
@@ -503,7 +586,20 @@ impl Player {
                             .auction_withdraw_sinks
                             .get_mut(participant as usize)
                             .ok_or("Auction withdraw participant outside original roster")?;
-                        replace_auction_voice(slot, mixer.as_ref(), samples, suppressed, gain);
+                        replace_auction_voice(
+                            slot,
+                            &self.audio,
+                            VoiceRequest {
+                                name: &actor_voice_name(character, 2),
+                                streamed: true,
+                                looping: false,
+                                unique: true,
+                            },
+                            mixer.as_ref(),
+                            samples,
+                            suppressed,
+                            gain,
+                        );
                     }
                     ActorCue::Win { character } => {
                         let samples = self
@@ -513,20 +609,28 @@ impl Player {
                             .ok_or("Auction win character outside original roster")?[1]
                             .clone();
                         let gain = self.audio.source_gain(100);
-                        if let Some(mixer) = self.mixer().cloned() {
-                            let sink = rodio::Sink::connect_new(&mixer);
-                            sink.set_volume(gain);
-                            sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                        if let Some(sink) = self.voice(
+                            &actor_voice_name(character, 1),
+                            &samples,
+                            true,
+                            false,
+                            true,
+                            gain,
+                        ) {
                             self.one_shots.push(sink);
                         }
                     }
                     ActorCue::Applause => {
                         let samples = self.assets.auction_applause.clone();
                         let gain = self.audio.source_gain(100);
-                        if let Some(mixer) = self.mixer().cloned() {
-                            let sink = rodio::Sink::connect_new(&mixer);
-                            sink.set_volume(gain);
-                            sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                        if let Some(sink) = self.voice(
+                            "auction\\ambi_any_applausehigh.wav",
+                            &samples,
+                            true,
+                            false,
+                            true,
+                            gain,
+                        ) {
                             self.one_shots.push(sink);
                         }
                     }
@@ -549,10 +653,7 @@ impl Player {
                 }
                 let samples = self.scripted.get(&name).unwrap().clone();
                 let gain = self.audio.source_gain(100);
-                if let Some(mixer) = self.mixer() {
-                    let sink = rodio::Sink::connect_new(mixer);
-                    sink.set_volume(gain);
-                    sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                if let Some(sink) = self.voice(&name, &samples, true, false, true, gain) {
                     self.one_shots.push(sink);
                 }
                 Ok(0)
@@ -564,37 +665,52 @@ impl Player {
                     self.assets.buy.clone()
                 };
                 let factor = self.audio.factor();
-                if let Some(mixer) = self.bus.combined_mixer() {
-                    let cue = LedgerCue {
-                        source_level: 60, // Both native 48a5e6 and 48a61d push 0x3c.
-                        sink: rodio::Sink::connect_new(mixer),
-                    };
-                    cue.sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, cue.source_level),
-                    ));
-                    // Gain precedes append: initial mute cannot leak full gain.
-                    cue.sink
-                        .append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
-                    self.ledger_cues.push(cue);
+                let source_level = 60;
+                let gain = crate::music_gain::normalized_amplitude(fixed_cue_normalized(
+                    factor,
+                    source_level,
+                ));
+                if let Some(sink) = self.voice(
+                    if sale {
+                        "spot_any_sell.wav"
+                    } else {
+                        "spot_any_buy.wav"
+                    },
+                    &samples,
+                    false,
+                    false,
+                    true,
+                    gain,
+                ) {
+                    self.ledger_cues.push(LedgerCue {
+                        #[cfg(test)]
+                        source_level,
+                        sink,
+                    });
                 }
                 Ok(0)
             }
             Operation::UiLightClick => {
                 let samples = self.assets.ui_light_click.clone();
                 let factor = self.audio.factor();
-                if let Some(mixer) = self.bus.combined_mixer() {
-                    let cue = UiClickCue {
-                        // All three widget sites push 0x64 before 4ad760.
-                        source_level: 100,
-                        sink: rodio::Sink::connect_new(mixer),
-                    };
-                    cue.sink.set_volume(crate::music_gain::normalized_amplitude(
-                        fixed_cue_normalized(factor, cue.source_level),
-                    ));
-                    // Native +1c precedes play +10; never append at full gain.
-                    cue.sink
-                        .append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
-                    self.ui_click_cues.push(cue);
+                let source_level = 100;
+                let gain = crate::music_gain::normalized_amplitude(fixed_cue_normalized(
+                    factor,
+                    source_level,
+                ));
+                if let Some(sink) = self.voice(
+                    "spot_any_ui_lightclick.wav",
+                    &samples,
+                    false,
+                    false,
+                    true,
+                    gain,
+                ) {
+                    self.ui_click_cues.push(UiClickCue {
+                        #[cfg(test)]
+                        source_level,
+                        sink,
+                    });
                 }
                 Ok(0)
             }
@@ -610,11 +726,38 @@ mod tests {
     fn result_firework_voice_caps_and_whistle_gain_without_device() {
         let (mixer, mut output) = rodio::mixer::mixer(1, 22_050);
         mixer.add(rodio::source::Zero::new(1, 22_050));
+        let audio = crate::audio_bus::focus::SharedAudio::new(100, 100);
         let mut bursts = Vec::new();
         for _ in 0..6 {
-            assert!(play_bounded(&mixer, &mut bursts, 6, vec![0.05; 64], 1.));
+            assert!(play_bounded(
+                &audio,
+                VoiceRequest {
+                    name: "test.wav",
+                    streamed: true,
+                    looping: false,
+                    unique: false
+                },
+                &mixer,
+                &mut bursts,
+                6,
+                vec![0.05; 64],
+                1.
+            ));
         }
-        assert!(!play_bounded(&mixer, &mut bursts, 6, vec![0.05; 64], 1.));
+        assert!(!play_bounded(
+            &audio,
+            VoiceRequest {
+                name: "test.wav",
+                streamed: true,
+                looping: false,
+                unique: false
+            },
+            &mixer,
+            &mut bursts,
+            6,
+            vec![0.05; 64],
+            1.
+        ));
         assert_eq!(bursts.len(), 6);
         assert!(bursts.iter().all(|sink| sink.volume() == 1.));
         assert!(
@@ -625,16 +768,49 @@ mod tests {
         for _ in 0..512 {
             output.next();
         }
-        assert!(play_bounded(&mixer, &mut bursts, 6, vec![0.05; 64], 1.));
+        assert!(play_bounded(
+            &audio,
+            VoiceRequest {
+                name: "test.wav",
+                streamed: true,
+                looping: false,
+                unique: false
+            },
+            &mixer,
+            &mut bursts,
+            6,
+            vec![0.05; 64],
+            1.
+        ));
         assert_eq!(bursts.len(), 1, "finished retained handles must recycle");
 
         let (mixer, mut output) = rodio::mixer::mixer(1, 22_050);
         mixer.add(rodio::source::Zero::new(1, 22_050));
         let mut whistles = Vec::new();
         for _ in 0..4 {
-            assert!(play_bounded(&mixer, &mut whistles, 4, vec![0.125; 64], 0.8));
+            assert!(play_bounded(
+                &audio,
+                VoiceRequest {
+                    name: "test.wav",
+                    streamed: true,
+                    looping: false,
+                    unique: false
+                },
+                &mixer,
+                &mut whistles,
+                4,
+                vec![0.125; 64],
+                0.8
+            ));
         }
         assert!(!play_bounded(
+            &audio,
+            VoiceRequest {
+                name: "test.wav",
+                streamed: true,
+                looping: false,
+                unique: false
+            },
             &mixer,
             &mut whistles,
             4,
@@ -662,7 +838,7 @@ mod tests {
             sink.append(
                 rodio::buffer::SamplesBuffer::new(1, 22_050, samples.clone()).repeat_infinite(),
             );
-            sink
+            Handle::from(sink)
         };
         let assets = Assets {
             weapon: samples.clone(),
@@ -718,16 +894,30 @@ mod tests {
     fn auction_withdraw_releases_prior_voice_before_sound_gate() {
         let (mixer, mut output) = rodio::mixer::mixer(1, 22_050);
         mixer.add(rodio::source::Zero::new(1, 22_050));
+        let audio = crate::audio_bus::focus::SharedAudio::new(100, 100);
         let previous = rodio::Sink::connect_new(&mixer);
         previous
             .append(rodio::buffer::SamplesBuffer::new(1, 22_050, vec![0.5; 64]).repeat_infinite());
-        let mut slot = Some(previous);
+        let mut slot = Some(previous.into());
         assert!(
             (0..512)
                 .filter_map(|_| output.next())
                 .any(|sample| sample > 0.)
         );
-        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], true, 1.);
+        replace_auction_voice(
+            &mut slot,
+            &audio,
+            VoiceRequest {
+                name: "test.wav",
+                streamed: true,
+                looping: false,
+                unique: false,
+            },
+            Some(&mixer),
+            vec![0.25; 64],
+            true,
+            1.,
+        );
         assert!(
             slot.is_none(),
             "native 4647a5 releases even when +858 suppresses the new voice"
@@ -738,7 +928,20 @@ mod tests {
                 .iter()
                 .all(|sample| *sample == Some(0.))
         );
-        replace_auction_voice(&mut slot, Some(&mixer), vec![0.25; 64], false, 1.);
+        replace_auction_voice(
+            &mut slot,
+            &audio,
+            VoiceRequest {
+                name: "test.wav",
+                streamed: true,
+                looping: false,
+                unique: false,
+            },
+            Some(&mixer),
+            vec![0.25; 64],
+            false,
+            1.,
+        );
         assert!(slot.is_some());
         assert!(
             (0..512)

@@ -885,14 +885,8 @@ fn export_live_price_scores(session: &Session<'_>) {
                     ] {
                         cases.extend(value.to_le_bytes());
                     }
-                    cases.extend(score.value.to_le_bytes());
-                    let integer = if score.value.is_finite() {
-                        openmt2001::x87::Sum::from_f64(score.value)
-                            .unwrap()
-                            .ftol_low_word()
-                    } else {
-                        0
-                    };
+                    cases.extend(score.value.to_f64().to_le_bytes());
+                    let integer = score.value.ftol_low_word();
                     cases.extend(integer.to_le_bytes());
                     queries += 1;
                 }

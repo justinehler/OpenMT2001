@@ -190,6 +190,9 @@ struct App {
     intro_music_decoder: PathBuf,
     failure: Option<String>,
     exit_after: Option<Duration>,
+    /// Initial physical window size (`--window-size`); `None` keeps the
+    /// 960x720 logical default.
+    window_size: Option<(u32, u32)>,
     launched: Instant,
     frame_profile: Option<FrameProfile>,
     next_redraw: Instant,
@@ -377,14 +380,15 @@ impl ApplicationHandler for App {
         if self.presenter.is_some() {
             return;
         }
+        let attributes = Window::default_attributes().with_title("OpenMT2001");
+        let attributes = match self.window_size {
+            Some((width, height)) => {
+                attributes.with_inner_size(winit::dpi::PhysicalSize::new(width, height))
+            }
+            None => attributes.with_inner_size(winit::dpi::LogicalSize::new(960., 720.)),
+        };
         let result = (|| -> Result<Presenter, Error> {
-            let window = Arc::new(
-                event_loop.create_window(
-                    Window::default_attributes()
-                        .with_title("OpenMT2001")
-                        .with_inner_size(winit::dpi::LogicalSize::new(960., 720.)),
-                )?,
-            );
+            let window = Arc::new(event_loop.create_window(attributes)?);
             pollster::block_on(Presenter::new(window))
         })();
         match result {
@@ -662,7 +666,7 @@ impl App {
                         light_click =
                             route_menu_left(menu, state == ElementState::Pressed, participant_down);
                     } else if state == ElementState::Pressed {
-                        intro.open_menu();
+                        intro.skip_opening(NamedKey::Enter);
                     }
                 }
                 if light_click {
@@ -912,6 +916,7 @@ pub fn run() -> Result<(), Error> {
     let mut skip_splash = false;
     let mut menu_onload = false;
     let mut exit_after = None;
+    let mut window_size = None;
     let mut source_options = String::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -987,9 +992,19 @@ pub fn run() -> Result<(), Error> {
                         .parse()?,
                 )?)
             }
+            "--window-size" => {
+                let value = args.next().ok_or("--window-size requires WIDTHxHEIGHT")?;
+                window_size = Some(
+                    value
+                        .split_once('x')
+                        .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+                        .filter(|&(w, h): &(u32, u32)| w > 0 && h > 0)
+                        .ok_or("--window-size requires WIDTHxHEIGHT, for example 1024x768")?,
+                );
+            }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\n--window-size <WIDTHxHEIGHT> (initial physical window size; captures under Xvfb should start at their target size instead of resizing the window)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }
@@ -1061,6 +1076,7 @@ pub fn run() -> Result<(), Error> {
         intro_music_decoder: music_decoder,
         failure: None,
         exit_after,
+        window_size,
         launched: now,
         next_redraw: now,
         desktop_keys: Default::default(),

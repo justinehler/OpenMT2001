@@ -211,6 +211,10 @@ impl TestSession {
                         self.applied.push(match command {
                             live_commands::Command::Demolish(_) => 0x10,
                             live_commands::Command::Open(_) => 0x11,
+                            live_commands::Command::Convert(_) => 0x12,
+                            live_commands::Command::SellBusiness(_) => 0x13,
+                            live_commands::Command::Takeover(_) => 0x15,
+                            live_commands::Command::Terms(_) => 0x18,
                             live_commands::Command::PropertyTransfer { .. } => 0x16,
                             _ => 0x0f,
                         });
@@ -366,6 +370,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
             crate::network::commands::Targets {
                 buildings: &right.world.city.buildings,
                 businesses: &right.world.city.ledgers.businesses,
+                ..Targets::default()
             },
             100,
         )
@@ -412,6 +417,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                         crate::network::commands::Targets {
                             buildings: &session.world.city.buildings,
                             businesses: &session.world.city.ledgers.businesses,
+                            ..Targets::default()
                         },
                         100,
                     )?;
@@ -432,7 +438,8 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 &mut right.world.city.categories,
                 crate::network::commands::Targets {
                     buildings: &right.world.city.buildings,
-                    businesses: &right.world.city.ledgers.businesses
+                    businesses: &right.world.city.ledgers.businesses,
+                    ..Targets::default()
                 },
                 100
             )
@@ -476,6 +483,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 crate::network::commands::Targets {
                     buildings: &left.world.city.buildings,
                     businesses: &left.world.city.ledgers.businesses,
+                    ..Targets::default()
                 },
                 &mut left.world.city.pause,
                 &mut left.tasks,
@@ -490,6 +498,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                 crate::network::commands::Targets {
                     buildings: &right.world.city.buildings,
                     businesses: &right.world.city.ledgers.businesses,
+                    ..Targets::default()
                 },
                 &mut right.world.city.pause,
                 &mut right.tasks,
@@ -798,31 +807,49 @@ fn ready_building(session: &mut TestSession, id: usize, owner: u8) {
 }
 
 fn business_family_applies_once_at_125(kind: u8) {
-    let bytes = image_bytes();
+    let mut bytes = image_bytes();
+    if kind == 0x12 {
+        bytes[0x125b00 + 0x200..0x125b08 + 0x200].copy_from_slice(&20f64.to_le_bytes());
+        bytes[0x125b08 + 0x200..0x125b10 + 0x200].copy_from_slice(&3f64.to_le_bytes());
+        put(&mut bytes, 0x125034 + 0x200, 1f32.to_bits());
+    }
+    if kind == 0x13 {
+        put(&mut bytes, 0x125c50 + 0x200, 0.5f32.to_bits());
+    }
     let image = crate::pe::PeImage::parse(&bytes).unwrap();
     let board = crate::board::Board::from_v14(&image).unwrap();
     let mut left = TestSession::new(&image, &board);
     let mut right = TestSession::new(&image, &board);
     for session in [&mut left, &mut right] {
-        ready_building(session, 0, if kind == 0x10 { 1 } else { 2 });
+        ready_building(session, 0, if kind == 0x11 { 2 } else { 1 });
+        session.world.city.categories[7][5] = if kind == 0x15 { 2 } else { 1 };
         // The business owner differs from both the building owner and landlord.
-        if kind == 0x10 {
+        if kind != 0x11 {
             put(&mut session.world.city.buildings[0], 0x1c, 0);
             let business = &mut session.world.city.ledgers.businesses[0];
             put(business, 0, 0);
-            put(business, 4, 0);
+            put(business, 4, if kind == 0x12 { 1 } else { 0 });
             business[8..10].copy_from_slice(&0u16.to_le_bytes());
-            business[0xa] = 2;
+            business[0xa] = if kind == 0x15 { 1 } else { 2 };
+            put(business, 0x20c, u32::MAX);
             business[0x21c] = 1;
-            session.roster.category_counts[7 * 45] = 1;
+            session.roster.category_counts[7 * 45 + usize::from(kind == 0x12)] = 1;
+            put(&mut session.world.city.buildings[0], 0x38, 500f32.to_bits());
+            if kind == 0x12 {
+                put(
+                    session.world.city.catalog.info.row_mut(0).unwrap(),
+                    0x54,
+                    10,
+                );
+            }
         }
     }
     let (owner, binding, peer) = owner();
     let owners = vec![Some(0), Some(4)];
     let mut host = Adapter::new(binding, true, 0, owners.clone()).unwrap();
     let mut client = Adapter::new(binding, false, 4, owners).unwrap();
-    let family = if kind == 0x10 {
-        Request::demolition(
+    let family = match kind {
+        0x10 => Request::demolition(
             1,
             2,
             &crate::demolition::Command {
@@ -830,9 +857,8 @@ fn business_family_applies_once_at_125(kind: u8) {
                 building: 0,
                 amount: 37.25,
             },
-        )
-    } else {
-        Request::business_open(
+        ),
+        0x11 => Request::business_open(
             1,
             &crate::business_open::Command {
                 kind: 0,
@@ -840,7 +866,36 @@ fn business_family_applies_once_at_125(kind: u8) {
                 owner: 2,
                 stock_argument: 1,
             },
-        )
+        ),
+        0x12 => Request::conversion(
+            1,
+            &crate::business_conversion::Command {
+                kind: 0,
+                building: 0,
+                owner: 2,
+            },
+        ),
+        0x13 => Request::business_sale(
+            1,
+            &crate::business_sale::Command {
+                business: 0,
+                player: 1,
+            },
+        ),
+        0x15 => Request::takeover(1, 2, &crate::business_takeover::Command { building: 0 }),
+        0x18 => Request::terms(
+            1,
+            2,
+            &crate::economy::PendingBusinessTerms {
+                business_index: 0,
+                terms: crate::economy::BusinessTerms {
+                    stock_targets: [-1, 2, -3, 4, 5, 6],
+                    prices: [1.25, 2.5, 3.75, 4., 5., 6.],
+                    rent: 12.5,
+                },
+            },
+        ),
+        _ => unreachable!(),
     };
     // Equal-due ordering spans the existing property-transfer family.
     for (sequence, request) in [
@@ -883,6 +938,7 @@ fn business_family_applies_once_at_125(kind: u8) {
                 Targets {
                     buildings: &left.world.city.buildings,
                     businesses: &left.world.city.ledgers.businesses,
+                    category_owners: left.world.city.categories.map(|row| row[5]),
                 },
             )
             .unwrap()
@@ -933,6 +989,7 @@ fn business_family_applies_once_at_125(kind: u8) {
             Targets {
                 buildings: &left.world.city.buildings,
                 businesses: &left.world.city.ledgers.businesses,
+                category_owners: left.world.city.categories.map(|row| row[5])
             }
         ),
         Err(Error::Sequence)
@@ -940,8 +997,11 @@ fn business_family_applies_once_at_125(kind: u8) {
     let mut wrong = family.clone();
     wrong.serial = 3;
     wrong.owner = 1;
-    if kind == 0x11 {
+    if matches!(kind, 0x11 | 0x12) {
         wrong.payload[8..12].copy_from_slice(&1u32.to_le_bytes());
+    }
+    if kind == 0x13 {
+        wrong.payload[4] = 0;
     }
     let wrong = ingress(&owner, binding, peer, Message::CommandRequest(wrong), 4).unwrap();
     assert_eq!(
@@ -952,6 +1012,7 @@ fn business_family_applies_once_at_125(kind: u8) {
             Targets {
                 buildings: &left.world.city.buildings,
                 businesses: &left.world.city.ledgers.businesses,
+                category_owners: left.world.city.categories.map(|row| row[5])
             }
         ),
         Err(Error::Peer)
@@ -959,16 +1020,21 @@ fn business_family_applies_once_at_125(kind: u8) {
     assert_eq!(host.next_commit, 3);
     for session in [&mut left, &mut right] {
         let before = session.world.city.buildings[0];
+        let business_before = session.world.city.ledgers.businesses[0];
         while session.world.clock.timing[0] < 124 {
             session.tick(&image, &board);
         }
         assert_eq!(session.world.city.buildings[0], before);
+        assert_eq!(session.world.city.ledgers.businesses[0], business_before);
         assert_eq!(session.world.ledgers.players[1].cash, 10000.);
         assert!(session.applied.is_empty());
         session.tick(&image, &board);
         assert_eq!(session.world.clock.timing[0], 125);
         assert_eq!(session.applied, [0x16, kind, 0x16]);
-        assert_eq!(session.world.ledgers.players[0].cash, 10000.);
+        assert_eq!(
+            session.world.ledgers.players[0].cash,
+            if kind == 0x15 { 10500. } else { 10000. }
+        );
         if kind == 0x10 {
             assert_eq!(session.world.ledgers.players[1].cash, 9662.75);
             assert_eq!(player_manager::word(&session.world.buildings[0], 0x14), 0);
@@ -979,13 +1045,50 @@ fn business_family_applies_once_at_125(kind: u8) {
             assert_eq!(session.world.ledgers.businesses[0][0x21c], 0);
             assert_eq!(session.world.pending_world.count, 1);
             assert_eq!(session.world.pending_world.records[0][2], 2);
-        } else {
+        } else if kind == 0x11 {
             assert_eq!(session.world.ledgers.players[1].cash, 9700.);
             assert_eq!(player_manager::word(&session.world.buildings[0], 0x1c), 0);
             assert_eq!(session.world.ledgers.businesses[0][0xa], 2);
             assert_eq!(session.world.ledgers.businesses[0][0x21c], 1);
             assert_eq!(session.population.business_counts.age, 100);
         }
+        if kind == 0x12 {
+            assert_eq!(session.world.ledgers.players[1].cash, 9260.); // 300 transfers + 440 conversion quote
+            let linked = player_manager::word(&session.world.buildings[0], 0x1c) as usize;
+            assert_eq!(
+                player_manager::word(&session.world.ledgers.businesses[linked], 4),
+                0
+            );
+            assert_eq!(session.world.ledgers.businesses[linked][0xa], 2);
+            assert_eq!(session.population.business_counts.age, 100);
+        } else if kind == 0x13 {
+            assert_eq!(session.world.ledgers.players[1].cash, 9950.); // 250 sale proceeds - 300 transfers
+            assert_eq!(session.world.ledgers.businesses[0][0xa], 0);
+            assert_eq!(session.world.buildings[0][0x2d], 0);
+            assert_eq!(session.population.business_counts.age, 100);
+        } else if kind == 0x15 {
+            assert_eq!(session.world.ledgers.players[1].cash, 9200.);
+            assert_eq!(session.world.ledgers.businesses[0][0xa], 2);
+            assert_eq!(session.world.buildings[0][0x2d], 2);
+            assert_eq!(session.population.business_counts.age, 100);
+        } else if kind == 0x18 {
+            assert_eq!(session.world.ledgers.players[1].cash, 9700.);
+            let row = &session.world.ledgers.businesses[0];
+            let terms = family.terms_payload().unwrap().terms;
+            for i in 0..6 {
+                assert_eq!(
+                    &row[0x1b8 + i * 2..0x1ba + i * 2],
+                    &terms.stock_targets[i].to_le_bytes()
+                );
+                assert_eq!(
+                    &row[0x1c4 + i * 4..0x1c8 + i * 4],
+                    &terms.prices[i].to_le_bytes()
+                );
+            }
+            assert_eq!(player_manager::word(row, 0x1dc), 12.5f32.to_bits());
+            assert_eq!(session.population.business_counts.age, 0);
+        }
+        let business_after = session.world.city.ledgers.businesses.clone();
         let after = session.world.city.buildings[0];
         let cash = session.world.ledgers.players[1].cash;
         session.controls.deadline = 150;
@@ -994,12 +1097,38 @@ fn business_family_applies_once_at_125(kind: u8) {
         assert_eq!(session.world.city.buildings[0], after);
         assert_eq!(session.world.ledgers.players[1].cash, cash);
         assert_eq!(session.applied.len(), 3);
+        assert_eq!(session.world.city.ledgers.businesses, business_after);
         assert!(session.queue.snapshot().unwrap().is_empty());
     }
-    let mut stale = family;
-    stale.serial = 3;
-    let stale = ingress(&owner, binding, peer, Message::CommandRequest(stale), 5).unwrap();
+    let expired = Commit {
+        order: 3,
+        due: 125,
+        request: family.clone(),
+    };
     assert_eq!(
+        host.enqueue(
+            &expired,
+            &mut left.queue,
+            &mut left.world.city.categories,
+            126
+        ),
+        Err(Error::Sequence)
+    );
+    assert_eq!(
+        client.enqueue(
+            &expired,
+            &mut right.queue,
+            &mut right.world.city.categories,
+            126
+        ),
+        Err(Error::Sequence)
+    );
+    let mut stale = family;
+    if kind != 0x18 {
+        stale.serial = 3;
+    }
+    let stale = ingress(&owner, binding, peer, Message::CommandRequest(stale), 5).unwrap();
+    assert!(
         host.receive(
             &owner,
             stale,
@@ -1007,9 +1136,10 @@ fn business_family_applies_once_at_125(kind: u8) {
             Targets {
                 buildings: &left.world.city.buildings,
                 businesses: &left.world.city.ledgers.businesses,
+                category_owners: left.world.city.categories.map(|row| row[5])
             }
-        ),
-        Err(Error::Row)
+        )
+        .is_err()
     );
     assert_eq!(host.next_commit, 3);
     assert_eq!(left.world.buildings, right.world.buildings);
@@ -1027,6 +1157,23 @@ fn demolition_runtime_charges_linked_owner_and_starts_removal_once_at_125() {
 #[test]
 fn business_open_runtime_allocates_and_attaches_encoded_owner_once_at_125() {
     business_family_applies_once_at_125(0x11);
+}
+
+#[test]
+fn conversion_runtime_charges_business_owner_and_opens_new_kind_once_at_125() {
+    business_family_applies_once_at_125(0x12);
+}
+#[test]
+fn sale_runtime_pays_business_owner_and_relinquishes_once_at_125() {
+    business_family_applies_once_at_125(0x13);
+}
+#[test]
+fn takeover_runtime_charges_category_landlord_and_pays_seller_once_at_125() {
+    business_family_applies_once_at_125(0x15);
+}
+#[test]
+fn terms_runtime_applies_signed_stock_prices_and_rent_once_at_125() {
+    business_family_applies_once_at_125(0x18);
 }
 
 #[test]
@@ -1103,7 +1250,8 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
                 &mut left.world.city.categories,
                 Targets {
                     buildings: &left.world.city.buildings,
-                    businesses: &left.world.city.ledgers.businesses
+                    businesses: &left.world.city.ledgers.businesses,
+                    ..Targets::default()
                 },
                 99
             )
@@ -1118,7 +1266,8 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
                 &mut right.world.city.categories,
                 Targets {
                     buildings: &right.world.city.buildings,
-                    businesses: &right.world.city.ledgers.businesses
+                    businesses: &right.world.city.ledgers.businesses,
+                    ..Targets::default()
                 },
                 99
             )
@@ -1135,6 +1284,7 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
             Targets {
                 buildings: &left.world.city.buildings,
                 businesses: &left.world.city.ledgers.businesses,
+                ..Targets::default()
             },
             99,
         )
@@ -1155,6 +1305,7 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
                     Targets {
                         buildings: &session.world.city.buildings,
                         businesses: &session.world.city.ledgers.businesses,
+                        ..Targets::default()
                     },
                     &mut session.world.city.pause,
                     &mut session.tasks,
@@ -1190,3 +1341,142 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
 
 #[path = "auction_tests.rs"]
 mod auction_tests;
+
+#[test]
+fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(true);
+    let hb = host
+        .bind_world(left.world.topology.epoch().serial())
+        .unwrap();
+    let cb = client
+        .bind_world(right.world.topology.epoch().serial())
+        .unwrap();
+    let owners = vec![Some(0), Some(peer), None];
+    let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
+    let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    for session in [&mut left, &mut right] {
+        session.world.city.categories[7][5] = 2;
+        session.world.city.categories[8][5] = 3;
+        for id in 0..8 {
+            ready_building(session, id, 1);
+            let building = &mut session.world.city.buildings[id];
+            put(building, 0x1c, id as u32);
+            put(
+                building,
+                0x40,
+                0x617628 + if id < 4 { 7 * 380 } else { 8 * 380 },
+            );
+            let business = &mut session.world.city.ledgers.businesses[id];
+            business[8..10].copy_from_slice(&(id as u16).to_le_bytes());
+            business[0xa] = if id % 4 == 2 {
+                1
+            } else if id < 4 {
+                2
+            } else {
+                3
+            };
+            business[0x21c] = 1;
+        }
+    }
+    for (gameplay_owner, adapter, worker, session) in [
+        (2, &mut replica, &client, &mut right),
+        (3, &mut authority, &host, &mut left),
+    ] {
+        for (offset, request) in lifecycle_requests(gameplay_owner).into_iter().enumerate() {
+            let id = offset as u32 + if gameplay_owner == 2 { 0 } else { 4 };
+            let command = match request.kind {
+                0x12 => live_commands::Command::Convert(crate::business_conversion::Command {
+                    kind: 4,
+                    building: id,
+                    owner: u32::from(gameplay_owner),
+                }),
+                0x13 => live_commands::Command::SellBusiness(crate::business_sale::Command {
+                    business: id,
+                    player: gameplay_owner - 1,
+                }),
+                0x15 => live_commands::Command::Takeover(crate::business_takeover::Command {
+                    building: id,
+                }),
+                0x18 => {
+                    let mut terms = request.terms_payload().unwrap();
+                    terms.business_index = id;
+                    live_commands::Command::Terms(terms)
+                }
+                _ => unreachable!(),
+            };
+            let targets = Targets::new(
+                &session.world.city.buildings,
+                &session.world.city.ledgers.businesses,
+                &session.world.city.categories,
+            );
+            adapter
+                .submit(
+                    worker,
+                    command,
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    targets,
+                    101,
+                )
+                .unwrap();
+        }
+    }
+    assert!(right.queue.snapshot().unwrap().is_empty());
+    assert_eq!(left.queue.snapshot().unwrap().len(), 4);
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        for (adapter, worker, session) in [
+            (&mut authority, &host, &mut left),
+            (&mut replica, &client, &mut right),
+        ] {
+            let targets = Targets::new(
+                &session.world.city.buildings,
+                &session.world.city.ledgers.businesses,
+                &session.world.city.categories,
+            );
+            adapter
+                .pump(
+                    worker,
+                    101,
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    targets,
+                    &mut session.world.city.pause,
+                    &mut session.tasks,
+                )
+                .unwrap();
+        }
+        if right.queue.snapshot().unwrap().len() == 8 {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "lifecycle commits did not cross loopback"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(authority.next_commit, 8);
+    assert_eq!(authority.next_enqueued, 8);
+    assert_eq!(replica.next_enqueued, 8);
+    for session in [&left, &right] {
+        let snapshot = session.queue.snapshot().unwrap();
+        assert_eq!(snapshot.len(), 8);
+        assert!(snapshot.iter().all(|(_, due, _, _, _)| *due == 126));
+    }
+    // Client admission cannot create a request or advance its request serial.
+    assert_eq!(replica.next_request, 4);
+    assert_eq!(replica.next_commit, 8);
+    assert_eq!(authority.requests[peer as usize], Some(3));
+    assert_eq!(authority.next_request, 4);
+    host.cancellation().cancel();
+    client.cancellation().cancel();
+}

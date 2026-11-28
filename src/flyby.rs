@@ -17,9 +17,7 @@ pub struct Playback {
 }
 impl Playback {
     pub fn new(track: &Flyby<'_>) -> Result<Self, String> {
-        let requests = (1..track.frame_count())
-            .map(|frame| track.sample(frame))
-            .collect::<Result<Vec<_>, _>>()?;
+        let requests = Self::requests(track)?;
         let mut playback = Self {
             requests,
             camera: crate::camera::primary::Primary::flyby([[0.; 3]; 2])?,
@@ -30,8 +28,29 @@ impl Playback {
         playback.advance_to(0)?;
         Ok(playback)
     }
+    fn requests(track: &Flyby<'_>) -> Result<Vec<CameraSample>, String> {
+        (1..track.frame_count())
+            .map(|frame| track.sample(frame))
+            .collect()
+    }
     pub fn duration_ticks(&self) -> usize {
         self.requests.len()
+    }
+    /// Re-enter kind17 from the live menu pose, using the same decoded track.
+    /// The loader preserves the current camera triples before its first request.
+    pub fn restart(&mut self, current: CameraSample) -> Result<(), String> {
+        self.camera = crate::camera::primary::Primary::flyby([current.eye, current.target])?;
+        self.frame = 0;
+        self.advance_to(0)
+    }
+    /// The FLYBY1 hub may choose a different quality track on each entry.
+    pub fn restart_track(
+        &mut self,
+        track: &Flyby<'_>,
+        current: CameraSample,
+    ) -> Result<(), String> {
+        self.requests = Self::requests(track)?;
+        self.restart(current)
     }
     /// Catch up every callback, including those between two rendered frames.
     /// Completion remains the frontend's separate FlybyEnded/menu transition.
@@ -221,6 +240,29 @@ mod tests {
             assert_eq!(playback.camera, before);
             assert_eq!(playback.frame, 1);
         }
+    }
+    #[test]
+    fn attract_restarts_the_same_track_from_the_live_menu_pose() {
+        let first = pose([12., 6., -6.], [2., 4., -2.]);
+        let bytes = authored_track(&[first, pose([100.; 3], [-100.; 3])]);
+        let mut playback = Playback::new(&Flyby::parse(&bytes).unwrap()).unwrap();
+        playback.advance_to(100).unwrap();
+        for _ in 0..2 {
+            playback
+                .restart(pose([10., 4., -4.], [0., 2., 0.]))
+                .unwrap();
+            assert_eq!(playback.frame, 1);
+            assert_eq!(playback.duration_ticks(), 2);
+            assert_eq!(playback.current(), pose([11., 5., -5.], [1., 3., -1.]));
+            playback.advance_to(1).unwrap();
+            assert_eq!(playback.current(), pose([100.; 3], [-100.; 3]));
+        }
+        let alternate = authored_track(&[pose([8.; 3], [4.; 3])]);
+        playback
+            .restart_track(&Flyby::parse(&alternate).unwrap(), pose([6.; 3], [2.; 3]))
+            .unwrap();
+        assert_eq!(playback.duration_ticks(), 1);
+        assert_eq!(playback.current(), pose([7.; 3], [3.; 3]));
     }
     #[test]
     fn startup_flyby_callback_sequence_is_independent_of_render_rate() {

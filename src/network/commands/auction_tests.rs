@@ -49,16 +49,18 @@ impl TestSession {
         worker: &worker::Handle,
         acknowledge: bool,
     ) {
+        let targets = Targets::new(
+            &self.world.city.buildings,
+            &self.world.city.ledgers.businesses,
+            &self.world.city.categories,
+        );
         adapter
             .pump(
                 worker,
                 self.world.clock.timing[0],
                 &mut self.queue,
                 &mut self.world.city.categories,
-                Targets {
-                    buildings: &self.world.city.buildings,
-                    businesses: &self.world.city.ledgers.businesses,
-                },
+                targets,
                 &mut self.world.city.pause,
                 &mut self.tasks,
             )

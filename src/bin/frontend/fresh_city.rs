@@ -531,15 +531,17 @@ impl<'data> Session<'data> {
         event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
     ) -> Result<(), String> {
         if let Some(connection) = &mut self.connected {
+            let targets = openmt2001::network::commands::Targets::new(
+                &self.world.city.buildings,
+                &self.world.city.ledgers.businesses,
+                &self.world.city.categories,
+            );
             return connection.commands.submit(
                 &connection.worker,
                 command,
                 &mut self.live_commands,
                 &mut self.world.city.categories,
-                openmt2001::network::commands::Targets {
-                    buildings: &self.world.city.buildings,
-                    businesses: &self.world.city.ledgers.businesses,
-                },
+                targets,
                 self.world.clock.timing[0],
             );
         }

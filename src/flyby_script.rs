@@ -18,6 +18,18 @@ pub fn performance_cap(quality: &str) -> Result<i32, String> {
     }
 }
 
+/// Offline level entry reseeds the static registry before invoking the hub
+/// (4b9fa0). Startup and later attract entries share this same selection path.
+pub fn select_seeded(
+    source: &[u8],
+    quality: Option<&str>,
+    seed: u32,
+    performance: impl FnMut() -> Result<i32, String>,
+) -> Result<Selection, String> {
+    let mut state = crate::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
+    select(source, quality, &mut state, performance)
+}
+
 /// The map is already assembled by the frontend. The initialization callback
 /// acknowledges that load and retains Game.SetLogos for the opening controller.
 /// With no CLI quality the live process performance is read unchanged. An
@@ -119,6 +131,21 @@ mod tests {
             Camera.SetFlybyMode("gamedata/cut_scenes/intro_" .. tracks[index] .. ".tm")
         end
     "#;
+
+    #[test]
+    fn attract_entry_reseeds_and_runs_the_shared_hub_selection() {
+        let mut tracks = std::collections::BTreeSet::new();
+        for seed in 1..=64 {
+            let selection = select_seeded(HUB, None, seed, || Ok(2)).unwrap();
+            assert!(selection.logos);
+            assert_eq!(selection, select_seeded(HUB, None, seed, || Ok(2)).unwrap());
+            tracks.insert(selection.track);
+            let low = select_seeded(HUB, Some("low"), seed, || Ok(2)).unwrap();
+            assert_eq!(low.track, "intro_low.tm");
+            assert_eq!(low.hour, 12);
+        }
+        assert_eq!(tracks.len(), 3);
+    }
 
     fn check_selections(source: &[u8]) {
         for performance in 0..=2 {

@@ -151,6 +151,9 @@ fn transport_creation_and_explicit_update_consume_current_factor_for_all_beds() 
             }
         }
         window(&mut output, expected, true);
+        // ID8 requests another unique voice. ID12 is the retained toot's
+        // ordinary setter path, which this gain test needs after creation.
+        let operation = if name == "toot" { route(12) } else { operation };
         audio.apply(Action::Suspend, guards);
         window(&mut output, expected, true); // Factor store alone does not rewrite source.
         player.apply(operation.clone());
@@ -277,7 +280,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         player.assets.train_motion.fill(0.); // Isolate toot PCM without omitting motion work.
         player.apply(route(8));
         let toot = player.train_toot.as_ref().unwrap();
-        let identity = toot as *const rodio::Sink;
+        let identity = &**toot as *const rodio::Sink;
         // Independent q69/p25 D=-3317 -> half PCM .010976654.
         window(&mut output, 0.010976654, true);
         let created_position = player.train_toot.as_ref().unwrap().get_pos();
@@ -286,7 +289,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         player.apply(route(7)); // Actual non-id8 retained-toot setter before motion.
         window(&mut output, 0., false);
         assert_eq!(
-            player.train_toot.as_ref().unwrap() as *const rodio::Sink,
+            &**player.train_toot.as_ref().unwrap() as *const rodio::Sink,
             identity
         );
         let muted_position = player.train_toot.as_ref().unwrap().get_pos();
@@ -305,7 +308,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         // Distance100 changes toot q to64; independent p25 command=-3384.
         window(&mut output, 0.010161785, false);
         assert_eq!(
-            player.train_toot.as_ref().unwrap() as *const rodio::Sink,
+            &**player.train_toot.as_ref().unwrap() as *const rodio::Sink,
             identity
         );
         // Original fcomp/test AH admits equality: q44 toot and q19 motion.
@@ -318,7 +321,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         window(&mut output, 0.0074125904, false);
         assert!(player.train_motion.is_some());
         assert_eq!(
-            player.train_toot.as_ref().unwrap() as *const rodio::Sink,
+            &**player.train_toot.as_ref().unwrap() as *const rodio::Sink,
             identity
         );
         assert!(player.train_toot.as_ref().unwrap().get_pos() > muted_position);
@@ -330,7 +333,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         window(&mut output, 0., false); // Native out-of-range source0, retained handle.
         assert!(player.train_motion.is_none());
         assert_eq!(
-            player.train_toot.as_ref().unwrap() as *const rodio::Sink,
+            &**player.train_toot.as_ref().unwrap() as *const rodio::Sink,
             identity
         );
         let far_position = player.train_toot.as_ref().unwrap().get_pos();
@@ -341,7 +344,7 @@ fn retained_train_toot_uses_non_id8_update_and_far_zero_without_restart() {
         // Same retained q64 toot at p100: D=-1233, half PCM .120912164.
         window(&mut output, 0.120912164, false);
         let toot = player.train_toot.as_ref().unwrap();
-        assert_eq!(toot as *const rodio::Sink, identity);
+        assert_eq!(&**toot as *const rodio::Sink, identity);
         assert!(toot.get_pos() > far_position);
         assert!(!toot.empty());
     }
@@ -402,7 +405,7 @@ fn coast_mutes_and_resumes_same_advancing_loop() {
     let (sender, receiver) = mpsc::channel();
     submit(&Some(sender), Operation::Coast { camera_z: -300. }).unwrap();
     player.apply(receiver.recv().unwrap().operation);
-    let identity = player.coast.as_ref().unwrap() as *const rodio::Sink;
+    let identity = &**player.coast.as_ref().unwrap() as *const rodio::Sink;
     // Independent q80/p25 D=-3173, with half-scale PCM.
     window(&mut output, 0.012955972, true);
     let near_position = player.coast.as_ref().unwrap().get_pos();
@@ -410,7 +413,7 @@ fn coast_mutes_and_resumes_same_advancing_loop() {
         player.apply(Operation::Coast { camera_z: z });
         window(&mut output, 0., false);
         let sink = player.coast.as_ref().unwrap();
-        assert_eq!(sink as *const rodio::Sink, identity);
+        assert_eq!(&**sink as *const rodio::Sink, identity);
         assert!(sink.get_pos() > near_position, "muted loop advances");
     }
     let muted_position = player.coast.as_ref().unwrap().get_pos();
@@ -424,7 +427,7 @@ fn coast_mutes_and_resumes_same_advancing_loop() {
         let _ = output.next();
     }
     let sink = player.coast.as_ref().unwrap();
-    assert_eq!(sink as *const rodio::Sink, identity);
+    assert_eq!(&**sink as *const rodio::Sink, identity);
     assert!(sink.get_pos() > muted_position, "returning never rewinds");
     player.apply(Operation::Coast { camera_z: -300. });
     window(&mut output, 0.23548867, false);
@@ -541,7 +544,7 @@ fn city_frame_keeps_construction_during_pause_and_repositions_before_resume() {
     assert!(player.construction[0].is_none()); // Receiving inputs does not service a frame.
     player.service_frame([0., 40., -300.]);
     let sink = player.construction[0].as_ref().unwrap();
-    let retained = sink as *const rodio::Sink;
+    let retained = &**sink as *const rodio::Sink;
     let near_gain = sink.volume();
     assert!(near_gain > 0.);
     assert!(player.coast.as_ref().unwrap().volume() > 0.);
@@ -560,7 +563,7 @@ fn city_frame_keeps_construction_during_pause_and_repositions_before_resume() {
         player.drain_requests(Some(&receiver));
         player.service_frame(camera);
         let sink = player.construction[0].as_ref().unwrap();
-        assert_eq!(sink as *const rodio::Sink, retained);
+        assert_eq!(&**sink as *const rodio::Sink, retained);
         if camera[0] == 200. {
             assert!(sink.volume() > 0. && sink.volume() < near_gain);
         } else if camera[0] == 400. {
@@ -710,7 +713,7 @@ fn train_route_dwell_departure_and_end_reach_player_with_retained_cursor() {
         if event == Some(11) {
             let sink = player.train_motion.as_ref().unwrap();
             assert_eq!(sink.volume(), 0.);
-            assert_eq!(Some(sink as *const rodio::Sink), identity);
+            assert_eq!(Some(&**sink as *const rodio::Sink), identity);
             let before = sink.get_pos();
             window(&mut output, 0., false);
             dwell_position = player.train_motion.as_ref().unwrap().get_pos();
@@ -735,7 +738,7 @@ fn train_route_dwell_departure_and_end_reach_player_with_retained_cursor() {
             .unwrap();
         player.drain_requests(Some(&receiver));
         if let Some(sink) = &player.train_motion {
-            let retained = sink as *const rodio::Sink;
+            let retained = &**sink as *const rodio::Sink;
             assert_eq!(*identity.get_or_insert(retained), retained);
         }
         output.by_ref().take(128).for_each(drop);
@@ -829,18 +832,18 @@ fn ship_unique_fallback_loses_handle_without_changing_or_stopping_active_voice()
         let gain = audio.source_gain(99);
         window(&mut output, gain * 0.5, true);
         let first_position = player.ship_engine.as_ref().unwrap().get_pos();
-        let horn = player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
+        let voice = player.ship_engine.as_ref().unwrap().clone();
+        let horn = &**player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
         for distance in [100., 400., 800., 0.] {
             player.apply(ship(distance));
             assert!(
                 player.ship_engine.is_none(),
                 "unique request returned no handle"
             );
-            let voice = player.ship_engine_unowned.as_ref().unwrap();
             assert_eq!(voice.volume(), gain, "distance cannot update a lost handle");
             assert!(!voice.empty());
             assert_eq!(
-                player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
+                &**player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
                 horn
             );
             assert_eq!(
@@ -849,7 +852,7 @@ fn ship_unique_fallback_loses_handle_without_changing_or_stopping_active_voice()
             );
             window(&mut output, gain * 0.5, false);
         }
-        assert!(player.ship_engine_unowned.as_ref().unwrap().get_pos() > first_position);
+        assert!(voice.get_pos() > first_position);
         assert_eq!(player.pending_ship_random, 5);
         // Apply the pending draws through the actual block consumer and compare
         // the whole controller, including the shared RNG, to five ship draws.
@@ -903,7 +906,6 @@ fn ship_leaving_before_suppression_releases_returned_engine_handle() {
         distance: 801.,
     });
     assert!(player.ship_engine.is_none() && player.ship_horn.is_none());
-    assert!(player.ship_engine_unowned.is_none());
     window(&mut output, 0., false);
     player.apply(Operation::Environment {
         call: EnvironmentCall::Ship(0),
@@ -923,17 +925,103 @@ fn ship_finished_horn_is_not_retriggered_by_admitted_updates() {
         distance: 0.,
     };
     player.apply(ship.clone());
-    let horn = player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
+    let horn = &**player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
     output.by_ref().take(4096).for_each(drop);
     assert!(player.ship_horn.as_ref().unwrap().empty());
     for _ in 0..32 {
         player.apply(ship.clone());
         assert_eq!(
-            player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
+            &**player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
             horn
         );
         assert!(player.ship_horn.as_ref().unwrap().empty());
     }
     assert_eq!(player.pending_ship_random, 33);
+    window(&mut output, 0., false);
+}
+
+#[test]
+fn voice_admission_factory_categories_retain_only_one_shared_loop() {
+    let (mut player, _, mut output) = owner();
+    let mut centers = [Some([1000., 1000.]); 52];
+    centers[2] = Some([0., 0.]);
+    centers[35] = Some([0., 0.]);
+    let snapshot = block_audio::Snapshot {
+        centers,
+        camera: [0., 40., 0.],
+        hour: 16,
+        tick: 100,
+        previous_tick: 100,
+        initial_random_state: 205,
+    };
+    for _ in 0..10 {
+        player.apply(Operation::Blocks(Box::new(snapshot)));
+    }
+    assert!(player.block_sinks[2].is_some());
+    assert!(
+        player.block_sinks[35].is_none(),
+        "suppressed unique request has no handle"
+    );
+    window(&mut output, 0.017098973, true);
+    let mut moved = snapshot;
+    moved.centers[2] = Some([1000., 1000.]);
+    player.apply(Operation::Blocks(Box::new(moved)));
+    assert!(player.block_sinks[2].is_none());
+    assert!(
+        player.block_sinks[35].is_some(),
+        "released loop can be admitted by another category"
+    );
+    window(&mut output, 0.017098973, false);
+}
+
+#[test]
+fn voice_admission_cached_motor_group_has_four_cells_and_keeps_earlier_equal_age() {
+    let (_, shared, _) = owner();
+    let mut players = Vec::new();
+    let mut handles = Vec::new();
+    let mut outputs = Vec::new();
+    let mut nearest = [[101f32.to_bits(), 0, 0]; 3];
+    nearest[0] = [10f32.to_bits(), 0, 1f32.to_bits()];
+    for _ in 0..4 {
+        let (mut player, _, mut output) = owner();
+        player.bind_audio(shared.clone());
+        let mixer = player.bus.combined_mixer().cloned();
+        player.update_road_motors(nearest, mixer.as_ref());
+        player.update_road_motors(nearest, mixer.as_ref());
+        window(&mut output, 0.008034706, true);
+        handles.push(player.road_motors[0].as_ref().unwrap().clone());
+        outputs.push(output);
+        players.push(player);
+    }
+    shared.service_effects();
+    let (mut fifth, _, output) = owner();
+    fifth.bind_audio(shared);
+    let mixer = fifth.bus.combined_mixer().cloned();
+    fifth.update_road_motors(nearest, mixer.as_ref());
+    assert!(
+        handles[0].empty(),
+        "cached equal ages replace the first cell"
+    );
+    assert!(handles[1..].iter().all(|handle| !handle.empty()));
+    assert!(!fifth.road_motors[0].as_ref().unwrap().empty());
+    outputs.push(output);
+    // Replacement stops the displaced backend, not merely its bookkeeping.
+    window(&mut outputs[0], 0., false);
+    window(&mut outputs[1], 0.008034706, false);
+}
+
+#[test]
+fn voice_admission_repeated_train_toot_returns_no_handle_and_keeps_existing_pcm() {
+    let (mut player, _, mut output) = owner();
+    player.apply(route(8));
+    window(&mut output, 0.010976654, true);
+    let voice = player.train_toot.as_ref().unwrap().clone();
+    player.set_level(0);
+    player.apply(route(8));
+    assert!(player.train_toot.is_none());
+    assert!(!voice.empty());
+    window(&mut output, 0.010976654, false);
+    player.apply(Operation::Reset);
+    assert!(voice.empty());
     window(&mut output, 0., false);
 }
