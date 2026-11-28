@@ -44,10 +44,9 @@ fn portrait_layout_width_anchor_and_wrap_use_shared_geometry() {
         glyph[36..40].copy_from_slice(&12i32.to_le_bytes());
     }
     let text = vec![b'A' - 32; 33]; // 33 advances of 7 fit the 232-pixel wrap.
-    assert_eq!(
-        text_rows(&tab, std::slice::from_ref(&text), layout.body, 4).unwrap(),
-        [text.clone()]
-    );
+    let rows = text_rows(&tab, std::slice::from_ref(&text), layout.body, 4).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0], text);
     let mut longer = vec![b'A' - 32; 32];
     longer.extend_from_slice(&[0, b'A' - 32]);
     assert_eq!(
