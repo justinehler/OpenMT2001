@@ -405,7 +405,7 @@ impl Rights<'_> {
                 self.color,
             )?;
             rules.rect([l + 40., t + y + 12., r, t + y + 13.], [0xffe55f49; 4]);
-            let (offsets, text) = crate::prompt::wrap_with_gap(
+            let (offsets, text) = openmt2001::prompt_queue::wrap_with_gap(
                 self.description_tab,
                 &self.strings[description],
                 (r - l - 38.) as i32,

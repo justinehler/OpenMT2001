@@ -1287,7 +1287,7 @@ impl CampaignDescription {
         {
             return Err("invalid campaign description bounds".into());
         }
-        let (offsets, text) = crate::prompt::wrap_with_gap(tab, text, width as i32, -1)?;
+        let (offsets, text) = openmt2001::prompt_queue::wrap_with_gap(tab, text, width as i32, -1)?;
         Ok(Self {
             offsets,
             text,
@@ -1349,7 +1349,8 @@ fn character_biography_lines(
     encoded: &[u8],
     width: f32,
 ) -> Result<Vec<Vec<u8>>, String> {
-    let (offsets, wrapped) = crate::prompt::wrap_with_gap(tab, encoded, width.trunc() as i32, -1)?;
+    let (offsets, wrapped) =
+        openmt2001::prompt_queue::wrap_with_gap(tab, encoded, width.trunc() as i32, -1)?;
     Ok(offsets
         .windows(2)
         .map(|range| {

@@ -959,8 +959,12 @@ impl Assets {
             &[0],
             &self.strings[1420],
         ] {
-            let (offsets, wrapped) =
-                crate::prompt::wrap_with_gap(&self.tab, text, (r - l).trunc() as i32, -1)?;
+            let (offsets, wrapped) = openmt2001::prompt_queue::wrap_with_gap(
+                &self.tab,
+                text,
+                (r - l).trunc() as i32,
+                -1,
+            )?;
             for row in offsets.windows(2) {
                 let end = row[1].saturating_sub(1).min(wrapped.len());
                 ui::text_widget_style0(
@@ -1656,7 +1660,7 @@ impl Assets {
             let l = self.bounds[0] + 5.;
             let r = self.bounds[2] - 5.;
             let top = self.bounds[1] + 80.;
-            let (offsets, text) = crate::prompt::wrap_with_gap(
+            let (offsets, text) = openmt2001::prompt_queue::wrap_with_gap(
                 &self.ownership_tab,
                 &self.strings[message as usize],
                 (r - l) as i32,
@@ -1948,8 +1952,12 @@ impl Assets {
                     &self.short_labels[category],
                 );
                 let [l, _, r, _] = layout.line(0, false);
-                let (offsets, copy) =
-                    crate::prompt::wrap_with_gap(&self.tab, &description, (r - l) as i32, -1)?;
+                let (offsets, copy) = openmt2001::prompt_queue::wrap_with_gap(
+                    &self.tab,
+                    &description,
+                    (r - l) as i32,
+                    -1,
+                )?;
                 for (line, pair) in offsets.windows(2).enumerate() {
                     let end = (pair[1] - 1).min(copy.len());
                     ui::text(
@@ -2000,7 +2008,7 @@ impl Assets {
                         &self.short_labels[category],
                     );
                     let [left, _, right, _] = layout.line(4, false);
-                    let (offsets, copy) = crate::prompt::wrap_with_gap(
+                    let (offsets, copy) = openmt2001::prompt_queue::wrap_with_gap(
                         &self.tab,
                         &description,
                         (right - left) as i32,
@@ -2902,7 +2910,7 @@ impl Assets {
         )?;
         if poll.residents == 0 {
             let (offsets, copy) =
-                crate::prompt::wrap_with_gap(&self.tab, &self.strings[1138], 155, -1)?;
+                openmt2001::prompt_queue::wrap_with_gap(&self.tab, &self.strings[1138], 155, -1)?;
             for (i, pair) in offsets.windows(2).enumerate() {
                 let end = (pair[1] - 1).min(copy.len());
                 let start = pair[0].min(end);
@@ -4229,7 +4237,7 @@ fn paint_rights_caption(
     let font = openmt2001::font::Font::parse(tab)?;
     let value = value.strip_suffix(&[0]).unwrap_or(value);
     let (offsets, text) =
-        crate::prompt::wrap_with_gap(tab, value, (bounds[2] - bounds[0]) as i32, -1)?;
+        openmt2001::prompt_queue::wrap_with_gap(tab, value, (bounds[2] - bounds[0]) as i32, -1)?;
     // Native441220/4419f0: font0, scale1, gap-1, centered two rows;
     // 88x25 yields x offsets7/31, y4 then12 and line height8.
     for (line, range) in offsets.windows(2).enumerate() {

@@ -210,7 +210,7 @@ impl Assets {
             return 0;
         };
         let info = self.bounds[21];
-        crate::prompt::wrap_with_gap(
+        openmt2001::prompt_queue::wrap_with_gap(
             &self.tab2,
             description,
             (info[2] - info[0] - 18.).trunc() as i32,
@@ -335,7 +335,7 @@ impl Assets {
                 )?;
                 if let Some(description) = self.level_text.description(words[0], &self.strings) {
                     let info = b[21];
-                    let (offsets, wrapped) = crate::prompt::wrap_with_gap(
+                    let (offsets, wrapped) = openmt2001::prompt_queue::wrap_with_gap(
                         &self.tab2,
                         description,
                         (info[2] - info[0] - 18.).trunc() as i32,

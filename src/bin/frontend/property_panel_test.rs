@@ -25,9 +25,13 @@ fn original_rights_caption_layout() {
     let count = word(&mut bytes) as usize;
     let caption = &bytes[..count];
     bytes = &bytes[count..];
-    let (offsets, _) =
-        crate::prompt::wrap_with_gap(&tab, caption.strip_suffix(&[0]).unwrap_or(caption), 88, -1)
-            .unwrap();
+    let (offsets, _) = openmt2001::prompt_queue::wrap_with_gap(
+        &tab,
+        caption.strip_suffix(&[0]).unwrap_or(caption),
+        88,
+        -1,
+    )
+    .unwrap();
     assert_eq!(offsets, [0, 18, 25]);
     let mut pages = [Surface::solid(), Surface::solid()];
     paint_rights_caption(&mut pages, &tab, caption, [0., 0., 88., 25.], 0xffffffff).unwrap();
