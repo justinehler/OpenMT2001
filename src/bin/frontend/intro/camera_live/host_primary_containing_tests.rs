@@ -104,7 +104,6 @@ pub(crate) fn inspection_products(
         vehicles_pending: None,
         transport: None,
         transport_pending: None,
-        last_transport_query: now,
         _fresh_session: None,
         adjustment: None,
         operations: Default::default(),

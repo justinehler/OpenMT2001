@@ -137,14 +137,18 @@ impl Session<'_> {
         }
         Ok(())
     }
-    /// Original scene frame processing is separate from normal logic ticks.
-    /// A paused host may still request a frame at the retained simulation time.
+    /// Original44f0b0 render pass over aircraft, trains and effects, separate
+    /// from logic ticks. Aircraft frames are `global tick - start` (44e000),
+    /// and the global tick 822d40 runs in every scheduler mode (481680), so
+    /// aircraft keep flying through auctions. Nothing here moves with the
+    /// render rate: trains and ships step only in the logic pass44ec50, and
+    /// no transport pose is interpolated between ticks (44de30, 44e5e0).
     pub fn advance_transport_frame(
         &mut self,
         submit: impl FnMut(&mut [u8; 284]) -> Result<(), String>,
     ) -> Result<(), String> {
         self.transport.advance_frame(
-            self.world.clock.timing[1],
+            self.world.clock.timing[0],
             &self.transport_models,
             self.policy.auxiliary_prior_bytes,
             submit,
@@ -698,7 +702,8 @@ impl Session<'_> {
                                                     hour: clock.hour(),
                                                     population: city.ledgers.residents.active_count
                                                         as i32,
-                                                    tick: clock.timing[1],
+                                                    // 44f2a0 stamps starts from the global tick 822d40.
+                                                    tick: clock.timing[0],
                                                 },
                                                 &self.transport_models,
                                                 &self.train_routes,
@@ -725,7 +730,9 @@ impl Session<'_> {
                             self.transport.advance_logic(
                                 image,
                                 &self.transport_models,
-                                clock.timing[1],
+                                // 44ec50 reads the global tick 822d40 for the ship
+                                // restart stamp and the proximity-sound phases.
+                                clock.timing[0],
                                 policy.camera,
                                 |event| {
                                     boundary(
