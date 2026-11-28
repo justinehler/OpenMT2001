@@ -4494,23 +4494,30 @@ impl SpendingAccount {
             return Err("resident preference exceeds native table or has non-finite inputs".into());
         }
         let mut mask = 0u32;
-        let mut total = 0f64;
+        let mut total = crate::x87::Sum::default();
         for preference in preferences {
             let id = preference.commodity as usize;
             let commodity = commodities[id];
             *random_state = random_state.wrapping_mul(0x343fd).wrapping_add(0x269ec3);
             let remainder = ((*random_state >> 16) & 0x7fff) % 101;
-            // FPCW 027f: retain 53-bit arithmetic until the actual f32 stores.
-            // Native evaluates the commodity product and random fraction separately.
-            let product = (f64::from(commodity.markup) * f64::from(commodity.value))
-                * f64::from(preference.factor);
-            let fraction = f64::from(remainder) * f64::from(f32::from_bits(0x3c23d70a));
-            let amount = fraction * product;
+            // Normal simulation uses x87 PC64 (64-bit significand). Evaluate
+            // the commodity product and random fraction separately, retaining
+            // extended precision until each explicit binary32 store.
+            let mut amount = crate::x87::Sum::from_f32(commodity.markup)?;
+            amount.mul_f32(commodity.value)?;
+            amount.mul_f32(preference.factor)?;
+            let mut fraction = crate::x87::Sum::from_i32(remainder as i32);
+            fraction.mul_f32(f32::from_bits(0x3c23d70a))?;
+            amount.mul(fraction);
             if commodity.active {
                 let at = 4 + id * 4;
-                let cell = (amount + f64::from(self.float(at))) as f32;
+                let mut cell = amount;
+                cell.add_f32(self.float(at))?;
+                let cell = cell.to_f32();
                 self.set_float(at, cell);
-                self.set_float(0x8c, (amount + f64::from(self.float(0x8c))) as f32);
+                let mut allocated = amount;
+                allocated.add_f32(self.float(0x8c))?;
+                self.set_float(0x8c, allocated.to_f32());
                 if cell == 0. {
                     mask &= !(1 << id);
                 } else {
@@ -4519,11 +4526,11 @@ impl SpendingAccount {
             }
             // Inactive entries still contribute. Both final aggregates overwrite
             // their previous values; this is not a sum of the updated cells.
-            total += amount;
+            total.add(amount);
         }
         self.bytes[0x84..0x88].copy_from_slice(&mask.to_le_bytes());
-        self.set_float(0x88, total as f32);
-        self.set_float(0x8c, total as f32);
+        self.set_float(0x88, total.to_f32());
+        self.set_float(0x8c, total.to_f32());
         Ok(())
     }
 }
@@ -8119,6 +8126,136 @@ mod tests {
             "native forward/reverse/gap/quota/zero coverage"
         );
         assert_eq!(at, bytes.len());
+    }
+
+    #[test]
+    fn resident_seed_retains_pc64_total_through_cell_stores() {
+        let large = 2_f32.powi(60);
+        let mut commodities = [Commodity::default(); 32];
+        commodities[0] = Commodity {
+            active: true,
+            value: large,
+            markup: 1.,
+        };
+        commodities[1] = Commodity {
+            active: false,
+            value: 1.,
+            markup: 1.,
+        };
+        let preferences = [
+            Preference {
+                commodity: 0,
+                factor: 1.,
+            },
+            Preference {
+                commodity: 1,
+                factor: 1.,
+            },
+            Preference {
+                commodity: 0,
+                factor: -1.,
+            },
+        ];
+        // All three draws have remainder 2. The small inactive contribution
+        // survives in the PC64 total between cancelling large contributions,
+        // although binary64 loses it. Active duplicate cells still store f32.
+        let fraction = 2. * f64::from(f32::from_bits(0x3c23d70a));
+        let binary64_total: f64 = [f64::from(large), 1., -f64::from(large)]
+            .into_iter()
+            .map(|product| fraction * product)
+            .sum();
+        assert_eq!(binary64_total, 0.);
+        let mut account = SpendingAccount::from_bytes([0; 0x90]);
+        account.set_float(8, 3.);
+        let mut state = 0x3f8f;
+        account
+            .allocate(&preferences, &commodities, &mut state)
+            .unwrap();
+        assert_eq!(state, 0x10943b40);
+        assert_eq!(account.float(4), 0., "duplicate commodity accumulates");
+        assert_eq!(account.float(8), 3., "inactive cell stays untouched");
+        assert_eq!(&account.as_bytes()[0x84..0x88], &[0; 4]);
+        assert_eq!(account.balance(), 5. / 256.);
+        assert_eq!(account.float(0x8c), 5. / 256.);
+    }
+
+    #[test]
+    #[cfg(feature = "lua4")]
+    #[ignore = "requires original default preferences, commodity settings, and parameters"]
+    fn resident_seed_matches_pc64_default_preference_74() {
+        use crate::economy::{
+            ResidentAccounts, ResidentCreationInputs, ResidentCreationState, ResidentModelBinding,
+        };
+        let read = |name| std::fs::read_to_string(crate::fixtures::path(name)).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
+        let configuration = super::Configuration::from_sources(
+            &read("DEFAULT_SETTINGS"),
+            &read("PARAMETERS"),
+            &read("TIMETABLE"),
+            &image,
+        )
+        .unwrap();
+        let mut commodity_state = crate::commodity_script::State::from_v14(&image, [0; 5]).unwrap();
+        let mut runtime = crate::lua4::Runtime::new().unwrap();
+        let bindings =
+            crate::commodity_script::Bindings::register(&mut runtime, &image, 100).unwrap();
+        runtime
+            .execute(
+                "commoditysettings.lua",
+                read("COMMODITY_SETTINGS").as_bytes(),
+                &mut |id, args| bindings.handle(id, args, &mut commodity_state),
+            )
+            .unwrap();
+        let commodities = commodity_state.resident_inputs();
+        let mut account = SpendingAccount::from_bytes([0; 0x90]);
+        let mut state = 0x2732a6c9;
+        account
+            .allocate(
+                configuration.preferences.get(74).unwrap(),
+                &commodities,
+                &mut state,
+            )
+            .unwrap();
+        assert_eq!(account.balance().to_bits(), 0x4202e147);
+        assert_eq!(account.float(0x8c).to_bits(), 0x4202e147);
+        assert_eq!(state, 0x54092fac);
+
+        // Fresh creation consumes five runtime/placement draws and three
+        // personal-field draws before entering the same budget routine.
+        let mut state = ResidentCreationState {
+            auxiliary: super::AuxiliaryPool::new(1),
+            initialization_rng: super::InitializationRng {
+                constructor: 0xe8295261,
+                movement: 0,
+                objective: 0,
+            },
+            identity_rng: 0,
+            preference_rng: 0,
+        };
+        let personal = configuration.inputs(&commodities, commodity_state.memberships, 0);
+        let models = std::array::from_fn(|_| ResidentModelBinding {
+            reference: 1,
+            definition: [0; 0x74],
+        });
+        let inputs = ResidentCreationInputs {
+            personal: &personal,
+            preference_groups: &configuration.preference_groups,
+            models: &models,
+            countdown_period: 1,
+        };
+        let mut categories = [[0u8; 0x17c]; 52];
+        let mut residents = ResidentAccounts::new_pool();
+        let index = residents
+            .create_resident([2, 0, 74], [0; 0x11c], &inputs, &mut state, &mut categories)
+            .unwrap()
+            .unwrap();
+        let account_index = usize::try_from(residents.nodes[index].account_index()).unwrap();
+        let created = &residents.accounts[account_index];
+        assert_eq!(created.balance().to_bits(), 0x4202e147);
+        assert_eq!(created.float(0x8c).to_bits(), 0x4202e147);
+        assert_eq!(state.initialization_rng.constructor, 0x54092fac);
+        assert_eq!(&created.as_bytes()[4..], &account.as_bytes()[4..]);
     }
 
     #[test]
