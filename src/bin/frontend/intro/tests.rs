@@ -4197,44 +4197,19 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
             .unwrap();
         crate::capture_test::capture_prepared(&renderer, &road_scene, &prepared, &path);
     }
-    let moving_transport = final_snapshot.transport.as_ref().unwrap();
-    let focus = moving_transport.first_position().unwrap();
-    let near_transport = CameraSample {
-        eye: [focus[0], focus[1] + 8., focus[2] - 24.],
-        target: focus,
-        ..camera
-    };
-    let mut transport_scene = final_snapshot.scene.clone();
-    transport_scene.reframe(near_transport).unwrap();
-    let transport_draws = moving_transport
-        .reframe(&mut transport_scene, near_transport, 35)
-        .unwrap();
+    // #490: the marina boats belong to the frontend backdrop city, so this
+    // morning game submits none. Starting Out's noon ship checks visible
+    // transport meshes near their pose.
+    let marina_boats = [0x688db0, 0x688dc0, 0x688dd0, 0x688de0];
     assert!(
-        transport_scene.draws[transport_draws]
-            .iter()
-            .any(|draw| !draw.vertices.is_empty()),
-        "native transport callbacks must submit visible meshes near their pose"
+        final_snapshot
+            .transport
+            .as_ref()
+            .unwrap()
+            .submitted_references()
+            .all(|reference| !marina_boats.contains(&reference)),
+        "a started game must not submit the marina boats"
     );
-    #[cfg(feature = "capture")]
-    if let Ok(path) = std::env::var("OPENMT2001_LIVE_TRANSPORT_CAPTURE") {
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        if cfg!(windows) {
-            descriptor.backends = wgpu::Backends::DX12;
-        }
-        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-        let prepared = renderer
-            .prepare(
-                &transport_scene
-                    .draws
-                    .iter()
-                    .map(|draw| draw.borrowed())
-                    .collect::<Vec<_>>(),
-                transport_scene.camera,
-                transport_scene.fog,
-            )
-            .unwrap();
-        crate::capture_test::capture_prepared(&renderer, &transport_scene, &prepared, &path);
-    }
     assert!(
         moving.differs_from(loaded.people.as_ref().unwrap()),
         "resident-only transport must contain advanced live poses/frames"
@@ -4731,6 +4706,43 @@ fn starting_out_early_controls_and_options_remain_live() {
         "actual noon frame did not submit an hourly ship: {references:x?}"
     );
     transport.reframe(&mut snapshot.scene, camera, 35).unwrap();
+    let focus = transport.first_position().unwrap();
+    let near_transport = CameraSample {
+        eye: [focus[0], focus[1] + 8., focus[2] - 24.],
+        target: focus,
+        ..camera
+    };
+    let mut transport_scene = snapshot.scene.clone();
+    transport_scene.reframe(near_transport).unwrap();
+    let transport_draws = transport
+        .reframe(&mut transport_scene, near_transport, 35)
+        .unwrap();
+    assert!(
+        transport_scene.draws[transport_draws]
+            .iter()
+            .any(|draw| !draw.vertices.is_empty()),
+        "native transport callbacks must submit visible meshes near their pose"
+    );
+    #[cfg(feature = "capture")]
+    if let Ok(path) = std::env::var("OPENMT2001_LIVE_TRANSPORT_CAPTURE") {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let prepared = renderer
+            .prepare(
+                &transport_scene
+                    .draws
+                    .iter()
+                    .map(|draw| draw.borrowed())
+                    .collect::<Vec<_>>(),
+                transport_scene.camera,
+                transport_scene.fog,
+            )
+            .unwrap();
+        crate::capture_test::capture_prepared(&renderer, &transport_scene, &prepared, &path);
+    }
     assert!(status().failure.is_none());
     eprintln!(
         "Starting Out: early build, stale controls, Options, queued tips and noon ship rendering pass ({references:x?})"

@@ -2535,12 +2535,31 @@ fn exercise_calendar(
         session.roster.manager.players[0].bytes[0x214..0x21c],
         [0; 8]
     );
-    for reference in [0x6887e0, 0x688880, 0x688db0, 0x688dc0, 0x688dd0, 0x688de0] {
+    for reference in [0x6887e0, 0x688880] {
         assert!(
             transport_submissions.get(&reference).copied().unwrap_or(0) > 0,
             "missing transport submission {reference:08x}"
         );
     }
+    // #490: the marina boats belong to the frontend backdrop city only, so
+    // a started game never submits them. The noon ship (one of the 539d50
+    // models) sails from effect row 0 instead.
+    for reference in [0x688db0, 0x688dc0, 0x688dd0, 0x688de0] {
+        assert_eq!(
+            transport_submissions.get(&reference),
+            None,
+            "marina boat {reference:08x} submitted in a game"
+        );
+    }
+    assert!(
+        session
+            .transport
+            .hourly
+            .models
+            .iter()
+            .any(|reference| { transport_submissions.get(reference).copied().unwrap_or(0) > 0 }),
+        "the noon ship must be submitted"
+    );
     assert!(
         session
             .transport

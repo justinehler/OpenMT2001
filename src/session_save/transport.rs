@@ -152,5 +152,9 @@ pub fn restore(s: &mut Session<'_>, bytes: &[u8]) -> Result<(), String> {
         1 => true,
         _ => return Err("V2 transport first-frame flag invalid".into()),
     };
-    r.end()
+    r.end()?;
+    // The effect rows and ship frame are still read for wire compatibility,
+    // but a load starts them over as the original does.
+    t.clear_effects_for_load();
+    Ok(())
 }
