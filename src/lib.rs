@@ -149,6 +149,10 @@ pub mod startup_settings;
 
 #[cfg(feature = "lua4")]
 pub mod level_startup;
+#[cfg(feature = "lua4")]
+pub mod session;
+#[cfg(feature = "lua4")]
+pub mod session_save;
 
 pub mod category_ownership;
 #[cfg(feature = "lua4")]

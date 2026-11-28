@@ -346,21 +346,29 @@ impl UiTextResources {
             board_stem: None,
         })
     }
-    ///Actual selected USA-board operation, not an implicit second language load.
-    ///Call once when the caller selects the supplied USA board. A failed attempt
-    ///leaves the live owner intact. No row slices escape this operation.
+    ///4922e0 replaces the selected board suffix atomically in the process owner.
     pub fn install_usa_board(&mut self, executable: &[u8], installer: &Path) -> Result<(), String> {
-        let path = installer.join("Standard/fonts/board/usa/tycoon");
+        self.install_board(
+            executable,
+            installer,
+            crate::board_selection::Name::default(),
+        )
+    }
+    pub fn install_board(
+        &mut self,
+        executable: &[u8],
+        installer: &Path,
+        name: crate::board_selection::Name,
+    ) -> Result<(), String> {
+        let path = name.directory(installer).join("tycoon");
         if self.board_stem.as_ref() == Some(&path) {
             return Ok(());
         }
-        if self.board_stem.is_some() {
-            return Err(
-                "shared language: board replacement beyond admitted once-only USA operation".into(),
-            );
-        }
         let board = PackedLanguage::load(&path)?;
-        let native = expand_one(&ntbs(&PeImage::parse(executable)?, 0x542324, 128)?, b"usa")?;
+        let native = expand_one(
+            &ntbs(&PeImage::parse(executable)?, 0x542324, 128)?,
+            name.as_str().as_bytes(),
+        )?;
         let mut language = self.manager.language.clone();
         language.overlay(2242, &board)?;
         let mut scratch = self.manager.scratch.clone();

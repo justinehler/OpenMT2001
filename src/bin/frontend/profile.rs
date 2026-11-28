@@ -32,6 +32,11 @@ impl Profiles {
         let root = self.path.parent().ok_or("profile directory")?;
         crate::menu::preferred_token::clear(root, name.as_bytes())?;
         let path = crate::profile_settings::profile_path(root, name.as_bytes());
+        match fs::remove_file(path.with_extension("board")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

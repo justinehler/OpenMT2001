@@ -82,6 +82,34 @@ static int host_call(lua_State *L) {
     return 0;
 }
 
+/* 4db6b0 -> 43bed0 -> 429d50. Rust supplies the active head context,
+ * then returns before the nested Lua call. Keep the head until that call ends. */
+static int dismiss_prompt(lua_State *L) {
+    mt4_runtime *runtime = (mt4_runtime *)lua_touserdata(L, -3);
+    uint32_t begin = (uint32_t)lua_tonumber(L, -2);
+    uint32_t finish = (uint32_t)lua_tonumber(L, -1);
+    mt4_value value;
+    double context = 0, ignored = 0;
+    int status, called = 0;
+    if (!runtime->handler) lua_error(L, "prompt dismissal outside active operation");
+    memset(&value, 0, sizeof(value));
+    status = runtime->handler(runtime->context, begin, &value, 0, &context,
+                              runtime->error, sizeof(runtime->error));
+    if (status < 0) lua_error(L, runtime->error);
+    if (status != 1) return 0;
+    if (context != 0) {
+        lua_getglobal(L, "CATCHEVENT_InterfacePromptDismiss");
+        if (lua_type(L, -1) == LUA_TFUNCTION) {
+            lua_pushnumber(L, context);
+            called = lua_call(L, 1, 0);
+        } else lua_pop(L, 1);
+    }
+    status = runtime->handler(runtime->context, finish, &value, 0, &ignored,
+                              runtime->error, sizeof(runtime->error));
+    if (status < 0 || called) lua_error(L, runtime->error);
+    return 0;
+}
+
 /* Tag methods receive the property table first. Its tag selects this closure's
  * callback IDs; Rust sees only the property key and optional assigned value. */
 static int host_property(lua_State *L) {
@@ -478,6 +506,13 @@ static void protected_operation(lua_State *L, void *data) {
         lua_pushcclosure(L, trigger_event, 3);
         lua_setglobal(L, op->name);
         break;
+    case 22:
+        lua_pushuserdata(L, op->runtime);
+        lua_pushnumber(L, op->id);
+        lua_pushnumber(L, op->number);
+        lua_pushcclosure(L, dismiss_prompt, 3);
+        lua_setglobal(L, op->name);
+        break;
     case 21:
         /* Alias the actual registered closure; no Lua base-library rawset
          * global and no call through the table's property setter is needed. */
@@ -723,4 +758,11 @@ int mt4_function_alias(mt4_runtime *runtime, const char *table, const char *memb
     mt4_operation op;
     memset(&op, 0, sizeof(op)); op.runtime = runtime; op.action = 21;
     op.name = table; op.source = member; op.target = function; return perform(&op);
+}
+
+int mt4_prompt_dismiss_binding(mt4_runtime *runtime, const char *name,
+                              uint32_t begin, uint32_t finish) {
+    mt4_operation op;
+    memset(&op, 0, sizeof(op)); op.runtime = runtime; op.action = 22;
+    op.name = name; op.id = begin; op.number = finish; return perform(&op);
 }

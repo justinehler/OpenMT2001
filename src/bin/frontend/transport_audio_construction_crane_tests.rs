@@ -118,7 +118,11 @@ fn construction_fallback_mutes_far_handles_and_skips_to_near_source() {
 }
 
 fn crane_call(player: &mut Player, call: EnvironmentCall, distance: f32) {
-    player.apply(Operation::Environment { call, distance });
+    player.apply(Operation::Environment {
+        call,
+        distance,
+        position: [distance, 0., 0.],
+    });
 }
 
 fn assert_crane_beds_cleared(player: &Player) {

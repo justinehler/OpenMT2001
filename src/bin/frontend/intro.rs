@@ -131,6 +131,7 @@ pub struct Paths {
     pub save_root: PathBuf,
 }
 pub struct Assets {
+    board_name: crate::board_selection::Name,
     //Process lifetime: moved into Intro, retained across city retirement.
     pub(crate) primary_products: camera_live::main_construction::CompletedMainLayout,
     pub(crate) ui_images: camera_live::process_images::Images,
@@ -171,6 +172,9 @@ pub struct Assets {
     strategic_scene: crate::strategic_scene::Assets,
 }
 impl Assets {
+    pub(crate) fn set_spatial_audio(&mut self, enabled: bool) {
+        self.transport_audio.spatial_enabled = enabled;
+    }
     pub fn load(paths: Paths) -> Result<Self, String> {
         Self::load_with_source_options(paths, "")
     }
@@ -440,6 +444,7 @@ impl Assets {
             maps,
         });
         Ok(Self {
+            board_name: Default::default(),
             process_runtime,
             activity,
             primary_products,
@@ -481,6 +486,7 @@ impl Assets {
     }
 }
 
+#[derive(Clone)]
 struct SceneInputs {
     process_runtime: Option<crate::live_host::process_runtime::Handle>,
     compatibility: crate::compatibility::Mode,
@@ -787,6 +793,7 @@ impl DetailVisibility {
 }
 
 struct LoadedInspection {
+    tutorial_session: bool,
     camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
     camera_publisher: Option<crate::save_menu::camera_source::Publisher>,
     camera_inbox: Option<crate::live_host::camera_bridge::Inbox>,
@@ -1076,6 +1083,7 @@ enum FreshRequest {
 #[path = "intro/scene_inputs.rs"]
 mod scene_inputs;
 struct Inspection {
+    tutorial_start: camera_producer::TutorialStart,
     music_admission: Option<focus::MusicAdmission>,
     camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
     camera_turns: std::collections::VecDeque<camera_producer::Pending>,
@@ -1594,7 +1602,8 @@ impl Intro {
             graphics: &mut self.graphics_levels,
             gameplay: &mut self.gameplay_levels,
         }
-        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())
+        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())?;
+        self.sync_board_names()
     }
     /// App invokes this once after EVERY synchronous window-event dispatch,
     /// including inner early returns, before any following OS focus prefix.
@@ -1615,6 +1624,7 @@ impl Intro {
             self.sync_profile_settings()?;
             self.persist_settings();
         }
+        self.sync_board_names()?;
         Ok(())
     }
 
@@ -2441,3 +2451,6 @@ mod process_worker_tests;
 #[cfg(test)]
 #[path = "intro/process_review_tests.rs"]
 pub(crate) mod process_review_tests;
+
+#[path = "intro/board_names.rs"]
+mod board_names;

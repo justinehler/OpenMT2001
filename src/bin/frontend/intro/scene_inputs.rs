@@ -2147,6 +2147,7 @@ impl SceneInputs {
             );
         }
         Ok(LoadedInspection {
+            tutorial_session: session.tutorial_state == 1,
             camera_epoch: None,
             camera_publisher: None,
             camera_inbox: None,
@@ -2245,6 +2246,7 @@ impl SceneInputs {
             Some(&self.style),
         )
         .map(|scene| LoadedInspection {
+            tutorial_session: false,
             camera_epoch: None,
             camera_publisher: None,
             camera_inbox: None,

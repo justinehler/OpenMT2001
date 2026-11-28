@@ -2,12 +2,6 @@
 //! #99). This keeps `crate::live_host::process_runtime::*` paths working.
 pub use openmt2001::process_runtime::*;
 
-impl SequenceSession for crate::fresh_city::Session<'_> {
-    fn clock_mut(&mut self) -> &mut openmt2001::clock::Clock {
-        &mut self.world.clock
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
