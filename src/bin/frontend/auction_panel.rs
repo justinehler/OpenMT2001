@@ -53,14 +53,14 @@ impl Info {
 #[test]
 #[ignore = "requires original auction panel resources"]
 fn original_auction_panel_resources() {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let exe = read("OPENMT2001_EXE");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameters = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameters.parent().unwrap().parent().unwrap();
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -964,7 +964,7 @@ mod bid_facing_tests {
     #[test]
     #[ignore = "SHA-pinned original auction meshes/materials/PE/font/language; CPU fixture, optional capture"]
     fn supplied_panels_cull_reversed_faces_and_preserve_fills_and_regions() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let exe = read("OPENMT2001_EXE");
@@ -1009,7 +1009,7 @@ mod bid_facing_tests {
         ] {
             guard(payload(name), hash);
         }
-        let param = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let param = openmt2001::fixtures::path("PARAMETERS");
         let installer = param.parent().unwrap().parent().unwrap();
         guard(
             &fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(),
@@ -1027,17 +1027,15 @@ mod bid_facing_tests {
             &fs::read(installer.join("Standard/fonts/board/usa/tycoon.bin")).unwrap(),
             "42696b634f2b7517a645516317341cf40ed2d25efe6931e033f65c527a3d28e1",
         );
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let language = std::env::var_os("OPENMT2001_AUCTION_LANGUAGE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                exe_path
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
-                    .join("US/language/usa")
-            });
+        let exe_path = openmt2001::fixtures::path("EXE");
+        let language = openmt2001::fixtures::optional("AUCTION_LANGUAGE").unwrap_or_else(|| {
+            exe_path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("US/language/usa")
+        });
         let off = fs::read(language.join("tycoon.off")).unwrap();
         let bytes = fs::read(language.join("tycoon.bin")).unwrap();
         guard(
