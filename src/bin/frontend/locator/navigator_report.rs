@@ -831,7 +831,7 @@ mod tests {
     }
 
     fn finance_owner() -> strategic::State {
-        let mut bytes = vec![0; 444];
+        let mut bytes = vec![0; 0x1c0];
         bytes[0x10] = 1;
         bytes[0x158..0x15d].copy_from_slice(b"Human");
         let mut account = PlayerAccount::from_runtime(&bytes).unwrap();

@@ -15,12 +15,27 @@ pub struct Row {
     pub heading: u32,
     pub value: Option<Value>,
 }
+/// The Building Rights value for a block in its exclusive period (rights 1).
+///
+/// 0x4045a9 compares the category's owner byte, which is the owner's roster
+/// slot plus one, with the current player's `+0x1bc`, which is the zero-based
+/// roster slot itself. Every other owner test in the original adds one to the
+/// slot first; this one does not, so the landlord sees 15 "Pending" (in single
+/// player the human is slot 0 and no owner byte is 0 here) and 17
+/// "Sole Rights" appears only when the owner sits one slot before the current
+/// player.
+pub fn exclusive_rights_label(owner: u8, current_roster_slot: u8) -> u32 {
+    if owner == current_roster_slot { 17 } else { 15 }
+}
+/// The BLOCK INFORMATION rows of 0x4044b0. `owner` is the category owner byte
+/// (roster slot plus one, 0 for none); `current_roster_slot` is the current
+/// player's `+0x1bc`.
 pub fn rows(
     prestige: f32,
     bias: f64,
     mode: i32,
     owner: u8,
-    current: u8,
+    current_roster_slot: u8,
     lease: i32,
 ) -> Result<Vec<Row>, String> {
     let mut p = Sum::from_f32(prestige)?;
@@ -42,7 +57,10 @@ pub fn rows(
             heading: 36,
             value: match mode {
                 0 => Some(Value::Label(13)),
-                1 => Some(Value::Label(if owner == current { 17 } else { 15 })),
+                1 => Some(Value::Label(exclusive_rights_label(
+                    owner,
+                    current_roster_slot,
+                ))),
                 2 => Some(Value::Label(21)),
                 _ => None,
             },
@@ -195,6 +213,9 @@ impl Report {
             &categories,
             &players,
             current.slot,
+            // The restored roster adds the saved players in order, so the
+            // first one's `+0x1bc` is its slot.
+            u8::try_from(current.slot).map_err(|_| "saved current player slot")?,
             crate::utility_report::Report::from_save(save, image)?,
             image,
             false,
@@ -217,11 +238,15 @@ impl Report {
         let Some(current) = players.current else {
             return Ok(None);
         };
+        let current_roster_slot = players
+            .current_roster_slot
+            .ok_or("block information current player roster slot missing")?;
         let categories: Vec<_> = world.categories.iter().map(|b| b.as_slice()).collect();
         let mut report = Self::from_records(
             &categories,
             &players.records,
             current,
+            current_roster_slot,
             crate::utility_report::Report::from_runtime(world, image)?,
             image,
             true,
@@ -253,6 +278,7 @@ impl Report {
         category_records: &[&[u8]],
         players: &[[u8; 440]],
         current: usize,
+        current_roster_slot: u8,
         utilities: crate::utility_report::Report,
         image: &openmt2001::pe::PeImage<'_>,
         initialized: bool,
@@ -313,7 +339,7 @@ impl Report {
                     bias,
                     i32::from_le_bytes(b[0x78..0x7c].try_into().unwrap()),
                     owner,
-                    current as u8 + 1,
+                    current_roster_slot,
                     i32::from_le_bytes(b[0x7c..0x80].try_into().unwrap()),
                 )?)
             });
@@ -339,6 +365,24 @@ impl Report {
 mod tests {
     use super::*;
     #[test]
+    fn exclusive_rights_compare_the_owner_byte_with_the_raw_roster_slot() {
+        // Single player: the human is roster slot 0 and owns category byte 1,
+        // so the landlord sees Pending, as do players who don't own it.
+        assert_eq!(exclusive_rights_label(1, 0), 15);
+        assert_eq!(exclusive_rights_label(2, 0), 15);
+        // Sole Rights only when the owner byte equals the current slot.
+        assert_eq!(exclusive_rights_label(2, 2), 17);
+        let building_rights = |owner, slot| {
+            rows(1.0, 0.005, 1, owner, slot, 0)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.heading == 36)
+                .and_then(|row| row.value)
+        };
+        assert!(matches!(building_rights(1, 0), Some(Value::Label(15))));
+        assert!(matches!(building_rights(3, 3), Some(Value::Label(17))));
+    }
+    #[test]
     #[ignore = "private original block information oracle"]
     fn matches_native_block_information() {
         let b = std::fs::read(openmt2001::fixtures::path("NATIVE_BLOCK_INFORMATION")).unwrap();
@@ -359,6 +403,7 @@ mod tests {
                 .map(|_| (word(&mut at), word(&mut at) as i32))
                 .collect::<Vec<_>>();
             let mut actual = vec![];
+            // The native harness's current player had `+0x1bc` = 1.
             for row in rows(prestige, 0.005, mode, owner, 1, 123).unwrap() {
                 actual.push((0, row.heading as i32));
                 if let Some(v) = row.value {
