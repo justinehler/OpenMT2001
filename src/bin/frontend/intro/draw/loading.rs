@@ -213,6 +213,7 @@ impl Intro {
                         self.assets.transport_audio.clone());
                     if let Some(process)=&self.process_frontend {transport_audio_player.bind_audio(process.borrow().audio.clone());}
                     else {transport_audio_player.set_level(self.audio_levels.effects);}
+                    transport_audio_player.set_listener(inspection_camera.eye, inspection_camera.target);
                     let mut gameplay_sound_player = crate::gameplay_sound::Player::new(
                         self.assets.gameplay_sound.clone());
                     if let Some(process)=&self.process_frontend {gameplay_sound_player.bind_audio(process.borrow().audio.clone());}
@@ -227,6 +228,7 @@ impl Intro {
                     let imported_cameras = loaded.imported_cameras;
                     let pending_music_era=loaded.music_era;
                     let mut view = Inspection {
+                        tutorial_start: camera_producer::TutorialStart::new(loaded.tutorial_session),
                         music_admission:self.focus.enabled().then(||self.focus.music_admission()),
                         camera_epoch: loaded.camera_epoch,
                         camera_turns: Default::default(),

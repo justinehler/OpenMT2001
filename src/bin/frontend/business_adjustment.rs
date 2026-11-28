@@ -738,6 +738,13 @@ fn inside(p: [f32; 2], b: [f32; 4]) -> bool {
     p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]
 }
 impl Assets {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)
+    }
+
     /// Runtime editing uses the same native one-based owner byte as the worker.
     /// A missing current player keeps inspection available without mutation.
     pub fn open_for_owner(

@@ -39,6 +39,7 @@ pub enum Page {
     Sound,
     Graphics,
     Gameplay,
+    Board,
 }
 impl Page {
     fn index(self) -> usize {
@@ -47,6 +48,7 @@ impl Page {
             Self::Sound => 1,
             Self::Graphics => 2,
             Self::Gameplay => 3,
+            Self::Board => 4,
         }
     }
 }
@@ -56,6 +58,11 @@ pub enum Button {
     Sound,
     Graphics,
     Gameplay,
+    Board,
+    BoardRow(usize),
+    BoardUp,
+    BoardDown,
+    BoardTrack,
     Reset,
     Back,
     MusicLeft,
@@ -158,7 +165,9 @@ impl Panel {
     }
 }
 pub struct Assets {
-    panels: [Panel; 4],
+    panels: [Panel; 5],
+    pub(crate) boards: Vec<crate::board_selection::Entry>,
+    board_pitch: f32,
     fonts: Vec<Surface>,
     font1: Vec<Surface>,
     font3: Vec<Surface>,
@@ -191,6 +200,7 @@ impl Assets {
             "sound_menu.tm",
             "graphics_options.tm",
             "gameplay_options.tm",
+            "board_version.tm",
         ] {
             let path = format!("gamedata2/brand_new_panels/{name}");
             let mesh = CachedMesh::parse(payload(&path)?)?;
@@ -212,6 +222,7 @@ impl Assets {
                 "graphics_options.tm" => &[0, 1, 2, 3, 4, 6],
                 "gameplay_options.tm" => &[0, 1, 2, 3, 4, 6],
                 "options_menu.tm" => &[0, 1, 2, 3, 4],
+                "board_version.tm" => &[0, 1, 2, 3, 4, 7],
                 _ => &[0, 1, 2, 3],
             };
             for &part_index in static_parts {
@@ -268,9 +279,32 @@ impl Assets {
                 );
                 base.push(surface);
             }
+            let regions = if name == "board_version.tm" {
+                let named = ui_mesh::regions(&mesh, 0)?;
+                [
+                    "BOARDVERSION_TITLE_AREA",
+                    "BOARDVERSION_LISTBOX_TITLE",
+                    "BOARDVERSION_BOARDLIST",
+                    "BOARDVERSION_CANCEL_BUTTON",
+                    "BOARDVERSION_OK_BUTTON",
+                ]
+                .iter()
+                .map(|name| {
+                    named
+                        .iter()
+                        .find(|r| r.name == *name)
+                        .map(|r| r.bounds)
+                        //43af30 returns zero bounds for the absent Cancel region.
+                        .or_else(|| (*name == "BOARDVERSION_CANCEL_BUTTON").then_some([0.; 4]))
+                        .ok_or("board panel region missing")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+            } else {
+                regions
+            };
             panels.push(Panel { base, regions });
         }
-        let panels = panels.try_into().map_err(|_| "settings panel count")?;
+        let panels: [Panel; 5] = panels.try_into().map_err(|_| "settings panel count")?;
         let atlas = TextureSet::parse(payload("gamedata2/font640/textures.gtd")?)
             .map_err(|e| e.to_string())?;
         let fonts = atlas.textures[8..10].iter().map(Surface::new).collect();
@@ -278,8 +312,8 @@ impl Assets {
         let font3 = atlas.textures[6..8].iter().map(Surface::new).collect();
         let generic = TextureSet::parse(payload("gamedata2/GenericTextures640/textures.gtd")?)
             .map_err(|e| e.to_string())?;
-        let mut slider_textures = vec![Surface::solid(); 105];
-        for (i, slot) in slider_textures.iter_mut().enumerate().skip(97) {
+        let mut slider_textures = vec![Surface::solid(); 113];
+        for (i, slot) in slider_textures.iter_mut().enumerate().skip(93) {
             *slot = Surface::new(
                 generic
                     .textures
@@ -339,8 +373,13 @@ impl Assets {
         ] {
             strings.get(id).ok_or("original Settings string missing")?;
         }
+        let board_pitch =
+            openmt2001::frontend_list::Layout::from_font(panels[4].regions[2], &tab3)?.pitch;
         Ok(Self {
             panels,
+            boards: crate::board_selection::catalog(installer)?,
+            //492090's extra2 units are removed by42e000's text viewport.
+            board_pitch,
             fonts,
             font1,
             font3,
@@ -384,6 +423,8 @@ impl Assets {
             (Page::Main, Button::Sound) => 6,
             (Page::Main, Button::Graphics) => 7,
             (Page::Main, Button::Gameplay) => 10,
+            (Page::Main, Button::Board) => 11,
+            (Page::Board, Button::Back) => 4,
             (Page::Main, Button::Back) => 8,
             (Page::Main, Button::Reset) => 9,
             (Page::Sound, Button::Back) => 26,
@@ -401,7 +442,9 @@ impl Assets {
         regions.get(index).copied()
     }
     pub fn button(&self, page: Page, pointer: [f32; 2]) -> Option<Button> {
-        let buttons: &[Button] = if page == Page::Sound {
+        let buttons: &[Button] = if page == Page::Board {
+            &[Button::Back]
+        } else if page == Page::Sound {
             &[
                 Button::MusicLeft,
                 Button::MusicRight,
@@ -437,6 +480,7 @@ impl Assets {
                 Button::Sound,
                 Button::Graphics,
                 Button::Gameplay,
+                Button::Board,
                 Button::Reset,
                 Button::Back,
             ]
@@ -463,6 +507,7 @@ impl Assets {
                 Button::Sound,
                 Button::Graphics,
                 Button::Gameplay,
+                Button::Board,
                 Button::Reset,
                 Button::Back,
             ]
@@ -470,7 +515,7 @@ impl Assets {
             &[Button::Back]
         };
         buttons.iter().any(|&button| {
-            if button == Button::Reset && !reset_enabled {
+            if matches!(button, Button::Reset | Button::Board) && !reset_enabled {
                 return false;
             }
             self.bounds(page, button)
@@ -689,6 +734,7 @@ impl Assets {
             Page::Sound => 1663,
             Page::Graphics => 1586,
             Page::Gameplay => 1583,
+            Page::Board => return Err("board page needs list state".into()),
         };
         crate::ui::text_widget_style9(
             &mut fonts,
@@ -702,7 +748,12 @@ impl Assets {
                 (6, 1607, Some(Button::Sound), [110, 4, 171]),
                 (7, 1608, Some(Button::Graphics), [110, 4, 171]),
                 (10, 1609, Some(Button::Gameplay), [110, 4, 171]),
-                (11, 1610, None, [110, 4, 171]),
+                (
+                    11,
+                    1610,
+                    reset_enabled.then_some(Button::Board),
+                    [110, 4, 171],
+                ),
                 (12, 1770, None, [110, 4, 171]),
             ] {
                 let active = button.is_some();
@@ -761,7 +812,7 @@ impl Assets {
                 Page::Sound => 1666,
                 Page::Graphics => 1595,
                 Page::Gameplay => 1582,
-                Page::Main => unreachable!(),
+                Page::Main | Page::Board => unreachable!(),
             };
             if matches!(page, Page::Sound | Page::Graphics | Page::Gameplay) {
                 crate::ui::text_widget_style4(
@@ -776,7 +827,7 @@ impl Assets {
                 Page::Sound => &[(9, 1664), (17, 1665)],
                 Page::Graphics => &[(9, 1587), (18, 1591), (25, 1596)],
                 Page::Gameplay => &[(9, 1570), (14, 1572), (19, 1574), (24, 1738)],
-                Page::Main => unreachable!(),
+                Page::Main | Page::Board => unreachable!(),
             };
             for &(region, label) in rows {
                 // All three pages select font 1 and character palette entry
@@ -1001,6 +1052,10 @@ pub struct View {
     pub page: Option<Page>,
     pub graphics: GraphicsLevels,
     pub gameplay: GameplayLevels,
+    pub board: crate::board_selection::Name,
+    saved_board: crate::board_selection::Name,
+    board_row: Option<usize>,
+    board_scroll: usize,
     reset_enabled: bool,
     reset_pending: bool,
     pressed: Option<Button>,
@@ -1034,9 +1089,12 @@ impl View {
         std::mem::take(&mut self.reset_pending)
     }
     fn hit(&self, assets: &Assets, page: Page, pointer: [f32; 2]) -> Option<Button> {
+        if page == Page::Board {
+            return self.board_hit(assets, pointer);
+        }
         assets
             .button(page, pointer)
-            .filter(|button| *button != Button::Reset || self.reset_enabled)
+            .filter(|button| !matches!(button, Button::Reset | Button::Board) || self.reset_enabled)
     }
     pub fn back(&mut self) {
         self.page = match self.page {
@@ -1063,7 +1121,8 @@ impl View {
         if matches!(
             self.pressed,
             Some(
-                Button::MusicTrack
+                Button::BoardTrack
+                    | Button::MusicTrack
                     | Button::EffectsTrack
                     | Button::DistanceTrack
                     | Button::SensitivityTrack
@@ -1075,7 +1134,8 @@ impl View {
         let hit = hit.filter(|button| {
             !matches!(
                 button,
-                Button::MusicTrack
+                Button::BoardTrack
+                    | Button::MusicTrack
                     | Button::EffectsTrack
                     | Button::DistanceTrack
                     | Button::SensitivityTrack
@@ -1106,6 +1166,20 @@ impl View {
         let Some(pointer) = pointer else {
             return false;
         };
+        if self.page == Some(Page::Board) && self.pressed == Some(Button::BoardTrack) {
+            let track = crate::ui::slider_track(assets.board_scroll_bounds(), true);
+            self.board_scroll = crate::ui::slider_selection(
+                track,
+                pointer[1],
+                assets
+                    .boards
+                    .len()
+                    .saturating_sub(assets.board_visible_rows()) as i32,
+                true,
+            ) as usize;
+            self.shown = None;
+            return false;
+        }
         if self.pressed == Some(Button::DistanceTrack) {
             let value = Self::track_value(assets, Button::DistanceTrack, pointer).unwrap();
             if self.graphics.distance == value {
@@ -1149,12 +1223,41 @@ impl View {
         let hit = pointer.and_then(|p| self.hit(assets, page, p));
         if pressed {
             self.pressed = hit;
+            //42eae0 stages the list row on mouse-down;492590 waits for Ok
+            //before changing the profile's board or any city text.
+            if let Some(Button::BoardRow(row)) = hit {
+                self.board_row = Some(row);
+                self.shown = None;
+            }
             return self.drag(assets, pointer, levels);
         }
         let activated = (hit == self.pressed).then_some(hit).flatten();
         self.pressed = None;
         match activated {
-            Some(Button::Back) => self.back(),
+            Some(Button::Back) => {
+                if page == Page::Board
+                    && let Some(entry) = self.board_row.and_then(|row| assets.boards.get(row))
+                {
+                    self.board = entry.name;
+                }
+                self.back();
+            }
+            Some(Button::Board) => {
+                self.page = Some(Page::Board);
+                self.board_row = assets.boards.iter().position(|b| b.name == self.board);
+                let visible = assets.board_visible_rows();
+                self.board_scroll = self
+                    .board_row
+                    .map_or(0, |row| (row + 1).saturating_sub(visible));
+                self.shown = None;
+            }
+            Some(Button::BoardRow(row)) => {
+                self.board_row = Some(row);
+                self.shown = None;
+            }
+            Some(Button::BoardTrack) => {}
+            Some(Button::BoardUp) => self.scroll_boards(assets, 1),
+            Some(Button::BoardDown) => self.scroll_boards(assets, -1),
             Some(Button::Reset) => {
                 // 496add calls 4c1c50 then 4c25d0 without leaving Settings
                 // or opening a confirmation. SysSetup Multitexture is not
@@ -1253,7 +1356,17 @@ impl View {
             reset_enabled: self.reset_enabled,
         };
         if self.shown != Some(state) {
-            self.prepared = Some(assets.prepare_with_options(renderer, state)?);
+            self.prepared = Some(if page == Page::Board {
+                assets.prepare_board(
+                    renderer,
+                    self.board_row,
+                    self.board_scroll,
+                    hovered,
+                    self.pressed,
+                )?
+            } else {
+                assets.prepare_with_options(renderer, state)?
+            });
             self.shown = Some(state);
         }
         Ok(())
@@ -1379,9 +1492,9 @@ mod graphics_tests {
                 assert!(!assets.action_cursor_hover(page, Some([x, b + 0.01]), true));
             }
         }
-        for region in [11, 12] {
-            // Board and Credits remain unavailable in the engine.
-            let [l, t, r, b] = assets.panel(Page::Main).regions[region];
+        {
+            // Credits remains outside the board-selection implementation.
+            let [l, t, r, b] = assets.panel(Page::Main).regions[12];
             assert!(!assets.action_cursor_hover(
                 Page::Main,
                 Some([(l + r) * 0.5, (t + b) * 0.5]),
@@ -1626,3 +1739,6 @@ mod settings_reset_tests;
 #[cfg(test)]
 #[path = "settings_draw_tests.rs"]
 mod settings_draw_tests;
+
+#[path = "settings_board.rs"]
+mod board_panel;

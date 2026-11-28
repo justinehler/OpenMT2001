@@ -48,6 +48,12 @@ type Callback = unsafe extern "C" fn(
     usize,
 ) -> c_int;
 unsafe extern "C" {
+    fn mt4_prompt_dismiss_binding(
+        runtime: *mut c_void,
+        name: *const c_char,
+        begin: u32,
+        finish: u32,
+    ) -> c_int;
     fn mt4_event_binding(
         runtime: *mut c_void,
         name: *const c_char,
@@ -305,6 +311,19 @@ impl Runtime {
     pub fn register(&mut self, name: &str, id: u32) -> Result<(), String> {
         let name = CString::new(name).map_err(|_| "Lua function name contains NUL")?;
         self.check(unsafe { mt4_register(self.raw.as_ptr(), name.as_ptr(), id) })
+    }
+    /// Begin returns the active prompt context (None means no modal). The C
+    /// boundary calls its nonzero dismiss catch, then finish unlinks the head.
+    pub fn register_prompt_dismiss(
+        &mut self,
+        name: &str,
+        begin: u32,
+        finish: u32,
+    ) -> Result<(), String> {
+        let name = CString::new(name).map_err(|_| "Lua function name contains NUL")?;
+        self.check(unsafe {
+            mt4_prompt_dismiss_binding(self.raw.as_ptr(), name.as_ptr(), begin, finish)
+        })
     }
     /// Copy the existing registered global function closure into a table's raw
     /// member. Preserves its identity and the table's numeric-property tag.

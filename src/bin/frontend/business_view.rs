@@ -66,6 +66,13 @@ fn information_heading_style(info: usize) -> (usize, usize, usize) {
     (0, 16, [30, 1405][info])
 }
 impl Assets {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)
+    }
+
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],

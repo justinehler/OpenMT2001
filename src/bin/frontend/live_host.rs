@@ -1641,32 +1641,7 @@ impl Host {
             return Ok(());
         }
         self.collect_script_prompts(session);
-        let active = session.hooks.script_prompt();
-        let before = session.hooks.commands.len();
         session.dispatch_session_event("TutorialEvent", callback as i32, assets, false)?;
-        if session.hooks.commands[before..]
-            .iter()
-            .any(|(command, _)| matches!(command, level_script::Command::TutorialDismissPrompt))
-        {
-            // Native43bed0 skips dismissal when its active byte+345 is zero.
-            if let Some(message) = active {
-                if message.dismissal_id != 0 {
-                    session.dispatch_session_event(
-                        "InterfacePromptDismiss",
-                        message.dismissal_id as i32,
-                        assets,
-                        false,
-                    )?;
-                }
-                if message.dismissal_id == 0 {
-                    session.hooks.close_script_prompt(false);
-                }
-                session
-                    .hooks
-                    .script_prompt_closes
-                    .push(session.hooks.commands.len());
-            }
-        }
         self.collect_script_prompts(session);
         Ok(())
     }
@@ -1697,32 +1672,11 @@ impl Host {
         };
         // Tutorials 10/11 attach pick gates to prompts too. The active queue
         // head supplies the continuation, independently of its button count.
-        let message = session
+        session
             .hooks
             .script_prompt()
             .ok_or("Tutorial pick has no active prompt")?;
-        let before = session.hooks.commands.len();
         session.dispatch_session_event("Picked3D", callback, assets, false)?;
-        if session.hooks.commands[before..]
-            .iter()
-            .any(|(command, _)| matches!(command, level_script::Command::TutorialDismissPrompt))
-        {
-            if message.dismissal_id != 0 {
-                session.dispatch_session_event(
-                    "InterfacePromptDismiss",
-                    message.dismissal_id as i32,
-                    assets,
-                    false,
-                )?;
-            }
-            if message.dismissal_id == 0 {
-                session.hooks.close_script_prompt(false);
-            }
-            session
-                .hooks
-                .script_prompt_closes
-                .push(session.hooks.commands.len());
-        }
         self.collect_script_prompts(session);
         Ok(true)
     }
@@ -2727,7 +2681,7 @@ impl Host {
                     let distance = camera.into_iter().zip(position)
                         .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
                     crate::transport_audio::submit(&transport_audio,
-                        crate::transport_audio::Operation::Environment { call, distance })?;
+                        crate::transport_audio::Operation::Environment { call, distance, position })?;
                     Ok(0)
                 }
                 Event::Command(openmt2001::live_commands::Event::Construction(
@@ -4700,6 +4654,10 @@ mod account_posting_tests;
 #[cfg(test)]
 #[path = "live_host/modal_tests.rs"]
 mod modal_tests;
+
+#[cfg(test)]
+#[path = "live_host/prompt_dismiss_tests.rs"]
+mod prompt_dismiss_tests;
 
 #[cfg(test)]
 #[path = "../../account_posting_test_support.rs"]

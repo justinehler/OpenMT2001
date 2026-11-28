@@ -1,7 +1,9 @@
 use super::*;
 
-fn synthetic_assets() -> Assets {
+pub(super) fn synthetic_assets() -> Assets {
     let mut assets = Assets {
+        boards: Vec::new(),
+        board_pitch: 11.,
         panels: std::array::from_fn(|_| Panel {
             base: Vec::new(),
             regions: (0..35)

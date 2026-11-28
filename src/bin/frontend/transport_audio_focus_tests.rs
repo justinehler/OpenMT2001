@@ -2,10 +2,12 @@ use super::*;
 use crate::audio_bus::focus::{Action, Guards, SharedAudio};
 
 include!("transport_audio_construction_crane_tests.rs");
+include!("transport_audio_spatial_tests.rs");
 
 fn owner() -> (Player, SharedAudio, rodio::mixer::MixerSource) {
     let samples = vec![0.5; 65536];
     let assets = Assets {
+        spatial_enabled: false,
         train_motion: samples.clone(),
         train_toot: samples.clone(),
         road_ambient: samples.clone(),
@@ -179,12 +181,17 @@ fn ship_suppressed_engine_keeps_creation_factor_while_horn_refreshes() {
     ] {
         let (mut player, audio, mut output) = owner();
         let expected = 0.034197945; // Two independently mapped q99 sources at p25.
-        player.apply(Operation::Environment { call, distance: 0. });
+        player.apply(Operation::Environment {
+            call,
+            distance: 0.,
+            position: [0.; 3],
+        });
         window(&mut output, expected, true);
         audio.apply(Action::Suspend, guards);
         window(&mut output, expected, true);
         let update = call;
         player.apply(Operation::Environment {
+            position: [0.; 3],
             call: update,
             distance: 0.,
         });
@@ -193,6 +200,7 @@ fn ship_suppressed_engine_keeps_creation_factor_while_horn_refreshes() {
         audio.apply(Action::Resume, guards);
         window(&mut output, expected / 2., true);
         player.apply(Operation::Environment {
+            position: [0.; 3],
             call: update,
             distance: 0.,
         });
@@ -221,10 +229,12 @@ fn crane_creation_stays_zero_until_actual_refresh_consumes_current_factor() {
     for id in [27, 28, 29, 31] {
         let (mut player, audio, mut output) = owner();
         let cue = Operation::Environment {
+            position: [0.; 3],
             call: EnvironmentCall::Cue(id),
             distance: 0.,
         };
         let refresh = Operation::Environment {
+            position: [0.; 3],
             call: EnvironmentCall::Refresh,
             distance: 0.,
         };
@@ -825,6 +835,7 @@ fn ship_unique_fallback_loses_handle_without_changing_or_stopping_active_voice()
         player.assets.ship_horn.fill(0.);
         player.assets.block_factory.fill(0.);
         let ship = |distance| Operation::Environment {
+            position: [0.; 3],
             call: EnvironmentCall::Ship(1),
             distance,
         };
@@ -897,17 +908,20 @@ fn ship_unique_fallback_loses_handle_without_changing_or_stopping_active_voice()
 fn ship_leaving_before_suppression_releases_returned_engine_handle() {
     let (mut player, _, mut output) = owner();
     player.apply(Operation::Environment {
+        position: [0.; 3],
         call: EnvironmentCall::Ship(0),
         distance: 0.,
     });
     window(&mut output, 0.034197945, true);
     player.apply(Operation::Environment {
+        position: [0.; 3],
         call: EnvironmentCall::Ship(0),
         distance: 801.,
     });
     assert!(player.ship_engine.is_none() && player.ship_horn.is_none());
     window(&mut output, 0., false);
     player.apply(Operation::Environment {
+        position: [0.; 3],
         call: EnvironmentCall::Ship(0),
         distance: 0.,
     });
@@ -921,6 +935,7 @@ fn ship_finished_horn_is_not_retriggered_by_admitted_updates() {
     player.assets.ship_engine.fill(0.);
     player.assets.ship_horn = vec![0.5; 128];
     let ship = Operation::Environment {
+        position: [0.; 3],
         call: EnvironmentCall::Ship(1),
         distance: 0.,
     };

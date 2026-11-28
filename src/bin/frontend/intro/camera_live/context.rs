@@ -177,8 +177,7 @@ pub enum NavigationUi {
 
 #[derive(Clone, Copy)]
 pub enum SoundBoundary {
-    /// Explicitly conditional on the existing mono/2D backend. The current
-    /// backend has no listener setter; this does not implement native v40/58.
+    /// Kept for callers which do not require a listener boundary.
     Existing2d,
     RequireOriginalListener,
 }
@@ -541,7 +540,8 @@ impl super::endpoint::Context for UiContext<'_> {
         }
     }
 
-    fn pending_sound(&mut self, _current: Pose) -> Result<(), String> {
+    fn pending_sound(&mut self, current: Pose) -> Result<(), String> {
+        publish_listener(&mut self.view.transport_audio_player, current);
         pending_sound_service(self.view, self.sound)
     }
 
@@ -908,10 +908,15 @@ mod caller_join_tests;
 ///witness. It never waits; PCM completion uses the view's SAME Route fence.
 pub(crate) fn pending_sound_service(
     view: &mut Inspection,
-    sound: SoundBoundary,
+    _sound: SoundBoundary,
 ) -> Result<(), String> {
-    if matches!(sound, SoundBoundary::RequireOriginalListener) {
-        return Err("Existing 2D audio has no native current-pose listener consumer".into());
-    }
     super::audio::service_available(view)
+}
+
+/// Sample calls this before owner.sample interpolates the camera (4b9c7e).
+pub(crate) fn publish_listener(player: &mut crate::transport_audio::Player, current: Pose) {
+    player.set_listener(
+        current.eye.map(f32::from_bits),
+        current.target.map(f32::from_bits),
+    );
 }

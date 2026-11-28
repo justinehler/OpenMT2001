@@ -437,6 +437,15 @@ pub struct Assets {
     backing_color: u32,
 }
 impl Assets {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) -> Result<(), String> {
+        self.currency = board.row(2)?.to_vec();
+        self.currency_left = board.row(3)?.first() == Some(&0x4c);
+        Ok(())
+    }
+
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],

@@ -10,13 +10,13 @@ fn rows<const N: usize>(r: &mut Input<'_>, dst: &mut [[u8; N]]) -> Result<(), St
     }
     Ok(())
 }
-pub(super) fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
+pub fn encode(s: &Session<'_>) -> Result<Vec<u8>, String> {
     encode_parts(&s.world.road_network, &s.road_traffic, &s.transport)
 }
-pub(super) fn encode_parts(
-    network: &openmt2001::traffic::road::construction::RoadNetwork,
-    roads: &openmt2001::traffic::road::runtime::RoadTraffic,
-    t: &openmt2001::traffic::scene::Scene,
+pub fn encode_parts(
+    network: &crate::traffic::road::construction::RoadNetwork,
+    roads: &crate::traffic::road::runtime::RoadTraffic,
+    t: &crate::traffic::scene::Scene,
 ) -> Result<Vec<u8>, String> {
     let mut out = Output(vec![]);
     for b in [
@@ -77,7 +77,7 @@ pub(super) fn encode_parts(
     ]));
     Ok(out.0)
 }
-pub(super) fn restore(s: &mut Session<'_>, bytes: &[u8]) -> Result<(), String> {
+pub fn restore(s: &mut Session<'_>, bytes: &[u8]) -> Result<(), String> {
     let mut r = Input::new(bytes);
     let network = &mut s.world.road_network;
     rows(&mut r, &mut network.roads)?;
@@ -91,7 +91,7 @@ pub(super) fn restore(s: &mut Session<'_>, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() != 200 * 284 {
         return Err("V2 vehicle auxiliary pool size invalid".into());
     }
-    s.road_traffic.auxiliaries = openmt2001::resident::AuxiliaryPool::from_slots(
+    s.road_traffic.auxiliaries = crate::resident::AuxiliaryPool::from_slots(
         bytes
             .chunks_exact(284)
             .map(|b| b.try_into().unwrap())
