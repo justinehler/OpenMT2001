@@ -104,7 +104,12 @@ fn transport_creation_and_explicit_update_consume_current_factor_for_all_beds() 
             0.008034706,
         ),
         ("crowd", Operation::ResidentCrowd(40.), 1, 0.0041924706),
-        ("coast", Operation::Coast { camera_z: -300. }, 1, 0.012955972),
+        (
+            "coast",
+            Operation::Coast { camera_z: -300. },
+            1,
+            0.012955972,
+        ),
         ("aircraft", route(0), 2, 0.0094074085),
         ("motion", route(7), 1, 0.010976654),
         ("toot", route(8), 1, 0.010976654),
@@ -367,7 +372,7 @@ fn coast_camera_z_threshold_clipping_and_source_levels() {
         (-151., 0),
         (-151.875, 1),
         (-153.75, 2),
-        (-163.125, 6), // A second f32 store before truncation would yield 7.
+        (-163.125, 6),  // A second f32 store before truncation would yield 7.
         (-226.875, 40), // Likewise 40, not 41.
         (-225., 40),
         (f32::from_bits((-300f32).to_bits() - 1), 79),
@@ -408,7 +413,10 @@ fn coast_mutes_and_resumes_same_advancing_loop() {
     let muted_position = player.coast.as_ref().unwrap().get_pos();
     audio.set_effects(100);
     player.apply(Operation::Coast { camera_z: -225. });
-    assert_eq!(player.coast.as_ref().unwrap().volume(), audio.source_gain(40));
+    assert_eq!(
+        player.coast.as_ref().unwrap().volume(),
+        audio.source_gain(40)
+    );
     for _ in 0..4096 {
         let _ = output.next();
     }
@@ -487,4 +495,136 @@ fn coast_missing_sample_is_silent_and_supplied_mixed_case_pcm_loads() {
     window(&mut output, 0.012955972, true);
     window(&mut output, 0.012955972, false); // Loops beyond the WAV's 64 samples.
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+fn city_inputs(tick: u32) -> CityInputs {
+    let mut categories = [[0; 0x17c]; 52];
+    for category in &mut categories {
+        category[4] = 1;
+        category[0xe0..0xe4].copy_from_slice(&1000f32.to_le_bytes());
+        category[0xe4..0xe8].copy_from_slice(&1000f32.to_le_bytes());
+    }
+    // A nearby factory and resident category let the frame update both beds.
+    categories[2][0xe0..0xe4].copy_from_slice(&0f32.to_le_bytes());
+    categories[2][0xe4..0xe8].copy_from_slice(&(-300f32).to_le_bytes());
+    categories[2][0x88..0x8c].copy_from_slice(&200i32.to_le_bytes());
+    let mut construction = [[None; 2]; 4];
+    insert_construction_source(&mut construction, 0, [0., 40., -300.], [0., 40., -300.]).unwrap();
+    CityInputs {
+        reciprocal_sum: 0.1,
+        nearest: [[101f32.to_bits(), 0, 0]; 3],
+        categories,
+        construction,
+        hour: 8,
+        tick,
+        previous_tick: 100,
+        initial_random_state: 205,
+    }
+}
+
+#[test]
+fn city_frame_keeps_construction_during_pause_and_repositions_before_resume() {
+    let (mut player, _, mut output) = owner();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let mut host = crate::live_host::Host::new([0., 40., -300.]);
+    host.transport_audio = Some(sender.clone());
+    host.set_running(true);
+    submit(
+        &Some(sender.clone()),
+        Operation::City(Box::new(city_inputs(101))),
+    )
+    .unwrap();
+    player.drain_requests(Some(&receiver));
+    assert!(player.construction[0].is_none()); // Receiving inputs does not service a frame.
+    player.service_frame([0., 40., -300.]);
+    let sink = player.construction[0].as_ref().unwrap();
+    let retained = sink as *const rodio::Sink;
+    let near_gain = sink.volume();
+    assert!(near_gain > 0.);
+    assert!(player.coast.as_ref().unwrap().volume() > 0.);
+    assert!(player.resident_crowd.as_ref().unwrap().volume() > 0.);
+    assert!(player.block_sinks[2].as_ref().unwrap().volume() > 0.);
+    let pcm: Vec<_> = output.by_ref().take(4096).collect();
+    assert!(pcm[2048..].iter().all(|sample| *sample > 0.));
+    let position = sink.get_pos();
+
+    host.set_running(false);
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
+    for camera in [[200., 40., -300.], [400., 40., 0.], [0., 40., -300.]] {
+        player.drain_requests(Some(&receiver));
+        player.service_frame(camera);
+        let sink = player.construction[0].as_ref().unwrap();
+        assert_eq!(sink as *const rodio::Sink, retained);
+        if camera[0] == 200. {
+            assert!(sink.volume() > 0. && sink.volume() < near_gain);
+        } else if camera[0] == 400. {
+            assert_eq!(sink.volume(), 0.);
+            assert_eq!(player.coast.as_ref().unwrap().volume(), 0.);
+            assert!(player.resident_crowd.is_none());
+            assert!(player.block_sinks[2].is_none());
+        } else {
+            assert_eq!(sink.volume(), near_gain);
+            assert!(player.coast.as_ref().unwrap().volume() > 0.);
+        }
+        output.by_ref().take(4096).for_each(drop);
+        assert_eq!(player.city.as_ref().unwrap().tick, 101);
+    }
+    assert!(player.construction[0].as_ref().unwrap().get_pos() > position);
+    host.set_running(true);
+    let mut finished = city_inputs(102);
+    finished.construction = [[None; 2]; 4];
+    submit(&Some(sender), Operation::City(Box::new(finished))).unwrap();
+    player.drain_requests(Some(&receiver));
+    assert!(player.construction[0].is_some());
+    player.service_frame([0., 40., -300.]);
+    assert!(player.construction[0].is_none());
+    player.apply(Operation::Reset);
+    player.service_frame([0., 40., -300.]);
+    assert!(player.city.is_none() && player.coast.is_none());
+}
+
+#[test]
+fn city_frame_render_frequency_preserves_simulation_inputs_and_shared_park_delta() {
+    let run = |renders_per_tick| {
+        let (mut player, _, mut output) = owner();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for tick in 101..=110 {
+            let input = city_inputs(tick);
+            let categories = input.categories;
+            let construction = input.construction;
+            submit(&Some(sender.clone()), Operation::City(Box::new(input))).unwrap();
+            player.drain_requests(Some(&receiver));
+            for _ in 0..renders_per_tick {
+                // Extra request polls must not consume a simulation delta.
+                player.drain_requests(Some(&receiver));
+                player.service_frame([0., 40., -300.]);
+                let retained = player.city.as_ref().unwrap();
+                assert_eq!(retained.categories, categories);
+                assert_eq!(retained.construction, construction);
+                assert_eq!(retained.reciprocal_sum, 0.1);
+                assert_eq!(retained.nearest, [[101f32.to_bits(), 0, 0]; 3]);
+                assert_eq!(retained.previous_tick, tick);
+            }
+            output.by_ref().take(4096).for_each(drop);
+        }
+        player.block_controller.take().unwrap()
+    };
+    let every_tick = run(1);
+    assert_eq!(run(2), every_tick);
+    assert_eq!(run(5), every_tick);
+
+    // Several simulation updates can arrive before the next rendered frame.
+    // Keep the previous frame tick, not the immediately preceding producer tick.
+    let (mut player, _, _) = owner();
+    for tick in 101..=110 {
+        let mut input = city_inputs(tick);
+        input.previous_tick = tick - 1;
+        player.apply(Operation::City(Box::new(input)));
+    }
+    assert_eq!(player.city.as_ref().unwrap().previous_tick, 100);
+    player.service_frame([0., 40., -300.]);
+    assert_eq!(player.block_controller.as_ref().unwrap(), &every_tick);
 }
