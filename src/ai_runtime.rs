@@ -72,10 +72,7 @@ pub enum Call {
         additional_delay: u32,
     },
     AuctionAction(ai_messages::offers::auction::Call),
-    TimetableDiagnostic {
-        secondary: bool,
-        code: i32,
-    },
+    Diagnostic(crate::ai_diagnostic::Diagnostic),
     Management(crate::ai_dispatch::Event),
     Strategy(crate::ai_strategy::Call),
     Continuation(crate::ai_strategy::ContinuationCall),
@@ -458,6 +455,9 @@ fn offer_predecision(
         image,
         |call, player| {
             match call {
+                offers::Call::Diagnostic(diagnostic) => {
+                    callback(Call::Diagnostic(diagnostic), player, profiles, world)?;
+                }
                 offers::Call::AuctionBudget => {
                     let scoring = valuation::scoring::World {
                         image,
@@ -1637,9 +1637,9 @@ pub fn advance(
                     controls.day_tick as i32,
                     secondary,
                     &world.categories.map(|c|c[0x6c]),
-                    |code, player, profiles| {
+                    |diagnostic, player, profiles| {
                         callback(
-                            Call::TimetableDiagnostic { secondary, code },
+                            Call::Diagnostic(diagnostic),
                             player,
                             profiles,
                             world,
@@ -1707,6 +1707,10 @@ pub fn advance(
                             let mut state=inbox::World{auction:auction.record[..128].try_into().unwrap(),categories:world.categories,loan,image,identity:world.proposal_identity};
                             // Explicit host policy for bytes the native local constructor leaves untouched.
                             inbox::activate(player,call.arguments[0],&packet,[0;104],&mut state)?;0
+                        },
+                        0x4e6960 => {
+                            let diagnostic = crate::ai_diagnostic::Diagnostic::original(call.arguments[0], call.arguments[2])?;
+                            return callback(Call::Diagnostic(diagnostic), player, context.profiles, world);
                         },
                         _=>return callback(Call::Message(call), player, context.profiles, world),
                     };

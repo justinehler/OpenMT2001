@@ -28,7 +28,7 @@ pub enum Call {
         recipient: i32,
     },
     Execute(u32),
-    Diagnostic(u32),
+    Diagnostic(crate::ai_diagnostic::Diagnostic),
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Reply {
@@ -275,7 +275,10 @@ pub fn predecision(
             if let Some(offer) = found {
                 let at = offset(player, offer)?;
                 if word(&player.bytes, at + 0x10) != 9 {
-                    callback(Call::Diagnostic(0x53d9fc), player)?;
+                    callback(
+                        Call::Diagnostic(crate::ai_diagnostic::Diagnostic::warning(0x53d9fc)),
+                        player,
+                    )?;
                 }
                 let amount =
                     crate::x87::Sum::from_f32(f32::from_bits(word(&player.bytes, at + 0x60)))?
@@ -298,13 +301,19 @@ pub fn predecision(
                 player.bytes[0xb86] = 0;
                 put(&mut player.bytes, 0xb70, 10);
             } else {
-                callback(Call::Diagnostic(0x53da30), player)?;
+                callback(
+                    Call::Diagnostic(crate::ai_diagnostic::Diagnostic::warning(0x53da30)),
+                    player,
+                )?;
             }
             put(&mut player.bytes, 0xc, u32::MAX);
         }
         3 => (),
         _ => {
-            callback(Call::Diagnostic(0x53d9e0), player)?;
+            callback(
+                Call::Diagnostic(crate::ai_diagnostic::Diagnostic::warning(0x53d9e0)),
+                player,
+            )?;
         }
     }
     Ok(())
@@ -393,7 +402,17 @@ mod tests {
                         }
                         (0x469bf0, vec![reference])
                     }
-                    Call::Diagnostic(text) => (0x4e6960, vec![text]),
+                    Call::Diagnostic(diagnostic) => {
+                        let crate::ai_diagnostic::Message::Original(text) = diagnostic.message
+                        else {
+                            panic!("expected original diagnostic text")
+                        };
+                        assert_eq!(
+                            diagnostic.kind,
+                            crate::ai_diagnostic::Kind::RecoverableWarning
+                        );
+                        (0x4e6960, vec![text])
+                    }
                 };
                 let mut row = [0; 9];
                 row[0] = address;
