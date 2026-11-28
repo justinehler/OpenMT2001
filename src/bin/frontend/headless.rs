@@ -25,15 +25,23 @@ original files (either --fixtures, or --assets/--scene-root/--executable):
   --language DIR        default: <executable dir>/../US/language/usa
 
 run:
-  --ticks N             logic ticks to advance (default 250)
+  --ticks N             logic ticks to advance (default 250; no limit with
+                        --autosaves)
   --every N             report every N ticks (default: on each new hour)
   --difficulty 0|1|2    fresh city only (default 1)
   --character N         fresh city only (default 4)
-  --seed N              fresh city host seed, decimal or 0x hex (default 0)
+  --seed N              host RNG seed, decimal or 0x hex (default 0). A save
+                        start uses it for the startup reseed the load runs on.
   --frame-ms N          host milliseconds per frame (default 40)
   --dialogs first|last|stop   reply to modal dialogs (default last)
   --auctions pass|wait|stop   human auction turn (default pass)
   --write-save FILE     write a V2 save when the run ends
+  --autosave-dir DIR    save starts: write each midnight autosave, as the
+                        original does, and copy it to DIR/autosave-N.sav
+  --autosaves N         stop after the Nth autosave (needs --autosave-dir)
+  --rng                 print the live RNG stream states, keyed by original
+                        registry address, at the start, at each autosave and
+                        at the end
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,7 +64,10 @@ pub enum Start {
         character: usize,
         seed: u32,
     },
-    Save(PathBuf),
+    Save {
+        path: PathBuf,
+        seed: u32,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Paths {
@@ -76,6 +87,9 @@ pub struct Options {
     pub dialogs: DialogPolicy,
     pub auctions: AuctionPolicy,
     pub write_save: Option<PathBuf>,
+    pub autosave_dir: Option<PathBuf>,
+    pub autosaves: Option<u32>,
+    pub rng: bool,
 }
 
 impl Paths {
@@ -143,8 +157,12 @@ impl Options {
         let (mut installer, mut scene, mut executable) = (None, None, None);
         let (mut scripts, mut language) = (None, None);
         let (mut difficulty, mut character, mut seed) = (1, 4, 0);
+        let mut ticks = None;
         let mut options = Self {
-            start: Start::Save(PathBuf::new()),
+            start: Start::Save {
+                path: PathBuf::new(),
+                seed: 0,
+            },
             paths: Paths {
                 installer: PathBuf::new(),
                 scene: PathBuf::new(),
@@ -158,6 +176,9 @@ impl Options {
             dialogs: DialogPolicy::Last,
             auctions: AuctionPolicy::Pass,
             write_save: None,
+            autosave_dir: None,
+            autosaves: None,
+            rng: false,
         };
         while let Some(arg) = args.next() {
             let mut value = || args.next().ok_or(format!("{arg} requires a value"));
@@ -170,7 +191,7 @@ impl Options {
                 "--executable" => executable = Some(PathBuf::from(value()?)),
                 "--scripts" => scripts = Some(PathBuf::from(value()?)),
                 "--language" => language = Some(PathBuf::from(value()?)),
-                "--ticks" => options.ticks = number(&value()?)?,
+                "--ticks" => ticks = Some(number(&value()?)?),
                 "--every" => {
                     let every = number(&value()?)?;
                     if every == 0 {
@@ -215,6 +236,15 @@ impl Options {
                     }
                 }
                 "--write-save" => options.write_save = Some(PathBuf::from(value()?)),
+                "--rng" => options.rng = true,
+                "--autosave-dir" => options.autosave_dir = Some(PathBuf::from(value()?)),
+                "--autosaves" => {
+                    let count = number(&value()?)?;
+                    if count == 0 {
+                        return Err("--autosaves must be positive".into());
+                    }
+                    options.autosaves = Some(count);
+                }
                 "--help" | "-h" => return Err(USAGE.into()),
                 other => return Err(format!("unknown option {other}\n{USAGE}")),
             }
@@ -226,12 +256,25 @@ impl Options {
                 character,
                 seed,
             },
-            (None, Some(path)) => Start::Save(path),
+            (None, Some(path)) => Start::Save { path, seed },
             _ => return Err(format!("give exactly one of --scenario or --save\n{USAGE}")),
         };
-        if options.write_save.is_some() && !matches!(options.start, Start::Save(_)) {
+        // A run that stops at autosaves has no tick budget unless one is given.
+        options.ticks = ticks.unwrap_or(if options.autosaves.is_some() {
+            u32::MAX
+        } else {
+            250
+        });
+        let save_start = matches!(options.start, Start::Save { .. });
+        if options.write_save.is_some() && !save_start {
             // A fresh city has no camera records to save; no camera owner runs headless.
             return Err("--write-save needs a run started with --save".into());
+        }
+        if options.autosave_dir.is_some() && !save_start {
+            return Err("--autosave-dir needs a run started with --save".into());
+        }
+        if options.autosaves.is_some() && options.autosave_dir.is_none() {
+            return Err("--autosaves needs --autosave-dir".into());
         }
         options.paths = match (fixtures, installer, scene, executable) {
             (true, None, None, None) => Paths::from_fixtures(scripts, language)?,
@@ -260,6 +303,10 @@ pub enum End {
         callback: u32,
     },
     Auction,
+    /// The requested number of midnight autosaves was written.
+    Autosaves {
+        count: u32,
+    },
     /// The logic clock did not move for `frames` consecutive frames.
     Stalled {
         frames: u32,
@@ -324,6 +371,30 @@ pub fn digest(session: &crate::fresh_city::Session<'_>) -> String {
         world.buildings.len(),
         world.objective.reached,
     )
+}
+
+/// Live RNG stream states keyed by the original registry node that owns them
+/// (`0x93c818` is the registry's master stream).
+pub fn rng_report(session: &crate::fresh_city::Session<'_>, tick: u32) -> String {
+    let creation = &session.world.creation;
+    let streams = [
+        (0x93c818, session.random_registry.process[0]),
+        (0x560a08, session.build_random_state),
+        (0x68c028, session.particle_random_state),
+        (0x6ae190, creation.preference_rng),
+        (0x6fc8a8, creation.initialization_rng.movement),
+        (0x6fc8c0, creation.identity_rng),
+        (0x6fcd40, creation.initialization_rng.constructor),
+        (0x7a4190, creation.initialization_rng.objective),
+        (0x8b06e8, session.credit_random_state),
+        (0x93aee8, session.script_random_state),
+        (0x940cf8, session.demolition_effects.random),
+    ];
+    let fields: Vec<String> = streams
+        .iter()
+        .map(|(node, state)| format!("\"{node:#x}\":{state}"))
+        .collect();
+    format!("{{\"tick\":{tick},\"rng\":{{{}}}}}", fields.join(","))
 }
 
 /// Stand-in for the auction renderer thread (`auction_bridge::View`). It keeps
@@ -517,7 +588,7 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
                 task[12..16].copy_from_slice(&0f32.to_le_bytes());
             }
         }
-        Start::Save(path) => {
+        Start::Save { path, seed } => {
             let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let save = openmt2001::save::SaveFile::parse(&bytes)?;
             save.validate_compatibility(&image)?;
@@ -547,7 +618,7 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
             session = crate::fresh_city::Session::load_original_joined(
                 tables.inputs(&scenario, difficulty, 0, b"Loaded original game")?,
                 crate::fresh_city::Policy {
-                    seed: 0,
+                    seed: *seed,
                     auxiliary_prior_bytes: [0; 0x11c],
                 },
                 &bytes,
@@ -573,6 +644,16 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
     let presenter = auction_stand_in(auction_requests);
     host.process_runtime = Some(process);
     host.auction_renderer = Some(auction_renderer);
+    if let Some(dir) = &options.autosave_dir {
+        // No camera owner runs headless: autosaves keep the loaded cameras,
+        // like --write-save, and the city view (interface mode 0).
+        let cameras = session
+            .saved_cameras
+            .ok_or("--autosave-dir: the loaded save has no camera records")?;
+        host.fixed_save_cameras = Some((cameras, 0));
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        host.autosave_profile_root = Some(dir.join("profile"));
+    }
     let setup = (|| {
         host.begin_presentation(&session)?;
         host.set_running(true);
@@ -630,9 +711,13 @@ fn advance(
     let start = session.world.clock.timing[0];
     let target = start.saturating_add(options.ticks);
     line(out, &digest(session))?;
+    if options.rng {
+        line(out, &rng_report(session, start))?;
+    }
     let mut last_tick = start;
     let mut last_hour = session.world.clock.hour();
     let mut still = 0;
+    let mut autosaves = 0;
     let end = loop {
         let tick = session.world.clock.timing[0];
         if tick >= target {
@@ -643,6 +728,11 @@ fn advance(
             break End::Failure(error.clone());
         }
         let tick = session.world.clock.timing[0];
+        if let Some(status) = host.autosave_status.take()
+            && let Some(end) = collect_autosave(status, options, &mut autosaves, session, out)?
+        {
+            break end;
+        }
         if let Some(end) = respond(host, session, assets, options, out)? {
             break end;
         }
@@ -665,6 +755,9 @@ fn advance(
         }
     };
     line(out, &digest(session))?;
+    if options.rng {
+        line(out, &rng_report(session, session.world.clock.timing[0]))?;
+    }
     line(
         out,
         &format!(
@@ -674,6 +767,7 @@ fn advance(
                 End::Result { context } => format!("result {context}"),
                 End::Dialog { callback } => format!("dialog {callback:#x}"),
                 End::Auction => "auction".to_owned(),
+                End::Autosaves { count } => format!("autosaves {count}"),
                 End::Stalled { frames } => format!("stalled {frames} frames"),
                 End::Failure(error) => format!("failure: {}", error.escape_debug()),
             },
@@ -681,6 +775,43 @@ fn advance(
         ),
     )?;
     Ok(end)
+}
+
+/// Copy a written autosave to `autosave-N.sav` and report it.
+fn collect_autosave(
+    status: crate::save_menu::AutosaveStatus,
+    options: &Options,
+    count: &mut u32,
+    session: &crate::fresh_city::Session<'_>,
+    out: &mut dyn Write,
+) -> Result<Option<End>, String> {
+    let path = match status {
+        crate::save_menu::AutosaveStatus::Saved(path) => path,
+        crate::save_menu::AutosaveStatus::Failed { error, .. } => {
+            return Ok(Some(End::Failure(format!("autosave failed: {error:?}"))));
+        }
+    };
+    let Some(dir) = &options.autosave_dir else {
+        return Ok(None);
+    };
+    *count += 1;
+    let copy = dir.join(format!("autosave-{count}.sav"));
+    std::fs::copy(&path, &copy).map_err(|e| format!("{}: {e}", copy.display()))?;
+    line(
+        out,
+        &format!(
+            "{{\"tick\":{},\"autosave\":{count},\"file\":{:?}}}",
+            session.world.clock.timing[0],
+            copy.display().to_string()
+        ),
+    )?;
+    if options.rng {
+        line(out, &rng_report(session, session.world.clock.timing[0]))?;
+    }
+    Ok(options
+        .autosaves
+        .filter(|&limit| *count >= limit)
+        .map(|count| End::Autosaves { count }))
 }
 
 /// Apply the fixed human policy to what the host is presenting.
@@ -778,7 +909,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> i32 {
                 .unwrap_or_else(|_| Err("headless runner panicked".into()))
         });
     match result {
-        Ok(End::Ticks | End::Result { .. }) => 0,
+        Ok(End::Ticks | End::Result { .. } | End::Autosaves { .. }) => 0,
         Ok(_) => 1,
         Err(error) => {
             eprintln!("{error}");
@@ -851,6 +982,57 @@ mod tests {
         assert!(with(&["--save", "y", "--frame-ms", "0"]).is_err());
         assert!(with(&["--scenario", "x", "--write-save", "z"]).is_err());
         assert!(with(&["--save", "y", "--write-save", "z"]).is_ok());
+        assert!(with(&["--scenario", "x", "--autosave-dir", "d"]).is_err());
+        assert!(with(&["--save", "y", "--autosaves", "1"]).is_err());
+        assert!(with(&["--save", "y", "--autosave-dir", "d", "--autosaves", "0"]).is_err());
+    }
+
+    #[test]
+    fn save_starts_take_a_seed_and_autosave_limits() {
+        let options = parse(&[
+            "--save",
+            "a.sav",
+            "--seed",
+            "7",
+            "--autosave-dir",
+            "out",
+            "--autosaves",
+            "2",
+            "--assets",
+            "a",
+            "--scene-root",
+            "b",
+            "--executable",
+            "c/d",
+        ])
+        .unwrap();
+        assert_eq!(
+            options.start,
+            Start::Save {
+                path: "a.sav".into(),
+                seed: 7
+            }
+        );
+        assert_eq!(options.autosave_dir, Some(PathBuf::from("out")));
+        assert_eq!((options.autosaves, options.ticks), (Some(2), u32::MAX));
+        let bounded = parse(&[
+            "--save",
+            "a.sav",
+            "--autosave-dir",
+            "out",
+            "--autosaves",
+            "2",
+            "--ticks",
+            "9",
+            "--assets",
+            "a",
+            "--scene-root",
+            "b",
+            "--executable",
+            "c/d",
+        ])
+        .unwrap();
+        assert_eq!(bounded.ticks, 9);
     }
 
     fn fixture_options(start: Start, ticks: u32) -> Options {
@@ -863,6 +1045,9 @@ mod tests {
             dialogs: DialogPolicy::Last,
             auctions: AuctionPolicy::Pass,
             write_save: None,
+            autosave_dir: None,
+            autosaves: None,
+            rng: false,
         }
     }
 
@@ -911,7 +1096,10 @@ mod tests {
     #[ignore = "requires original assets and the in-progress original save"]
     fn original_save_advances_deterministically() {
         let report = twice(&fixture_options(
-            Start::Save(openmt2001::fixtures::path("SAVE_ONE")),
+            Start::Save {
+                path: openmt2001::fixtures::path("SAVE_ONE"),
+                seed: 0,
+            },
             500,
         ));
         assert!(

@@ -297,6 +297,9 @@ pub struct Host {
     /// Authority supplied only by Inputs::session_worker selected profile.
     pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
     pub autosave_status: Option<crate::save_menu::AutosaveStatus>,
+    /// Headless only: the camera records and interface view an autosave
+    /// writes when neither camera owner is installed.
+    pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
     camera_suppliers: Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
     presentation_started: bool,
@@ -529,6 +532,7 @@ impl Host {
             ui_camera_source: None,
             autosave_profile_root: None,
             autosave_status: None,
+            fixed_save_cameras: None,
             camera_suppliers: None,
             time_runtime: Default::default(),
             presentation_started: false,
@@ -2189,6 +2193,7 @@ impl Host {
         let ai_warnings = &mut self.ai_warnings;
         let camera_bridge = &mut self.camera_bridge;
         let ui_camera_source = &self.ui_camera_source;
+        let fixed_save_cameras = self.fixed_save_cameras;
         let ui_camera_epoch = session.world.topology.epoch();
         let interface_ticks = self.interface_ticks;
         let mut autosave_retired = false;
@@ -2267,6 +2272,8 @@ impl Host {
                             };
                             let raw=observation.raw_capture.ok_or_else(||Failure::UnsupportedState("Raw camera capture absent".into()))?;
                             (raw.cameras,raw.interface_mode.map_err(Failure::UnsupportedState)?)
+                        } else if let (None,Some((records,mode)))=(ui_camera_source,fixed_save_cameras) {
+                            (openmt2001::camera::bank::Capture::from_records(records),mode)
                         } else {
                             let source=ui_camera_source.as_ref().ok_or(Failure::UnsupportedCamera)?;
                             let snapshot=source.read(ui_camera_epoch).map_err(Failure::UnsupportedState)?;
