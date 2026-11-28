@@ -56,6 +56,7 @@ pub enum Button {
     Sound,
     Graphics,
     Gameplay,
+    Reset,
     Back,
     MusicLeft,
     MusicTrack,
@@ -138,6 +139,7 @@ struct MenuState {
     levels: Levels,
     graphics: GraphicsLevels,
     gameplay: GameplayLevels,
+    reset_enabled: bool,
 }
 
 struct Panel {
@@ -366,6 +368,7 @@ impl Assets {
             (Page::Main, Button::Graphics) => 7,
             (Page::Main, Button::Gameplay) => 10,
             (Page::Main, Button::Back) => 8,
+            (Page::Main, Button::Reset) => 9,
             (Page::Sound, Button::Back) => 26,
             (Page::Sound, Button::MusicLeft) => 15,
             (Page::Sound, Button::MusicTrack) => 14,
@@ -429,6 +432,7 @@ impl Assets {
                 Button::Sound,
                 Button::Graphics,
                 Button::Gameplay,
+                Button::Reset,
                 Button::Back,
             ]
         };
@@ -440,7 +444,12 @@ impl Assets {
     }
     /// Original action widgets request cursor1 only inside their enabled bounds.
     /// Slider, radio and checkbox subclasses have separate cursor contracts.
-    pub fn action_cursor_hover(&self, page: Page, pointer: Option<[f32; 2]>) -> bool {
+    pub fn action_cursor_hover(
+        &self,
+        page: Page,
+        pointer: Option<[f32; 2]>,
+        reset_enabled: bool,
+    ) -> bool {
         let Some([x, y]) = pointer else {
             return false;
         };
@@ -449,12 +458,16 @@ impl Assets {
                 Button::Sound,
                 Button::Graphics,
                 Button::Gameplay,
+                Button::Reset,
                 Button::Back,
             ]
         } else {
             &[Button::Back]
         };
         buttons.iter().any(|&button| {
+            if button == Button::Reset && !reset_enabled {
+                return false;
+            }
             self.bounds(page, button)
                 .is_some_and(|[l, t, r, b]| x > l && x < r && y >= t && y <= b)
         })
@@ -628,6 +641,7 @@ impl Assets {
                 levels,
                 graphics,
                 gameplay: GameplayLevels::default(),
+                reset_enabled: true,
             },
         )
     }
@@ -643,6 +657,7 @@ impl Assets {
             levels,
             graphics,
             gameplay,
+            reset_enabled,
         } = state;
         let panel = self.panel(page);
         let mut art = Surface::solid();
@@ -701,10 +716,14 @@ impl Assets {
                 panel.regions[9],
                 [166, 133, 0],
                 ButtonState {
-                    flag_330: false,
-                    flag_334: false,
-                    flag_335: false,
-                    flag_333: true,
+                    flag_330: reset_enabled
+                        && hovered == Some(Button::Reset)
+                        && pressed == Some(Button::Reset),
+                    flag_334: reset_enabled
+                        && hovered == Some(Button::Reset)
+                        && pressed == Some(Button::Reset),
+                    flag_335: reset_enabled && hovered == Some(Button::Reset),
+                    flag_333: !reset_enabled,
                 },
             )?;
             crate::ui::text_widget_style9(
@@ -712,7 +731,11 @@ impl Assets {
                 &self.tab1,
                 self.label(1139),
                 panel.regions[9],
-                0xff646464,
+                if reset_enabled {
+                    0xffffffff
+                } else {
+                    0xff646464
+                },
             )?;
         } else {
             let heading = match page {
@@ -977,6 +1000,8 @@ pub struct View {
     pub page: Option<Page>,
     pub graphics: GraphicsLevels,
     pub gameplay: GameplayLevels,
+    reset_enabled: bool,
+    reset_pending: bool,
     pressed: Option<Button>,
     button_down: bool,
     click_latch: Option<Button>,
@@ -991,11 +1016,26 @@ impl View {
         self.shown = None;
     }
     pub fn open(&mut self) {
+        self.reset_enabled = true;
+        self.reset_pending = false;
         self.page = Some(Page::Main);
         self.pressed = None;
         self.button_down = false;
         self.click_latch = None;
         self.shown = None;
+    }
+    /// Original 496950 disables Default while a city is active.
+    pub fn open_in_game(&mut self) {
+        self.open();
+        self.reset_enabled = false;
+    }
+    pub fn take_reset(&mut self) -> bool {
+        std::mem::take(&mut self.reset_pending)
+    }
+    fn hit(&self, assets: &Assets, page: Page, pointer: [f32; 2]) -> Option<Button> {
+        assets
+            .button(page, pointer)
+            .filter(|button| *button != Button::Reset || self.reset_enabled)
     }
     pub fn back(&mut self) {
         self.page = match self.page {
@@ -1014,7 +1054,7 @@ impl View {
     pub fn pointer_click_cue(&mut self, assets: &Assets, pointer: Option<[f32; 2]>) -> bool {
         let hit = self
             .page
-            .and_then(|page| pointer.and_then(|p| assets.button(page, p)));
+            .and_then(|page| pointer.and_then(|p| self.hit(assets, page, p)));
         if !self.button_down {
             self.click_latch = None;
             return false;
@@ -1105,7 +1145,7 @@ impl View {
             return false;
         };
         self.button_down = pressed;
-        let hit = pointer.and_then(|p| assets.button(page, p));
+        let hit = pointer.and_then(|p| self.hit(assets, page, p));
         if pressed {
             self.pressed = hit;
             return self.drag(assets, pointer, levels);
@@ -1114,6 +1154,21 @@ impl View {
         self.pressed = None;
         match activated {
             Some(Button::Back) => self.back(),
+            Some(Button::Reset) => {
+                // 496add calls 4c1c50 then 4c25d0 without leaving Settings
+                // or opening a confirmation. SysSetup Multitexture is not
+                // a profile default, so retain the engine water switch.
+                self.reset_pending = true;
+                let old = *levels;
+                *levels = Levels::default();
+                self.graphics = GraphicsLevels {
+                    water_effects: self.graphics.water_effects,
+                    ..GraphicsLevels::default()
+                };
+                self.gameplay = GameplayLevels::default();
+                self.shown = None;
+                return *levels != old;
+            }
             Some(Button::Sound) => {
                 self.page = Some(Page::Sound);
                 self.shown = None;
@@ -1186,7 +1241,7 @@ impl View {
         let Some(page) = self.page else {
             return Ok(());
         };
-        let hovered = pointer.and_then(|p| assets.button(page, p));
+        let hovered = pointer.and_then(|p| self.hit(assets, page, p));
         let state = MenuState {
             page,
             hovered,
@@ -1194,6 +1249,7 @@ impl View {
             levels,
             graphics: self.graphics,
             gameplay: self.gameplay,
+            reset_enabled: self.reset_enabled,
         };
         if self.shown != Some(state) {
             self.prepared = Some(assets.prepare_with_options(renderer, state)?);
@@ -1304,28 +1360,32 @@ mod graphics_tests {
             (Page::Graphics, &[Button::Back][..]),
             (Page::Gameplay, &[Button::Back][..]),
         ] {
-            assert!(!assets.action_cursor_hover(page, None));
-            assert!(!assets.action_cursor_hover(page, Some([1., 1.])));
+            assert!(!assets.action_cursor_hover(page, None, true));
+            assert!(!assets.action_cursor_hover(page, Some([1., 1.]), true));
             for &button in buttons {
                 let [l, t, r, b] = assets.bounds(page, button).unwrap();
                 let x = (l + r) * 0.5;
                 let y = (t + b) * 0.5;
                 assert!(
-                    assets.action_cursor_hover(page, Some([x, y])),
+                    assets.action_cursor_hover(page, Some([x, y]), true),
                     "{page:?} {button:?}"
                 );
-                assert!(!assets.action_cursor_hover(page, Some([l, y])));
-                assert!(!assets.action_cursor_hover(page, Some([r, y])));
-                assert!(assets.action_cursor_hover(page, Some([x, t])));
-                assert!(assets.action_cursor_hover(page, Some([x, b])));
-                assert!(!assets.action_cursor_hover(page, Some([x, t - 0.01])));
-                assert!(!assets.action_cursor_hover(page, Some([x, b + 0.01])));
+                assert!(!assets.action_cursor_hover(page, Some([l, y]), true));
+                assert!(!assets.action_cursor_hover(page, Some([r, y]), true));
+                assert!(assets.action_cursor_hover(page, Some([x, t]), true));
+                assert!(assets.action_cursor_hover(page, Some([x, b]), true));
+                assert!(!assets.action_cursor_hover(page, Some([x, t - 0.01]), true));
+                assert!(!assets.action_cursor_hover(page, Some([x, b + 0.01]), true));
             }
         }
-        for region in [9, 11, 12] {
-            // disabled Main defaults, Board and Credits
+        for region in [11, 12] {
+            // Board and Credits remain unavailable in the engine.
             let [l, t, r, b] = assets.panel(Page::Main).regions[region];
-            assert!(!assets.action_cursor_hover(Page::Main, Some([(l + r) * 0.5, (t + b) * 0.5])));
+            assert!(!assets.action_cursor_hover(
+                Page::Main,
+                Some([(l + r) * 0.5, (t + b) * 0.5]),
+                true
+            ));
         }
         for (page, button) in [
             (Page::Sound, Button::MusicLeft),
@@ -1337,7 +1397,7 @@ mod graphics_tests {
             (Page::Gameplay, Button::InvertVertical),
         ] {
             let [l, t, r, b] = assets.bounds(page, button).unwrap();
-            assert!(!assets.action_cursor_hover(page, Some([(l + r) * 0.5, (t + b) * 0.5])));
+            assert!(!assets.action_cursor_hover(page, Some([(l + r) * 0.5, (t + b) * 0.5]), true));
         }
         let [l, t, r, b] = assets.panel(Page::Sound).regions[25];
         assert_eq!(
@@ -1544,6 +1604,7 @@ mod graphics_tests {
                             levels: audio,
                             graphics: view.graphics,
                             gameplay,
+                            reset_enabled: true,
                         },
                     )
                     .unwrap();
@@ -1556,3 +1617,7 @@ mod graphics_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "settings_reset_tests.rs"]
+mod settings_reset_tests;

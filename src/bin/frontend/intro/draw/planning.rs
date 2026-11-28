@@ -99,7 +99,7 @@ impl Intro {
                                     planning.close = true;
                                 }
                                 Ok(Some(quote)) => {
-                                    if planning.request().ok() == planning.quote_request {
+                                    if planning.quote_matches_request() {
                                         planning.diagnostic = if quote.category_locked {
                                             Some("This block is locked".into())
                                         } else if !quote.placement_allowed {

@@ -260,6 +260,8 @@ pub struct Request {
     pub packed_model: u32,
     pub kind: u32,
     pub quality: u8,
+    /// Human confirmation gate; inspection and scripted submission ignore it.
+    /// The live planner only confirms after it has received a preview quote.
     pub displayed_quote: f32,
     pub business: u32,
 }

@@ -3343,6 +3343,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
         }
     }
     let total = accepted.expect("original fresh city has a valid construction preview");
+    form.displayed_quote = total;
     let construction_camera = construction_camera.unwrap();
     let (reply, answer) = mpsc::channel();
     loaded
@@ -3359,7 +3360,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
     assert!(submitted.submitted);
     assert_eq!(
         submitted.total, total,
-        "UI NaN quote is never financial input"
+        "confirmation carries the displayed quote"
     );
     let (reply, answer) = mpsc::channel();
     loaded
@@ -4479,7 +4480,9 @@ fn starting_out_early_controls_and_options_remain_live() {
                 reply,
             })
             .unwrap();
-        if answer.recv().unwrap().unwrap().unwrap().allowed() {
+        let quote = answer.recv().unwrap().unwrap().unwrap();
+        if quote.allowed() {
+            form.displayed_quote = quote.total;
             allowed = true;
             break;
         }
@@ -4660,4 +4663,8 @@ fn starting_out_early_controls_and_options_remain_live() {
     drop(sender);
     drop(loaded);
     worker.join().unwrap();
+}
+
+mod announcement_save_test {
+    include!("../intro_announcement_save_test.rs");
 }

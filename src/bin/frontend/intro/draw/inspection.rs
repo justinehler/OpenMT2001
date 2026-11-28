@@ -84,7 +84,9 @@ impl Intro {
                     .or(navigator_tooltip)
                     .or_else(|| {
                         visible_icon.zip(view.pointer.map(|point| {
-                            if speed_icon.is_some() {
+                            //New CityMode captions use the same 640-space
+                            //pointer as the live focus owner and speed help.
+                            if speed_icon.is_some() || matches!(icon, Some(1150..=1153)) {
                                 point.map(|v| v / 2)
                             } else {
                                 point

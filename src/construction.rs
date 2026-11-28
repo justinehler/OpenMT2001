@@ -21,6 +21,27 @@ pub fn affordable(cash: f32, allowance: i32, requested: f32, override_gate: bool
         .is_lt()
 }
 
+/// Original424600/48a6d0 admits the retained planner price before48ac20
+/// obtains the command's current components. Producers without a displayed
+/// quote retain their current-price affordability check.
+pub fn confirmation_quote(
+    cash: f32,
+    allowance: i32,
+    displayed_quote: Option<f32>,
+    current_quote: impl FnOnce() -> Result<f32, String>,
+) -> Result<(f32, bool), String> {
+    if let Some(displayed) = displayed_quote
+        && !affordable(cash, allowance, displayed, false)
+    {
+        return Ok((displayed, false));
+    }
+    let current = current_quote()?;
+    Ok((
+        current,
+        displayed_quote.is_some() || affordable(cash, allowance, current, false),
+    ))
+}
+
 /// Ordered original failure UI calls. The shared predicate never displays UI.
 pub const INSUFFICIENT_CASH_CALLS: [(u32, &[u32]); 6] = [
     (0x43be20, &[]),

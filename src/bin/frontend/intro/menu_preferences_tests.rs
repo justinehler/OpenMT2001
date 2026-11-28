@@ -224,3 +224,102 @@ fn equal_level_profile_change_forwards_once_preserving_saved_snapshot_and_desire
     owner.borrow_mut().observe(true).unwrap();
     assert_eq!(owner.borrow().audio.music_level(), 63);
 }
+
+#[test]
+#[ignore = "requires original Menu assets and executable; CPU only"]
+fn settings_reset_actual_menu_commits_defaults_to_process_and_selected_profile() {
+    let scratch = Scratch::new();
+    let (mut menu, assets, owner) = fixture(&scratch.0);
+    menu.participant_test_named_profile("Reset selected");
+    let selected = menu.current_settings_path().unwrap();
+    let initial = Snapshot {
+        audio: Levels {
+            music: 12,
+            effects: 24,
+        },
+        graphics: GraphicsLevels {
+            water_effects: false,
+            detail: 0,
+            filtering: 0,
+            distance: 90,
+        },
+        gameplay: GameplayLevels {
+            auto_rotate: false,
+            invert_vertical: true,
+            hardware_cursor: true,
+            mouse_sensitivity: 99,
+        },
+    };
+    initial.save(&selected).unwrap();
+    let other = crate::profile_settings::profile_path(&scratch.0, b"Reset other");
+    initial.save(&other).unwrap();
+    let token_path = crate::menu::preferred_token::path(&scratch.0, b"Reset selected");
+    let other_token = crate::menu::preferred_token::path(&scratch.0, b"Reset other");
+    crate::menu::preferred_token::Token::new(7)
+        .unwrap()
+        .save(&token_path)
+        .unwrap();
+    crate::menu::preferred_token::Token::new(8)
+        .unwrap()
+        .save(&other_token)
+        .unwrap();
+    let mut profile = None;
+    let mut saved = Snapshot::default();
+    let mut error = None;
+    let mut audio = Levels::default();
+    let mut graphics = GraphicsLevels::default();
+    let mut gameplay = GameplayLevels::default();
+    let mut cells = Cells {
+        profile: &mut profile,
+        saved: &mut saved,
+        error: &mut error,
+        audio: &mut audio,
+        graphics: &mut graphics,
+        gameplay: &mut gameplay,
+    };
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    assert_eq!(menu.settings_snapshot(), initial);
+    menu.selected = Some(5);
+    menu.activate();
+    let [l, t, r, b] = assets.bounds(Page::Main, Button::Reset).unwrap();
+    menu.pointer([(l + r) * 0.5, (t + b) * 0.5]);
+    assert!(menu.enabled_cursor_hover());
+    menu.mouse_button(true);
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    assert_eq!(menu.settings_snapshot(), initial);
+    menu.mouse_button(false);
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    let expected = Snapshot {
+        graphics: GraphicsLevels {
+            water_effects: false,
+            ..GraphicsLevels::default()
+        },
+        ..Snapshot::default()
+    };
+    assert_eq!(menu.settings.page, Some(Page::Main));
+    assert_eq!(menu.settings_snapshot(), expected);
+    assert_eq!(*cells.saved, expected);
+    assert_eq!(
+        (*cells.audio, *cells.graphics, *cells.gameplay),
+        (expected.audio, expected.graphics, expected.gameplay)
+    );
+    assert_eq!(owner.borrow().audio.music_level(), 63);
+    assert_eq!(
+        owner.borrow().audio.factor(),
+        crate::music_gain::normalized_percentage(83)
+    );
+    assert_eq!(Snapshot::load(&selected).unwrap(), expected);
+    assert_eq!(Snapshot::load(&other).unwrap(), initial);
+    assert_eq!(
+        crate::menu::preferred_token::Token::load(&token_path)
+            .unwrap()
+            .index(),
+        0
+    );
+    assert_eq!(
+        crate::menu::preferred_token::Token::load(&other_token)
+            .unwrap()
+            .index(),
+        8
+    );
+}
