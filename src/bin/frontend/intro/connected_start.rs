@@ -238,7 +238,7 @@ impl SceneInputs {
         hash_part(
             &mut hash,
             "startup-version",
-            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-4").as_bytes(),
+            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-5").as_bytes(),
         );
         for (name, bytes) in [
             ("original-executable", self.executable.as_slice()),

@@ -695,7 +695,7 @@ impl Runtime<'_> {
                 descriptor: d,
                 size,
             } => {
-                if word(&d, 4) == 0x1f && d[16] == 0 && word(&d, 12) == 0 {
+                if !network[0] && word(&d, 4) == 0x1f && d[16] == 0 && word(&d, 12) == 0 {
                     auction::apply(
                         auction::Command {
                             action: word(&d, 20),
@@ -768,6 +768,26 @@ impl Runtime<'_> {
     ) -> Result<(), String> {
         use crate::{ai_messages::offers::auction::admission, player_manager::word};
         match word(d, 4) {
+            0x27..=0x2a => {
+                // Auction notifications are host-produced, addressed inbox
+                // messages. Only the destination's local human consumes them.
+                let slot = usize::from(d[0x15]);
+                let player = self
+                    .roster
+                    .manager
+                    .players
+                    .get_mut(slot)
+                    .ok_or("auction notification recipient leaves roster")?;
+                if player.reference == self.roster.status.current_player {
+                    let packet = d[..48]
+                        .try_into()
+                        .map_err(|_| "auction notification extent")?;
+                    crate::player_messages::enqueue(player, packet, || {
+                        self.message_context.arena.allocate()
+                    })?;
+                }
+                Ok(())
+            }
             0x19 => {
                 let category = word(d, 20);
                 let row = self

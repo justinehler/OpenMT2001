@@ -1187,3 +1187,6 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
         right.world.ledgers.businesses
     );
 }
+
+#[path = "auction_tests.rs"]
+mod auction_tests;
