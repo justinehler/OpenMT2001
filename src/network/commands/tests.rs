@@ -37,6 +37,134 @@ fn transfer() -> Transfer {
     }
 }
 
+#[test]
+fn deadline_grant_sequence_starts_at_25_and_waits_for_each_ceiling() {
+    let (_, binding, _) = owner();
+    let mut host = Adapter::new(binding, true, 0, vec![Some(0), Some(4)]).unwrap();
+    let client = Adapter::new(binding, false, 4, vec![Some(0), Some(4)]).unwrap();
+    assert_eq!(client.advance_deadline(25), Err(Error::Peer));
+    let mut grants = vec![];
+    for tick in 0..=100 {
+        match host.advance_deadline(tick) {
+            Ok(Message::CommandDeadline {
+                after,
+                tick: ceiling,
+            }) => {
+                assert_eq!(after, 0);
+                grants.push((tick, ceiling));
+                host.admit_deadline(after, ceiling).unwrap();
+            }
+            Err(Error::Phase) => assert!(tick < host.deadline()),
+            other => panic!("unexpected grant: {other:?}"),
+        }
+        assert_eq!(host.deadline(), (tick / 25 + 1) * 25);
+    }
+    assert_eq!(grants, [(25, 50), (50, 75), (75, 100), (100, 125)]);
+}
+
+#[test]
+fn event_card_schema_and_role_gates_keep_player_separate_from_connection() {
+    use crate::event_cards::lifecycle::Command;
+    let command = Command {
+        card: 65,
+        player: 2,
+        target: 599,
+    };
+    let request = Request::event_card(0, &command);
+    assert_eq!(request.owner, 3);
+    assert_eq!(request.payload.len(), 12);
+    assert_eq!(request.event_card_payload().unwrap(), command);
+    for message in [
+        Message::CommandRequest(request.clone()),
+        Message::CommandCommit(Commit {
+            order: 0,
+            due: 125,
+            request: request.clone(),
+        }),
+    ] {
+        let frame = Frame {
+            session: [7; 16],
+            sequence: 0,
+            message,
+        };
+        assert_eq!(
+            codec::decode(&codec::encode(&frame).unwrap()).unwrap(),
+            frame
+        );
+    }
+    for length in [0, 11, 13, 32] {
+        let mut wrong = request.clone();
+        wrong.payload.resize(length, 0);
+        assert_eq!(wrong.validate(), Err(Error::Unsupported));
+    }
+    for (at, value) in [(0, 83u32), (4, 0), (4, 6), (8, u32::MAX), (8, 600)] {
+        let mut wrong = request.clone();
+        wrong.payload[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        assert_eq!(wrong.validate(), Err(Error::Row));
+    }
+    let mut wrong = request.clone();
+    wrong.owner = 0;
+    assert_eq!(wrong.validate(), Err(Error::Row));
+    let (owner, binding, peer) = owner();
+    let owners = vec![Some(0), None, Some(4)];
+    let mut host = Adapter::new(binding, true, 0, owners.clone()).unwrap();
+    let client = Adapter::new(binding, false, 4, owners).unwrap();
+    for player in 0..3 {
+        let request = Request::event_card(0, &Command { player, ..command });
+        assert_eq!(
+            host.authorize(0, &request),
+            if player < 2 { Ok(()) } else { Err(Error::Peer) }
+        );
+        assert_eq!(
+            client.authorize(4, &request),
+            if player == 2 {
+                Ok(())
+            } else {
+                Err(Error::Peer)
+            }
+        );
+    }
+    let admitted = ingress(
+        &owner,
+        binding,
+        peer,
+        Message::CommandRequest(request.clone()),
+        0,
+    )
+    .unwrap();
+    let Message::CommandCommit(commit) = host
+        .receive(&owner, admitted, 100, Targets::default())
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!((commit.order, commit.due), (0, 125));
+    let replay = ingress(&owner, binding, peer, Message::CommandRequest(request), 1).unwrap();
+    assert_eq!(
+        host.receive(&owner, replay, 100, Targets::default()),
+        Err(Error::Sequence)
+    );
+    let wrong = ingress(
+        &owner,
+        binding,
+        peer,
+        Message::CommandRequest(Request::event_card(
+            1,
+            &Command {
+                player: 1,
+                ..command
+            },
+        )),
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        host.receive(&owner, wrong, 100, Targets::default()),
+        Err(Error::Peer)
+    );
+    assert_eq!(host.next_commit, 1);
+}
+
 fn construction(owner: i8) -> crate::construction::Command {
     crate::construction::Command {
         category: 7,
@@ -236,7 +364,6 @@ fn every_unqualified_family_and_auction_transfer_schema_is_explicitly_unsupporte
         0x14,
         0x17,
         0x19,
-        0x1a,
         0x1b,
         0x1c,
         0x1d,

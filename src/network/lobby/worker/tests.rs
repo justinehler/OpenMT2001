@@ -420,6 +420,8 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     let cb = client.bind_world(200).unwrap();
     let mut authority = Adapter::new(hb, true, 0, vec![Some(0), Some(local_peer)]).unwrap();
     let mut replica = Adapter::new(cb, false, local_peer, vec![Some(0), Some(local_peer)]).unwrap();
+    // The simulated host is already inside its 100..125 grant window.
+    authority.admit_deadline(0, 125).unwrap();
     let (mut left, mut right) = (
         live_commands::Queue::default(),
         live_commands::Queue::default(),
@@ -450,7 +452,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     }
     let deadline = Instant::now() + WAIT;
     // Don't publish deadline125 before all requests in this test are admitted.
-    // Pump at101: the host stamps126, then closes it at105 with deadline130.
+    // Pump at101: the host stamps126; at125 it grants150.
     while left.snapshot().unwrap().len() < 2 {
         authority
             .pump(
@@ -469,7 +471,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     authority
         .pump(
             &host,
-            105,
+            125,
             &mut left,
             &mut [[0; 0x17c]; 52],
             crate::network::commands::Targets::default(),
@@ -479,7 +481,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         .unwrap();
     crate::network::commands::pause_at_limit(&mut rp, &mut rt).unwrap();
     let retained = rt.clone();
-    while replica.deadline() < 130 {
+    while replica.deadline() < 150 {
         replica
             .pump(
                 &client,
@@ -506,7 +508,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     for (paused, resumed) in retained.iter().zip(&rt) {
         assert_eq!(&paused[1..], &resumed[1..]);
     }
-    // A later frame at the SAME105 Total cannot commit a new request at130:
+    // A later frame at the SAME125 Total cannot commit a new request at150:
     // the client already has permission to run through that deadline.
     replica
         .submit(
@@ -525,7 +527,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     authority
         .pump(
             &host,
-            105,
+            125,
             &mut left,
             &mut [[0; 0x17c]; 52],
             crate::network::commands::Targets::default(),
@@ -538,7 +540,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         authority
             .pump(
                 &host,
-                106,
+                126,
                 &mut left,
                 &mut [[0; 0x17c]; 52],
                 crate::network::commands::Targets::default(),
@@ -549,7 +551,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(left.snapshot().unwrap()[2].1, 131);
+    assert_eq!(left.snapshot().unwrap()[2].1, 151);
     // Unsupported family reaches an explicit host rejection, never the queue.
     client
         .send_gameplay(
@@ -567,7 +569,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         authority
             .pump(
                 &host,
-                106,
+                126,
                 &mut left,
                 &mut [[0; 0x17c]; 52],
                 crate::network::commands::Targets::default(),
