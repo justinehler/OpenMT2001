@@ -1230,6 +1230,15 @@ impl Session<'_> {
             policy.hourly = context.hourly;
             result
         })();
+        // Inside a batch the live accounts are copied into the manager's
+        // player records only before code that reads them, the 0x48cea0
+        // player tick every fifth global tick among them. A batch can end
+        // between those copies, and a pause raised in the 0x480ec0 drain ends
+        // it before that iteration's player tick. The original keeps one
+        // record that sales update directly (0x4625c0), so copy the accounts
+        // again here: between batches the records always hold the live values
+        // the panels, saves and the next batch's first readers see.
+        let result = result.and_then(|()| self.roster.publish_accounts(&self.world.city));
         if policy.scheduler.iterations == admitted_iterations {
             policy.scheduler.iterations = requested_iterations;
         }

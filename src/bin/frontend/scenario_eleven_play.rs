@@ -159,6 +159,9 @@ fn build_reserved_owned_shop(
     None
 }
 
+/// The human's live sales count. Every caller runs between frames, where the
+/// batch-end copy keeps the manager record's +0x1b4 equal to it (and the
+/// rivals' +0x1b4, which the checks below print, equal to theirs).
 fn sold(session: &Session<'_>) -> i32 {
     let count = session.world.ledgers.players[0].retail_counters[1];
     assert_eq!(
