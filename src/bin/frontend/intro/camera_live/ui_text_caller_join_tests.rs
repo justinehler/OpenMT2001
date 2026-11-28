@@ -106,7 +106,6 @@ fn inspection(assets: &Assets) -> Inspection {
         environment_pending: None,
         environment_tick: Default::default(),
         environment_time: None,
-        last_environment_query: std::time::Instant::now(),
         last_status_query: std::time::Instant::now(),
         last_snapshot: std::time::Instant::now(),
         construction_active: Default::default(),

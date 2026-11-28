@@ -73,7 +73,6 @@ pub(crate) fn inspection_products(
         environment_pending: None,
         environment_tick: 0,
         environment_time: None,
-        last_environment_query: now,
         last_status_query: now,
         last_snapshot: now,
         construction_active: false,

@@ -920,6 +920,9 @@ impl Host {
             }
         }
     }
+    pub fn prompt_updates(&self) -> u64 {
+        self.prompt_updates
+    }
     pub fn interface_ticks(&self) -> u64 {
         self.interface_ticks
     }
