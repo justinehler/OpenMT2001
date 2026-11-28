@@ -1992,6 +1992,15 @@ impl Intro {
             state.cursor_presented();
         }
     }
+    /// The active profile's Hardware Cursor option. Off (the default) means the
+    /// original's software cursor, drawn in 640x480 UI space.
+    pub fn hardware_cursor(&self) -> bool {
+        match (&self.inspection, &self.menu) {
+            (Some(view), _) => view.settings_menu.gameplay.hardware_cursor,
+            (None, Some(menu)) => menu.settings.gameplay.hardware_cursor,
+            (None, None) => self.gameplay_levels.hardware_cursor,
+        }
+    }
     pub fn inspection_cursor_kind(&self) -> Option<usize> {
         if self.inspection.is_none() {
             // Keep the existing city indices; appended index3 is original cursor1.

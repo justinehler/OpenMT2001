@@ -169,7 +169,7 @@ impl Assets {
 struct App {
     intro_loading: std::sync::mpsc::Receiver<Result<crate::intro::Assets, String>>,
     intro: Option<crate::intro::Intro>,
-    cursors: Option<[winit::window::CustomCursor; crate::cursor::COUNT]>,
+    cursors: Option<crate::cursor::Cursors>,
     cursor_kind: Option<usize>,
     menu_onload: bool,
     modifiers: ModifiersState,
@@ -739,14 +739,8 @@ impl App {
                     if self.intro.is_none() {
                         match self.intro_loading.try_recv() {
                             Ok(Ok(mut assets)) => {
-                                match assets.cursors.take().unwrap().create(event_loop) {
-                                    Ok(cursors) => self.cursors = Some(cursors),
-                                    Err(e) => {
-                                        self.failure = Some(e);
-                                        event_loop.exit();
-                                        return;
-                                    }
-                                }
+                                self.cursors =
+                                    assets.cursors.take().map(crate::cursor::Cursors::new);
                                 let result = crate::intro::Intro::new(
                                     self.presenter.as_ref().unwrap(),
                                     assets,
@@ -866,13 +860,28 @@ impl App {
                                 self.presenter.as_ref().unwrap(),
                             );
                         }
+                        let window = &self.presenter.as_ref().unwrap().window;
+                        let size = window.inner_size();
+                        let rebuilt = match self.cursors.as_mut().map(|cursors| {
+                            cursors.update(
+                                event_loop,
+                                [size.width, size.height],
+                                intro.hardware_cursor(),
+                            )
+                        }) {
+                            Some(Ok(rebuilt)) => rebuilt,
+                            Some(Err(e)) => {
+                                self.failure = Some(e);
+                                event_loop.exit();
+                                return;
+                            }
+                            None => false,
+                        };
                         let kind = intro.inspection_cursor_kind();
-                        if self.cursor_kind != kind {
-                            let window = &self.presenter.as_ref().unwrap().window;
-                            if let Some(kind) = kind {
-                                window.set_cursor(self.cursors.as_ref().unwrap()[kind].clone());
-                            } else {
-                                window.set_cursor(winit::window::CursorIcon::Default);
+                        if rebuilt || self.cursor_kind != kind {
+                            match kind.and_then(|kind| self.cursors.as_ref()?.get(kind)) {
+                                Some(cursor) => window.set_cursor(cursor.clone()),
+                                None => window.set_cursor(winit::window::CursorIcon::Default),
                             }
                             self.cursor_kind = kind;
                         }
