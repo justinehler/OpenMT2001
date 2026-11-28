@@ -209,12 +209,72 @@ impl Assets {
             self.strings[2244].first() != Some(&0x4c),
         )
     }
+    fn value_rows(&self, data: &Inspection) -> Result<[(usize, Vec<u8>); 3], String> {
+        Ok([
+            (1118, self.money(data.base_value)?),
+            (
+                93,
+                data.rent_age.to_string().bytes().map(|b| b - 32).collect(),
+            ),
+            (
+                if data.owned { 1413 } else { 1414 },
+                data.trade_price
+                    .map(|v| self.money(v))
+                    .transpose()?
+                    .unwrap_or_default(),
+            ),
+        ])
+    }
+    fn conversion_list(&self) -> Result<openmt2001::frontend_list::Layout, String> {
+        openmt2001::frontend_list::Layout::from_font(
+            [
+                self.bounds[0],
+                self.layout.list_top,
+                self.bounds[2] - 16.,
+                self.bounds[3],
+            ],
+            &self.tabs[0],
+        )
+    }
+    fn conversion_scrollbar(&self) -> [f32; 4] {
+        [
+            self.bounds[2] - 16.,
+            self.layout.list_top,
+            self.bounds[2],
+            self.bounds[3],
+        ]
+    }
     pub fn prepare(
         &self,
         renderer: &Renderer,
         state: &View,
         name: u32,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.surfaces(state, name)?;
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+    fn surfaces(&self, state: &View, name: u32) -> Result<Vec<Surface>, String> {
         let mut surfaces = self.base.clone();
         let title = state
             .inspection
@@ -314,20 +374,7 @@ impl Assets {
                 )?;
                 if state.info == 1 {
                     //408c50 uses the separate+8c list: top+40, font3 offset3.
-                    let values = [
-                        (1118, self.money(data.base_value)?),
-                        (
-                            93,
-                            data.rent_age.to_string().bytes().map(|b| b - 32).collect(),
-                        ),
-                        (
-                            if data.owned { 1413 } else { 1414 },
-                            data.trade_price
-                                .map(|v| self.money(v))
-                                .transpose()?
-                                .unwrap_or_default(),
-                        ),
-                    ];
+                    let values = self.value_rows(data)?;
                     for (row, (label, value)) in values.into_iter().enumerate() {
                         let y = self.bounds[1] + 43. + row as f32 * self.report_line_height as f32;
                         text(
@@ -584,7 +631,7 @@ impl Assets {
                 _ => (0, None, false),
             };
             if matches!(state.mode, 2..=4) {
-                if matches!(state.mode, 3 | 4) || state.mode == 2 && data.owned {
+                if matches!(state.mode, 3 | 4) {
                     let dialog = crate::human_dialog::Dialog {
                         body: 9,
                         arguments: [
@@ -600,62 +647,43 @@ impl Assets {
                         ..Default::default()
                     };
                     let text = dialog.paragraphs(&self.strings)?.remove(0);
-                    let (lines, copy) = crate::prompt::wrap_with_gap(
+                    // 408da0 configures the owner caption with centered style4.
+                    ui::text_widget_style4(
+                        &mut font,
                         &self.tabs[0],
                         &text,
-                        (self.layout.description[2] - self.layout.description[0]).trunc() as i32,
-                        -1,
+                        self.layout.description,
+                        0xffffffff,
                     )?;
-                    for (i, pair) in lines.windows(2).enumerate() {
-                        let end = (pair[1] - 1).min(copy.len());
-                        let start = pair[0].min(end);
-                        let [l, t, r, b] = self.layout.description;
-                        ui::text_fit(
-                            &mut font,
-                            &self.tabs[0],
-                            &copy[start..end],
-                            [l, t + i as f32 * 10., r, b],
-                            false,
-                            if state.mode == 2 {
-                                self.palette[9]
-                            } else {
-                                self.color
-                            },
-                        )?;
-                    }
-                } else if state.mode == 2 {
+                } else if state.mode == 2 && !sell {
                     //4085e0 writes Buy82 into+c4 when the owner is not current.
                     text(&mut font, &self.strings[82], self.layout.description, false)?;
                 }
 
-                let cost_label = if state.mode == 4 {
-                    84
-                } else if state.mode == 3 {
-                    87
-                } else if sell {
-                    1413
-                } else {
-                    1414
-                };
-                if state.mode == 2 {
-                    //4085e0: one445520 price in+c0, not the Info1+8c list.
-                    if let Some(price) = price {
+                if state.mode == 2 && sell {
+                    // 407f60 fills the same capital/lease/sale rows as 408c50.
+                    for (row, (label, value)) in self.value_rows(data)?.into_iter().enumerate() {
+                        let y = self.bounds[1] + 3. + row as f32 * self.report_line_height as f32;
+                        let rect = [
+                            self.bounds[0],
+                            y,
+                            self.bounds[2] - 4.,
+                            self.layout.action[1],
+                        ];
+                        text(&mut font, &self.strings[label], rect, false)?;
                         ui::text_fit(
                             &mut font,
                             &self.tabs[0],
-                            &self.money(price)?,
-                            self.layout.quote,
+                            &value,
+                            rect,
                             true,
                             self.palette[9],
                         )?;
                     }
-                } else {
-                    text(
-                        &mut font,
-                        &self.strings[cost_label],
-                        self.layout.quote,
-                        false,
-                    )?;
+                } else if state.mode != 3 {
+                    if state.mode == 4 {
+                        text(&mut font, &self.strings[84], self.layout.quote, false)?;
+                    }
                     if let Some(price) = price {
                         ui::text_fit(
                             &mut font,
@@ -690,26 +718,63 @@ impl Assets {
                     self.color,
                 )?;
                 if state.mode == 3 {
-                    let top = self.layout.list_top;
+                    let list = self.conversion_list()?;
+                    let first = state
+                        .scroll
+                        .min(data.conversions.len().saturating_sub(list.visible_rows()));
                     for (i, row) in data
                         .conversions
                         .iter()
                         .enumerate()
-                        .skip(state.scroll)
-                        .take(15)
+                        .skip(first)
+                        .take(list.visible_rows())
                     {
-                        let y = top + (i - state.scroll) as f32 * 10.;
-                        if y + 10. > self.bounds[3] - 2. {
-                            break;
-                        }
-                        let rect = [self.bounds[0], y, self.bounds[2] - 12., self.bounds[3]];
+                        let rect = list.text_bounds(i - first);
                         if state.selected == Some(i) {
                             let mut tint = Surface::solid();
-                            tint.rect([rect[0], y, rect[2], y + 10.], [0xff01762f; 4]);
+                            tint.rect(list.highlight(i - first), [0xff008ed0; 4]);
                             surfaces.push(tint);
                         }
-                        text(&mut font, &self.strings[row.label as usize], rect, false)?;
+                        let price = self.money(row.price)?;
+                        let width = ui::text_width(&self.tabs[0], &price, 1.)? as f32;
+                        text(
+                            &mut font,
+                            &self.strings[row.label as usize],
+                            [rect[0], rect[1], rect[2] - width - 4., rect[3]],
+                            false,
+                        )?;
+                        ui::text_fit(
+                            &mut font,
+                            &self.tabs[0],
+                            &price,
+                            rect,
+                            true,
+                            self.palette[9],
+                        )?;
                     }
+                    let maximum = data.conversions.len().saturating_sub(list.visible_rows());
+                    let mut slider = Surface::solid();
+                    let mut controls = Vec::new();
+                    ui::Slider {
+                        bounds: self.conversion_scrollbar(),
+                        vertical: true,
+                        value: first as f32,
+                        range: [0., maximum as f32],
+                        pointer: state.pointer,
+                        pressed: state.scroll_capture,
+                    }
+                    .paint_with_extent(
+                        &mut slider,
+                        &mut controls,
+                        &self.textures,
+                        if data.conversions.is_empty() {
+                            0
+                        } else {
+                            maximum as i32 + 1
+                        },
+                    );
+                    surfaces.push(slider);
+                    surfaces.extend(controls);
                 }
             }
         }
@@ -726,28 +791,7 @@ impl Assets {
         surfaces.extend(buttons);
         surfaces.extend(title_font);
         surfaces.extend(graph_font);
-        renderer.prepare(
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        Ok(surfaces)
     }
 }
 #[derive(Default)]
@@ -768,6 +812,8 @@ pub struct View {
     pub error: Option<String>,
     pressed: Option<usize>,
     hovered: Option<usize>,
+    pointer: Option<[f32; 2]>,
+    scroll_capture: Option<[f32; 2]>,
     tutorial_control: Option<u32>,
     tutorial_producer: Option<(u32, u32)>,
     pub refresh: bool,
@@ -828,6 +874,18 @@ impl View {
             }
         }
     }
+    fn scroll_to_pointer(&mut self, assets: &Assets, point: [f32; 2]) {
+        if let (Some(data), Ok(list)) = (&self.inspection, assets.conversion_list()) {
+            let maximum = data.conversions.len().saturating_sub(list.visible_rows());
+            self.scroll = (ui::slider_selection(
+                ui::slider_track(assets.conversion_scrollbar(), true),
+                point[1],
+                maximum as i32,
+                true,
+            ) as usize)
+                .min(maximum);
+        }
+    }
     pub fn captured(&self) -> bool {
         self.pressed.is_some()
     }
@@ -857,10 +915,25 @@ impl View {
             7 => Some(36),
             8 => Some(37),
             100..=101 => Some(15 + (self.hovered.unwrap() - 100) as u32),
+            200..=202 => None,
             9.. => Some(40),
         }
     }
     pub fn pointer(&mut self, assets: &Assets, point: Option<[f32; 2]>) {
+        self.pointer = point;
+        if self.mode == 3
+            && let (Some(data), Ok(list)) = (&self.inspection, assets.conversion_list())
+        {
+            self.scroll = self
+                .scroll
+                .min(data.conversions.len().saturating_sub(list.visible_rows()));
+        }
+        if self.mode == 3
+            && self.pressed == Some(202)
+            && let Some(p) = point
+        {
+            self.scroll_to_pointer(assets, p);
+        }
         let Some(data) = &self.inspection else {
             self.hovered = None;
             return;
@@ -886,25 +959,60 @@ impl View {
             && data.owned
             && self.action_pending.is_none())
         .then(|| {
-            point.and_then(|[x, y]| {
-                let top = assets.layout.list_top;
-                (x >= assets.bounds[0]
-                    && x < assets.bounds[2] - 12.
-                    && y >= top
-                    && y < assets.bounds[3] - 2.)
-                    .then(|| self.scroll + ((y - top) / 10.) as usize)
-                    .filter(|&row| row < data.conversions.len())
+            point.and_then(|p| {
+                assets
+                    .conversion_list()
+                    .ok()?
+                    .hit(p, self.scroll, data.conversions.len())
             })
         })
         .flatten();
+        let scrollbar = (self.mode == 3)
+            .then(|| {
+                point.and_then(|p| {
+                    let bounds = assets.conversion_scrollbar();
+                    ui::slider_arrows(bounds, true)
+                        .into_iter()
+                        .position(|r| hit(r, p))
+                        .map(|i| 200 + i)
+                        .or_else(|| hit(ui::slider_track(bounds, true), p).then_some(202))
+                })
+            })
+            .flatten();
         self.hovered = mode
             .or(information.map(|i| 100 + i))
             .or(action.then_some(6))
             .or(detail.map(|i| 7 + i))
+            .or(scrollbar)
             .or(row.map(|i| 9 + i));
     }
     pub fn mouse(&mut self, assets: &Assets, point: Option<[f32; 2]>, down: bool) {
         self.pointer(assets, point);
+        if down && matches!(self.hovered, Some(200..=202)) {
+            self.pressed = self.hovered;
+            self.scroll_capture = point;
+            match self.hovered {
+                Some(200) => self.scroll = self.scroll.saturating_sub(1),
+                Some(201) => {
+                    let maximum = self.inspection.as_ref().map_or(0, |data| {
+                        data.conversions.len().saturating_sub(
+                            assets.conversion_list().map_or(0, |l| l.visible_rows()),
+                        )
+                    });
+                    self.scroll = self.scroll.saturating_add(1).min(maximum);
+                }
+                Some(202) => {
+                    if let Some(p) = point {
+                        self.scroll_to_pointer(assets, p);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if !down {
+            self.scroll_capture = None;
+        }
         let Some(data) = &self.inspection else {
             if !down {
                 self.pressed = None;
@@ -917,24 +1025,14 @@ impl View {
                 && data.permissions.convert
                 && data.owned
                 && self.action_pending.is_none()
-                && let Some([x, y]) = point
+                && let Some(p) = point
+                && let Ok(list) = assets.conversion_list()
+                && let Some(row) = list.hit(p, self.scroll, data.conversions.len())
             {
-                let top = assets.layout.list_top;
-                if x >= assets.bounds[0]
-                    && x < assets.bounds[2] - 12.
-                    && y >= top
-                    && y < assets.bounds[3] - 2.
-                {
-                    let row = self.scroll + ((y - top) / 10.) as usize;
-                    if row < data.conversions.len() {
-                        self.selected = Some(row);
-                        //408430 emits7 after an eligible candidate's quote is
-                        //shown, including a repeated selection. The worker's
-                        //conversion list already applies fit/owner/pending gates.
-                        self.tutorial_control = Some(7);
-                        self.tutorial_producer = Some((40, 7));
-                    }
-                }
+                self.selected = Some(row);
+                // 408430 emits7 after an eligible candidate quote is shown.
+                self.tutorial_control = Some(7);
+                self.tutorial_producer = Some((40, 7));
             }
             return;
         }
@@ -952,6 +1050,7 @@ impl View {
                 } else {
                     self.mode = mode;
                     self.selected = None;
+                    self.scroll = 0;
                     self.refresh = true;
                 }
             }
@@ -1620,3 +1719,7 @@ pub(crate) mod facing_fixture {
         crate::capture_test::capture_overlay(&renderer, &underlay, &panel, path);
     }
 }
+
+#[cfg(test)]
+#[path = "business_action_tests.rs"]
+mod action_tests;

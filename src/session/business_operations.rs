@@ -40,6 +40,82 @@ struct Target {
     inputs: business_permissions::Inputs,
 }
 
+struct ConversionWorld<'a> {
+    categories: &'a [[u8; 380]; 52],
+    buildings: &'a [[u8; 916]],
+    catalog: &'a crate::business_pool::BusinessCatalog,
+    products: &'a [[[u32; 2]; 6]; 45],
+    commodities: &'a [[u8; 28]; 32],
+}
+
+/// Original 408140 fills both columns in the executable's display order.
+/// Each row stores F(4453b0), then adds initial stock (4610d0) from 6am.
+fn conversion_options(
+    inputs: &business_permissions::Inputs,
+    building: usize,
+    world: ConversionWorld<'_>,
+    hour: u32,
+    image: &crate::pe::PeImage<'_>,
+) -> Result<Vec<Conversion>, String> {
+    let ConversionWorld {
+        categories,
+        buildings,
+        catalog,
+        products,
+        commodities,
+    } = world;
+    let row = buildings
+        .get(building)
+        .ok_or("Conversion building outside pool")?;
+    let mut conversions = Vec::new();
+    for kind in image
+        .at(0x53bdc4, 45 * 4)?
+        .chunks_exact(4)
+        .map(|b| word(b, 0))
+    {
+        let info = catalog
+            .row(kind as usize)
+            .ok_or("Conversion display order outside catalog")?;
+        if !business_permissions::conversion_candidate(
+            inputs,
+            kind,
+            catalog,
+            crate::business_conversion::fits(row, info)?,
+        )? {
+            continue;
+        }
+        let mut price = crate::business_conversion::quote(
+            building as u32,
+            kind,
+            categories,
+            buildings,
+            catalog,
+            image,
+        )?
+        .to_f32();
+        if hour >= 6 {
+            let volume = (i32::from(row[7]) - i32::from(row[5]) + 1)
+                .wrapping_mul(i32::from(row[6]) - i32::from(row[4]) + 1)
+                .wrapping_mul(i32::from(row[8]));
+            let mut stock = business_controls::initial_stock(
+                kind as usize,
+                volume,
+                catalog,
+                products,
+                commodities,
+            )?;
+            stock.add_f32(price)?;
+            price = stock.to_f32();
+        }
+        conversions.push(Conversion {
+            kind,
+            label: word(info, 8),
+            price,
+        });
+    }
+    Ok(conversions)
+}
+
 impl Session<'_> {
     fn business_operation_target(&self, building: usize) -> Result<Target, String> {
         let row = self
@@ -175,54 +251,19 @@ impl Session<'_> {
         } else {
             None
         };
-        let mut conversions = Vec::new();
-        for kind in image
-            .at(0x53bdc4, 45 * 4)?
-            .chunks_exact(4)
-            .map(|b| word(b, 0))
-        {
-            let info = city
-                .catalog
-                .info
-                .row(kind as usize)
-                .ok_or("Conversion display order outside catalog")?;
-            if !business_permissions::conversion_candidate(
-                &target.inputs,
-                kind,
-                &city.catalog.info,
-                crate::business_conversion::fits(row, info)?,
-            )? {
-                continue;
-            }
-            let mut price = crate::business_conversion::quote(
-                building as u32,
-                kind,
-                &city.categories,
-                &city.buildings,
-                &city.catalog.info,
-                image,
-            )?
-            .to_f32();
-            if self.world.clock.hour() >= 6 {
-                let volume = (i32::from(row[7]) - i32::from(row[5]) + 1)
-                    .wrapping_mul(i32::from(row[6]) - i32::from(row[4]) + 1)
-                    .wrapping_mul(i32::from(row[8]));
-                let mut stock = business_controls::initial_stock(
-                    kind as usize,
-                    volume,
-                    &city.catalog.info,
-                    &city.catalog.products,
-                    &city.commodities.rows,
-                )?;
-                stock.add_f32(price)?;
-                price = stock.to_f32();
-            }
-            conversions.push(Conversion {
-                kind,
-                label: word(info, 8),
-                price,
-            });
-        }
+        let conversions = conversion_options(
+            &target.inputs,
+            building,
+            ConversionWorld {
+                categories: &city.categories,
+                buildings: &city.buildings,
+                catalog: &city.catalog.info,
+                products: &city.catalog.products,
+                commodities: &city.commodities.rows,
+            },
+            self.world.clock.hour(),
+            image,
+        )?;
         Ok(Inspection {
             graph: crate::business_report::graph(
                 business,
@@ -446,5 +487,190 @@ impl Session<'_> {
             }
         }
         Ok(submitted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{business_pool::BusinessCatalog, pe::PeImage, player_manager::put};
+
+    fn image_bytes() -> Vec<u8> {
+        let mut bytes = vec![0; 0x20100];
+        bytes[..2].copy_from_slice(b"MZ");
+        put(&mut bytes, 0x3c, 0x40);
+        bytes[0x40..0x44].copy_from_slice(b"PE\0\0");
+        bytes[0x44..0x46].copy_from_slice(&0x14cu16.to_le_bytes());
+        bytes[0x46..0x48].copy_from_slice(&1u16.to_le_bytes());
+        bytes[0x54..0x56].copy_from_slice(&32u16.to_le_bytes());
+        bytes[0x58..0x5a].copy_from_slice(&0x10bu16.to_le_bytes());
+        put(&mut bytes, 0x74, 0x400000);
+        put(&mut bytes, 0x84, 0x120000);
+        put(&mut bytes, 0x88, 0x20000);
+        put(&mut bytes, 0x8c, 0x100);
+        for (address, value) in [
+            (0x52502c, 0.5f32),
+            (0x525034, 1.),
+            (0x5251e8, 1.5),
+            (0x525b10, 1.2),
+            (0x525c50, 0.4),
+        ] {
+            put(&mut bytes, address - 0x520000 + 0x100, value.to_bits());
+        }
+        for (address, value) in [(0x525b00, 0.8f64), (0x525b08, 0.6), (0x5250e8, 0.5)] {
+            let at = address - 0x520000 + 0x100;
+            bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        // Deliberately nonnumeric order, with inadmissible candidates between.
+        for (i, kind) in [0, 3, 42, 2, 43, 4].into_iter().enumerate() {
+            put(&mut bytes, 0x53bdc4 - 0x520000 + 0x100 + i * 4, kind);
+        }
+        bytes[0x5365f4 - 0x520000 + 0x100..0x5365f6 - 0x520000 + 0x100]
+            .copy_from_slice(&4u16.to_le_bytes());
+        bytes
+    }
+    fn gates() -> business_permissions::Inputs {
+        business_permissions::Inputs {
+            building_present: true,
+            business_class: Some(0),
+            business_kind: 0,
+            business_owner: 1,
+            category_owner: 0,
+            current_player: 1,
+            category_reserved: 0,
+            pending: [0; 3],
+        }
+    }
+    #[test]
+    fn production_conversion_list_keeps_display_order_fit_and_daytime_prices() {
+        let bytes = image_bytes();
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut buildings = [[0; 916]; 1];
+        buildings[0][6] = 2; // 3 x 2 x 2 = 12 units
+        buildings[0][7] = 1;
+        buildings[0][8] = 2;
+        put(&mut buildings[0], 0x40, 0x617628);
+        let mut categories = [[0; 380]; 52];
+        put(&mut categories[0], 0x84, 5f32.to_bits());
+        let mut rows = [[0; 116]; 45];
+        for (kind, cost, class) in [
+            (0, 99, 0),
+            (2, 20, 0),
+            (3, 10, 0),
+            (42, 30, 1),
+            (43, 40, 0),
+            (4, 50, 0),
+        ] {
+            let row = &mut rows[kind];
+            put(row, 0, kind as u32);
+            put(row, 8, 100 + kind as u32);
+            put(row, 12, class);
+            row[0x30] = 1;
+            put(row, 0x38, 1);
+            put(row, 0x3c, if kind == 4 { 5 } else { 20 });
+            put(row, 0x40, 7);
+            put(row, 0x44, 3);
+            put(row, 0x48, 1);
+            row[0x4c] = 1;
+            put(row, 0x54, cost);
+            put(row, 0x58, 2f32.to_bits());
+        }
+        let catalog = BusinessCatalog::from_rows(rows);
+        let products = [[[0, 1f32.to_bits()]; 6]; 45];
+        let mut commodities = [[0; 28]; 32];
+        put(&mut commodities[0], 0x14, 3f32.to_bits());
+        let options = |inputs: &business_permissions::Inputs, hour| {
+            conversion_options(
+                inputs,
+                0,
+                ConversionWorld {
+                    categories: &categories,
+                    buildings: &buildings,
+                    catalog: &catalog,
+                    products: &products,
+                    commodities: &commodities,
+                },
+                hour,
+                &image,
+            )
+            .unwrap()
+        };
+        let before = options(&gates(), 5);
+        assert_eq!(
+            before
+                .iter()
+                .map(|r| (r.kind, r.label, r.price))
+                .collect::<Vec<_>>(),
+            [(3, 103, 280.), (2, 102, 560.)]
+        );
+        // ((12*.6+.8)*(5*.5+1)*refurbcost)*quality, plus 12*2*3 stock.
+        let after = options(&gates(), 6);
+        assert_eq!(
+            after.iter().map(|r| (r.kind, r.price)).collect::<Vec<_>>(),
+            [(3, 352.), (2, 632.)]
+        );
+        for hour in [12, 23] {
+            assert_eq!(
+                options(&gates(), hour)
+                    .iter()
+                    .map(|r| r.price)
+                    .collect::<Vec<_>>(),
+                [352., 632.]
+            );
+        }
+        let mut pending = gates();
+        pending.pending[1] = 1;
+        assert!(options(&pending, 6).is_empty());
+    }
+    #[test]
+    fn panel_value_inputs_follow_original_capital_lease_sale_and_demolition_formulas() {
+        let bytes = image_bytes();
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut building = [0; 916];
+        building[6] = 2;
+        building[7] = 1;
+        building[8] = 2;
+        put(&mut building, 0x38, 1000f32.to_bits());
+        put(&mut building, 0x40, 0x617628);
+        let buildings = [building];
+        let mut business = [0; 544];
+        put(&mut business, 0x20, 50f32.to_bits());
+        put(&mut business, 0x64, 100f32.to_bits()); // previous period when bank=0
+        let categories = [[0; 380]; 52];
+        assert_eq!(
+            crate::ai_actions::liquidation_score::business_base_value(
+                &business, &buildings, &image
+            )
+            .unwrap()
+            .to_f32(),
+            1125.
+        );
+        assert_eq!(
+            crate::ai_actions::liquidation_score::business_value(&business, &buildings, &image)
+                .unwrap()
+                .to_f32(),
+            450.
+        );
+        assert_eq!(
+            crate::business_report::rent_age(
+                0,
+                &buildings,
+                &[business],
+                &categories,
+                59 * 625,
+                &image
+            )
+            .unwrap(),
+            41
+        );
+        let mut categories = categories;
+        put(&mut categories[0], 0x84, 5f32.to_bits());
+        let parameters = crate::building_parameters::BuildingKinds::from_image(&image).unwrap();
+        assert_eq!(
+            crate::demolition::quote_with_parameters(&building, &categories, &parameters, &image)
+                .unwrap()
+                .to_f32(),
+            168.
+        );
     }
 }
