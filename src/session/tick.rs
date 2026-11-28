@@ -255,6 +255,26 @@ impl Session<'_> {
         mut boundary: impl FnMut(Event<'_>, &crate::clock::Clock) -> Result<u32, String>,
     ) -> Result<(), String> {
         self.pump_connected_commands(policy)?;
+        // The receive router runs in network maintenance, even while paused.
+        self.receive_connected_messages(assets.image, policy.player_message_prior, &mut boundary)?;
+        // In a connected game a player message for another peer leaves through
+        // the transport (0x450490/0x4e2590) once this batch's simulation ends.
+        let outbox = std::cell::RefCell::new(Vec::new());
+        let carried = self.connected.is_some();
+        let mut boundary = |event: Event<'_>, clock: &crate::clock::Clock| {
+            if carried
+                && let Event::Command(live_commands::Event::PlayerMessageRoute {
+                    route:
+                        route @ (crate::player_messages::Route::NetworkSend
+                        | crate::player_messages::Route::NetworkRecipient { .. }),
+                    packet,
+                }) = event
+            {
+                outbox.borrow_mut().push((route, packet));
+                return Ok(0);
+            }
+            boundary(event, clock)
+        };
         //481718..481736 keeps the level script countdown active in auction
         //mode when the retained selected level object's+85c byte is nonzero.
         policy.scheduler.alternate_script_active = self.tutorial_state != 0;
@@ -1244,6 +1264,14 @@ impl Session<'_> {
         self.models = std::mem::take(geometry.registrar_mut());
         self.hooks.utilities = utilities;
         self.allocation_next = messages.into_inner().arena.next;
-        result
+        result?;
+        if let Some(connection) = &self.connected {
+            for (route, packet) in outbox.take() {
+                connection
+                    .commands
+                    .send_player_message(&connection.worker, route, &packet)?;
+            }
+        }
+        Ok(())
     }
 }

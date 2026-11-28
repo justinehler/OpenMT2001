@@ -268,6 +268,51 @@ pub fn produce_in(
     )
 }
 
+/// A player message that arrived from another peer (0x451fe0). The authority
+/// routes it exactly like a local send (0x451720): broadcaster, local inbox,
+/// or a forward to the recipient's peer. A client applies it (0x450a30): kind
+/// 0x26 first refreshes its property view, then only the local current player
+/// queues it. Returns whether a local inbox took it.
+pub fn receive<P: Players>(
+    packet: &Packet,
+    authority: bool,
+    players: &mut P,
+    arena: &mut Arena,
+    current_player: u32,
+    mut external: impl FnMut(Route, &Packet, &mut P) -> Result<(), String>,
+) -> Result<bool, String> {
+    if authority {
+        return route(
+            packet,
+            players,
+            arena,
+            current_player,
+            [true, true],
+            external,
+        );
+    }
+    if (word(packet, 4) as i32) < 0x21 {
+        return Err("received player message requires a player-message kind".into());
+    }
+    if word(packet, 4) == 0x26 {
+        external(
+            Route::PropertyRefresh {
+                category: word(packet, 0x18),
+            },
+            packet,
+            players,
+        )?;
+    }
+    let player = usize::try_from(packet[0x15] as i8)
+        .ok()
+        .and_then(|slot| players.get_mut(slot))
+        .ok_or("received player message recipient leaves roster")?;
+    if player.reference != current_player {
+        return Ok(false);
+    }
+    enqueue(player, packet, || arena.allocate())
+}
+
 ///450490/451720 routing after a producer has checked recipient admission.
 fn route<P: Players>(
     packet: &Packet,

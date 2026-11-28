@@ -69,6 +69,8 @@ impl Session<'_> {
             prior: [0; 48],
         };
         let mut outgoing_cards = Vec::new();
+        // A client's card requests and releases go to the authority's deck.
+        let mut outgoing_messages = Vec::new();
         let mut call = |call, player: &mut crate::player_manager::Player| match call {
             human::Call::Submit(command) => {
                 if self.connected.is_some() {
@@ -101,6 +103,11 @@ impl Session<'_> {
                     |route, packet| {
                         if route == player_messages::Route::Broadcast {
                             broadcast = Some(*packet);
+                            Ok(())
+                        } else if route == player_messages::Route::NetworkSend
+                            && self.connected.is_some()
+                        {
+                            outgoing_messages.push(*packet);
                             Ok(())
                         } else {
                             Err(format!(
@@ -171,6 +178,13 @@ impl Session<'_> {
         self.allocation_next = arena.next;
         result?;
         if let Some(connection) = &mut self.connected {
+            for packet in outgoing_messages {
+                connection.commands.send_player_message(
+                    &connection.worker,
+                    player_messages::Route::NetworkSend,
+                    &packet,
+                )?;
+            }
             for command in outgoing_cards {
                 let targets = crate::network::commands::Targets::new(
                     &self.world.city.buildings,

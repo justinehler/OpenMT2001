@@ -7,6 +7,7 @@ use crate::{
 use std::{fs, path::Path};
 pub mod business_operations;
 pub mod cards;
+mod connected_messages;
 pub mod custom;
 pub mod property;
 pub mod restore;
@@ -497,6 +498,19 @@ impl<'data> Session<'data> {
         mut event: impl FnMut(crate::live_commands::Event) -> Result<(), String>,
     ) -> Result<(), String> {
         use crate::{human_reply, live_commands, player_messages};
+        // In a connected game a client's reply leaves for the authority.
+        let carried = self.connected.is_some();
+        let mut outbox = Vec::new();
+        let mut event = |call: live_commands::Event| match call {
+            live_commands::Event::PlayerMessageRoute {
+                route: player_messages::Route::NetworkSend,
+                packet,
+            } if carried => {
+                outbox.push(packet);
+                Ok(())
+            }
+            other => event(other),
+        };
         let current = self.roster.status.current_player;
         let slot = self
             .roster
@@ -585,7 +599,17 @@ impl<'data> Session<'data> {
             },
         );
         self.allocation_next = arena.next;
-        result
+        result?;
+        if let Some(connection) = &self.connected {
+            for packet in outbox {
+                connection.commands.send_player_message(
+                    &connection.worker,
+                    player_messages::Route::NetworkSend,
+                    &packet,
+                )?;
+            }
+        }
+        Ok(())
     }
     /// Immediate local464610 action consumer, used by the original auction UI
     /// producers. Admission and control availability belong to the caller.

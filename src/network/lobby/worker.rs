@@ -45,6 +45,8 @@ pub struct Ticket {
 enum Command {
     Chat(Vec<u8>, Option<network::chat::Recipients>),
     Gameplay(network::SessionBinding, Option<Connection>, Box<Message>),
+    /// An authority player message for the peer that owns its recipient.
+    GameplayPeer(network::SessionBinding, u8, Box<Message>),
     Stage(Box<dyn FnOnce() -> Result<network::Content, String> + Send>),
     Edit(Action),
     Prepared(std::result::Result<network::Content, String>),
@@ -258,11 +260,29 @@ impl Handle {
                 | Message::CommandCommit(_)
                 | Message::CommandDeadline { .. }
                 | Message::CommandRejected { .. }
+                | Message::PlayerMessage(_)
         ) {
             return Err(network::Error::Unsupported.to_string());
         }
         self.commands
             .try_send(Command::Gameplay(binding, target, Box::new(message)))
+            .map_err(|_| "Gameplay worker is busy".into())
+    }
+    /// Authority only: send a player message to one admitted peer slot, on the
+    /// same ordered channel as the commits (0x4e2590 directed forward).
+    pub fn send_player_message_to_peer(
+        &self,
+        binding: network::SessionBinding,
+        peer: u8,
+        packet: crate::player_messages::Packet,
+    ) -> Result<(), String> {
+        self.validate_binding(binding)?;
+        self.commands
+            .try_send(Command::GameplayPeer(
+                binding,
+                peer,
+                Box::new(Message::PlayerMessage(packet)),
+            ))
             .map_err(|_| "Gameplay worker is busy".into())
     }
     pub fn poll_synchronization(&self) -> Option<network::synchronization::Ingress> {
@@ -516,7 +536,8 @@ fn run(
                     message @ (Message::CommandRequest(_)
                     | Message::CommandCommit(_)
                     | Message::CommandDeadline { .. }
-                    | Message::CommandRejected { .. }) => {
+                    | Message::CommandRejected { .. }
+                    | Message::PlayerMessage(_)) => {
                         gameplay
                             .try_send(network::commands::Ingress {
                                 binding: binding.ok_or("Gameplay without a world")?,
@@ -701,8 +722,14 @@ fn run(
                 Command::Gameplay(binding, target, message) => {
                     let message = *message;
                     owner.validate_binding(binding).map_err(|e| e.to_string())?;
-                    let request = matches!(message, Message::CommandRequest(_));
-                    if host == request {
+                    // Player messages travel both ways; requests only reach
+                    // the authority and everything else only leaves it.
+                    let wrong_role = match message {
+                        Message::PlayerMessage(_) => false,
+                        Message::CommandRequest(_) => host,
+                        _ => !host,
+                    };
+                    if wrong_role {
                         return Err("Gameplay message has wrong local role".into());
                     }
                     let destinations: Vec<_> = if let Some(target) = target {
@@ -730,6 +757,21 @@ fn run(
                             .send(connection, message.clone())
                             .map_err(|e| e.to_string())?;
                     }
+                    continue;
+                }
+                Command::GameplayPeer(binding, peer, message) => {
+                    owner.validate_binding(binding).map_err(|e| e.to_string())?;
+                    if !host || peer == 0 {
+                        return Err("Directed player message needs the authority".into());
+                    }
+                    let connection = peers
+                        .get(usize::from(peer))
+                        .copied()
+                        .flatten()
+                        .ok_or("Player message recipient peer missing")?;
+                    owner
+                        .send(connection, *message)
+                        .map_err(|e| e.to_string())?;
                     continue;
                 }
                 Command::Prepared(result) => {
