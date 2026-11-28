@@ -695,6 +695,41 @@ pub fn update_evening(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn housing_average_adapter_retains_capacity_weighted_rent() {
+        let topology = Topology {
+            buildings: (0..2)
+                .map(|index| Building {
+                    business: Some(index),
+                    category: 0,
+                    attribute_2c: 0,
+                    housing_position: [0.; 3],
+                })
+                .collect(),
+            categories: std::array::from_fn(|_| Category {
+                buildings: vec![],
+                value: 0.,
+                center: None,
+                resident_counter: 0,
+            }),
+            active: vec![true; 2],
+        };
+        let mut businesses = [[0u8; 0x220]; 2];
+        for (row, (capacity, rent)) in businesses
+            .iter_mut()
+            .zip([(1u16, 2f32.powi(-42)), (4097, 1. + 2f32.powi(-12))])
+        {
+            row[..4].copy_from_slice(&1u32.to_le_bytes());
+            row[0xe..0x10].copy_from_slice(&capacity.to_le_bytes());
+            row[0x1dc..0x1e0].copy_from_slice(&rent.to_le_bytes());
+        }
+        assert_eq!(
+            topology.average_rent(&businesses).unwrap().to_bits(),
+            0x3f80_0001
+        );
+    }
+
     #[test]
     #[ignore = "requires original two-tick housing fixture and timetable"]
     fn matches_native_housing_ticks() {
