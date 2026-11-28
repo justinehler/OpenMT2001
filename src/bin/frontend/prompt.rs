@@ -2078,6 +2078,7 @@ mod resource_format_tests {
                 title: None,
                 body: None,
                 format_value: 0,
+                timeout: true,
             }),
         };
         assert_eq!(
