@@ -1,6 +1,6 @@
 //! Host I/O for the original level catalog and V2-owned progression records.
 //! Private original profiles are never written or executed.
-use openmt2001::{
+use crate::{
     level_catalog::{Catalog, script},
     pe::PeImage,
 };
@@ -60,7 +60,7 @@ fn ordered_entries(path: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(entries)
 }
 
-pub(super) fn original_path(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+pub fn original_path(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
     let root = fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let name = name.replace('\\', "/");
     if name.is_empty()
@@ -277,8 +277,8 @@ pub fn save_progress(catalog: &Catalog, path: &Path) -> Result<(), String> {
 /// level before `level_id` in the original catalog's campaign order has been
 /// won once on Easy, through the same `Catalog::finish` path a real Win takes.
 /// Each call writes its own file, so tests never depend on another test's
-/// output or share progress.
-#[cfg(test)]
+/// output or share progress. Test support: panics on any failure.
+#[doc(hidden)]
 pub fn checkpoint_profile(image: &PeImage<'_>, scripts: &Path, level_id: u32) -> PathBuf {
     let mut catalog = load_catalog(image, scripts).unwrap();
     catalog.reset_progress();
@@ -312,7 +312,7 @@ pub fn checkpoint_profile(image: &PeImage<'_>, scripts: &Path, level_id: u32) ->
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = openmt2001::fixtures::scratch("CAMPAIGN_CHECKPOINTS").join(format!(
+    let path = crate::fixtures::scratch("CAMPAIGN_CHECKPOINTS").join(format!(
         "before-{level_id}-{}-{nonce}.lua",
         std::process::id()
     ));
@@ -327,10 +327,10 @@ pub fn commit_result(
     catalog: &mut Catalog,
     profile: Option<&Path>,
     applied: &mut bool,
-    sequence: openmt2001::outcome_notice::Sequence,
+    sequence: crate::outcome_notice::Sequence,
     end_requested: Option<u32>,
 ) -> Result<(), String> {
-    let secondary = if sequence == openmt2001::outcome_notice::Sequence::Lose {
+    let secondary = if sequence == crate::outcome_notice::Sequence::Lose {
         2
     } else {
         1
@@ -386,8 +386,8 @@ mod tests {
     }
     #[test]
     fn result_profile_waits_for_result_sequence_end() {
-        use openmt2001::level_catalog::{Labels, Registration};
-        use openmt2001::outcome_notice::Sequence;
+        use crate::level_catalog::{Labels, Registration};
+        use crate::outcome_notice::Sequence;
         let fixture = Fixture::new();
         for (sequence, secondary, awarded) in [
             (Sequence::Win, 1, true),
@@ -464,8 +464,8 @@ mod tests {
 
     #[test]
     fn custom_result_records_share_profile_and_preserve_campaign_by_id() {
-        use openmt2001::level_catalog::{Labels, Registration};
-        use openmt2001::outcome_notice::Sequence;
+        use crate::level_catalog::{Labels, Registration};
+        use crate::outcome_notice::Sequence;
         let fixture = Fixture::new();
         let path = profile_path(&fixture.0, b"Combined profile");
         let mut catalog = Catalog::default();
@@ -657,9 +657,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and supplied patch Essential scripts"]
     fn supplied_eight_custom_registrations_append_to_gamestart() {
-        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let executable = fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let scripts = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
+        let scripts = crate::fixtures::path("ORIGINAL_SCRIPTS");
         let sources = registration_sources(&scripts).unwrap();
         assert_eq!(sources.len(), 9);
         let base = script::load(&image, &sources[0].1, false, |name| {
@@ -689,7 +689,7 @@ mod tests {
     }
     #[test]
     fn retrying_failed_profile_write_does_not_finish_twice() {
-        use openmt2001::level_catalog::{Labels, Registration};
+        use crate::level_catalog::{Labels, Registration};
         let mut catalog = Catalog::default();
         for (id, name) in [
             (200003, b"SCENARIO3".as_slice()),
@@ -728,7 +728,7 @@ mod tests {
                 &mut catalog,
                 Some(&occupied.join("progress.lua")),
                 &mut applied,
-                openmt2001::outcome_notice::Sequence::Win,
+                crate::outcome_notice::Sequence::Win,
                 Some(1)
             )
             .is_err()
@@ -740,7 +740,7 @@ mod tests {
             &mut catalog,
             Some(&path),
             &mut applied,
-            openmt2001::outcome_notice::Sequence::Win,
+            crate::outcome_notice::Sequence::Win,
             Some(1),
         )
         .unwrap();
@@ -760,7 +760,7 @@ mod tests {
             &mut catalog,
             Some(&path),
             &mut replay_applied,
-            openmt2001::outcome_notice::Sequence::Lose,
+            crate::outcome_notice::Sequence::Lose,
             Some(2),
         )
         .unwrap();
@@ -776,7 +776,7 @@ mod tests {
                 &mut catalog,
                 None,
                 &mut invalid_applied,
-                openmt2001::outcome_notice::Sequence::Lose,
+                crate::outcome_notice::Sequence::Lose,
                 Some(2)
             )
             .is_err()
@@ -786,7 +786,7 @@ mod tests {
     }
     #[test]
     fn abandoned_launch_reopens_original_profile_state() {
-        use openmt2001::level_catalog::{Labels, Registration};
+        use crate::level_catalog::{Labels, Registration};
         let mut base = Catalog::default();
         for (id, name) in [
             (200003, b"SCENARIO3".as_slice()),
@@ -836,7 +836,7 @@ mod tests {
             &mut reopened,
             Some(&path),
             &mut applied,
-            openmt2001::outcome_notice::Sequence::Win,
+            crate::outcome_notice::Sequence::Win,
             Some(1),
         )
         .unwrap();
@@ -851,9 +851,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and installed level scripts"]
     fn original_catalog_and_retained_profile_roundtrip() {
-        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let executable = fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let scripts = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
+        let scripts = crate::fixtures::path("ORIGINAL_SCRIPTS");
         let mut catalog = load_catalog(&image, &scripts).unwrap();
         let hub = original_path(&scripts, "GAMESTART/hub.lua")
             .unwrap()

@@ -210,7 +210,7 @@ mod tests {
     #[test]
     #[ignore = "requires explicit-PC64 native result-controller fixture"]
     fn native_result_every_service_tick() {
-        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_RESULT_CONTROLLER")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESULT_CONTROLLER")).unwrap();
         assert_eq!(&bytes[..8], b"MTRCTRL1");
         let mut at = 8;
         let word = |bytes: &[u8], at: &mut usize| {
@@ -260,8 +260,7 @@ mod tests {
     #[test]
     #[ignore = "requires original explicit-PC64 full credit timing fixture"]
     fn original_complete_thirty_two_credit_rows() {
-        let bytes =
-            std::fs::read(openmt2001::fixtures::path("NATIVE_RESULT_CREDITS_TIMING")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESULT_CREDITS_TIMING")).unwrap();
         assert_eq!(&bytes[..8], b"MTRC32T2");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
         let frames = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
