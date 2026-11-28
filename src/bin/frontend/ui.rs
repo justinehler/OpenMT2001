@@ -1,8 +1,11 @@
 //! Native UI surfaces; original asset parsing stays in shared core modules.
+#[path = "ui/text_entry.rs"]
+mod text_entry;
 use openmt2001::{
     render::{SurfaceMode, TexturedDraw},
     texture::{TextureRecord, loader_pixels},
 };
+pub use text_entry::text_entry;
 
 /// Original43a8c0. The symbol and result use the game's glyph-byte encoding.
 /// NEG wraps at signed MIN, including the original double-negative rendering.
@@ -830,13 +833,28 @@ fn text_scaled(
         baseline: 0,
     };
     let width = text_width(tab, encoded, scale)? as f32;
-    for q in font.layout(
+    text_at(
+        pages,
+        &font,
         encoded,
+        bounds,
+        color,
         Layout {
             origin: [if center { (l + r - width) / 2. } else { l }, t],
             ..layout
         },
-    )? {
+    )
+}
+
+fn text_at(
+    pages: &mut [Surface],
+    font: &openmt2001::font::Font<'_>,
+    encoded: &[u8],
+    bounds: [f32; 4],
+    color: u32,
+    layout: openmt2001::font::Layout,
+) -> Result<(), String> {
+    for q in font.layout(encoded, layout)? {
         // Host clipping keeps long names inside their original widget bounds.
         // Glyph order is bottom-left, bottom-right, top-right, top-left.
         let left = q.positions[0][0];

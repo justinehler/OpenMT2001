@@ -800,12 +800,14 @@ impl SetupPanel {
                     0xffffffff,
                 )?;
             }
-            ui::text_widget_style3(
+            ui::text_entry(
                 &mut pages[2],
+                &mut shapes,
                 &self.fonts[2].tab,
                 &self.encoded(&state.name)?,
                 self.bounds("INFO1")?,
-                0xffffffff,
+                false,
+                state.name_focused,
             )?;
             for (i, name) in ["EASY", "MEDIUM", "HARD"].iter().enumerate() {
                 self.image(&mut images, 293 + i, self.bounds(&format!("{name}_CUP"))?)?;

@@ -638,6 +638,7 @@ impl Route {
                 roster::Presentation {
                     visible: true,
                     busy: false,
+                    name_focused: false,
                     rows: &rows,
                     enabled: std::array::from_fn(|id| self.enabled(id)),
                     start_enabled: view.snapshot.start_enabled(),
