@@ -21,6 +21,35 @@ pub struct Timing {
     pub frame: timers::Frame,
     pub epoch: Instant,
 }
+impl Timing {
+    /// Host milliseconds on the process clock every city frame samples.
+    pub fn now(&self) -> u32 {
+        self.epoch.elapsed().as_millis() as u32
+    }
+
+    /// One city frame: milliseconds since the previous sample (original4eb8b0).
+    pub fn elapsed_now(&mut self) -> i32 {
+        let now = self.now();
+        self.frame.elapsed(Some(now))
+    }
+
+    /// Discard the interval since the previous sample (original4ebaa0).
+    pub fn synchronize_now(&mut self) {
+        let now = self.now();
+        self.frame.synchronize(now);
+    }
+
+    /// Begin a city's frame loop, whether it was started fresh or loaded.
+    /// The original ends every city start with4ebaa0 (call at4ba1b4), and its
+    /// main loop samples this clock every frame (4b9c74), menus included, so no
+    /// menu or loading time ever reaches a city. This process clock is not
+    /// sampled between cities, so the first frame would otherwise replay the
+    /// whole frontend interval as logic ticks. Registrations, accumulators and
+    /// pending adjustments are retained.
+    pub fn start_city(&mut self) {
+        self.synchronize_now();
+    }
+}
 impl DispatchCustody {
     pub fn startup(pause: pause::State) -> Result<Self, String> {
         // Explicit modern prior padding policy, not recovered native heap data.
@@ -116,5 +145,89 @@ impl Seed {
             })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    const LOGIC_TICK: u32 = 0x481680;
+
+    fn logic_ticks(tasks: &mut Vec<timers::Task>, elapsed: i32) -> u32 {
+        let mut ticks = 0;
+        timers::dispatch(tasks, elapsed, |_, callback, _| {
+            if callback == LOGIC_TICK {
+                ticks += 1;
+            }
+            Ok(())
+        })
+        .unwrap();
+        ticks
+    }
+
+    /// A process custody whose clock was last sampled `menu_ms` ago, as after
+    /// sitting in the frontend (or a previous city's teardown) before Ok.
+    fn custody_after_menus(menu_ms: u32, previous_city: bool) -> DispatchCustody {
+        let mut custody = DispatchCustody::startup(pause::State::default()).unwrap();
+        if previous_city {
+            custody.retire_session().unwrap();
+        }
+        let now = custody.epoch.elapsed().as_millis() as u32;
+        custody.frame.synchronize(now.wrapping_sub(menu_ms));
+        custody
+    }
+
+    #[test]
+    fn city_start_after_long_menu_delay_advances_only_from_start() {
+        for fresh in [false, true] {
+            for previous_city in [false, true] {
+                let (mut seed, mut timing) = custody_after_menus(180_000, previous_city)
+                    .prepare_start(fresh)
+                    .unwrap();
+                if fresh {
+                    seed.fresh_reset().unwrap();
+                } else {
+                    // Saved adoption: shared accumulator reset, menu hold released.
+                    seed.world_reset_accumulators();
+                    seed.pause
+                        .unpause(0, |change, _| {
+                            change.apply(&mut seed.tasks);
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+
+                // Without the rebase the first frame replays the menu interval.
+                let mut stale = Timing {
+                    frame: timing.frame.clone(),
+                    epoch: timing.epoch,
+                };
+                let mut stale_tasks = seed.tasks.clone();
+                let stale_elapsed = stale.elapsed_now();
+                assert!(stale_elapsed >= 180_000);
+                assert!(logic_ticks(&mut stale_tasks, stale_elapsed) > 4_000);
+
+                // Loaded at saved tick 84487; the first frames run at 25 Hz from
+                // the moment the city loop starts.
+                let saved_tick = 84_487;
+                let mut tick = saved_tick;
+                timing.start_city();
+                let started = std::time::Instant::now();
+                for frame in 0..5 {
+                    let elapsed = timing.elapsed_now();
+                    let ticks = logic_ticks(&mut seed.tasks, elapsed);
+                    let allowed = started.elapsed().as_millis() as u32 / 40 + 1;
+                    tick += ticks;
+                    assert!(
+                        tick - saved_tick <= allowed,
+                        "fresh={fresh} previous_city={previous_city}: frame {frame} \
+                         advanced {saved_tick} -> {tick}, at most {allowed} allowed"
+                    );
+                    std::thread::sleep(Duration::from_millis(16));
+                }
+            }
+        }
     }
 }
