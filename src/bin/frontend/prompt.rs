@@ -117,6 +117,7 @@ pub fn scenario_reminder(
                 title: Some(title.into()),
                 body: Some(description.into()),
                 format_value: 0,
+                timeout: true,
             });
         }
     }
@@ -135,6 +136,8 @@ pub struct ScriptText {
     pub title: Option<std::sync::Arc<[u8]>>,
     pub body: Option<std::sync::Arc<[u8]>>,
     pub format_value: u32,
+    /// Tutorial script messages explicitly disable the modal timeout.
+    pub timeout: bool,
 }
 /// Bounded native no-argument printf policy, followed by original row0 mapping.
 pub fn literal_glyphs(raw: &[u8], row: &[u8]) -> Result<Vec<u8>, String> {
@@ -304,6 +307,7 @@ pub struct State {
     pressed: bool,
     last_tick: Option<u64>,
     deferred: bool,
+    pending_backspace: bool,
 }
 impl State {
     /// Retained same-target left-button capture, released by the actual prompt
@@ -377,11 +381,20 @@ impl State {
         if let Some(dialog) = self.slots[at].request.as_ref()?.dialog {
             if dialog.timeout {
                 if self.slots[at].remaining <= 0 {
-                    self.dialog_button(0);
+                    self.dialog_reply(0);
                 } else {
                     self.slots[at].remaining -= 1;
                 }
             }
+            return None;
+        }
+        if self.slots[at]
+            .request
+            .as_ref()?
+            .script
+            .as_ref()
+            .is_some_and(|s| !s.timeout)
+        {
             return None;
         }
         if self.slots[at].remaining <= 0 {
@@ -415,6 +428,11 @@ impl State {
         }
         self.deferred = false;
         self.dismiss_with(|_, _| {});
+        // Resume the independent second branch of the same event only after
+        // Return's worker callback and close have exposed the resulting head.
+        if std::mem::take(&mut self.pending_backspace) {
+            self.dialog_reply(1);
+        }
     }
     pub fn request_left_button(&mut self, down: bool, bounds: [f32; 4]) -> Option<u32> {
         if down {
@@ -430,14 +448,18 @@ impl State {
             if activate { self.begin_dismiss() } else { None }
         }
     }
-    pub fn advance_to(&mut self, tick: u64) -> Vec<u32> {
+    /// Consume the worker's cumulative delivered group updates. Keep updates
+    /// after a deferred callback for the next head, rather than dropping them.
+    pub fn advance_to(&mut self, delivered: u64) -> Vec<u32> {
         let mut callbacks = Vec::new();
-        let previous = self.last_tick.replace(tick).unwrap_or(tick);
-        for _ in previous..tick {
+        let mut consumed = self.last_tick.unwrap_or(delivered);
+        while consumed < delivered && !self.deferred {
+            consumed += 1;
             if let Some(id) = self.tick() {
                 callbacks.push(id);
             }
         }
+        self.last_tick = Some(consumed);
         callbacks
     }
     pub fn cancel_press(&mut self) {
@@ -448,7 +470,7 @@ impl State {
         std::mem::take(&mut self.dialog_replies)
     }
     /// Original42a1f0 arms on the first UI event1. Later Return/Backspace
-    /// edges use the same reply path as the corresponding mouse button.
+    /// edges reply independently of the number of visible mouse buttons.
     pub fn dialog_event1(&mut self, edges: [bool; 2]) {
         let Some(at) = self.head else {
             return;
@@ -464,22 +486,29 @@ impl State {
         if !std::mem::replace(&mut self.slots[at].keys_armed, true) {
             return;
         }
-        for (button, edge) in edges.into_iter().enumerate() {
-            if edge {
-                self.dialog_button(button);
-            }
+        if edges[0] {
+            self.pending_backspace = edges[1];
+            self.dialog_reply(0);
+        } else if edges[1] {
+            self.dialog_reply(1);
         }
     }
     pub fn dialog_button(&mut self, button: usize) {
+        if self
+            .request()
+            .and_then(|r| r.dialog)
+            .is_some_and(|d| button < d.button_count)
+        {
+            self.dialog_reply(button);
+        }
+    }
+    fn dialog_reply(&mut self, button: usize) {
         if self.deferred {
             return;
         }
         let Some(dialog) = self.request().and_then(|r| r.dialog) else {
             return;
         };
-        if button >= dialog.button_count {
-            return;
-        }
         self.deferred = true;
         self.dialog_replies.push(crate::human_dialog::Reply {
             callback: dialog.callback,
@@ -548,6 +577,108 @@ impl State {
             } else {
                 None
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod modal_update_tests {
+    use super::*;
+
+    fn timed(remaining: i32, timeout: bool, context: u32) -> Request {
+        Request {
+            script: None,
+            dialog: Some(crate::human_dialog::Dialog {
+                timeout_ticks: Some(remaining),
+                timeout,
+                context,
+                context_written: true,
+                timeout_written: true,
+                ..Default::default()
+            }),
+            title: 0,
+            body: 0,
+            dismissal_id: 0,
+            card: None,
+        }
+    }
+
+    #[test]
+    fn modal_timeout_expires_on_n_plus_one_even_without_buttons() {
+        for remaining in [1, 3, 1000] {
+            let mut state = State::default();
+            state.advance_to(70);
+            state.submit(timed(remaining, true, 17));
+            for delivered in 1..=remaining as u64 {
+                assert!(state.advance_to(70 + delivered).is_empty());
+                assert!(state.take_dialog_replies().is_empty());
+            }
+            state.advance_to(71 + remaining as u64);
+            assert_eq!(state.take_dialog_replies()[0].context, 17);
+            assert!(state.request().is_some(), "callback before close");
+            state.finish_dismiss(vec![]);
+            assert!(state.request().is_none());
+        }
+    }
+
+    #[test]
+    fn modal_timeout_zero_policy_and_suppressed_updates_do_not_expire() {
+        let mut state = State::default();
+        state.advance_to(10);
+        state.submit(timed(2, true, 17));
+        for _ in 0..1002 {
+            state.advance_to(10); // No delivered group updates during suppression.
+        }
+        state.advance_to(12);
+        assert!(state.take_dialog_replies().is_empty());
+        state.advance_to(13);
+        assert_eq!(state.take_dialog_replies()[0].button, 0);
+        state.finish_dismiss(vec![]);
+        let mut dialog = crate::human_dialog::Dialog::default();
+        dialog
+            .outcome(openmt2001::outcome_notice::Call::Timeout(0))
+            .unwrap();
+        let mut request = timed(0, true, 29);
+        request.dialog = Some(dialog);
+        state.submit(request);
+        state.advance_to(2013);
+        assert!(state.take_dialog_replies().is_empty());
+        assert!(state.request().is_some());
+    }
+
+    #[test]
+    fn modal_timeout_batch_resumes_on_next_head_after_worker_reply() {
+        let mut state = State::default();
+        state.advance_to(0);
+        state.submit(timed(1, true, 17));
+        state.submit(timed(1, true, 29));
+        state.advance_to(4);
+        assert_eq!(state.take_dialog_replies()[0].context, 17);
+        state.finish_dismiss(vec![]);
+        state.advance_to(4);
+        assert_eq!(state.take_dialog_replies()[0].context, 29);
+        state.finish_dismiss(vec![]);
+        assert!(state.request().is_none());
+    }
+
+    #[test]
+    fn tutorial_script_request_survives_until_its_continuation_dismisses_it() {
+        let arguments: [_; 3] = std::array::from_fn(|_| openmt2001::lua4::Value::Number(1.));
+        for tutorial in [true, false] {
+            let mut state = State::default();
+            state.advance_to(0);
+            let request = crate::live_host::prompt_request(&arguments, tutorial).unwrap();
+            state.submit(request);
+            let callbacks = state.advance_to(1002);
+            if tutorial {
+                assert!(callbacks.is_empty());
+                assert_eq!(state.begin_dismiss(), Some(1));
+            } else {
+                assert_eq!(callbacks, vec![1]);
+            }
+            assert!(state.request().is_some());
+            state.finish_dismiss(vec![]);
+            assert!(state.request().is_none());
         }
     }
 }
@@ -1852,6 +1983,7 @@ mod owned_script_tests {
                 title: Some(format!("Synthetic {id}").into_bytes().into()),
                 body: Some(b"A test zone is available.".as_slice().into()),
                 format_value: 0,
+                timeout: true,
             }),
         }
     }
@@ -1936,6 +2068,7 @@ mod resource_integer_tests {
                     title: None,
                     body: None,
                     format_value: 7,
+                    timeout: true,
                 }),
             };
             assert_eq!(
@@ -1981,6 +2114,7 @@ mod resource_integer_tests {
                 title: Some(b"AB".as_slice().into()),
                 body: Some(b"CD".as_slice().into()),
                 format_value: 0,
+                timeout: true,
             }),
         };
         let mut tab = vec![0; 4 + 224 * 44];
