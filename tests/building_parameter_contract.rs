@@ -337,8 +337,8 @@ fn due_build_keeps_descriptor_cost_and_copies_current_resource_rent() {
         },
         &mut Geometry,
         |event, _| {
-            if let construction::Event::Posted { amount, ledger, .. } = event {
-                posts.push((amount.to_bits(), ledger));
+            if let construction::Event::AccountPosted(posting) = event {
+                posts.push((posting.amount.to_bits(), [0xc, 0xe, 0x11, 7][posts.len()]));
             }
             Ok(())
         },

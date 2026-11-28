@@ -780,7 +780,7 @@ struct LoadedInspection {
     saved_viewpoint: Option<(CameraSample, openmt2001::camera::BlockCamera)>,
     saved_prior_mode: Option<u32>,
     saved_auction: Option<crate::session_save::AuctionContinuation>,
-    restored_presentation: Vec<openmt2001::category_ownership::Seam>,
+    restored_presentation: Vec<openmt2001::economy::AccountPosting>,
     auction_requests: Option<mpsc::Receiver<crate::auction_bridge::Request>>,
     auction_audio_requests: Option<mpsc::Receiver<crate::live_host::auction_audio::Request>>,
     transport_audio_requests: Option<mpsc::Receiver<crate::transport_audio::Request>>,

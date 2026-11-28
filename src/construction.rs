@@ -186,11 +186,7 @@ pub enum Event {
     Appearance(usize),
     Created(usize),
     /// Ledger/cash stores already happened; original48a5a0's host effects follow.
-    Posted {
-        player: usize,
-        amount: f32,
-        ledger: usize,
-    },
+    AccountPosted(crate::economy::AccountPosting),
     RefreshInterface,
 }
 fn word(row: &[u8], at: usize) -> u32 {
@@ -277,11 +273,7 @@ pub fn apply(
             .ok_or("construction owner leaves roster")?
             .post(amount, ledger)?;
         callback(
-            Event::Posted {
-                player,
-                amount,
-                ledger,
-            },
+            Event::AccountPosted(crate::economy::AccountPosting { player, amount }),
             world,
         )?;
     }
@@ -599,12 +591,10 @@ mod tests {
                 &context,
                 geometry,
                 |event, _| {
-                    if let Event::Posted {
-                        player,
-                        amount,
-                        ledger,
-                    } = event
+                    if let Event::AccountPosted(crate::economy::AccountPosting { player, amount }) =
+                        event
                     {
+                        let ledger = [0xc, 0xe, 0x11, 7][posts.len()];
                         posts.push((
                             0x10030000 + player as u32 * 0x400,
                             vec![amount.to_bits(), ledger as u32],

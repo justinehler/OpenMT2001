@@ -158,8 +158,9 @@ fn matches_native_category_wait() {
 /// Synchronous boundaries called while the original helper mutates state.
 /// `NativeUiCall` preserves the original address and argument order so the
 /// host can attach sound, display, or manager behavior without moving it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Seam {
+    AccountPosted(crate::economy::AccountPosting),
     NativeUiCall {
         address: u32,
         args: [u32; 6],
@@ -376,56 +377,10 @@ impl World<'_> {
             amount,
         );
         add_f32(&mut record.bytes, PLAYER_CASH_OFFSET, amount);
-        self.notify(player, amount, seams)?;
-        Ok(())
-    }
-
-    fn notify(
-        &mut self,
-        player: usize,
-        amount: f32,
-        seams: &mut impl FnMut(&mut Self, Seam) -> Result<(), String>,
-    ) -> Result<(), String> {
-        if self.current_player != Some(player) {
-            return Ok(());
-        }
-        let args = |asset| [asset, 0, 0, 0, 1, 0x3c];
-        if amount > self.notification_threshold {
-            seams(
-                self,
-                Seam::NativeUiCall {
-                    address: 0x004ad760,
-                    args: args(0x00541cc8),
-                    argument_count: 6,
-                },
-            )?;
-            seams(
-                self,
-                Seam::NativeUiCall {
-                    address: 0x004c6290,
-                    args: [0; 6],
-                    argument_count: 0,
-                },
-            )?;
-        } else if amount < self.notification_threshold || amount.is_nan() {
-            seams(
-                self,
-                Seam::NativeUiCall {
-                    address: 0x004c62d0,
-                    args: [0; 6],
-                    argument_count: 0,
-                },
-            )?;
-            seams(
-                self,
-                Seam::NativeUiCall {
-                    address: 0x004ad760,
-                    args: args(0x00541cb4),
-                    argument_count: 6,
-                },
-            )?;
-        }
-        Ok(())
+        seams(
+            self,
+            Seam::AccountPosted(crate::economy::AccountPosting { player, amount }),
+        )
     }
 
     fn visit_building(
@@ -644,21 +599,24 @@ mod tests {
             };
             let mut trace = vec![];
             let mut callback = |world: &mut World<'_>, seam| {
-                trace.push(match seam {
-                    Seam::NativeUiCall {
-                        address: 0x4ad760,
-                        args,
-                        ..
-                    } => {
-                        if config[3] != 0 {
-                            world.categories[7][5] = 3;
-                        }
-                        [0, u32::from(args[0] == 0x541cc8), 0]
+                if let Seam::AccountPosted(posting) = seam {
+                    for (address, args) in crate::account_posting_test_support::cash_calls(
+                        posting.amount,
+                        world.current_player == Some(posting.player),
+                        world.notification_threshold,
+                    ) {
+                        trace.push(if address == 0x4ad760 {
+                            if config[3] != 0 {
+                                world.categories[7][5] = 3;
+                            }
+                            [0, u32::from(args[0] == 0x541cc8), 0]
+                        } else {
+                            [1, u32::from(address == 0x4c6290), 0]
+                        });
                     }
-                    Seam::NativeUiCall {
-                        address: address @ (0x4c6290 | 0x4c62d0),
-                        ..
-                    } => [1, u32::from(address == 0x4c6290), 0],
+                    return Ok(());
+                }
+                trace.push(match seam {
                     Seam::NativeUiCall {
                         address: 0x41f410, ..
                     } => [7, 0, 0],
@@ -914,14 +872,28 @@ mod tests {
 
             let observed_trace: Vec<_> = observed
                 .iter()
-                .map(|event| match event {
+                .flat_map(|event| match event {
+                    Seam::AccountPosted(posting) => {
+                        crate::account_posting_test_support::cash_calls(
+                            posting.amount,
+                            world.current_player == Some(posting.player),
+                            world.notification_threshold,
+                        )
+                        .into_iter()
+                        .map(|(address, values)| {
+                            let mut args = [0; 6];
+                            args[..values.len()].copy_from_slice(&values);
+                            (address, values.len(), args)
+                        })
+                        .collect::<Vec<_>>()
+                    }
                     Seam::NativeUiCall {
                         address,
                         args,
                         argument_count,
-                    } => (*address, usize::from(*argument_count), *args),
-                    Seam::BuildingAppearance { .. } => (0x0048_5520, 0, [0; 6]),
-                    Seam::AiOwnershipLists { .. } => (0x0046_7a30, 0, [0; 6]),
+                    } => vec![(*address, usize::from(*argument_count), *args)],
+                    Seam::BuildingAppearance { .. } => vec![(0x0048_5520, 0, [0; 6])],
+                    Seam::AiOwnershipLists { .. } => vec![(0x0046_7a30, 0, [0; 6])],
                 })
                 .collect();
             let native_seams: Vec<_> = native_trace

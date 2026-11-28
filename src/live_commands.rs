@@ -208,7 +208,6 @@ pub enum Event {
         kind: u32,
         used: bool,
     },
-    EventCardEffect(crate::event_cards::effects::Call),
     EventCardNotice(crate::event_cards::effects::Notice),
     EventCardTargeted(crate::event_cards::targeted::Call),
     Elimination(crate::player_elimination::Call),
@@ -257,8 +256,8 @@ pub fn event_card(
         world,
         context.image,
         |call, world, notice| match call {
-            effects::Call::AccountPosted(_) => {
-                event(Event::EventCardEffect(call), world)?;
+            effects::Call::AccountPosted(posting) => {
+                event(Event::AccountPosted(posting), world)?;
                 Ok(true)
             }
             effects::Call::Utility {
@@ -274,7 +273,10 @@ pub fn event_card(
                 context.catalog,
                 notice,
                 |call, world, _| {
-                    event(Event::EventCardEffect(call), world)?;
+                    let effects::Call::AccountPosted(posting) = call else {
+                        return Err("utility rebate emitted a non-posting effect".into());
+                    };
+                    event(Event::AccountPosted(posting), world)?;
                     Ok(true)
                 },
             ),
@@ -291,9 +293,7 @@ pub fn event_card(
                 notice,
                 |call, world| {
                     let event_call = match call {
-                        targeted::Call::AccountPosted(posting) => {
-                            Event::EventCardEffect(effects::Call::AccountPosted(posting))
-                        }
+                        targeted::Call::AccountPosted(posting) => Event::AccountPosted(posting),
                         call => Event::EventCardTargeted(call),
                     };
                     event(event_call, world)
@@ -1153,17 +1153,9 @@ impl Runtime<'_> {
                     event(
                         match call {
                             crate::business_sale::Call::RefreshInterface => Event::RefreshInterface,
-                            crate::business_sale::Call::NativeUiCall {
-                                address,
-                                args,
-                                argument_count,
-                            } => Event::PropertyOwnership(
-                                crate::category_ownership::Seam::NativeUiCall {
-                                    address,
-                                    args,
-                                    argument_count,
-                                },
-                            ),
+                            crate::business_sale::Call::AccountPosted(posting) => {
+                                Event::AccountPosted(posting)
+                            }
                             other => Event::BusinessSale(other),
                         },
                         &*context.clock,
@@ -1225,20 +1217,9 @@ impl Runtime<'_> {
                         crate::business_takeover::Call::RefreshInterface => {
                             event(Event::RefreshInterface, &*context.clock)
                         }
-                        crate::business_takeover::Call::NativeUiCall {
-                            address,
-                            args,
-                            argument_count,
-                        } => event(
-                            Event::PropertyOwnership(
-                                crate::category_ownership::Seam::NativeUiCall {
-                                    address,
-                                    args,
-                                    argument_count,
-                                },
-                            ),
-                            &*context.clock,
-                        ),
+                        crate::business_takeover::Call::AccountPosted(posting) => {
+                            event(Event::AccountPosted(posting), &*context.clock)
+                        }
                         other => event(Event::BusinessTakeover(other), &*context.clock),
                     },
                 )
@@ -1376,6 +1357,7 @@ pub fn expire_leases(
                             Seam::NativeUiCall {
                                 address: 0x41f410, ..
                             } => event(Event::RefreshInterface),
+                            Seam::AccountPosted(posting) => event(Event::AccountPosted(posting)),
                             other => event(Event::PropertyOwnership(other)),
                         },
                     )?,
@@ -1487,6 +1469,7 @@ pub fn property_transfer(
         Seam::NativeUiCall {
             address: 0x41f410, ..
         } => event(Event::RefreshInterface),
+        Seam::AccountPosted(posting) => event(Event::AccountPosted(posting)),
         other => event(Event::PropertyOwnership(other)),
     };
     let result = if owner == 0 {
@@ -1571,6 +1554,8 @@ pub fn build(
                     world.categories,
                 )?;
                 Ok(())
+            } else if let construction::Event::AccountPosted(posting) = call {
+                event(Event::AccountPosted(posting))
             } else {
                 event(Event::Construction(call))
             }
@@ -2183,7 +2168,10 @@ pub fn demolish(
                     .get_mut(owner as usize - 1)
                     .ok_or("demolition owner unresolved")?
                     .post(amount, ledger)?;
-                event(Event::Demolition(call))?;
+                event(Event::AccountPosted(economy::AccountPosting {
+                    player: owner as usize - 1,
+                    amount,
+                }))?;
             }
             crate::demolition::Call::Detach { business } => {
                 let mut binding = business_binding::World {

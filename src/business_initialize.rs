@@ -40,6 +40,26 @@ pub fn initialize(
     image: &PeImage<'_>,
     charge: &mut impl FnMut(&mut [u8; 0x220], f32) -> Result<(), String>,
 ) -> Result<(), String> {
+    let initialization = initialize_before_charge(business, building, input, image)?;
+    if let Some(amount) = initialization.charge {
+        charge(business, amount)?;
+    }
+    initialize_after_charge(business, input, image, initialization)
+}
+
+pub(crate) struct Initialization {
+    pub charge: Option<f32>,
+    kind: u32,
+}
+
+/// Split at462a00 so a caller can publish a posting with its whole world
+/// available, before pricing and schedule stores resume.
+pub(crate) fn initialize_before_charge(
+    business: &mut [u8; 0x220],
+    building: &mut [u8; 0x394],
+    input: &Inputs<'_>,
+    image: &PeImage<'_>,
+) -> Result<Initialization, String> {
     put_word(business, 0x1c, 0);
     let kind = word(business, 0);
     if kind == 1 {
@@ -120,9 +140,29 @@ pub fn initialize(
             balance.add_f32(float(business, 0x30))?;
             put_float(business, 0x30, balance.to_f32());
             if input.initializer == 0 {
-                charge(business, cost.negated().to_f32())?;
+                return Ok(Initialization {
+                    charge: Some(cost.negated().to_f32()),
+                    kind,
+                });
             }
         }
+    }
+    Ok(Initialization { charge: None, kind })
+}
+
+pub(crate) fn initialize_after_charge(
+    business: &mut [u8; 0x220],
+    input: &Inputs<'_>,
+    image: &PeImage<'_>,
+    initialization: Initialization,
+) -> Result<(), String> {
+    let kind = initialization.kind;
+    let count = usize::from(input.info[0x4c]);
+    if kind == 0 {
+        let products = input
+            .products
+            .get(..count)
+            .ok_or("initializer products are truncated")?;
         put_word(business, 0x20, 0);
         let bias = f64::from_le_bytes(image.at(0x525c38, 8)?.try_into().unwrap());
         let ten = f64::from(image.f32_at(0x5250a0)?);

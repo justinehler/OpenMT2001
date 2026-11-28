@@ -342,10 +342,14 @@ impl Host {
     /// exist. These calls already changed the loaded world during restoration.
     pub fn apply_restored_presentation(
         &mut self,
-        calls: Vec<openmt2001::category_ownership::Seam>,
+        postings: Vec<openmt2001::economy::AccountPosting>,
     ) -> Result<(), String> {
-        for call in calls {
-            ledger_ui_call(&mut self.cash_arrow, &self.gameplay_sound, call)?;
+        for posting in postings {
+            // The loader resolved locality at the original posting boundary.
+            // Replay that decision after the UI channels have been attached.
+            account_ui_post(posting, u8::try_from(posting.player).ok(), |amount| {
+                ledger_ui_post(&mut self.cash_arrow, &self.gameplay_sound, true, amount, 0.)
+            })?;
         }
         Ok(())
     }
@@ -2462,11 +2466,6 @@ impl Host {
                     openmt2001::ai_messages::offers::auction::closure::Call::Tutorial(_),
                 )) if tutorial_state != 1 => Ok(0),
                 Event::Command(openmt2001::live_commands::Event::PropertyOwnership(
-                    call @ openmt2001::category_ownership::Seam::NativeUiCall {
-                        address: 0x4ad760 | 0x4c6290 | 0x4c62d0, ..
-                    },
-                )) => ledger_ui_call(&mut cash_arrow.borrow_mut(), &gameplay_sound, call),
-                Event::Command(openmt2001::live_commands::Event::PropertyOwnership(
                     openmt2001::category_ownership::Seam::BuildingAppearance { .. },
                 )) => {
                     omitted.insert(0x485520);
@@ -2665,26 +2664,12 @@ impl Host {
                     omitted.insert(0x407660);
                     Ok(0)
                 }
-                Event::AccountPosted(_)
-                | Event::Command(openmt2001::live_commands::Event::AccountPosted(_))
-                | Event::Command(openmt2001::live_commands::Event::EventCardEffect(
-                    openmt2001::event_cards::effects::Call::AccountPosted(_),
-                )) => account_event_ui_post(&event, current_slot, |amount| {
-                    ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
-                        assets.image.f32_at(0x525040)?)
-                }).expect("matched account posting"),
-                Event::Command(openmt2001::live_commands::Event::Construction(
-                    openmt2001::construction::Event::Posted { player, amount, .. },
-                )) => {
-                    ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound,
-                        current_slot.map(usize::from) == Some(player), amount,
-                        assets.image.f32_at(0x525040)?)
-                }
-                Event::Command(openmt2001::live_commands::Event::Demolition(
-                    openmt2001::demolition::Call::Post { owner, amount, .. },
-                )) => ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound,
-                    current_slot.map(i32::from) == Some(i32::from(owner) - 1), amount,
-                    assets.image.f32_at(0x525040)?),
+                Event::AccountPosted(posting)
+                | Event::Command(openmt2001::live_commands::Event::AccountPosted(posting)) =>
+                    account_ui_post(posting, current_slot, |amount| {
+                        ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
+                            assets.image.f32_at(0x525040)?)
+                    }),
                 Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::RefreshInterface,
                 ))
@@ -3509,20 +3494,18 @@ impl Host {
     }
 }
 
-/// Common account notification route used by live ticks and command effects.
+/// Test adapter for the same two envelopes consumed by the live match arm.
+#[cfg(test)]
 fn account_event_ui_post(
     event: &fresh_city::tick::Event<'_>,
     current_slot: Option<u8>,
     post: impl FnMut(f32) -> Result<u32, String>,
 ) -> Option<Result<u32, String>> {
     use fresh_city::tick::Event;
-    use openmt2001::{event_cards::effects, live_commands};
+    use openmt2001::live_commands;
     let posting = match event {
         Event::AccountPosted(posting)
-        | Event::Command(live_commands::Event::AccountPosted(posting))
-        | Event::Command(live_commands::Event::EventCardEffect(effects::Call::AccountPosted(
-            posting,
-        ))) => *posting,
+        | Event::Command(live_commands::Event::AccountPosted(posting)) => *posting,
         _ => return None,
     };
     Some(account_ui_post(posting, current_slot, post))
@@ -4648,3 +4631,7 @@ mod account_posting_tests;
 #[cfg(test)]
 #[path = "live_host/modal_tests.rs"]
 mod modal_tests;
+
+#[cfg(test)]
+#[path = "../../account_posting_test_support.rs"]
+pub(super) mod account_posting_test_support;

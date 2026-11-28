@@ -181,6 +181,10 @@ fn matches_native_live_leases() {
         advance(&mut world, &mut controls, &image, |call, world, _| {
             if call.address == 0x48c450 {
                 world.release(call.arguments[0] as usize, 0., &mut |world, seam| {
+                    if let Seam::AccountPosted(posting) = seam {
+                        assert_eq!(posting.amount, 0.);
+                        return Ok(());
+                    }
                     trace.push(match seam {
                         Seam::BuildingAppearance { building } => {
                             vec![0x485520, 0x591318 + building as u32 * 916]

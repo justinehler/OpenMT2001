@@ -134,7 +134,9 @@ impl PlayerAccount {
     }
 
     /// 0048a5a0 stores the event first, then adds the same rounded amount
-    /// independently to cash. Negative amounts are ordinary debits.
+    /// independently to cash. Negative amounts are ordinary debits. Live callers
+    /// must publish a separate AccountPosting at this boundary; the synthetic
+    /// account_posting_sites test audits every production caller.
     pub fn post(&mut self, amount: f32, event: usize) -> Result<(), String> {
         self.record(amount, event)?;
         self.cash = (f64::from(amount) + f64::from(self.cash)) as f32;

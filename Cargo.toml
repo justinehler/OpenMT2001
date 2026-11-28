@@ -43,3 +43,6 @@ required-features = ["capture"]
 name = "game"
 path = "src/bin/game.rs"
 required-features = ["native"]
+
+[dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }

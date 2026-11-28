@@ -1583,6 +1583,7 @@ dependencies = [
  "pollster",
  "rodio",
  "sha2",
+ "syn 2.0.119",
  "wgpu",
  "windows-sys 0.61.2",
  "winit",

@@ -109,17 +109,17 @@ fn compare_sale_fixture(variable: &str, magic: &[u8; 8]) {
                 },
                 &image,
                 |call, _| {
+                    if let business_sale::Call::AccountPosted(posting) = call {
+                        actual_trace.extend(crate::live_host::account_posting_test_support::cash_calls(posting.amount, h[5] != 0 && posting.player == ((h[5] - 0x10030000) / 0x400) as usize, image.f32_at(0x525040)?));
+                        return Ok(());
+                    }
                     actual_trace.push(match call {
                         business_sale::Call::BuildingAppearance(id) => {
                             (0x485520, vec![0x591318 + id as u32 * 916])
                         }
                         business_sale::Call::RefreshInterface => (0x41f410, vec![]),
                         business_sale::Call::BuildingPanel(id) => (0x407660, vec![id as u32]),
-                        business_sale::Call::NativeUiCall {
-                            address,
-                            args,
-                            argument_count,
-                        } => (address, args[..usize::from(argument_count)].to_vec()),
+                        business_sale::Call::AccountPosted(_) => unreachable!(),
                     });
                     Ok(())
                 },
@@ -171,11 +171,9 @@ fn check_cash_presenter(case: u32, trace: &[(u32, Vec<u32>)]) {
     let (sound, requests) = std::sync::mpsc::channel();
     host.gameplay_sound = Some(sound);
     // Native producer ordering enters the real saved-preview Host adapter.
-    let calls = cash.iter().map(|(address, values)| {
-        let mut args = [0; 6];
-        args[..values.len()].copy_from_slice(values);
-        openmt2001::category_ownership::Seam::NativeUiCall {
-            address: *address, args, argument_count: values.len() as u8,
+    let calls = cash.iter().filter(|(address, _)| *address == 0x4ad760).map(|(_, values)| {
+        openmt2001::economy::AccountPosting {
+            player: 0, amount: if values[0] == 0x541cc8 { 1. } else { -1. },
         }
     }).collect();
     host.apply_restored_presentation(calls).unwrap();
@@ -274,6 +272,7 @@ fn matches_native_sale_at_positive_appearance_boundary() {
             &business_sale::Controls { current_player: None, accounting: false,
                 ownership_tick: 500, timestamp: 1000, hour: 0 }, &image,
             |call, world| match call {
+                business_sale::Call::AccountPosted(_) => Ok(()),
                 business_sale::Call::BuildingAppearance(actual) if actual == slot => {
                     assert!(!reached); reached = true;
                     assert_eq!(world.buildings[slot].as_slice(), building, "case{case} native building at485520");

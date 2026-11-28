@@ -70,21 +70,18 @@ fn compare_native_saved_stream(env: &str, magic: &[u8; 8]) {
         };
         let mut trace = vec![];
         let mut callback = |world: &mut World<'_>, seam| {
-            trace.push(match seam {
-                Seam::NativeUiCall {
-                    address: 0x4ad760,
-                    args,
-                    ..
-                } => {
-                    if config[3] != 0 {
-                        world.categories[7][5] = 3;
-                    }
-                    [0, u32::from(args[0] == 0x541cc8), 0]
+            if let Seam::AccountPosted(posting) = seam {
+                for (address, args) in crate::live_host::account_posting_test_support::cash_calls(posting.amount, world.current_player == Some(posting.player), world.notification_threshold) {
+                    trace.push(if address == 0x4ad760 {
+                        if config[3] != 0 { world.categories[7][5] = 3; }
+                        [0, u32::from(args[0] == 0x541cc8), 0]
+                    } else {
+                        [1, u32::from(address == 0x4c6290), 0]
+                    });
                 }
-                Seam::NativeUiCall {
-                    address: address @ (0x4c6290 | 0x4c62d0),
-                    ..
-                } => [1, u32::from(address == 0x4c6290), 0],
+                return Ok(());
+            }
+            trace.push(match seam {
                 Seam::NativeUiCall {
                     address: 0x41f410, ..
                 } => [7, 0, 0],
