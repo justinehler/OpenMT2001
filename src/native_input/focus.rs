@@ -17,6 +17,15 @@ pub enum AudioOutcome {
     GuardedInactive,
 }
 
+/// Result of the whole focus-change prefix the session worker runs for one
+/// focus event: either no UI receiver was attached, or it completed, with the
+/// audio frontend outcome when the event reached it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Prefix {
+    ReceiverAbsent,
+    Complete(Option<AudioOutcome>),
+}
+
 impl Frontend {
     /// Supply the real process byte8af401. This is not a per-World default.
     pub fn from_process_byte(suspended: u8) -> Self {
