@@ -681,6 +681,72 @@ fn mode12_input_tick_with_height(
     Ok(pose)
 }
 
+/// The player's input to one legacy camera callback.
+#[derive(Clone, Copy, Debug, Default)]
+struct CameraCallbackInput {
+    keys: [bool; 4],
+    drag: [i32; 2],
+    buttons: [bool; 2],
+}
+impl CameraCallbackInput {
+    /// Tutorial `Interface.DisableCameraControl` (and DisableAllControls)
+    /// remove the player's input but leave the callback running.
+    fn gated(self, disabled: bool) -> Self {
+        if disabled { Self::default() } else { self }
+    }
+}
+
+/// The legacy camera state one callback advances.
+struct LegacyCamera<'a> {
+    controls: &'a mut openmt2001::camera::BlockCamera,
+    building_angle: &'a mut f32,
+    building_camera: bool,
+    saved_camera: bool,
+    inertia: &'a mut openmt2001::camera::BlockCameraInertia,
+}
+
+/// One 50 Hz legacy camera callback: steer the block or building controls by
+/// the input, then ease the inertia toward the resulting pose (0x4e03c9).
+fn legacy_camera_callback(
+    camera: LegacyCamera,
+    input: CameraCallbackInput,
+    sensitivity: i32,
+    invert_vertical: bool,
+    low_height: bool,
+) -> Result<(), String> {
+    let (eye, target) = if input.buttons == [true, true] {
+        crate::navigation::pan_tick(
+            camera.controls,
+            camera.building_camera.then_some(camera.building_angle),
+            input.keys,
+            input.drag,
+            sensitivity,
+        )?
+    } else if camera.building_camera {
+        crate::navigation::building_tick_with_height(
+            camera.controls,
+            camera.building_angle,
+            input.keys,
+            input.drag,
+            sensitivity,
+            invert_vertical,
+            low_height,
+        )?
+    } else {
+        mode12_input_tick_with_height(
+            camera.controls,
+            camera.saved_camera,
+            input.keys,
+            input.drag,
+            sensitivity,
+            invert_vertical,
+            low_height,
+        )?
+    };
+    camera.inertia.tick(eye, target);
+    Ok(())
+}
+
 #[derive(Clone)]
 struct DetailSpan {
     category: usize,
@@ -2167,17 +2233,19 @@ impl Intro {
             let callback_time = view.started.elapsed().as_secs_f64() * 50.;
             let tick = callback_time.floor() as usize;
             let previous = view.camera;
+            // Interface.DisableCameraControl clears the camera-input byte at
+            // 0x920889, but the camera callback keeps running: it still eases
+            // toward a scripted pose such as Tutorial 1's BlockCam on Pacific
+            // Avenue. Disabled tutorial controls only remove the player's input.
+            let input_disabled = view.live_status.as_ref().is_some_and(|status| {
+                status.tutorial_controls.camera_disabled || status.tutorial_controls.all_disabled
+            });
             while view.tick <= tick {
-                if view.live_status.as_ref().is_some_and(|status| {
-                    status.tutorial_controls.camera_disabled
-                        || status.tutorial_controls.all_disabled
-                }) {
-                    view.tick = tick + 1;
+                if input_disabled {
                     view.keys = [false; 4];
                     view.taps = [false; 4];
                     view.drag = [0; 2];
                     view.mouse_buttons = [false; 2];
-                    break;
                 }
                 if !view.camera_producer.as_ref().map_or(!view.strategic, |p| {
                     p.legacy_callback_enabled(view.strategic)
@@ -2199,39 +2267,28 @@ impl Intro {
                 } else {
                     view.mouse_buttons
                 };
-                let pose = if buttons == [true, true] {
-                    crate::navigation::pan_tick(
-                        &mut view.controls,
-                        view.building_camera.then_some(&mut view.building_angle),
-                        keys,
-                        view.drag,
-                        i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                    )?
-                } else if view.building_camera {
-                    crate::navigation::building_tick_with_height(
-                        &mut view.controls,
-                        &mut view.building_angle,
-                        keys,
-                        view.drag,
-                        i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                        view.settings_menu.gameplay.invert_vertical,
-                        low_height,
-                    )?
-                } else {
-                    mode12_input_tick_with_height(
-                        &mut view.controls,
-                        view.saved_camera,
-                        keys,
-                        view.drag,
-                        i32::from(view.settings_menu.gameplay.mouse_sensitivity),
-                        view.settings_menu.gameplay.invert_vertical,
-                        low_height,
-                    )?
-                };
+                let input = CameraCallbackInput {
+                    keys,
+                    drag: view.drag,
+                    buttons,
+                }
+                .gated(input_disabled);
+                let gameplay = view.settings_menu.gameplay;
+                legacy_camera_callback(
+                    LegacyCamera {
+                        controls: &mut view.controls,
+                        building_angle: &mut view.building_angle,
+                        building_camera: view.building_camera,
+                        saved_camera: view.saved_camera,
+                        inertia: &mut view.inertia,
+                    },
+                    input,
+                    i32::from(gameplay.mouse_sensitivity),
+                    gameplay.invert_vertical,
+                    low_height,
+                )?;
                 view.drag = [0; 2];
-                let (eye, target) = pose;
                 view.taps = [false; 4];
-                view.inertia.tick(eye, target);
                 if self.process_frontend.is_some() {
                     self.camera_physical.consumed();
                 }
