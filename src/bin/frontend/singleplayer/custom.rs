@@ -181,6 +181,14 @@ impl SinglePlayer {
         if self.tutorial_screen && i == 0 && self.tutorial_index.is_none() {
             return false;
         }
+        if i == 0
+            && !self.tutorial_screen
+            && !self.sandbox
+            && self.custom.is_none()
+            && self.scenario_id.is_none()
+        {
+            return false;
+        }
         let Some(c) = &self.custom else {
             return true;
         };
