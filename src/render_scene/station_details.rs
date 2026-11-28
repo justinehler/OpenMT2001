@@ -1,4 +1,6 @@
-//! Fixed chimney-bearing station details in the original 0068a978 list.
+//! Fixed station details in the original 0068a978 list: the chimney-bearing
+//! factories beside the stations and the station "frills" (the Reading
+//! Railroad forecourt parasols and the B&O rail bridge girders).
 use super::OwnedDraw;
 use crate::street_furniture::Pose;
 
@@ -7,7 +9,7 @@ use crate::street_furniture::Pose;
 // zero translation/rotation, unit scale (4df9c0). Positions are baked in.
 // Materials come from the City Surround group (4c0240), retaining the TM's
 // texture slots and 4ea510 atlas UVs in the ordinary state-1 pass (4f22d0).
-const MODELS: [(&str, u32); 3] = [
+const FACTORIES: [(&str, u32); 3] = [
     (
         "gamedata2/New_building stuff/train_stations/shortline_fact6.tm",
         0x54b978,
@@ -22,8 +24,25 @@ const MODELS: [(&str, u32); 3] = [
     ),
 ];
 
+// 4c0c4b and 4c0c6e register the frills in the same 00687a68 list, so they
+// share the factories' placement, materials and detail gate.
+const FRILLS: [(&str, u32); 2] = [
+    (
+        "gamedata2/New_building stuff/train_stations/split_band0_frills.tm",
+        0x54b75c,
+    ),
+    (
+        "gamedata2/New_building stuff/train_stations/reading_frills.tm",
+        0x54b71c,
+    ),
+];
+
+fn models() -> impl Iterator<Item = (&'static str, u32)> {
+    FACTORIES.into_iter().chain(FRILLS)
+}
+
 pub(super) fn paths() -> impl Iterator<Item = &'static str> {
-    MODELS.into_iter().map(|(path, _)| path)
+    models().map(|(path, _)| path)
 }
 
 pub(super) fn pose(path: &str) -> Option<Pose> {
@@ -43,7 +62,7 @@ pub(super) fn set_detail(
 ) -> Result<Vec<usize>, String> {
     let mut changed = Vec::new();
     for &index in indices {
-        let draw = draws.get_mut(index).ok_or("station factory draw missing")?;
+        let draw = draws.get_mut(index).ok_or("station detail draw missing")?;
         let count = if detail != 0 { draw.vertices.len() } else { 0 };
         if draw.active_vertices != Some(count) {
             draw.active_vertices = Some(count);
@@ -61,8 +80,14 @@ mod tests {
     #[test]
     fn synthetic_registration_preserves_baked_positions_and_detail_gate() {
         let registered: Vec<_> = paths().collect();
-        assert_eq!(registered.len(), 3);
-        for name in ["shortline_fact6.tm", "bando_fact1.tm", "pensyl_fact2.tm"] {
+        assert_eq!(registered.len(), 5);
+        for name in [
+            "shortline_fact6.tm",
+            "bando_fact1.tm",
+            "pensyl_fact2.tm",
+            "split_band0_frills.tm",
+            "reading_frills.tm",
+        ] {
             let path = format!("gamedata2/New_building stuff/train_stations/{name}");
             assert!(registered.contains(&path.as_str()));
             let transform = pose(&path).unwrap().transform();
@@ -91,7 +116,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires original v1.4 city meshes, maps and save"]
-    fn original_factories_reach_city_draws_with_materials_and_smoke_alignment() {
+    fn original_station_details_reach_city_draws_with_materials_and_smoke_alignment() {
         use crate::{archive::ArchiveIndex, mesh::CachedMesh, pe::PeImage, render_scene::*};
         let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let executable = read("EXE");
@@ -131,7 +156,7 @@ mod tests {
         assert_eq!(locators.len(), 3);
         let mut matched_locators = std::collections::BTreeSet::new();
         let mut expected = Vec::new();
-        for (path, address) in MODELS {
+        for (path, address) in models() {
             let bytes = image.at(address, 260).unwrap();
             let end = bytes.iter().position(|&b| b == 0).unwrap();
             assert_eq!(
@@ -142,33 +167,63 @@ mod tests {
             );
             let model = mesh(path);
             let positions = model.positions(0).unwrap();
-            let top = positions
-                .iter()
-                .map(|v| v[1])
-                .fold(f32::NEG_INFINITY, f32::max);
-            let rim: Vec<_> = positions
-                .iter()
-                .filter(|v| (v[1] - top).abs() < 0.001)
-                .collect();
-            let middle = |axis| {
-                let min = rim.iter().map(|v| v[axis]).fold(f32::INFINITY, f32::min);
-                let max = rim
+            if FACTORIES.iter().any(|&(factory, _)| factory == path) {
+                let top = positions
                     .iter()
-                    .map(|v| v[axis])
+                    .map(|v| v[1])
                     .fold(f32::NEG_INFINITY, f32::max);
-                (min + max) / 2.
-            };
-            // 4b5c10 adds two Y units to each locator before emitting smoke.
-            // Preserve the authored sub-unit rim offsets, without snapping it.
-            let matched: Vec<_> = locators
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| (p[0] - middle(0)).abs() < 0.1 && (p[2] - middle(2)).abs() < 0.1)
-                .collect();
-            assert_eq!(matched.len(), 1, "{path}");
-            let (locator, position) = matched[0];
-            assert!((position[1] + 2. - top).abs() < 0.75, "{path}");
-            assert!(matched_locators.insert(locator));
+                let rim: Vec<_> = positions
+                    .iter()
+                    .filter(|v| (v[1] - top).abs() < 0.001)
+                    .collect();
+                let middle = |axis| {
+                    let min = rim.iter().map(|v| v[axis]).fold(f32::INFINITY, f32::min);
+                    let max = rim
+                        .iter()
+                        .map(|v| v[axis])
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    (min + max) / 2.
+                };
+                // 4b5c10 adds two Y units to each locator before emitting smoke.
+                // Preserve the authored sub-unit rim offsets, without snapping it.
+                let matched: Vec<_> = locators
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| {
+                        (p[0] - middle(0)).abs() < 0.1 && (p[2] - middle(2)).abs() < 0.1
+                    })
+                    .collect();
+                assert_eq!(matched.len(), 1, "{path}");
+                let (locator, position) = matched[0];
+                assert!((position[1] + 2. - top).abs() < 0.75, "{path}");
+                assert!(matched_locators.insert(locator));
+            } else {
+                // The frills carry baked city positions inside their station's
+                // own footprint: the B&O platforms and the Reading forecourt.
+                let station = if path.ends_with("/split_band0_frills.tm") {
+                    "gamedata2/New_building stuff/train_stations/split_band0_rail.tm"
+                } else {
+                    "gamedata2/New_building stuff/train_stations/reading_rail.tm"
+                };
+                let footprint = mesh(station).positions(0).unwrap();
+                for axis in [0, 2] {
+                    let low = footprint
+                        .iter()
+                        .map(|v| v[axis])
+                        .fold(f32::INFINITY, f32::min);
+                    let high = footprint
+                        .iter()
+                        .map(|v| v[axis])
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    // The B&O awning edge overhangs its platform by 0.14.
+                    assert!(
+                        positions
+                            .iter()
+                            .all(|v| (low - 0.5..=high + 0.5).contains(&v[axis])),
+                        "{path} lies outside {station}"
+                    );
+                }
+            }
             let registrations: Vec<_> = model
                 .texture_names
                 .iter()
@@ -231,10 +286,10 @@ mod tests {
                 animated: true,
             })
             .unwrap();
-            assert_eq!(city.station_factories.len(), expected.len());
+            assert_eq!(city.station_details.len(), expected.len());
             for (vertices, page) in &expected {
                 let draw = city
-                    .station_factories
+                    .station_details
                     .iter()
                     .map(|&i| &city.draws[i])
                     .find(|draw| {
@@ -258,8 +313,8 @@ mod tests {
                 assert!(draw.specular.is_some());
             }
             for detail in [0, 1, 2, 0] {
-                city.set_station_factory_detail(detail).unwrap();
-                for &i in &city.station_factories {
+                city.set_station_detail_level(detail).unwrap();
+                for &i in &city.station_details {
                     let draw = &city.draws[i];
                     assert_eq!(
                         draw.active_vertices,
@@ -268,7 +323,7 @@ mod tests {
                 }
             }
             let positions = |city: &Scene| {
-                city.station_factories
+                city.station_details
                     .iter()
                     .flat_map(|&i| {
                         city.draws[i]
@@ -281,7 +336,7 @@ mod tests {
             let before = positions(&city);
             city.advance_daylight(13, 950, camera).unwrap();
             assert_eq!(positions(&city), before);
-            for &i in &city.station_factories {
+            for &i in &city.station_details {
                 assert_eq!(city.draws[i].active_vertices, Some(0));
             }
         }
