@@ -1039,7 +1039,12 @@ mod tests {
         assert_eq!(layout.limit(), 2);
         let mut pages = vec![Surface::solid(), Surface::solid()];
         layout.paint(&mut pages, &tab, 0).unwrap();
-        let quads = pages[0].vertices.chunks_exact(6).collect::<Vec<_>>();
+        let quads = pages[0]
+            .vertices
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .collect::<Vec<_>>();
         assert_eq!(quads.len(), 4); // only two visible lines
         assert_eq!(quads[0][0][0], 14.5); // left + inset3 + style0 inset2 - half pixel
         assert_eq!(quads[2][2][1] - quads[0][2][1], 12.);
@@ -1111,7 +1116,7 @@ mod tests {
                         && surface.pixels == font.pixels
                 })
             })
-            .flat_map(|p| p.vertices.chunks_exact(6))
+            .flat_map(|p| p.vertices.as_chunks::<6>().0.iter())
             .filter(|q| {
                 q.iter().all(|v| {
                     v[0] >= value_bounds[0]
@@ -1130,7 +1135,7 @@ mod tests {
         // Inspect the first glyph of every line in the production paint path.
         let ys = pages
             .iter()
-            .flat_map(|p| p.vertices.chunks_exact(6))
+            .flat_map(|p| p.vertices.as_chunks::<6>().0.iter())
             .filter(|q| q[0][0] == panel.bounds("INFO7").unwrap()[0].trunc() + 4.5)
             .map(|q| q[2][1])
             .collect::<Vec<_>>();
