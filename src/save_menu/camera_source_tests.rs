@@ -236,7 +236,7 @@ fn publication_and_retirement_have_one_ordered_boundary() {
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
+        let parent = crate::fixtures::scratch("TEST_SCRATCH");
         fs::create_dir_all(&parent).unwrap();
         let path = parent.join(format!(
             "ui-save-{}-{}",
