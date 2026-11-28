@@ -562,6 +562,26 @@ pub(super) enum Event {
         strategic: CameraSample,
     },
 }
+impl Event {
+    pub(super) fn script_block(
+        target: u32,
+        selection: &crate::selection::Assets,
+    ) -> Result<Self, String> {
+        let category = selection
+            .blocks
+            .iter()
+            .position(|block| block.id == target as usize)
+            .ok_or("Script camera category identity missing")?;
+        Ok(Self::Block {
+            category: target,
+            selected: crate::selection::Hit {
+                category,
+                building: None,
+            },
+            origin: BlockOrigin::Tutorial,
+        })
+    }
+}
 pub(super) struct Pending {
     pub posts: Vec<Post>,
     pub turn: Turn,
@@ -671,7 +691,7 @@ fn stage_block(
     view.normal_return = None;
     Ok(())
 }
-impl Producer {
+impl Core {
     fn prepare_event(
         &self,
         mut view: View,
@@ -679,9 +699,6 @@ impl Producer {
         input: Resolved,
         assets: &crate::selection::Assets,
     ) -> Result<Prepared, String> {
-        if let Some(error) = self.error() {
-            return Err(error.to_owned());
-        }
         let mut bank = Bank::from_capture(self.capture()); // ephemeral transaction only
         let mut kind = None;
         let mut raw = RawCommit::Prefix;
@@ -710,7 +727,7 @@ impl Producer {
                         return Err("Camera UI category identity changed".into());
                     }
                     let operand =
-                        camera_live::selection::actor(&self.core.owner, assets, live, auto_rotate)?;
+                        camera_live::selection::actor(&self.owner, assets, live, auto_rotate)?;
                     bank.initialize_selected_actor(
                         operand,
                         &mut openmt2001::x87::portable_trig::PortableTrig,
@@ -839,34 +856,47 @@ impl Producer {
         let prepared = self.prepare_event(*view, event, input, assets)?;
         match prepared.raw {
             RawCommit::None => {}
-            RawCommit::ReturnSecondary => self.core.owner.copy_secondary_to_primary(),
+            RawCommit::ReturnSecondary => self.owner.copy_secondary_to_primary(),
             RawCommit::EnterCompass(camera) => {
-                self.core.project(camera).expect("preflighted normal pose");
-                self.core.owner.copy_primary_to_secondary();
-                self.core
-                    .owner
+                self.project(camera).expect("preflighted normal pose");
+                self.owner.copy_primary_to_secondary();
+                self.owner
                     .enter_strategic_fields()
                     .expect("proved finite fixed strategic operands");
             }
             RawCommit::EnterPlan => {
-                self.core
-                    .owner
+                self.owner
                     .enter_strategic_fields()
                     .expect("proved finite fixed strategic operands");
             }
             RawCommit::Prefix => {
-                self.core.owner.restore(prepared.prefix);
+                self.owner.restore(prepared.prefix);
                 if let Some(kind) = prepared.kind {
-                    self.core.owner.set_kind(kind);
+                    self.owner.set_kind(kind);
                 }
             }
         }
         if !prepared.view.active.same_pose(&self.capture().records()[0]) {
-            self.core
-                .project(prepared.view.active.camera)
+            self.project(prepared.view.active.camera)
                 .expect("all pose operands preflighted");
         }
         *view = prepared.view;
+        Ok(())
+    }
+}
+
+impl Producer {
+    pub(super) fn event(
+        &mut self,
+        view: &mut View,
+        event: Event,
+        input: Resolved,
+        assets: &crate::selection::Assets,
+    ) -> Result<(), String> {
+        if let Some(error) = self.error() {
+            return Err(error.to_owned());
+        }
+        self.core.event(view, event, input, assets)?;
         self.publisher
             .publish(self.capture(), if view.strategic { 3 } else { 0 })
     }

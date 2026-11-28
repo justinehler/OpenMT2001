@@ -2294,3 +2294,48 @@ fn actual_status_camera_suffix_survives_delayed_refresh_rejection_and_warm_commi
         .join()
         .unwrap();
 }
+
+#[test]
+#[ignore = "requires supplied Tutorial 1/4 scripts, map and original assets; CPU"]
+fn original_tutorial_one_and_four_start_in_pacific_block_view() {
+    std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
+        let scratch = Scratch::new();
+        let inputs = inputs(scratch.0.join("profiles"));
+        let image = openmt2001::pe::PeImage::parse(&inputs.executable).unwrap();
+        let board = inputs.styled_board(&image).unwrap();
+        let file = openmt2001::build_file::BuildFile::parse(&inputs.build_file).unwrap();
+        let command_assets = crate::fresh_city::CommandAssets { image: &image, board: &board, file: &file };
+        let index = openmt2001::archive::ArchiveIndex::parse(&inputs.directory, inputs.archive.len() as u64).unwrap();
+        let assets = crate::selection::Assets::load(&inputs.executable, &index, &inputs.archive).unwrap();
+        for id in [100000, 100003] {
+            let mut launch = setup(&inputs);
+            launch.preview = crate::singleplayer::Preview::Scenario(id);
+            let (loaded, mut session) = inputs.fresh_preview(launch, fresh_controls().camera, &mut SnapshotCache::default()).unwrap();
+            drop(loaded);
+            let epoch = session.world.topology.epoch();
+            let (publisher, reader) = crate::save_menu::camera_source::channel(epoch);
+            let initial = Initial::prepare(None, Some(0), fresh_controls()).unwrap();
+            let mut slot = Some(camera_producer::new_process_owner().unwrap());
+            let mut producer = Producer::attach(&mut slot, publisher, &initial).unwrap();
+            let mut state = camera_producer::View { active: initial.active, strategic: false, normal_return: None };
+            let mut host = crate::live_host::Host::new(initial.active.camera.eye);
+            host.begin_presentation(&session).unwrap();
+            host.set_running(true);
+            host.frame(&mut session, &command_assets, 20);
+            host.frame(&mut session, &command_assets, 80);
+            let status = host.status(&session);
+            assert!(status.failure.is_none(), "tutorial {id}: {:?}", status.failure);
+            assert_eq!(status.prompts.len(), 1);
+            let pacific = session.scripts.runtime.number("PACIFIC_AVENUE").unwrap().unwrap() as u32;
+            assert!(matches!(status.tutorial_camera_events.as_slice(), [crate::live_host::TutorialCameraAction::Mode { mode: 12, target }] if *target == pacific), "tutorial {id}: {:?}", status.tutorial_camera_events);
+            producer.event(&mut state, camera_producer::Event::script_block(pacific, &assets).unwrap(), camera_producer::Resolved::Local, &assets).unwrap();
+            let hit = state.active.selected.unwrap();
+            assert_eq!(assets.blocks[hit.category].id as u32, pacific);
+            assert_eq!(producer.kind(), 12);
+            assert!(!state.strategic);
+            assert!(matches!(information_target(state.active.selected, &[]), InformationTarget::Block(_)));
+            assert_eq!(reader.read(epoch).unwrap().interface_mode(), 0);
+            let _ = producer.retire();
+        }
+    }).unwrap().join().unwrap();
+}
