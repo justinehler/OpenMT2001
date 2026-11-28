@@ -2,11 +2,13 @@
 //! Fixed 36-byte header, all integers little-endian:
 //! [0..4] "OMT1", [4..6] version u16, [6..8] tag u16,
 //! [8..12] payload byte length u32, [12..28] session bytes, [28..36] sequence u64.
-//! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome.
-//! Hello has a zero session and no payload; Welcome has the host's session and
+//! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
+//! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe.
+//! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
 //! never Rust/native struct copies. Sequences start at zero per adopted link.
+use super::lobby::{Request, Settings, Slot, Snapshot};
 use super::{Content, Error, Frame, Message, Result, Row, RowKind, SLOTS, Start, Transfer};
 
 pub const HEADER: usize = 36;
@@ -30,7 +32,10 @@ impl Decoder {
         Ok(frame)
     }
     pub(super) fn accept(&mut self, frame: &Frame) -> Result<()> {
-        if matches!(frame.message, Message::Hello | Message::Welcome { .. }) {
+        if matches!(
+            frame.message,
+            Message::Hello | Message::Probe | Message::Welcome { .. }
+        ) {
             return Err(Error::Tag);
         }
         if frame.session != self.session {
@@ -46,7 +51,9 @@ impl Decoder {
 
 fn validate(message: &Message) -> Result<()> {
     match message {
-        Message::Hello => {}
+        Message::Lobby(snapshot) => snapshot.validate()?,
+        Message::LobbyRequest(request) => request.validate()?,
+        Message::Hello | Message::Probe | Message::LobbyDenied => {}
         Message::Welcome { slot } => {
             if !(1..SLOTS as u8).contains(slot) {
                 return Err(Error::Peer);
@@ -82,11 +89,50 @@ fn content(out: &mut Vec<u8>, content: Content) {
     out.push(content.difficulty);
     out.extend_from_slice(&content.fingerprint);
 }
+fn blob(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.push(bytes.len() as u8);
+    out.extend_from_slice(bytes);
+}
 pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
     envelope(frame)?;
     validate(&frame.message)?;
     let mut payload = Vec::new();
     let tag: u16 = match &frame.message {
+        Message::Lobby(snapshot) => {
+            let settings = &snapshot.settings;
+            blob(&mut payload, &settings.name);
+            payload.extend_from_slice(&settings.level.to_le_bytes());
+            payload.extend_from_slice(&settings.parameter_bits.to_le_bytes());
+            payload.push(settings.difficulty);
+            blob(&mut payload, &settings.map);
+            payload.extend_from_slice(&snapshot.revision.to_le_bytes());
+            for slot in &snapshot.rows {
+                payload.push(match slot.player.kind {
+                    RowKind::Human => 0,
+                    RowKind::Ai => 1,
+                    RowKind::Open => 2,
+                    RowKind::Closed => 3,
+                });
+                payload.extend_from_slice(&[slot.player.token as u8, u8::from(slot.player.ready)]);
+                blob(&mut payload, &slot.player.name);
+                payload.extend_from_slice(&[slot.peer.unwrap_or(255), slot.difficulty]);
+            }
+            6
+        }
+        Message::LobbyRequest(request) => {
+            match request {
+                Request::Join { name, token } => {
+                    payload.extend_from_slice(&[0, *token as u8]);
+                    blob(&mut payload, name);
+                }
+                Request::Edit { token, ready } => {
+                    payload.extend_from_slice(&[1, *token as u8, u8::from(*ready)]);
+                }
+            }
+            7
+        }
+        Message::LobbyDenied => 8,
+        Message::Probe => 9,
         Message::Hello => 4,
         Message::Welcome { slot } => {
             payload.push(*slot);
@@ -157,6 +203,24 @@ impl<'a> Reader<'a> {
     }
     fn byte(&mut self) -> Result<u8> {
         Ok(self.take::<1>()?[0])
+    }
+    fn blob(&mut self) -> Result<Vec<u8>> {
+        let length = self.byte()? as usize;
+        let end = self.at + length;
+        let bytes = self
+            .bytes
+            .get(self.at..end)
+            .ok_or(Error::Truncated)?
+            .to_vec();
+        self.at = end;
+        Ok(bytes)
+    }
+    fn boolean(&mut self) -> Result<bool> {
+        match self.byte()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(Error::Row),
+        }
     }
     fn word(&mut self) -> Result<u32> {
         Ok(u32::from_le_bytes(self.take()?))
@@ -234,6 +298,48 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
         at: 0,
     };
     let message = match tag {
+        6 => {
+            let settings = Settings {
+                name: reader.blob()?,
+                level: reader.word()?,
+                parameter_bits: reader.word()?,
+                difficulty: reader.byte()?,
+                map: reader.blob()?,
+            };
+            let revision = u64::from_le_bytes(reader.take()?);
+            let mut rows = Vec::with_capacity(SLOTS);
+            for _ in 0..SLOTS {
+                let player = reader.row()?;
+                let peer = match reader.byte()? {
+                    255 => None,
+                    peer => Some(peer),
+                };
+                rows.push(Slot {
+                    player,
+                    peer,
+                    difficulty: reader.byte()?,
+                });
+            }
+            Message::Lobby(Snapshot {
+                settings,
+                revision,
+                rows: rows.try_into().map_err(|_| Error::Row)?,
+            })
+        }
+        7 => Message::LobbyRequest(match reader.byte()? {
+            0 => {
+                let token = reader.byte()? as i8;
+                Request::Join {
+                    name: reader.blob()?,
+                    token,
+                }
+            }
+            1 => Request::Edit {
+                token: reader.byte()? as i8,
+                ready: reader.boolean()?,
+            },
+            _ => return Err(Error::Tag),
+        }),
         1 => {
             let content = reader.content()?;
             let mut rows = Vec::with_capacity(SLOTS);
@@ -255,6 +361,8 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
             amount: reader.word()? as i32,
             due: reader.word()?,
         }),
+        8 => Message::LobbyDenied,
+        9 => Message::Probe,
         4 => Message::Hello,
         5 => Message::Welcome {
             slot: reader.byte()?,
@@ -275,10 +383,14 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
 }
 
 fn envelope(frame: &Frame) -> Result<()> {
-    if matches!(frame.message, Message::Hello) != (frame.session == [0; 16]) {
+    if matches!(frame.message, Message::Hello | Message::Probe) != (frame.session == [0; 16]) {
         return Err(Error::Session);
     }
-    if matches!(frame.message, Message::Hello | Message::Welcome { .. }) && frame.sequence != 0 {
+    if matches!(
+        frame.message,
+        Message::Hello | Message::Probe | Message::Welcome { .. }
+    ) && frame.sequence != 0
+    {
         return Err(Error::Sequence);
     }
     Ok(())

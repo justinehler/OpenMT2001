@@ -3,7 +3,7 @@
 //! #33 wires this owner API into the lobby. Call `Owner::pump` explicitly there
 //! and later from the 5 Hz callback (0x450410); this module starts no thread.
 //!
-//! At most five peer streams (including unfinished handshakes) and five accepts per
+//! At most five peer streams plus one read-only probe (including unfinished handshakes) and five accepts per
 //! pump. Each link has the framing limits in `stream`; handshakes expire after
 //! ten seconds when pumped. Slot zero is the host; slots 1 through 5 are assigned.
 //! Hello/Welcome are admission frames, outside the application sequence. A
@@ -71,6 +71,7 @@ pub enum Event {
 enum Admission {
     Hello,
     WelcomePending,
+    ProbePending,
     HelloPending,
     Welcome,
     Connected(Connection),
@@ -101,6 +102,7 @@ impl Link {
 pub(super) struct Transport {
     attempt: Attempt,
     listener: Option<TcpListener>,
+    advertisement: Option<super::lobby::Snapshot>,
     links: [Option<Link>; SLOTS],
 }
 impl Transport {
@@ -112,8 +114,9 @@ impl Transport {
             return;
         };
         for _ in 1..SLOTS {
-            let Some(slot) =
-                (1..SLOTS).find(|&slot| self.links[slot].is_none() && state.peers[slot].is_none())
+            let Some(slot) = (1..SLOTS)
+                .chain(std::iter::once(0))
+                .find(|&slot| self.links[slot].is_none() && state.peers[slot].is_none())
             else {
                 break;
             };
@@ -171,6 +174,12 @@ impl Transport {
                 failure = link.stream.flush().err();
             }
             if failure.is_none()
+                && matches!(link.admission, Admission::ProbePending)
+                && link.stream.drained()
+            {
+                continue; // Metadata-only connection never adopts or occupies a human row.
+            }
+            if failure.is_none()
                 && matches!(link.admission, Admission::HelloPending)
                 && link.stream.drained()
             {
@@ -217,7 +226,17 @@ impl Transport {
             Admission::Hello => {
                 state.phase(Phase::Lobby)?;
                 let hello = codec::decode(bytes)?;
-                if hello.message != Message::Hello {
+                if hello.message == Message::Probe {
+                    let snapshot = self.advertisement.clone().ok_or(Error::Unavailable)?;
+                    link.stream.enqueue(codec::encode(&Frame {
+                        session: state.session.ok_or(super::Error::Session)?,
+                        sequence: 0,
+                        message: Message::Lobby(snapshot),
+                    })?)?;
+                    link.admission = Admission::ProbePending;
+                    return Ok(());
+                }
+                if slot == 0 || hello.message != Message::Hello {
                     return Err(Error::Handshake);
                 }
                 link.stream.enqueue(codec::encode(&Frame {
@@ -249,7 +268,9 @@ impl Transport {
                     message: Box::new(message),
                 });
             }
-            Admission::WelcomePending | Admission::HelloPending => return Err(Error::Handshake),
+            Admission::WelcomePending | Admission::HelloPending | Admission::ProbePending => {
+                return Err(Error::Handshake);
+            }
         }
         Ok(())
     }
@@ -259,7 +280,10 @@ impl Transport {
         session: [u8; 16],
         message: Message,
     ) -> Result<(), Error> {
-        if matches!(message, Message::Hello | Message::Welcome { .. }) {
+        if matches!(
+            message,
+            Message::Hello | Message::Probe | Message::Welcome { .. }
+        ) {
             return Err(Error::Handshake);
         }
         let link = self
@@ -318,6 +342,7 @@ impl Owner {
         state.transport = Some(Transport {
             attempt,
             listener: Some(listener),
+            advertisement: None,
             links: std::array::from_fn(|_| None),
         });
         Ok(address)
@@ -360,6 +385,7 @@ impl Owner {
         state.transport = Some(Transport {
             attempt,
             listener: None,
+            advertisement: None,
             links,
         });
         Ok(())
@@ -380,6 +406,23 @@ impl Owner {
         state.transport = Some(transport);
         Ok(events)
     }
+    /// Read-only probe metadata, updated only by the host coordinator.
+    pub fn advertise(
+        &self,
+        attempt: Attempt,
+        snapshot: super::lobby::Snapshot,
+    ) -> Result<(), Error> {
+        snapshot.validate()?;
+        let mut state = self.lock()?;
+        state.attempt(attempt)?;
+        state.phase(Phase::Lobby)?;
+        let transport = state.transport.as_mut().ok_or(Error::Unavailable)?;
+        if transport.listener.is_none() {
+            return Err(Error::Unavailable);
+        }
+        transport.advertisement = Some(snapshot);
+        Ok(())
+    }
     /// Queue one application frame for an admitted link. A full queue is an
     /// error; retry only after pumping. No sequence is consumed on rejection.
     pub fn send(&self, connection: Connection, message: Message) -> Result<(), Error> {
@@ -391,6 +434,43 @@ impl Owner {
             .as_mut()
             .ok_or(Error::Unavailable)?
             .send(connection, session, message)
+    }
+}
+
+/// Read-only probe with bounded framing and an overall response deadline.
+/// Connection setup blocks, so callers must run this on a worker.
+pub fn probe(
+    address: SocketAddr,
+    timeout: Duration,
+) -> Result<([u8; 16], super::lobby::Snapshot), Error> {
+    let socket = TcpStream::connect_timeout(&address, timeout)?;
+    let mut stream = Stream::new(socket)?;
+    stream.enqueue(codec::encode(&Frame {
+        session: [0; 16],
+        sequence: 0,
+        message: Message::Probe,
+    })?)?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        stream.flush()?;
+        let batch = stream.read();
+        if let Some(bytes) = batch.frames.first() {
+            let frame = codec::decode(bytes)?;
+            if frame.sequence != 0 {
+                return Err(super::Error::Sequence.into());
+            }
+            let Message::Lobby(snapshot) = frame.message else {
+                return Err(Error::Handshake);
+            };
+            return Ok((frame.session, snapshot));
+        }
+        if let Some(error) = batch.terminal {
+            return Err(error);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Timeout);
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

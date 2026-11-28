@@ -72,6 +72,36 @@ fn request(button_count: usize, context: u32) -> prompt::Request {
 }
 
 #[test]
+fn options_quit_menu_backspace_and_return_use_original_replies() {
+    for (code, button) in [(KeyCode::Backspace, 1), (KeyCode::Enter, 0)] {
+        let mut h = Harness::new();
+        let assets = crate::game_options::Assets::test_menu();
+        let mut menu = crate::game_options::View::default();
+        menu.open(true);
+        assert_eq!(menu.mouse(&assets, Some([65., 5.]), true), None);
+        assert_eq!(
+            menu.mouse(&assets, Some([65., 5.]), false),
+            Some(crate::game_options::Button::Quit)
+        );
+        h.prompts = std::mem::take(&mut menu.quit_prompt);
+        h.event1(true);
+        h.key(code, true, false);
+        h.event1(true);
+        assert_eq!(
+            h.prompts.take_dialog_replies(),
+            vec![crate::human_dialog::Reply {
+                callback: crate::game_options::QUIT_CALLBACK,
+                context: 0,
+                button,
+            }]
+        );
+        h.prompts.finish_dismiss(vec![]);
+        assert!(h.prompts.request().is_none());
+        assert!(menu.open && menu.resume_running);
+    }
+}
+
+#[test]
 fn production_dialog_keys_return_and_backspace_match_mouse_replies() {
     for (code, button) in [(KeyCode::Enter, 0), (KeyCode::Backspace, 1)] {
         let mut h = Harness::new();
@@ -135,7 +165,7 @@ fn production_dialog_keys_first_tick_held_repeat_and_replacement() {
 }
 
 #[test]
-fn production_dialog_keys_no_dialog_inactive_and_missing_button() {
+fn production_dialog_keys_no_dialog_inactive_and_button_count() {
     for code in [KeyCode::Enter, KeyCode::Backspace] {
         let mut h = Harness::new();
         h.key(code, true, false);
@@ -150,19 +180,17 @@ fn production_dialog_keys_no_dialog_inactive_and_missing_button() {
         h.event1(true);
         h.no_reply();
     }
-    let mut h = Harness::new();
-    h.open(1);
-    h.key(KeyCode::Backspace, true, false);
-    h.event1(true);
-    h.no_reply();
-    h.key(KeyCode::Enter, true, false);
-    h.event1(true);
-    assert_eq!(h.prompts.take_dialog_replies()[0].button, 0);
-    let mut h = Harness::new();
-    h.open(0);
-    h.key(KeyCode::Enter, true, false);
-    h.event1(true);
-    h.no_reply();
+    for count in 0..=2 {
+        for (code, button) in [(KeyCode::Enter, 0), (KeyCode::Backspace, 1)] {
+            let mut h = Harness::new();
+            h.open(count);
+            h.key(code, true, false);
+            h.event1(true);
+            assert_eq!(h.prompts.take_dialog_replies()[0].button, button);
+            h.prompts.finish_dismiss(vec![]);
+            assert!(h.prompts.request().is_none());
+        }
+    }
 }
 
 #[test]
@@ -263,19 +291,28 @@ fn production_dialog_keys_held_press_cannot_answer_full_queue_replacement() {
 }
 
 #[test]
-fn production_dialog_keys_simultaneous_edges_dispatch_one_pending_reply() {
+fn production_dialog_keys_simultaneous_edges_resume_after_callback_and_close() {
     let mut h = Harness::new();
-    h.open(2);
+    h.open(1);
+    h.prompts.submit(request(0, 29));
     h.key(KeyCode::Enter, true, false);
     h.key(KeyCode::Backspace, true, false);
     h.event1(true);
     let replies = h.prompts.take_dialog_replies();
     assert_eq!(replies.len(), 1);
-    assert_eq!(replies[0].button, 0);
-    h.prompts.finish_dismiss(vec![request(2, 29)]);
+    assert_eq!((replies[0].button, replies[0].context), (0, 17));
+    assert_eq!(h.prompts.request().unwrap().dialog.unwrap().context, 17);
+    // The callback appends a third request while the first slot is still active.
+    h.prompts.finish_dismiss(vec![request(2, 41)]);
+    let replies = h.prompts.take_dialog_replies();
+    assert_eq!(replies.len(), 1);
+    assert_eq!((replies[0].button, replies[0].context), (1, 29));
+    assert_eq!(h.prompts.request().unwrap().dialog.unwrap().context, 29);
+    h.prompts.finish_dismiss(vec![]);
+    assert_eq!(h.prompts.request().unwrap().dialog.unwrap().context, 41);
     h.event1(true);
     h.event1(true);
-    h.no_reply();
+    h.no_reply(); // Neither held edge is reused against the third request.
 }
 
 #[test]

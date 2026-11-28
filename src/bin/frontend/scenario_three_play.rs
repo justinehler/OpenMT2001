@@ -274,7 +274,6 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
         let level=&reloaded.levels[reloaded.find(200003).unwrap()];assert_eq!(level.attempts(),1);assert!(level.completed()[0]);
         assert!(reloaded.levels[reloaded.find(200004).unwrap()].unlocked());assert!(!reloaded.levels[reloaded.find(200002).unwrap()].unlocked());
         println!("Natural Scenario3 Win exactly once: builds{submitted}, sales{}, profile{}, nextScenario4 unlocked; originalScenario2 remains locked behind4/5",session.world.ledgers.players[0].retail_counters[1],profile.display());
-        fs::write("work/economy/scenario3-natural-win-profile-path.txt",profile.to_string_lossy().as_bytes()).unwrap();
     }).unwrap().join().unwrap();
 }
 fn submit_legal_business(
@@ -443,7 +442,7 @@ fn campaign_continuation(
         let exe = openmt2001::fixtures::path("EXE");
         let scripts = exe.parent().unwrap().join("scripts");
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
-        let profile = PathBuf::from(fs::read_to_string("work/economy/scenario3-natural-win-profile-path.txt").unwrap());
+        let profile = crate::campaign_store::checkpoint_profile(&image, &scripts, level_id);
         let profile_before = fs::read(&profile).unwrap();
         let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();

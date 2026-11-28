@@ -39,6 +39,25 @@ pub enum Button {
     Quit,
 }
 
+pub const QUIT_CALLBACK: u32 = 0x49e940;
+
+/// Original 49e970's abandonment prompt, distinct from desktop Quit.
+pub fn quit_dialog() -> crate::human_dialog::Dialog {
+    crate::human_dialog::Dialog {
+        portrait: u32::MAX,
+        title: 1763,
+        body: 1764,
+        buttons: [1636, 1637],
+        button_count: 2,
+        callback: QUIT_CALLBACK,
+        timeout: false,
+        handler_written: true,
+        context_written: true,
+        timeout_written: true,
+        ..Default::default()
+    }
+}
+
 pub struct Assets {
     base: Vec<Surface>,
     fonts: Vec<Surface>,
@@ -65,6 +84,21 @@ fn options_mesh_triangles<'a>(
 }
 
 impl Assets {
+    #[cfg(test)]
+    pub(crate) fn test_menu() -> Self {
+        Self {
+            base: Vec::new(),
+            fonts: Vec::new(),
+            tab: Vec::new(),
+            labels: std::array::from_fn(|_| Vec::new()),
+            bounds: [
+                [0., 0., 10., 10.],
+                [20., 0., 30., 10.],
+                [40., 0., 50., 10.],
+                [60., 0., 70., 10.],
+            ],
+        }
+    }
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],
@@ -307,6 +341,8 @@ pub struct View {
     shown: Option<(Option<Button>, Option<Button>)>,
     message: Option<String>,
     save_disabled: bool,
+    pub quit_prompt: crate::prompt::State,
+    pub quit_reply: Option<std::sync::mpsc::Receiver<Vec<crate::prompt::Request>>>,
 }
 impl View {
     pub fn open(&mut self, running: bool) {
@@ -326,6 +362,8 @@ impl View {
         self.cue_latch = None;
         self.prepared = None;
         self.shown = None;
+        self.quit_prompt = crate::prompt::State::default();
+        self.quit_reply = None;
         running
     }
     pub fn set_message(&mut self, message: String) {
@@ -344,6 +382,9 @@ impl View {
         pointer: Option<[f32; 2]>,
         pressed: bool,
     ) -> Option<Button> {
+        if self.quit_prompt.request().is_some() {
+            return None;
+        }
         let hit = pointer
             .and_then(|p| assets.button(p))
             .filter(|button| !self.save_disabled || *button != Button::Save);
@@ -357,6 +398,17 @@ impl View {
             self.cue_latch = None;
             let activation = (hit == self.pressed).then_some(hit).flatten();
             self.pressed = None;
+            if activation == Some(Button::Quit) {
+                let dialog = quit_dialog();
+                self.quit_prompt.submit(crate::prompt::Request {
+                    script: None,
+                    dialog: Some(dialog),
+                    title: dialog.title,
+                    body: dialog.body,
+                    dismissal_id: 0,
+                    card: None,
+                });
+            }
             activation
         }
     }
@@ -407,18 +459,7 @@ mod tests {
 
     #[test]
     fn options_generic_button_cue_tracks_held_entry_and_disabled_save() {
-        let assets = Assets {
-            base: Vec::new(),
-            fonts: Vec::new(),
-            tab: Vec::new(),
-            labels: std::array::from_fn(|_| Vec::new()),
-            bounds: [
-                [0., 0., 10., 10.],
-                [20., 0., 30., 10.],
-                [40., 0., 50., 10.],
-                [60., 0., 70., 10.],
-            ],
-        };
+        let assets = Assets::test_menu();
         let mut view = View::default();
         view.open(false);
         assert_eq!(view.mouse(&assets, Some([5., 5.]), true), None);

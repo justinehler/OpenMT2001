@@ -34,10 +34,10 @@ fn active_dismissal(hooks: &super::Hooks) -> Result<Option<i32>, String> {
     for (command, args) in &hooks.commands {
         match command {
             level_script::Command::Prompt => {
-                prompt = Some(crate::live_host::prompt_request(args)?.dismissal_id as i32)
+                prompt = Some(crate::live_host::prompt_request(args, true)?.dismissal_id as i32)
             }
             level_script::Command::TutorialMessage => {
-                message = Some(crate::live_host::prompt_request(args)?.dismissal_id as i32);
+                message = Some(crate::live_host::prompt_request(args, true)?.dismissal_id as i32);
                 prompt = None;
             }
             level_script::Command::TutorialDismissPrompt => {

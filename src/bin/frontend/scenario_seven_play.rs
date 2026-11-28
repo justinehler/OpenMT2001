@@ -150,7 +150,7 @@ fn legal_scenario_seven_virginia_three_apartments_frontier() {
 }
 
 #[test]
-#[ignore = "requires the genuine Scenario6 Win profile and original v1.4 catalog"]
+#[ignore = "requires the original v1.4 catalog"]
 fn scenario_seven_requires_natural_scenario_eleven_campaign_unlock() {
     let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
@@ -158,7 +158,7 @@ fn scenario_seven_requires_natural_scenario_eleven_campaign_unlock() {
         .parent()
         .unwrap()
         .join("scripts");
-    let profile = openmt2001::fixtures::path("SCENARIO6_WIN_PROFILE");
+    let profile = crate::campaign_store::checkpoint_profile(&image, &scripts, 200011);
     let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
     crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
     for id in [200003, 200004, 200005, 200002, 200012, 200001, 200006] {

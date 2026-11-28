@@ -355,6 +355,17 @@ pub enum Button {
     Manager,
     ScenarioReminder,
 }
+impl Button {
+    pub(crate) fn tooltip(self, speed: u32, speed_disabled: bool) -> Option<u32> {
+        match self {
+            Self::ScenarioReminder => Some(1141),
+            // 425490/481940: the caption describes the next action, with
+            // 1144 at normal speed and 1145 after switching to four passes.
+            Self::Speed if !speed_disabled => Some(if speed == 1 { 1144 } else { 1145 }),
+            _ => None,
+        }
+    }
+}
 
 pub(crate) struct Display<'a> {
     pub year: u32,
@@ -947,6 +958,9 @@ pub struct View {
     normal: bool,
 }
 impl View {
+    pub(crate) fn displayed_speed(&self) -> Option<u32> {
+        self.clock.latest.map(|sample| sample.speed)
+    }
     #[cfg(test)]
     pub fn displayed_name(&self) -> Option<&str> {
         self.key.as_ref().map(|key| key.4.as_str())
@@ -1263,6 +1277,77 @@ pub(crate) fn capture_auction_status(status: &crate::live_host::Status, label: &
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn speed_tooltip_follows_live_toggle_with_original_dwell_while_hovered() {
+        use super::Button;
+        use crate::intro::camera_live::focus::{ChildKey, Focus};
+        let mut host = crate::live_host::Host::new([0.; 3]);
+        let mut hud = super::View::default();
+        let mut focus = Focus::default();
+        let mut legacy = crate::tooltip::IconDwell::default();
+        let mut sample = super::ClockSample {
+            interface_ticks: 0,
+            ticks: 0,
+            year: 1930,
+            hour: 9,
+            fraction: 0,
+            speed: 1,
+        };
+        for (speed, expected) in [(1, 1144), (4, 1145), (1, 1144)] {
+            assert_eq!(host.policy.scheduler.iterations, speed);
+            let stale = sample;
+            sample.speed = speed;
+            hud.clock.observe(sample, true);
+            hud.clock.observe(stale, false);
+            let id = Button::Speed
+                .tooltip(
+                    hud.displayed_speed().unwrap(),
+                    host.policy.scheduler.network_enabled,
+                )
+                .unwrap();
+            assert_eq!(id, expected);
+            // Keep the same hovered widget across each speed change. Both
+            // existing HUD paths refresh the caption and restart its dwell.
+            focus
+                .show_child(ChildKey::Time(Button::Speed), id, false)
+                .unwrap();
+            assert_eq!(focus.retained_text_identifier(), Some(expected));
+            for _ in 0..25 {
+                focus.advance();
+                assert_eq!(focus.caption(), None);
+                assert_eq!(legacy.advance(Some(id)), None);
+            }
+            focus.advance();
+            assert_eq!(focus.caption(), Some(expected));
+            assert_eq!(legacy.advance(Some(id)), Some(expected));
+            focus
+                .show_child(ChildKey::Time(Button::Speed), id, false)
+                .unwrap();
+            assert_eq!(
+                focus.caption(),
+                Some(expected),
+                "unchanged hover retains dwell"
+            );
+            host.toggle_speed();
+        }
+        focus.clear_child();
+        assert_eq!(focus.caption(), None);
+        assert_eq!(legacy.advance(None), None);
+        assert_eq!(legacy.advance(Some(1144)), None);
+    }
+
+    #[test]
+    fn network_speed_has_neither_help_nor_toggle() {
+        let mut host = crate::live_host::Host::new([0.; 3]);
+        host.policy.scheduler.network_enabled = true;
+        for speed in [1, 4] {
+            host.policy.scheduler.iterations = speed;
+            assert_eq!(super::Button::Speed.tooltip(speed, true), None);
+            host.toggle_speed();
+            assert_eq!(host.policy.scheduler.iterations, speed);
+        }
+    }
+
     #[test]
     fn portrait_hit_target_opens_scenario_reminder_separately_from_manager() {
         let mut regions = [[-10.; 4]; 14];

@@ -1,7 +1,7 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
-//! Direct-IP transport is pumped explicitly by this owner; #33 wires the lobby.
+//! Direct-IP transport is pumped by the lobby worker through this owner.
 //! Connected startup and command consumers follow in #30. Only explicit
-//! listen/connect calls open sockets; there is no menu or match wiring yet.
+//! listen/connect/probe calls open sockets; connected startup is still separate.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{
     Mutex, MutexGuard, OnceLock,
@@ -9,6 +9,7 @@ use std::sync::{
 };
 
 pub mod codec;
+pub mod lobby;
 pub mod stream;
 #[cfg(test)]
 mod tests;
@@ -167,14 +168,19 @@ impl State {
         let frame = codec::decode(bytes)?;
         self.attempt(connection.attempt)?;
         match &frame.message {
-            Message::Roster { .. } | Message::Start(_) => self.phase(Phase::Lobby)?,
+            Message::Roster { .. }
+            | Message::Start(_)
+            | Message::Lobby(_)
+            | Message::LobbyRequest(_)
+            | Message::LobbyDenied => self.phase(Phase::Lobby)?,
             Message::Transfer(_) => self.binding(binding.ok_or(Error::World)?)?,
-            Message::Hello | Message::Welcome { .. } => return Err(Error::Tag),
+            Message::Hello | Message::Probe | Message::Welcome { .. } => return Err(Error::Tag),
         }
         let peer = self.peers[usize::from(connection.slot)]
             .as_mut()
             .ok_or(Error::Peer)?;
-        if peer.identity != connection.identity || !peer.authority {
+        let request = matches!(frame.message, Message::LobbyRequest(_));
+        if peer.identity != connection.identity || peer.authority == request {
             return Err(Error::Peer);
         }
         peer.decoder.accept(&frame)?;
@@ -288,7 +294,7 @@ impl Owner {
         state.transport = None;
         Ok(())
     }
-    /// Admit only authority commits from the adopted connection. Rejected input
+    /// Admit authority commits or client lobby requests from adopted connections. Rejected input
     /// changes neither sequence nor lifecycle. No simulation callback runs here.
     /// A deferred consumer must revalidate its Session binding before applying.
     pub fn receive(
@@ -374,6 +380,8 @@ pub struct Transfer {
 pub enum Message {
     /// Admission only: zero session, zero sequence, no payload or chosen role.
     Hello,
+    /// Read-only admission: returns metadata without allocating a player peer.
+    Probe,
     /// Admission only: the host's nonzero session and assigned client slot.
     /// The authority is always slot zero. Application sequences restart at zero.
     Welcome {
@@ -383,6 +391,11 @@ pub enum Message {
         content: Content,
         rows: [Row; SLOTS],
     },
+    /// Host metadata and six-row revision; distinct from verified startup content.
+    Lobby(lobby::Snapshot),
+    LobbyDenied,
+    /// Only the adopted client connection identifies the requester.
+    LobbyRequest(lobby::Request),
     Start(Start),
     Transfer(Transfer),
 }
