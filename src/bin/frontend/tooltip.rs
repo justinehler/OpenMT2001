@@ -17,10 +17,7 @@ pub struct Tooltip {
     speed_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
-    pub(crate) fn apply_board(
-        &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
-    ) {
+    pub(crate) fn apply_board(&mut self, board: &openmt2001::packed_language::PackedLanguage) {
         self.names = board.rows().into_iter().map(<[u8]>::to_vec).collect();
     }
 
@@ -77,9 +74,8 @@ impl Tooltip {
         let packed = match shared {
             Some(text) => &text.fonts().language,
             None => {
-                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
-                    &language.join("tycoon"),
-                )?;
+                loaded =
+                    openmt2001::packed_language::PackedLanguage::load(&language.join("tycoon"))?;
                 &loaded
             }
         };
@@ -290,8 +286,7 @@ pub(crate) fn board_strings(installer: &Path) -> Result<Vec<Vec<u8>>, String> {
     //4922e0 installs USA board strings at2242, skipping the source character map.
     //The current native inspection host uses the supplied USA board.
     let path = installer.join("Standard/fonts/board/usa");
-    let packed =
-        crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&path.join("tycoon"))?;
+    let packed = openmt2001::packed_language::PackedLanguage::load(&path.join("tycoon"))?;
     Ok(packed.rows().into_iter().map(<[u8]>::to_vec).collect())
 }
 

@@ -103,6 +103,7 @@ pub mod initial_conditions;
 pub mod lua4;
 pub mod objective_tick;
 pub mod outcome_notice;
+pub mod packed_language;
 pub mod player_constructor;
 pub mod player_history;
 pub mod player_manager;

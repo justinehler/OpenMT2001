@@ -131,7 +131,7 @@ impl View {
     pub(crate) fn board_language(
         &self,
         installer: &Path,
-    ) -> Result<crate::intro::camera_live::ui_text_resources::PackedLanguage, String> {
+    ) -> Result<openmt2001::packed_language::PackedLanguage, String> {
         self.board.language(installer)
     }
 
@@ -191,7 +191,7 @@ impl View {
 mod tests {
     use super::*;
     use crate::board_selection::{self, Name};
-    use crate::intro::camera_live::ui_text_resources::PackedLanguage;
+    use openmt2001::packed_language::PackedLanguage;
 
     fn click(view: &mut View, assets: &Assets, point: [f32; 2]) {
         let mut audio = Levels::default();

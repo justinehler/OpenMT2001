@@ -1,5 +1,5 @@
 //! Original board catalog (4926b0), language overlay (4922e0) and profile choice.
-use crate::intro::camera_live::ui_text_resources::PackedLanguage;
+use openmt2001::packed_language::PackedLanguage;
 use std::{
     fs,
     path::{Path, PathBuf},

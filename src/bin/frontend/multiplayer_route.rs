@@ -84,7 +84,7 @@ fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
 impl Route {
     pub(crate) fn apply_board(
         &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
         strings: &[Vec<u8>],
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.strings, board)?;
