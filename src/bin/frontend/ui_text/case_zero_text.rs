@@ -396,7 +396,7 @@ pub fn trunc(v: f64) -> Result<i32, String> {
 }
 ///Finite signed-result layout admission for50e928. Preserve fractional
 ///values whose truncation still fits (MIN-1 < x < MAX+1).
-pub(crate) fn ftol_layout(s: openmt2001::x87::Sum) -> Result<i32, String> {
+pub fn ftol_layout(s: openmt2001::x87::Sum) -> Result<i32, String> {
     use openmt2001::x87::Sum;
     use std::cmp::Ordering;
     let mut lower = Sum::from_i32(i32::MIN);
@@ -457,7 +457,7 @@ impl Text {
     ///transient148 are not consumed by a live normal-success field. Native
     ///x87 status/traps and allocation-failure unwind are outside this API.
     ///Node context/padding live in the typed Node's explicit Unknown carrier.
-    pub(crate) fn normal_fields() -> Self {
+    pub fn normal_fields() -> Self {
         Self {
             reset_target: ResetTarget::Ret43b370,
             bounds: [0.; 4],
@@ -490,7 +490,7 @@ impl Text {
             background: 0,
         }
     }
-    pub(crate) fn extent440900(&mut self, bounds: [f32; 4]) -> Result<(), String> {
+    pub fn extent440900(&mut self, bounds: [f32; 4]) -> Result<(), String> {
         if self.pitch == 0 {
             return Err("440900 Text live pitch zero".into());
         }
@@ -508,7 +508,7 @@ impl Text {
         self.dirty = 0;
         Ok(()) //native setter ignores incoming depth
     }
-    pub(crate) fn style440650(&mut self, style: u32, inset: i32, scroll: i32) {
+    pub fn style440650(&mut self, style: u32, inset: i32, scroll: i32) {
         if inset != -999 {
             self.inset = inset
         }
@@ -593,7 +593,7 @@ impl Text {
     }
     ///Plain441220 with explicit unknown X allocation state, no4406a0.
     ///The retained caller owns this SAME Text and its actual X capacity carrier.
-    pub(crate) fn identifier441220_unaligned(
+    pub fn identifier441220_unaligned(
         &mut self,
         font: &mut Fonts,
         id: u32,
@@ -607,7 +607,7 @@ impl Text {
     }
     ///One native440330 growth body for retained unaligned Text owners.
     ///Native X storage has capacity but no first writer on construction paths.
-    pub(crate) fn resize_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
+    pub fn resize_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
         if !self.x.is_empty() || x.len() != self.colors.len() {
             return Err("unaligned Text capacity authority differs".into());
         }
@@ -628,7 +628,7 @@ impl Text {
         }
         Ok(())
     }
-    pub(crate) fn reset_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
+    pub fn reset_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
         self.reset_before_resize()?;
         self.resize_unaligned(x)?;
         self.colors[..self.group.count as usize].fill(0);
@@ -747,7 +747,7 @@ impl Text {
     }
     ///441770 retained construction branch, zero extra arguments. Uses the
     ///SAME formatter as literal; retains native reached selector/scale/mode.
-    pub(crate) fn literal441770_unaligned(
+    pub fn literal441770_unaligned(
         &mut self,
         font: &mut Fonts,
         format: &[u8],
@@ -1037,10 +1037,104 @@ impl Literals {
     }
 }
 
+/// Synthetic case-zero text state for regressions without original resources.
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures {
+    use super::{FontData, Fonts, Group, ResetTarget, ScratchByte, Text};
+    use std::collections::BTreeMap;
+    pub fn text() -> Text {
+        Text {
+            reset_target: ResetTarget::Ret43b370,
+            bounds: [0., 0., 200., 100.],
+            depth: 0.5,
+            font: 0,
+            pitch: 10,
+            gap: 0,
+            visible: 10,
+            line_mode: 1,
+            scale: 1.,
+            padding: 0,
+            colors: vec![9; 8],
+            blink_colors: vec![8; 8],
+            blink: vec![0; 8],
+            x: vec![0; 8],
+            extent: [0.; 4],
+            group: Group {
+                bytes: Vec::new(),
+                offsets: vec![0; 2],
+                count: 0,
+            },
+            y: 7,
+            inset: 0,
+            scroll: 0,
+            style: 0,
+            first: 0,
+            dirty: 0,
+            geometry_dirty: 1,
+            background_color: 0,
+            background: 0,
+        }
+    }
+    pub fn set_metric(fonts: &mut Fonts, glyph: u8, offset: usize, value: i32) {
+        let at = 4 + usize::from(glyph) * 44 + offset;
+        fonts.fonts.get_mut(&0).unwrap().table[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    pub fn fonts() -> Fonts {
+        let mut table = vec![0; 4 + 256 * 44];
+        table[..4].copy_from_slice(&256u32.to_le_bytes());
+        let mut fonts = Fonts {
+            fonts: BTreeMap::from([(
+                0,
+                FontData {
+                    table,
+                    baseline: 0,
+                    scale: 1.,
+                },
+            )]),
+            language: crate::ui_text::resources::PackedLanguage::test_rows(
+                std::iter::once((0..=255).collect())
+                    .chain((1..1814).map(|_| vec![1]))
+                    .collect(),
+            ),
+            current: 0,
+            gap: 0,
+            line_mode: 1,
+            scratch: vec![ScratchByte::Unwritten; 1024],
+            formatted: Group {
+                bytes: Vec::new(),
+                offsets: vec![0; 2],
+                count: 0,
+            },
+            temporary: Group {
+                bytes: Vec::new(),
+                offsets: Vec::new(),
+                count: 0,
+            },
+            error: super::ErrorWord::Unknown,
+            selector: super::SelectorState {
+                cached: 0,
+                pending: [0, 0],
+                notify: 0,
+            },
+            context: u32::MAX,
+            glyph_callback: 0x4554e0,
+            ready_callback: 0,
+            four_callback: 0,
+            pair: [2243, 2244],
+            tail: Some(2245),
+        };
+        for g in 0..=255 {
+            set_metric(&mut fonts, g, 32, 8);
+            set_metric(&mut fonts, g, 36, 10);
+        }
+        fonts
+    }
+}
+
 #[cfg(test)]
 mod style_nine_regressions {
+    use super::fixtures::{fonts, set_metric, text};
     use super::*;
-    use crate::intro::camera_live::main_panel::regression_tests::{fonts, set_metric, text};
     #[test]
     fn style_nine_centers_from_first_row_rise_plus_truncated_height_only() {
         let mut fonts = fonts();
@@ -1133,8 +1227,8 @@ mod style_nine_regressions {
 
 #[cfg(test)]
 mod active_font_regressions {
+    use super::fixtures::{fonts, text};
     use super::*;
-    use crate::intro::camera_live::main_panel::regression_tests::{fonts, text};
     fn divergent() -> Fonts {
         let mut font = fonts();
         let mut active = font.fonts[&0].clone();

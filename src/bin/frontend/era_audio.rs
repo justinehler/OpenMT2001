@@ -131,7 +131,7 @@ pub struct Player {
     pending_token: Option<crate::audio_bus::focus::MusicToken>,
     prepared: Option<(bool, Vec<f32>)>,
     change_queued: bool,
-    before_six: Option<(u32, crate::audio_bus::effects::Handle)>,
+    pub before_six: Option<(u32, crate::audio_bus::effects::Handle)>,
     next_handle: u32,
     warned_before_six_release: bool,
 }
@@ -393,6 +393,20 @@ impl Drop for Player {
     }
 }
 
+/// A player over half-amplitude before-six PCM, with a test output.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_player() -> (Player, rodio::mixer::MixerSource) {
+    let assets = Assets {
+        songs: std::array::from_fn(|_| PathBuf::new()),
+        before_six: vec![0.5; 65_536],
+        ffmpeg: PathBuf::new(),
+    };
+    let mut player = Player::new(assets);
+    let (mixer, output) = rodio::mixer::mixer(1, 22_050);
+    player.effects_bus.connect_test_output(&mixer, 1, 22_050);
+    (player, output)
+}
+
 #[cfg(test)]
 #[path = "era_audio_fade_tests.rs"]
 mod fade_tests;
@@ -643,9 +657,9 @@ mod cold_gain_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Player {
-    pub(crate) fn composition_pending_pcm(
+    pub fn composition_pending_pcm(
         &mut self,
         audio: crate::audio_bus::focus::SharedAudio,
         mixer: &rodio::mixer::Mixer,
@@ -657,7 +671,7 @@ impl Player {
         self.pending = Some((true, receiver));
         sender
     }
-    pub(crate) fn composition_song_state(&self) -> Option<(bool, f32)> {
+    pub fn composition_song_state(&self) -> Option<(bool, f32)> {
         self.song
             .as_ref()
             .map(|song| (song.is_paused(), song.volume()))

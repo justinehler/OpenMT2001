@@ -816,33 +816,33 @@ impl Locator {
             |_| "C negative selected world key outside source domain",
         )?))
     }
-    pub(crate) fn install_strategic(&mut self, state: State) -> Result<(), String> {
+    pub fn install_strategic(&mut self, state: State) -> Result<(), String> {
         if self.strategic_state.is_some() {
             return Err("C lifecycle replacement forbidden".into());
         }
         self.strategic_state = Some(state);
         self.publish_strategic()
     }
-    pub(crate) fn strategic(&self) -> Result<&State, String> {
+    pub fn strategic(&self) -> Result<&State, String> {
         self.strategic_state
             .as_ref()
             .ok_or_else(|| "C actual reset/load producer absent".into())
     }
-    pub(crate) fn strategic_mut(&mut self) -> Result<&mut State, String> {
+    pub fn strategic_mut(&mut self) -> Result<&mut State, String> {
         self.strategic_state
             .as_mut()
             .ok_or_else(|| "C actual reset/load producer absent".into())
     }
-    pub(crate) fn replace_strategic_suppliers(&mut self, input: Arc<Inputs>) -> Result<(), String> {
+    pub fn replace_strategic_suppliers(&mut self, input: Arc<Inputs>) -> Result<(), String> {
         self.strategic_mut()?.replace_suppliers(input)
     }
-    pub(crate) fn take_strategic_writeback(
+    pub fn take_strategic_writeback(
         &mut self,
         colors: [u32; 600],
     ) -> Result<Option<Writeback>, String> {
         Ok(self.strategic_mut()?.take_writeback(colors))
     }
-    pub(crate) fn has_strategic(&self) -> bool {
+    pub fn has_strategic(&self) -> bool {
         self.strategic_state.is_some()
     }
     /// Validate the destination shell's actual report attachments and every
@@ -952,7 +952,7 @@ impl Locator {
     }
     /// Prepare every report and stable-key projection using a borrowed actual
     /// State. The destination owns no C lifecycle until the caller commits.
-    pub(crate) fn prepare_strategic_refresh(
+    pub fn prepare_strategic_refresh(
         &mut self,
         old: &Self,
         buildings: &[openmt2001::render_scene::InspectionBuilding],
@@ -971,12 +971,12 @@ impl Locator {
     }
     /// Only after the caller's full preparation succeeds. No projection or
     /// fallible decoding remains; move the SAME tree/Arc/provenance owner.
-    pub(crate) fn commit_strategic_refresh(&mut self, old: &mut Self) {
+    pub fn commit_strategic_refresh(&mut self, old: &mut Self) {
         self.strategic_state = old.strategic_state.take();
     }
     ///Read projection only. Actual report, mode, row and poll authority remains
     ///State. Modern GPU batches are invalidated, never reconstructed as state.
-    pub(crate) fn publish_strategic(&mut self) -> Result<(), String> {
+    pub fn publish_strategic(&mut self) -> Result<(), String> {
         let s = self
             .strategic_state
             .take()
@@ -1074,7 +1074,7 @@ impl Locator {
                 .rows = s.people_rows.clone();
         }
         self.poll_category = (s.field460 != NONE).then_some(s.field460 as usize);
-        let mut polls = std::array::from_fn(|i| crate::consumer_polls::Poll {
+        let mut polls = std::array::from_fn(|i| openmt2001::consumer_poll::Poll {
             counts: s.input.poll_queries[i][..32].try_into().unwrap(),
             residents: s.input.poll_queries[i][33],
         });
@@ -1165,7 +1165,7 @@ impl Locator {
     }
     ///Stable building keys are resolved only for rendering/current scene input.
     ///4138b0 supplier itself never takes a display-vector index as authority.
-    pub(crate) fn project_strategic_owned(
+    pub fn project_strategic_owned(
         &mut self,
         scene: &openmt2001::render_scene::Scene,
     ) -> Result<(), String> {
@@ -1256,8 +1256,8 @@ impl Prior {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod selector_boundary_tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod selector_boundary_tests {
     use super::*;
     use crate::compatibility::Mode;
     fn normal(path: NormalAllocationPath) -> EnabledBufferProvenance {
@@ -1439,7 +1439,7 @@ pub(crate) mod selector_boundary_tests {
             unchanged(&e);
         }
     }
-    pub(crate) fn state_fixture(mode: Mode, provenance: EnabledBufferProvenance) -> State {
+    pub fn state_fixture(mode: Mode, provenance: EnabledBufferProvenance) -> State {
         let mut p = [0u8; 440];
         p[0xc] = 1;
         let tables = Arc::new(openmt2001::strategic_inputs::Tables {

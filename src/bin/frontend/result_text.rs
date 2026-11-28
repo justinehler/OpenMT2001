@@ -1,8 +1,8 @@
 //! Original4b22e8 result title draw: font4, center X=320, top Y=340,
 //! white RGB with the 4b1eb0 controller's alpha byte. Text comes from the
 //! original language table via4dad30/4b17e0, not from embedded English.
-use crate::fresh_city::result::ResultPresentation;
 use crate::ui::{self, Surface};
+use openmt2001::session::result::ResultPresentation;
 use openmt2001::{
     archive::ArchiveIndex,
     render::{PreparedScene, Renderer},
@@ -27,7 +27,7 @@ impl Assets {
     ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, None)
     }
-    pub(crate) fn load_shared(
+    pub fn load_shared(
         index: &ArchiveIndex,
         archive: &[u8],
         installer: &Path,
@@ -137,10 +137,10 @@ impl Assets {
     }
 
     /// Settings and campaign completion use the same original credit layout.
-    pub(crate) fn prepare_credit_rows(
+    pub fn prepare_credit_rows(
         &self,
         renderer: &Renderer,
-        rows: &[crate::fresh_city::result::CreditRow],
+        rows: &[openmt2001::session::result::CreditRow],
         row: usize,
         alpha: u8,
     ) -> Result<Option<PreparedScene>, String> {
@@ -210,7 +210,7 @@ impl Assets {
 
     fn credit_row_surfaces(
         &self,
-        rows: &[crate::fresh_city::result::CreditRow],
+        rows: &[openmt2001::session::result::CreditRow],
         row: usize,
         alpha: u8,
     ) -> Result<Option<Vec<Surface>>, String> {
@@ -282,7 +282,7 @@ mod tests {
             credit_heading_tab: ui::synthetic_text_font(3, 6),
             strings: vec![vec![33; 3]],
         };
-        let rows = vec![crate::fresh_city::result::CreditRow {
+        let rows = vec![openmt2001::session::result::CreditRow {
             heading_id: Some(0),
             names: (1..=5).map(|n| vec![33; n]).collect(),
         }];
@@ -391,7 +391,8 @@ mod tests {
         let assets = Assets::load(&index, &archive, installer, &language).unwrap();
         let mut result = ResultPresentation::new(Sequence::Complete, (0, 1));
         let mut state = 0x1234_5678;
-        result.credit_lines = crate::fresh_city::result::credit_lines(&image, &mut state).unwrap();
+        result.credit_lines =
+            openmt2001::session::result::credit_lines(&image, &mut state).unwrap();
         result.credit_rows = result.credit_lines.len();
         assert_eq!(result.credit_rows, 32);
         for row in [0, 1, 14, 24, 31] {

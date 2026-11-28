@@ -14,6 +14,9 @@ log=$(mktemp)
 cargo "${toolchain[@]}" clippy --locked --features native,capture --all-targets \
   --message-format short --color never > "$log" 2>&1
 status=$?
+# The game and frontend packages mount their sources from src/bin (#99). Report
+# those files as src/... so warnings line up with the diff below.
+sed -i -E 's#^crates/game/\.\./\.\./##; s#^crates/frontend/src/\.\./\.\./\.\./##' "$log"
 if ((status != 0)) && ! grep -q 'Finished' "$log"; then
   cat "$log"
   echo "::error::clippy did not finish"

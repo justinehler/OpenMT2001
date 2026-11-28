@@ -73,7 +73,7 @@ pub struct Report {
     pub lease_available: [bool; 52],
 }
 impl Report {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn verify_runtime(
         world: &openmt2001::level_startup::World,
         players: &crate::player_info::State,

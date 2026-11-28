@@ -59,3 +59,69 @@ impl Auction {
         Ok(())
     }
 }
+
+/// Applies one auction presentation call from the AI offer script to the live
+/// panel state (moved from the game Host, #99).
+pub fn action(
+    call: crate::ai_messages::offers::auction::Call,
+    auction: &mut Option<Auction>,
+    omitted: &mut std::collections::BTreeSet<u32>,
+    tutorial_state: u8,
+    actor_events: &Option<std::sync::mpsc::Sender<crate::render_requests::auction::ActorEvent>>,
+    bid_gate: &std::cell::Cell<bool>,
+) -> Result<u32, String> {
+    use crate::ai_messages::offers::auction::Call;
+    let auction = auction
+        .as_mut()
+        .ok_or("Auction presentation action arrived without a prepared scene")?;
+    match call {
+        Call::ShowPanel(0x565b9c) => {
+            auction.visible = true;
+            // 4140b0 resets the hidden bid-voice/AI gate on panel reopen.
+            bid_gate.set(false);
+            auction.bid_voice_gate = false;
+            if let Some(sender) = actor_events {
+                sender
+                    .send(crate::render_requests::auction::ActorEvent::BidVoiceGate(
+                        false,
+                    ))
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            }
+        }
+        Call::ShowPanel(0x565b94) => (), // Original top panel is part of the renderer.
+        Call::ShowPanel(address @ (0x565ba4 | 0x565ba0)) => {
+            omitted.insert(address);
+        }
+        Call::ShowPanel(address) => return Err(format!("Unmapped auction panel{address:08x}")),
+        Call::ParticipantEffect { participant, kind } => {
+            if let Some(sender) = actor_events {
+                sender
+                    .send(crate::render_requests::auction::ActorEvent::Effect { participant, kind })
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            } else {
+                omitted.insert(0x465980);
+            }
+        }
+        Call::Tutorial(_) if tutorial_state == 1 => {
+            return Err("Auction tutorial event needs its tutorial session".into());
+        }
+        Call::Tutorial(_) => (),
+        Call::RefreshTurn(_) => {
+            // Invalidate the old text; the host refreshes from the completed
+            // controller after the simulation releases its mutable borrow.
+            auction.participants.clear();
+        }
+        Call::WithdrawNotice(participant) => {
+            if let Some(sender) = actor_events {
+                sender
+                    .send(crate::render_requests::auction::ActorEvent::WithdrawNotice(
+                        participant,
+                    ))
+                    .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
+            } else {
+                omitted.insert(0x464769);
+            }
+        }
+    }
+    Ok(0)
+}

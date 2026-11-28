@@ -579,7 +579,7 @@ mod tests {
             1,
             true,
             |call, _| {
-                crate::live_host::auction_action(
+                openmt2001::auction_panel::action(
                     call,
                     &mut host_auction,
                     &mut omitted,
@@ -639,7 +639,7 @@ mod tests {
         );
         assert_eq!(actors.poses[7].frame, 21);
         let gate = std::cell::Cell::new(true);
-        crate::live_host::auction_action(
+        openmt2001::auction_panel::action(
             auction::Call::ShowPanel(0x565b9c),
             &mut host_auction,
             &mut omitted,
@@ -710,7 +710,7 @@ mod tests {
             2,
             true,
             |call, _| {
-                crate::live_host::auction_action(
+                openmt2001::auction_panel::action(
                     call,
                     &mut host_auction,
                     &mut omitted,

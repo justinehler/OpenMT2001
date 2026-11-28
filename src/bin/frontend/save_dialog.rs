@@ -92,7 +92,7 @@ impl Assets {
             map: self.strings.first().map_or(&[], Vec::as_slice),
         }
     }
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {

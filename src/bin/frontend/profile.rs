@@ -366,10 +366,10 @@ impl Profile {
         self.notice = Some(notice);
         self.notice_keys.open(self.pointer_position);
     }
-    pub(crate) fn prompt_pending(&self) -> bool {
+    pub fn prompt_pending(&self) -> bool {
         self.notice.is_some()
     }
-    pub(crate) fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
+    pub fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
         use crate::human_dialog::{Argument, Dialog};
         let mut dialog = Dialog {
             portrait: crate::human_dialog::NO_PORTRAIT,
@@ -401,7 +401,7 @@ impl Profile {
         }
         Some(dialog)
     }
-    pub(crate) fn ui_event1(&mut self, sample: crate::desktop_quit::Sample) -> bool {
+    pub fn ui_event1(&mut self, sample: crate::desktop_quit::Sample) -> bool {
         let edges = self.notice_keys.event1(sample);
         let mut replied = false;
         for (button, edge) in edges.into_iter().enumerate() {
@@ -412,7 +412,7 @@ impl Profile {
         }
         replied
     }
-    pub(crate) fn modal_open(&self) -> bool {
+    pub fn modal_open(&self) -> bool {
         self.name.is_some() || self.notice.is_some()
     }
     pub fn count(&self) -> usize {
@@ -563,21 +563,21 @@ impl Profile {
                 .saturating_sub(self.assets.list_layout.visible_rows()) as i32,
         ) as usize;
     }
-    pub(crate) fn prompt_mouse(&mut self, down: bool, hit: Option<usize>) -> bool {
+    pub fn prompt_mouse(&mut self, down: bool, hit: Option<usize>) -> bool {
         if let Some(button) = self.notice_keys.left(down, hit) {
             self.activate(button);
             return true;
         }
         false
     }
-    pub(crate) fn prompt_right(&mut self, down: bool) {
+    pub fn prompt_right(&mut self, down: bool) {
         self.notice_keys.right(down);
     }
-    pub(crate) fn cancel_input(&mut self) {
+    pub fn cancel_input(&mut self) {
         self.pointer_position = None;
         self.notice_keys.cancel_pointer();
     }
-    pub(crate) fn prompt_controls(&self) -> &crate::desktop_quit::Modal {
+    pub fn prompt_controls(&self) -> &crate::desktop_quit::Modal {
         &self.notice_keys
     }
     pub fn pointer(&mut self, p: [f32; 2]) {

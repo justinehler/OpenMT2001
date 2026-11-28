@@ -86,8 +86,8 @@ impl Bus {
             master.set_volume(self.gain);
         }
     }
-    #[cfg(test)]
-    pub(super) fn connect_test_output(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn connect_test_output(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
         self.connect_to(output, channels, sample_rate);
     }
     #[cfg(test)]

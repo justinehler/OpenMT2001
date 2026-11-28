@@ -91,7 +91,7 @@ pub struct Layer {
 }
 
 impl Layer {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn active_count(&self) -> usize {
         self.auxiliaries
             .iter()
@@ -102,7 +102,7 @@ impl Layer {
             .count()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn first_active_position(&self) -> Option<[f32; 3]> {
         self.auxiliaries.iter().find_map(|auxiliary| {
             let index = u32::from_le_bytes(auxiliary[0x38..0x3c].try_into().unwrap()) as usize;

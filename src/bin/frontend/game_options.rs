@@ -67,8 +67,8 @@ fn options_mesh_triangles<'a>(
 }
 
 impl Assets {
-    #[cfg(test)]
-    pub(crate) fn test_menu() -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_menu() -> Self {
         Self {
             base: Vec::new(),
             fonts: Vec::new(),
@@ -204,15 +204,15 @@ impl Assets {
                 ][i]
             })
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bounds(&self) -> [[f32; 4]; 4] {
         self.bounds
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn labels(&self) -> &[Vec<u8>; 4] {
         &self.labels
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn prepare(
         &self,
         renderer: &Renderer,

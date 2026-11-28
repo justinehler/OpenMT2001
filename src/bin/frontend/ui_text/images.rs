@@ -14,7 +14,7 @@ pub struct Record {
     pub scale: Option<f32>,
 }
 pub struct Images {
-    pub(crate) construction_identity: super::ResourceIdentity,
+    pub construction_identity: super::ResourceIdentity,
     pub path: String,
     pub archive_range: Range<usize>,
     pub metadata: [u32; 13],

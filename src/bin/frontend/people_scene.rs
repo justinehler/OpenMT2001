@@ -59,9 +59,7 @@ pub(crate) fn transform(
     Ok(transform_from_matrix(object_matrix(auxiliary)?))
 }
 
-pub(crate) fn transform_from_matrix(
-    mut matrix: [[f32; 3]; 4],
-) -> openmt2001::people::PeopleTransform {
+pub fn transform_from_matrix(mut matrix: [[f32; 3]; 4]) -> openmt2001::people::PeopleTransform {
     // Original 004f2350 tests the unflipped diagonal only.
     let translation_only = (0..3).all(|i| matrix[i][i].to_bits() == 1_f32.to_bits());
     matrix[2] = matrix[2].map(|v| -v);
@@ -87,7 +85,7 @@ pub(crate) fn object_view(view: [f32; 12], object: [[f32; 3]; 4]) -> [f32; 12] {
 
 /// 004e3770 sunlight in object coordinates, before the local-Z flip applied
 /// by Palette::shade_static. Every component is stored before scaling by127.
-pub(crate) fn sunlight(matrix: [[f32; 3]; 4], sun: [f32; 3]) -> [f32; 3] {
+pub fn sunlight(matrix: [[f32; 3]; 4], sun: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|i| {
         (f64::from(sun[2]) * f64::from(matrix[i][2])
             + (f64::from(sun[1]) * f64::from(matrix[i][1])
@@ -439,7 +437,7 @@ impl Layer {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn differs_from(&self, previous: &Self) -> bool {
         self.residents.len() != previous.residents.len()
             || self
@@ -449,7 +447,7 @@ impl Layer {
                 .any(|(a, b)| a.auxiliary != b.auxiliary)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn first_position(&self) -> [f32; 3] {
         let auxiliary = &self.residents[0].auxiliary;
         std::array::from_fn(|i| {

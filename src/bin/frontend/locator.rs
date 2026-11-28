@@ -5,7 +5,7 @@ mod navigator_report;
 #[path = "locator/report_text.rs"]
 mod report_text;
 #[path = "locator/strategic.rs"]
-pub(crate) mod strategic;
+pub mod strategic;
 #[path = "toolbar_collapse.rs"]
 pub mod toolbar_collapse;
 use openmt2001::{
@@ -69,22 +69,22 @@ pub struct Assets {
     utility_tabs: [Surface; 2],
     property_tabs: [Surface; 5],
     property_side_icons: [Surface; 3],
-    property_side_bounds: [[f32; 4]; 3],
+    pub property_side_bounds: [[f32; 4]; 3],
     toolbar_closed_base: Vec<Surface>,
     toolbar_disabled: Surface,
     offer_buttons: [Surface; 3],
     offer_arrows: [[Surface; 3]; 2],
-    period_bounds: [[f32; 4]; 2],
+    pub period_bounds: [[f32; 4]; 2],
     amount_bounds: [f32; 4],
-    amount_arrow_bounds: [[f32; 4]; 2],
-    offer_button_bounds: [f32; 4],
-    rights_button_bounds: [f32; 4],
+    pub amount_arrow_bounds: [[f32; 4]; 2],
+    pub offer_button_bounds: [f32; 4],
+    pub rights_button_bounds: [f32; 4],
     rights_fonts: Vec<Surface>,
     rights_tab: Vec<u8>,
-    currency_suffix: bool,
-    property_lease_available: [bool; 52],
+    pub currency_suffix: bool,
+    pub property_lease_available: [bool; 52],
     player_buttons: [[Surface; 4]; 10],
-    city_layout: ui::MppModes,
+    pub city_layout: ui::MppModes,
     people_selector: [f32; 4],
     city_tab_backgrounds: [Surface; 3],
     prestige_star: Surface,
@@ -121,7 +121,7 @@ pub struct Assets {
     scrollbar_textures: [[Surface; 4]; 2],
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
         blocks: &[openmt2001::board::Block],
@@ -141,7 +141,7 @@ impl Assets {
         Ok(())
     }
 
-    #[cfg(all(test, feature = "capture"))]
+    #[cfg(all(any(test, feature = "test-support"), feature = "capture"))]
     pub fn verify_fresh_property(
         &self,
         report: &crate::block_information::Report,
@@ -206,7 +206,7 @@ impl Assets {
             }
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn verify_fresh_players(
         &self,
         scene: &Scene,
@@ -699,7 +699,7 @@ impl Assets {
             t + 21. + texture.height as f32,
         ]
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn block_panel(
         &self,
         renderer: &Renderer,
@@ -2230,7 +2230,7 @@ impl Assets {
     }
     ///C body and D world/report producers have separate actual owners.
     ///Tint keys are original600-building slot identities, not render indices.
-    pub(crate) fn prepare_graph(
+    pub fn prepare_graph(
         &self,
         renderer: &Renderer,
         state: &Locator,
@@ -3239,7 +3239,7 @@ impl Assets {
         }
         Ok(surface)
     }
-    pub(crate) fn refresh_extents(&self) -> [usize; 2] {
+    pub fn refresh_extents(&self) -> [usize; 2] {
         [self.visible(), self.owned_visible()]
     }
     fn visible(&self) -> usize {
@@ -3366,7 +3366,7 @@ impl Assets {
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Action {
+pub enum Action {
     None,
     Toggle,
     City,
@@ -3383,7 +3383,7 @@ enum Action {
     Scroll(i32),
     ScrollTrack,
 }
-fn icon_tooltip(action: Action) -> Option<u32> {
+pub fn icon_tooltip(action: Action) -> Option<u32> {
     match action {
         Action::City => Some(1146),
         Action::Player => Some(1147),
@@ -3411,17 +3411,17 @@ pub struct Locator {
     strategic_state: Option<strategic::State>,
     saved_panels: bool,
     catalog: Option<BusinessCatalog>,
-    city_info: bool,
+    pub city_info: bool,
     city_people: Option<crate::city_people::Report>,
     people_mode: usize,
-    polls: Option<[crate::consumer_polls::Poll; 52]>,
+    polls: Option<[openmt2001::consumer_poll::Poll; 52]>,
     poll_category: Option<usize>,
     poll_info: bool,
-    ownership: Option<crate::city_ownership::Ownership>,
+    pub ownership: Option<crate::city_ownership::Ownership>,
     ownership_mode: bool,
-    rights: Option<crate::city_rights::Rights>,
+    pub rights: Option<crate::city_rights::Rights>,
     rights_mode: bool,
-    prestige: Option<crate::city_prestige::Prestige>,
+    pub prestige: Option<crate::city_prestige::Prestige>,
     prestige_mode: bool,
     ownership_scroll: usize,
     city_visible_rows: usize,
@@ -3503,7 +3503,7 @@ impl Locator {
             &scene.inspection_buildings,
         )
     }
-    pub(crate) fn retain_refresh_ui_from(
+    pub fn retain_refresh_ui_from(
         &mut self,
         old: &Self,
         extents: [usize; 2],
@@ -3665,7 +3665,7 @@ impl Locator {
         Ok(())
     }
 
-    fn city_mode_at(&self, layout: &ui::MppModes, point: [f32; 2]) -> Option<Action> {
+    pub fn city_mode_at(&self, layout: &ui::MppModes, point: [f32; 2]) -> Option<Action> {
         if !self.body_open() || !self.city_info {
             return None;
         }
@@ -3809,7 +3809,7 @@ impl Locator {
         self.ownership = report;
         self.dirty = true;
     }
-    pub fn attach_polls(&mut self, polls: Option<[crate::consumer_polls::Poll; 52]>) {
+    pub fn attach_polls(&mut self, polls: Option<[openmt2001::consumer_poll::Poll; 52]>) {
         self.polls = polls;
         self.dirty = true;
     }
@@ -4179,7 +4179,7 @@ fn rows(catalog: &BusinessCatalog, order: &[u32; 45]) -> Result<Vec<Row>, String
     }
     Ok(out)
 }
-fn paint_rights_caption(
+pub fn paint_rights_caption(
     pages: &mut [Surface],
     tab: &[u8],
     value: &[u8],
@@ -5087,7 +5087,7 @@ mod tests {
             state.mouse(&assets, &scene, Some([32, 130]), false);
             assert!(state.city_info && !state.player_info && state.open);
             state.attach_polls(Some(
-                crate::consumer_polls::Poll::from_save(&original).unwrap(),
+                openmt2001::consumer_poll::Poll::from_save(&original).unwrap(),
             ));
             state.mouse(&assets, &scene, Some([32, 274]), true);
             state.mouse(&assets, &scene, Some([32, 274]), false);
@@ -5660,14 +5660,10 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-#[path = "property_panel_test.rs"]
-mod property_panel_tests;
-
-#[cfg(test)]
-pub(crate) mod refresh_ui_tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod refresh_ui_tests {
     use super::*;
-    pub(crate) fn fresh() -> Locator {
+    pub fn fresh() -> Locator {
         Locator {
             strategic_state: None,
             city_info: false,
@@ -5708,95 +5704,6 @@ pub(crate) mod refresh_ui_tests {
             prepared: None,
         }
     }
-    #[test]
-    fn city_tab_hover_help_uses_regions_and_shared_dwell() {
-        use crate::intro::camera_live::focus::{ChildKey, Focus};
-        let mut state = fresh();
-        state.city_info = true;
-        state.open = true;
-        state.prestige = Some(crate::city_prestige::Prestige {
-            rows: vec![],
-            values: [0.; 52],
-            overlay_categories: vec![],
-        });
-        state.rights = Some(crate::city_rights::Rights {
-            categories: [crate::city_rights::Category {
-                mode: 0,
-                owner: 0,
-                remaining: 0,
-            }; 52],
-            owner_number: 1,
-        });
-        state.ownership = Some(crate::city_ownership::Ownership {
-            badges: [crate::ownership_badges::Badge {
-                character: None,
-                remaining: 0,
-            }; 52],
-            groups: vec![],
-        });
-        let layout = ui::mpp_modes([30., 30., 190., 245.], [25, 25]).unwrap();
-        let target =
-            |state: &Locator, point| state.city_mode_at(&layout, point).and_then(icon_tooltip);
-        let mut focus = Focus::default();
-        let mut fallback = crate::tooltip::IconDwell::default();
-        for (index, id) in [1150, 1151, 1152, 1153].into_iter().enumerate() {
-            let [l, t, r, b] = layout.buttons[index];
-            let point = [(l + r) / 2., (t + b) / 2.];
-            assert_eq!(target(&state, point), Some(id));
-            for tick in 1..=26 {
-                //Repeated presentation of the same widget preserves dwell.
-                focus
-                    .show_child(ChildKey::Locator(id), target(&state, point).unwrap(), false)
-                    .unwrap();
-                focus.advance();
-                let expected = (tick > 25).then_some(id);
-                assert_eq!(focus.caption(), expected);
-                assert_eq!(fallback.advance(target(&state, point)), expected);
-            }
-            for point in [[r + 1., (t + b) / 2.], [(l + r) / 2., b + 1.]] {
-                assert_eq!(target(&state, point), None);
-            }
-            focus.clear_child();
-            assert_eq!(focus.caption(), None);
-            assert_eq!(fallback.advance(None), None);
-            state.open = false;
-            assert_eq!(target(&state, point), None);
-            state.open = true;
-            state.city_info = false;
-            assert_eq!(target(&state, point), None);
-            state.city_info = true;
-        }
-        //A direct move between tabs replaces help and starts a fresh dwell.
-        focus
-            .show_child(ChildKey::Locator(1150), 1150, false)
-            .unwrap();
-        for _ in 0..26 {
-            focus.advance();
-        }
-        assert_eq!(focus.caption(), Some(1150));
-        focus
-            .show_child(ChildKey::Locator(1151), 1151, false)
-            .unwrap();
-        assert_eq!(focus.caption(), None);
-        for _ in 0..26 {
-            focus.advance();
-        }
-        assert_eq!(focus.caption(), Some(1151));
-        //The presentation gate clears the child when a modal takes input.
-        focus.clear_child();
-        assert_eq!(focus.caption(), None);
-        state.prestige = None;
-        let [l, t, r, b] = layout.buttons[1];
-        assert_eq!(target(&state, [(l + r) / 2., (t + b) / 2.]), None);
-        for (action, id) in [
-            (Action::City, 1146),
-            (Action::Player, 1147),
-            (Action::Toggle, 1148),
-            (Action::Poll, 12),
-        ] {
-            assert_eq!(icon_tooltip(action), Some(id));
-        }
-    }
     fn report(value: i32) -> crate::city_people::Report {
         crate::city_people::Report {
             initialized: true,
@@ -5830,9 +5737,11 @@ pub(crate) mod refresh_ui_tests {
         for value in [2, 3] {
             let mut new = fresh();
             new.attach_people(report(value));
-            new.attach_polls(Some(std::array::from_fn(|_| crate::consumer_polls::Poll {
-                residents: value as u16,
-                ..Default::default()
+            new.attach_polls(Some(std::array::from_fn(|_| {
+                openmt2001::consumer_poll::Poll {
+                    residents: value as u16,
+                    ..Default::default()
+                }
             })));
             new.retain_ui_choices(&old, 2, 2).unwrap();
             assert_eq!(new.open, old.open);

@@ -532,7 +532,7 @@ impl Assets {
     fn label(&self, id: usize) -> &[u8] {
         &self.strings[id]
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn label_for_test(&self, id: usize) -> &[u8] {
         self.label(id)
     }
@@ -632,7 +632,7 @@ impl Assets {
         }
         Ok(())
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn prepare(
         &self,
         renderer: &Renderer,
@@ -650,7 +650,7 @@ impl Assets {
             GraphicsLevels::default(),
         )
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn prepare_with_graphics(
         &self,
         renderer: &Renderer,
@@ -1076,7 +1076,7 @@ impl View {
     pub fn take_reset(&mut self) -> bool {
         std::mem::take(&mut self.reset_pending)
     }
-    pub(crate) fn take_credits(&mut self) -> bool {
+    pub fn take_credits(&mut self) -> bool {
         std::mem::take(&mut self.credits_pending)
     }
     fn hit(&self, assets: &Assets, page: Page, pointer: [f32; 2]) -> Option<Button> {

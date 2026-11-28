@@ -288,7 +288,7 @@ fn demolition_draws_white_header_and_quote_then_submits_demolition() {
 #[test]
 #[ignore = "requires supplied original panel/font/language assets"]
 fn supplied_action_pages_build_through_production_surface_path() {
-    let (assets, _) = super::tests::original_assets();
+    let (assets, _) = super::original_assets();
     for mode in [2, 3, 4] {
         let view = View {
             mode,

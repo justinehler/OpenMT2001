@@ -2,52 +2,36 @@
 // Session dependencies that moved into the library (#99); kept nameable as
 // crate::<module> in the binary.
 use openmt2001::{
-    auction_controls, build_panel, campaign_store, compatibility, human_dialog, result_controller,
-    save_menu, session::business_operations, skirmish_maps, tutorial_two_interaction,
+    build_panel, campaign_store, compatibility, human_dialog, result_controller, save_menu,
+    session::business_operations, skirmish_maps, tutorial_two_interaction,
 };
 // Panel and report state that moved into the library (#99).
-use openmt2001::{auction_labels, city_people, notifications, people_markers, player_info};
+#[cfg(test)]
+use openmt2001::{auction_controls, auction_labels};
+use openmt2001::{city_people, player_info};
+// The acyclic interface layer lives in crates/frontend (#99); kept nameable
+// as crate::<module> in the binary.
+use openmt_frontend::{
+    auction_bridge, auction_notice, auction_panel, auction_scene, audio_bus, block_information,
+    block_sidewalk_labels, board_selection, business_adjustment, business_edit, business_view,
+    cash_arrow, category_distance, chat_panel, chimney_smoke_scene, city_ownership, city_prestige,
+    city_pulse_scene, city_rights, comparison, cursor, desktop_quit, dust_scene, era_audio,
+    event_list, game_options, gameplay_sound, locator, market_share_panel, modal_frame, navigation,
+    notice_panel, object_scene, ownership_badges, pause_banner, people_scene, preferred_token,
+    present, profile, profile_settings, prompt, result_presentation, save_appearance, save_dialog,
+    scenarios, selection, settings_menu, static_detail, stats_panel, strategic_scene, tooltip,
+    transport_audio, transport_scene, tree_scene, tutorial_visual, ui, ui_text, utility_report,
+    vehicle_scene,
+};
+#[cfg(test)]
+use openmt_frontend::{music_gain, saved_current_player};
 #[path = "frontend/app.rs"]
 mod app;
-#[path = "frontend/auction_bridge.rs"]
-pub mod auction_bridge;
-#[path = "frontend/auction_notice.rs"]
-pub mod auction_notice;
-#[path = "frontend/auction_panel.rs"]
-pub mod auction_panel;
-#[path = "frontend/auction_scene.rs"]
-pub mod auction_scene;
-#[path = "frontend/block_sidewalk_labels.rs"]
-pub mod block_sidewalk_labels;
-#[path = "frontend/board_selection.rs"]
-mod board_selection;
 #[cfg(test)]
 #[path = "frontend/building_models_tests.rs"]
 mod building_models_tests;
-#[path = "frontend/business_adjustment.rs"]
-pub mod business_adjustment;
-#[path = "frontend/business_edit.rs"]
-mod business_edit;
-#[path = "frontend/business_view.rs"]
-mod business_view;
 #[path = "frontend/card_panel.rs"]
 pub mod card_panel;
-#[path = "frontend/category_distance.rs"]
-pub mod category_distance;
-#[path = "frontend/chimney_smoke_scene.rs"]
-pub mod chimney_smoke_scene;
-#[path = "frontend/city_pulse_scene.rs"]
-pub mod city_pulse_scene;
-#[path = "frontend/cursor.rs"]
-mod cursor;
-#[path = "frontend/desktop_quit.rs"]
-mod desktop_quit;
-#[path = "frontend/dust_scene.rs"]
-pub mod dust_scene;
-#[path = "frontend/event_list.rs"]
-pub mod event_list;
-#[path = "frontend/game_options.rs"]
-mod game_options;
 #[path = "frontend/headless.rs"]
 mod headless;
 #[path = "frontend/intro.rs"]
@@ -56,68 +40,22 @@ mod intro;
 mod live_host;
 #[path = "frontend/load.rs"]
 mod load;
-#[path = "frontend/locator.rs"]
-mod locator;
-#[path = "frontend/market_share_panel.rs"]
-pub mod market_share_panel;
 #[path = "frontend/menu.rs"]
 mod menu;
-#[path = "frontend/modal_frame.rs"]
-mod modal_frame;
-#[path = "frontend/navigation.rs"]
-mod navigation;
 #[path = "frontend/navigator.rs"]
 mod navigator;
-#[path = "frontend/notice_panel.rs"]
-pub mod notice_panel;
-#[path = "frontend/pause_banner.rs"]
-mod pause_banner;
-#[path = "frontend/preferred_token.rs"]
-mod preferred_token;
-#[path = "frontend/present.rs"]
-mod present;
 #[path = "frontend/process_dispatch.rs"]
 mod process_dispatch;
-#[path = "frontend/profile.rs"]
-mod profile;
-#[path = "frontend/profile_settings.rs"]
-mod profile_settings;
-#[path = "frontend/prompt.rs"]
-pub mod prompt;
-#[path = "frontend/result_presentation.rs"]
-pub mod result_presentation;
-#[path = "frontend/save_appearance.rs"]
-pub mod save_appearance;
-#[path = "frontend/save_dialog.rs"]
-mod save_dialog;
-#[path = "frontend/scenarios.rs"]
-mod scenarios;
-#[path = "frontend/selection.rs"]
-mod selection;
 #[path = "frontend/session_save.rs"]
 pub mod session_save;
-#[path = "frontend/settings_menu.rs"]
-mod settings_menu;
 #[path = "frontend/singleplayer.rs"]
 mod singleplayer;
 #[path = "frontend/skirmish_roster.rs"]
 mod skirmish_roster;
 #[path = "frontend/skirmish_setup.rs"]
 mod skirmish_setup;
-#[path = "frontend/static_detail.rs"]
-pub mod static_detail;
-#[path = "frontend/stats_panel.rs"]
-pub mod stats_panel;
-#[path = "frontend/strategic_scene.rs"]
-mod strategic_scene;
 #[path = "frontend/time_panel.rs"]
 pub mod time_panel;
-#[path = "frontend/tooltip.rs"]
-mod tooltip;
-#[path = "frontend/ui.rs"]
-mod ui;
-#[path = "frontend/ui_text.rs"]
-mod ui_text;
 fn main() -> std::process::ExitCode {
     if std::env::args().nth(1).as_deref() == Some("headless") {
         std::process::exit(headless::main(std::env::args().skip(2)));
@@ -132,8 +70,7 @@ fn main() -> std::process::ExitCode {
 }
 
 #[cfg(all(test, feature = "capture"))]
-#[path = "frontend/capture_test.rs"]
-mod capture_test;
+use openmt_frontend::capture_test;
 #[path = "frontend/fresh_city.rs"]
 pub mod fresh_city;
 
@@ -141,62 +78,11 @@ pub mod fresh_city;
 #[path = "frontend/session_validation.rs"]
 mod session_validation;
 
-#[path = "frontend/audio_bus.rs"]
-mod audio_bus;
-#[path = "frontend/era_audio.rs"]
-pub mod era_audio;
-#[path = "frontend/gameplay_sound.rs"]
-pub mod gameplay_sound;
-#[path = "frontend/music_gain.rs"]
-mod music_gain;
-#[path = "frontend/object_scene.rs"]
-pub mod object_scene;
-#[path = "frontend/people_scene.rs"]
-pub mod people_scene;
-#[path = "frontend/transport_audio.rs"]
-pub mod transport_audio;
-#[path = "frontend/transport_scene.rs"]
-pub mod transport_scene;
-#[path = "frontend/tree_scene.rs"]
-pub mod tree_scene;
-#[path = "frontend/tutorial_visual.rs"]
-mod tutorial_visual;
-#[path = "frontend/vehicle_scene.rs"]
-pub mod vehicle_scene;
-
-#[path = "frontend/chat_panel.rs"]
-pub mod chat_panel;
-#[path = "frontend/city_ownership.rs"]
-pub mod city_ownership;
-#[path = "frontend/city_prestige.rs"]
-pub mod city_prestige;
-#[path = "frontend/comparison.rs"]
-pub mod comparison;
 #[path = "frontend/consumer_polls.rs"]
 pub mod consumer_polls;
-#[path = "frontend/prestige_stars.rs"]
-pub mod prestige_stars;
-
-#[path = "frontend/ownership_badges.rs"]
-pub mod ownership_badges;
-
-#[path = "frontend/block_information.rs"]
-pub mod block_information;
-#[path = "frontend/city_rights.rs"]
-pub mod city_rights;
-#[path = "frontend/saved_current_player.rs"]
-pub mod saved_current_player;
-#[path = "frontend/strategic_labels.rs"]
-pub mod strategic_labels;
-#[path = "frontend/strategic_selection.rs"]
-pub mod strategic_selection;
-#[path = "frontend/utility_report.rs"]
-pub mod utility_report;
 
 #[path = "frontend/build_view.rs"]
 mod build_view;
-#[path = "frontend/cash_arrow.rs"]
-mod cash_arrow;
 
 #[cfg(test)]
 #[path = "frontend/rental_turnover.rs"]
@@ -205,3 +91,18 @@ mod rental_turnover;
 #[cfg(test)]
 #[path = "frontend/scenario_three_play.rs"]
 mod scenario_three_play;
+
+// Tests of interface-layer modules (crates/frontend) that need the Host, the
+// Session harness or intro, so they build with the game binary (#99).
+#[cfg(test)]
+#[path = "frontend/era_audio_host_tests.rs"]
+mod era_audio_host_tests;
+#[cfg(test)]
+#[path = "frontend/locator_host_tests.rs"]
+mod locator_host_tests;
+#[cfg(test)]
+#[path = "frontend/property_panel_test.rs"]
+mod locator_property_panel_tests;
+#[cfg(test)]
+#[path = "frontend/transport_audio_host_tests.rs"]
+mod transport_audio_host_tests;

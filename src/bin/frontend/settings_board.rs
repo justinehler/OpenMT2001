@@ -1,11 +1,8 @@
 //! Board-version panel: native492090 layout,492380 selection,492590 accept.
 use super::*;
 impl Assets {
-    #[cfg(test)]
-    pub(crate) fn board_point_for_test(
-        &self,
-        name: crate::board_selection::Name,
-    ) -> Option<[f32; 2]> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn board_point_for_test(&self, name: crate::board_selection::Name) -> Option<[f32; 2]> {
         let row = self.boards.iter().position(|entry| entry.name == name)?;
         let bounds = self.panel(Page::Board).regions[2];
         Some([
@@ -128,7 +125,7 @@ impl Assets {
     }
 }
 impl View {
-    pub(crate) fn board_language(
+    pub fn board_language(
         &self,
         installer: &Path,
     ) -> Result<openmt2001::packed_language::PackedLanguage, String> {

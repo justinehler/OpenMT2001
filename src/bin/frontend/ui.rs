@@ -1463,8 +1463,8 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn synthetic_text_font(width: i32, height: i32) -> Vec<u8> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn synthetic_text_font(width: i32, height: i32) -> Vec<u8> {
     let mut tab = 96u32.to_le_bytes().to_vec();
     for _ in 0..96 {
         tab.extend([0; 32]);

@@ -1,5 +1,20 @@
 //! Original asset geometry and same-target property controls; numeric reports have a separate native fixture.
-use super::*;
+//! They use intro's utility report, so they build with the game binary; the
+//! Locator itself is in crates/frontend (#99).
+use crate::locator::*;
+#[allow(unused_imports)]
+use crate::ui::{self, Surface};
+#[allow(unused_imports)]
+use openmt2001::{
+    archive::ArchiveIndex,
+    business_pool::BusinessCatalog,
+    pe::PeImage,
+    render::{PreparedScene, Renderer},
+    render_scene::Scene,
+    texture::TextureSet,
+};
+#[allow(unused_imports)]
+use std::{fs, path::Path};
 #[test]
 #[ignore = "requires original font0 and pinned native441220/4419f0 caption oracle"]
 fn original_rights_caption_layout() {
@@ -303,7 +318,7 @@ fn property_reports_and_offer_input() {
     };
     view.apply_property_inspection(
         category as u32,
-        Ok(crate::fresh_city::property::Inspection {
+        Ok(openmt2001::session::property::Inspection {
             category: category as u32,
             owned: false,
             panel,
@@ -360,7 +375,7 @@ fn property_reports_and_offer_input() {
     owned.amount_visible = 0;
     view.apply_property_inspection(
         category as u32,
-        Ok(crate::fresh_city::property::Inspection {
+        Ok(openmt2001::session::property::Inspection {
             category: category as u32,
             owned: true,
             panel: owned,

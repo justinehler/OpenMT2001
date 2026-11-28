@@ -1,44 +1,10 @@
 use super::*;
-use crate::audio_bus::focus::{Action, Guards, SharedAudio};
+use crate::audio_bus::focus::{Action, Guards};
 
 include!("transport_audio_construction_crane_tests.rs");
 include!("transport_audio_spatial_tests.rs");
 
-fn owner() -> (Player, SharedAudio, rodio::mixer::MixerSource) {
-    let samples = vec![0.5; 65536];
-    let assets = Assets {
-        spatial_enabled: false,
-        train_motion: samples.clone(),
-        train_toot: samples.clone(),
-        road_ambient: samples.clone(),
-        road_motor: samples.clone(),
-        resident_crowd: samples.clone(),
-        coast: Some(samples.clone()),
-        near_aircraft: samples.clone(),
-        ship_engine: samples.clone(),
-        ship_horn: samples.clone(),
-        ocean_liner: samples.clone(),
-        crane_start: samples.clone(),
-        crane_end: samples.clone(),
-        crane_lift: samples.clone(),
-        crane_loop: samples.clone(),
-        construction_scaffold: samples.clone(),
-        construction_saw: samples.clone(),
-        construction_hammer: samples.clone(),
-        block_factory: samples.clone(),
-        block_school: samples.clone(),
-        block_park_one: samples.clone(),
-        block_park_two: samples.clone(),
-        block_owl: samples,
-    };
-    let mut player = Player::new(assets);
-    let audio = SharedAudio::new(75, 25);
-    player.bind_audio(audio.clone());
-    let (mixer, output) = rodio::mixer::mixer(1, 22050);
-    mixer.add(rodio::source::Zero::new(1, 22050));
-    player.bus.connect_test_output(&mixer, 1, 22050);
-    (player, audio, output)
-}
+use super::test_owner as owner;
 fn window(output: &mut rodio::mixer::MixerSource, expected: f32, creation: bool) {
     let samples: Vec<_> = output.by_ref().take(4096).collect();
     assert_eq!(samples.len(), 4096);
@@ -513,94 +479,7 @@ fn coast_missing_sample_is_silent_and_supplied_mixed_case_pcm_loads() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
-fn city_inputs(tick: u32) -> CityInputs {
-    let mut categories = [[0; 0x17c]; 52];
-    for category in &mut categories {
-        category[4] = 1;
-        category[0xe0..0xe4].copy_from_slice(&1000f32.to_le_bytes());
-        category[0xe4..0xe8].copy_from_slice(&1000f32.to_le_bytes());
-    }
-    // A nearby factory and resident category let the frame update both beds.
-    categories[2][0xe0..0xe4].copy_from_slice(&0f32.to_le_bytes());
-    categories[2][0xe4..0xe8].copy_from_slice(&(-300f32).to_le_bytes());
-    categories[2][0x88..0x8c].copy_from_slice(&200i32.to_le_bytes());
-    let mut construction = [[None; 2]; 4];
-    insert_construction_source(&mut construction, 0, [0., 40., -300.], [0., 40., -300.]).unwrap();
-    CityInputs {
-        reciprocal_sum: 0.1,
-        nearest: [[101f32.to_bits(), 0, 0]; 3],
-        categories,
-        construction,
-        hour: 8,
-        tick,
-        previous_tick: 100,
-        initial_random_state: 205,
-    }
-}
-
-#[test]
-fn city_frame_keeps_construction_during_pause_and_repositions_before_resume() {
-    let (mut player, _, mut output) = owner();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let mut host = crate::live_host::Host::new([0., 40., -300.]);
-    host.transport_audio = Some(sender.clone());
-    host.set_running(true);
-    submit(
-        &Some(sender.clone()),
-        Operation::City(Box::new(city_inputs(101))),
-    )
-    .unwrap();
-    player.drain_requests(Some(&receiver));
-    assert!(player.construction[0].is_none()); // Receiving inputs does not service a frame.
-    player.service_frame([0., 40., -300.]);
-    let sink = player.construction[0].as_ref().unwrap();
-    let retained = &**sink as *const rodio::Sink;
-    let near_gain = sink.volume();
-    assert!(near_gain > 0.);
-    assert!(player.coast.as_ref().unwrap().volume() > 0.);
-    assert!(player.resident_crowd.as_ref().unwrap().volume() > 0.);
-    assert!(player.block_sinks[2].as_ref().unwrap().volume() > 0.);
-    let pcm: Vec<_> = output.by_ref().take(4096).collect();
-    assert!(pcm[2048..].iter().all(|sample| *sample > 0.));
-    let position = sink.get_pos();
-
-    host.set_running(false);
-    assert!(matches!(
-        receiver.try_recv(),
-        Err(std::sync::mpsc::TryRecvError::Empty)
-    ));
-    for camera in [[200., 40., -300.], [400., 40., 0.], [0., 40., -300.]] {
-        player.drain_requests(Some(&receiver));
-        player.service_frame(camera);
-        let sink = player.construction[0].as_ref().unwrap();
-        assert_eq!(&**sink as *const rodio::Sink, retained);
-        if camera[0] == 200. {
-            assert!(sink.volume() > 0. && sink.volume() < near_gain);
-        } else if camera[0] == 400. {
-            assert_eq!(sink.volume(), 0.);
-            assert_eq!(player.coast.as_ref().unwrap().volume(), 0.);
-            assert!(player.resident_crowd.is_none());
-            assert!(player.block_sinks[2].is_none());
-        } else {
-            assert_eq!(sink.volume(), near_gain);
-            assert!(player.coast.as_ref().unwrap().volume() > 0.);
-        }
-        output.by_ref().take(4096).for_each(drop);
-        assert_eq!(player.city.as_ref().unwrap().tick, 101);
-    }
-    assert!(player.construction[0].as_ref().unwrap().get_pos() > position);
-    host.set_running(true);
-    let mut finished = city_inputs(102);
-    finished.construction = [[None; 2]; 4];
-    submit(&Some(sender), Operation::City(Box::new(finished))).unwrap();
-    player.drain_requests(Some(&receiver));
-    assert!(player.construction[0].is_some());
-    player.service_frame([0., 40., -300.]);
-    assert!(player.construction[0].is_none());
-    player.apply(Operation::Reset);
-    player.service_frame([0., 40., -300.]);
-    assert!(player.city.is_none() && player.coast.is_none());
-}
+use super::test_city_inputs as city_inputs;
 
 #[test]
 fn city_frame_render_frequency_preserves_simulation_inputs_and_shared_park_delta() {

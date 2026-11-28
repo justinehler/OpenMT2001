@@ -112,7 +112,7 @@ pub struct Assets {
     category_titles: [u32; 52],
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
@@ -376,7 +376,7 @@ fn rect(s: &mut Surface, b: [f32; 4]) {
     );
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn verify_panel(scene: &openmt2001::render_scene::Scene, player: &[u8; 440]) {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let exe = read("OPENMT2001_EXE");

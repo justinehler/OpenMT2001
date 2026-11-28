@@ -1,5 +1,5 @@
 //! Original 4b3230 owned-block corner quads in the result city.
-use crate::fresh_city::result::ResultPresentation;
+use openmt2001::session::result::ResultPresentation;
 use openmt2001::{
     archive::ArchiveIndex,
     board::Block,

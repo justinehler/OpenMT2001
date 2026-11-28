@@ -3,6 +3,7 @@ name = "openmt2001"
 version = "0.1.0"
 edition = "2024"
 publish = false
+autobins = false
 license = "MIT"
 repository = "https://github.com/justinehler/OpenMT2001"
 
@@ -40,9 +41,14 @@ path = "src/bin/capture.rs"
 required-features = ["capture"]
 
 [[bin]]
-name = "game"
-path = "src/bin/game.rs"
-required-features = ["native"]
+name = "inspect"
+path = "src/bin/inspect.rs"
 
 [dev-dependencies]
 syn = { version = "2", features = ["full", "visit"] }
+
+# The game binary and its interface layer are their own packages so an edit
+# there rebuilds only what depends on it (#99). Their sources stay in src/bin.
+[workspace]
+members = [".", "crates/frontend", "crates/game"]
+default-members = [".", "crates/frontend", "crates/game"]

@@ -10,7 +10,7 @@ use openmt2001::{
 
 // Gameplay reset4b9d40 loads53 degrees (545acc). Strategic entry4b5509
 // changes the pose/mode but retains that renderer projection.
-pub(crate) const STRATEGIC_VERTICAL_FOV: f32 = 53.;
+pub const STRATEGIC_VERTICAL_FOV: f32 = 53.;
 pub struct Navigation {
     pub bounds: [f32; 4],
     pub camera: CameraSample,
@@ -25,7 +25,7 @@ impl Navigation {
         let images = crate::ui_text::images::Images::load(executable, index, archive, [640, 480])?;
         Self::load_shared(index, archive, executable, &images)
     }
-    pub(crate) fn load_shared(
+    pub fn load_shared(
         index: &ArchiveIndex,
         archive: &[u8],
         executable: &[u8],

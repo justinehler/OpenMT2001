@@ -8,16 +8,10 @@ fn spatial_owner() -> (Player, rodio::mixer::MixerSource) {
     (player, output)
 }
 
+// What intro's context::publish_listener does with the current camera pose
+// (4b9c7e). Audio uses world up even if the camera rolls.
 fn current_listener(player: &mut Player, eye: [f32; 3], target: [f32; 3]) {
-    crate::intro::camera_live::context::publish_listener(
-        player,
-        crate::intro::camera_live::owner::Pose {
-            eye: eye.map(f32::to_bits),
-            target: target.map(f32::to_bits),
-            // Audio uses world up even if the camera rolls.
-            up: [1f32, 0., 0.].map(f32::to_bits),
-        },
-    );
+    player.set_listener(eye, target);
 }
 fn stereo_window(output: &mut rodio::mixer::MixerSource, expected: [f32; 2]) {
     let samples: Vec<_> = output.by_ref().take(4096).collect();

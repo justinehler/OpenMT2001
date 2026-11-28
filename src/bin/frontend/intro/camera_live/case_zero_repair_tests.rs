@@ -1,7 +1,7 @@
 //! Synthetic regressions without original resources or live UI.
 use super::super::{
     case_zero,
-    case_zero_text::{FontData, Fonts, Group, Literals, ResetTarget, ScratchByte, Text},
+    case_zero_text::Literals,
     main_model, navigation,
     property_child::{self, Caption, ListRange, Selector, Title, Widget, Widgets},
     property_inputs, ui_graph, ui_selection,
@@ -25,93 +25,7 @@ pub(crate) fn widget() -> Widget {
         font: 0,
     }
 }
-pub(crate) fn text() -> Text {
-    Text {
-        reset_target: ResetTarget::Ret43b370,
-        bounds: [0., 0., 200., 100.],
-        depth: 0.5,
-        font: 0,
-        pitch: 10,
-        gap: 0,
-        visible: 10,
-        line_mode: 1,
-        scale: 1.,
-        padding: 0,
-        colors: vec![9; 8],
-        blink_colors: vec![8; 8],
-        blink: vec![0; 8],
-        x: vec![0; 8],
-        extent: [0.; 4],
-        group: Group {
-            bytes: Vec::new(),
-            offsets: vec![0; 2],
-            count: 0,
-        },
-        y: 7,
-        inset: 0,
-        scroll: 0,
-        style: 0,
-        first: 0,
-        dirty: 0,
-        geometry_dirty: 1,
-        background_color: 0,
-        background: 0,
-    }
-}
-pub(crate) fn set_metric(fonts: &mut Fonts, glyph: u8, offset: usize, value: i32) {
-    let at = 4 + usize::from(glyph) * 44 + offset;
-    fonts.fonts.get_mut(&0).unwrap().table[at..at + 4].copy_from_slice(&value.to_le_bytes());
-}
-pub(crate) fn fonts() -> Fonts {
-    let mut table = vec![0; 4 + 256 * 44];
-    table[..4].copy_from_slice(&256u32.to_le_bytes());
-    let mut fonts = Fonts {
-        fonts: BTreeMap::from([(
-            0,
-            FontData {
-                table,
-                baseline: 0,
-                scale: 1.,
-            },
-        )]),
-        language: super::super::ui_text_resources::PackedLanguage::test_rows(
-            std::iter::once((0..=255).collect())
-                .chain((1..1814).map(|_| vec![1]))
-                .collect(),
-        ),
-        current: 0,
-        gap: 0,
-        line_mode: 1,
-        scratch: vec![ScratchByte::Unwritten; 1024],
-        formatted: Group {
-            bytes: Vec::new(),
-            offsets: vec![0; 2],
-            count: 0,
-        },
-        temporary: Group {
-            bytes: Vec::new(),
-            offsets: Vec::new(),
-            count: 0,
-        },
-        error: super::super::case_zero_text::ErrorWord::Unknown,
-        selector: super::super::case_zero_text::SelectorState {
-            cached: 0,
-            pending: [0, 0],
-            notify: 0,
-        },
-        context: u32::MAX,
-        glyph_callback: 0x4554e0,
-        ready_callback: 0,
-        four_callback: 0,
-        pair: [2243, 2244],
-        tail: Some(2245),
-    };
-    for g in 0..=255 {
-        set_metric(&mut fonts, g, 32, 8);
-        set_metric(&mut fonts, g, 36, 10);
-    }
-    fonts
-}
+pub(crate) use crate::ui_text::case_zero_text::fixtures::{fonts, text};
 pub(crate) fn literals() -> Literals {
     Literals {
         version: b"%i.%i".to_vec(),

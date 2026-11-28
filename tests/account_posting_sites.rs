@@ -178,7 +178,12 @@ fn every_production_post_site_has_an_audited_feedback_route() {
         .unwrap();
     let mut actual = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    for entry in ["src/lib.rs", "src/bin/game.rs", "src/bin/capture.rs"] {
+    for entry in [
+        "src/lib.rs",
+        "src/bin/game.rs",
+        "crates/frontend/src/lib.rs",
+        "src/bin/capture.rs",
+    ] {
         inventory(&root.join(entry), true, &root, &mut seen, &mut actual);
     }
     let expected: BTreeMap<_, _> = [
