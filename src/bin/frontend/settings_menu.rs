@@ -146,6 +146,17 @@ struct Panel {
     base: Vec<Surface>,
     regions: Vec<[f32; 4]>,
 }
+impl Panel {
+    /// 43f510 takes integer X/Y/span, then creates sixteen-pixel arrow
+    /// children. The authored height and arrow regions are not widget bounds.
+    fn slider_bounds(&self, region: usize) -> Option<[f32; 4]> {
+        let &[l, t, r, _] = self.regions.get(region)?;
+        let x = l.trunc();
+        let y = t.trunc();
+        let span = (f64::from(r) - f64::from(l)).trunc() as f32;
+        Some([x, y, x + span, y + 16.])
+    }
+}
 pub struct Assets {
     panels: [Panel; 4],
     fonts: Vec<Surface>,
@@ -347,21 +358,27 @@ impl Assets {
     }
     pub fn bounds(&self, page: Page, button: Button) -> Option<[f32; 4]> {
         let regions = &self.panel(page).regions;
-        let arrow = match (page, button) {
-            (Page::Sound, Button::MusicLeft) => Some((14, 0)),
-            (Page::Sound, Button::MusicRight) => Some((14, 1)),
-            (Page::Sound, Button::EffectsLeft) => Some((22, 0)),
-            (Page::Sound, Button::EffectsRight) => Some((22, 1)),
+        let slider = match (page, button) {
+            // Sound 49bd0f/49bd8c use BLUEBACK, not SLIDEZONE or the
+            // authored LEFT/RIGHTBUTTON parts. Graphics/Gameplay use SLIDEZONE.
+            (Page::Sound, Button::MusicLeft) => Some((13, 0)),
+            (Page::Sound, Button::MusicTrack) => Some((13, 1)),
+            (Page::Sound, Button::MusicRight) => Some((13, 2)),
+            (Page::Sound, Button::EffectsLeft) => Some((21, 0)),
+            (Page::Sound, Button::EffectsTrack) => Some((21, 1)),
+            (Page::Sound, Button::EffectsRight) => Some((21, 2)),
             (Page::Graphics, Button::DistanceLeft) => Some((27, 0)),
-            (Page::Graphics, Button::DistanceRight) => Some((27, 1)),
+            (Page::Graphics, Button::DistanceTrack) => Some((27, 1)),
+            (Page::Graphics, Button::DistanceRight) => Some((27, 2)),
             (Page::Gameplay, Button::SensitivityLeft) => Some((29, 0)),
-            (Page::Gameplay, Button::SensitivityRight) => Some((29, 1)),
+            (Page::Gameplay, Button::SensitivityTrack) => Some((29, 1)),
+            (Page::Gameplay, Button::SensitivityRight) => Some((29, 2)),
             _ => None,
         };
-        if let Some((track, side)) = arrow {
-            return Some(
-                crate::ui::slider_arrows(regions.get(track)?.map(f32::trunc), false)[side],
-            );
+        if let Some((region, part)) = slider {
+            let bounds = self.panel(page).slider_bounds(region)?;
+            let [left, right] = crate::ui::slider_arrows(bounds, false);
+            return Some([left, bounds, right][part]);
         }
         let index = match (page, button) {
             (Page::Main, Button::Sound) => 6,
@@ -370,26 +387,14 @@ impl Assets {
             (Page::Main, Button::Back) => 8,
             (Page::Main, Button::Reset) => 9,
             (Page::Sound, Button::Back) => 26,
-            (Page::Sound, Button::MusicLeft) => 15,
-            (Page::Sound, Button::MusicTrack) => 14,
-            (Page::Sound, Button::MusicRight) => 16,
-            (Page::Sound, Button::EffectsLeft) => 23,
-            (Page::Sound, Button::EffectsTrack) => 22,
-            (Page::Sound, Button::EffectsRight) => 24,
             (Page::Graphics, Button::DetailLow) => 11,
             (Page::Graphics, Button::DetailMedium) => 12,
             (Page::Graphics, Button::DetailHigh) => 13,
             (Page::Graphics, Button::Bilinear) => 20,
             (Page::Graphics, Button::Trilinear) => 21,
-            (Page::Graphics, Button::DistanceLeft) => 30,
-            (Page::Graphics, Button::DistanceTrack) => 27,
-            (Page::Graphics, Button::DistanceRight) => 29,
             (Page::Graphics, Button::Back) => 34,
             (Page::Gameplay, Button::AutoRotate) => 13,
             (Page::Gameplay, Button::InvertVertical) => 18,
-            (Page::Gameplay, Button::SensitivityLeft) => 30,
-            (Page::Gameplay, Button::SensitivityTrack) => 29,
-            (Page::Gameplay, Button::SensitivityRight) => 31,
             (Page::Gameplay, Button::Back) => 33,
             _ => return None,
         };
@@ -576,13 +581,15 @@ impl Assets {
         fonts: &mut [Surface],
         panel: &Panel,
         value: u8,
-        indices: [usize; 5],
+        indices: [usize; 2],
         hovered: Option<Button>,
         pressed: Option<Button>,
         controls: [Button; 3],
     ) -> Result<(), String> {
-        let [low, _blue, track, _left, _right] = indices;
-        let bounds = panel.regions[track].map(f32::trunc);
+        let [low, region] = indices;
+        let bounds = panel
+            .slider_bounds(region)
+            .ok_or("Settings slider bounds missing")?;
         let [left, right] = crate::ui::slider_arrows(bounds, false);
         let center =
             |region: [f32; 4]| [(region[0] + region[2]) * 0.5, (region[1] + region[3]) * 0.5];
@@ -650,6 +657,18 @@ impl Assets {
         renderer: &Renderer,
         state: MenuState,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.surfaces(state)?;
+        let draws = self
+            .panel(state.page)
+            .base
+            .iter()
+            .chain(&surfaces)
+            .map(Surface::draw)
+            .collect::<Vec<_>>();
+        renderer.prepare(&draws, VIEW, None)
+    }
+    /// Panel overlays shared by rendering and CPU-only draw-output tests.
+    fn surfaces(&self, state: MenuState) -> Result<Vec<Surface>, String> {
         let MenuState {
             page,
             hovered,
@@ -760,37 +779,16 @@ impl Assets {
                 Page::Main => unreachable!(),
             };
             for &(region, label) in rows {
-                if page == Page::Sound {
-                    // Native 49bade/49bb6a enable the text widget's own
-                    // uniform green backing on Music/Effects captions.
-                    art.rect(panel.regions[region], [0xff01762f; 4]);
-                } else {
-                    // Native 4419f0 paints each caption widget's enabled
-                    // background before its glyphs (+1b0, +1ac=ff01762f).
-                    art.rect(panel.regions[region], [0xff01762f; 4]);
-                }
-                if matches!(page, Page::Sound | Page::Graphics) {
-                    crate::ui::text_widget_style9(
-                        &mut font1,
-                        &self.tab1,
-                        self.label(label),
-                        panel.regions[region],
-                        0xffffffff,
-                    )?;
-                } else if page == Page::Gameplay {
-                    let (pages, tab) = if region == 24 {
-                        (&mut font1, &self.tab1)
-                    } else {
-                        (&mut font3, &self.tab3)
-                    };
-                    crate::ui::text_widget_style9(
-                        pages,
-                        tab,
-                        self.label(label),
-                        panel.regions[region],
-                        0xffffffff,
-                    )?;
-                }
+                // All three pages select font 1 and character palette entry
+                // 16, retaining style 9 alignment and the green backing.
+                art.rect(panel.regions[region], [0xff01762f; 4]);
+                crate::ui::text_widget_style9(
+                    &mut font1,
+                    &self.tab1,
+                    self.label(label),
+                    panel.regions[region],
+                    crate::ui::SECTION_HEADER_COLOR,
+                )?;
             }
             if page == Page::Sound {
                 self.slider(
@@ -799,7 +797,7 @@ impl Assets {
                     &mut fonts,
                     panel,
                     levels.music,
-                    [11, 13, 14, 15, 16],
+                    [11, 13],
                     hovered,
                     pressed,
                     [Button::MusicLeft, Button::MusicTrack, Button::MusicRight],
@@ -810,7 +808,7 @@ impl Assets {
                     &mut fonts,
                     panel,
                     levels.effects,
-                    [19, 21, 22, 23, 24],
+                    [19, 21],
                     hovered,
                     pressed,
                     [
@@ -857,7 +855,9 @@ impl Assets {
                     panel.regions[24],
                     0xffffffff,
                 )?;
-                let bounds = panel.regions[27].map(f32::trunc);
+                let bounds = self
+                    .bounds(page, Button::DistanceTrack)
+                    .ok_or("Settings slider bounds missing")?;
                 let [left, right] = crate::ui::slider_arrows(bounds, false);
                 let center = |region: [f32; 4]| {
                     [(region[0] + region[2]) * 0.5, (region[1] + region[3]) * 0.5]
@@ -930,7 +930,9 @@ impl Assets {
                         0xffffffff,
                     )?;
                 }
-                let bounds = panel.regions[29].map(f32::trunc);
+                let bounds = self
+                    .bounds(page, Button::SensitivityTrack)
+                    .ok_or("Settings slider bounds missing")?;
                 let [left, right] = crate::ui::slider_arrows(bounds, false);
                 let center = |region: [f32; 4]| {
                     [(region[0] + region[2]) * 0.5, (region[1] + region[3]) * 0.5]
@@ -985,13 +987,12 @@ impl Assets {
             pressed == Some(Button::Back),
         )?;
         crate::ui::text_widget_style9(&mut font1, &self.tab1, self.label(1435), back, 0xffffffff)?;
-        let mut draws = panel.base.iter().map(Surface::draw).collect::<Vec<_>>();
-        draws.push(art.draw());
-        draws.extend(icons.iter().map(Surface::draw));
-        draws.extend(fonts.iter().map(Surface::draw));
-        draws.extend(font1.iter().map(Surface::draw));
-        draws.extend(font3.iter().map(Surface::draw));
-        renderer.prepare(&draws, VIEW, None)
+        let mut surfaces = vec![art];
+        surfaces.extend(icons);
+        surfaces.extend(fonts);
+        surfaces.extend(font1);
+        surfaces.extend(font3);
+        Ok(surfaces)
     }
 }
 
@@ -1407,7 +1408,7 @@ mod graphics_tests {
         );
         for (button, expected) in [
             (Button::DetailLow, [143.09, 157.84, 159.09, 173.84]),
-            (Button::DistanceTrack, [224., 298.59, 422., 314.59]),
+            (Button::DistanceTrack, [224., 298., 422., 314.]),
         ] {
             let actual = assets.bounds(Page::Graphics, button).unwrap();
             for (got, want) in actual.into_iter().zip(expected) {
@@ -1516,7 +1517,7 @@ mod graphics_tests {
         for (button, expected) in [
             (Button::AutoRotate, [138., 159.86, 154., 175.86]),
             (Button::InvertVertical, [138., 206.86, 154., 222.86]),
-            (Button::SensitivityTrack, [224., 317.37, 422., 333.37]),
+            (Button::SensitivityTrack, [224., 317., 422., 333.]),
         ] {
             let actual = assets.bounds(Page::Gameplay, button).unwrap();
             for (got, want) in actual.into_iter().zip(expected) {
@@ -1621,3 +1622,7 @@ mod graphics_tests {
 #[cfg(test)]
 #[path = "settings_reset_tests.rs"]
 mod settings_reset_tests;
+
+#[cfg(test)]
+#[path = "settings_draw_tests.rs"]
+mod settings_draw_tests;
