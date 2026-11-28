@@ -27,6 +27,7 @@ pub mod pe;
 pub mod people;
 pub mod picking;
 pub mod polygon;
+pub mod prompt_format;
 pub mod pulse_lights;
 #[cfg(feature = "graphics")]
 pub mod render;

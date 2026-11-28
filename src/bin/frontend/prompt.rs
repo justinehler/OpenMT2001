@@ -167,44 +167,6 @@ pub fn literal_glyphs(raw: &[u8], row: &[u8]) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
-/// Proven resource subset of4e7fe0/4e80d5: one signed32-bit decimal word.
-/// Parse atomically into private output; return no text on unsupported formats.
-fn resource_integer(text: &[u8], row: &[u8], word: u32) -> Result<Vec<u8>, String> {
-    let selector = |at| row.get(at).copied().ok_or("prompt map truncated");
-    let percent = selector(5)?;
-    let d = selector(0x44)?;
-    let integer = selector(0x49)?;
-    let mut result = Vec::with_capacity(text.len());
-    let mut used = false;
-    let mut at = 0;
-    while at < text.len() {
-        if text[at] != percent {
-            result.push(text[at]);
-            at += 1;
-            continue;
-        }
-        let next = *text
-            .get(at + 1)
-            .ok_or("resource prompt trailing percent is unsupported")?;
-        if next != d && next != integer {
-            return Err(
-                "resource prompt pointer, escape or unproved directive is unsupported".into(),
-            );
-        }
-        if used {
-            return Err("resource prompt consumes more than one word".into());
-        }
-        used = true;
-        for byte in (word as i32).to_string().bytes() {
-            result.push(
-                *row.get(usize::from(byte - 32))
-                    .ok_or("prompt decimal glyph missing")?,
-            );
-        }
-        at += 2;
-    }
-    Ok(result)
-}
 
 fn script_field(
     request: &Request,
@@ -233,11 +195,10 @@ fn script_field(
     let text = strings
         .get(id as usize)
         .ok_or("prompt language ID out of range")?;
-    Ok(Some(vec![resource_integer(
-        text,
-        strings.first().ok_or("prompt map missing")?,
-        script.format_value,
-    )?]))
+    let argument = openmt2001::prompt_format::Argument::Word(script.format_value);
+    let output = openmt2001::prompt_format::resource(text, strings, &[argument]);
+    // The original row bridge displays even a failed gatherer's emitted prefix.
+    Ok(Some(vec![output.glyphs]))
 }
 /// Original41c88f..41c966 presentation data. Names remain original ASCII until
 /// insertion into the encoded language text; the amount preserves its float bits.
@@ -1914,13 +1875,13 @@ mod owned_script_tests {
 }
 
 #[cfg(test)]
-mod resource_integer_tests {
+mod resource_format_tests {
     use super::*;
     fn encoded(raw: &[u8], row: &[u8]) -> Vec<u8> {
         raw.iter().map(|b| row[usize::from(b - 32)]).collect()
     }
     #[test]
-    fn signed_decimal_is_not_a_language_reference() {
+    fn decimal_and_language_reference_use_the_same_script_word() {
         for shift in [0u8, 17] {
             let row: Vec<u8> = (0..224).map(|i| (i as u8).wrapping_add(shift)).collect();
             let mut strings = vec![row.clone(); 8];
@@ -1949,24 +1910,44 @@ mod resource_integer_tests {
                     Some(vec![encoded(expected, &row)])
                 );
             }
+            strings[1] = encoded(b"%i", &row);
+            r.script.as_mut().unwrap().format_value = 7;
             assert_eq!(
-                resource_integer(&encoded(b"%i", &row), &row, u32::MAX).unwrap(),
-                encoded(b"-1", &row)
+                script_field(&r, 0, &strings).unwrap(),
+                Some(vec![strings[7].clone()])
             );
-            for raw in [
-                b"Count %".as_slice(),
-                b"%%",
-                b"%%s",
-                b"%d %i",
-                b"%s",
-                b"%07d",
-            ] {
-                assert!(
-                    resource_integer(&encoded(raw, &row), &row, 7).is_err(),
-                    "{raw:?}"
-                );
-            }
         }
+    }
+    #[test]
+    fn script_fields_expand_board_directives_and_keep_failed_gather_prefixes() {
+        let row: Vec<u8> = (0..224).map(|i| i as u8).collect();
+        let mut strings = vec![vec![]; 2449];
+        strings[0] = row.clone();
+        strings[1] = encoded(b"Zone %b19. Bid %c50.", &row);
+        strings[2243] = encoded(b"$", &row);
+        strings[2244] = vec![b'L'];
+        strings[2323] = encoded(b"Synthetic", &row);
+        let request = Request {
+            title: 1,
+            body: 1,
+            dismissal_id: 0,
+            dialog: None,
+            card: None,
+            script: Some(ScriptText {
+                title: None,
+                body: None,
+                format_value: 0,
+            }),
+        };
+        assert_eq!(
+            script_field(&request, 1, &strings).unwrap(),
+            Some(vec![encoded(b"Zone Synthetic. Bid $50.", &row)])
+        );
+        strings[1] = encoded(b"Prefix %s", &row);
+        assert_eq!(
+            script_field(&request, 1, &strings).unwrap(),
+            Some(vec![encoded(b"Prefix ", &row)])
+        );
     }
     #[test]
     fn actual_synthetic_font_quads_from_prepared_script_fields() {
