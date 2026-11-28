@@ -1222,10 +1222,13 @@ fn actual_cold_adoption_absence_explicit_city_view_raw4_and_mismatch_first_retur
                 .save_v2_with_auction_view(&image, pair.into_records(), 1, None, 0)
                 .unwrap();
             let root = crate::save_menu::selected_profile_root(&scratch.0, b"Cold provenance");
+            // Saved raw records carry no renderer FOV: gameplay reset 4b9d40
+            // loads 53 degrees (545acc) and strategic entry 4b5509 keeps it,
+            // so every attachment starts at 53.
             for (index, bytes, metadata, attachment, fov) in [
-                (0, legacy, None, Attachment::LegacyRawKind4, 45.),
+                (0, legacy, None, Attachment::LegacyRawKind4, 53.),
                 (1, city, Some(0), Attachment::Explicit(0), 53.),
-                (2, modern, Some(3), Attachment::Explicit(3), 45.),
+                (2, modern, Some(3), Attachment::Explicit(3), 53.),
             ] {
                 let path = scratch.0.join(format!("cold{index}.sav"));
                 fs::write(&path, bytes).unwrap();

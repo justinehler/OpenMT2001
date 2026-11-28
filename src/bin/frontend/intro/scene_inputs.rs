@@ -1453,8 +1453,12 @@ impl SceneInputs {
     ) -> Result<(), String> {
         let started = Instant::now();
         let file = openmt2001::build_file::BuildFile::parse(&self.build_file)?;
-        let fixed_templates = scene
-            .city_structures
+        let fixed: &[openmt2001::scene::SceneBuilding] = if context.fixed_structures {
+            &scene.city_structures
+        } else {
+            &[]
+        };
+        let fixed_templates = fixed
             .iter()
             .map(|building| {
                 openmt2001::save::appearance::renderer_templates(&file, building.selected, 1)
@@ -1469,13 +1473,16 @@ impl SceneInputs {
                     .filter(|row| crate::static_detail::supports(row.descriptor))
                     .map(move |row| (building, row))
             })
-            .chain(scene.city_structures.iter().zip(&fixed_templates).flat_map(
-                |(building, rows)| {
-                    rows.iter()
-                        .filter(|row| crate::static_detail::supports(row.descriptor))
-                        .map(move |row| (building, row))
-                },
-            ))
+            .chain(
+                fixed
+                    .iter()
+                    .zip(&fixed_templates)
+                    .flat_map(|(building, rows)| {
+                        rows.iter()
+                            .filter(|row| crate::static_detail::supports(row.descriptor))
+                            .map(move |row| (building, row))
+                    }),
+            )
             .collect::<Vec<_>>();
         let instance_count = instances.len();
         if instance_count == 0 {
@@ -1516,6 +1523,10 @@ impl SceneInputs {
                 .iter()
                 .any(|building| building.block_id == span.category)
             {
+                #[cfg(test)]
+                cache
+                    .fixed_detail_spans
+                    .push((first + span.draw, span.vertices));
                 continue;
             }
             let center = context
@@ -1707,6 +1718,7 @@ impl SceneInputs {
                 board: &board,
                 image: &image,
                 hour: session.world.clock.hour(),
+                fixed_structures: true,
             },
         )?;
         scene.diagnostics.push(format!(
@@ -1847,6 +1859,8 @@ impl SceneInputs {
                 board: &board,
                 image: &image,
                 hour: session.world.clock.hour(),
+                // After a saved refresh the saved pass has already submitted them.
+                fixed_structures: !after_saved_refresh,
             },
         )?;
         scene.diagnostics.push(format!(
@@ -1925,6 +1939,8 @@ impl SceneInputs {
         } else {
             #[cfg(test)]
             cache.static_detail_ranges.clear();
+            #[cfg(test)]
+            cache.fixed_detail_spans.clear();
             let assembly_started = Instant::now();
             let mut scene = session.scene_with_style_cached(
                 &self.build_file,

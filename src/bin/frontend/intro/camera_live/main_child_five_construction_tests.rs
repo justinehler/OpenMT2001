@@ -199,7 +199,9 @@ fn child5_consumes_same_owner_and_only_one_ordinary_list_with_three_texts() {
             l.list.primary.gap,
             l.list.secondary.gap
         ),
-        (3, 2, 1, 2, 2)
+        // Native 440650 first-column args are 0/0/3 (style 0), as in the
+        // direct-layout test above.
+        (0, 2, 1, 2, 2)
     );
     let trace = &done.journal()[events..];
     assert_eq!(
