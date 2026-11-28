@@ -1237,6 +1237,8 @@ struct Inspection {
     time_pressed: Option<crate::time_panel::Button>,
     game_options: crate::game_options::View,
     save_dialog: crate::save_dialog::View,
+    /// Secondary-group panel fade behind the 88c0d4 confirmations.
+    secondary_fade: crate::modal_frame::GroupFade,
     save_pending: Option<mpsc::Receiver<Result<PathBuf, String>>>,
     options_ack: options_ack::Gate,
     save_delete_pending: Option<mpsc::Receiver<Result<(), String>>>,

@@ -626,6 +626,11 @@ impl Assets {
             textured_rect(&mut button, bounds);
             surfaces.push(button);
         }
+        // The portrait-free owner's text objects keep their constructed
+        // vertical offset of 0 (440160 -> 440540 clears +0x19c, and setup's
+        // configure(4,4,-999) leaves it), so 4406a0 centres the rows in their
+        // bounds with no extra drop. The portrait path keeps its own margin.
+        let y_margin = if desktop.is_some() { 0 } else { 4 };
         let mut text_fields = vec![
             (
                 1,
@@ -633,6 +638,7 @@ impl Assets {
                 self.title,
                 true,
                 4,
+                y_margin,
             ),
             (
                 0,
@@ -650,6 +656,7 @@ impl Assets {
                 },
                 desktop.is_some(), // original no-portrait format(4,4); portrait path unchanged
                 4,
+                y_margin,
             ),
         ];
         for (i, bounds) in buttons.into_iter().enumerate() {
@@ -663,6 +670,7 @@ impl Assets {
                 bounds,
                 true,
                 0,
+                0,
             ));
         }
         //429e30 traverses the two retained prompt fields in reverse order:
@@ -670,7 +678,7 @@ impl Assets {
         let mut text_fields = text_fields.into_iter().enumerate().collect::<Vec<_>>();
         text_fields.swap(0, 1);
         let text_surface_start = surfaces.len();
-        for (field_index, (font, id, bounds, center, margin)) in text_fields {
+        for (field_index, (font, id, bounds, center, margin, y_margin)) in text_fields {
             let scripted = if field_index < 2 {
                 script_field(&request, field_index, &self.strings)?
             } else {
@@ -711,7 +719,7 @@ impl Assets {
                 bounds,
                 center,
                 margin,
-                margin,
+                y_margin,
                 offset,
             )? {
                 pages

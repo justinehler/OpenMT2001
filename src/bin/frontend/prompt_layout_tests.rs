@@ -346,3 +346,45 @@ fn save_and_load_confirmations_use_the_portrait_free_owner() {
         }
     }
 }
+
+#[test]
+fn portrait_free_title_and_message_rows_centre_without_a_vertical_margin() {
+    // The 88c0d4 owner's text objects keep their constructed vertical offset
+    // of 0 (440160 -> 440540; setup's configure(4,4,-999) leaves it), so
+    // 4406a0 centres the title and message rows with no 4-unit drop. At
+    // 1024x768 that drop was the 6 px of #595.
+    let assets = synthetic_assets();
+    let dialog = crate::human_dialog::Dialog {
+        portrait: crate::human_dialog::NO_PORTRAIT,
+        title: 0x661,
+        body: 0x65f,
+        buttons: [0x664, 0x665],
+        button_count: 2,
+        timeout: false,
+        ..crate::human_dialog::Dialog::default()
+    };
+    let surfaces = assets
+        .screen_confirmation_surfaces(dialog, [-1.; 2], None)
+        .unwrap();
+    // Base, title bar and two button backgrounds; then the body page, the
+    // title page and the button labels (429e30 draws the body first).
+    let body_page = &surfaces[assets.base.len() + 3];
+    let title_page = &surfaces[assets.base.len() + 4];
+    let offset = crate::desktop_quit::OFFSET;
+    let tab = &assets.tabs[0];
+    let main = assets.main;
+    let body_bounds = [
+        main[0],
+        main[1],
+        main[2],
+        ((3. * f64::from(main[3]) + f64::from(main[1])) * 0.25 + 2.) as f32,
+    ];
+    let row = std::slice::from_ref(&assets.strings[0x65f]);
+    let centred = text_quads(tab, row, body_bounds, true, 4, 0, offset).unwrap();
+    let dropped = text_quads(tab, row, body_bounds, true, 4, 4, offset).unwrap();
+    assert_eq!(body_page.vertices[0][1], centred[0].positions[0][1]);
+    assert_eq!(dropped[0].positions[0][1] - centred[0].positions[0][1], 4.);
+    let row = std::slice::from_ref(&assets.strings[0x661]);
+    let centred = text_quads(&assets.tabs[1], row, assets.title, true, 4, 0, offset).unwrap();
+    assert_eq!(title_page.vertices[0][1], centred[0].positions[0][1]);
+}

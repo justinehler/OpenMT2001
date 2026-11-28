@@ -82,6 +82,16 @@ impl Assets {
             ],
         }
     }
+    /// The bound main_menu.tm model, which takes the secondary group's fade
+    /// (43bce0). 49e900's logo, painted after it, and the child buttons keep
+    /// their own colours.
+    fn backdrop(&self, panel_alpha: u8) -> crate::modal_frame::Backdrop<'_> {
+        let mesh = &self.base[..self.base.len().saturating_sub(1)];
+        crate::modal_frame::Backdrop::new(mesh, panel_alpha)
+    }
+    fn logo(&self) -> &[Surface] {
+        &self.base[self.base.len().saturating_sub(1)..]
+    }
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],
@@ -219,7 +229,7 @@ impl Assets {
         hovered: Option<Button>,
         pressed: Option<Button>,
     ) -> Result<PreparedScene, String> {
-        self.prepare_message(renderer, hovered, pressed, None, false)
+        self.prepare_message(renderer, hovered, pressed, None, false, 255)
     }
     fn prepare_message(
         &self,
@@ -228,6 +238,7 @@ impl Assets {
         pressed: Option<Button>,
         message: Option<&str>,
         save_disabled: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         let mut buttons = Surface::solid();
         let colors = [[0, 192, 0], [0, 0, 192], [110, 4, 171], [185, 7, 187]];
@@ -306,7 +317,9 @@ impl Assets {
                 }
             }
         }
-        let mut draws = self.base.iter().map(Surface::draw).collect::<Vec<_>>();
+        let backdrop = self.backdrop(panel_alpha);
+        let mut draws = backdrop.draws();
+        draws.extend(self.logo().iter().map(Surface::draw));
         draws.push(buttons.draw());
         draws.extend(fonts.iter().map(Surface::draw));
         renderer.prepare(&draws, VIEW, None)
@@ -321,7 +334,7 @@ pub struct View {
     held: bool,
     cue_latch: Option<Button>,
     pub prepared: Option<PreparedScene>,
-    shown: Option<(Option<Button>, Option<Button>)>,
+    shown: Option<(Option<Button>, Option<Button>, u8)>,
     message: Option<String>,
     save_disabled: bool,
     pub quit_prompt: crate::prompt::State,
@@ -419,6 +432,7 @@ impl View {
         assets: &Assets,
         renderer: &Renderer,
         pointer: Option<[f32; 2]>,
+        panel_alpha: u8,
     ) -> Result<(), String> {
         if !self.open {
             return Ok(());
@@ -426,7 +440,7 @@ impl View {
         let hover = pointer
             .and_then(|p| assets.button(p))
             .filter(|button| !self.save_disabled || *button != Button::Save);
-        let state = (hover, self.pressed);
+        let state = (hover, self.pressed, panel_alpha);
         if self.shown != Some(state) {
             self.prepared = Some(assets.prepare_message(
                 renderer,
@@ -434,6 +448,7 @@ impl View {
                 self.pressed,
                 self.message.as_deref(),
                 self.save_disabled,
+                panel_alpha,
             )?);
             self.shown = Some(state);
         }
@@ -444,6 +459,24 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::{Assets, Button, View};
+
+    #[test]
+    fn quit_fade_reaches_the_menu_model_but_not_the_logo() {
+        // 49e970 raises Quit into the secondary group; 43bce0 fades the
+        // main_menu.tm parts while 49e900's logo keeps full alpha.
+        let mut assets = Assets::test_menu();
+        let mut part = crate::ui::Surface::solid();
+        part.rect([0., 0., 640., 480.], [0xffffffff; 4]);
+        assets.base = vec![part.clone(), part.clone(), part];
+        let backdrop = assets.backdrop(crate::modal_frame::SETTLED_ALPHA);
+        let draws = backdrop.draws();
+        assert_eq!(draws.len(), 2);
+        for draw in &draws {
+            assert_eq!(draw.diffuse_alpha.unwrap(), [125; 6]);
+        }
+        assert_eq!(assets.logo().len(), 1);
+        assert_eq!(assets.logo()[0].alpha, [255; 6]);
+    }
 
     #[test]
     fn options_generic_button_cue_tracks_held_entry_and_disabled_save() {
