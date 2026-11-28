@@ -229,7 +229,15 @@ impl Load {
                     });
                 }
             }
-            self.entries.sort_by(|a, b| a.path.cmp(&b.path));
+            self.entries.sort_by(|a, b| {
+                crate::save_menu::compare_save_names(
+                    &a.path.file_name().unwrap_or_default().to_string_lossy(),
+                    &b.path.file_name().unwrap_or_default().to_string_lossy(),
+                )
+                // Different import/profile directories may contain the same
+                // name; retain a deterministic target for each displayed row.
+                .then_with(|| a.path.cmp(&b.path))
+            });
             Ok(())
         })();
         // Original 494ac0 clears the list selection at +0x388 after the
@@ -871,6 +879,10 @@ pub(crate) fn wrapped(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "load_list_order_tests.rs"]
+mod load_list_order_tests;
 
 #[cfg(test)]
 mod tests {

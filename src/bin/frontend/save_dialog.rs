@@ -932,6 +932,10 @@ impl View {
 }
 
 #[cfg(test)]
+#[path = "save_list_order_tests.rs"]
+mod save_list_order_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

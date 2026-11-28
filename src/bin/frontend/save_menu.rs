@@ -221,6 +221,32 @@ pub enum Target {
     ExistingSlot(String),
 }
 
+/// Windows/NTFS enumeration used by 497660 and 494ac0 compares upper-case
+/// names ordinally. Use UTF-16 units, without locale collation or expanding
+/// characters such as sharp S into multiple letters. Non-ASCII uses Rust's
+/// single-character upper-case mappings as a deterministic portable fallback
+/// for the original volume's NTFS upper-case table.
+pub(crate) fn compare_save_names(left: &str, right: &str) -> std::cmp::Ordering {
+    fn folded(name: &str) -> impl Iterator<Item = u16> + '_ {
+        name.chars().flat_map(|character| {
+            let mut uppercase = character.to_uppercase();
+            let first = uppercase.next().unwrap();
+            let simple = if uppercase.next().is_none() {
+                first
+            } else {
+                character
+            };
+            let mut units = [0; 2];
+            let len = simple.encode_utf16(&mut units).len();
+            units.into_iter().take(len)
+        })
+    }
+    folded(left)
+        .cmp(folded(right))
+        // Case-only duplicates cannot occur on NTFS, but can on other hosts.
+        .then_with(|| left.as_bytes().cmp(right.as_bytes()))
+}
+
 /// Enumerate only writable V2-profile saves for the in-game Save Game panel.
 /// Original import directories remain load-only, even when the Load Game
 /// panel presents them alongside V2 slots.
@@ -282,7 +308,7 @@ pub fn list_slots(profile_root: &Path) -> Result<Vec<Slot>, String> {
             metadata,
         });
     }
-    slots.sort_by(|left, right| left.id.cmp(&right.id));
+    slots.sort_by(|left, right| compare_save_names(&left.id, &right.id));
     Ok(slots)
 }
 
@@ -834,6 +860,26 @@ pub fn cameras(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn save_names_use_uppercase_ordinal_order_with_bytewise_ties() {
+        let mut names = ["cherry", "apple", "Banana", "_x", "1a", "APPLE", "Apple"];
+        names.sort_by(|a, b| compare_save_names(a, b));
+        assert_eq!(
+            names,
+            ["1a", "APPLE", "Apple", "apple", "Banana", "cherry", "_x"]
+        );
+        assert!(compare_save_names("éclair", "Êclair").is_lt());
+        assert!(compare_save_names("éclair", "Éclair").is_gt());
+        assert!(
+            compare_save_names("ß", "SS").is_gt(),
+            "do not expand uppercase"
+        );
+        assert!(
+            compare_save_names("\u{10000}", "\u{e000}").is_lt(),
+            "UTF-16 ordinal order"
+        );
+    }
+
     #[test]
     fn selected_profile_progress_identity_roundtrips_without_save_path_authority() {
         let root = Path::new("work/identity-fixture");
