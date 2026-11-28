@@ -455,20 +455,21 @@ impl State {
     }
     /// Original42a1f0 arms on the first UI event1. Later Return/Backspace
     /// edges reply independently of the number of visible mouse buttons.
-    pub fn dialog_event1(&mut self, edges: [bool; 2]) {
-        let Some(at) = self.head else {
-            return;
-        };
-        if self.deferred
-            || self.slots[at]
-                .request
-                .as_ref()
-                .is_none_or(|r| r.dialog.is_none())
-        {
-            return;
+    ///
+    /// A notice (a request without a dialog) uses the same armed Return edge
+    /// to dismiss. When that dismissal has a script callback, its id is
+    /// returned and the host sends it to the worker, as for a click.
+    pub fn dialog_event1(&mut self, edges: [bool; 2]) -> Option<u32> {
+        let at = self.head?;
+        if self.deferred {
+            return None;
         }
+        let notice = self.slots[at].request.as_ref()?.dialog.is_none();
         if !std::mem::replace(&mut self.slots[at].keys_armed, true) {
-            return;
+            return None;
+        }
+        if notice {
+            return if edges[0] { self.begin_dismiss() } else { None };
         }
         if edges[0] {
             self.pending_backspace = edges[1];
@@ -476,6 +477,7 @@ impl State {
         } else if edges[1] {
             self.dialog_reply(1);
         }
+        None
     }
     pub fn dialog_button(&mut self, button: usize) {
         if self

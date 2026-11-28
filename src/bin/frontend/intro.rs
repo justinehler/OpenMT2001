@@ -10,6 +10,8 @@ mod camera_keys;
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
+#[path = "intro/city_keys.rs"]
+mod city_keys;
 #[path = "intro/city_ui.rs"]
 pub(crate) mod city_ui;
 #[path = "intro/dialog_keys.rs"]
@@ -1500,6 +1502,7 @@ pub struct Intro {
     saved_settings: crate::profile_settings::Snapshot,
     settings_save_error: Option<String>,
     dialog_keys: dialog_keys::Input,
+    city_keys: city_keys::Input,
 }
 impl Drop for Intro {
     fn drop(&mut self) {
@@ -1517,6 +1520,9 @@ impl Intro {
         self.menu_focused = focused;
         self.menu_updated = now;
         self.dialog_keys.focus(focused);
+        if !focused {
+            self.city_keys.unfocus();
+        }
         self.service_camera_turns();
         if let Some(process) = &self.process_frontend {
             process.borrow_mut().observe(focused)?;
@@ -1531,31 +1537,31 @@ impl Intro {
         self.attract_input.sample(sample);
         self.dialog_keys.physical(sample);
     }
-    pub(crate) fn dialog_ui_event1(&mut self) {
+    pub(crate) fn dialog_ui_event1(&mut self) -> Result<(), String> {
         let active = !self.focus_pending() && self.loading.is_none();
-        let prompts = self
-            .inspection
-            .as_mut()
-            .filter(|view| {
-                active
-                    && view._fresh_session.is_some()
-                    && !view.save_visible()
-                    && !view.stats_requested
-                    && view.result.is_none()
-                    && view.result_pending.is_none()
-                    && view
-                        .live_status
-                        .as_ref()
-                        .is_none_or(|s| s.stats.is_none() && s.result_request.is_none())
-            })
-            .map(|view| {
-                if view.game_options.quit_prompt.request().is_some() {
-                    &mut view.game_options.quit_prompt
-                } else {
-                    &mut view.prompts
-                }
-            });
-        self.dialog_keys.event1(prompts);
+        let Some(view) = self.inspection.as_mut().filter(|view| {
+            active
+                && view._fresh_session.is_some()
+                && !view.save_visible()
+                && !view.stats_requested
+                && view.result.is_none()
+                && view.result_pending.is_none()
+                && view
+                    .live_status
+                    .as_ref()
+                    .is_none_or(|s| s.stats.is_none() && s.result_request.is_none())
+        }) else {
+            // Consume the edge even when no dialog can take it.
+            self.dialog_keys.event1(None);
+            return Ok(());
+        };
+        if view.game_options.quit_prompt.request().is_some() {
+            self.dialog_keys
+                .event1(Some(&mut view.game_options.quit_prompt));
+        } else if let Some(id) = self.dialog_keys.event1(Some(&mut view.prompts)) {
+            view.dismiss_prompt(id)?;
+        }
+        Ok(())
     }
     /// Drain before modal/loading early returns and every dependent worker poll.
     /// No call in this service can request work from the suspended Session.
@@ -1931,6 +1937,7 @@ impl Intro {
             saved_settings: crate::profile_settings::Snapshot::default(),
             settings_save_error: None,
             dialog_keys: dialog_keys::Input::default(),
+            city_keys: city_keys::Input::default(),
         })
     }
     pub fn open_menu(&mut self) {
