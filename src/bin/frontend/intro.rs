@@ -8503,6 +8503,9 @@ impl Intro {
                             navigation: &mut previous.camera_navigation, focus: &mut previous.camera_focus,
                             endpoint: &mut previous.camera_endpoint,
                             navigation_click_latched: &mut previous.navigation_click_latched,
+                            tooltip: &mut previous.tooltip,
+                            tooltip_state: &mut previous.tooltip_state,
+                            icon_tooltip_dwell: &mut previous.icon_tooltip_dwell,
                         };
                         let mut next = refresh::Owners {
                             locator: &mut view.locator, adjustment: &mut view.adjustment,
@@ -8510,6 +8513,9 @@ impl Intro {
                             navigation: &mut view.camera_navigation, focus: &mut view.camera_focus,
                             endpoint: &mut view.camera_endpoint,
                             navigation_click_latched: &mut view.navigation_click_latched,
+                            tooltip: &mut view.tooltip,
+                            tooltip_state: &mut view.tooltip_state,
+                            icon_tooltip_dwell: &mut view.icon_tooltip_dwell,
                         };
                         Some(refresh::prepare(&mut old, &mut next, inputs,
                             menu.adjustment_assets(), &mut self.refresh_retry)?)

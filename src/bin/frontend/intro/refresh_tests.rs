@@ -18,6 +18,9 @@ struct Headless {
     focus: camera_live::focus::Focus,
     endpoint: Option<camera_live::endpoint::Endpoint>,
     click: bool,
+    tooltip: Option<openmt2001::render::PreparedScene>,
+    tooltip_state: Option<(u32, [i32; 2])>,
+    icon_tooltip_dwell: crate::tooltip::IconDwell,
     // Fixture's process-lifetime resource, separate from retained World owners.
     pavement: Option<crate::selection::Assets>,
 }
@@ -32,6 +35,9 @@ impl Headless {
             focus: Default::default(),
             endpoint: None,
             click: false,
+            tooltip: None,
+            tooltip_state: None,
+            icon_tooltip_dwell: Default::default(),
             pavement: None,
         }
     }
@@ -45,6 +51,9 @@ impl Headless {
             focus: &mut self.focus,
             endpoint: &mut self.endpoint,
             navigation_click_latched: &mut self.click,
+            tooltip: &mut self.tooltip,
+            tooltip_state: &mut self.tooltip_state,
+            icon_tooltip_dwell: &mut self.icon_tooltip_dwell,
         }
     }
 }
@@ -733,4 +742,75 @@ fn actual_refresh_commit_retains_same_resident_registry_until_real_retirement() 
             .is_err()
     );
     assert!(parked.as_ref().unwrap().current_ui_selected().is_err());
+}
+
+#[test]
+fn tooltip_dwell_and_visible_draw_survive_repeated_scene_refreshes() {
+    // Toolbar, sidebar and locator identifiers use the same retained timer.
+    for id in [29, 1141, 1146] {
+        let assets = business_adjustment::refresh_assets_fixture();
+        let mut retry = Retry::default();
+        let mut view = Headless::empty();
+        let mut baseline = crate::tooltip::IconDwell::default();
+        for frame in 1..=30 {
+            if [8, 17, 28].contains(&frame) {
+                let mut next = Headless::empty();
+                let plan =
+                    prepare_refresh(&mut view, &mut next, &[], &[], &assets, &mut retry).unwrap();
+                let was_visible = view.tooltip.is_some();
+                let previous_caption = view.tooltip_state;
+                commit(&mut view.owners(), &mut next.owners(), plan, &mut retry);
+                // The third refresh happens after paint: retain both the
+                // prepared draw and its cache key without waiting for a draw.
+                assert_eq!(next.tooltip.is_some(), was_visible);
+                assert_eq!(next.tooltip_state, previous_caption);
+                assert!(view.tooltip.is_none());
+                assert!(view.tooltip_state.is_none());
+                view = next;
+            }
+            let visible = view.icon_tooltip_dwell.advance(Some(id));
+            assert_eq!(
+                visible,
+                baseline.advance(Some(id)),
+                "frame {frame}, ID {id}"
+            );
+            assert_eq!(visible, (frame >= 26).then_some(id));
+            if let Some(id) = visible {
+                view.tooltip = Some(Default::default());
+                view.tooltip_state = Some((id, [40, 100]));
+            }
+        }
+    }
+}
+
+#[test]
+fn tooltip_dwell_resets_on_target_change_exit_and_new_city() {
+    let assets = business_adjustment::refresh_assets_fixture();
+    let mut retry = Retry::default();
+    let mut previous = Headless::empty();
+    for _ in 0..26 {
+        previous.icon_tooltip_dwell.advance(Some(1146));
+    }
+    let mut view = Headless::empty();
+    let plan = prepare_refresh(&mut previous, &mut view, &[], &[], &assets, &mut retry).unwrap();
+    commit(&mut previous.owners(), &mut view.owners(), plan, &mut retry);
+    for _ in 0..25 {
+        assert_eq!(view.icon_tooltip_dwell.advance(Some(29)), None);
+    }
+    assert_eq!(view.icon_tooltip_dwell.advance(Some(29)), Some(29));
+    assert_eq!(view.icon_tooltip_dwell.advance(None), None);
+    for _ in 0..25 {
+        assert_eq!(view.icon_tooltip_dwell.advance(Some(29)), None);
+    }
+    assert_eq!(view.icon_tooltip_dwell.advance(Some(29)), Some(29));
+
+    // City entry and true Load create a fresh view without refresh::commit.
+    // Even the same icon must dwell again after that boundary.
+    let mut new_city = Headless::empty();
+    assert!(new_city.tooltip.is_none());
+    assert!(new_city.tooltip_state.is_none());
+    for _ in 0..25 {
+        assert_eq!(new_city.icon_tooltip_dwell.advance(Some(29)), None);
+    }
+    assert_eq!(new_city.icon_tooltip_dwell.advance(Some(29)), Some(29));
 }
