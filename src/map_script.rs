@@ -1122,6 +1122,7 @@ mod tests {
                 .initialize(
                     &roster,
                     crate::player_script::RosterInputs {
+                        local_slot: None,
                         names: [b"Fixture Player"; 6],
                         initial_cash: cash,
                         default_ai: &read("OPENMT2001_AI_SCRIPT"),

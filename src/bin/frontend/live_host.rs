@@ -2075,6 +2075,19 @@ impl Host {
         self.commands_seen = session.hooks.commands.len();
     }
     pub fn tick(&mut self, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
+        if let Some(connection) = &session.connected {
+            if let Err(error) = connection.worker.validate_binding(connection.binding) {
+                self.fail(error);
+                return;
+            }
+            // #35 supplies authority commits/deadline updates. Hold at the
+            // admitted initial deadline instead of running independent games.
+            let remaining = 25u32.saturating_sub(session.world.clock.timing[0]);
+            if remaining == 0 {
+                return;
+            }
+            self.policy.scheduler.iterations = self.policy.scheduler.iterations.min(remaining);
+        }
         if self.stop_retired_camera() {
             return;
         }

@@ -50,6 +50,9 @@ enum Target {
     Difficulty(usize),
 }
 pub struct Route {
+    pub request: Option<crate::intro::connected_start::Request>,
+    pub busy: bool,
+    cancellation: Option<openmt2001::network::lobby::worker::Cancellation>,
     pub visible: bool,
     pub notice: Option<String>,
     page: Page,
@@ -91,6 +94,9 @@ impl Route {
             setup::SetupPanel::new(index, archive, installer, strings, executable, 0xbb000a28)?;
         setup_panel.network_mode();
         Ok(Self {
+            request: None,
+            busy: false,
+            cancellation: None,
             visible: false,
             notice: None,
             page: Page::Browser,
@@ -114,7 +120,12 @@ impl Route {
         })
     }
     pub fn open(&mut self, catalog: Catalog, name: &[u8], token: usize) {
+        if let Some(cancellation) = self.cancellation.take() {
+            cancellation.cancel();
+        }
         self.worker = None;
+        self.request = None;
+        self.busy = false;
         self.view = None;
         self.catalog = catalog;
         self.name = name.to_vec();
@@ -127,9 +138,31 @@ impl Route {
         self.press = None;
         self.status.clear();
     }
+    pub fn finish(&mut self, error: Option<String>) {
+        self.cancellation = None;
+        self.request = None;
+        self.busy = false;
+        if let Some(error) = error {
+            self.page = Page::Browser;
+            self.notice = Some(error);
+        } else {
+            self.visible = false;
+        }
+    }
     pub fn poll(&mut self) {
         while let Some(update) = self.worker.as_ref().and_then(Handle::poll) {
             match update {
+                Update::Prepare(ticket) => {
+                    self.cancellation = self.worker.as_ref().map(Handle::cancellation);
+                    self.request = Some(crate::intro::connected_start::Request {
+                        ticket,
+                        worker: self.worker.take().unwrap(),
+                    });
+                    self.busy = true;
+                    self.page = Page::Waiting;
+                    self.status = "Validating connected content...".into();
+                }
+                Update::Validated => (),
                 Update::Probed(selection) => {
                     self.browser.result = Some(selection);
                     self.browser.selected = false;
@@ -507,6 +540,11 @@ impl Route {
         if self.notice.take().is_some() {
             return;
         }
+        if let Some(cancellation) = self.cancellation.take() {
+            cancellation.cancel();
+        }
+        self.request = None;
+        self.busy = false;
         self.worker = None;
         self.view = None;
         self.keyboard = None;

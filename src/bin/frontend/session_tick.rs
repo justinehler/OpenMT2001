@@ -277,6 +277,11 @@ impl Session<'_> {
                     if matches!(event, scheduler::Event::Helper(0x481340)) && !scheduler.network_enabled {
                         return Ok(0);
                     }
+                    if matches!(event, scheduler::Event::Helper(0x4bac90)) && self.connected.is_some() {
+                        // Initial connected city only: #35 will advance this
+                        // deadline after authority commits. Host holds at 25.
+                        return Ok(0);
+                    }
                     match event {
                         scheduler::Event::Helper(0x4eb5b0) => {
                             self.demolition_effects.advance(image)?;

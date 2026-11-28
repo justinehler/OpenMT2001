@@ -27,10 +27,24 @@ pub struct View {
 }
 #[derive(Clone, Debug)]
 pub enum Update {
+    Prepare(Ticket),
+    Validated,
     Probed(Selection),
     Lobby(View),
     Notice(String),
     Failed(String),
+}
+/// Frozen admitted lobby and the authority seed. Only the worker mints this.
+#[derive(Clone, Debug)]
+pub struct Ticket {
+    pub view: View,
+    pub seed: u32,
+    pub expected: Option<network::Content>,
+}
+enum Command {
+    Stage(Box<dyn FnOnce() -> Result<network::Content, String> + Send>),
+    Edit(Action),
+    Prepared(std::result::Result<network::Content, String>),
 }
 pub enum Open {
     Host {
@@ -45,11 +59,22 @@ pub enum Open {
         token: i8,
     },
 }
+pub struct Cancellation {
+    owner: &'static Owner,
+    attempt: Attempt,
+    cancel: std::sync::Arc<AtomicBool>,
+}
+impl Cancellation {
+    pub fn cancel(self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        let _ = self.owner.retire(self.attempt);
+    }
+}
 pub struct Handle {
     owner: &'static Owner,
     attempt: Attempt,
     cancel: std::sync::Arc<AtomicBool>,
-    commands: SyncSender<Action>,
+    commands: SyncSender<Command>,
     updates: Receiver<Update>,
 }
 impl Handle {
@@ -90,8 +115,54 @@ impl Handle {
     }
     pub fn action(&self, action: Action) -> Result<(), String> {
         self.commands
-            .try_send(action)
+            .try_send(Command::Edit(action))
             .map_err(|_| "Lobby is busy; try again.".into())
+    }
+    pub fn cancellation(&self) -> Cancellation {
+        Cancellation {
+            owner: self.owner,
+            attempt: self.attempt,
+            cancel: self.cancel.clone(),
+        }
+    }
+    pub fn validate_binding(&self, binding: network::SessionBinding) -> Result<(), String> {
+        self.owner
+            .validate_binding(binding)
+            .map_err(|e| e.to_string())
+    }
+    /// Staging and all peer waits stay on this worker. UI only polls updates.
+    pub fn stage(
+        &self,
+        stage: impl FnOnce() -> Result<network::Content, String> + Send + 'static,
+    ) -> Result<(), String> {
+        self.commands
+            .try_send(Command::Stage(Box::new(stage)))
+            .map_err(|_| "Startup worker is busy".into())
+    }
+    pub fn prepared(
+        &self,
+        content: std::result::Result<network::Content, String>,
+    ) -> Result<(), String> {
+        self.commands
+            .try_send(Command::Prepared(content))
+            .map_err(|_| "Startup worker is busy".into())
+    }
+    pub fn bind_world(&self, world: u64) -> Result<network::SessionBinding, String> {
+        self.owner
+            .bind_world(self.attempt, world)
+            .map_err(|e| e.to_string())
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        self.owner
+            .lock()
+            .and_then(|s| {
+                s.attempt(self.attempt)?;
+                if matches!(s.phase, network::Phase::Offline | network::Phase::Stopped) {
+                    return Err(network::Error::Phase);
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
     }
     pub fn poll(&self) -> Option<Update> {
         self.updates.try_recv().ok()
@@ -121,7 +192,7 @@ fn run(
     owner: &Owner,
     attempt: Attempt,
     open: Open,
-    actions: Receiver<Action>,
+    actions: Receiver<Command>,
     publish: &SyncSender<Update>,
     cancel: &AtomicBool,
 ) -> Result<(), String> {
@@ -187,7 +258,15 @@ fn run(
             address,
         })
     });
+    let mut starting: Option<Ticket> = None;
+    let mut prepared = false;
+    let mut ready = [false; SLOTS];
+    let mut committed = false;
+    let mut start_deadline = None;
     while !cancel.load(Ordering::Relaxed) {
+        if start_deadline.is_some_and(|d| !committed && Instant::now() > d) {
+            return Err("Timed out validating connected startup content.".into());
+        }
         if !admitted && Instant::now() > deadline {
             return Err("Timed out waiting for session information or lobby admission.".into());
         }
@@ -211,7 +290,8 @@ fn run(
                 } => match *message {
                     Message::LobbyRequest(request) if host => {
                         let roster = snapshot.as_mut().unwrap();
-                        if roster.request(connection.slot(), request).is_ok() {
+                        if starting.is_none() && roster.request(connection.slot(), request).is_ok()
+                        {
                             changed = true;
                         } else {
                             match owner.send(connection, Message::LobbyDenied) {
@@ -264,6 +344,49 @@ fn run(
                         snapshot = Some(next);
                         changed = admitted;
                     }
+                    Message::Start(start) if !host && admitted && starting.is_none() => {
+                        let frozen = snapshot.clone().ok_or("Start without lobby")?;
+                        if !frozen.start_enabled()
+                            || start.content.level != frozen.settings.level
+                            || start.content.parameter_bits != frozen.settings.parameter_bits
+                            || start.content.difficulty != frozen.settings.difficulty
+                        {
+                            return Err(
+                                "Connected startup parameters do not match the admitted lobby."
+                                    .into(),
+                            );
+                        }
+                        let ticket = Ticket {
+                            view: View {
+                                snapshot: frozen,
+                                local_peer,
+                                host,
+                                address,
+                            },
+                            seed: start.seed,
+                            expected: Some(start.content),
+                        };
+                        starting = Some(ticket.clone());
+                        start_deadline = Some(Instant::now() + Duration::from_secs(60));
+                        pending = Some(Update::Prepare(ticket));
+                    }
+                    Message::StartReady(content) if host && prepared && !committed => {
+                        let ticket = starting.as_ref().ok_or("Unexpected startup readiness")?;
+                        if ticket.view.snapshot.local_row(connection.slot()).is_none()
+                            || ticket.expected != Some(content)
+                        {
+                            return Err("Connected startup content mismatch.".into());
+                        }
+                        ready[connection.slot() as usize] = true;
+                    }
+                    Message::StartCommit if !host && prepared && !committed => {
+                        owner.begin_start(attempt).map_err(|e| e.to_string())?;
+                        committed = true;
+                        pending = Some(Update::Validated);
+                    }
+                    Message::StartFailure => {
+                        return Err("A peer could not validate connected startup content.".into());
+                    }
                     Message::LobbyDenied if !host => {
                         if !admitted {
                             return Err("Host refused the join request; probe again.".into());
@@ -275,6 +398,13 @@ fn run(
                     _ => return Err("Unexpected message in lobby.".into()),
                 },
                 Event::Failed { connection, error } => {
+                    if starting.as_ref().is_some_and(|ticket| {
+                        !host
+                            || connection
+                                .is_some_and(|c| ticket.view.snapshot.local_row(c.slot()).is_some())
+                    }) {
+                        return Err("Peer connection ended during connected startup.".into());
+                    }
                     if !host {
                         return Err(format!(
                             "Host connection ended: {error}. Host migration is not available."
@@ -292,18 +422,103 @@ fn run(
                 }
             }
         }
-        for action in actions.try_iter().take(32) {
+        for command in actions.try_iter().take(32) {
+            let command = match command {
+                Command::Stage(stage) => Command::Prepared(stage()),
+                other => other,
+            };
+            let action = match command {
+                Command::Prepared(result) => {
+                    let content = match result {
+                        Ok(content) => content,
+                        Err(error) => {
+                            for connection in peers.iter().flatten() {
+                                let _ = owner.send(*connection, Message::StartFailure);
+                            }
+                            let _ = owner.pump(attempt, None);
+                            return Err(error);
+                        }
+                    };
+                    let ticket = starting.as_mut().ok_or("Content without admitted Start")?;
+                    if prepared {
+                        return Err("Duplicate startup content".into());
+                    }
+                    if ticket.expected.is_some_and(|expected| expected != content) {
+                        if let Some(connection) = peers[0] {
+                            let _ = owner.send(connection, Message::StartFailure);
+                        }
+                        let _ = owner.pump(attempt, None);
+                        return Err("Connected startup version/content digest mismatch.".into());
+                    }
+                    ticket.expected = Some(content);
+                    prepared = true;
+                    if host {
+                        for peer in ticket
+                            .view
+                            .snapshot
+                            .rows
+                            .iter()
+                            .filter_map(|r| r.peer)
+                            .filter(|&p| p != 0)
+                        {
+                            let connection =
+                                peers[peer as usize].ok_or("Admitted peer connection missing")?;
+                            // Publish the exact final revision before Start on this ordered stream.
+                            owner
+                                .send(connection, Message::Lobby(ticket.view.snapshot.clone()))
+                                .map_err(|e| e.to_string())?;
+                            owner
+                                .send(
+                                    connection,
+                                    Message::Start(network::Start {
+                                        content,
+                                        seed: ticket.seed,
+                                    }),
+                                )
+                                .map_err(|e| e.to_string())?;
+                        }
+                        ready[0] = true;
+                    } else {
+                        owner
+                            .send(
+                                peers[0].ok_or("Host connection missing")?,
+                                Message::StartReady(content),
+                            )
+                            .map_err(|e| e.to_string())?;
+                    }
+                    continue;
+                }
+                Command::Edit(action) => action,
+                Command::Stage(_) => unreachable!(),
+            };
+            if starting.is_some() {
+                continue;
+            }
             let Some(roster) = snapshot.as_mut().filter(|_| admitted) else {
                 continue;
             };
             if host {
                 if action == Action::Start {
-                    pending = Some(Update::Notice(if roster.start_enabled() {
-                        super::START_BOUNDARY.into()
+                    if roster.start_enabled() {
+                        let ticket = Ticket {
+                            view: View {
+                                snapshot: roster.clone(),
+                                local_peer,
+                                host,
+                                address,
+                            },
+                            seed: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_err(|e| e.to_string())?
+                                .as_secs() as u32,
+                            expected: None,
+                        };
+                        starting = Some(ticket.clone());
+                        start_deadline = Some(Instant::now() + Duration::from_secs(60));
+                        pending = Some(Update::Prepare(ticket));
                     } else {
-                        "At least two populated rows must have a character, name and readiness."
-                            .into()
-                    }));
+                        pending = Some(Update::Notice("At least two populated rows must have a character, name and readiness.".into()));
+                    }
                 } else if let Open::Host { token_names, .. } = &open {
                     match roster.action(action, token_names) {
                         Ok(()) => changed = true,
@@ -322,7 +537,7 @@ fn run(
                     .map_err(|e| e.to_string())?;
             }
         }
-        if changed {
+        if changed && starting.is_none() {
             let roster = snapshot.as_ref().unwrap();
             if host {
                 owner
@@ -336,7 +551,40 @@ fn run(
                 address,
             }));
         }
-        if host {
+        if host
+            && prepared
+            && !committed
+            && starting.as_ref().is_some_and(|t| {
+                t.view
+                    .snapshot
+                    .rows
+                    .iter()
+                    .filter_map(|r| r.peer)
+                    .all(|p| ready[p as usize])
+            })
+        {
+            for peer in starting
+                .as_ref()
+                .unwrap()
+                .view
+                .snapshot
+                .rows
+                .iter()
+                .filter_map(|r| r.peer)
+                .filter(|&p| p != 0)
+            {
+                owner
+                    .send(
+                        peers[peer as usize].ok_or("Admitted peer missing")?,
+                        Message::StartCommit,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            owner.begin_start(attempt).map_err(|e| e.to_string())?;
+            committed = true;
+            pending = Some(Update::Validated);
+        }
+        if host && starting.is_none() {
             let roster = snapshot.as_ref().unwrap();
             for (slot, connection) in peers
                 .iter()

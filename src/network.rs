@@ -1,7 +1,7 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
 //! Direct-IP transport is pumped by the lobby worker through this owner.
-//! Connected startup and command consumers follow in #30. Only explicit
-//! listen/connect/probe calls open sockets; connected startup is still separate.
+//! The lobby worker validates staged startup content before binding an actual
+//! city. Command/deadline exchange remains the next slice in #30.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{
     Mutex, MutexGuard, OnceLock,
@@ -173,13 +173,21 @@ impl State {
             | Message::Lobby(_)
             | Message::LobbyRequest(_)
             | Message::LobbyDenied => self.phase(Phase::Lobby)?,
+            Message::StartReady(_) | Message::StartCommit | Message::StartFailure => {
+                if !matches!(self.phase, Phase::Lobby | Phase::Starting | Phase::Playing) {
+                    return Err(Error::Phase);
+                }
+            }
             Message::Transfer(_) => self.binding(binding.ok_or(Error::World)?)?,
             Message::Hello | Message::Probe | Message::Welcome { .. } => return Err(Error::Tag),
         }
         let peer = self.peers[usize::from(connection.slot)]
             .as_mut()
             .ok_or(Error::Peer)?;
-        let request = matches!(frame.message, Message::LobbyRequest(_));
+        let request = matches!(
+            frame.message,
+            Message::LobbyRequest(_) | Message::StartReady(_)
+        ) || (matches!(frame.message, Message::StartFailure) && !peer.authority);
         if peer.identity != connection.identity || peer.authority == request {
             return Err(Error::Peer);
         }
@@ -397,6 +405,9 @@ pub enum Message {
     /// Only the adopted client connection identifies the requester.
     LobbyRequest(lobby::Request),
     Start(Start),
+    StartReady(Content),
+    StartCommit,
+    StartFailure,
     Transfer(Transfer),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
