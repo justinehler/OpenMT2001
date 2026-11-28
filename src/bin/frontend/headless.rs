@@ -39,6 +39,9 @@ run:
   --autosave-dir DIR    save starts: write each midnight autosave, as the
                         original does, and copy it to DIR/autosave-N.sav
   --autosaves N         stop after the Nth autosave (needs --autosave-dir)
+  --rng                 print the live RNG stream states, keyed by original
+                        registry address, at the start, at each autosave and
+                        at the end
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +89,7 @@ pub struct Options {
     pub write_save: Option<PathBuf>,
     pub autosave_dir: Option<PathBuf>,
     pub autosaves: Option<u32>,
+    pub rng: bool,
 }
 
 impl Paths {
@@ -174,6 +178,7 @@ impl Options {
             write_save: None,
             autosave_dir: None,
             autosaves: None,
+            rng: false,
         };
         while let Some(arg) = args.next() {
             let mut value = || args.next().ok_or(format!("{arg} requires a value"));
@@ -231,6 +236,7 @@ impl Options {
                     }
                 }
                 "--write-save" => options.write_save = Some(PathBuf::from(value()?)),
+                "--rng" => options.rng = true,
                 "--autosave-dir" => options.autosave_dir = Some(PathBuf::from(value()?)),
                 "--autosaves" => {
                     let count = number(&value()?)?;
@@ -365,6 +371,30 @@ pub fn digest(session: &crate::fresh_city::Session<'_>) -> String {
         world.buildings.len(),
         world.objective.reached,
     )
+}
+
+/// Live RNG stream states keyed by the original registry node that owns them
+/// (`0x93c818` is the registry's master stream).
+pub fn rng_report(session: &crate::fresh_city::Session<'_>, tick: u32) -> String {
+    let creation = &session.world.creation;
+    let streams = [
+        (0x93c818, session.random_registry.process[0]),
+        (0x560a08, session.build_random_state),
+        (0x68c028, session.particle_random_state),
+        (0x6ae190, creation.preference_rng),
+        (0x6fc8a8, creation.initialization_rng.movement),
+        (0x6fc8c0, creation.identity_rng),
+        (0x6fcd40, creation.initialization_rng.constructor),
+        (0x7a4190, creation.initialization_rng.objective),
+        (0x8b06e8, session.credit_random_state),
+        (0x93aee8, session.script_random_state),
+        (0x940cf8, session.demolition_effects.random),
+    ];
+    let fields: Vec<String> = streams
+        .iter()
+        .map(|(node, state)| format!("\"{node:#x}\":{state}"))
+        .collect();
+    format!("{{\"tick\":{tick},\"rng\":{{{}}}}}", fields.join(","))
 }
 
 /// Stand-in for the auction renderer thread (`auction_bridge::View`). It keeps
@@ -681,6 +711,9 @@ fn advance(
     let start = session.world.clock.timing[0];
     let target = start.saturating_add(options.ticks);
     line(out, &digest(session))?;
+    if options.rng {
+        line(out, &rng_report(session, start))?;
+    }
     let mut last_tick = start;
     let mut last_hour = session.world.clock.hour();
     let mut still = 0;
@@ -722,6 +755,9 @@ fn advance(
         }
     };
     line(out, &digest(session))?;
+    if options.rng {
+        line(out, &rng_report(session, session.world.clock.timing[0]))?;
+    }
     line(
         out,
         &format!(
@@ -769,6 +805,9 @@ fn collect_autosave(
             copy.display().to_string()
         ),
     )?;
+    if options.rng {
+        line(out, &rng_report(session, session.world.clock.timing[0]))?;
+    }
     Ok(options
         .autosaves
         .filter(|&limit| *count >= limit)
@@ -1008,6 +1047,7 @@ mod tests {
             write_save: None,
             autosave_dir: None,
             autosaves: None,
+            rng: false,
         }
     }
 
