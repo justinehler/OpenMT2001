@@ -536,15 +536,17 @@ pub fn text(
 ) -> Result<(), String> {
     text_scaled(pages, tab, encoded, bounds, center, color, 1.)
 }
+/// Character palette entry 16 (440ad0), shared by green section captions.
+pub const SECTION_HEADER_COLOR: u32 = 0xff00ff00;
+
 /// Green section captions shared by the single-player setup screens.
-/// The original widgets select per-character palette entry16 (440ad0).
 pub fn section_header(
     pages: &mut [Surface],
     tab: &[u8],
     encoded: &[u8],
     bounds: [f32; 4],
 ) -> Result<(), String> {
-    text(pages, tab, encoded, bounds, true, 0xff00ff00)
+    text(pages, tab, encoded, bounds, true, SECTION_HEADER_COLOR)
 }
 pub fn text_fit(
     pages: &mut [Surface],
