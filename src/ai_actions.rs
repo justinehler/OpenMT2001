@@ -420,6 +420,147 @@ mod tests {
             }
         }
     }
+
+    /// Executes one 47c630 plan for a character-3 computer player choosing a
+    /// 1x1 catalogue-24 shop, as in the 1980 goodspread Skirmish of issue
+    /// #399, and returns the floor count it proposes (None when it gives up).
+    /// The floor, footprint, reduction and admission helpers are the real
+    /// ones; placement, quote and the volume clamp are fixed stand-ins.
+    fn planned_floors(rng: u32, cash: f32) -> Option<u32> {
+        use crate::player_manager::put;
+        let kind = 24;
+        let mut rows = [[0u8; 116]; 45];
+        put(&mut rows[kind], 0x44, 3); // maximum floors
+        put(&mut rows[kind], 0x48, 2); // minimum floors
+        rows[kind][0x5e] = 0; // footprint group0: 2x2,1x4,1x3,1x2,1x1
+        let catalog = crate::business_pool::BusinessCatalog::from_rows(rows);
+        let mut profile = [0u8; 0x650];
+        profile[0x36..0x40].copy_from_slice(&[30, 15, 15, 70, 4, 2, 0, 0, 0, 0]);
+        profile[0x40] = 1; // group0 minimum area
+        profile[0x42] = 1; // group0 preferred area
+        profile[0x46] = 1; // group0's listed areas start with 1
+        let mut profiles = [profile; 4]; // indexed by character 3
+        let mut categories = [[0u8; 0x17c]; 52];
+        put(&mut categories[8], 0x84, 3f32.to_bits()); // style tier1
+        let mut player = Player {
+            reference: 0x2000b000,
+            bytes: vec![0; 0x1e50],
+            auxiliaries: vec![],
+        };
+        put(&mut player.bytes, 4, cash.to_bits());
+        put(&mut player.bytes, 0x150, 3);
+        put(&mut player.bytes, 0x224, rng);
+        put(&mut player.bytes, 0x228, 0x343fd);
+        put(&mut player.bytes, 0x22c, 0x269ec3);
+        player.bytes[0xb44] = 5; // five active businesses: early reserve applies
+        put(&mut player.bytes, 0xb68, 8);
+        put(&mut player.bytes, 0xb90, kind as u32);
+        put(&mut player.bytes, 0x13fc, 2); // cached placement edge, no draw
+        let mut proposed = None;
+        let mut state = Planning::default();
+        let input = Input {
+            execute: 1,
+            style_override: 0,
+            style: 0,
+        };
+        let planned = choose_from_catalog(
+            &mut player,
+            &mut profiles,
+            &categories,
+            &catalog,
+            input,
+            &mut state,
+            |call, player, profiles, categories, state| {
+                let a = call.arguments;
+                let cash = f32::from_bits(word(&player.bytes, 4));
+                let mut reply = Reply::default();
+                reply.value = match call.address {
+                    0x4769f0 | 0x476ee0 | 0x4725f0 => 0,
+                    0x47dd40 => {
+                        planning::preferred_area_from_catalog(a[0], a[1], profiles, &catalog)?
+                    }
+                    0x47db30 => {
+                        planning::floor_count_from_catalog(player, a[0], profiles, &catalog)?
+                    }
+                    0x47dd90 => planning::style(player, &categories[a[1] as usize], 0)?,
+                    0x46ba80 => {
+                        planning::footprints_from_catalog(
+                            a[0],
+                            &mut state.footprints,
+                            &mut state.count,
+                            &catalog,
+                        )?;
+                        0
+                    }
+                    0x46bd50 => {
+                        planning::trim_footprints(a[0], &mut state.footprints, &mut state.count)?;
+                        0
+                    }
+                    0x4747c0 => {
+                        state.position = [3, 0];
+                        u32::from(state.width * state.height == 1)
+                    }
+                    // Construction quote of the recorded shop: 84*(0.6*volume+0.8).
+                    0x445720 => {
+                        reply.quote = 84. * (0.6 * a[1] as f32 + 0.8);
+                        0
+                    }
+                    0x48a6d0 => u32::from(crate::construction::affordable(
+                        cash,
+                        10000,
+                        f32::from_bits(a[0]),
+                        false,
+                    )),
+                    // 476b30 with fewer than six businesses: cash-1000 < cost.
+                    0x476b30 => u32::from(f64::from(cash) - 1000. < f64::from(a[0] as i32)),
+                    0x475f70 => {
+                        planning::reduce_from_catalog(
+                            player,
+                            a[1],
+                            &mut state.floors,
+                            &mut state.area,
+                            profiles,
+                            &catalog,
+                        )?;
+                        0
+                    }
+                    0x46ee90 => {
+                        planning::normalize_area_from_catalog(
+                            player,
+                            a[0],
+                            &mut state.area,
+                            profiles,
+                            &catalog,
+                        )?;
+                        0
+                    }
+                    0x478650 => {
+                        proposed = Some(a[9]);
+                        1
+                    }
+                    other => return Err(format!("unexpected planning callback {other:x}")),
+                };
+                Ok(reply)
+            },
+        )
+        .unwrap();
+        assert_eq!(planned, proposed.is_some());
+        proposed
+    }
+
+    #[test]
+    fn executed_plan_floor_count_follows_the_player_rng_position() {
+        // The original reaches this plan 420 draws later than the engine did
+        // before the 1980 businesses were re-enabled after loading (#399):
+        // that player RNG state draws 3 floors and the engine's drew 2. Both
+        // fit the 1000 early reserve with 1314.13 cash (218 and 168).
+        assert_eq!(planned_floors(0x053c43e5, 1314.1257), Some(3));
+        assert_eq!(planned_floors(0xffbbd6b1, 1314.1257), Some(2));
+        // In debt, the cash-minus-reservations test rejects every size,
+        // so cash alone cannot turn a 3-floor plan into a 2-floor one.
+        assert_eq!(planned_floors(0x053c43e5, -73.20365), None);
+    }
+
     #[test]
     #[ignore = "requires original business-planning observations"]
     fn matches_native_planning() {

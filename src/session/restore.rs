@@ -923,6 +923,83 @@ impl<'data> Session<'data> {
         self.restore_original_state_with_presentation(save, assets, None)
     }
 
+    /// 4806b0 as called by the load finalizer 4bbd20 with the loaded decade.
+    /// Original saves keep no Lua timed events, so at hours below 2 this is
+    /// what re-arms EVENT_BusinessIntro1940..1980 (1250 ticks, argument 0):
+    /// a midnight save of 1980 enables the 1980 businesses at 02:00, before
+    /// the computer players' next planning pass. The style bank was already
+    /// selected from the saved clock, and the presenter selects the loaded
+    /// decade's music, so only the script admission is applied here. Engine
+    /// saves later replace the whole event queue from their extension.
+    fn schedule_loaded_era_introduction(
+        &mut self,
+        assets: &CommandAssets<'_, '_>,
+    ) -> Result<(), String> {
+        let era = self.world.clock.calendar[2] as i32;
+        let mut introductions = Vec::new();
+        crate::era::advance(era, &mut self.world.clock, |call, _| {
+            if let crate::era::Call::Script {
+                name,
+                delay,
+                argument,
+            } = call
+            {
+                introductions.push((name, delay, argument));
+            }
+            Ok(())
+        })?;
+        if introductions.is_empty() {
+            return Ok(());
+        }
+        let players: Vec<_> = self
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|player| {
+                Some(crate::business_binding::Player {
+                    identity: player.reference,
+                    kind: crate::player_manager::word(&player.bytes, 0x154),
+                })
+            })
+            .collect();
+        let context = self.world.script_context(
+            assets.image,
+            &self.resident_models,
+            level_startup::HostContext {
+                precision: crate::x87::Precision::Pc64,
+                accounting_enabled: true,
+                difficulty: self.difficulty as i32,
+                notifications: self.world.city.ai_demand.ready != 0,
+                auxiliary_template: self.policy.auxiliary_prior_bytes,
+                category_base: 0x617628,
+                building_base: 0x591318,
+            },
+        )?;
+        let mut geometry =
+            BuildingGeometry::new(assets.board, assets.file, std::mem::take(&mut self.models));
+        let result = (|| {
+            for (name, delay, argument) in introductions {
+                let raw = assets.image.at(name, 32)?;
+                let length = raw
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .ok_or("era event name unterminated")?;
+                let name = std::str::from_utf8(&raw[..length]).map_err(|e| e.to_string())?;
+                self.scripts.trigger_event(
+                    (name, delay, argument),
+                    &mut self.world.script_state(&players),
+                    &context,
+                    &mut geometry,
+                    &mut self.hooks,
+                )?;
+            }
+            Ok(())
+        })();
+        self.models = std::mem::take(geometry.registrar_mut());
+        result
+    }
+
     fn restore_original_state_with_presentation(
         &mut self,
         save: &SaveFile<'_>,
@@ -1623,7 +1700,11 @@ impl<'data> Session<'data> {
             // ranking query recomputes from this rebuilt city/catalog and
             // has no persistent counterpart to clear.
         }
-        // 4bbd20 first refreshes the 51 ordinary category commodity masks.
+        // 4bbd20 opens with 4806b0 for the loaded decade, before its
+        // category refresh, so a save loaded before 02:00 reschedules that
+        // decade's business introduction.
+        self.schedule_loaded_era_introduction(assets)?;
+        // 4bbd20 then refreshes the 51 ordinary category commodity masks.
         // Its loop intentionally stops before the final sentinel category.
         {
             let city = &mut self.world.city;

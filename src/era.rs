@@ -50,6 +50,38 @@ pub fn advance(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn introductions(hour: u32, era: u32) -> Vec<(u32, u32, i32)> {
+        let mut clock = Clock {
+            calendar: [hour, 0, era, 0, 0],
+            timing: [0; 6],
+        };
+        let mut scheduled = vec![];
+        advance(era as i32, &mut clock, |call, _| {
+            if let Call::Script {
+                name,
+                delay,
+                argument,
+            } = call
+            {
+                scheduled.push((name, delay, argument));
+            }
+            Ok(())
+        })
+        .unwrap();
+        scheduled
+    }
+
+    #[test]
+    fn loaded_decade_reschedules_its_introduction_only_before_two() {
+        // A midnight 1980 save loaded through 4bbd20 re-arms BusinessIntro1980.
+        assert_eq!(introductions(0, 5), [(0x54188c, 1250, 0)]);
+        assert_eq!(introductions(1, 1), [(0x5418dc, 1250, 0)]);
+        assert!(introductions(2, 5).is_empty());
+        assert!(introductions(0, 0).is_empty());
+        assert!(introductions(0, 6).is_empty());
+    }
+
     #[test]
     #[ignore = "requires original4806b0 transition observations"]
     fn matches_native_transition() {
