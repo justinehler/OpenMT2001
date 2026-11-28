@@ -6117,7 +6117,7 @@ mod tests {
         run_unrestricted_ai(144, true, true, false, 5, false, 4);
     }
     #[test]
-    #[ignore = "requires original data, GPU, and retained Scenario1+6 Win profile in OPENMT2001_NATURAL_WIN_PROFILE"]
+    #[ignore = "requires original data and GPU"]
     fn natural_scenario_eleven_sales_frontier() {
         run_unrestricted_ai(72, false, true, false, 5, false, 5);
     }
@@ -6298,7 +6298,9 @@ mod tests {
             let exe_path=openmt2001::fixtures::path("EXE");
             let names=character_names(&image,&exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let scripts=settings.parent().unwrap().parent().unwrap();
-            let natural_win_source=openmt2001::fixtures::optional("NATURAL_WIN_PROFILE").unwrap_or_else(||openmt2001::fixtures::path("NATURAL_WIN_PROFILE"));
+            // Scenario6 (mode 4) and Scenario11 (mode 5) continue a campaign whose
+            // earlier levels were won; build that profile instead of reading one.
+            let natural_win_source=crate::campaign_store::checkpoint_profile(&image,scripts,if capacity_mode==5 {200011} else {200006});
             let profile_path=(capacity_mode>=3).then(|| {
                 let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
                 let root=std::path::PathBuf::from("work/validation").join(format!("natural-win-profile-{}-{nonce}",std::process::id()));
@@ -6308,7 +6310,7 @@ mod tests {
             let mut baseline_profile=None;
             let mut campaign_catalog=if let Some(path)=profile_path.as_ref() {
                 if capacity_mode>=4 {
-                    let bytes=fs::read(&natural_win_source).expect("retained natural Scenario1 Win profile fixture missing");
+                    let bytes=fs::read(&natural_win_source).unwrap();
                     fs::create_dir_all(path.parent().unwrap()).unwrap();
                     fs::write(path,&bytes).unwrap();
                     baseline_profile=Some(bytes.clone());
