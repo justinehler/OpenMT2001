@@ -71,11 +71,10 @@ pub struct Route {
     token_names: [Vec<u8>; 10],
     name: Vec<u8>,
     token: i8,
-    keyboard: Option<Target>,
     press: Option<Target>,
     status: String,
     /// The lobby's Chat Window input (0x4a0ff0). It is the lobby's only text field, so
-    /// typing always goes here; Enter sends it unless a keyboard-selected button is active.
+    /// typing always goes here and Return sends it.
     chat_input: Vec<u8>,
 }
 fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
@@ -128,7 +127,6 @@ impl Route {
             token_names,
             name: vec![],
             token: 0,
-            keyboard: None,
             press: None,
             status: String::new(),
             chat_input: vec![],
@@ -150,7 +148,6 @@ impl Route {
         self.page = Page::Browser;
         self.notice = None;
         self.browser.invalidate();
-        self.keyboard = None;
         self.press = None;
         self.status.clear();
     }
@@ -193,7 +190,6 @@ impl Route {
                 Update::Lobby(view) => {
                     self.view = Some(view);
                     self.page = Page::Lobby;
-                    self.keyboard = None;
                 }
                 Update::Notice(message) => self.notice = Some(message),
                 Update::Failed(message) => {
@@ -335,7 +331,6 @@ impl Route {
     }
     pub fn mouse(&mut self, p: Option<[f32; 2]>, down: bool) {
         let target = p.and_then(|p| self.target(p));
-        self.keyboard = None;
         if down {
             self.press = target;
             if let Some(p) = p {
@@ -461,65 +456,27 @@ impl Route {
                 .action(Action::Difficulty(row))?,
             _ => (),
         }
-        self.keyboard = None;
         self.press = None;
         Ok(())
     }
-    pub fn activate_keyboard(&mut self) {
-        if self.page == Page::Lobby && matches!(self.keyboard, None | Some(Target::Chat)) {
-            let text = std::mem::take(&mut self.chat_input);
-            if let Some(worker) = &self.worker
-                && let Err(error) = worker.submit_chat(text, None)
-            {
-                self.notice = Some(error);
-            }
-            return;
-        }
-        self.activate(self.keyboard, None);
-    }
-    pub fn navigate(&mut self, delta: i32) {
-        let targets = match self.page {
-            Page::Browser => self
-                .browser_controls()
-                .iter()
-                .filter(|(_, _, _, enabled)| *enabled)
-                .map(|(id, ..)| Target::Browser(*id))
-                .collect::<Vec<_>>(),
-            Page::Setup => self
-                .setup
-                .as_ref()
-                .map(|s| {
-                    self.setup_panel
-                        .keyboard_actions(s)
-                        .into_iter()
-                        .map(Target::Setup)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            Page::Waiting => vec![Target::Browser(5)],
+    /// Return on a focused field (443aa0). Lobby chat submits its text
+    /// and stays focused; the setup name field commits and loses focus.
+    pub fn commit_text(&mut self) {
+        match self.page {
             Page::Lobby => {
-                let mut targets = (0..26)
-                    .filter(|id| self.enabled(*id))
-                    .map(Target::Lobby)
-                    .collect::<Vec<_>>();
-                if let Some(view) = self.view.as_ref().filter(|v| v.host) {
-                    targets.extend(
-                        (0..6)
-                            .filter(|&r| view.snapshot.rows[r].player.kind == RowKind::Ai)
-                            .map(Target::Difficulty),
-                    );
+                let text = std::mem::take(&mut self.chat_input);
+                if let Some(worker) = &self.worker
+                    && let Err(error) = worker.submit_chat(text, None)
+                {
+                    self.notice = Some(error);
                 }
-                targets.push(Target::Chat);
-                targets
             }
-        };
-        if !targets.is_empty() {
-            let next = self
-                .keyboard
-                .and_then(|t| targets.iter().position(|v| *v == t))
-                .map(|i| (i as i32 + delta).rem_euclid(targets.len() as i32) as usize)
-                .unwrap_or(if delta >= 0 { 0 } else { targets.len() - 1 });
-            self.keyboard = Some(targets[next]);
+            Page::Setup => {
+                if let Some(setup) = &mut self.setup {
+                    setup.name_focused = false;
+                }
+            }
+            _ => (),
         }
     }
     pub fn is_editing(&self) -> bool {
@@ -568,12 +525,6 @@ impl Route {
             self.browser.address.pop();
         }
     }
-    pub fn select_all(&mut self) {
-        if self.is_editing() && self.page == Page::Browser {
-            self.browser.address.clear();
-            self.browser.invalidate();
-        }
-    }
     pub fn scroll(&mut self, p: Option<[f32; 2]>, delta: i32) {
         if self.page == Page::Setup
             && let (Some(s), Some(p)) = (&mut self.setup, p)
@@ -594,7 +545,6 @@ impl Route {
         self.chat_input.clear();
         self.worker = None;
         self.view = None;
-        self.keyboard = None;
         self.press = None;
         self.browser.invalidate();
         self.browser.editing = false;
@@ -631,10 +581,7 @@ impl Route {
                 renderer,
                 p,
                 pressed,
-                match self.keyboard {
-                    Some(Target::Setup(a)) => Some(a),
-                    _ => None,
-                },
+                None,
                 panel_alpha,
             );
         }
@@ -657,7 +604,7 @@ impl Route {
             let difficulty = self.strings
                 [[1654, 1655, 1658][view.snapshot.settings.difficulty as usize]]
                 .clone();
-            let selected = match self.keyboard.or_else(|| p.and_then(|p| self.target(p))) {
+            let selected = match p.and_then(|p| self.target(p)) {
                 Some(Target::Lobby(id)) => Some(id),
                 _ => None,
             };
@@ -708,7 +655,7 @@ impl Route {
                 .into_bytes(),
             );
         }
-        let selected = match self.keyboard.or_else(|| p.and_then(|p| self.target(p))) {
+        let selected = match p.and_then(|p| self.target(p)) {
             Some(Target::Browser(id)) => Some(id),
             _ => None,
         };
@@ -786,7 +733,6 @@ mod tests {
             token_names: std::array::from_fn(|i| vec![b'A' + i as u8]),
             name: b"Host".to_vec(),
             token: 1,
-            keyboard: None,
             press: None,
             status: String::new(),
             chat_input: vec![],
@@ -821,7 +767,7 @@ mod tests {
         route.erase();
         route.text("e!");
         assert_eq!(route.chat_input, b"hi there!");
-        route.activate_keyboard();
+        route.commit_text();
         assert!(route.chat_input.is_empty());
         let chat = |route: &Route| route.worker.as_ref().and_then(Handle::chat_view).unwrap();
         while chat(&route).lines.is_empty() {
@@ -829,7 +775,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         // Empty Enter sends nothing; the one echo is named from the admitted row.
-        route.activate_keyboard();
+        route.commit_text();
         std::thread::sleep(std::time::Duration::from_millis(100));
         let lines = chat(&route).lines;
         assert_eq!(lines.len(), 1);

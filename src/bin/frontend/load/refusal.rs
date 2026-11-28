@@ -290,10 +290,8 @@ mod tests {
             load.activate(0); // The same selected row can be loaded again.
             assert_eq!(load.request.take(), Some(path.clone()));
             load.refuse(expected);
-            load.back(); // Escape dismisses only the warning.
+            load.activate(0); // OK dismisses only the warning.
             assert!(load.visible && !load.prompt_pending() && !load.busy);
-            load.back();
-            assert!(!load.visible);
         }
         let mut truncated = save(7, 1);
         truncated.pop();

@@ -1,6 +1,27 @@
 //! Supplied-art integration through the actual Menu producers; no GPU/window.
 use super::*;
 
+/// Return to the main panel the way each screen's Back or Cancel control
+/// does; the frontend has no Escape route (4ba6bc skips UI mode 4).
+fn close_screens(menu: &mut Menu) {
+    if menu.multiplayer.visible {
+        menu.multiplayer.back();
+    }
+    while menu.settings.page.is_some() {
+        menu.settings.back();
+    }
+    if menu.single.visible {
+        menu.single.back();
+    }
+    menu.single_mode = false;
+    menu.load.visible = false;
+    if menu.profile.visible {
+        menu.profile.back();
+    }
+    menu.selected = None;
+    menu.sync_main_panel();
+}
+
 #[test]
 #[ignore = "requires supplied menu assets/scripts"]
 fn attract_and_settings_credits_real_menu_retain_profile_and_clear_selection() {
@@ -96,11 +117,10 @@ fn attract_and_settings_credits_real_menu_retain_profile_and_clear_selection() {
         assert!(!menu.attract_event1());
     }
     menu.pointer([1., 1.]);
-    menu.navigate(1);
     menu.input("ignored on main");
+    menu.commit_text();
     menu.mouse_button(true);
     menu.cancel_input();
-    menu.back(); // Escape on the main panel is not a fresh show.
     assert!(menu.attract_event1());
     // This is the same retained Menu returned by Intro::open_menu.
     menu.return_from_attract();
@@ -121,12 +141,7 @@ fn attract_and_settings_credits_real_menu_retain_profile_and_clear_selection() {
         for _ in 0..6001 {
             assert!(!menu.attract_event1());
         }
-        for _ in 0..4 {
-            if menu.main_panel_shown() {
-                break;
-            }
-            menu.back();
-        }
+        close_screens(&mut menu);
         assert!(menu.main_panel_shown(), "return from action {action}");
         for _ in 0..5999 {
             assert!(!menu.attract_event1());

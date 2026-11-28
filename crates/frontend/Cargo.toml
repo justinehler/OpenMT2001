@@ -14,7 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 openmt2001 = { path = "../.." }
 sha2 = "0.10"
-arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"], optional = true }
 bytemuck = { version = "1.25.2", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 glam = { version = "0.33.7", optional = true }
@@ -37,4 +36,4 @@ test-support = ["openmt2001/test-support"]
 lua4 = ["openmt2001/lua4"]
 graphics = ["openmt2001/graphics", "dep:wgpu", "dep:bytemuck", "dep:glam"]
 capture = ["openmt2001/capture", "graphics", "dep:pollster", "dep:png"]
-native = ["openmt2001/native", "graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:arboard", "dep:chrono", "dep:windows-sys"]
+native = ["openmt2001/native", "graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:chrono", "dep:windows-sys"]

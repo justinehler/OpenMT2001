@@ -23,6 +23,7 @@ use openmt2001::{
     ui_mesh,
 };
 use std::{fs, path::Path};
+use winit::keyboard::{Key, NamedKey};
 #[cfg(test)]
 #[path = "menu_attract_tests.rs"]
 mod attract_tests;
@@ -304,6 +305,30 @@ impl Assets {
             single,
             bounds,
         })
+    }
+}
+/// What a key press means to a focused frontend text field.
+#[derive(Debug, PartialEq)]
+enum FieldKey<'a> {
+    Erase,
+    Commit,
+    Text(&'a str),
+}
+/// The frontend panels are pointer driven. The window procedure 4c6960 falls
+/// back to DefWindowProcA, with no dialog-message or accelerator translation,
+/// so there is no Tab or arrow focus movement and no Return/Space button
+/// press. The central input handler skips its Escape dispatcher 491720 in UI
+/// mode 4, the frontend (4ba6bc). A focused field takes translated characters
+/// only (443aa0): Backspace deletes, Return commits and printable bytes
+/// append. Ctrl turns letters into control bytes the field rejects, so there
+/// is no select-all or paste.
+fn field_key(key: &Key, control: bool) -> Option<FieldKey<'_>> {
+    match key {
+        Key::Named(NamedKey::Backspace) => Some(FieldKey::Erase),
+        Key::Named(NamedKey::Enter) => Some(FieldKey::Commit),
+        Key::Named(NamedKey::Space) if !control => Some(FieldKey::Text(" ")),
+        Key::Character(text) if !control => Some(FieldKey::Text(text)),
+        _ => None,
     }
 }
 pub struct Menu {
@@ -1013,10 +1038,8 @@ impl Menu {
         if self.desktop_input_blocked() {
             return;
         }
+        // Multiplayer and Skirmish take their clicks in their own mouse paths.
         if self.multiplayer.visible {
-            self.multiplayer.activate_keyboard();
-            self.selected = None;
-            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -1024,13 +1047,7 @@ impl Menu {
             self.dirty = true;
             return;
         }
-        if self.skirmish.visible() {
-            self.skirmish.activate_keyboard();
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        if self.settings.page.is_some() {
+        if self.skirmish.visible() || self.settings.page.is_some() {
             return;
         }
         if self.single.visible {
@@ -1228,54 +1245,40 @@ impl Menu {
             || self.skirmish.is_editing()
             || (self.profile.visible && self.profile.name.is_some())
     }
-    pub fn navigate(&mut self, delta: i32) {
-        if self.desktop_input_blocked() {
+    /// A key press on a frontend screen (UI mode 4). Only a focused text
+    /// field reads keys; Tab, the arrows, Escape and every other key do
+    /// nothing, and Return or Space never press a button.
+    pub fn key(&mut self, key: &Key, control: bool) {
+        match field_key(key, control) {
+            Some(FieldKey::Erase) => self.erase(),
+            Some(FieldKey::Commit) => self.commit_text(),
+            Some(FieldKey::Text(text)) => self.input(text),
+            None => (),
+        }
+    }
+    /// Return on a focused text field. The common editor commits it and
+    /// tells the owner (event 22, 443aa0); new-player registration treats
+    /// that as its OK (495ed0). Return does nothing without a focused field.
+    pub fn commit_text(&mut self) {
+        if self.desktop_input_blocked() || !self.is_editing() {
             return;
         }
         if self.multiplayer.visible {
-            self.multiplayer.navigate(delta);
-            self.dirty = true;
-            return;
-        }
-        if self.skirmish.error.is_some() {
-            return;
-        }
-        if self.skirmish.visible() {
-            self.skirmish.navigate(delta);
-            self.dirty = true;
-            return;
-        }
-        if self.settings.page.is_some() {
-            return;
-        }
-        if self.pending.is_some() {
-            return;
-        }
-        let count = if self.single.visible {
-            self.single.count()
-        } else if self.load.visible {
-            self.load.count()
+            self.multiplayer.commit_text();
+        } else if self.skirmish.visible() {
+            self.skirmish.commit_text();
         } else if self.profile.visible {
-            self.profile.count()
-        } else if self.single_mode {
-            5
-        } else {
-            7
-        };
-        let mut next = (self
-            .selected
-            .map_or(if delta > 0 { -1 } else { 0 }, |i| i as i32)
-            + delta)
-            .rem_euclid(count as i32) as usize;
-        if self.single.visible {
-            for _ in 0..count {
-                if self.single.keyboard_enabled(next) {
-                    break;
-                }
-                next = (next as i32 + delta.signum()).rem_euclid(count as i32) as usize;
+            let modal_before = self.profile.modal_open();
+            self.profile.activate(0);
+            if !self.profile.visible
+                || modal_before != self.profile.modal_open()
+                || self.profile.prompt_pending()
+            {
+                self.selected = None;
             }
+            self.sync_main_panel();
         }
-        self.select(Some(next), false);
+        self.dirty = true;
     }
     pub fn input(&mut self, text: &str) {
         if self.desktop_input_blocked() {
@@ -1296,20 +1299,6 @@ impl Menu {
         }
         if self.profile.visible {
             self.profile.input(text);
-            self.dirty = true;
-        }
-    }
-    pub fn select_all(&mut self) {
-        if self.desktop_input_blocked() {
-            return;
-        }
-        if self.multiplayer.visible {
-            self.multiplayer.select_all();
-            self.dirty = true;
-            return;
-        }
-        if self.profile.visible {
-            self.profile.select_all();
             self.dirty = true;
         }
     }
@@ -1371,61 +1360,6 @@ impl Menu {
         }
     }
     pub fn invalidate(&mut self) {
-        self.dirty = true;
-    }
-    pub fn back(&mut self) {
-        self.back_inner();
-        self.sync_main_panel();
-    }
-    fn back_inner(&mut self) {
-        if self.desktop_input_blocked() {
-            return;
-        }
-        if self.multiplayer.visible {
-            self.multiplayer.back();
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        if self.skirmish.error.is_some() {
-            self.skirmish.error = None;
-            self.dirty = true;
-            return;
-        }
-        if self.skirmish.visible() {
-            self.skirmish.back();
-            self.dirty = true;
-            return;
-        }
-        if self.settings.page.is_some() {
-            self.settings.back();
-            return;
-        }
-        if self.single.visible {
-            self.single.back();
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        if self.single_mode && self.pending.is_none() {
-            self.single_mode = false;
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        if self.load.visible {
-            self.load.back();
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        if self.profile.visible {
-            self.profile.back();
-            self.selected = None;
-            self.dirty = true;
-            return;
-        }
-        self.pending = None;
         self.dirty = true;
     }
     pub fn draw(
@@ -1953,7 +1887,7 @@ mod settings_route_tests {
         );
         assert_eq!(menu.settings.page, Some(Page::Gameplay));
         click(&mut menu, Button::AutoRotate);
-        menu.back(); // Escape from Gameplay
+        click(&mut menu, Button::Back); // Gameplay -> Options
         assert_eq!(menu.settings.page, Some(Page::Main));
         click(&mut menu, Button::Back);
         assert_eq!(menu.settings.page, None);
@@ -1996,7 +1930,7 @@ mod settings_route_tests {
         }
         menu.settings.persist_board(&path).unwrap();
         assert_eq!(crate::board_selection::Name::load(&path).unwrap(), german);
-        menu.back(); // Escape directly from Settings to menu
+        click(&mut menu, Button::Back); // Options -> main menu
         assert_eq!(menu.settings.page, None);
         assert_eq!(menu.pending, None);
     }
@@ -2072,8 +2006,6 @@ mod desktop_quit_route_tests {
         assert!(!menu.enabled_cursor_hover()); // modal wins over actual menu row
         menu.mouse_button(true);
         menu.mouse_button(false);
-        menu.back();
-        menu.navigate(1);
         menu.erase();
         menu.input("changed");
         menu.activate();
@@ -2117,5 +2049,176 @@ mod desktop_quit_route_tests {
             fs::read(root.join("keep.profile")).unwrap(),
             b"untouched profile sentinel"
         );
+    }
+}
+
+#[cfg(test)]
+mod frontend_key_tests {
+    use super::*;
+    use crate::settings_menu::Page;
+
+    fn character(text: &str) -> Key {
+        Key::Character(text.into())
+    }
+
+    #[test]
+    fn only_field_editing_keys_reach_a_frontend_screen() {
+        for key in [
+            NamedKey::Tab,
+            NamedKey::ArrowUp,
+            NamedKey::ArrowDown,
+            NamedKey::ArrowLeft,
+            NamedKey::ArrowRight,
+            NamedKey::Escape,
+            NamedKey::Delete,
+            NamedKey::Home,
+        ] {
+            assert_eq!(field_key(&Key::Named(key), false), None, "{key:?}");
+        }
+        for text in ["a", "v", "A", "V", "c"] {
+            assert_eq!(field_key(&character(text), true), None, "Ctrl+{text}");
+        }
+        assert_eq!(field_key(&Key::Named(NamedKey::Space), true), None);
+        assert_eq!(
+            field_key(&Key::Named(NamedKey::Backspace), false),
+            Some(FieldKey::Erase)
+        );
+        assert_eq!(
+            field_key(&Key::Named(NamedKey::Enter), false),
+            Some(FieldKey::Commit)
+        );
+        assert_eq!(
+            field_key(&Key::Named(NamedKey::Space), false),
+            Some(FieldKey::Text(" "))
+        );
+        assert_eq!(field_key(&character("b"), false), Some(FieldKey::Text("b")));
+    }
+
+    /// Everything a stray key could change on the frontend.
+    fn screen(menu: &Menu) -> impl PartialEq + std::fmt::Debug + use<> {
+        (
+            (menu.selected, menu.pending, menu.main_panel_shown()),
+            (
+                menu.profile.visible,
+                menu.profile.name.clone(),
+                menu.profile.store.names.clone(),
+                menu.profile.store.current,
+            ),
+            (menu.settings.page, menu.single.visible, menu.single_mode),
+            (
+                menu.load.visible,
+                menu.multiplayer.visible,
+                menu.skirmish.visible(),
+                menu.desktop_quit_active(),
+            ),
+        )
+    }
+
+    fn press_stray_keys(menu: &mut Menu, editing: bool) {
+        let mut keys = vec![
+            (Key::Named(NamedKey::Tab), false),
+            (Key::Named(NamedKey::ArrowDown), false),
+            (Key::Named(NamedKey::ArrowUp), false),
+            (Key::Named(NamedKey::Escape), false),
+            (character("a"), true),
+            (character("v"), true),
+        ];
+        if !editing {
+            keys.extend([
+                (Key::Named(NamedKey::Enter), false),
+                (Key::Named(NamedKey::Space), false),
+            ]);
+        }
+        for (key, control) in keys {
+            let before = screen(menu);
+            menu.key(&key, control);
+            assert_eq!(screen(menu), before, "{key:?} control={control}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires supplied menu assets/scripts"]
+    fn frontend_screens_ignore_navigation_escape_and_clipboard_keys() {
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let directory = read("ARCHIVE_DIR");
+        let archive = read("ARCHIVE_BIN");
+        let executable = read("EXE");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
+        let exe = openmt2001::fixtures::path("EXE");
+        let root = openmt2001::fixtures::scratch("TEST_SCRATCH").join(format!(
+            "frontend-keys-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let mut menu = Menu::new(
+            Assets::load(
+                &index,
+                &archive,
+                parameter.parent().unwrap().parent().unwrap(),
+                &exe.parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("US/language/usa"),
+                &openmt2001::fixtures::path("SCRIPTS"),
+                root.clone(),
+                root.join("saves"),
+                &executable,
+            )
+            .unwrap(),
+        );
+        menu.participant_test_named_profile("Key Player");
+
+        // Main menu, with and without a hovered entry.
+        assert!(menu.main_panel_shown());
+        press_stray_keys(&mut menu, false);
+        menu.select(Some(2), false);
+        press_stray_keys(&mut menu, false);
+        menu.select(None, false);
+
+        // Options and one of its pages.
+        menu.select(Some(5), false);
+        menu.activate();
+        assert_eq!(menu.settings.page, Some(Page::Main));
+        press_stray_keys(&mut menu, false);
+        menu.settings.page = Some(Page::Sound);
+        press_stray_keys(&mut menu, false);
+        menu.settings.page = None;
+
+        // Player Selection.
+        menu.select(Some(0), false);
+        menu.activate();
+        assert!(menu.profile.visible && menu.profile.name.is_none());
+        press_stray_keys(&mut menu, false);
+
+        // New Player: the focused field takes text, Backspace and Return only.
+        menu.select(Some(0), false);
+        menu.activate();
+        assert_eq!(menu.profile.name.as_deref(), Some(""));
+        for text in ["B", "o", "b", "s"] {
+            menu.key(&character(text), false);
+        }
+        press_stray_keys(&mut menu, true);
+        assert_eq!(menu.profile.name.as_deref(), Some("Bobs"));
+        menu.key(&Key::Named(NamedKey::Backspace), false);
+        assert_eq!(menu.profile.name.as_deref(), Some("Bob"));
+        menu.key(&Key::Named(NamedKey::Space), false);
+        menu.key(&character("Z"), false);
+        menu.key(&Key::Named(NamedKey::Enter), false);
+        assert!(menu.profile.visible && menu.profile.name.is_none());
+        assert_eq!(menu.profile.store.names, ["Key Player", "Bob Z"]);
+        assert_eq!(menu.profile.store.current, Some(1));
     }
 }
