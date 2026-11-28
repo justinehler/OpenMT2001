@@ -763,16 +763,10 @@ impl SinglePlayer {
                 "gamedata2\\brand_new_panels\\SP_Scenario_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 7],
             )?,
-            tutorial_panel: {
-                let (base, bounds) = ui::panel_front_base(
-                    index,
-                    archive,
-                    "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm",
-                    &(0..14).collect::<Vec<_>>(),
-                    0,
-                )?;
-                Panel { base, bounds }
-            },
+            tutorial_panel: panel(
+                "gamedata2\\brand_new_panels\\tutorial_panel_v2.tm",
+                &(0..14).collect::<Vec<_>>(),
+            )?,
             character_panel: panel(
                 "gamedata2\\brand_new_panels\\sp_token_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
