@@ -7,13 +7,17 @@ use openmt2001::{
 struct Scratch(std::path::PathBuf);
 impl Scratch {
     fn new() -> Self {
+        // Parallel tests share the process id, and macOS clocks tick in
+        // microseconds, so the time alone can repeat. The counter keeps names unique.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "openmt-final-statistics-{}-{}",
+            "openmt-final-statistics-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir(&path).unwrap();
         Self(path)
