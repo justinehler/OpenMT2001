@@ -164,6 +164,7 @@ pub struct Presentation<'a> {
     pub enabled: [bool; 26],
     pub start_enabled: bool,
     pub local_row: usize,
+    pub name_focused: bool,
     pub closed: [bool; 6],
     pub details: &'a [Vec<u8>],
 }
@@ -394,6 +395,7 @@ impl RosterPanel {
                 enabled: std::array::from_fn(|id| state.enabled(id)),
                 start_enabled: state.roster.start_enabled(),
                 local_row: 0,
+                name_focused: state.name_focused,
                 closed: [false; 6],
                 details: &[],
             },
@@ -614,7 +616,15 @@ impl RosterPanel {
                 } else {
                     encode(&p.name)?
                 };
-                ui::text_widget_style3(&mut pages[1], &self.fonts[1].tab, &text, name, 0xffffffff)?;
+                ui::text_entry(
+                    &mut pages[1],
+                    &mut shapes,
+                    &self.fonts[1].tab,
+                    &text,
+                    name,
+                    false,
+                    view.name_focused && i == view.local_row,
+                )?;
                 let tint = self.bounds(&format!("TINT_SLOT{row}"))?;
                 if let Some(token) = p.token {
                     let c = self

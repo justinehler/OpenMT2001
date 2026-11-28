@@ -482,8 +482,8 @@ impl Assets {
         view: &View,
         pointer: Option<[f32; 2]>,
     ) -> Result<(), String> {
-        // The supplied named-save keyframe bounds this central modal. The
-        // native Save As text-entry control is still under reconstruction.
+        // The supplied named-save keyframe bounds this central modal;
+        // its text row uses the shared native input-control painter.
         shapes.rect(NAME_MODAL, [0xcc000000; 4]);
         shapes.rect(
             NAME_HEADER,
@@ -496,9 +496,9 @@ impl Assets {
             NAME_HEADER,
             0xffffffff,
         )?;
-        let body = crate::load::ascii(&format!("{}|", view.name));
+        let body = crate::load::ascii(&view.name);
         shapes.rect(NAME_INPUT, [0xff0724a2; 4]);
-        ui::text_widget_style9(font, &self.tab1, &body, NAME_INPUT, 0xffffffff)?;
+        ui::text_entry(font, shapes, &self.tab1, &body, NAME_INPUT, true, true)?;
         for (part, id, color) in [(true, 0x598, [80, 148, 34]), (false, 0x59c, [175, 6, 6])] {
             let bounds = NAME_BUTTONS[usize::from(!part)];
             ui::button(
