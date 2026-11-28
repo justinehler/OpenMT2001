@@ -328,11 +328,13 @@ impl Assets {
                 false,
                 0xffffffff,
             )?;
-            if let Some(modified) = crate::save_menu::format_modified_local(slot.modified) {
+            let suffixes = crate::save_menu::DaySuffixes::from_strings(&self.strings);
+            if let Some(modified) = crate::save_menu::format_modified_local(slot.modified, suffixes)
+            {
                 ui::text_fit(
                     &mut font2,
                     &self.tab2,
-                    &openmt2001::level_text::ascii(&modified),
+                    &modified,
                     [row[0] + 155., row[1], row[2], row[3]],
                     false,
                     0xff6ed1e1,
@@ -478,16 +480,6 @@ impl Assets {
                 if disabled { 0xff646464 } else { 0xffffffff },
             )?;
         }
-        if let Some(message) = &view.message {
-            ui::text_fit(
-                &mut font1,
-                &self.tab1,
-                &openmt2001::level_text::ascii(message),
-                [32., 438., 608., 458.],
-                false,
-                0xffffffff,
-            )?;
-        }
         let mut surfaces = self.base.clone();
         crate::modal_frame::set_alpha(&mut surfaces, panel_alpha);
         surfaces.push(shapes);
@@ -592,9 +584,15 @@ pub struct View {
     modal: Option<Modal>,
     modal_pressed: Option<bool>,
     name: String,
+    /// The last engine-side failure. The original has no failure text for
+    /// saving or deleting, so it is logged rather than drawn.
     pub message: Option<String>,
 }
 impl View {
+    pub fn fail(&mut self, error: String) {
+        eprintln!("Save Game: {error}");
+        self.message = Some(error);
+    }
     pub fn generic_prompt(&self) -> Option<(crate::human_dialog::Dialog, Option<usize>)> {
         let (title, body) = match self.modal.as_ref()? {
             Modal::Overwrite => (0x661, 0x65f),
@@ -715,7 +713,7 @@ impl View {
             Err(error) => {
                 self.slots.clear();
                 self.selected = None;
-                self.message = Some(error);
+                self.fail(error);
             }
         }
     }
@@ -1018,7 +1016,7 @@ impl View {
         self.busy = false;
         match result {
             Ok(_) => self.refresh_rows(profile_root),
-            Err(error) => self.message = Some(format!("Save failed: {error}")),
+            Err(error) => self.fail(format!("Save failed: {error}")),
         }
     }
     /// A finished Delete. Like a write, it rebuilds the rows, clears the
@@ -1028,7 +1026,7 @@ impl View {
         self.busy = false;
         match result {
             Ok(()) => self.refresh_rows(profile_root),
-            Err(error) => self.message = Some(format!("Delete failed: {error}")),
+            Err(error) => self.fail(format!("Delete failed: {error}")),
         }
     }
     /// Re-enumerates the profile's saves with no row selected (0x497660).
@@ -1040,7 +1038,7 @@ impl View {
             Ok(slots) => self.slots = slots,
             Err(error) => {
                 self.slots.clear();
-                self.message = Some(error);
+                self.fail(error);
             }
         }
     }

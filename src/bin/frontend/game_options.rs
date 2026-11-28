@@ -3,7 +3,6 @@
 use crate::ui::Surface;
 use openmt2001::{
     archive::ArchiveIndex,
-    font::{Font, Layout},
     mesh::CachedMesh,
     render::{PreparedScene, Renderer},
     texture::TextureSet,
@@ -229,14 +228,13 @@ impl Assets {
         hovered: Option<Button>,
         pressed: Option<Button>,
     ) -> Result<PreparedScene, String> {
-        self.prepare_message(renderer, hovered, pressed, None, false, 255)
+        self.prepare_buttons(renderer, hovered, pressed, false, 255)
     }
-    fn prepare_message(
+    fn prepare_buttons(
         &self,
         renderer: &Renderer,
         hovered: Option<Button>,
         pressed: Option<Button>,
-        message: Option<&str>,
         save_disabled: bool,
         panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
@@ -284,7 +282,6 @@ impl Assets {
             }
         }
         let mut fonts = self.fonts.clone();
-        let font = Font::parse(&self.tab)?;
         for (i, label) in self.labels.iter().enumerate() {
             // Native 49e750 sets font4 and 440650 style9 on each row.
             crate::ui::button_label(
@@ -294,28 +291,6 @@ impl Assets {
                 self.bounds[i],
                 save_disabled && i == 1,
             )?;
-        }
-        if let Some(message) = message {
-            // Save feedback is host presentation text beneath the original menu.
-            // Wrap long errors so the complete result remains visible.
-            let text = openmt2001::level_text::ascii(message);
-            for (i, line) in openmt2001::level_text::wrap_lines(&self.tab, &text, 480.)?
-                .iter()
-                .enumerate()
-            {
-                for q in font.layout(
-                    line,
-                    Layout {
-                        origin: [80., self.bounds[3][3] + 12. + i as f32 * 24.],
-                        depth: 0.5,
-                        scale: 1.,
-                        gap: 0,
-                        baseline: 0,
-                    },
-                )? {
-                    fonts[q.page].quad(q.positions.map(|p| [p[0], p[1]]), q.uv, [0xffffffff; 4]);
-                }
-            }
         }
         let backdrop = self.backdrop(panel_alpha);
         let mut draws = backdrop.draws();
@@ -335,7 +310,6 @@ pub struct View {
     cue_latch: Option<Button>,
     pub prepared: Option<PreparedScene>,
     shown: Option<(Option<Button>, Option<Button>, u8)>,
-    message: Option<String>,
     save_disabled: bool,
     pub quit_prompt: crate::prompt::State,
     pub quit_reply: Option<std::sync::mpsc::Receiver<Vec<crate::prompt::Request>>>,
@@ -361,15 +335,6 @@ impl View {
         self.quit_prompt = crate::prompt::State::default();
         self.quit_reply = None;
         running
-    }
-    pub fn set_message(&mut self, message: String) {
-        self.message = Some(message);
-        self.shown = None;
-    }
-    pub fn clear_message(&mut self) {
-        if self.message.take().is_some() {
-            self.shown = None;
-        }
     }
     pub fn set_save_disabled(&mut self, disabled: bool) {
         if self.save_disabled != disabled {
@@ -442,11 +407,10 @@ impl View {
             .filter(|button| !self.save_disabled || *button != Button::Save);
         let state = (hover, self.pressed, panel_alpha);
         if self.shown != Some(state) {
-            self.prepared = Some(assets.prepare_message(
+            self.prepared = Some(assets.prepare_buttons(
                 renderer,
                 hover,
                 self.pressed,
-                self.message.as_deref(),
                 self.save_disabled,
                 panel_alpha,
             )?);

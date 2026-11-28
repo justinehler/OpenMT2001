@@ -1660,19 +1660,6 @@ fn capture_mr_monopoly_in_intro_city() {
         &[&options],
         "frontend/game-options-city.png",
     );
-    let mut save_feedback = crate::game_options::View::default();
-    save_feedback.open(false);
-    save_feedback.set_message("Saved: V2-1790352000000-000.sav".into());
-    save_feedback
-        .update(&options_assets, &renderer, None, 255)
-        .unwrap();
-    crate::capture_test::capture_prepared_world_overlays(
-        &renderer,
-        &city,
-        &[&actor],
-        &[save_feedback.prepared.as_ref().unwrap()],
-        "frontend/game-options-save-feedback.png",
-    );
     let mut tutorial_options = crate::game_options::View::default();
     tutorial_options.open(false);
     tutorial_options.set_save_disabled(true);

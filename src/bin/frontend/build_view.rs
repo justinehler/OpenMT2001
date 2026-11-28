@@ -1010,6 +1010,12 @@ pub struct State {
     pub prepared: Option<PreparedScene>,
 }
 impl State {
+    /// Record a planner failure. The original planner has no caption for
+    /// these, so it is logged rather than drawn.
+    pub fn fail(&mut self, error: String) {
+        eprintln!("Build planner: {error}");
+        self.diagnostic = None;
+    }
     fn parent_hit(&self, pointer: [f32; 2]) -> bool {
         openmt2001::ui_mesh::parent_hit(self.input_bounds, pointer, [0., 0.])
     }
@@ -1230,7 +1236,6 @@ impl State {
                 Err(error) => {
                     eprintln!("Original planning model unavailable: {error}");
                     self.preview_failure = Some(error.clone());
-                    self.diagnostic = Some(format!("Original model unavailable: {error}"));
                     self.dirty = true;
                     self.preview_cache =
                         Some(diagnostic_preview(renderer, camera, fog, &building)?);

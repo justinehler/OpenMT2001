@@ -5,7 +5,7 @@ pub mod camera_source;
 #[cfg(feature = "native")]
 mod modified_label;
 #[cfg(feature = "native")]
-pub use modified_label::format_modified_local;
+pub use modified_label::{DaySuffixes, format_modified_local};
 use std::{
     fs::{self, OpenOptions},
     io::Write,

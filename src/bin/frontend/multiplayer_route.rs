@@ -619,7 +619,6 @@ impl Route {
                     chat: chat.as_ref().map(|c| (c, self.chat_input.as_slice())),
                     network_host: Some(view.host),
                     visible: true,
-                    busy: false,
                     name_focused: false,
                     rows: &rows,
                     enabled: std::array::from_fn(|id| self.enabled(id)),

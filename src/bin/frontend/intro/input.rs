@@ -249,8 +249,9 @@ impl Intro {
         action: crate::save_dialog::Action,
     ) {
         use crate::save_dialog::Action;
+        // The Options acknowledgement is still pending: the press is ignored
+        // without a caption, as the original shows none here.
         if !matches!(&action, Action::Back) && !view.options_ack.ready() {
-            view.save_dialog.message = Some("Preparing Save Game...".into());
             return;
         }
         match action {
@@ -266,7 +267,8 @@ impl Intro {
                     return;
                 }
                 let Some(sender) = &view._fresh_session else {
-                    view.save_dialog.message = Some("Delete unavailable in this view".into());
+                    view.save_dialog
+                        .fail("Delete unavailable in this view".into());
                     return;
                 };
                 let (reply, result) = mpsc::channel();
@@ -274,25 +276,23 @@ impl Intro {
                     Ok(()) => {
                         view.save_delete_pending = Some(result);
                         view.save_dialog.busy = true;
-                        view.save_dialog.message = Some("Deleting...".into());
                     }
-                    Err(_) => {
-                        view.save_dialog.message = Some("Delete failed: session closed".into())
-                    }
+                    Err(_) => view
+                        .save_dialog
+                        .fail("Delete failed: session closed".into()),
                 }
             }
         }
     }
     pub(super) fn submit_save_target(view: &mut Inspection, target: crate::save_menu::Target) {
         if let Some(error) = view.camera_producer.as_ref().and_then(|p| p.error()) {
-            view.save_dialog.message = Some(format!("Save failed: {error}"));
+            view.save_dialog.fail(format!("Save failed: {error}"));
             return;
         }
         if view.save_pending.is_some() || view.camera_capture_pending.is_some() {
             return;
         }
         if !view.options_ack.ready() {
-            view.save_dialog.message = Some("Preparing Save Game...".into());
             return;
         }
         if let Some(error) = view
@@ -301,13 +301,12 @@ impl Intro {
             .and_then(|status| status.failure.as_ref())
         {
             view.save_dialog.busy = false;
-            view.save_dialog.message = Some(format!("Save failed: {error}"));
+            view.save_dialog.fail(format!("Save failed: {error}"));
             return;
         }
         if let Some(state) = &mut view.camera_ui {
             view.camera_capture_pending = Some((target, state.queue_save_capture()));
             view.save_dialog.busy = true;
-            view.save_dialog.message = Some("Saving...".into());
             return;
         }
         Self::send_save_target(view, target, None);
@@ -326,7 +325,7 @@ impl Intro {
             Ok(capture) => Self::send_save_target(view, target, Some(capture)),
             Err(error) => {
                 view.save_dialog.busy = false;
-                view.save_dialog.message = Some(format!("Save failed: {error}"));
+                view.save_dialog.fail(format!("Save failed: {error}"));
             }
         }
     }
@@ -337,12 +336,14 @@ impl Intro {
     ) {
         if !view.options_ack.ready() {
             view.save_dialog.busy = false;
-            view.save_dialog.message = Some("Save cancelled: Options closed".into());
+            view.save_dialog
+                .fail("Save cancelled: Options closed".into());
             return;
         }
         let Some(sender) = &view._fresh_session else {
             view.save_dialog.busy = false;
-            view.save_dialog.message = Some("Save unavailable in this view".into());
+            view.save_dialog
+                .fail("Save unavailable in this view".into());
             return;
         };
         let (reply, result) = mpsc::channel();
@@ -358,11 +359,10 @@ impl Intro {
             Ok(()) => {
                 view.save_pending = Some(result);
                 view.save_dialog.busy = true;
-                view.save_dialog.message = Some("Saving...".into());
             }
             Err(_) => {
                 view.save_dialog.busy = false;
-                view.save_dialog.message = Some("Save failed: session closed".into());
+                view.save_dialog.fail("Save failed: session closed".into());
             }
         }
     }
@@ -882,8 +882,7 @@ impl Intro {
                                 if let Some(root) = view.save_profile_root.as_deref() {
                                     view.save_dialog.open(root);
                                 } else {
-                                    view.game_options
-                                        .set_message("Save unavailable in this view".into());
+                                    eprintln!("[Options] Save has no profile root in this view");
                                 }
                             }
                             _ => {}
@@ -1336,8 +1335,7 @@ impl Intro {
                         }) {
                             planning.placement_pending = Some(receiver);
                         } else {
-                            planning.diagnostic =
-                                Some("Build placement session disconnected".into());
+                            planning.fail("Build placement session disconnected".into());
                             planning.dirty = true;
                         }
                     }
@@ -1535,7 +1533,7 @@ impl Intro {
                                     Some(panel),
                                     false,
                                 ) {
-                                    view.save_dialog.message = Some(error);
+                                    view.save_dialog.fail(error);
                                 }
                                 if let Some(id) = tutorial_control {
                                     view.send_tutorial_control(id);
@@ -1692,7 +1690,7 @@ impl Intro {
                                     None,
                                     false,
                                 ) {
-                                    view.save_dialog.message = Some(error);
+                                    view.save_dialog.fail(error);
                                 }
                                 return;
                             }
@@ -1764,7 +1762,7 @@ impl Intro {
                                 let post = view.camera_control_post(103);
                                 match view.queue_camera_event(event, None, None, false) {
                                     Ok(pending) => pending.posts.extend(post),
-                                    Err(error) => view.save_dialog.message = Some(error),
+                                    Err(error) => view.save_dialog.fail(error),
                                 }
                                 return;
                             }
@@ -1870,7 +1868,7 @@ impl Intro {
                                             pending.posts.extend(camera_post);
                                             hyperlink_committed = true;
                                         }
-                                        Err(error) => view.save_dialog.message = Some(error),
+                                        Err(error) => view.save_dialog.fail(error),
                                     }
                                 } else {
                                     let building = &view.scene.inspection_buildings[i];
@@ -2039,7 +2037,7 @@ impl Intro {
                                 };
                                 match result {
                                     Ok(pending) => pending.posts.extend(post),
-                                    Err(error) => view.save_dialog.message = Some(error),
+                                    Err(error) => view.save_dialog.fail(error),
                                 }
                                 return;
                             } else {
@@ -2049,7 +2047,7 @@ impl Intro {
                                     None,
                                     false,
                                 ) {
-                                    view.save_dialog.message = Some(error);
+                                    view.save_dialog.fail(error);
                                 }
                                 return;
                             }
@@ -2079,7 +2077,7 @@ impl Intro {
                                     };
                                     match view.queue_camera_event(event, None, None, false) {
                                         Ok(pending) => pending.posts.extend(post),
-                                        Err(error) => view.save_dialog.message = Some(error),
+                                        Err(error) => view.save_dialog.fail(error),
                                     }
                                     return;
                                 }

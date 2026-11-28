@@ -99,9 +99,16 @@ fn mixed_case_load_rows_target_the_displayed_file_after_refresh() {
             assert_eq!(load.chosen, Some(row));
             load.activate(0);
             assert_eq!(load.request.as_ref(), Some(path));
+            // The original shows no loading caption while the save loads.
+            assert!(load.busy && load.message.is_none());
             load.busy = false;
         }
         if pass == 0 {
+            // Delete on an imported original save is inert: no prompt and no
+            // invented "read-only" caption.
+            load.activate(3 + 1); // aardvark
+            load.activate(2);
+            assert!(load.delete_confirmation.is_none() && load.message.is_none());
             load.activate(3 + 4); // Banana
             load.activate(2);
             assert_eq!(load.delete_confirmation.as_deref(), Some("Banana.sav"));

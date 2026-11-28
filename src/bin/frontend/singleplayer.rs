@@ -1,6 +1,6 @@
 //! Original campaign and Sandbox setup, launching a retained city session.
 use crate::{
-    load::{ascii, level_labels, wrap_lines, wrapped},
+    load::{ascii, level_labels, wrap_lines},
     ui::{self, Surface},
 };
 use openmt2001::{
@@ -1557,7 +1557,7 @@ impl SinglePlayer {
         self.character = match token {
             Ok(t) => t.index(),
             Err(e) => {
-                self.message = Some(e);
+                self.fail(e);
                 self.custom = None;
                 self.visible = true;
                 return;
@@ -1578,7 +1578,9 @@ impl SinglePlayer {
         self.pointer_position = None;
         // Sandbox opens straight onto Character Selection.
         if sandbox {
-            self.message = self.load_roster().err();
+            if let Err(error) = self.load_roster() {
+                self.fail(error);
+            }
         }
     }
     /// Original 0x4a8420 runs as Character Selection opens: it clears all six
@@ -1849,6 +1851,12 @@ impl SinglePlayer {
                 .collect(),
         }
     }
+    /// Record an engine-side failure. The original panel has no status line
+    /// for these, so it is logged rather than drawn.
+    pub fn fail(&mut self, error: String) {
+        eprintln!("Single Player: {error}");
+        self.message = Some(error);
+    }
     pub fn back(&mut self) {
         self.busy = false;
         self.request = None;
@@ -1905,16 +1913,15 @@ impl SinglePlayer {
                     };
                     let tutorial = crate::scenarios::TUTORIALS[row];
                     if !crate::scenarios::live_tutorial(tutorial.id) {
-                        self.message =
-                            Some("This tutorial's live session is not yet available.".into());
+                        self.fail("This tutorial's live session is not yet available.".into());
                         return;
                     }
                     let Some(catalog) = self.catalog.clone() else {
-                        self.message = Some("Selected profile catalog is unavailable".into());
+                        self.fail("Selected profile catalog is unavailable".into());
                         return;
                     };
                     let Some(profile_path) = self.profile_path.clone() else {
-                        self.message = Some("Selected profile path is unavailable".into());
+                        self.fail("Selected profile path is unavailable".into());
                         return;
                     };
                     self.request = Some(Setup {
@@ -1926,7 +1933,6 @@ impl SinglePlayer {
                         profile_path,
                     });
                     self.busy = true;
-                    self.message = Some("Loading tutorial...".into());
                 }
                 1 => self.back(),
                 2.. if i < self.count() => {
@@ -1941,16 +1947,16 @@ impl SinglePlayer {
                 0 => {
                     if self.custom.is_some() {
                         if let Err(e) = self.custom_roster() {
-                            self.message = Some(e);
+                            self.fail(e);
                             return;
                         }
                     }
                     let Some(catalog) = self.catalog.clone() else {
-                        self.message = Some("Selected profile catalog is unavailable".into());
+                        self.fail("Selected profile catalog is unavailable".into());
                         return;
                     };
                     let Some(profile_path) = self.profile_path.clone() else {
-                        self.message = Some("Selected profile path is unavailable".into());
+                        self.fail("Selected profile path is unavailable".into());
                         return;
                     };
                     self.request = Some(Setup {
@@ -1977,19 +1983,18 @@ impl SinglePlayer {
                         profile_path,
                     });
                     self.busy = true;
-                    self.message = Some("Loading city preview...".into());
                 }
                 1 => self.back(),
                 2 => {
                     if let Err(e) = self.choose_character((self.character + 9) % 10) {
-                        self.message = Some(e);
+                        self.fail(e);
                         return;
                     }
                     self.description_first = 0;
                 }
                 3 => {
                     if let Err(e) = self.choose_character((self.character + 1) % 10) {
-                        self.message = Some(e);
+                        self.fail(e);
                         return;
                     }
                     self.description_first = 0;
@@ -2008,12 +2013,11 @@ impl SinglePlayer {
                         .and_then(|c| c.find(id).map(|i| c.levels[i].unlocked()))
                         .unwrap_or(false);
                     if !unlocked {
-                        self.message =
-                            Some("This scenario is locked in the selected profile.".into());
+                        self.fail("This scenario is locked in the selected profile.".into());
                         return;
                     }
                     if let Err(e) = self.load_roster() {
-                        self.message = Some(e);
+                        self.fail(e);
                         return;
                     }
                     self.character_screen = true;
@@ -2297,13 +2301,6 @@ impl SinglePlayer {
                 0xffffffff,
             )?;
         }
-        wrapped(
-            &mut fonts,
-            &self.tab,
-            &ascii(self.message.as_deref().unwrap_or("")),
-            [32., 449., 609., 466.],
-            0,
-        )?;
         surfaces.push(shapes);
         surfaces.extend(fonts);
         surfaces.extend(list_fonts);
@@ -2716,14 +2713,6 @@ impl SinglePlayer {
                 0xffffffff,
             )?;
         }
-        let notice = self.message.as_deref().unwrap_or("");
-        wrapped(
-            &mut fonts,
-            &self.tab,
-            &ascii(notice),
-            [32., 449., 609., 466.],
-            0,
-        )?;
         surfaces.push(shapes);
         surfaces.extend(images);
         surfaces.extend(slider_controls);

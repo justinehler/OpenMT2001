@@ -17,18 +17,11 @@ impl Intro {
                     }
                 };
                 if let Some(result) = outcome {
-                    // The original confirms nothing after a save (#510); only
-                    // a failure is reported on the Options panel.
+                    // The original confirms nothing after a save (#510) and
+                    // has no failure text for one, so both are only logged.
                     match &result {
-                        Ok(path) => {
-                            eprintln!("Saved V2 game: {}", path.display());
-                            view.game_options.clear_message();
-                        }
-                        Err(error) => {
-                            eprintln!("Save failed: {error}");
-                            view.game_options
-                                .set_message(format!("Save failed: {error}"));
-                        }
+                        Ok(path) => eprintln!("Saved V2 game: {}", path.display()),
+                        Err(error) => eprintln!("Save failed: {error}"),
                     }
                     if let Some(root) = view.save_profile_root.as_deref() {
                         view.save_dialog.saved(result, root);
@@ -222,7 +215,7 @@ impl Intro {
                             }
                             if view.camera_capture_pending.take().is_some() {
                                 view.save_dialog.busy = false;
-                                view.save_dialog.message = Some(format!("Save failed: {error}"));
+                                view.save_dialog.fail(format!("Save failed: {error}"));
                             }
                         }
                         view.game_options.set_save_disabled(

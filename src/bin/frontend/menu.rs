@@ -307,6 +307,18 @@ impl Assets {
         })
     }
 }
+/// The main panel's NAME row for a selected profile: 0x4956c0 formats
+/// language row 1604 ("NAME: %s") with the profile name (0x441150, 0x4e7fe0).
+fn name_row_label(strings: &[Vec<u8>], name: &str) -> Vec<u8> {
+    let format = strings.get(1604).map_or(&[][..], Vec::as_slice);
+    let name = crate::ui::text_field::code_page(name);
+    openmt2001::prompt_format::resource(
+        format,
+        strings,
+        &[openmt2001::prompt_format::Argument::Text(&name)],
+    )
+    .glyphs
+}
 /// What a key press means to a focused frontend text field.
 #[derive(Debug, PartialEq)]
 enum FieldKey<'a> {
@@ -1119,7 +1131,7 @@ impl Menu {
                                     self.single.open(i == 2, name, catalog, path);
                                 }
                             }
-                            Err(error) => self.single.message = Some(error),
+                            Err(error) => self.single.fail(error),
                         }
                         self.selected = None;
                     } else {
@@ -1144,7 +1156,7 @@ impl Menu {
                 let mut catalog = self.assets.catalog.clone();
                 match crate::campaign_store::load_progress(&mut catalog, &path) {
                     Ok(()) => self.single.open_tutorial(name, catalog, path),
-                    Err(error) => self.single.message = Some(error),
+                    Err(error) => self.single.fail(error),
                 }
             } else {
                 self.profile.open_selection();
@@ -1555,14 +1567,12 @@ impl Menu {
                 &self.assets.labels
             };
             for (i, original_label) in labels.iter().enumerate() {
-                let mut label = original_label.clone();
-                if !self.single_mode
-                    && i == 0
-                    && let Some(current) = self.profile.store.current
-                {
-                    label.push(0);
-                    label.extend(self.profile.name_glyphs(&self.profile.store.names[current]));
-                }
+                let label = match self.profile.store.current {
+                    Some(current) if !self.single_mode && i == 0 => {
+                        name_row_label(&self.assets.language, &self.profile.store.names[current])
+                    }
+                    _ => original_label.clone(),
+                };
                 let label = &label;
                 let [l, t, r, _] = bounds[i];
                 let measure = font.layout(
@@ -1933,6 +1943,36 @@ mod settings_route_tests {
         click(&mut menu, Button::Back); // Options -> main menu
         assert_eq!(menu.settings.page, None);
         assert_eq!(menu.pending, None);
+    }
+}
+
+#[cfg(test)]
+mod name_row_tests {
+    use super::name_row_label;
+    use openmt2001::level_text::ascii;
+
+    /// A language table whose row 0 maps every byte to its own glyph, with
+    /// the NAME row (1604) set to `format`.
+    fn strings(format: &str) -> Vec<Vec<u8>> {
+        let mut strings = vec![Vec::new(); 1605];
+        strings[0] = (0..=223).collect();
+        strings[1597] = ascii("NAME:");
+        strings[1604] = ascii(format);
+        strings
+    }
+
+    #[test]
+    fn name_row_formats_language_row_1604_with_the_profile_name() {
+        assert_eq!(
+            name_row_label(&strings("NAME: %s"), "Setkon"),
+            ascii("NAME: Setkon")
+        );
+        // Another language's row decides the wording and the name's place,
+        // rather than 1597 plus a space.
+        assert_eq!(
+            name_row_label(&strings("%s, SPIELER"), "Setkon"),
+            ascii("Setkon, SPIELER")
+        );
     }
 }
 
