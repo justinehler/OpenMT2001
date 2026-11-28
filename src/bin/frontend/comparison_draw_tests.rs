@@ -294,14 +294,14 @@ fn chat_lines_use_sender_colour_and_stack_up_from_city_bottom() {
 #[test]
 fn city_view_holds_the_panel_open_without_its_toggle() {
     let mut assets = synthetic_assets();
-    // Tag the closed-toggle textures (88..=90) so their quads can be found.
-    for texture in 88..=90 {
+    // Tag row 8's button (88..=90) and contour (71/72) textures.
+    for texture in [71, 72, 88, 89, 90] {
         assets.generic[texture].pixels = vec![texture as u8, 0, 0, 255];
     }
     let toggles = |surfaces: &[Surface]| {
         surfaces
             .iter()
-            .filter(|s| (88..=90).contains(&s.pixels[0]) && !s.vertices.is_empty())
+            .filter(|s| [71, 72, 88, 89, 90].contains(&s.pixels[0]) && !s.vertices.is_empty())
             .count()
     };
     let mut view = View::new(Data {
@@ -322,7 +322,7 @@ fn city_view_holds_the_panel_open_without_its_toggle() {
             )
             .unwrap()
     };
-    assert_eq!(toggles(&shown(&view)), 1, "3D views draw the toggle");
+    assert_eq!(toggles(&shown(&view)), 2, "3D views draw the toggle");
     // 427210: interface mode 3 opens the closed panel and hides row 8.
     view.set_city_view(true);
     assert!(view.state.open && !view.toggle_visible());
@@ -338,7 +338,7 @@ fn city_view_holds_the_panel_open_without_its_toggle() {
     // Leaving City View closes the panel it opened and shows the toggle.
     view.set_city_view(false);
     assert!(!view.state.open && view.toggle_visible());
-    assert_eq!(toggles(&shown(&view)), 1);
+    assert_eq!(toggles(&shown(&view)), 2);
     // A panel the player left open stays open on both sides of City View.
     view.state.open = true;
     view.set_city_view(true);

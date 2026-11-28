@@ -632,8 +632,9 @@ impl Assets {
                 },
                 57,
             )?;
+            // Row 8's contour: the open/close glyph (425e10) hides with it.
+            icon(if state.open { 71 } else { 72 }, 58)?;
         }
-        icon(if state.open { 71 } else { 72 }, 58)?;
         if state.open {
             icon(
                 97 + if pressed == Some(1) {
