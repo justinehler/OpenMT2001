@@ -1488,3 +1488,7 @@ mod tests {
 #[cfg(test)]
 #[path = "lua4/function_alias_tests.rs"]
 mod function_alias_tests;
+
+#[cfg(test)]
+#[path = "lua4/timed_event_load_tests.rs"]
+mod timed_event_load_tests;

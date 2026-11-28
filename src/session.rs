@@ -1447,6 +1447,7 @@ impl<'data> Session<'data> {
             process,
             dispatch,
             None,
+            None,
         )
     }
     pub fn initialize_connected_joined(
@@ -1473,6 +1474,7 @@ impl<'data> Session<'data> {
             Some(process),
             dispatch,
             Some(stage),
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -1488,6 +1490,7 @@ impl<'data> Session<'data> {
         process: Option<crate::process_runtime::Handle>,
         mut dispatch: Option<crate::process_dispatch::Seed>,
         connected: Option<&crate::skirmish::launch::Staged>,
+        loaded_timing: Option<[u32; 6]>,
     ) -> Result<Self, String> {
         if !load_mode
             && dispatch
@@ -1611,6 +1614,9 @@ impl<'data> Session<'data> {
             )?;
         if let Some(style) = style {
             style.apply_categories(&mut world.categories);
+        }
+        if let Some(saved) = loaded_timing {
+            world.clock.restore_load_timing(saved);
         }
         let mut scripts = level_startup::Scripts::new(input.image)?;
         let read = |relative: &str| {

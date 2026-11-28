@@ -55,6 +55,17 @@ impl Clock {
         self.timing[2] = 0;
     }
 
+    /// The early timing pass of a load (0x4bcb90 scanning tag 400 through
+    /// 0x4bb0d0), which runs after the world reset and before the hub scripts.
+    /// No player exists yet, so the UI-mode word is skipped; the four tick
+    /// words and the logic mode are stored. Level scripts therefore see the
+    /// saved global tick, and `C_TriggerEventAbsolute` drops deadlines that
+    /// have already passed.
+    pub fn restore_load_timing(&mut self, saved: [u32; 6]) {
+        self.timing[..4].copy_from_slice(&saved[..4]);
+        self.timing[5] = saved[5];
+    }
+
     pub fn hour(&self) -> u32 {
         self.calendar[0]
     }
