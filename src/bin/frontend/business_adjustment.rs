@@ -1910,7 +1910,7 @@ mod tests {
     fn retail_columns_center_values_without_moving_commodity_labels() {
         let mut tab = vec![0; 4 + 96 * 44];
         tab[..4].copy_from_slice(&96u32.to_le_bytes());
-        for glyph in tab[4..].chunks_exact_mut(44) {
+        for glyph in tab[4..].as_chunks_mut::<44>().0.iter_mut() {
             glyph[32..36].copy_from_slice(&8i32.to_le_bytes());
             glyph[36..40].copy_from_slice(&10i32.to_le_bytes());
         }
