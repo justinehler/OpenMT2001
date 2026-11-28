@@ -34,6 +34,9 @@ mod test_observers;
 #[cfg(test)]
 #[path = "fresh_city/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "fresh_city/transport_clock_tests.rs"]
+mod transport_clock_tests;
 
 // The moved module's imports, for its tests' `use super::*`.
 #[cfg(test)]

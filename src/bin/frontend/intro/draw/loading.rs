@@ -326,7 +326,6 @@ impl Intro {
                         vehicles_pending: None,
                         transport,
                         transport_pending: None,
-                        last_transport_query: Instant::now(),
                         _fresh_session: retained_session,
                         adjustment: None,
                         operations: crate::business_view::View::default(),

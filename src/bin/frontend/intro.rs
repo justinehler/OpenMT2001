@@ -1277,7 +1277,6 @@ struct Inspection {
     vehicles_pending: Option<mpsc::Receiver<Result<crate::vehicle_scene::Layer, String>>>,
     transport: Option<crate::transport_scene::Layer>,
     transport_pending: Option<mpsc::Receiver<Result<crate::transport_scene::Layer, String>>>,
-    last_transport_query: Instant,
     _fresh_session: Option<mpsc::Sender<FreshRequest>>,
     adjustment: Option<crate::business_adjustment::State>,
     operations: crate::business_view::View,

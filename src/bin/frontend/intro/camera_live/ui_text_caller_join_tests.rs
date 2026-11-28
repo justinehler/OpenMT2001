@@ -135,7 +135,6 @@ fn inspection(assets: &Assets) -> Inspection {
         vehicles_pending: None,
         transport: None,
         transport_pending: None,
-        last_transport_query: std::time::Instant::now(),
         _fresh_session: None,
         adjustment: None,
         operations: Default::default(),

@@ -128,9 +128,12 @@ impl Intro {
                     }
                 }
             }
+            // The original draws aircraft, trains and boats in every city
+            // render pass (44f0b0). Their poses only change on logic ticks and
+            // are not interpolated, so asking each frame shows a new tick as
+            // soon as it happens; asking never advances transport state.
             if self.loading.is_none()
                 && view.transport_pending.is_none()
-                && view.last_transport_query.elapsed().as_millis() >= 40
                 && view.live_status.as_ref().is_some_and(|status| {
                     status.running && !status.script_paused && status.failure.is_none()
                 })
@@ -141,7 +144,6 @@ impl Intro {
                     .send(FreshRequest::Transport { reply })
                     .map_err(|e| e.to_string())?;
                 view.transport_pending = Some(answer);
-                view.last_transport_query = Instant::now();
             }
         }
         Ok(())
