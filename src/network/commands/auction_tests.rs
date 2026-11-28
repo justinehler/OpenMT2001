@@ -40,7 +40,7 @@ fn auction_event(
 }
 
 impl TestSession {
-    fn auction_frame(
+    pub(super) fn auction_frame(
         &mut self,
         image: &crate::pe::PeImage<'_>,
         board: &crate::board::Board,

@@ -961,16 +961,7 @@ impl Runtime<'_> {
                 )?;
                 if !admitted && (!context.network_enabled || context.network_override) {
                     self.message_context.produce(
-                        [
-                            word(d, 24) as i32,
-                            -1,
-                            0x26,
-                            word(d, 32) as i32,
-                            word(d, 36) as i32,
-                            word(d, 40) as i32,
-                            word(d, 44) as i32,
-                            word(d, 48) as i32,
-                        ],
+                        admission::busy_reply(d),
                         &mut self.roster.manager,
                         |route, packet| {
                             if let crate::player_messages::Route::PropertyRefresh { category } =

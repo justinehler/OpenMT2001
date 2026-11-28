@@ -1790,6 +1790,9 @@ mod auction_tests;
 #[path = "player_message_tests.rs"]
 mod player_message_tests;
 
+#[path = "offer_tests.rs"]
+mod offer_tests;
+
 #[test]
 fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {
     use std::{

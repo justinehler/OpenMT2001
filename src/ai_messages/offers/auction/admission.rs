@@ -115,6 +115,21 @@ pub fn initialize(
     }
     Ok(())
 }
+/// The authority's answer to a refused kind-29 admission (0x450a30): inbox
+/// kind 38 to the requesting bidder, carrying the request's retained words
+/// +0x20..+0x30 (property, amount, offer identity and context) unchanged.
+pub fn busy_reply(descriptor: &[u8]) -> [i32; 8] {
+    [
+        word(descriptor, 24) as i32,
+        -1,
+        0x26,
+        word(descriptor, 32) as i32,
+        word(descriptor, 36) as i32,
+        word(descriptor, 40) as i32,
+        word(descriptor, 44) as i32,
+        word(descriptor, 48) as i32,
+    ]
+}
 pub fn admit(
     category: u32,
     bidder: u32,

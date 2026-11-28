@@ -14,7 +14,7 @@
 //! | 13 business sale | +0 business u32, +4 zero-based player u8, +5 padding[3] (8 bytes) | supported; business owner authorizes |
 //! | 15 takeover | +0 building u32 (4 bytes) | supported; category landlord authorizes as buyer |
 //! | 16 property transfer | amount i32, category i16, new owner u8 | supported |
-//! | 16/19/1d/1e/1f/20 auction | native descriptor plus announcement delay | supported; host control, participant-owned actions |
+//! | 16/19/1d/1e/1f/20 auction | native descriptor plus announcement delay | supported; host control, participant-owned actions, and a human owner's kind-1d offer acceptance for its own row |
 //! | 27..2a auction notifications | addressed 48-byte inbox descriptor | supported; authority only |
 //! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
 //! | 1a event card | +0 card u32, +4 zero-based player u32, +8 target i32 (12 bytes) | supported; local human or authority-owned AI |
@@ -23,7 +23,9 @@
 //! | other native IDs / shapes | no qualified decoder | unsupported |
 //!
 //! Every other kind/schema returns Unsupported. This is not full multiplayer
-//! command coverage. Property offer negotiation remains unqualified. The submitting gameplay caller
+//! command coverage. Property offers travel as player messages (kinds 0x22/0x23
+//! and their 0x24/0x26 replies); the authority's broadcaster turns a city offer
+//! into a kind-1d or kind-16 command. The submitting gameplay caller
 //! still owns its original quote/offer policy; a wire owner is never authority.
 mod auction;
 

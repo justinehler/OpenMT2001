@@ -221,9 +221,6 @@ impl Session<'_> {
         assets: &CommandAssets<'_, '_>,
         mut event: impl FnMut(live_commands::Event) -> Result<(), String>,
     ) -> Result<Inspection, String> {
-        if self.connected.is_some() {
-            return Err(crate::network::Error::Unsupported.to_string());
-        }
         let amount = panel.amount;
         let mut inspection = self.inspect_property_offer_panel(category, panel, assets)?;
         if inspection.panel.visible == 0 {
@@ -253,14 +250,20 @@ impl Session<'_> {
             allowance: i32::from_le_bytes(assets.image.at(0x541c7c, 4)?.try_into().unwrap()),
             affordability_override: false,
         };
+        // In a connected game a client's offer goes to the authority, and the
+        // authority sends an offer for a remote human to that human's peer
+        // (0x450490 -> 0x451720 -> 0x4e2590). The authority's broadcaster
+        // turns a city offer into a command scheduled for every peer.
+        let connected = self.connected.as_ref().map(|c| c.commands.is_host());
         let mut messages = player_messages::Context {
             arena: player_messages::Arena {
                 next: self.allocation_next,
             },
             current_player: self.roster.status.current_player,
-            network: [false, false],
+            network: [connected.is_some(), connected == Some(true)],
             prior: [0; 48],
         };
+        let mut outgoing = Vec::new();
         let result = property_offer::submit(
             property_offer::Action::Confirm,
             &mut inspection.panel,
@@ -287,11 +290,34 @@ impl Session<'_> {
                             },
                             &mut messages,
                             |dispatch| {
-                                match dispatch{
-                        property_offer::Dispatch::Queue{descriptor,..}=>self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},self.world.clock.timing[0],descriptor[16]!=0,0,
-                            |_|Err("property offer delay wrapped into immediate dispatch".into())).map(|_|()),
-                        property_offer::Dispatch::External{route,packet}=>event(live_commands::Event::PlayerMessageRoute{route,packet}),
-                    }
+                                match dispatch {
+                                property_offer::Dispatch::Queue { .. }
+                                | property_offer::Dispatch::External {
+                                    route:
+                                        player_messages::Route::NetworkSend
+                                        | player_messages::Route::NetworkRecipient { .. },
+                                    ..
+                                } if connected.is_some() => {
+                                    outgoing.push(dispatch);
+                                    Ok(())
+                                }
+                                property_offer::Dispatch::Queue { descriptor, .. } => self
+                                    .live_commands
+                                    .submit_with_delay(
+                                        live_commands::Command::Auction { descriptor },
+                                        self.world.clock.timing[0],
+                                        descriptor[16] != 0,
+                                        0,
+                                        |_| {
+                                            Err("property offer delay wrapped into immediate dispatch"
+                                                .into())
+                                        },
+                                    )
+                                    .map(|_| ()),
+                                property_offer::Dispatch::External { route, packet } => {
+                                    event(live_commands::Event::PlayerMessageRoute { route, packet })
+                                }
+                            }
                             },
                         )?;
                     }
@@ -302,6 +328,25 @@ impl Session<'_> {
         );
         self.allocation_next = messages.arena.next;
         result?;
+        if let Some(connection) = &mut self.connected {
+            for dispatch in outgoing {
+                match dispatch {
+                    property_offer::Dispatch::Queue { descriptor, .. } => {
+                        connection.commands.submit_auction(
+                            &connection.worker,
+                            descriptor,
+                            0,
+                            &mut self.live_commands,
+                            &mut self.world.city.categories,
+                            self.world.clock.timing[0],
+                        )?
+                    }
+                    property_offer::Dispatch::External { route, packet } => connection
+                        .commands
+                        .send_player_message(&connection.worker, route, &packet)?,
+                }
+            }
+        }
         Ok(inspection)
     }
 }

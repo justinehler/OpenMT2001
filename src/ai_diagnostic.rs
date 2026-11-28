@@ -1,4 +1,5 @@
-//! Typed AI calls to the original 4e6960 diagnostic dispatcher.
+//! Typed calls to the original 4e6960 diagnostic dispatcher from the AI and
+//! the player-message broadcaster (0x48c1c0).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -54,6 +55,7 @@ impl std::fmt::Display for Diagnostic {
                     0x53da30 => "offer completion has no matching offer",
                     0x53d9fc => "offer completion received in an unexpected state",
                     0x53d9e0 => "unsupported offer predecision type",
+                    0x541d70 => "unhandled city message",
                     _ => "original AI diagnostic",
                 };
                 write!(f, "{description} (message {text:08x})")
