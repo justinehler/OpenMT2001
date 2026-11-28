@@ -541,7 +541,9 @@ impl Intro {
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &view.markers);
             }
-            if let (Some(menu), Some(status)) = (&self.menu, &view.live_status) {
+            if view.city_layers().hud_visible()
+                && let (Some(menu), Some(status)) = (&self.menu, &view.live_status)
+            {
                 view.event_list.update(
                     menu.event_list_assets(),
                     &self.renderer,
@@ -554,7 +556,7 @@ impl Intro {
                         .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
-            if !view.options_visible() {
+            if view.city_layers().hud_visible() {
                 // Native 404eb0 closes the current main/Block Information panel
                 // before 43be20 opens the construction planner. Keep its retained
                 // state for dismissal, but do not composite glyphs behind the
@@ -789,19 +791,6 @@ impl Intro {
                     view,
                 )?;
                 if let Some(menu) = &self.menu {
-                    view.stats_panel.update(
-                        menu.stats_assets(),
-                        &self.renderer,
-                        view.live_status
-                            .as_ref()
-                            .and_then(|status| status.stats.as_ref()),
-                    )?;
-                    if let Some(panel) = &view.stats_panel.prepared {
-                        self.renderer
-                            .draw_overlay(&self.color_view, &self.depth_view, panel);
-                    }
-                }
-                if let Some(menu) = &self.menu {
                     view.market_share_panel.update(
                         menu.market_share_assets(),
                         &self.renderer,
@@ -831,6 +820,22 @@ impl Intro {
                     )?;
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &panel);
+                }
+            }
+            // Statistics is a secondary-group screen, like Options. Do not
+            // composite the retained primary HUD underneath its translucent mesh.
+            // 49dcb0/4b5370 retain the city camera and add no fullscreen fade.
+            if let Some(menu) = &self.menu {
+                view.stats_panel.update(
+                    menu.stats_assets(),
+                    &self.renderer,
+                    view.live_status
+                        .as_ref()
+                        .and_then(|status| status.stats.as_ref()),
+                )?;
+                if let Some(panel) = &view.stats_panel.prepared {
+                    self.renderer
+                        .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
             }
             if view.options_visible() {

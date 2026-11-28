@@ -8,6 +8,8 @@ mod camera_keys;
 pub(crate) mod camera_live;
 #[path = "intro/camera_producer.rs"]
 mod camera_producer;
+#[path = "intro/city_ui.rs"]
+pub(crate) mod city_ui;
 #[path = "intro/dialog_keys.rs"]
 mod dialog_keys;
 #[path = "intro/focus.rs"]
