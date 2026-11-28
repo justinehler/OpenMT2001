@@ -80,11 +80,20 @@ impl Fixture {
             current_player: None, // No presentation is part of this component.
             notification_threshold: 0.,
         };
+        // Since #228 every player account posting reports through the seam.
+        let mut postings = Vec::new();
         world
-            .apply(0, 0, 1000., &mut |_, seam| {
-                panic!("empty-property human acquisition reached unrelated seam {seam:?}")
+            .apply(0, 0, 1000., &mut |_, seam| match seam {
+                category_ownership::Seam::AccountPosted(posting) => {
+                    postings.push((posting.player, posting.amount));
+                    Ok(())
+                }
+                seam => {
+                    panic!("empty-property human acquisition reached unrelated seam {seam:?}")
+                }
             })
             .unwrap();
+        assert_eq!(postings, [(0, -1000.)]);
         assert_eq!(world.refresh_counter, 100);
         assert_eq!(world.categories[0][5], 1);
         assert_eq!(&world.categories[0][0x78..0x7c], &[0; 4]);
