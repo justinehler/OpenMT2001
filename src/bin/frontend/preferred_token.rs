@@ -40,6 +40,10 @@ pub fn path(root: &Path, name: &[u8]) -> PathBuf {
         .join(key.file_stem().unwrap())
         .with_extension("bin")
 }
+/// Original profile defaults (4c1c50) restore PreferredCharacter to zero.
+pub fn reset(root: &Path, name: &[u8]) -> Result<(), String> {
+    Token::default().save(&path(root, name))
+}
 pub fn clear(root: &Path, name: &[u8]) -> Result<(), String> {
     match fs::remove_file(path(root, name)) {
         Ok(()) => Ok(()),
@@ -68,6 +72,9 @@ mod tests {
         assert_eq!(Token::load(&b).unwrap().index(), 0);
         Token::new(7).unwrap().save(&b).unwrap();
         assert_eq!(Token::load(&a).unwrap().index(), 3);
+        reset(&root, b"A").unwrap();
+        assert_eq!(Token::load(&a).unwrap().index(), 0);
+        assert_eq!(Token::load(&b).unwrap().index(), 7);
         clear(&root, b"A").unwrap();
         assert_eq!(Token::load(&a).unwrap().index(), 0);
         assert_eq!(Token::load(&b).unwrap().index(), 7);

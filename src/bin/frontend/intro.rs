@@ -1806,7 +1806,12 @@ impl Intro {
                         .as_ref()
                         .is_some_and(|status| status.stats.is_some());
                 let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
-                return if !blocked && self.assets.settings_menu.action_cursor_hover(page, pointer) {
+                return if !blocked
+                    && self
+                        .assets
+                        .settings_menu
+                        .action_cursor_hover(page, pointer, false)
+                {
                     3
                 } else {
                     0

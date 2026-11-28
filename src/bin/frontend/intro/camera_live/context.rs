@@ -627,7 +627,12 @@ pub fn ui_cursor_pass(
                 .as_ref()
                 .is_some_and(|status| status.stats.is_some());
         let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
-        u32::from(!blocked && assets.settings_menu.action_cursor_hover(page, pointer))
+        u32::from(
+            !blocked
+                && assets
+                    .settings_menu
+                    .action_cursor_hover(page, pointer, false),
+        )
     } else {
         u32::from(menu.is_some_and(|menu| {
             view.toolbar_target(menu, &assets.selection.blocks)
