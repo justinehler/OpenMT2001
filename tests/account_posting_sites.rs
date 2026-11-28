@@ -182,6 +182,7 @@ fn every_production_post_site_has_an_audited_feedback_route() {
         "src/lib.rs",
         "src/bin/game.rs",
         "crates/frontend/src/lib.rs",
+        "crates/headless/src/lib.rs",
         "src/bin/capture.rs",
     ] {
         inventory(&root.join(entry), true, &root, &mut seen, &mut actual);
