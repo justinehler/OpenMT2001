@@ -4,19 +4,17 @@ use openmt2001::network::{
     lobby::{Settings, Slot, Snapshot, worker::View},
 };
 
+fn settings() -> Settings {
+    Settings {
+        name: b"Shared city".to_vec(),
+        level: 300001,
+        parameter_bits: 3500f32.to_bits(),
+        difficulty: 1,
+        map: b"empty.lua".to_vec(),
+    }
+}
 fn ticket() -> Ticket {
-    let mut snapshot = Snapshot::host(
-        Settings {
-            name: b"Shared city".to_vec(),
-            level: 300001,
-            parameter_bits: 3500f32.to_bits(),
-            difficulty: 1,
-            map: b"empty.lua".to_vec(),
-        },
-        b"Host".to_vec(),
-        4,
-    )
-    .unwrap();
+    let mut snapshot = Snapshot::host(settings(), b"Host".to_vec(), 4).unwrap();
     // Gaps, transport peers and compact player slots are independent identities.
     snapshot.rows[2] = Slot {
         player: Row {
@@ -440,4 +438,318 @@ fn per_peer_player_state_is_blanked_and_shared_state_is_kept() {
     let mut truncated = roster(0, 0, 1, 5);
     truncated.pop();
     assert!(per_peer_players(&mut truncated).is_err());
+
+/// Construct one staged city and link it to its lobby worker exactly as
+/// `fresh_connected_joined` does.
+fn link<'s>(
+    inputs: &'s SceneInputs,
+    ticket: &Ticket,
+    stage: &Staged,
+    worker: Handle,
+) -> crate::fresh_city::Session<'s> {
+    let mut session = inputs.construct_connected(ticket, stage, None).unwrap();
+    let binding = worker
+        .bind_world(session.world.topology.epoch().serial())
+        .unwrap();
+    let commands = network::commands::Adapter::new(
+        binding,
+        ticket.view.host,
+        ticket.view.local_peer,
+        stage.peers.clone(),
+    )
+    .unwrap();
+    let mut synchronization = network::synchronization::Synchronization::new(
+        binding,
+        ticket.view.host,
+        ticket.view.local_peer,
+        stage.peers.clone(),
+    )
+    .unwrap();
+    session.network_command_timer =
+        Some(synchronization.enable(&mut session.hooks.timers).unwrap());
+    synchronization
+        .barrier
+        .open(&mut session.world.city.pause, &mut session.hooks.timers)
+        .unwrap();
+    session.connected = Some(Connection {
+        synchronization,
+        commands,
+        binding,
+        worker,
+    });
+    session
+}
+
+/// A host and a client brought up through the real lobby over loopback and
+/// linked as a connected start links them: host slot 0, client slot 1.
+fn with_linked_pair(body: impl for<'s> FnOnce(&mut LinkedPair<'s, '_>)) {
+    use openmt2001::network::lobby::{
+        Action,
+        worker::{Open, Update},
+    };
+    fn wait(worker: &Handle, mut accept: impl FnMut(&Update) -> bool) -> Update {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            while let Some(update) = worker.poll() {
+                if let Update::Failed(error) = &update {
+                    panic!("{error}");
+                }
+                if accept(&update) {
+                    return update;
+                }
+            }
+            assert!(std::time::Instant::now() < until, "lobby update never came");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    let names: [Vec<u8>; 10] = std::array::from_fn(|i| format!("Character {i}").into_bytes());
+    let host_worker = Handle::open_isolated(Open::Host {
+        address: "127.0.0.1:0".parse().unwrap(),
+        snapshot: Snapshot::host(settings(), b"Host".to_vec(), 4).unwrap(),
+        token_names: names,
+    })
+    .unwrap();
+    let Update::Lobby(initial) = wait(&host_worker, |u| matches!(u, Update::Lobby(_))) else {
+        unreachable!()
+    };
+    let probe = Handle::open_isolated(Open::Probe(initial.address)).unwrap();
+    let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+        unreachable!()
+    };
+    drop(probe);
+    let client_worker = Handle::open_isolated(Open::Join {
+        selection,
+        name: b"Client".to_vec(),
+        token: 3,
+    })
+    .unwrap();
+    wait(&client_worker, |u| matches!(u, Update::Lobby(_)));
+    client_worker.action(Action::Ready).unwrap();
+    wait(
+        &host_worker,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.start_enabled()),
+    );
+    host_worker.action(Action::Start).unwrap();
+    let host_inputs = inputs();
+    let client_inputs = inputs();
+    let Update::Prepare(host_ticket) = wait(&host_worker, |u| matches!(u, Update::Prepare(_)))
+    else {
+        unreachable!()
+    };
+    let host_stage = host_inputs.stage_connected(&host_ticket).unwrap();
+    host_worker.prepared(Ok(host_stage.content)).unwrap();
+    let Update::Prepare(client_ticket) = wait(&client_worker, |u| matches!(u, Update::Prepare(_)))
+    else {
+        unreachable!()
+    };
+    let client_stage = client_inputs.stage_connected(&client_ticket).unwrap();
+    client_worker.prepared(Ok(client_stage.content)).unwrap();
+    wait(&host_worker, |u| matches!(u, Update::Validated));
+    wait(&client_worker, |u| matches!(u, Update::Validated));
+    let host = link(&host_inputs, &host_ticket, &host_stage, host_worker);
+    let client = link(&client_inputs, &client_ticket, &client_stage, client_worker);
+    let image = openmt2001::pe::PeImage::parse(&host_inputs.executable).unwrap();
+    let board = host_inputs.styled_board(&image).unwrap();
+    let file = openmt2001::build_file::BuildFile::parse(&host_inputs.build_file).unwrap();
+    let assets = crate::fresh_city::CommandAssets {
+        image: &image,
+        board: &board,
+        file: &file,
+    };
+    let mut frames = [
+        crate::live_host::Host::new([100., 120., 100.]),
+        crate::live_host::Host::new([120., 140., 120.]),
+    ];
+    for frame in &mut frames {
+        frame.running = true;
+        frame.policy.scheduler.network_enabled = true;
+        frame.policy.scheduler.deadline = 25;
+    }
+    body(&mut LinkedPair {
+        sessions: [host, client],
+        frames,
+        assets: &assets,
+        image: &image,
+    });
+}
+
+/// Peer 0 is the host, peer 1 the client; each human is its peer's slot.
+struct LinkedPair<'s, 'a> {
+    sessions: [crate::fresh_city::Session<'s>; 2],
+    frames: [crate::live_host::Host; 2],
+    assets: &'a crate::fresh_city::CommandAssets<'a, 'a>,
+    image: &'a openmt2001::pe::PeImage<'a>,
+}
+impl LinkedPair<'_, '_> {
+    /// One frame on each peer. Returns the dialogs each peer raised.
+    fn step(&mut self) -> [Vec<(u32, u32)>; 2] {
+        for peer in 0..2 {
+            self.frames[peer].frame(&mut self.sessions[peer], self.assets, 40);
+            assert!(
+                self.frames[peer].failure.is_none(),
+                "peer {peer}: {:?}",
+                self.frames[peer].failure
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        std::array::from_fn(|peer| {
+            self.frames[peer]
+                .take_prompts(&self.sessions[peer])
+                .into_iter()
+                .filter_map(|p| p.dialog)
+                .map(|d| (d.callback, d.context))
+                .collect()
+        })
+    }
+    fn reply(&mut self, peer: usize, callback: u32, context: u32, button: u32) {
+        let (frame, session) = (&mut self.frames[peer], &mut self.sessions[peer]);
+        frame
+            .human_dialog_reply(
+                session,
+                self.assets,
+                openmt2001::human_dialog::Reply {
+                    callback,
+                    context,
+                    button,
+                },
+            )
+            .unwrap();
+    }
+    fn auctions(&self) -> [u32; 2] {
+        self.sessions
+            .each_ref()
+            .map(|s| s.world.auction.controller.active_count)
+    }
+    /// Compare the shared gameplay save sections of both peers and print the
+    /// sample.
+    fn sample(&mut self, label: &str) {
+        let [host, client] = &mut self.sessions;
+        for (tag, (left, right)) in (2..=13).chain([16, 17, 18]).zip(
+            shared_state(host, self.image)
+                .into_iter()
+                .zip(shared_state(client, self.image)),
+        ) {
+            assert!(left == right, "{label}: shared gameplay tag {tag} differs");
+        }
+        assert_eq!(host.world.categories, client.world.categories, "{label}");
+        assert_eq!(
+            host.world.auction.controller.record[..0x8c],
+            client.world.auction.controller.record[..0x8c],
+            "{label}: auction state differs"
+        );
+        let ticks = [host.world.clock.timing[0], client.world.clock.timing[0]];
+        println!(
+            "{label}: host tick {} client tick {}, auctions {:?}, shared gameplay sections identical",
+            ticks[0],
+            ticks[1],
+            self.auctions(),
+        );
+    }
+    /// The proposer's human offers, through the property panel, for the
+    /// cheapest available property, which the other human owns. The owner's
+    /// peer raises the offer modal (0x48bc70) and answers with `button`.
+    fn offer(&mut self, proposer: usize, button: u32) -> u32 {
+        let owner = 1 - proposer;
+        let image = self.image;
+        let categories = &self.sessions[0].world.categories;
+        let category = (0..52u32)
+            .filter(|&c| {
+                let row = &categories[c as usize];
+                row[0x74] != 0 && row[0x6c] == 0 && row[5] == 0
+            })
+            .min_by_key(|&c| {
+                openmt2001::ai_messages::offers::execution::category_value(
+                    &categories[c as usize],
+                    image,
+                )
+                .unwrap()
+                .to_f64() as i64
+            })
+            .expect("an available property");
+        for s in &mut self.sessions {
+            s.world.categories[category as usize][5] = owner as u8 + 1;
+        }
+        self.sample("before the offer");
+        let side = &mut self.sessions[proposer];
+        let panel = side
+            .inspect_property_offer(category, None, self.assets)
+            .unwrap()
+            .panel;
+        let submitted = side
+            .submit_property_offer(category, panel.minimum, self.assets, |_| Ok(()))
+            .unwrap();
+        assert!(submitted.submitted, "offer for {category} not submitted");
+        let mut frames = 0;
+        while !self.step()[owner].contains(&(0x48b350, 0x23)) {
+            frames += 1;
+            assert!(
+                frames < 2000,
+                "offer for {category} never reached the owner"
+            );
+        }
+        self.reply(owner, 0x48b350, 0x23, button);
+        category
+    }
+}
+
+#[test]
+#[ignore = "requires original assets; two connected Sessions over the real loopback lobby"]
+fn human_to_human_offers_accepted_and_rejected_match_on_both_peers() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            with_linked_pair(|pair| {
+                let word = |b: &[u8], at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+                let mut started = 0;
+                while pair.sessions.iter().any(|s| s.world.clock.timing[0] < 50) {
+                    pair.step();
+                    started += 1;
+                    assert!(started < 2000, "connected start never ran");
+                }
+                for (proposer, accept) in [(0, false), (1, false), (1, true), (0, true)] {
+                    let label = format!(
+                        "{} offer {}",
+                        ["host->client", "client->host"][proposer],
+                        if accept { "accepted" } else { "rejected" }
+                    );
+                    let busy = pair.auctions()[0] != 0;
+                    let category = pair.offer(proposer, u32::from(!accept));
+                    // A refusal, or an admission refused while another auction
+                    // runs, is a kind-38 notice for the proposer only.
+                    let notice = !accept || busy;
+                    let mut frames = 0;
+                    loop {
+                        let dialogs = pair.step();
+                        if notice && dialogs[proposer].contains(&(0x48b480, 0)) {
+                            pair.reply(proposer, 0x48b480, 0, 0);
+                            break;
+                        }
+                        if !notice && pair.auctions() == [1, 1] {
+                            break;
+                        }
+                        frames += 1;
+                        assert!(frames < 2000, "{label}: answer never arrived");
+                    }
+                    // Let any scheduled command land on both peers.
+                    for _ in 0..40 {
+                        pair.step();
+                    }
+                    for s in &pair.sessions {
+                        for player in &s.roster.manager.players {
+                            assert_eq!(word(&player.bytes, 0x214), 0, "{label}: inbox left over");
+                        }
+                    }
+                    assert_eq!(pair.auctions(), [u32::from(accept || busy); 2], "{label}");
+                    if accept && !busy {
+                        let record = &pair.sessions[0].world.auction.controller.record;
+                        assert_eq!(word(record, 4), category);
+                        assert_eq!(word(record, 0x54), proposer as u32);
+                    }
+                    pair.sample(&label);
+                }
+            });
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
