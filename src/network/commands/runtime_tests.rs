@@ -181,6 +181,25 @@ impl TestSession {
             &[player_manager::Player],
         ) -> std::result::Result<(), String>,
     ) {
+        self.tick_with(image, board, |event, clock, city, players, _, _| {
+            observe(event, clock, city, players)
+        });
+    }
+    /// One retained scheduler pass. `observe` sees each event first, with the
+    /// live scheduler controls and retained timer tasks, as a Session does.
+    fn tick_with(
+        &mut self,
+        image: &crate::pe::PeImage<'_>,
+        board: &crate::board::Board,
+        mut observe: impl FnMut(
+            scheduler::Event,
+            &crate::clock::Clock,
+            &mut level_startup::City,
+            &[player_manager::Player],
+            &mut scheduler::Controls,
+            &mut [[u8; 20]],
+        ) -> std::result::Result<(), String>,
+    ) {
         if self.world.pause.has_reason() {
             return;
         }
@@ -195,8 +214,15 @@ impl TestSession {
         scheduler::advance(
             &mut self.world.clock,
             &mut self.controls,
-            |event, clock, _| {
-                observe(event, clock, city, &self.roster.manager.players)?;
+            |event, clock, controls| {
+                observe(
+                    event,
+                    clock,
+                    city,
+                    &self.roster.manager.players,
+                    controls,
+                    &mut self.tasks,
+                )?;
                 if event == scheduler::Event::Helper(0x480ec0) {
                     let mut runtime = live_commands::Runtime {
                         city,
@@ -844,6 +870,9 @@ fn connected_hour_boundary_keeps_shared_accounts_and_rng_with_ai_on_both_peers()
 
 #[path = "../synchronization/runtime_tests.rs"]
 mod synchronization;
+
+#[path = "ceiling_tests.rs"]
+mod ceiling;
 
 fn ready_building(session: &mut TestSession, id: usize, owner: u8) {
     let row = &mut session.world.city.buildings[id];

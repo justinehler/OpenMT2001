@@ -985,29 +985,77 @@ impl Adapter {
                 _ => return Err(Error::Unsupported.to_string()),
             }
         }
+        // A live Session grants at the scheduler's ceiling test (`reach_ceiling`).
+        // This covers an authority that reaches its ceiling outside that test.
         if self.is_host() && tick >= self.deadline() {
-            let message = self.advance_deadline(tick).map_err(|e| e.to_string())?;
-            if let Message::CommandDeadline {
-                after,
-                tick: deadline,
-            } = message
-            {
-                // Queue the deadline AFTER all commits; never unblock locally
-                // if the bounded outbound channel could not accept it.
-                worker.send_gameplay(
-                    self.binding,
-                    None,
-                    Message::CommandDeadline {
-                        after,
-                        tick: deadline,
-                    },
-                )?;
-                self.admit_deadline(after, deadline)
-                    .map_err(|e| e.to_string())?;
-                self.closed_tick = Some(tick);
-            }
+            self.grant(worker, tick)?;
         }
         Ok(())
+    }
+    /// Publish kind8 `tick+25` after every commit minted so far, then admit it
+    /// locally through the same path as a client.
+    #[cfg(feature = "lua4")]
+    fn grant(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        let message = self.advance_deadline(tick).map_err(|e| e.to_string())?;
+        if let Message::CommandDeadline {
+            after,
+            tick: deadline,
+        } = message
+        {
+            // Queue the deadline AFTER all commits; never unblock locally
+            // if the bounded outbound channel could not accept it.
+            worker.send_gameplay(
+                self.binding,
+                None,
+                Message::CommandDeadline {
+                    after,
+                    tick: deadline,
+                },
+            )?;
+            self.admit_deadline(after, deadline)
+                .map_err(|e| e.to_string())?;
+            self.closed_tick = Some(tick);
+        }
+        Ok(())
+    }
+    /// The end of each 481680 substep tests `Total >= ceiling`. A client pauses
+    /// with reason 1 (4bac90) until kind8 arrives; the authority sends kind8
+    /// `Total+25` there and then, applying it locally, so it never waits for a
+    /// client. Returns false for any other scheduler event.
+    #[cfg(feature = "lua4")]
+    pub fn reach_ceiling(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        event: crate::scheduler::Event,
+        tick: u32,
+        controls: &mut crate::scheduler::Controls,
+        pause: &mut crate::pause::State,
+        tasks: &mut [[u8; 20]],
+    ) -> std::result::Result<bool, String> {
+        match event {
+            crate::scheduler::Event::Helper(0x4bac90) if !self.host => {
+                pause_at_limit(pause, tasks)?;
+            }
+            crate::scheduler::Event::Deadline { next_tick }
+                if self.host && Some(next_tick) == tick.checked_add(25) =>
+            {
+                self.grant(worker, tick)?;
+                controls.deadline = self.deadline;
+            }
+            crate::scheduler::Event::Helper(0x4bac90)
+            | crate::scheduler::Event::Deadline { .. } => {
+                return Err(format!(
+                    "{} reached the tick ceiling with {event:?} at {tick}",
+                    if self.host { "Authority" } else { "Client" }
+                ));
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
     }
     #[cfg(feature = "lua4")]
     pub fn enqueue(
