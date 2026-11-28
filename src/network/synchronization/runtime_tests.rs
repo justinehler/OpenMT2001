@@ -133,6 +133,7 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
                 )
                 .unwrap();
             session.controls.deadline = adapter.deadline();
+            session.controls.network_override = adapter.is_host();
             let mut tasks = session.tasks.clone();
             crate::timers::dispatch(&mut tasks, 40, |_, address, tasks| {
                 session.tasks.clone_from(tasks);

@@ -68,8 +68,13 @@ impl Session<'_> {
             network,
             prior: [0; 48],
         };
+        let mut outgoing_cards = Vec::new();
         let mut call = |call, player: &mut crate::player_manager::Player| match call {
             human::Call::Submit(command) => {
+                if self.connected.is_some() {
+                    outgoing_cards.push(command);
+                    return Ok(());
+                }
                 if network[0] && !network[1] {
                     return Err("human card command requires network transport".into());
                 }
@@ -164,7 +169,25 @@ impl Session<'_> {
             .map(|_| ()),
         };
         self.allocation_next = arena.next;
-        result
+        result?;
+        if let Some(connection) = &mut self.connected {
+            for command in outgoing_cards {
+                let targets = crate::network::commands::Targets::new(
+                    &self.world.city.buildings,
+                    &self.world.city.ledgers.businesses,
+                    &self.world.city.categories,
+                );
+                connection.commands.submit(
+                    &connection.worker,
+                    live_commands::Command::EventCard(command),
+                    &mut self.live_commands,
+                    &mut self.world.city.categories,
+                    targets,
+                    self.world.clock.timing[0],
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 

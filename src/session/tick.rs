@@ -597,6 +597,7 @@ impl Session<'_> {
                                             let nodes:Vec<_>=board.blocks.iter().map(|b|event_cards::lifecycle::Node {
                                                 reference:0xe0000000+b.id as u32*284,kind:4,category:b.id as u32,
                                             }).collect();
+                                            let mut outgoing_cards = Vec::new();
                                             self.roster.advance_hourly_ai(city,image,clock.hour(),|_,update,player,city| {
                                                 let binding=event_cards::ai::Bindings {
                                                     world:event_cards::selection::World {
@@ -615,6 +616,11 @@ impl Session<'_> {
                                                     event_cards::ai::run_update(player,update,&binding,|call,player| {
                                                         match call {
                                                             event_cards::ai::RuntimeCall::Submit(command)=>{
+                                                                if self.connected.is_some() {
+                                                                    // Evaluation/reset still runs on every peer, including RNG draws.
+                                                                    outgoing_cards.push(command);
+                                                                    return Ok(());
+                                                                }
                                                                 if scheduler.network_enabled&&!scheduler.network_override {return Err("event command requires network transport".into());}
                                                                 self.live_commands.submit(live_commands::Command::EventCard(command),clock.timing[0],true,
                                                                     |_|Err("wrapped event command requires immediate execution".into()))
@@ -634,6 +640,12 @@ impl Session<'_> {
                                                         }
                                                     })
                                             })?;
+                                            if let Some(connection) = &mut self.connected {
+                                                for command in outgoing_cards {
+                                                    let targets = crate::network::commands::Targets::new(&city.buildings, &city.ledgers.businesses, &city.categories);
+                                                    connection.commands.submit_ai_card(&connection.worker, command, &mut self.live_commands, &mut city.categories, targets, clock.timing[0])?;
+                                                }
+                                            }
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x4bb500)) => {
                                             let accounts = self.roster.account_prefixes(city)?;
@@ -810,7 +822,7 @@ impl Session<'_> {
                             let mut outgoing_auctions=Vec::new();
                             let mut prepared_room=false;
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)|live_commands::Command::EventCard(_)) {
                                     return Err(crate::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
