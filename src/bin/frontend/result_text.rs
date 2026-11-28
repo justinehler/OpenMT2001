@@ -32,7 +32,7 @@ impl Assets {
         archive: &[u8],
         installer: &Path,
         language: &Path,
-        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+        shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, Some(shared))
     }
@@ -41,7 +41,7 @@ impl Assets {
         archive: &[u8],
         installer: &Path,
         language: &Path,
-        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+        shared: Option<&crate::ui_text::resources::UiTextResources>,
     ) -> Result<Self, String> {
         let (pages, tab, credit_heading_pages, credit_heading_tab) = if let Some(shared) = shared {
             (

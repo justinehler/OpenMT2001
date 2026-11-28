@@ -40,11 +40,15 @@ pub struct PageSource {
 pub struct FontPages {
     pub name: String,
     pub archive_range: Range<usize>,
-    bytes: Vec<u8>,
+    pub(crate) bytes: Vec<u8>,
     pub records: Vec<PageSource>,
 }
 impl FontPages {
-    fn parse(name: String, archive_range: Range<usize>, bytes: Vec<u8>) -> Result<Self, String> {
+    pub(crate) fn parse(
+        name: String,
+        archive_range: Range<usize>,
+        bytes: Vec<u8>,
+    ) -> Result<Self, String> {
         let parsed = TextureSet::parse(&bytes).map_err(|e| format!("{name}: {e}"))?;
         if parsed.textures.len() < 12 {
             return Err(format!("{name}: twelve selected font pages required"));
@@ -91,7 +95,7 @@ impl FontPages {
 /// No Clone implementation and no move-out manager API: panels borrow it.
 #[derive(Debug)]
 pub struct UiTextResources {
-    pub(super) construction_identity: super::main_construction::ResourceIdentity,
+    pub(crate) construction_identity: super::ResourceIdentity,
     manager: Box<Fonts>,
     pub literals: Literals,
     pub tables: Vec<TableSource>,
@@ -200,7 +204,7 @@ impl UiTextResources {
         }
         //Static selector cache/counters are actual PE process-image products.
         //They are not fields of the newly allocated unknown manager heap.
-        let image = super::process_image::Cells::process_allocation(executable)?;
+        let image = openmt2001::process_image::Cells::process_allocation(executable)?;
         let selector = SelectorState {
             cached: image.word(0x6aad08)?,
             pending: [image.word(0x6aad00)?, image.word(0x6aad0c)?],
@@ -225,7 +229,7 @@ impl UiTextResources {
             tail: Some(2245),
         };
         Ok(Self {
-            construction_identity: super::main_construction::ResourceIdentity::new(),
+            construction_identity: super::ResourceIdentity::new(),
             manager: Box::new(manager),
             literals: Literals::from_pe(&pe)?,
             tables,
@@ -269,14 +273,14 @@ impl UiTextResources {
         Ok(())
     }
 }
-pub(super) fn empty_group() -> Group {
+pub(crate) fn empty_group() -> Group {
     Group {
         bytes: Vec::new(),
         offsets: Vec::new(),
         count: 0,
     }
 }
-pub(super) fn write_filename(
+pub(crate) fn write_filename(
     scratch: &mut [ScratchByte],
     stem: &[u8],
     extension: &[u8],
@@ -300,7 +304,7 @@ pub(super) fn write_filename(
     }
     Ok(())
 }
-fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>, String> {
     let b = pe.at(address, max)?;
     let n = b
         .iter()
@@ -308,7 +312,7 @@ fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>, String> {
         .ok_or_else(|| format!("PE text resource{address:x} unterminated"))?;
     Ok(b[..n].to_vec())
 }
-fn expand_one(format: &[u8], value: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn expand_one(format: &[u8], value: &[u8]) -> Result<Vec<u8>, String> {
     let at = format
         .windows(2)
         .position(|b| b == b"%s")
@@ -349,6 +353,3 @@ fn case_file(directory: &Path, name: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-#[cfg(test)]
-#[path = "ui_text_resource_tests.rs"]
-mod tests;

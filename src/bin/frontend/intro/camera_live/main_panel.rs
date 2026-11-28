@@ -508,4 +508,4 @@ pub fn check_info_identifier(view: &impl Access, id: u32) -> Result<(), String> 
 
 #[cfg(test)]
 #[path = "case_zero_repair_tests.rs"]
-pub(super) mod regression_tests;
+pub(crate) mod regression_tests;
