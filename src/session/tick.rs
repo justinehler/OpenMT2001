@@ -349,8 +349,9 @@ impl Session<'_> {
                         }
                         return Ok(0);
                     }
-                    if matches!(event, scheduler::Event::Helper(0x4bac90)) && self.connected.is_some() {
-                        crate::network::commands::pause_at_limit(&mut city.pause,&mut self.hooks.timers)?;
+                    if let Some(connection) = &mut self.connected
+                        && connection.commands.reach_ceiling(&connection.worker, event, clock.timing[0], scheduler, &mut city.pause, &mut self.hooks.timers)?
+                    {
                         return Ok(0);
                     }
                     match event {
