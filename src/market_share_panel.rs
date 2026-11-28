@@ -10,9 +10,14 @@ pub struct Row {
     pub progress: u32,
 }
 impl Row {
-    pub fn percentage_text(&self) -> String {
-        // 42c4b0 uses the CRT's default %f precision, followed by a literal %.
-        format!("{:.6}%", self.percentage)
+    /// 42c4b0 passes "%f%%" (0x535868) to the game's own text formatter
+    /// (0x441770, tokens 0x441480), not to the CRT. Its %f case prints with
+    /// its own "%.2f" literal (0x535894), so the label has two decimals.
+    pub fn percentage_text(&self) -> Result<String, String> {
+        Ok(format!(
+            "{}%",
+            crate::decimal_text::decimal2(self.percentage)?
+        ))
     }
     pub fn progress_text(&self) -> String {
         format!("{}", self.progress as i32)
@@ -113,5 +118,32 @@ impl State {
                 self.dismiss();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Row;
+
+    fn label(percentage: f32) -> String {
+        Row {
+            name: Vec::new(),
+            character: 0,
+            percentage,
+            progress: 0,
+        }
+        .percentage_text()
+        .unwrap()
+    }
+
+    #[test]
+    fn voting_percentages_have_the_formatters_two_decimals() {
+        // #591: the original reads 48.27%, 39.65%, 12.08%, 0.00%.
+        assert_eq!(label(48.27), "48.27%");
+        assert_eq!(label(26.779999), "26.78%");
+        assert_eq!(label(0.), "0.00%");
+        assert_eq!(label(100.), "100.00%");
+        // An exact halfway value rounds away from zero, as the CRT's %.2f does.
+        assert_eq!(label(0.125), "0.13%");
     }
 }
