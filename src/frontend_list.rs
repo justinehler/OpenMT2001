@@ -1,16 +1,42 @@
 //! Frontend list geometry in the original 640×480 coordinate system.
 
+// 430b50 reads selection at 536294 and hover RGB at 5362ac. Keep the
+// existing fixed hover opacity; the original pulses its alpha via 4b4e90.
+pub const SELECTED_COLOR: u32 = 0xff288be1;
+pub const HOVER_COLOR: u32 = 0x996ed1e1;
+
+pub fn row_color(selected: bool, hovered: bool) -> Option<u32> {
+    if selected {
+        Some(SELECTED_COLOR)
+    } else {
+        hovered.then_some(HOVER_COLOR)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Layout {
     bounds: [f32; 4],
     pub pitch: f32,
     inset: f32,
+    horizontal_inset: f32,
 }
 
 impl Layout {
     /// 4406a0 measures W and adds the text payload's signed line gap.
     /// Frontend RichTextRect constructors set gap=2 and vertical inset=3.
     pub fn from_font(bounds: [f32; 4], tab: &[u8]) -> Result<Self, String> {
+        Self::from_font_with_insets(bounds, tab, [0., 3.])
+    }
+
+    /// Load Game configures horizontal inset0 while Tutorial/Scenario use3.
+    pub fn from_font_with_insets(
+        bounds: [f32; 4],
+        tab: &[u8],
+        insets: [f32; 2],
+    ) -> Result<Self, String> {
+        if !insets[0].is_finite() || insets[0] < 0. {
+            return Err("invalid frontend list horizontal inset".into());
+        }
         let at = 4 + usize::from(b'W' - 32) * 44 + 36;
         let height = i32::from_le_bytes(
             tab.get(at..at + 4)
@@ -18,7 +44,9 @@ impl Layout {
                 .try_into()
                 .unwrap(),
         );
-        Self::new(bounds, height as f32 + 2., 3.)
+        let mut layout = Self::new(bounds, height as f32 + 2., insets[1])?;
+        layout.horizontal_inset = insets[0];
+        Ok(layout)
     }
 
     pub fn new(bounds: [f32; 4], pitch: f32, inset: f32) -> Result<Self, String> {
@@ -36,6 +64,7 @@ impl Layout {
             bounds,
             pitch,
             inset,
+            horizontal_inset: 0.,
         })
     }
 
@@ -46,14 +75,24 @@ impl Layout {
 
     pub fn text_bounds(self, row: usize) -> [f32; 4] {
         let top = (self.bounds[1] + self.inset).trunc() + row as f32 * self.pitch;
-        [self.bounds[0], top, self.bounds[2], top + self.pitch]
+        // 4419f0 submits complete glyphs for each visible row. A row's
+        // advance is not its clip height: g/p/y extend below the W metric.
+        [self.bounds[0], top, self.bounds[2], self.bounds[3]]
     }
 
-    /// 42f740 paints the selection one unit below the row, one short of pitch.
+    /// 4406a0 style0 adds two units after the horizontal text inset.
+    pub fn text_origin(self, row: usize) -> [f32; 2] {
+        [
+            self.bounds[0].trunc() + self.horizontal_inset + 2.,
+            self.text_bounds(row)[1],
+        ]
+    }
+
+    /// 430b50 paints both bars at inset x, one below y, one short of pitch.
     pub fn highlight(self, row: usize) -> [f32; 4] {
         let top = self.bounds[1] + self.inset + row as f32 * self.pitch + 1.;
         [
-            self.bounds[0],
+            self.bounds[0] + self.horizontal_inset,
             top,
             self.bounds[2] - 1.,
             top + self.pitch - 1.,
@@ -115,6 +154,21 @@ mod tests {
         let list = Layout::from_font([20., 95., 300., 195.], &tab).unwrap();
         assert_eq!((list.pitch, list.visible_rows()), (11., 9));
         assert_eq!(list.hit([30., 110.], 0, 30), Some(1));
+    }
+
+    #[test]
+    fn load_preserves_zero_horizontal_inset_and_shared_vertical_layout() {
+        let mut tab = vec![0; 4 + 96 * 44];
+        let at = 4 + usize::from(b'W' - 32) * 44 + 36;
+        tab[at..at + 4].copy_from_slice(&9i32.to_le_bytes());
+        let layout = Layout::from_font_with_insets([20., 40., 284., 302.], &tab, [0., 3.]).unwrap();
+        assert_eq!(layout.text_origin(0), [22., 43.]);
+        assert_eq!(layout.highlight(0), [20., 44., 283., 54.]);
+        assert_eq!(layout.text_bounds(0)[3], 302.);
+        assert_eq!(layout.visible_rows(), 23);
+        assert_eq!(row_color(true, true), Some(0xff288be1));
+        assert_eq!(row_color(false, true), Some(0x996ed1e1));
+        assert_eq!(row_color(false, false), None);
     }
 
     #[test]

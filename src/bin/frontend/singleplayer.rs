@@ -127,6 +127,110 @@ mod campaign_picker_tests {
         }
     }
 
+    fn tutorial_test_font() -> Vec<u8> {
+        let mut tab = vec![0; 4 + 96 * 44];
+        tab[..4].copy_from_slice(&96u32.to_le_bytes());
+        for glyph in 0..96 {
+            let at = 4 + glyph * 44;
+            tab[at + 32..at + 36].copy_from_slice(&7i32.to_le_bytes());
+            tab[at + 36..at + 40].copy_from_slice(&10i32.to_le_bytes());
+            tab[at + 40..at + 44].copy_from_slice(&3i32.to_le_bytes());
+        }
+        // Unequal advances put the expected first line between264 and280
+        // units, exposing an incorrectly reserved16-unit scrollbar strip.
+        let at = 4 + usize::from(b'a' - 32) * 44;
+        tab[at + 32..at + 36].copy_from_slice(&11i32.to_le_bytes());
+        // A descender extends below W's row advance, as g/p/y do.
+        let at = 4 + usize::from(b'g' - 32) * 44;
+        tab[at + 40..at + 44].copy_from_slice(&5i32.to_le_bytes());
+        tab
+    }
+
+    #[test]
+    fn tutorial_layout_draws_shared_rows_descenders_colours_and_two_description_lines() {
+        let mut panel = panel();
+        let tab = tutorial_test_font();
+        panel.tab = tab.clone();
+        panel.title_tab = tab.clone();
+        panel.scenario_list_tab = tab;
+        panel.fonts = vec![Surface::solid(), Surface::solid()];
+        panel.title_fonts = panel.fonts.clone();
+        panel.scenario_list_fonts = panel.fonts.clone();
+        panel.strings.resize(0x900, vec![]);
+        // Fractional mesh-style edges expose the native origin truncation.
+        panel.tutorial_panel.bounds[8] = [172., 90.75, 459., 265.];
+        panel.tutorial_panel.bounds[11] = [172.25, 296., 459., 404.5];
+        panel.tutorial_panel.bounds[12] = [500., 450., 600., 475.];
+        panel.tutorial_panel.bounds[13] = [400., 450., 490., 475.];
+        panel.tutorial_screen = true;
+        panel.tutorial_index = Some(0);
+        for tutorial in crate::scenarios::TUTORIALS {
+            panel.strings[level_labels(tutorial.id).unwrap().0] = ascii("Tg");
+        }
+        let description =
+            ascii("Learn about the various panels around the screen, and what they do.");
+        let description_id = level_labels(crate::scenarios::TUTORIALS[0].id).unwrap().1;
+        panel.strings[description_id] = description.clone();
+        let layout = panel.tutorial_list_layout().unwrap();
+        assert_eq!(layout.text_bounds(0), [172., 93., 459., 265.]);
+        assert_eq!(layout.highlight(0), [175., 94.75, 458., 105.75]);
+        assert_eq!(layout.highlight(1), [175., 106.75, 458., 117.75]);
+        assert_eq!(panel.hit([180., 106.5]), Some(3));
+        let rich = CampaignDescription::child(
+            &panel.scenario_list_tab,
+            &description,
+            panel.tutorial_panel.bounds[11],
+        )
+        .unwrap();
+        assert_eq!((rich.child[2] - rich.child[0] - 6.).trunc(), 280.); // 448 screen px
+        assert_eq!(
+            rich.rows().collect::<Vec<_>>(),
+            [
+                ascii("Learn about the various panels around the"),
+                ascii("screen, and what they do."),
+            ]
+        );
+        let surfaces = panel.tutorial_surfaces(Some(3), false).unwrap();
+        let shapes = &surfaces[0];
+        let bars = shapes.vertices.as_chunks::<6>().0;
+        for (bounds, color) in [
+            (
+                [175., 94.75, 458., 105.75],
+                openmt2001::frontend_list::SELECTED_COLOR,
+            ),
+            (
+                [175., 106.75, 458., 117.75],
+                openmt2001::frontend_list::HOVER_COLOR,
+            ),
+        ] {
+            let mut expected = Surface::solid();
+            expected.rect(bounds, [color; 4]);
+            assert!(bars.iter().any(|quad| quad.as_slice() == expected.vertices));
+        }
+        // Production Tutorial font surfaces, after shapes and the two caption pages.
+        let quads = surfaces[3].vertices.as_chunks::<6>().0;
+        assert_eq!(quads[0][0][0], 176.5); // inset3 + style0 inset2 - half pixel
+        assert_eq!(
+            quads[1]
+                .iter()
+                .map(|v| v[1])
+                .fold(f32::NEG_INFINITY, f32::max),
+            107.5
+        );
+        assert_eq!(quads[2][0][1] - quads[0][0][1], 12.);
+        let top = quads[0].iter().map(|v| v[1]).fold(f32::INFINITY, f32::min);
+        assert!((top * 1.6 - 152.8).abs() < 0.01);
+        let mut painted = vec![Surface::solid(), Surface::solid()];
+        rich.paint(&mut painted, &panel.scenario_list_tab, 0)
+            .unwrap();
+        let first_line_len = rich.rows().next().unwrap().len();
+        let q = painted[0].vertices.as_chunks::<6>().0;
+        assert_eq!(q[first_line_len][0][1] - q[0][0][1], 12.);
+        panel.description_first = 99;
+        panel.scroll(1);
+        assert_eq!(panel.description_first, 0);
+    }
+
     #[test]
     fn lobby_campaign_frame_uses_select_region_under_backing_and_slot_interiors() {
         let mut panel = panel();
@@ -1015,7 +1119,7 @@ fn tutorial_tick_rect(row: usize) -> [f32; 4] {
 // Ordinary campaign description: 499707..499848 builds a Font2 rich-text
 // child from Info8 minus the always-reserved scrollbar. 440650 sets inset3;
 // 441279..44129d subtracts both insets before 4e7a90 wraps with glyph gap -1.
-// Custom, Tutorial and Character keep their independent layout contracts.
+// Tutorial uses the same payload without reserving a scrollbar strip.
 pub(crate) struct CampaignDescription {
     offsets: Vec<usize>,
     text: Vec<u8>,
@@ -1029,12 +1133,18 @@ impl CampaignDescription {
     const LINE_PITCH: f32 = 12.;
 
     pub(crate) fn new(tab: &[u8], text: &[u8], bounds: [f32; 4]) -> Result<Self, String> {
-        let [left, top, right, bottom] = bounds;
-        let strip = SCENARIO_INFO_SCROLL[2] - SCENARIO_INFO_SCROLL[0];
-        let child = [left, top, right - strip, bottom];
+        let mut child = bounds;
+        child[2] -= SCENARIO_INFO_SCROLL[2] - SCENARIO_INFO_SCROLL[0];
+        Self::child(tab, text, child)
+    }
+
+    // 49c5a9..49c66c constructs Tutorial details over the full mesh region,
+    // selects Font2 and configures style0 with both insets3. No scrollbar.
+    fn child(tab: &[u8], text: &[u8], child: [f32; 4]) -> Result<Self, String> {
+        let [left, top, _, bottom] = child;
         // Keep the fractional mesh edges until native toward-zero conversion.
         let width = (f64::from(child[2]) - f64::from(left) - 6.).trunc();
-        if bounds.iter().any(|v| !v.is_finite())
+        if child.iter().any(|v| !v.is_finite())
             || bottom <= top
             || width < 1.
             || width > f64::from(i32::MAX)
@@ -1235,8 +1345,8 @@ impl SinglePlayer {
             fonts: texture.textures[2..4].iter().map(Surface::new).collect(),
             tab: fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab"))
                 .map_err(|e| e.to_string())?,
-            // Native 4997d3/4997e5 and 499904/499916 select font2 for
-            // the Scenario description and list columns.
+            // 4997d3/4997e5, 499904/499916 and 49c65a/49c72d select Font2
+            // for the Scenario and Tutorial descriptions and list columns.
             scenario_list_fonts: texture.textures[4..6].iter().map(Surface::new).collect(),
             scenario_list_tab: fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
                 .map_err(|e| e.to_string())?,
@@ -1784,11 +1894,13 @@ impl SinglePlayer {
             }
             return;
         }
-        let row_height = if self.tutorial_screen {
-            14.
-        } else {
-            SCENARIO_ROW_HEIGHT
-        };
+        if self.tutorial_screen {
+            if let Ok(layout) = CampaignDescription::child(&self.scenario_list_tab, text, b) {
+                self.description_first = layout.wheel(self.description_first, delta);
+            }
+            return;
+        }
+        let row_height = SCENARIO_ROW_HEIGHT;
         let lines = wrap_lines(tab, text, b[2] - b[0]);
         if let Ok(lines) = lines {
             let visible = ((b[3] - b[1]) / row_height) as usize;
@@ -1797,10 +1909,19 @@ impl SinglePlayer {
                 as usize;
         }
     }
+    fn tutorial_list_layout(&self) -> Result<openmt2001::frontend_list::Layout, String> {
+        // 49c6ed..49c73f: style0 inset3, Font2, on the original list mesh.
+        openmt2001::frontend_list::Layout::from_font_with_insets(
+            self.tutorial_panel.bounds[8],
+            &self.scenario_list_tab,
+            [3., 3.],
+        )
+    }
     fn scenario_list_layout(&self) -> Result<openmt2001::frontend_list::Layout, String> {
-        openmt2001::frontend_list::Layout::from_font(
+        openmt2001::frontend_list::Layout::from_font_with_insets(
             self.scenario.bounds[8],
             &self.scenario_list_tab,
+            [3., 3.],
         )
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
@@ -1814,11 +1935,11 @@ impl SinglePlayer {
                     return Some(i);
                 }
             }
-            if inside(self.tutorial_panel.bounds[8]) {
-                let row =
-                    ((p[1] - self.tutorial_panel.bounds[8][1]) / TUTORIAL_ROW_HEIGHT) as usize;
-                return (row < crate::scenarios::TUTORIALS.len()).then_some(2 + row);
-            }
+            return self
+                .tutorial_list_layout()
+                .ok()?
+                .hit(p, 0, crate::scenarios::TUTORIALS.len())
+                .map(|row| 2 + row);
         } else if self.character_screen {
             for (i, part) in [70, 69, 53, 54].iter().enumerate() {
                 if inside(self.character_panel.bounds[*part]) {
@@ -1869,10 +1990,41 @@ impl SinglePlayer {
         selected: Option<usize>,
         pressed: bool,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.tutorial_surfaces(selected, pressed)?;
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+
+    fn tutorial_surfaces(
+        &self,
+        selected: Option<usize>,
+        pressed: bool,
+    ) -> Result<Vec<Surface>, String> {
         let b = &self.tutorial_panel.bounds;
         let mut surfaces = self.tutorial_panel.base.clone();
         let mut shapes = Surface::solid();
         let mut fonts = self.fonts.clone();
+        let mut list_fonts = self.scenario_list_fonts.clone();
         let mut title_fonts = self.title_fonts.clone();
         // 49c970 paints the Tutorial title-area child with a gold 433370
         // rectangle before its text. Vertex order is TL, BL, BR, TR.
@@ -1905,36 +2057,30 @@ impl SinglePlayer {
             true,
             0xffffffff,
         )?;
-        let [l, t, r, _] = b[8];
+        let layout = self.tutorial_list_layout()?;
         for (row, tutorial) in crate::scenarios::TUTORIALS.iter().enumerate() {
-            let top = t + row as f32 * TUTORIAL_ROW_HEIGHT;
-            if self.tutorial_index == Some(row) || selected == Some(2 + row) {
-                shapes.rect(
-                    [l, top, r, top + TUTORIAL_ROW_HEIGHT],
-                    [if self.tutorial_index == Some(row) {
-                        0xff008ed0
-                    } else {
-                        0x99505050
-                    }; 4],
-                );
-            }
-            ui::text(
-                &mut fonts,
-                &self.tab,
+            ui::list_highlight(
+                &mut shapes,
+                layout,
+                row,
+                self.tutorial_index == Some(row),
+                selected == Some(2 + row),
+            );
+            ui::list_text(
+                &mut list_fonts,
+                &self.scenario_list_tab,
                 &self.strings[level_labels(tutorial.id).unwrap().0],
-                [l + 3., top, 430., top + TUTORIAL_ROW_HEIGHT],
-                false,
-                0xffffffff,
+                layout,
+                row,
             )?;
         }
         if let Some((_, description)) = labels {
-            wrapped(
-                &mut fonts,
-                &self.tab,
-                &self.strings[description],
-                b[11],
-                self.description_first,
-            )?;
+            CampaignDescription::child(&self.scenario_list_tab, &self.strings[description], b[11])?
+                .paint(
+                    &mut list_fonts,
+                    &self.scenario_list_tab,
+                    self.description_first,
+                )?;
         }
         for (i, part, label, color) in [(0, 13, 1435, [80, 148, 34]), (1, 12, 1439, [175, 6, 6])] {
             ui::button(
@@ -1963,6 +2109,7 @@ impl SinglePlayer {
         )?;
         surfaces.push(shapes);
         surfaces.extend(fonts);
+        surfaces.extend(list_fonts);
         surfaces.extend(title_fonts);
         for row in tutorial_tick_rows(self.catalog.as_ref()) {
             self.image(
@@ -1971,28 +2118,7 @@ impl SinglePlayer {
                 tutorial_tick_rect(row),
             )?;
         }
-        renderer.prepare(
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        Ok(surfaces)
     }
     pub fn advance_highlight(&mut self) -> bool {
         if !self.visible || !self.character_screen {
@@ -2239,25 +2365,19 @@ impl SinglePlayer {
                 .take(list_layout.visible_rows())
                 .filter(|_| self.custom.is_none())
             {
-                let mut text_bounds = list_layout.text_bounds(row);
-                text_bounds[0] += 3.;
-                if self.scenario_id == Some(id) || selected == Some(5 + row) {
-                    shapes.rect(
-                        list_layout.highlight(row),
-                        [if self.scenario_id == Some(id) {
-                            0xff008ed0
-                        } else {
-                            0x99505050
-                        }; 4],
-                    );
-                }
-                ui::text(
+                ui::list_highlight(
+                    &mut shapes,
+                    list_layout,
+                    row,
+                    self.scenario_id == Some(id),
+                    selected == Some(5 + row),
+                );
+                ui::list_text(
                     &mut scenario_list_fonts,
                     &self.scenario_list_tab,
                     &self.scenario_record_text_at(id, true),
-                    text_bounds,
-                    false,
-                    0xffffffff,
+                    list_layout,
+                    row,
                 )?;
                 let completed = self
                     .catalog
@@ -3113,6 +3233,51 @@ mod campaign_description_tests {
             panel
         }
     }
+    #[test]
+    #[ignore = "requires original Tutorial mesh, fonts, language and executable"]
+    fn original_tutorial_layout_wrap_and_palette() {
+        let supplied = Supplied::read();
+        let mut panel = supplied.panel();
+        panel.tutorial_screen = true;
+        panel.tutorial_index = Some(0);
+        let b = panel.tutorial_panel.bounds[11];
+        let id = level_labels(crate::scenarios::TUTORIALS[0].id).unwrap().1;
+        let layout =
+            CampaignDescription::child(&panel.scenario_list_tab, &panel.strings[id], b).unwrap();
+        println!(
+            "Tutorial list {:?}, description {b:?}, wrap {}, rows {:?}",
+            panel.tutorial_panel.bounds[8],
+            b[2] - b[0] - 6.,
+            layout
+                .rows()
+                .map(|row| row.iter().map(|b| char::from(b + 32)).collect::<String>())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            layout.rows().collect::<Vec<_>>(),
+            [
+                ascii("Learn about the various panels around the"),
+                ascii("screen, and what they do."),
+            ]
+        );
+        let image = PeImage::parse(&supplied.executable).unwrap();
+        for (address, color) in [
+            (0x536294, openmt2001::frontend_list::SELECTED_COLOR),
+            (
+                0x5362ac,
+                openmt2001::frontend_list::HOVER_COLOR | 0xff000000,
+            ),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(image.at(address, 4).unwrap().try_into().unwrap()),
+                color
+            );
+        }
+        assert_eq!(panel.tutorial_list_layout().unwrap().pitch, 12.);
+        let surfaces = panel.tutorial_surfaces(Some(3), false).unwrap();
+        assert!(surfaces.iter().any(|surface| !surface.vertices.is_empty()));
+    }
+
     #[test]
     #[ignore = "requires SHA-pinned original assets, patched language and sha256sum"]
     fn supplied_starting_out_description_offsets_paint_and_scroll() {

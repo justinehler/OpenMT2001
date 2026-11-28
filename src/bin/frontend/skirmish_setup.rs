@@ -516,7 +516,12 @@ impl SetupPanel {
         Ok(b)
     }
     fn list_layout(&self, bounds: [f32; 4]) -> Result<openmt2001::frontend_list::Layout, String> {
-        openmt2001::frontend_list::Layout::from_font(bounds, &self.fonts[1].tab)
+        // 4a2980 configures the condition and map primary payloads at (0,0,3).
+        openmt2001::frontend_list::Layout::from_font_with_insets(
+            bounds,
+            &self.fonts[1].tab,
+            [0., 3.],
+        )
     }
     fn map_capacity(&self) -> Result<usize, String> {
         Ok(self.list_layout(self.map_viewport()?)?.visible_rows())
@@ -887,16 +892,19 @@ impl SetupPanel {
                         .skip(first)
                         .take(layout.visible_rows())
                     {
-                        let row = layout.text_bounds(i - first);
-                        if state.selected == Some(i) {
-                            shapes.rect(layout.highlight(i - first), [0xff008ed0; 4]);
-                        }
-                        ui::text_widget_style0(
+                        ui::list_highlight(
+                            &mut shapes,
+                            layout,
+                            i - first,
+                            state.selected == Some(i),
+                            selected == Some(Action::Row(i)),
+                        );
+                        ui::list_text(
                             &mut pages[1],
                             tab,
                             &self.record_text(&state.catalog.levels[level], true)?,
-                            row,
-                            0xffffffff,
+                            layout,
+                            i - first,
                         )?;
                     }
                 }
@@ -914,16 +922,19 @@ impl SetupPanel {
                 .skip(first)
                 .take(self.map_capacity()?)
             {
-                let row = layout.text_bounds(i - first);
-                if state.map_selected == Some(i) {
-                    shapes.rect(layout.highlight(i - first), [0xff008ed0; 4]);
-                }
-                ui::text_widget_style0(
+                ui::list_highlight(
+                    &mut shapes,
+                    layout,
+                    i - first,
+                    state.map_selected == Some(i),
+                    selected == Some(Action::MapRow(i)),
+                );
+                ui::list_text(
                     &mut pages[1],
                     tab,
                     &self.encoded(identity)?,
-                    row,
-                    0xffffffff,
+                    layout,
+                    i - first,
                 )?;
             }
             let maximum = self.map_limit(state)?;
