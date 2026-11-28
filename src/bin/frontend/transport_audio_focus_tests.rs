@@ -1,6 +1,8 @@
 use super::*;
 use crate::audio_bus::focus::{Action, Guards, SharedAudio};
 
+include!("transport_audio_construction_crane_tests.rs");
+
 fn owner() -> (Player, SharedAudio, rodio::mixer::MixerSource) {
     let samples = vec![0.5; 65536];
     let assets = Assets {
