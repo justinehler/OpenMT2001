@@ -327,6 +327,17 @@ impl Inspection {
     pub(super) fn save_visible(&self) -> bool {
         self.secondary_enabled() && self.save_dialog.visible
     }
+    /// Whether an 88c0d4 confirmation is raised into the secondary group:
+    /// Save Game's Overwrite or Delete, or Options Quit.
+    pub(super) fn secondary_confirmation_open(&self) -> bool {
+        self.save_visible() && self.save_dialog.generic_prompt().is_some()
+            || self.options_visible() && self.game_options.quit_prompt.request().is_some()
+    }
+    /// Advance the secondary group's fade to the worker's interface samples.
+    pub(super) fn observe_secondary_fade(&mut self, interface_ticks: u64) {
+        let modal = self.secondary_confirmation_open();
+        self.secondary_fade.observe(interface_ticks, modal);
+    }
     pub(super) fn settings_visible(&self) -> bool {
         self.secondary_enabled() && self.settings_menu.page.is_some()
     }

@@ -125,6 +125,7 @@ impl Intro {
                             &mut view.prompt_reply,
                             status.prompt_updates,
                         )?;
+                        view.observe_secondary_fade(status.interface_ticks);
                         if let Some(image) = &status.window_texture {
                             self.renderer.publish_window_texture(image.pixels.clone())?;
                             for index in view.scene.set_window_pixels(image.pixels.clone())? {
@@ -273,6 +274,7 @@ impl Intro {
                             &mut view.prompt_reply,
                             clock.prompt_updates,
                         )?;
+                        view.observe_secondary_fade(clock.interface_ticks);
                         view.time_panel.update_clock(
                             &self.assets.time_panel,
                             &self.renderer,

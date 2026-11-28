@@ -243,8 +243,9 @@ impl Assets {
         renderer: &Renderer,
         view: &View,
         pointer: Option<[f32; 2]>,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        let surfaces = self.surfaces(view, pointer)?;
+        let surfaces = self.surfaces(view, pointer, panel_alpha)?;
         renderer.prepare(
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
             VIEW,
@@ -252,8 +253,15 @@ impl Assets {
         )
     }
     /// The panel in draw order: mesh, 497ab0's rectangles, sliders,
-    /// headings, then the three fonts.
-    fn surfaces(&self, view: &View, pointer: Option<[f32; 2]>) -> Result<Vec<Surface>, String> {
+    /// headings, then the three fonts. `panel_alpha` is the secondary
+    /// group's fade on the bound save_menu_V2.tm model; 497ab0's rectangles
+    /// and the text keep their own colours.
+    fn surfaces(
+        &self,
+        view: &View,
+        pointer: Option<[f32; 2]>,
+        panel_alpha: u8,
+    ) -> Result<Vec<Surface>, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
         let mut headings = Surface::solid();
@@ -481,6 +489,7 @@ impl Assets {
             )?;
         }
         let mut surfaces = self.base.clone();
+        crate::modal_frame::set_alpha(&mut surfaces, panel_alpha);
         surfaces.push(shapes);
         // Native 43e790 draws slider children before Save's 497ab0 heading
         // overlay. Its y70 list arrow is dimmed by the later y71..94 heading.
@@ -1045,6 +1054,49 @@ mod save_list_order_tests;
 mod tests {
     use super::*;
     #[test]
+    fn confirmation_fade_reaches_the_panel_model_only() {
+        // 497f60/4981d0 raise the prompt with 43cb80, so 43bce0 fades the
+        // bound save_menu_V2.tm model; 497ab0's rectangles keep their colours.
+        let (tab1, glyph_map) = ui::text_field::synthetic_font();
+        let mut part = Surface::solid();
+        part.rect([0., 0., 640., 480.], [0xff00_24c6; 4]);
+        let assets = Assets {
+            base: vec![part.clone(), part],
+            info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+                .unwrap(),
+            bounds: vec![[20., 40., 300., 80.]; 26],
+            list_layout: openmt2001::frontend_list::Layout::new([20., 40., 104., 302.], 12., 3.)
+                .unwrap(),
+            font1: vec![Surface::solid(); 2],
+            font2: vec![Surface::solid(); 2],
+            font4: vec![Surface::solid(); 2],
+            tab2: tab1.clone(),
+            tab4: tab1.clone(),
+            tab1,
+            strings: vec![glyph_map; 0x700],
+            level_text: openmt2001::level_text::LevelTextCatalog::default(),
+            slider_textures: vec![Surface::solid(); 128],
+        };
+        let view = View {
+            visible: true,
+            modal: Some(Modal::Overwrite),
+            ..View::default()
+        };
+        let open = assets.surfaces(&view, None, 255).unwrap();
+        let faded = assets
+            .surfaces(&view, None, crate::modal_frame::SETTLED_ALPHA)
+            .unwrap();
+        for (open, faded) in open.iter().zip(&faded).take(assets.base.len()) {
+            assert_eq!(open.alpha, [255; 6]);
+            assert_eq!(faded.alpha, [125; 6]);
+            assert_eq!(faded.vertices, open.vertices);
+        }
+        for (open, faded) in open.iter().zip(&faded).skip(assets.base.len()) {
+            assert_eq!(faded.alpha, open.alpha);
+            assert_eq!(faded.vertices, open.vertices);
+        }
+    }
+    #[test]
     fn save_dialog_requires_confirmed_name_or_selected_slot() {
         let mut bounds = vec![[0.; 4]; 26];
         bounds[8] = [20., 40., 120., 327.];
@@ -1366,7 +1418,7 @@ mod tests {
             metadata,
         });
         view.selected = Some(0);
-        let surfaces = assets.surfaces(&view, None).unwrap();
+        let surfaces = assets.surfaces(&view, None, 255).unwrap();
         let rects = solid_rects(&surfaces[assets.base.len()]);
         // 497ab0: the title gradient and the two 0x5362c0 backings only; no
         // full-panel blue fill brightens the Overwrite panel.
@@ -1543,7 +1595,7 @@ mod tests {
                 visible: true,
                 ..View::default()
             };
-            let panel = assets.prepare(&renderer, &view, None).unwrap();
+            let panel = assets.prepare(&renderer, &view, None, 255).unwrap();
             crate::capture_test::capture_scene_overlays(
                 &renderer,
                 &scene,
@@ -1563,7 +1615,7 @@ mod tests {
                 metadata,
             });
             view.selected = Some(0);
-            let panel = assets.prepare(&renderer, &view, None).unwrap();
+            let panel = assets.prepare(&renderer, &view, None, 255).unwrap();
             crate::capture_test::capture_scene_overlays(
                 &renderer,
                 &scene,
@@ -1603,7 +1655,10 @@ mod tests {
                 view.modal = Some(modal);
                 let (dialog, pressed_button) = view.generic_prompt().unwrap();
                 assert_eq!(dialog.portrait, crate::human_dialog::NO_PORTRAIT);
-                let page = assets.prepare(&renderer, &view, None).unwrap();
+                // 43cb80 fades the page behind the raised prompt.
+                let page = assets
+                    .prepare(&renderer, &view, None, crate::modal_frame::SETTLED_ALPHA)
+                    .unwrap();
                 let popup = generic
                     .prepare_screen_confirmation(&renderer, dialog, [-1.; 2], pressed_button)
                     .unwrap();
@@ -1619,7 +1674,7 @@ mod tests {
             view.selected = None;
             view.modal = Some(Modal::Name);
             view.name = "test1-".into();
-            let panel = assets.prepare(&renderer, &view, None).unwrap();
+            let panel = assets.prepare(&renderer, &view, None, 255).unwrap();
             let modal = assets
                 .prepare_name_modal(&renderer, &view, None)
                 .unwrap()

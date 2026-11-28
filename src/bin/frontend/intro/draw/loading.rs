@@ -284,6 +284,7 @@ impl Intro {
                         time_pressed: None,
                         game_options: crate::game_options::View::default(),
                         save_dialog: crate::save_dialog::View::default(),
+                        secondary_fade: Default::default(),
                         save_pending: None,
                         options_ack: options_ack::Gate::default(),
                         save_delete_pending: None,

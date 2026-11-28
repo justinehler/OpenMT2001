@@ -886,6 +886,7 @@ impl Intro {
                         &self.renderer,
                         &view.save_dialog,
                         view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        view.secondary_fade.alpha(),
                     )?;
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &panel);
@@ -927,6 +928,7 @@ impl Intro {
                         &self.assets.game_options,
                         &self.renderer,
                         view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        view.secondary_fade.alpha(),
                     )?;
                     if let Some(panel) = &view.game_options.prepared {
                         self.renderer
