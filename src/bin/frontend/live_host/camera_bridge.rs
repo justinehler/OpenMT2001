@@ -51,16 +51,17 @@ impl PropertySource {
             .as_ref()
             .ok_or_else(|| "actual Session resident source absent".into())
     }
-    /// Only explicit cfg(test) property-only fixtures may omit resident authority.
+    /// Only explicit test property-only fixtures (cfg(test), or the game's tests
+    /// through test-support) may omit resident authority.
     pub fn resident_for_install(&self) -> Result<Option<&ResidentSource>, String> {
         if let Some(source) = &self.resident {
             return Ok(Some(source));
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             Ok(None)
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         {
             Err("actual completed Session resident source absent".into())
         }

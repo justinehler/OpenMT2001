@@ -180,11 +180,11 @@ pub fn report_status(status: &Status, previous: Option<&Status>) {
 struct AiWarnings {
     count: u64,
     last_message: Option<String>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     expected_count: u64,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for AiWarnings {
     fn drop(&mut self) {
         // Preserve an existing test failure instead of panicking during unwind.
@@ -377,7 +377,7 @@ pub struct Host {
 impl Host {
     /// Declare the exact number of deliberately injected warnings in a test.
     /// All other session tests reject warnings when their host is dropped.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn expect_ai_warnings(&mut self, count: u64) {
         self.ai_warnings.expected_count = count;
     }
