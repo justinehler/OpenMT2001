@@ -621,7 +621,7 @@ fn retirement_preserves_an_independent_new_load_receiver() {
         .unwrap();
     assert_eq!(
         loading.as_ref().unwrap().try_recv().unwrap().err().unwrap(),
-        "independent initial load remains owned"
+        "independent initial load remains owned".into()
     );
 }
 
