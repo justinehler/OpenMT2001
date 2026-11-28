@@ -126,6 +126,74 @@ fn settings_draw_headers_use_green_palette_font1_and_style9() {
     }
 }
 
+#[test]
+fn settings_draw_ok_uses_original_page_base_colors() {
+    let assets = synthetic_assets();
+    // OK colours from each panel's button table, passed to the shared button
+    // widget 0x4428a0: Sound 0x5435e0, Graphics 0x542678, Gameplay 0x542390.
+    for (page, rgb) in [
+        (Page::Sound, [80., 148., 24.]),
+        (Page::Graphics, [80., 148., 34.]),
+        (Page::Gameplay, [80., 148., 34.]),
+    ] {
+        let surfaces = assets.surfaces(state(page)).unwrap();
+        let [l, t, r, b] = assets.bounds(page, Button::Back).unwrap();
+        let fills = surfaces[0]
+            .vertices
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, quad)| rect(*quad) == [l + 4., t + 4., r - 4., b - 4.])
+            .collect::<Vec<_>>();
+        assert_eq!(fills.len(), 1, "{page:?} OK interior");
+        let (index, fill) = fills[0];
+        for vertex in fill {
+            assert_eq!(vertex[3..6], rgb.map(|v| v / 255.), "{page:?} OK RGB");
+        }
+        assert_eq!(
+            surfaces[0].alpha[index * 6..index * 6 + 6],
+            [255, 255, 90, 255, 90, 90],
+            "{page:?} shared button gradient"
+        );
+    }
+}
+
+#[test]
+fn settings_draw_low_high_use_font3_and_style9_on_all_pages() {
+    let assets = synthetic_assets();
+    for (page, regions) in [
+        (Page::Sound, &[11, 12, 19, 20][..]),
+        (Page::Graphics, &[32, 31][..]),
+        (Page::Gameplay, &[26, 27][..]),
+    ] {
+        let surfaces = assets.surfaces(state(page)).unwrap();
+        for &region in regions {
+            let [l, t, r, b] = assets.panel(page).regions[region];
+            let glyphs = surfaces
+                .iter()
+                .flat_map(|surface| surface.vertices.as_chunks::<6>().0)
+                .filter(|quad| {
+                    let [ql, qt, qr, qb] = rect(*quad);
+                    ql >= l && qt >= t && qr <= r && qb <= b
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(glyphs.len(), 1, "{page:?} Low/High region {region}");
+            // The synthetic fonts have distinct metrics: font 3 is 3x6,
+            // font 1 is 7x10 and the generic font is 11x14. Style 9 centers
+            // the unscaled glyph with the original integer placement.
+            assert_eq!(
+                rect(glyphs[0]),
+                [58.5, t + 6.5, 61.5, t + 12.5],
+                "{page:?} region {region} font 3, style 9"
+            );
+            for vertex in glyphs[0] {
+                assert_eq!(vertex[3..6], [1.; 3]);
+            }
+        }
+    }
+}
+
 fn assert_slider_draw(
     assets: &Assets,
     page: Page,
