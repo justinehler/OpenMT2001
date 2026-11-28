@@ -29,6 +29,8 @@ fn assets() -> Assets {
     ] {
         strings[id] = ascii(text);
     }
+    // USA currency layout: the symbol leads the amount.
+    strings[2244] = vec![b'L'];
     let mut tab = ui::synthetic_text_font(4, 8);
     // Encode each glyph in its U coordinate so tests can read the actual
     // submitted bold-font batch without invoking a GPU or duplicating layout.
@@ -206,7 +208,7 @@ fn refurbish_draws_centered_white_header_and_each_price_without_cost_row() {
         );
     }
     let list = assets.conversion_list().unwrap();
-    click(&mut view, &assets, list.text_bounds(1));
+    click(&mut view, &assets, list.highlight(1));
     assert_eq!(view.selected, Some(1));
     let surfaces = assets.surfaces(&view, 128).unwrap();
     let mut highlight = Surface::solid();
@@ -241,7 +243,7 @@ fn refurbish_scrollbar_changes_visible_rows_and_hit_selection() {
     assert_eq!(view.scroll, 1);
     assert_eq!(view.selected, None);
     let list = assets.conversion_list().unwrap();
-    click(&mut view, &assets, list.text_bounds(0));
+    click(&mut view, &assets, list.highlight(0));
     assert_eq!(view.selected, Some(1));
     let surfaces = assets.surfaces(&view, 128).unwrap();
     assert!(text(bold(&surfaces)).starts_with("ref: BakeryBook Store$101.00"));
@@ -250,11 +252,7 @@ fn refurbish_scrollbar_changes_visible_rows_and_hit_selection() {
     view.pointer(&assets, Some([188., track[3] + 30.]));
     view.mouse(&assets, Some([188., track[3] + 30.]), false);
     assert_eq!(view.scroll, 40 - list.visible_rows());
-    click(
-        &mut view,
-        &assets,
-        list.text_bounds(list.visible_rows() - 1),
-    );
+    click(&mut view, &assets, list.highlight(list.visible_rows() - 1));
     assert_eq!(view.selected, Some(39));
     click(&mut view, &assets, arrows[1]);
     assert_eq!(view.scroll, 40 - list.visible_rows());
