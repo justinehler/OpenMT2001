@@ -944,6 +944,57 @@ mod tests {
         assert!(with(&["--save", "y", "--frame-ms", "0"]).is_err());
         assert!(with(&["--scenario", "x", "--write-save", "z"]).is_err());
         assert!(with(&["--save", "y", "--write-save", "z"]).is_ok());
+        assert!(with(&["--scenario", "x", "--autosave-dir", "d"]).is_err());
+        assert!(with(&["--save", "y", "--autosaves", "1"]).is_err());
+        assert!(with(&["--save", "y", "--autosave-dir", "d", "--autosaves", "0"]).is_err());
+    }
+
+    #[test]
+    fn save_starts_take_a_seed_and_autosave_limits() {
+        let options = parse(&[
+            "--save",
+            "a.sav",
+            "--seed",
+            "7",
+            "--autosave-dir",
+            "out",
+            "--autosaves",
+            "2",
+            "--assets",
+            "a",
+            "--scene-root",
+            "b",
+            "--executable",
+            "c/d",
+        ])
+        .unwrap();
+        assert_eq!(
+            options.start,
+            Start::Save {
+                path: "a.sav".into(),
+                seed: 7
+            }
+        );
+        assert_eq!(options.autosave_dir, Some(PathBuf::from("out")));
+        assert_eq!((options.autosaves, options.ticks), (Some(2), u32::MAX));
+        let bounded = parse(&[
+            "--save",
+            "a.sav",
+            "--autosave-dir",
+            "out",
+            "--autosaves",
+            "2",
+            "--ticks",
+            "9",
+            "--assets",
+            "a",
+            "--scene-root",
+            "b",
+            "--executable",
+            "c/d",
+        ])
+        .unwrap();
+        assert_eq!(bounded.ticks, 9);
     }
 
     fn fixture_options(start: Start, ticks: u32) -> Options {
