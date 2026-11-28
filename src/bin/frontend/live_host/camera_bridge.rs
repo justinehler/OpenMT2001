@@ -64,7 +64,7 @@ pub struct PropertySource {
 }
 impl PropertySource {
     pub fn capture(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         resource: crate::selection::pavement_resource::LocalPavementHandle,
     ) -> Self {
         Self {

@@ -1,5 +1,5 @@
 use super::*;
-use fresh_city::{CommandAssets, Inputs, Policy, Session, tick::Event};
+use openmt2001::session::{CommandAssets, Inputs, Policy, Session, tick::Event};
 use openmt2001::{category_ownership::Seam, economy::AccountPosting, live_commands};
 
 fn word(row: &[u8], at: usize) -> u32 {
@@ -33,7 +33,7 @@ fn with_session(test: impl FnOnce(&mut Session<'_>, &CommandAssets<'_, '_>)) {
         .parent()
         .unwrap()
         .join("US/language/usa");
-    let names = fresh_city::character_names(&image, &language).unwrap();
+    let names = openmt2001::session::character_names(&image, &language).unwrap();
     let mut session = Session::initialize(
         Inputs {
             tree_locators: None,
@@ -52,7 +52,7 @@ fn with_session(test: impl FnOnce(&mut Session<'_>, &CommandAssets<'_, '_>)) {
             road_routes: read("ROAD_ROUTE_TABLE"),
             scripts,
             parameters: std::str::from_utf8(&parameters).unwrap(),
-            era_styles: fresh_city::load_era_styles(
+            era_styles: openmt2001::session::load_era_styles(
                 openmt2001::fixtures::path("PARAMETERS").parent().unwrap(),
             )
             .unwrap(),
@@ -780,9 +780,9 @@ fn conversion_feedback_follows_debit_before_business_replacement() {
         assert_eq!(session.world.ledgers.businesses, businesses);
     });
 }
-fn simulation_test_policy() -> fresh_city::tick::Policy {
+fn simulation_test_policy() -> openmt2001::session::tick::Policy {
     use openmt2001::{hourly, scheduler};
-    fresh_city::tick::Policy {
+    openmt2001::session::tick::Policy {
         scheduler: scheduler::Controls {
             iterations: 1,
             abort: false,

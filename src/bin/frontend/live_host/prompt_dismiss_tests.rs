@@ -2,7 +2,7 @@ use super::*;
 use level_script::Hooks as _;
 use openmt2001::level_script::prompt_dismiss;
 
-fn message(hooks: &mut fresh_city::Hooks, context: u32) {
+fn message(hooks: &mut openmt2001::session::Hooks, context: u32) {
     hooks
         .command(
             level_script::Command::TutorialMessage,
@@ -32,7 +32,11 @@ fn runtime() -> openmt2001::lua4::Runtime {
     vm
 }
 
-fn callback(hooks: &mut fresh_city::Hooks, id: u32, args: &[Value]) -> Result<Option<f64>, String> {
+fn callback(
+    hooks: &mut openmt2001::session::Hooks,
+    id: u32,
+    args: &[Value],
+) -> Result<Option<f64>, String> {
     match id {
         725 | 749 => prompt_dismiss::handle(id, hooks),
         10000 => Ok(hooks.script_prompt().map(|r| r.dismissal_id as f64)),
@@ -55,7 +59,7 @@ fn callback(hooks: &mut fresh_city::Hooks, id: u32, args: &[Value]) -> Result<Op
 fn synchronous_prompt_dismiss_updates_caller_and_preserves_picking_write_order() {
     for producer in ["TutorialEvent", "Picked3D"] {
         let mut vm = runtime();
-        let mut hooks = fresh_city::Hooks::new();
+        let mut hooks = openmt2001::session::Hooks::new();
         message(&mut hooks, 17);
         vm.execute(
             "nested dismiss",
@@ -97,7 +101,7 @@ fn synchronous_prompt_dismiss_updates_caller_and_preserves_picking_write_order()
         assert_eq!(picking.block_id, 9, "nested filter write survives disable");
         assert_eq!(hooks.script_prompt_closes, [4]);
         // The presenter gets nested admissions before the old head's close.
-        let mut presented = prompt::State::default();
+        let mut presented = prompt_queue::State::default();
         let requests = hooks
             .commands
             .iter()
@@ -124,7 +128,7 @@ fn synchronous_prompt_dismiss_updates_caller_and_preserves_picking_write_order()
 #[test]
 fn synchronous_prompt_dismiss_zero_context_suppresses_catch_and_promotes_queue() {
     let mut vm = runtime();
-    let mut hooks = fresh_city::Hooks::new();
+    let mut hooks = openmt2001::session::Hooks::new();
     message(&mut hooks, 0);
     message(&mut hooks, 7);
     vm.execute(
@@ -146,7 +150,7 @@ fn synchronous_prompt_dismiss_zero_context_suppresses_catch_and_promotes_queue()
 #[test]
 fn synchronous_prompt_dismiss_missing_catch_and_empty_queue_are_safe() {
     let mut vm = runtime();
-    let mut hooks = fresh_city::Hooks::new();
+    let mut hooks = openmt2001::session::Hooks::new();
     message(&mut hooks, 17);
     vm.execute(
         "missing catch",
@@ -161,7 +165,7 @@ fn synchronous_prompt_dismiss_missing_catch_and_empty_queue_are_safe() {
 #[test]
 fn synchronous_prompt_dismiss_error_unlinks_after_catch_and_keeps_vm_usable() {
     let mut vm = runtime();
-    let mut hooks = fresh_city::Hooks::new();
+    let mut hooks = openmt2001::session::Hooks::new();
     message(&mut hooks, 17);
     let error = vm
         .execute(

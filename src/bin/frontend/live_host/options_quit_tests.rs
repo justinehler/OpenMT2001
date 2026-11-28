@@ -31,7 +31,7 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
                 .parent()
                 .unwrap()
                 .join("US/language/usa");
-            let names = fresh_city::character_names(&image, &language).unwrap();
+            let names = openmt2001::session::character_names(&image, &language).unwrap();
             let offsets = std::fs::read(language.join("tycoon.off")).unwrap();
             let bytes = std::fs::read(language.join("tycoon.bin")).unwrap();
             let mut at = 0;
@@ -48,7 +48,7 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
                 .collect::<Vec<_>>();
             // The frontend prompt_panel.tm owner that 49e970 raises (88c0d4).
             let prompts =
-                prompt::Assets::load(&index, &archive, installer, &strings, &image).unwrap();
+                crate::prompt::Assets::load(&index, &archive, installer, &strings, &image).unwrap();
             let assets = CommandAssets {
                 image: &image,
                 board: &board,
@@ -59,7 +59,7 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
                 ("SCENARIO1", ResultMenu::Scenarios),
             ] {
                 let mut session = Session::initialize(
-                    fresh_city::Inputs {
+                    openmt2001::session::Inputs {
                         tree_locators: None,
                         image: &image,
                         board: &board,
@@ -77,8 +77,10 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
                         road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
                         scripts: settings.parent().unwrap().parent().unwrap(),
                         parameters: std::str::from_utf8(&parameters).unwrap(),
-                        era_styles: fresh_city::load_era_styles(parameter.parent().unwrap())
-                            .unwrap(),
+                        era_styles: openmt2001::session::load_era_styles(
+                            parameter.parent().unwrap(),
+                        )
+                        .unwrap(),
                         timetable: std::str::from_utf8(&timetable).unwrap(),
                         scenario,
                         difficulty: 0,
@@ -86,7 +88,7 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
                         profile_name: b"Quit test",
                         character_names: &names,
                     },
-                    fresh_city::Policy {
+                    openmt2001::session::Policy {
                         seed: 0x12345678,
                         auxiliary_prior_bytes: [0; 0x11c],
                     },
