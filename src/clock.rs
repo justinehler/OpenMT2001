@@ -126,6 +126,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn zero_year_tutorial_rollover_keeps_the_autosave_cut_and_network_gate() {
+        for network in [false, true] {
+            let mut clock = Clock {
+                calendar: [23, 0, 0, 23, 0],
+                timing: [15000, 15000, 624, 15000, 0, 1],
+            };
+            let mut controls = Controls {
+                years_per_day: 0,
+                suppress_rollover_query: false,
+                rollover_events_enabled: true,
+                autosave_disabled: network,
+            };
+            let mut calls = Vec::new();
+            clock.advance_hour(&mut controls, |event, clock, _| {
+                calls.push((event, *clock));
+                // 48dbf0 reports busy for tutorials, suppressing daily work
+                // without suppressing the later automatic writer.
+                event == Event::RolloverQuery
+            });
+            let events: Vec<_> = calls.iter().map(|(event, _)| *event).collect();
+            let mut expected = vec![Event::Hourly, Event::RolloverQuery];
+            if !network {
+                expected.push(Event::Autosave);
+                let cut = calls.last().unwrap().1;
+                assert_eq!(cut.calendar, [0, 0, 0, 23, 1]);
+                assert_eq!(cut.timing, [15000, 15000, 0, 0, 0, 1]);
+            }
+            assert_eq!(events, expected);
+            assert_eq!(clock.calendar, [0, 0, 0, 0, 1]);
+        }
+    }
+
+    #[test]
     fn failed_hourly_dispatch_does_not_roll_over() {
         let mut clock = Clock {
             calendar: [23, 9, 2, 719, 6],
