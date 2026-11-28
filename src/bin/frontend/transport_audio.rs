@@ -442,7 +442,7 @@ impl Player {
         gain: f32,
     ) -> Option<Handle> {
         let mixer = self.mixer()?.clone();
-        self.audio.effect(
+        self.audio.effect_with_channels(
             &mixer,
             VoiceRequest {
                 name,
@@ -452,6 +452,7 @@ impl Player {
             },
             samples,
             gain,
+            self.bus.output_channels(),
         )
     }
 

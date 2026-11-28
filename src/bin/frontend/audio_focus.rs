@@ -135,6 +135,22 @@ impl SharedAudio {
             .effects
             .request(mixer, request, samples, gain)
     }
+    pub fn effect_with_channels(
+        &self,
+        mixer: &rodio::mixer::Mixer,
+        request: super::effects::Request<'_>,
+        samples: &[f32],
+        gain: f32,
+        output_channels: u16,
+    ) -> Option<super::effects::Handle> {
+        self.0.borrow_mut().effects.request_with_channels(
+            mixer,
+            request,
+            samples,
+            gain,
+            output_channels,
+        )
+    }
     pub fn set_listener(&self, listener: super::spatial::Listener) {
         self.0.borrow_mut().effects.set_listener(listener);
     }

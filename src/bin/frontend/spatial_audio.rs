@@ -90,20 +90,22 @@ impl Gains {
 fn pack(gains: [f32; 2]) -> u64 {
     u64::from(gains[0].to_bits()) | (u64::from(gains[1].to_bits()) << 32)
 }
-/// Mono WAV -> stereo, sharing one gain snapshot across each sample pair.
-/// Source-level/preference gain remains on Sink, outside this adapter.
+/// Mono WAV presentation; stereo pairs share one gain snapshot. Mono output
+/// uses distance gain alone. Source/preference gain remains on Sink.
 #[derive(Clone)]
 pub struct Stereo<S> {
     source: S,
     gains: Arc<Gains>,
     right: Option<f32>,
+    mono: bool,
 }
 impl<S> Stereo<S> {
-    pub fn new(source: S, gains: Arc<Gains>) -> Self {
+    pub fn new(source: S, gains: Arc<Gains>, output_channels: u16) -> Self {
         Self {
             source,
             gains,
             right: None,
+            mono: output_channels == 1,
         }
     }
 }
@@ -115,6 +117,11 @@ impl<S: Source> Iterator for Stereo<S> {
         }
         let sample = self.source.next()?;
         let gains = self.gains.load();
+        // Mono devices ignore direction; rodio's default channel converter
+        // would discard the right channel and lose sources to our right.
+        if self.mono {
+            return Some(sample * gains[0].max(gains[1]));
+        }
         self.right = Some(sample * gains[1]);
         Some(sample * gains[0])
     }
@@ -123,10 +130,10 @@ impl<S: Source> Source for Stereo<S> {
     fn current_span_len(&self) -> Option<usize> {
         self.source
             .current_span_len()
-            .map(|n| n * 2 + usize::from(self.right.is_some()))
+            .map(|n| n * usize::from(self.channels()) + usize::from(self.right.is_some()))
     }
     fn channels(&self) -> u16 {
-        2
+        if self.mono { 1 } else { 2 }
     }
     fn sample_rate(&self) -> u32 {
         self.source.sample_rate()

@@ -137,6 +137,16 @@ impl Owner {
         samples: &[f32],
         gain: f32,
     ) -> Option<Handle> {
+        self.request_with_channels(mixer, request, samples, gain, 2)
+    }
+    pub fn request_with_channels(
+        &mut self,
+        mixer: &Mixer,
+        request: Request<'_>,
+        samples: &[f32],
+        gain: f32,
+        output_channels: u16,
+    ) -> Option<Handle> {
         let path = request.path();
         let slots: &mut [Option<Entry>] = if request.streamed {
             &mut self.streamed
@@ -179,9 +189,13 @@ impl Owner {
         // Repeat raw PCM, not rendered stereo: rodio buffers repeat input,
         // and caching spatial gains there would freeze them after one loop.
         if request.looping {
-            sink.append(Stereo::new(source.repeat_infinite(), gains.clone()));
+            sink.append(Stereo::new(
+                source.repeat_infinite(),
+                gains.clone(),
+                output_channels,
+            ));
         } else {
-            sink.append(Stereo::new(source, gains.clone()));
+            sink.append(Stereo::new(source, gains.clone(), output_channels));
         }
         let voice = Rc::new(Voice {
             spatial: RefCell::new(None),

@@ -24,6 +24,7 @@ pub struct Bus {
     level: u8,
     gain: f32,
     attempted: bool,
+    output_channels: u16,
 }
 impl Bus {
     pub fn new() -> Self {
@@ -33,7 +34,11 @@ impl Bus {
             ..Self::default()
         }
     }
+    pub fn output_channels(&self) -> u16 {
+        self.output_channels
+    }
     fn connect_to(&mut self, output: &Mixer, channels: u16, sample_rate: u32) {
+        self.output_channels = channels;
         let (mixer, source) = rodio::mixer::mixer(channels, sample_rate);
         // A mixer with no source detaches from its parent and would not pick
         // up sounds submitted after the menu closes.

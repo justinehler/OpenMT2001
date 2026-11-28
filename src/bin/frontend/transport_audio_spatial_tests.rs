@@ -206,3 +206,17 @@ fn spatial_gain_uses_full_3d_distance_and_normalized_camera_basis() {
     .gains(listener);
     assert_eq!(elevated, [0.25; 2]);
 }
+
+#[test]
+fn spatial_mono_output_preserves_sources_on_either_side() {
+    let (mut player, _, mut output) = owner();
+    player.assets.spatial_enabled = true;
+    current_listener(&mut player, [0.; 3], [0., 0., 1.]);
+    let mut groups = [[None; 2]; 4];
+    insert_construction_source(&mut groups, 2, [40., 0., 0.], [0.; 3]).unwrap();
+    player.apply(Operation::Construction(groups));
+    let gain = player.audio.source_gain(70) * 0.5;
+    window(&mut output, gain, true);
+    current_listener(&mut player, [0.; 3], [0., 0., -1.]);
+    window(&mut output, gain, false);
+}
