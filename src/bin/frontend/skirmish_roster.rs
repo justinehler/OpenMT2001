@@ -1011,12 +1011,15 @@ mod tests {
             for phase in 0..33 {
                 let out = surfaces(&panel, &rows, false, local);
                 let shapes = &out[0];
+                // The green title gradient shares the marker colour; exclude it.
+                let title = panel.bounds("TITLE_AREA").unwrap();
                 let markers = shapes
                     .vertices
                     .as_chunks::<6>()
                     .0
                     .iter()
                     .filter(|q| q.iter().all(|v| v[3..6] == [0., 1., 0.]))
+                    .filter(|q| !(q[0][..2] == title[..2] && q[2][..2] == title[2..]))
                     .collect::<Vec<_>>();
                 assert_eq!(markers.len(), usize::from(local != 5));
                 if local != 5 {
