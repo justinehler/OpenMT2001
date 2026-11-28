@@ -25,7 +25,11 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
     bounds[22] = [210., 360., 300., 390.]; // Delete
     let assets = Assets {
         base: Vec::new(),
+        info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+            .unwrap(),
         bounds,
+        list_layout: openmt2001::frontend_list::Layout::new([20., 40., 104., 302.], 12., 3.)
+            .unwrap(),
         font1: Vec::new(),
         font2: Vec::new(),
         font4: Vec::new(),
@@ -51,7 +55,10 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
         ["1a", "apple", "Banana", "cherry", "_x"]
     );
     for (row, name) in ["1a", "apple", "Banana", "cherry", "_x"].iter().enumerate() {
-        click(&mut view, [30., 45. + row as f32 * ROW_HEIGHT]);
+        click(
+            &mut view,
+            [30., 45. + row as f32 * assets.list_layout.pitch],
+        );
         assert_eq!(view.selected_name(), Some(*name));
         click(&mut view, [150., 375.]);
         assert_eq!(
@@ -67,7 +74,7 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
 
     // Inserting an earlier row must restore the saved file by identity, not
     // retain its former row index. Subsequent overwrite/delete use that file.
-    click(&mut view, [30., 45. + 2. * ROW_HEIGHT]);
+    click(&mut view, [30., 45. + 2. * assets.list_layout.pitch]);
     assert_eq!(view.selected_name(), Some("Banana"));
     write_target(&root, &Target::NewName("0new".into()), &bytes).unwrap();
     view.saved(Ok(root.join("saves/Banana.sav")), &root);
@@ -80,7 +87,7 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
             .collect::<Vec<_>>(),
         ["0new", "1a", "apple", "Banana", "cherry", "_x"]
     );
-    click(&mut view, [30., 45. + 3. * ROW_HEIGHT]);
+    click(&mut view, [30., 45. + 3. * assets.list_layout.pitch]);
     click(&mut view, [150., 375.]);
     let Some(Action::ExistingSlot(id)) = view.enter() else {
         panic!("expected overwrite")
@@ -104,7 +111,7 @@ fn mixed_case_save_rows_target_the_displayed_file_after_refresh() {
             .collect::<Vec<_>>(),
         ["0new", "1a", "apple", "cherry", "_x"]
     );
-    click(&mut view, [30., 45. + 3. * ROW_HEIGHT]);
+    click(&mut view, [30., 45. + 3. * assets.list_layout.pitch]);
     click(&mut view, [150., 375.]);
     assert_eq!(
         view.enter(),

@@ -162,6 +162,9 @@ struct Assets {
     confirm: Vec<[f32; 4]>,
     fonts: Vec<Surface>,
     tab: Vec<u8>,
+    list_fonts: Vec<Surface>,
+    list_tab: Vec<u8>,
+    list_layout: openmt2001::frontend_list::Layout,
     labels: Vec<Vec<u8>>,
     slider_textures: Vec<Surface>,
 }
@@ -259,6 +262,20 @@ impl Profile {
             .collect();
         let tab = fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab"))
             .map_err(|e| e.to_string())?;
+        let list_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
+            .map_err(|e| e.to_string())?;
+        let list_fonts = TextureSet::parse(payload("gamedata2\\font640\\textures.gtd")?)
+            .map_err(|e| e.to_string())?
+            .textures[6..8]
+            .iter()
+            .map(Surface::new)
+            .collect();
+        let mut list_bounds = regions[5].bounds;
+        // 42e000 insets the text viewport vertically by one on each edge;
+        // 42df90 uses font3, gap2, and scroll=-1 (cancelling its top inset).
+        list_bounds[3] -= 2.;
+        let metric = openmt2001::frontend_list::Layout::from_font(list_bounds, &list_tab)?;
+        let list_layout = openmt2001::frontend_list::Layout::new(list_bounds, metric.pitch, 0.)?;
         let labels = [1430, 1434, 1435, 1439, 0x662, 0x645]
             .iter()
             .map(|&i| {
@@ -278,6 +295,9 @@ impl Profile {
                 confirm,
                 fonts,
                 tab,
+                list_fonts,
+                list_tab,
+                list_layout,
                 labels,
                 slider_textures,
             },
@@ -299,7 +319,12 @@ impl Profile {
         if self.name.is_some() || self.deleting {
             2
         } else {
-            4 + self.store.names.len() + if self.store.names.len() > 6 { 3 } else { 0 }
+            4 + self.store.names.len()
+                + if self.store.names.len() > self.assets.list_layout.visible_rows() {
+                    3
+                } else {
+                    0
+                }
         }
     }
     /// The four LOGIN_SELECT action children are generic 43ed20 buttons.
@@ -321,7 +346,7 @@ impl Profile {
                 return Some(i);
             }
         }
-        if self.store.names.len() > 6 {
+        if self.store.names.len() > self.assets.list_layout.visible_rows() {
             for (part, bounds) in ui::slider_arrows(PROFILE_SCROLL, true)
                 .into_iter()
                 .enumerate()
@@ -334,14 +359,10 @@ impl Profile {
                 return Some(4 + self.store.names.len() + 2);
             }
         }
-        let [l, t, r, b] = self.assets.bounds[5];
-        if hit([l, t, r, b]) {
-            let row = ((p[1] - t) / 14.) as usize + self.first;
-            if row < self.store.names.len() && row < self.first + 6 {
-                return Some(4 + row);
-            }
-        }
-        None
+        self.assets
+            .list_layout
+            .hit(p, self.first, self.store.names.len())
+            .map(|row| 4 + row)
     }
     pub fn back(&mut self) {
         self.error = None;
@@ -384,8 +405,8 @@ impl Profile {
             let row = index - 4;
             if row < self.first {
                 self.first = row;
-            } else if row >= self.first + 6 {
-                self.first = row - 5;
+            } else if row >= self.first + self.assets.list_layout.visible_rows() {
+                self.first = row + 1 - self.assets.list_layout.visible_rows();
             }
         }
     }
@@ -393,9 +414,13 @@ impl Profile {
         if self.name.is_some() || self.deleting {
             return;
         }
-        self.first = (self.first as i32 + delta)
-            .clamp(0, self.store.names.len().saturating_sub(6) as i32)
-            as usize;
+        self.first = (self.first as i32 + delta).clamp(
+            0,
+            self.store
+                .names
+                .len()
+                .saturating_sub(self.assets.list_layout.visible_rows()) as i32,
+        ) as usize;
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
@@ -403,12 +428,16 @@ impl Profile {
     pub fn drag_track(&mut self, origin: Option<usize>, p: [f32; 2]) -> bool {
         if self.name.is_some()
             || self.deleting
-            || self.store.names.len() <= 6
+            || self.store.names.len() <= self.assets.list_layout.visible_rows()
             || origin != Some(4 + self.store.names.len() + 2)
         {
             return false;
         }
-        let maximum = self.store.names.len().saturating_sub(6) as i32;
+        let maximum = self
+            .store
+            .names
+            .len()
+            .saturating_sub(self.assets.list_layout.visible_rows()) as i32;
         let next = ui::slider_selection(ui::slider_track(PROFILE_SCROLL, true), p[1], maximum, true)
             as usize;
         let changed = next != self.first;
@@ -416,7 +445,8 @@ impl Profile {
         changed
     }
     pub fn is_scroll_track(&self, index: Option<usize>) -> bool {
-        self.store.names.len() > 6 && index == Some(4 + self.store.names.len() + 2)
+        self.store.names.len() > self.assets.list_layout.visible_rows()
+            && index == Some(4 + self.store.names.len() + 2)
     }
     pub fn activate(&mut self, index: usize) {
         self.error = None;
@@ -463,7 +493,12 @@ impl Profile {
                     1 => self.scroll(1),
                     _ => {
                         if let Some(point) = self.pointer_position {
-                            let maximum = self.store.names.len().saturating_sub(6) as i32;
+                            let maximum = self
+                                .store
+                                .names
+                                .len()
+                                .saturating_sub(self.assets.list_layout.visible_rows())
+                                as i32;
                             self.first = ui::slider_selection(
                                 ui::slider_track(PROFILE_SCROLL, true),
                                 point[1],
@@ -510,6 +545,7 @@ impl Profile {
         let mut slider_shapes = Surface::solid();
         let mut slider_controls = Vec::new();
         let mut fonts = self.assets.fonts.clone();
+        let mut list_fonts = self.assets.list_fonts.clone();
         let [l, t, r, b] = self.assets.bounds[5];
         shapes.rect([l, t, r, b], [0xbb000a28; 4]);
         shapes.rect(
@@ -526,18 +562,28 @@ impl Profile {
             true,
             0xffffffff,
         )?;
-        for (i, name) in self.store.names.iter().enumerate().skip(self.first).take(6) {
-            let y = t + (i - self.first) as f32 * 14.;
+        for (i, name) in self
+            .store
+            .names
+            .iter()
+            .enumerate()
+            .skip(self.first)
+            .take(self.assets.list_layout.visible_rows())
+        {
+            let mut row = self.assets.list_layout.text_bounds(i - self.first);
+            row[0] += 2.;
             if self.chosen == Some(i) {
-                shapes.rect([l, y, r, y + 14.], [0xff008ed0; 4]);
+                // Profile's separate 42e430 widget uses a full-pitch bar at +2.
+                let pitch = self.assets.list_layout.pitch;
+                let top = t + (i - self.first) as f32 * pitch + 2.;
+                shapes.rect([l, top, r, top + pitch], [0xff008ed0; 4]);
             }
             let encoded: Vec<_> = name.bytes().map(|c| c - 32).collect();
-            ui::text(
-                &mut fonts,
-                &self.assets.tab,
+            ui::text_widget_style0(
+                &mut list_fonts,
+                &self.assets.list_tab,
                 &encoded,
-                [l + 3., y, r, b],
-                false,
+                row,
                 0xffffffff,
             )?;
         }
@@ -546,7 +592,13 @@ impl Profile {
             bounds: PROFILE_SCROLL,
             vertical: true,
             value: self.first as f32,
-            range: [0., self.store.names.len().saturating_sub(6) as f32],
+            range: [
+                0.,
+                self.store
+                    .names
+                    .len()
+                    .saturating_sub(self.assets.list_layout.visible_rows()) as f32,
+            ],
             pointer: self.pointer_position,
             pressed: (pressed
                 && selected.is_some_and(|i| (scroll_base..scroll_base + 3).contains(&i)))
@@ -692,6 +744,7 @@ impl Profile {
         draws.push(slider_shapes.draw());
         draws.extend(slider_controls.iter().map(Surface::draw));
         draws.extend(fonts.iter().map(Surface::draw));
+        draws.extend(list_fonts.iter().map(Surface::draw));
         if modal_open {
             draws.extend(self.assets.modal.iter().map(Surface::draw));
             draws.push(modal.draw());
@@ -788,6 +841,14 @@ mod tests {
                 confirm: vec![],
                 fonts: vec![],
                 tab: vec![],
+                list_fonts: vec![],
+                list_tab: vec![],
+                list_layout: openmt2001::frontend_list::Layout::new(
+                    [198., 200., 440., 285.],
+                    11.,
+                    0.,
+                )
+                .unwrap(),
                 labels: vec![],
                 slider_textures: vec![],
             },
@@ -814,12 +875,12 @@ mod tests {
         profile.pointer([448., 260.]);
         assert_eq!(profile.hit([448., 260.]), Some(base + 2));
         profile.activate(base + 2);
-        assert!(profile.first >= 1 && profile.first <= 3);
+        assert!(profile.first >= 1 && profile.first <= 2);
         let before_up = profile.first;
         profile.activate(base);
         assert_eq!(profile.first, before_up - 1);
         assert!(profile.drag_track(Some(base + 2), [448., 999.]));
-        assert_eq!(profile.first, 3);
+        assert_eq!(profile.first, 2);
         assert!(profile.drag_track(Some(base + 2), [448., -100.]));
         assert_eq!(profile.first, 0);
         profile.store.names.truncate(1);

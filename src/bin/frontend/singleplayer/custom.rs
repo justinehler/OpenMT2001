@@ -37,18 +37,16 @@ fn rows(catalog: &openmt2001::level_catalog::Catalog) -> Vec<Row> {
     }
     rows
 }
-// Share the text viewport: headers/spacers consume height even though they draw no cups.
+// Native cups use a fixed12-unit stride; headers/spacers consume a row too.
 fn visible_rows(
     rows: &[Row],
     first: usize,
     bounds: [f32; 4],
 ) -> impl Iterator<Item = (usize, &Row)> {
-    rows.iter()
-        .skip(first)
-        .enumerate()
-        .take_while(move |(row, _)| {
-            bounds[1] + (*row as f32 + 1.) * SCENARIO_ROW_HEIGHT <= bounds[3]
-        })
+    rows.iter().skip(first).enumerate().take(
+        openmt2001::frontend_list::Layout::new(bounds, SCENARIO_ROW_HEIGHT, 3.)
+            .map_or(0, |layout| layout.visible_rows()),
+    )
 }
 // Native 49a297..49a3d2: viewport row, three independent completion bytes,
 // bank 296 empty / 297..299 earned. Callback is the production submission seam.
@@ -207,7 +205,10 @@ impl SinglePlayer {
         11 + self.custom.as_ref().unwrap().rows.len()
     }
     pub(super) fn custom_list_limit(&self) -> usize {
-        self.custom.as_ref().unwrap().rows.len().saturating_sub(29)
+        self.custom.as_ref().unwrap().rows.len().saturating_sub(
+            self.scenario_list_layout()
+                .map_or(0, |layout| layout.visible_rows()),
+        )
     }
     pub(super) fn custom_activate(&mut self, i: usize) {
         match i {
@@ -311,12 +312,14 @@ impl SinglePlayer {
                 return Some(i);
             }
         }
-        if inside(self.scenario.bounds[8]) {
-            let row =
-                self.custom.as_ref()?.first + ((p[1] - self.scenario.bounds[8][1]) / 12.) as usize;
-            if matches!(self.custom.as_ref()?.rows.get(row), Some(Row::Level(_))) {
-                return Some(11 + row);
-            }
+        let custom = self.custom.as_ref()?;
+        if let Some(row) = self
+            .scenario_list_layout()
+            .ok()?
+            .hit(p, custom.first, custom.rows.len())
+            && matches!(custom.rows.get(row), Some(Row::Level(_)))
+        {
+            return Some(11 + row);
         }
         None
     }
@@ -364,15 +367,22 @@ impl SinglePlayer {
         fonts: &mut [Surface],
     ) -> Result<(), String> {
         let c = self.custom.as_ref().unwrap();
-        let [l, t, r, _] = self.scenario.bounds[8];
-        for (row, item) in visible_rows(&c.rows, c.first, self.scenario.bounds[8]) {
-            let y = t + row as f32 * SCENARIO_ROW_HEIGHT;
+        let layout = self.scenario_list_layout()?;
+        for (row, item) in c
+            .rows
+            .iter()
+            .skip(c.first)
+            .take(layout.visible_rows())
+            .enumerate()
+        {
+            let mut bounds = layout.text_bounds(row);
+            bounds[0] += 3.;
             let text = match item {
                 Row::Header(s) => ascii(&String::from_utf8_lossy(s)),
                 Row::Space => vec![],
                 Row::Level(i) => {
                     if c.selected == Some(*i) {
-                        shapes.rect([l, y, r, y + 12.], [0xff008ed0; 4]);
+                        shapes.rect(layout.highlight(row), [0xff008ed0; 4]);
                     }
                     self.custom_label(&self.catalog.as_ref().unwrap().levels[*i], true)
                 }
@@ -381,7 +391,7 @@ impl SinglePlayer {
                 fonts,
                 &self.scenario_list_tab,
                 &text,
-                [l + 3., y, r, y + 12.],
+                bounds,
                 false,
                 0xffffffff,
             )?;
