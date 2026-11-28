@@ -4,6 +4,7 @@ pub mod auction_restore;
 pub mod board;
 pub mod board_style;
 pub mod build_file;
+pub mod building_models;
 pub mod business_pool;
 pub mod business_report;
 #[cfg(feature = "lua4")]

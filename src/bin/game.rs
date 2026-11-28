@@ -1,7 +1,9 @@
 //! Native boot host. Shared simulation and asset modules do not depend on it.
 // Session dependencies that moved into the library (#99); kept nameable as
 // crate::<module> in the binary.
-use openmt2001::{campaign_store, compatibility, result_controller, save_menu, skirmish_maps};
+use openmt2001::{
+    building_models, campaign_store, compatibility, result_controller, save_menu, skirmish_maps,
+};
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_bridge.rs"]
@@ -18,8 +20,9 @@ pub mod auction_panel;
 pub mod auction_scene;
 #[path = "frontend/block_sidewalk_labels.rs"]
 pub mod block_sidewalk_labels;
-#[path = "frontend/building_models.rs"]
-pub mod building_models;
+#[cfg(test)]
+#[path = "frontend/building_models_tests.rs"]
+mod building_models_tests;
 #[path = "frontend/business_adjustment.rs"]
 pub mod business_adjustment;
 #[path = "frontend/business_edit.rs"]
