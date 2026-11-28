@@ -838,7 +838,7 @@ impl Assets {
                 crate::ui::text_widget_style9(
                     &mut font3,
                     &self.tab3,
-                    b"Halos",
+                    &b"Halos".map(|byte| byte - 32),
                     [163., 333., 400., 349.],
                     0xffffffff,
                 )?;

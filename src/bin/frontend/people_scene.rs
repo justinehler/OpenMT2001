@@ -886,12 +886,12 @@ mod tests {
     #[test]
     fn shopping_bag_pass_reuses_visible_body_frame_pose_and_tint() {
         use openmt2001::{render::SurfaceMode, render_scene::OwnedDraw};
-        let mut tga = vec![0; 18 + 384 * 161 * 4];
+        let mut tga = vec![0; 18 + 384 * 177 * 4];
         tga[2] = 2;
         tga[12..14].copy_from_slice(&384_u16.to_le_bytes());
-        tga[14..16].copy_from_slice(&161_u16.to_le_bytes());
+        tga[14..16].copy_from_slice(&177_u16.to_le_bytes());
         tga[16..18].copy_from_slice(&[32, 8]);
-        let markers = 18 + (161 - 97) * 384 * 4;
+        let markers = 18 + (177 - 97) * 384 * 4;
         tga[markers] = 64;
         tga[markers + 4] = 192;
         let part = |page| {

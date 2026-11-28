@@ -4150,7 +4150,6 @@ mod temporal_city_lighting_regressions {
 mod street_furniture_tests;
 
 #[cfg(test)]
-#[cfg(test)]
 #[path = "render_scene/city_structures_tests.rs"]
 mod city_structures_tests;
 
