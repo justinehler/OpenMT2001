@@ -42,6 +42,7 @@ pub struct Ticket {
     pub expected: Option<network::Content>,
 }
 enum Command {
+    Gameplay(network::SessionBinding, Option<Connection>, Box<Message>),
     Stage(Box<dyn FnOnce() -> Result<network::Content, String> + Send>),
     Edit(Action),
     Prepared(std::result::Result<network::Content, String>),
@@ -76,6 +77,7 @@ pub struct Handle {
     cancel: std::sync::Arc<AtomicBool>,
     commands: SyncSender<Command>,
     updates: Receiver<Update>,
+    gameplay: Receiver<network::commands::Ingress>,
 }
 impl Handle {
     pub fn open(open: Open) -> Result<Self, String> {
@@ -94,6 +96,7 @@ impl Handle {
         let stopped = cancel.clone();
         let (commands, actions) = mpsc::sync_channel(32);
         let (publish, updates) = mpsc::sync_channel(16);
+        let (gameplay_tx, gameplay) = mpsc::sync_channel(64);
         if let Err(error) = thread::Builder::new()
             .name("multiplayer lobby".into())
             .spawn(move || {
@@ -103,7 +106,10 @@ impl Handle {
                     attempt,
                     open,
                     actions,
-                    &publish,
+                    Publications {
+                        lobby: &publish,
+                        gameplay: &gameplay_tx,
+                    },
                     &stopped,
                     network_timeout,
                 ) {
@@ -126,6 +132,7 @@ impl Handle {
             cancel,
             commands,
             updates,
+            gameplay,
         })
     }
     pub fn action(&self, action: Action) -> Result<(), String> {
@@ -179,6 +186,34 @@ impl Handle {
             })
             .map_err(|e| e.to_string())
     }
+    pub fn gameplay_owner(&self) -> &Owner {
+        self.owner
+    }
+    pub fn poll_gameplay(&self) -> Option<network::commands::Ingress> {
+        self.gameplay.try_recv().ok()
+    }
+    /// Send on the same ordered worker channel as all prior commits. `None`
+    /// broadcasts from the host, or sends to the authority on a client.
+    pub fn send_gameplay(
+        &self,
+        binding: network::SessionBinding,
+        target: Option<Connection>,
+        message: Message,
+    ) -> Result<(), String> {
+        self.validate_binding(binding)?;
+        if !matches!(
+            message,
+            Message::CommandRequest(_)
+                | Message::CommandCommit(_)
+                | Message::CommandDeadline { .. }
+                | Message::CommandRejected { .. }
+        ) {
+            return Err(network::Error::Unsupported.to_string());
+        }
+        self.commands
+            .try_send(Command::Gameplay(binding, target, Box::new(message)))
+            .map_err(|_| "Gameplay worker is busy".into())
+    }
     pub fn poll(&self) -> Option<Update> {
         self.updates.try_recv().ok()
     }
@@ -203,15 +238,23 @@ fn session(owner: &Owner, attempt: Attempt) -> Result<[u8; 16], String> {
     state.attempt(attempt).map_err(|e| e.to_string())?;
     state.session.ok_or_else(|| "Session has closed.".into())
 }
+struct Publications<'a> {
+    lobby: &'a SyncSender<Update>,
+    gameplay: &'a SyncSender<network::commands::Ingress>,
+}
 fn run(
     owner: &Owner,
     attempt: Attempt,
     open: Open,
     actions: Receiver<Command>,
-    publish: &SyncSender<Update>,
+    publications: Publications<'_>,
     cancel: &AtomicBool,
     network_timeout: Duration,
 ) -> Result<(), String> {
+    let Publications {
+        lobby: publish,
+        gameplay,
+    } = publications;
     if let Open::Probe(address) = &open {
         let (session, snapshot) =
             network::transport::probe(*address, network_timeout).map_err(|e| e.to_string())?;
@@ -287,7 +330,23 @@ fn run(
             return Err("Timed out waiting for session information or lobby admission.".into());
         }
         let mut changed = false;
-        for event in owner.pump(attempt, None).map_err(|e| e.to_string())? {
+        let (binding, constructing) = {
+            let state = owner.lock().map_err(|e| e.to_string())?;
+            state.attempt(attempt).map_err(|e| e.to_string())?;
+            (
+                state.binding,
+                committed && state.phase == network::Phase::Starting,
+            )
+        };
+        // Preserve unread TCP ingress while this process constructs its world.
+        // No committed gameplay message may be consumed with an absent binding.
+        let events = if constructing {
+            owner.flush(attempt).map_err(|e| e.to_string())?;
+            Vec::new()
+        } else {
+            owner.pump(attempt, binding).map_err(|e| e.to_string())?
+        };
+        for event in events {
             match event {
                 Event::Connected {
                     connection,
@@ -304,6 +363,18 @@ fn run(
                     connection,
                     message,
                 } => match *message {
+                    message @ (Message::CommandRequest(_)
+                    | Message::CommandCommit(_)
+                    | Message::CommandDeadline { .. }
+                    | Message::CommandRejected { .. }) => {
+                        gameplay
+                            .try_send(network::commands::Ingress {
+                                binding: binding.ok_or("Gameplay without a world")?,
+                                connection,
+                                message,
+                            })
+                            .map_err(|_| "Gameplay ingress queue is full or closed".to_string())?;
+                    }
                     Message::LobbyRequest(request) if host => {
                         let roster = snapshot.as_mut().unwrap();
                         if starting.is_none() && roster.request(connection.slot(), request).is_ok()
@@ -444,6 +515,40 @@ fn run(
                 other => other,
             };
             let action = match command {
+                Command::Gameplay(binding, target, message) => {
+                    let message = *message;
+                    owner.validate_binding(binding).map_err(|e| e.to_string())?;
+                    let request = matches!(message, Message::CommandRequest(_));
+                    if host == request {
+                        return Err("Gameplay message has wrong local role".into());
+                    }
+                    let destinations: Vec<_> = if let Some(target) = target {
+                        owner
+                            .validate_connection(binding, target, false)
+                            .map_err(|e| e.to_string())?;
+                        vec![target]
+                    } else if host {
+                        starting
+                            .as_ref()
+                            .ok_or("Gameplay without Start")?
+                            .view
+                            .snapshot
+                            .rows
+                            .iter()
+                            .filter_map(|r| r.peer)
+                            .filter(|&p| p != 0)
+                            .map(|p| peers[p as usize].ok_or("Admitted gameplay peer missing"))
+                            .collect::<Result<Vec<_>, _>>()?
+                    } else {
+                        vec![peers[0].ok_or("Authority connection missing")?]
+                    };
+                    for connection in destinations {
+                        owner
+                            .send(connection, message.clone())
+                            .map_err(|e| e.to_string())?;
+                    }
+                    continue;
+                }
                 Command::Prepared(result) => {
                     let content = match result {
                         Ok(content) => content,

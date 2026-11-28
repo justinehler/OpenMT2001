@@ -63,6 +63,23 @@ pub enum Event<'a> {
 }
 
 impl Session<'_> {
+    /// Poll admitted ingress before the host's pause/timer gate.
+    pub fn pump_connected_commands(&mut self, policy: &mut Policy) -> Result<(), String> {
+        let Some(connection) = &mut self.connected else {
+            return Ok(());
+        };
+        let tick = self.world.clock.timing[0];
+        connection.commands.pump(
+            &connection.worker,
+            tick,
+            &mut self.live_commands,
+            &mut self.world.city.pause,
+            &mut self.hooks.timers,
+        )?;
+        policy.scheduler.network_enabled = true;
+        policy.scheduler.deadline = connection.commands.deadline();
+        Ok(())
+    }
     /// One original4ba580 interface tick, independent of25Hz logic dispatch.
     /// The caller must drive its registered50Hz task; paused logic alone does
     /// not suppress interface dispatch. Only retained8b22d8 gates the countdown.
@@ -198,6 +215,7 @@ impl Session<'_> {
         animations: impl FnMut() -> Result<(), String>,
         mut boundary: impl FnMut(Event<'_>, &openmt2001::clock::Clock) -> Result<u32, String>,
     ) -> Result<(), String> {
+        self.pump_connected_commands(policy)?;
         //481718..481736 keeps the level script countdown active in auction
         //mode when the retained selected level object's+85c byte is nonzero.
         policy.scheduler.alternate_script_active = self.tutorial_state != 0;
@@ -236,6 +254,18 @@ impl Session<'_> {
         );
         let mut utilities =
             std::mem::replace(&mut self.hooks.utilities, economy::Utilities::new([0; 4]));
+        let requested_iterations = policy.scheduler.iterations;
+        let admitted_iterations = if self.connected.is_some() {
+            requested_iterations.min(
+                policy
+                    .scheduler
+                    .deadline
+                    .saturating_sub(self.world.clock.timing[0]),
+            )
+        } else {
+            requested_iterations
+        };
+        policy.scheduler.iterations = admitted_iterations;
         let result = (|| {
             for index in 0..geometry.registrar().models.len() {
                 geometry.retain_model(
@@ -286,8 +316,7 @@ impl Session<'_> {
                         return Ok(0);
                     }
                     if matches!(event, scheduler::Event::Helper(0x4bac90)) && self.connected.is_some() {
-                        // Initial connected city only: #35 will advance this
-                        // deadline after authority commits. Host holds at 25.
+                        openmt2001::network::commands::pause_at_limit(&mut city.pause,&mut self.hooks.timers)?;
                         return Ok(0);
                     }
                     match event {
@@ -738,6 +767,9 @@ impl Session<'_> {
                                 message_context: &mut messages.borrow_mut(),
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}) {
+                                    return Err(openmt2001::network::Error::Unsupported.to_string());
+                                }
                                 if let live_commands::Command::Auction{descriptor}=command
                                     && matches!(u32::from_le_bytes(descriptor[4..8].try_into().unwrap()),0x1e..=0x20){
                                         let hooks=std::cell::RefCell::new(&mut self.hooks);
@@ -1039,6 +1071,9 @@ impl Session<'_> {
                 },
             )
         })();
+        if policy.scheduler.iterations == admitted_iterations {
+            policy.scheduler.iterations = requested_iterations;
+        }
         self.models = std::mem::take(geometry.registrar_mut());
         self.hooks.utilities = utilities;
         self.allocation_next = messages.into_inner().arena.next;
