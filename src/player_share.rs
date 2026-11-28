@@ -10,6 +10,18 @@ use crate::x87::Sum;
 
 pub const PLAYER_SLOTS: usize = 6;
 
+/// Live value for the native share words of empty roster slots.
+///
+/// 004899e0 never writes the local share word of a slot that is null or
+/// inactive, yet its tie scan compares all six words against the active
+/// maximum and minimum. The original holds stack residue there, and in the
+/// observed games it never matches an active share. A five-player Last Man
+/// Standing still eliminates a unique zero-share player (campaign 9 Easy and
+/// a four-AI Skirmish). A zero word would tie that player and block the
+/// removal. Shares are whole numbers, so a fractional word can never tie
+/// one.
+pub const INACTIVE_SLOT_RESIDUE: [f32; PLAYER_SLOTS] = [0.5; PLAYER_SLOTS];
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Controls {
     pub manager_kind: i32,
@@ -690,6 +702,106 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A five-player Last Man Standing election whose idle human (slot 0)
+    /// has share 0 and is the unique minimum. Returns the share result and
+    /// the callbacks in native order.
+    fn five_player_election(
+        target: f32,
+        ai_shares: [i32; 4],
+        prior: [f32; PLAYER_SLOTS],
+    ) -> (ResultState, Vec<Call>) {
+        let mut players: Vec<_> = std::iter::once(0)
+            .chain(ai_shares)
+            .enumerate()
+            .map(|(slot, share)| {
+                let mut bytes = vec![0; 0x220];
+                bytes[0x10] = 1;
+                bytes[0x1bc] = slot as u8;
+                bytes[0x1ac..0x1b0].copy_from_slice(&share.to_le_bytes());
+                Some(Player {
+                    reference: 0x10000000 + slot as u32 * 0x1000,
+                    bytes,
+                    auxiliaries: Vec::new(),
+                })
+            })
+            .collect();
+        let mut calls = Vec::new();
+        let result = apply_with_state_callback(
+            Controls {
+                manager_kind: 2,
+                manager_value: target,
+                day: target as u32,
+                player_count: players.len(),
+                network_enabled: false,
+                network_override: false,
+                current_slot: 0,
+            },
+            None,
+            prior,
+            &mut players,
+            |call, _, _, _| {
+                calls.push(call);
+                Ok(CallbackEffect::default())
+            },
+        )
+        .unwrap();
+        (result, calls)
+    }
+
+    #[test]
+    fn five_player_weakest_link_eliminates_the_unique_zero_share_human() {
+        // Campaign 9 Easy (target 2) and a four-AI Skirmish (target 3): the
+        // original removes the human at the first qualifying election.
+        for (target, ai_shares) in [
+            (2.0, [2900, 6540, 4940, 3980]),
+            (3.0, [7360, 1460, 5320, 1640]),
+        ] {
+            let (result, calls) = five_player_election(target, ai_shares, INACTIVE_SLOT_RESIDUE);
+            assert_eq!(
+                (result.min_ties, result.min_index),
+                (1, 0),
+                "target {target}"
+            );
+            assert_eq!(result.shares[0], 0);
+            let removal: Vec<_> = calls
+                .iter()
+                .filter(|call| {
+                    matches!(
+                        call,
+                        Call::CommandProducer { .. }
+                            | Call::Command { .. }
+                            | Call::RemovePlayer { .. }
+                    )
+                })
+                .collect();
+            assert_eq!(
+                removal,
+                [
+                    &Call::CommandProducer { slot: 0 },
+                    &Call::Command {
+                        args: [0, u32::MAX, 0x2d, 0, 0, 0, 0, 0xffff_fc19]
+                    },
+                    &Call::RemovePlayer { slot: 0 },
+                ],
+                "target {target}: {calls:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_filled_empty_slot_would_tie_a_zero_share_player() {
+        // The empty sixth word takes part in the tie scan. Zero-filling it
+        // ties the human's zero share and blocks the removal the original
+        // makes, which is why the live game uses INACTIVE_SLOT_RESIDUE.
+        let (result, calls) = five_player_election(2.0, [2900, 6540, 4940, 3980], [0.0; 6]);
+        assert_eq!((result.min_ties, result.min_index), (2, 5));
+        assert!(
+            !calls
+                .iter()
+                .any(|call| matches!(call, Call::RemovePlayer { .. }))
+        );
     }
 
     struct Reader<'a> {
