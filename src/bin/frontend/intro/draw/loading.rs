@@ -316,7 +316,6 @@ impl Intro {
                         last_people_query: Instant::now(),
                         vehicles,
                         vehicles_pending: None,
-                        last_vehicles_query: Instant::now(),
                         transport,
                         transport_pending: None,
                         last_transport_query: Instant::now(),

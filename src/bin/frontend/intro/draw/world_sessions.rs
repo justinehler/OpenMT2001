@@ -75,9 +75,10 @@ impl Intro {
                     }
                 }
             }
+            // Road poses are interpolated per rendered frame (44d340 from
+            // 4b3870), so ask again as soon as the previous reply arrived.
             if self.loading.is_none()
                 && view.vehicles_pending.is_none()
-                && view.last_vehicles_query.elapsed().as_millis() >= 40
                 && view
                     .live_status
                     .as_ref()
@@ -89,7 +90,6 @@ impl Intro {
                     .send(FreshRequest::Vehicles { reply })
                     .map_err(|e| e.to_string())?;
                 view.vehicles_pending = Some(answer);
-                view.last_vehicles_query = Instant::now();
             }
             if let Some(receiver) = &view.transport_pending {
                 match receiver.try_recv() {

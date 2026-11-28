@@ -150,6 +150,15 @@ impl Session<'_> {
             submit,
         )
     }
+    /// Original44d340 road pose pass for one rendered frame. Poses are drawn at
+    /// `stored distance + factor * speed`, with the factor taken from the logic
+    /// timer's current progress, so cars move smoothly between logic ticks.
+    /// Only the auxiliary poses change; vehicle records are never advanced.
+    pub fn project_road_traffic(&mut self) -> Result<(), String> {
+        let factor = crate::timers::logic_progress(&self.hooks.timers).unwrap_or(0.);
+        self.road_traffic
+            .project(&mut self.world.road_network, factor)
+    }
     /// Apply an original script event (including prompt dismissal) to the same
     /// paused or running session, restoring retained geometry even on failure.
     pub fn dispatch_session_event(

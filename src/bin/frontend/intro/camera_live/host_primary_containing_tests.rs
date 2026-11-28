@@ -102,7 +102,6 @@ pub(crate) fn inspection_products(
         last_people_query: now,
         vehicles: None,
         vehicles_pending: None,
-        last_vehicles_query: now,
         transport: None,
         transport_pending: None,
         last_transport_query: now,
