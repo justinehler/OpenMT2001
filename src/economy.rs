@@ -632,7 +632,7 @@ pub fn update_daily_businesses(
                 if owner != 0 {
                     postings.push(AccountPosting {
                         player: usize::from(owner) - 1,
-                        amount: (-result.cost) as f32,
+                        amount: result.cost.negated().to_f32(),
                     });
                 }
             }
@@ -1425,7 +1425,7 @@ impl BusinessAccount {
             return Err("business exceeds six native commodity slots".into());
         }
         let modifier = owner.as_ref().map_or(0, |p| p.replenishment_modifier);
-        let result = replenish_stock(lines, capacity, modifier);
+        let result = replenish_stock(lines, capacity, modifier)?;
         if !free {
             if let Some(account) = owner.as_deref_mut() {
                 for (line, slot) in lines.iter().zip(&result.slots) {
@@ -1435,8 +1435,10 @@ impl BusinessAccount {
             }
             // FST rounds the charge but leaves the extended value on x87
             // for the business cost addition (00461f39..00461f4b).
-            let charge = (-result.cost) as f32;
-            self.cost_balance = (f64::from(self.cost_balance) - result.cost) as f32;
+            let mut cost_balance = result.cost.negated();
+            let charge = cost_balance.to_f32();
+            cost_balance.add_f32(self.cost_balance)?;
+            self.cost_balance = cost_balance.to_f32();
             self.balance = (f64::from(self.balance) + f64::from(charge)) as f32;
             if let Some(account) = owner {
                 account.post(charge, 0x11)?;
@@ -1591,11 +1593,49 @@ pub struct ReplenishedSlot {
     pub increment: i32,
 }
 
+/// Retained replenishment cost. Finite arithmetic stays at PC64; exceptional
+/// operands retain the existing host-float fallback, outside the finite helper.
+#[derive(Clone, Copy, Debug)]
+pub enum ReplenishmentCost {
+    Finite(crate::x87::Sum),
+    Nonfinite(f64),
+}
+
+impl ReplenishmentCost {
+    pub fn to_f32(self) -> f32 {
+        match self {
+            Self::Finite(value) => value.to_f32(),
+            Self::Nonfinite(value) => value as f32,
+        }
+    }
+
+    pub fn negated(self) -> Self {
+        match self {
+            Self::Finite(value) => Self::Finite(value.negated()),
+            Self::Nonfinite(value) => Self::Nonfinite(-value),
+        }
+    }
+
+    fn add_f32(&mut self, value: f32) -> Result<(), &'static str> {
+        match self {
+            Self::Finite(total) if value.is_finite() => total.add_f32(value),
+            Self::Finite(total) => {
+                *self = Self::Nonfinite(total.to_f64() + f64::from(value));
+                Ok(())
+            }
+            Self::Nonfinite(total) => {
+                *total += f64::from(value);
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Replenishment {
     pub slots: Vec<ReplenishedSlot>,
     /// Kept across the loop in x87, unlike the per-slot f32 quote accumulator.
-    pub cost: f64,
+    pub cost: ReplenishmentCost,
     pub total_stock: u32,
 }
 
@@ -1603,7 +1643,11 @@ pub struct Replenishment {
 /// footprint * height * BusinessInfo.stockcapacity. Modifier is the original
 /// linked object's +0x148: 1 halves cost, 2 halves individual increments.
 /// Accounting, turnover history and scheduling are applied by the caller.
-pub fn replenish_stock(lines: &[RestockLine], capacity: i32, modifier: u32) -> Replenishment {
+pub fn replenish_stock(
+    lines: &[RestockLine],
+    capacity: i32,
+    modifier: u32,
+) -> Result<Replenishment, String> {
     let mut remaining = capacity;
     let mut deficit = 0i32;
     let mut slots = Vec::with_capacity(lines.len());
@@ -1625,7 +1669,7 @@ pub fn replenish_stock(lines: &[RestockLine], capacity: i32, modifier: u32) -> R
     } else {
         1.
     };
-    let mut cost = 0f64;
+    let mut cost = ReplenishmentCost::Finite(crate::x87::Sum::default());
     for (line, slot) in lines.iter().zip(&mut slots) {
         if i32::from(slot.stock) < i32::from(line.target) {
             let difference = i32::from(line.target) - i32::from(slot.stock);
@@ -1635,20 +1679,36 @@ pub fn replenish_stock(lines: &[RestockLine], capacity: i32, modifier: u32) -> R
             }
             slot.stock = slot.stock.wrapping_add(increment as u16);
             slot.increment = increment;
-            cost += f64::from(line.unit_cost) * f64::from(increment);
+            match (&mut cost, crate::x87::Sum::from_f32(line.unit_cost)) {
+                (ReplenishmentCost::Finite(total), Ok(mut term)) => {
+                    term.mul(crate::x87::Sum::from_i32(increment));
+                    total.add(term);
+                }
+                (ReplenishmentCost::Finite(total), Err(_)) => {
+                    cost = ReplenishmentCost::Nonfinite(
+                        total.to_f64() + f64::from(line.unit_cost) * f64::from(increment),
+                    );
+                }
+                (ReplenishmentCost::Nonfinite(total), _) => {
+                    *total += f64::from(line.unit_cost) * f64::from(increment);
+                }
+            }
         }
     }
     if modifier == 1 {
-        cost *= 0.5;
+        match &mut cost {
+            ReplenishmentCost::Finite(total) => total.mul_f32(0.5)?,
+            ReplenishmentCost::Nonfinite(total) => *total *= 0.5,
+        }
     }
     let total_stock = slots
         .iter()
         .fold(0u32, |sum, s| sum.wrapping_add(u32::from(s.stock)));
-    Replenishment {
+    Ok(Replenishment {
         slots,
         cost,
         total_stock,
-    }
+    })
 }
 
 /// Original 00461c67..00461c95 integer seed and _ftol conversion.
@@ -1691,8 +1751,14 @@ pub fn adjust_stock_target(
     let old = i16::from_le_bytes(record[at..at + 2].try_into().unwrap());
     // The original retains only EAX from the first_ftol before multiplying
     // the signed capacity by the selected f32 fraction and subtracting old.
-    let selected =
-        ftol_low_word(f64::from(capacity) * f64::from(selected_fraction) - f64::from(old));
+    let selected = if selected_fraction.is_finite() {
+        let mut selected = crate::x87::Sum::from_i32(capacity);
+        selected.mul_f32(selected_fraction)?;
+        selected.add(crate::x87::Sum::from_i32(i32::from(old)).negated());
+        selected.ftol_low_word()
+    } else {
+        0 // FTOL integer-indefinite's low word.
+    };
     let delta = selected
         .min(remaining)
         .min(i32::from(quantity) - i32::from(old));
@@ -3720,7 +3786,7 @@ mod tests {
                 ));
                 at += 12;
             }
-            let actual = replenish_stock(&lines, capacity, modifier);
+            let actual = replenish_stock(&lines, capacity, modifier).unwrap();
             assert_eq!(
                 actual
                     .slots
@@ -3733,7 +3799,7 @@ mod tests {
             assert_eq!(actual.total_stock, word(at), "case {case} total stock");
             if charged {
                 assert_eq!(
-                    ((0f64 - actual.cost) as f32).to_bits(),
+                    actual.cost.negated().to_f32().to_bits(),
                     word(at + 4),
                     "case {case} cost"
                 );
