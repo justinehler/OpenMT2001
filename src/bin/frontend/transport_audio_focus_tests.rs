@@ -163,7 +163,7 @@ fn transport_creation_and_explicit_update_consume_current_factor_for_all_beds() 
 }
 
 #[test]
-fn ship_sources_use_factor_at_creation_and_refresh() {
+fn ship_suppressed_engine_keeps_creation_factor_while_horn_refreshes() {
     let guards = Guards {
         active: true,
         sound_enabled: true,
@@ -185,9 +185,10 @@ fn ship_sources_use_factor_at_creation_and_refresh() {
             call: update,
             distance: 0.,
         });
-        window(&mut output, 0., false);
+        assert!(player.ship_engine.is_none());
+        window(&mut output, expected / 2., false);
         audio.apply(Action::Resume, guards);
-        window(&mut output, 0., true);
+        window(&mut output, expected / 2., true);
         player.apply(Operation::Environment {
             call: update,
             distance: 0.,
@@ -629,4 +630,310 @@ fn city_frame_render_frequency_preserves_simulation_inputs_and_shared_park_delta
     assert_eq!(player.city.as_ref().unwrap().previous_tick, 100);
     player.service_frame([0., 40., -300.]);
     assert_eq!(player.block_controller.as_ref().unwrap(), &every_tick);
+}
+
+#[test]
+fn train_route_dwell_departure_and_end_reach_player_with_retained_cursor() {
+    use openmt2001::traffic::{HourlyEffects, RouteGeometry, scene, spawn_route, train_motion};
+    let (mut player, audio, mut output) = owner();
+    player.assets.train_toot.fill(0.);
+    let mut scene = scene::Scene {
+        hourly: HourlyEffects {
+            tier: 0,
+            random: [1, 0x343fd, 0x269ec3],
+            model_choice: 0,
+            variant: 0,
+            auxiliaries: [[0; 300]; 2],
+            effects: [[0; 20]; 9],
+            models: [0; 4],
+        },
+        aircraft: [[0; 304]; 8],
+        trains: [[0; 60]; 10],
+        environment: scene::Environment::default(),
+        first_frame: false,
+    };
+    let (sender, receiver) = mpsc::channel();
+    let sender = Some(sender);
+    let mut events = Vec::new();
+    spawn_route(
+        &mut scene.trains,
+        0,
+        0,
+        0,
+        |_| {
+            Ok(RouteGeometry {
+                start: [0.; 3],
+                end: [200., 0., 0.],
+            })
+        },
+        [0.; 3],
+        |call, _| {
+            events.push(call.id);
+            submit(&sender, Operation::Route(call))
+        },
+    )
+    .unwrap();
+    player.drain_requests(Some(&receiver));
+    let constants = train_motion::Constants {
+        speed_scale: 50.,
+        step: 0.06,
+        zero: 0.,
+        max_distance: 2.,
+        origin: [0.; 3],
+    };
+    let mut identity = None;
+    let mut dwell_position = std::time::Duration::ZERO;
+    let mut ended = false;
+    for tick in 1..2000 {
+        let mut event = None;
+        train_motion::advance(
+            0,
+            &mut scene.trains[0],
+            constants,
+            &mut train_motion::Callbacks {
+                audio: &mut |call, _| {
+                    event = Some(call.kind);
+                    events.push(call.kind);
+                    submit(
+                        &sender,
+                        Operation::Route(RouteSound {
+                            id: call.kind,
+                            distance: f32::from_bits(call.arguments[1]),
+                            arguments: [0; 2],
+                        }),
+                    )
+                },
+            },
+        )
+        .unwrap();
+        player.drain_requests(Some(&receiver));
+        if event == Some(11) {
+            let sink = player.train_motion.as_ref().unwrap();
+            assert_eq!(sink.volume(), 0.);
+            assert_eq!(Some(sink as *const rodio::Sink), identity);
+            let before = sink.get_pos();
+            window(&mut output, 0., false);
+            dwell_position = player.train_motion.as_ref().unwrap().get_pos();
+            assert!(
+                dwell_position > before,
+                "dwell mutes without pausing or rewinding"
+            );
+        } else if event == Some(12) {
+            let sink = player.train_motion.as_ref().unwrap();
+            assert!(sink.volume() > 0., "departure runs the common level tail");
+            assert!(sink.get_pos() > dwell_position);
+        } else if event == Some(9) {
+            assert!(player.train_motion.is_none());
+            assert!(scene.trains.iter().all(|row| row[..4] == [0; 4]));
+            ended = true;
+            break;
+        }
+        scene
+            .proximity_sounds(&mut { tick }, &mut [0.; 3], |call, _, _, _| {
+                submit(&sender, Operation::Route(call))
+            })
+            .unwrap();
+        player.drain_requests(Some(&receiver));
+        if let Some(sink) = &player.train_motion {
+            let retained = sink as *const rodio::Sink;
+            assert_eq!(*identity.get_or_insert(retained), retained);
+        }
+        output.by_ref().take(128).for_each(drop);
+    }
+    assert!(
+        ended,
+        "train did not finish its route: events={events:?}, row={:?}",
+        scene.trains[0]
+    );
+    assert_eq!(events, [8, 11, 12, 9]);
+    window(&mut output, 0., false);
+    // No active train produces another proximity request. The UI still drains
+    // requests and services retained city inputs on subsequent rendered frames.
+    scene
+        .proximity_sounds(&mut 2001, &mut [0.; 3], |_, _, _, _| {
+            panic!("last train is gone")
+        })
+        .unwrap();
+    player.apply(Operation::City(Box::new(city_inputs(2001))));
+    player.drain_requests(Some(&receiver));
+    player.service_frame([0., 40., -300.]);
+    assert!(player.train_motion.is_none());
+    assert!(player.coast.as_ref().unwrap().volume() > 0.);
+    player.service_frame([0., 40., 0.]);
+    assert_eq!(
+        player.coast.as_ref().unwrap().volume(),
+        audio.source_gain(0)
+    );
+    assert!(output.by_ref().take(4096).any(|sample| sample > 0.));
+}
+
+#[test]
+fn train_normal_event_range_updates_toot_and_finishes_far_cleanup() {
+    let (mut player, audio, mut output) = owner();
+    player.assets.train_toot = vec![0.5; 128];
+    player.apply(route(8));
+    output.by_ref().take(4096).for_each(drop);
+    assert!(player.train_toot.as_ref().unwrap().empty());
+    player.apply(route(11));
+    assert!(
+        player.train_toot.is_none(),
+        "dwell still retires a finished toot"
+    );
+    player.assets.train_toot = vec![0.5; 65536];
+    player.apply(route(8));
+    for id in 7..=18 {
+        if id == 8 {
+            continue;
+        }
+        player.apply(Operation::Route(RouteSound {
+            id,
+            distance: 100.,
+            arguments: [0; 2],
+        }));
+        assert_eq!(
+            player.train_toot.as_ref().unwrap().volume(),
+            audio.source_gain(64)
+        );
+    }
+    player.apply(route(7));
+    player.apply(Operation::Route(RouteSound {
+        id: 9,
+        distance: 700.,
+        arguments: [0; 2],
+    }));
+    assert!(player.train_motion.is_none());
+    assert_eq!(player.train_toot.as_ref().unwrap().volume(), 0.);
+    output.by_ref().take(70000).for_each(drop);
+    player.apply(Operation::Route(RouteSound {
+        id: 18,
+        distance: 700.,
+        arguments: [0; 2],
+    }));
+    assert!(
+        player.train_toot.is_none(),
+        "far calls retire finished toots too"
+    );
+}
+
+#[test]
+fn ship_unique_fallback_loses_handle_without_changing_or_stopping_active_voice() {
+    for exit_mode in [0, 1, 3] {
+        let (mut player, audio, mut output) = owner();
+        player.assets.ship_horn.fill(0.);
+        player.assets.block_factory.fill(0.);
+        let ship = |distance| Operation::Environment {
+            call: EnvironmentCall::Ship(1),
+            distance,
+        };
+        player.apply(ship(0.));
+        let gain = audio.source_gain(99);
+        window(&mut output, gain * 0.5, true);
+        let first_position = player.ship_engine.as_ref().unwrap().get_pos();
+        let horn = player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
+        for distance in [100., 400., 800., 0.] {
+            player.apply(ship(distance));
+            assert!(
+                player.ship_engine.is_none(),
+                "unique request returned no handle"
+            );
+            let voice = player.ship_engine_unowned.as_ref().unwrap();
+            assert_eq!(voice.volume(), gain, "distance cannot update a lost handle");
+            assert!(!voice.empty());
+            assert_eq!(
+                player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
+                horn
+            );
+            assert_eq!(
+                player.ship_horn.as_ref().unwrap().volume(),
+                audio.source_gain(positional_level(distance, 800.))
+            );
+            window(&mut output, gain * 0.5, false);
+        }
+        assert!(player.ship_engine_unowned.as_ref().unwrap().get_pos() > first_position);
+        assert_eq!(player.pending_ship_random, 5);
+        // Apply the pending draws through the actual block consumer and compare
+        // the whole controller, including the shared RNG, to five ship draws.
+        let snapshot = block_audio::Snapshot {
+            centers: [None; 52],
+            camera: [0.; 3],
+            hour: 0,
+            tick: 100,
+            previous_tick: 100,
+            initial_random_state: 205,
+        };
+        player.apply(Operation::Blocks(Box::new(snapshot)));
+        let mut expected = block_audio::Controller::new(205, 100);
+        for _ in 0..5 {
+            expected.ship_random();
+        }
+        expected.advance(snapshot, 0, [false; 52]);
+        assert_eq!(player.block_controller.as_ref().unwrap(), &expected);
+        assert_eq!(player.pending_ship_random, 0);
+        player.set_interface_mode(exit_mode);
+        player.apply(ship(if exit_mode == 0 { 801. } else { 0. }));
+        assert!(player.ship_engine.is_none() && player.ship_horn.is_none());
+        assert_eq!(
+            player.block_controller.as_ref().unwrap(),
+            &expected,
+            "rejected calls do not draw RNG"
+        );
+        window(&mut output, gain * 0.5, false);
+        player.set_interface_mode(0);
+        player.apply(ship(400.));
+        expected.ship_random();
+        assert_eq!(player.block_controller.as_ref().unwrap(), &expected);
+        assert!(
+            player.ship_engine.is_none(),
+            "returning still finds the unique sample active"
+        );
+        window(&mut output, gain * 0.5, false);
+    }
+}
+
+#[test]
+fn ship_leaving_before_suppression_releases_returned_engine_handle() {
+    let (mut player, _, mut output) = owner();
+    player.apply(Operation::Environment {
+        call: EnvironmentCall::Ship(0),
+        distance: 0.,
+    });
+    window(&mut output, 0.034197945, true);
+    player.apply(Operation::Environment {
+        call: EnvironmentCall::Ship(0),
+        distance: 801.,
+    });
+    assert!(player.ship_engine.is_none() && player.ship_horn.is_none());
+    assert!(player.ship_engine_unowned.is_none());
+    window(&mut output, 0., false);
+    player.apply(Operation::Environment {
+        call: EnvironmentCall::Ship(0),
+        distance: 0.,
+    });
+    assert!(player.ship_engine.is_some());
+    window(&mut output, 0.034197945, true);
+}
+
+#[test]
+fn ship_finished_horn_is_not_retriggered_by_admitted_updates() {
+    let (mut player, _, mut output) = owner();
+    player.assets.ship_engine.fill(0.);
+    player.assets.ship_horn = vec![0.5; 128];
+    let ship = Operation::Environment {
+        call: EnvironmentCall::Ship(1),
+        distance: 0.,
+    };
+    player.apply(ship.clone());
+    let horn = player.ship_horn.as_ref().unwrap() as *const rodio::Sink;
+    output.by_ref().take(4096).for_each(drop);
+    assert!(player.ship_horn.as_ref().unwrap().empty());
+    for _ in 0..32 {
+        player.apply(ship.clone());
+        assert_eq!(
+            player.ship_horn.as_ref().unwrap() as *const rodio::Sink,
+            horn
+        );
+        assert!(player.ship_horn.as_ref().unwrap().empty());
+    }
+    assert_eq!(player.pending_ship_random, 33);
+    window(&mut output, 0., false);
 }
