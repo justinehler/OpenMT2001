@@ -54,7 +54,7 @@ pub mod road_textures;
 pub mod roof;
 pub mod routing;
 pub mod save;
-#[cfg(feature = "native")]
+#[cfg(feature = "lua4")]
 pub mod save_menu;
 pub mod scene;
 pub mod scheduler;

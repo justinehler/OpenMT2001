@@ -9,8 +9,9 @@ use std::{
 pub struct Name([u8; 128]);
 impl Default for Name {
     fn default() -> Self {
+        let board = openmt2001::board_style::DEFAULT_BOARD.as_bytes();
         let mut name = [0; 128];
-        name[..3].copy_from_slice(b"usa");
+        name[..board.len()].copy_from_slice(board);
         Self(name)
     }
 }
@@ -70,7 +71,7 @@ impl Name {
         &self.0[..self.0.iter().position(|b| *b == 0).unwrap_or(128)]
     }
     pub fn directory(&self, installer: &Path) -> PathBuf {
-        installer.join("Standard/fonts/board").join(self.as_str())
+        openmt2001::board_style::board_directory(installer, self.as_str())
     }
     pub fn language(&self, installer: &Path) -> Result<PackedLanguage, String> {
         PackedLanguage::load(&self.directory(installer).join("tycoon"))

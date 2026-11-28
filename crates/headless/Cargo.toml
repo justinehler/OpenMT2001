@@ -1,0 +1,25 @@
+[package]
+name = "openmt-headless"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+repository = "https://github.com/justinehler/OpenMT2001"
+autobins = false
+
+# `game headless` without the native stack (#99): the same runner, Host and
+# session sources as the game binary, mounted from src/bin, built against the
+# library alone. No wgpu, winit or rodio.
+[[bin]]
+name = "headless"
+path = "src/main.rs"
+# The runner's tests need the game's interface layer; they run in openmt-game.
+test = false
+
+[dependencies]
+openmt2001 = { path = "../..", features = ["lua4"] }
+sha2 = "0.10"
+
+# The mounted sources gate some tests on the game's `capture` feature.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("capture"))'] }

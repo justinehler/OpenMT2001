@@ -1,6 +1,15 @@
 //! District material settings from the original539780/539784 tables and board.prm.
 //! Parsing and application are pure; the host supplies the original source text.
 use crate::{board::Board, pe::PeImage};
+use std::path::{Path, PathBuf};
+
+/// The board folder 4c2880 falls back to when none is installed or chosen.
+pub const DEFAULT_BOARD: &str = "usa";
+
+/// A board's folder under the installer, holding `board.prm` and its language.
+pub fn board_directory(installer: &Path, name: &str) -> PathBuf {
+    installer.join("Standard/fonts/board").join(name)
+}
 
 #[derive(Clone, Debug)]
 pub struct Style {
@@ -11,6 +20,14 @@ pub struct Style {
 }
 
 impl Style {
+    /// The original tables with the board's `board.prm` applied.
+    pub fn load(image: &PeImage<'_>, board_directory: &Path) -> Result<Self, String> {
+        let mut style = Self::from_v14(image)?;
+        let source = std::fs::read_to_string(board_directory.join("board.prm"))
+            .map_err(|e| e.to_string())?;
+        style.apply_source(&source)?;
+        Ok(style)
+    }
     pub fn from_v14(image: &PeImage<'_>) -> Result<Self, String> {
         let mut names: [String; 12] = std::array::from_fn(|_| String::new());
         let mut pavement = [0; 12];

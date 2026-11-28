@@ -123,11 +123,7 @@ pub fn load_board_style(
     installer: &Path,
     board: crate::board_selection::Name,
 ) -> Result<openmt2001::board_style::Style, String> {
-    let mut style = openmt2001::board_style::Style::from_v14(image)?;
-    let source = fs::read_to_string(board.directory(installer).join("board.prm"))
-        .map_err(|e| e.to_string())?;
-    style.apply_source(&source)?;
-    Ok(style)
+    openmt2001::board_style::Style::load(image, &board.directory(installer))
 }
 
 impl Assets {

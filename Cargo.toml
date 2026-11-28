@@ -52,5 +52,5 @@ syn = { version = "2", features = ["full", "visit"] }
 # The game binary and its interface layer are their own packages so an edit
 # there rebuilds only what depends on it (#99). Their sources stay in src/bin.
 [workspace]
-members = [".", "crates/frontend", "crates/game"]
-default-members = [".", "crates/frontend", "crates/game"]
+members = [".", "crates/frontend", "crates/game", "crates/headless"]
+default-members = [".", "crates/frontend", "crates/game", "crates/headless"]

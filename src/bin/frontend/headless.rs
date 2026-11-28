@@ -1,5 +1,8 @@
 //! `game headless`: run a city with no window, renderer or audio.
 //!
+//! The `headless` binary (crates/headless) builds the same runner without the
+//! native stack, so it needs no wgpu, winit or rodio (#99).
+//!
 //! The session starts the way the live session worker starts it
 //! (`intro/scene_inputs.rs`): same process runtime, dispatch custody, styled
 //! board and `live_host::Host::frame` boundary. Presentation sinks stay
@@ -11,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 const USAGE: &str = "\
 usage: game headless (--scenario TOKEN | --save FILE) [options]
+       headless (--scenario TOKEN | --save FILE) [options]
 
 start (exactly one):
   --scenario TOKEN      fresh city, e.g. SCENARIO3, sandbox
@@ -427,14 +431,14 @@ pub fn rng_report(session: &crate::fresh_city::Session<'_>, tick: u32) -> String
     format!("{{\"tick\":{tick},\"rng\":{{{}}}}}", fields.join(","))
 }
 
-/// Stand-in for the auction renderer thread (`auction_bridge::View`). It keeps
+/// Stand-in for the auction renderer thread (the game's `auction_bridge::View`). It keeps
 /// the scene/transition state machine so the session sees the values the live
 /// renderer returns, and drains actor events without drawing them.
 fn auction_stand_in(
-    requests: std::sync::mpsc::Receiver<crate::auction_bridge::Request>,
+    requests: std::sync::mpsc::Receiver<openmt2001::render_requests::auction::Request>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        use crate::auction_bridge::Operation;
+        use openmt2001::render_requests::auction::Operation;
         let mut actors = None;
         let mut prepared = false;
         let mut transition = 0u32;
@@ -556,7 +560,14 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
     let files = Files::load(&options.paths)?;
     let paths = &options.paths;
     let image = openmt2001::pe::PeImage::parse(&files.executable)?;
-    let style = crate::block_sidewalk_labels::load_style(&image, &paths.installer)?;
+    // The default board, as the game's block_sidewalk_labels::load_style.
+    let style = openmt2001::board_style::Style::load(
+        &image,
+        &openmt2001::board_style::board_directory(
+            &paths.installer,
+            openmt2001::board_style::DEFAULT_BOARD,
+        ),
+    )?;
     let mut board = openmt2001::board::Board::from_v14(&image)?;
     style.apply_board(&mut board)?;
     let file = openmt2001::build_file::BuildFile::parse(&files.build_file)?;
