@@ -353,6 +353,11 @@ impl View {
         self.message = Some(message);
         self.shown = None;
     }
+    pub fn clear_message(&mut self) {
+        if self.message.take().is_some() {
+            self.shown = None;
+        }
+    }
     pub fn set_save_disabled(&mut self, disabled: bool) {
         if self.save_disabled != disabled {
             self.save_disabled = disabled;

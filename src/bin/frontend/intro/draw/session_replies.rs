@@ -17,20 +17,19 @@ impl Intro {
                     }
                 };
                 if let Some(result) = outcome {
-                    let message = match &result {
+                    // The original confirms nothing after a save (#510); only
+                    // a failure is reported on the Options panel.
+                    match &result {
                         Ok(path) => {
                             eprintln!("Saved V2 game: {}", path.display());
-                            format!(
-                                "Saved: {}",
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            )
+                            view.game_options.clear_message();
                         }
                         Err(error) => {
                             eprintln!("Save failed: {error}");
-                            format!("Save failed: {error}")
+                            view.game_options
+                                .set_message(format!("Save failed: {error}"));
                         }
-                    };
-                    view.game_options.set_message(message);
+                    }
                     if let Some(root) = view.save_profile_root.as_deref() {
                         view.save_dialog.saved(result, root);
                     }
