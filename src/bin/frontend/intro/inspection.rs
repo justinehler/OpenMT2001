@@ -655,14 +655,7 @@ impl Inspection {
         if self.camera_producer.is_some() {
             let post = self.camera_control_post(14);
             match self.queue_camera_event(
-                camera_producer::Event::Block {
-                    category: selection.blocks[hit.category].id as u32,
-                    selected: crate::selection::Hit {
-                        category: hit.category,
-                        building: None,
-                    },
-                    origin: camera_producer::BlockOrigin::Selection,
-                },
+                camera_producer::Event::select_block(hit.category, selection),
                 None,
                 None,
                 false,
@@ -678,14 +671,7 @@ impl Inspection {
     pub(super) fn focus_category(&mut self, category: usize, selection: &crate::selection::Assets) {
         if self.camera_producer.is_some() {
             if let Err(error) = self.queue_camera_event(
-                camera_producer::Event::Block {
-                    category: selection.blocks[category].id as u32,
-                    selected: crate::selection::Hit {
-                        category,
-                        building: None,
-                    },
-                    origin: camera_producer::BlockOrigin::Selection,
-                },
+                camera_producer::Event::select_block(category, selection),
                 None,
                 None,
                 false,

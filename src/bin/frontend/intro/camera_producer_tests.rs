@@ -773,3 +773,118 @@ fn open_prompt_removes_camera_input_without_stopping_the_callback() {
         })
     ));
 }
+
+#[test]
+fn city_view_notice_click_leaves_city_view_for_the_hidden_rows_block() {
+    use super::super::{InformationTarget, information_target, notice_click_block};
+    // Board IDs deliberately differ from vector indices: notices carry IDs.
+    let block = |id, x| openmt2001::board::Block {
+        id,
+        name: format!("Authored block {id}"),
+        text_id: 0,
+        kind: 0,
+        center: [x, 30.],
+        size: [82.; 2],
+        pavement_color: 0,
+        flags: 0,
+        street_sides: 0,
+    };
+    let assets = crate::selection::Assets::descriptor_test_assets(
+        vec![block(2, 0.), block(7, 100.), block(9, 200.)],
+        [0; 116],
+    );
+    let notice = |category| openmt2001::notifications::Notice {
+        category,
+        category_kind: 0,
+        character: 0,
+        actor: Vec::new(),
+        business_kind: None,
+    };
+    // More active notices than the three collapsed rows, and one whose block
+    // is not presented.
+    let notices = [notice(2), notice(9), notice(2), notice(7), notice(40)];
+    // Logical 640x480 row rectangles: x 191..=492, y 5+12i..=16+12i.
+    let row = |i: usize| Some([340., 11. + 12. * i as f32]);
+    assert_eq!(
+        notice_click_block(&notices, row(0), &assets.blocks),
+        Some(Some(0))
+    );
+    assert_eq!(
+        notice_click_block(&notices, row(1), &assets.blocks),
+        Some(Some(2))
+    );
+    // 0x420a70 tests every active row, not only the visible ones.
+    assert_eq!(
+        notice_click_block(&notices, row(3), &assets.blocks),
+        Some(Some(1))
+    );
+    // A hit whose block is absent is still consumed, with nothing to focus.
+    assert_eq!(
+        notice_click_block(&notices, row(4), &assets.blocks),
+        Some(None)
+    );
+    // Outside every active row the click is not a notice click, so it goes on
+    // to the strategic map.
+    for pointer in [
+        Some([190., 11.]),
+        Some([493., 11.]),
+        Some([340., 4.]),
+        Some([340., 11. + 12. * 5.]),
+        None,
+    ] {
+        assert_eq!(notice_click_block(&notices, pointer, &assets.blocks), None);
+    }
+    assert_eq!(notice_click_block(&[], row(0), &assets.blocks), None);
+
+    // Enter City View from the compass button and from the choose-view
+    // transaction (scripts and the Escape menu).
+    let strategic = CameraSample {
+        eye: [-220., 1050., -30.1],
+        target: [-220., 0., -30.],
+        up: [0., 1., 0.],
+        vertical_fov: 45.,
+    };
+    for entry in [
+        Event::Compass { strategic },
+        Event::ChooseView { mode: 3, strategic },
+    ] {
+        let mut view = View {
+            active: fresh(),
+            strategic: false,
+            normal_return: None,
+        };
+        let mut core = Core::new(new_process_owner().unwrap());
+        core.project(view.active.camera).unwrap();
+        core.event(&mut view, entry, Resolved::Local, &assets)
+            .unwrap();
+        assert!(view.strategic);
+        assert_eq!(core.kind(), 4);
+        assert_eq!(view.active.selected, None);
+
+        // The click on hidden row 3 focuses block 7 through the same event the
+        // input path queues (Inspection::focus_category).
+        let Some(Some(index)) = notice_click_block(&notices, row(3), &assets.blocks) else {
+            panic!("row 3 must hit block 7")
+        };
+        core.event(
+            &mut view,
+            Event::select_block(index, &assets),
+            Resolved::Local,
+            &assets,
+        )
+        .unwrap();
+        let selected = crate::selection::Hit {
+            category: 1,
+            building: None,
+        };
+        assert!(!view.strategic, "the notice click leaves City View");
+        assert_eq!(core.kind(), 0xc, "block camera kind");
+        assert_eq!(view.active.selected, Some(selected));
+        assert!(view.normal_return.is_none());
+        assert_eq!(
+            information_target(view.active.selected, &[]),
+            InformationTarget::Block(selected),
+            "the main panel shows Block Information"
+        );
+    }
+}

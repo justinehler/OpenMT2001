@@ -597,6 +597,19 @@ pub(super) enum Event {
     },
 }
 impl Event {
+    /// Focus a block from the interface: a notice row click (0x420a70), the
+    /// business panel's parent-block control or Home. From City View this leaves
+    /// mode 3 and places the block camera as kind 12.
+    pub(super) fn select_block(category: usize, selection: &crate::selection::Assets) -> Self {
+        Self::Block {
+            category: selection.blocks[category].id as u32,
+            selected: crate::selection::Hit {
+                category,
+                building: None,
+            },
+            origin: BlockOrigin::Selection,
+        }
+    }
     pub(super) fn script_block(
         target: u32,
         selection: &crate::selection::Assets,
