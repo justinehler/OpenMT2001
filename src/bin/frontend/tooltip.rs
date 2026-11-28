@@ -13,6 +13,7 @@ pub struct Tooltip {
     names: Vec<Vec<u8>>,
     icon_labels: [Vec<u8>; 8],
     compass_labels: [Vec<u8>; 2],
+    speed_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
     pub fn load(
@@ -98,18 +99,32 @@ impl Tooltip {
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| "compass focus caption count")?;
+        let speed_labels = [1144, 1145]
+            .map(|id| {
+                labels
+                    .get(id)
+                    .map(|s| s.to_vec())
+                    .ok_or("speed tooltip missing".to_owned())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| "speed tooltip count")?;
         Ok(Self {
             pages,
             tab,
             names,
             icon_labels,
             compass_labels,
+            speed_labels,
         })
     }
     fn focus_identifier(&self, text_id: u32) -> Result<&[u8], String> {
         let name = match text_id {
             1142 => &self.compass_labels[0],
             1143 => &self.compass_labels[1],
+            1144 => &self.speed_labels[0],
+            1145 => &self.speed_labels[1],
             1146 => &self.icon_labels[0],
             1147 => &self.icon_labels[1],
             1148 => &self.icon_labels[2],
@@ -316,7 +331,10 @@ mod tests {
         }
         let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
         let assets = super::Tooltip::load(&index, &archive, &installer, &language).unwrap();
-        for id in ids.into_iter().chain([1146, 1147, 1148, 12, 2242]) {
+        for id in ids
+            .into_iter()
+            .chain([1144, 1145, 1146, 1147, 1148, 12, 2242])
+        {
             let panel = assets.prepare(&renderer, id, [40, 100]).unwrap();
             #[cfg(feature = "capture")]
             if ids.contains(&id)

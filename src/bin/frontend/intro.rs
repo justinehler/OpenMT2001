@@ -3666,6 +3666,11 @@ impl Inspection {
         auction: bool,
     ) -> Option<crate::time_panel::Button> {
         let target = assets.button_in_mode(point, auction)?;
+        if target == crate::time_panel::Button::Speed
+            && self.live_status.as_ref().is_some_and(|s| s.network_enabled)
+        {
+            return None;
+        }
         let Some(g) = &self.ui_graph else {
             return Some(target);
         };
@@ -3680,7 +3685,10 @@ impl Inspection {
             }
         }
     }
-    fn time_tooltip(&self, assets: &crate::time_panel::Assets) -> Option<u32> {
+    fn time_tooltip(
+        &self,
+        assets: &crate::time_panel::Assets,
+    ) -> Option<(crate::time_panel::Button, u32)> {
         if self.options_visible()
             || self.settings_visible()
             || self.save_visible()
@@ -3700,9 +3708,12 @@ impl Inspection {
             .live_status
             .as_ref()
             .is_some_and(|s| s.auction.is_some());
-        (self.time_target(assets, point, auction)
-            == Some(crate::time_panel::Button::ScenarioReminder))
-        .then_some(1141)
+        let target = self.time_target(assets, point, auction)?;
+        let status = self.live_status.as_ref()?;
+        let speed = self.time_panel.displayed_speed().unwrap_or(status.speed);
+        target
+            .tooltip(speed, status.network_enabled)
+            .map(|id| (target, id))
     }
     fn time_occupied(
         &self,
@@ -9913,14 +9924,30 @@ impl Intro {
                     .as_ref()
                     .and_then(|menu| view.toolbar_target(menu, &self.assets.selection.blocks))
                     .map(|a| a.tooltip());
-                let visible_icon = view.icon_tooltip_dwell.advance(side_icon.or(icon));
-                let time_icon = view
-                    .time_tooltip(&self.assets.time_panel)
-                    .filter(|_| view.time_panel.tooltip_ready());
+                let time_icon = view.time_tooltip(&self.assets.time_panel);
+                let speed_icon = time_icon
+                    .filter(|(button, _)| *button == crate::time_panel::Button::Speed)
+                    .map(|(_, id)| id);
+                let visible_icon = view
+                    .icon_tooltip_dwell
+                    .advance(speed_icon.or(side_icon).or(icon));
                 let tooltip_state = time_icon
+                    .filter(|(button, _)| {
+                        *button == crate::time_panel::Button::ScenarioReminder
+                            && view.time_panel.tooltip_ready()
+                    })
+                    .map(|(_, id)| id)
                     .zip(view.pointer.map(|p| p.map(|v| v / 2)))
                     .or(navigator_tooltip)
-                    .or_else(|| visible_icon.zip(view.pointer));
+                    .or_else(|| {
+                        visible_icon.zip(view.pointer.map(|point| {
+                            if speed_icon.is_some() {
+                                point.map(|v| v / 2)
+                            } else {
+                                point
+                            }
+                        }))
+                    });
                 if tooltip_state != view.tooltip_state {
                     view.tooltip = tooltip_state
                         .map(|(text_id, point)| {

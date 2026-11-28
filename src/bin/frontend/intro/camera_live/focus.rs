@@ -19,7 +19,7 @@ pub enum ChildKey {
     Toolbar(usize),
     Locator(u32),
     Compass,
-    PlayerPortrait,
+    Time(crate::time_panel::Button),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Child {
@@ -90,7 +90,7 @@ impl Focus {
             return Err("Identifier0/inline focus child needs its real text producer".into());
         }
         if self.child.is_some_and(|c| c.key == key) && !force1 {
-            // 425400 changes the caption of an existing compass widget.
+            // 425400/425490 change an existing compass/speed caption.
             // This is the finite set-secondary-identifier/refresh path,
             // not another child show that silently ignores the new label.
             if self.child.is_some_and(|c| c.identifier != identifier) {
@@ -199,8 +199,8 @@ pub fn present(
         None
     };
     let toolbar = menu.and_then(|menu| view.toolbar_target(menu, &assets.selection.blocks));
-    let child = if let Some(id) = view.time_tooltip(&assets.time_panel) {
-        Some((ChildKey::PlayerPortrait, id))
+    let child = if let Some((button, id)) = view.time_tooltip(&assets.time_panel) {
+        Some((ChildKey::Time(button), id))
     } else if let Some(action) = toolbar {
         Some((ChildKey::Toolbar(action.index()), action.tooltip()))
     } else if let Some(id) = locator {
