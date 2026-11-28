@@ -9,6 +9,7 @@ fn owner() -> (Player, SharedAudio, rodio::mixer::MixerSource) {
         road_ambient: samples.clone(),
         road_motor: samples.clone(),
         resident_crowd: samples.clone(),
+        coast: Some(samples.clone()),
         near_aircraft: samples.clone(),
         ship_engine: samples.clone(),
         ship_horn: samples.clone(),
@@ -103,6 +104,7 @@ fn transport_creation_and_explicit_update_consume_current_factor_for_all_beds() 
             0.008034706,
         ),
         ("crowd", Operation::ResidentCrowd(40.), 1, 0.0041924706),
+        ("coast", Operation::Coast { camera_z: -300. }, 1, 0.012955972),
         ("aircraft", route(0), 2, 0.0094074085),
         ("motion", route(7), 1, 0.010976654),
         ("toot", route(8), 1, 0.010976654),
@@ -348,4 +350,141 @@ fn authored_park_and_owl_one_shots_keep_creation_gain() {
         audio.set_effects(100);
         window(&mut output, 0.017098973, true);
     }
+}
+
+#[test]
+fn coast_camera_z_threshold_clipping_and_source_levels() {
+    let (mut player, audio, mut output) = owner();
+    audio.set_effects(100);
+    for z in [-150., 0., 500.] {
+        player.apply(Operation::Coast { camera_z: z });
+        assert!(player.coast.is_none(), "no inland creation at Z={z}");
+    }
+    // Independent source words from 4adbe0's clipped distance and f32 gain
+    // store. The first two coastal positions still create a zero-level loop.
+    for (z, level) in [
+        (f32::from_bits((-150f32).to_bits() + 1), 0),
+        (-151., 0),
+        (-151.875, 1),
+        (-153.75, 2),
+        (-163.125, 6), // A second f32 store before truncation would yield 7.
+        (-226.875, 40), // Likewise 40, not 41.
+        (-225., 40),
+        (f32::from_bits((-300f32).to_bits() - 1), 79),
+        (-300., 80),
+        (-1000., 80),
+        (-f32::MAX, 80),
+        (-150., 0),
+        (1000., 0),
+    ] {
+        player.apply(Operation::Coast { camera_z: z });
+        let sink = player.coast.as_ref().unwrap();
+        assert_eq!(sink.volume(), audio.source_gain(level), "Z={z}");
+        assert!(!sink.is_paused());
+        assert!(!sink.empty());
+    }
+    player.apply(Operation::Coast { camera_z: -300. });
+    // Independent q80/p100 D=-654 maps half-scale PCM to this amplitude.
+    window(&mut output, 0.23548867, true);
+}
+
+#[test]
+fn coast_mutes_and_resumes_same_advancing_loop() {
+    let (mut player, audio, mut output) = owner();
+    let (sender, receiver) = mpsc::channel();
+    submit(&Some(sender), Operation::Coast { camera_z: -300. }).unwrap();
+    player.apply(receiver.recv().unwrap().operation);
+    let identity = player.coast.as_ref().unwrap() as *const rodio::Sink;
+    // Independent q80/p25 D=-3173, with half-scale PCM.
+    window(&mut output, 0.012955972, true);
+    let near_position = player.coast.as_ref().unwrap().get_pos();
+    for z in [-150., 0.] {
+        player.apply(Operation::Coast { camera_z: z });
+        window(&mut output, 0., false);
+        let sink = player.coast.as_ref().unwrap();
+        assert_eq!(sink as *const rodio::Sink, identity);
+        assert!(sink.get_pos() > near_position, "muted loop advances");
+    }
+    let muted_position = player.coast.as_ref().unwrap().get_pos();
+    audio.set_effects(100);
+    player.apply(Operation::Coast { camera_z: -225. });
+    assert_eq!(player.coast.as_ref().unwrap().volume(), audio.source_gain(40));
+    for _ in 0..4096 {
+        let _ = output.next();
+    }
+    let sink = player.coast.as_ref().unwrap();
+    assert_eq!(sink as *const rodio::Sink, identity);
+    assert!(sink.get_pos() > muted_position, "returning never rewinds");
+    player.apply(Operation::Coast { camera_z: -300. });
+    window(&mut output, 0.23548867, false);
+}
+
+#[test]
+fn coast_releases_in_strategic_inspection_and_reset() {
+    for mode in [1, 3] {
+        let (mut player, _, mut output) = owner();
+        player.apply(Operation::Coast { camera_z: -300. });
+        window(&mut output, 0.012955972, true);
+        player.set_interface_mode(mode);
+        player.apply(Operation::Coast { camera_z: -300. });
+        assert!(player.coast.is_none());
+        window(&mut output, 0., false);
+        player.set_interface_mode(0);
+        player.apply(Operation::Coast { camera_z: -300. });
+        window(&mut output, 0.012955972, true);
+        player.apply(Operation::Reset);
+        assert!(player.coast.is_none());
+        window(&mut output, 0., false);
+    }
+}
+
+#[test]
+fn coast_missing_sample_is_silent_and_supplied_mixed_case_pcm_loads() {
+    let root = openmt2001::fixtures::scratch("COAST_AUDIO");
+    let directory = root.join(format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let (mut player, _, mut output) = owner();
+    player.assets.coast = load_coast(&directory);
+    assert!(player.assets.coast.is_none());
+    for z in [-300., -225., -150., -300.] {
+        player.apply(Operation::Coast { camera_z: z });
+        assert!(player.coast.is_none());
+        window(&mut output, 0., true);
+    }
+    // Other city audio still works when the optional coast WAV is absent.
+    player.apply(Operation::ResidentCrowd(40.));
+    window(&mut output, 0.0041924706, true);
+    player.apply(Operation::Reset);
+    window(&mut output, 0., false);
+
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&164u32.to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&22_050u32.to_le_bytes());
+    wav.extend_from_slice(&44_100u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&128u32.to_le_bytes());
+    for _ in 0..64 {
+        wav.extend_from_slice(&16_384i16.to_le_bytes());
+    }
+    std::fs::write(directory.join("WAVCRASH2.WAV"), wav).unwrap();
+    player.assets.coast = load_coast(&directory);
+    assert_eq!(player.assets.coast.as_deref(), Some([0.5; 64].as_slice()));
+    player.apply(Operation::Coast { camera_z: -300. });
+    window(&mut output, 0.012955972, true);
+    window(&mut output, 0.012955972, false); // Loops beyond the WAV's 64 samples.
+    std::fs::remove_dir_all(directory).unwrap();
 }

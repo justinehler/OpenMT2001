@@ -2855,6 +2855,14 @@ impl Host {
                 ) {
                     self.fail(error);
                 }
+                if let Err(error) = crate::transport_audio::submit(
+                    &transport_audio,
+                    crate::transport_audio::Operation::Coast {
+                        camera_z: camera[2],
+                    },
+                ) {
+                    self.fail(error);
+                }
             }
             Err(error) => self.fail(error),
         }

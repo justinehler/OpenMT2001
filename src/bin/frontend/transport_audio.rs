@@ -38,6 +38,10 @@ pub enum Operation {
     Construction([[Option<ConstructionSource>; 2]; 4]),
     /// Original 4afd65 presents block ambience after the construction beds.
     Blocks(Box<block_audio::Snapshot>),
+    /// Original 4afd6c services the retained nonspatial coast loop after blocks.
+    Coast {
+        camera_z: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -132,6 +136,7 @@ pub struct Assets {
     road_ambient: Vec<f32>,
     road_motor: Vec<f32>,
     resident_crowd: Vec<f32>,
+    coast: Option<Vec<f32>>,
     near_aircraft: Vec<f32>,
     ship_engine: Vec<f32>,
     ship_horn: Vec<f32>,
@@ -233,10 +238,26 @@ pub(crate) fn original_case_path(path: &Path) -> Result<PathBuf, String> {
     folded.ok_or_else(|| format!("{}: original sound missing", path.display()))
 }
 
+// Missing/unsupported optional coast audio must not disable the other city beds.
+fn load_coast(directory: &Path) -> Option<Vec<f32>> {
+    pcm16(&directory.join("wavcrash2.wav")).ok()
+}
+
+/// 4adbe0 reads camera position Z (93af6c), clips distance before scaling,
+/// stores gain as binary32, then truncates gain * 80 at the source-level setter.
+fn coast_level(camera_z: f32) -> Option<i32> {
+    (camera_z < -150.).then(|| {
+        let distance = (-150. - f64::from(camera_z)).clamp(1., 150.);
+        let gain = (distance * f64::from(1f32 / 150.)) as f32;
+        (f64::from(gain) * 80.).trunc() as i32
+    })
+}
+
 impl Assets {
     pub fn load(image: &PeImage<'_>, installer: &Path) -> Result<Self, String> {
         let directory = installer.join("Standard/sound/high");
         for (address, name) in [
+            (0x5451b0, "wavcrash2.wav"),
             (0x545220, "Block_Sounds\\ambi_factory_1.wav"),
             (0x5451fc, "Block_Sounds\\SchoolPlayground.wav"),
             (0x544ff8, "block_sounds//ambi_park_1.wav"),
@@ -268,6 +289,7 @@ impl Assets {
                 0x5450d0,
                 "ambi_day_peop_busycity.wav",
             )?))?,
+            coast: load_coast(&directory),
             near_aircraft: pcm16(&directory.join(checked_name(
                 image,
                 0x54511c,
@@ -313,6 +335,7 @@ pub struct Player {
     road_ambient: Option<rodio::Sink>,
     road_motors: [Option<rodio::Sink>; 3],
     resident_crowd: Option<rodio::Sink>,
+    coast: Option<rodio::Sink>,
     near_aircraft: Option<rodio::Sink>,
     ship_engine: Option<rodio::Sink>,
     ship_horn: Option<rodio::Sink>,
@@ -338,6 +361,7 @@ impl Player {
             road_ambient: None,
             road_motors: std::array::from_fn(|_| None),
             resident_crowd: None,
+            coast: None,
             near_aircraft: None,
             ship_engine: None,
             ship_horn: None,
@@ -398,6 +422,7 @@ impl Player {
             Operation::Environment { call, distance } => self.environment(call, distance),
             Operation::Construction(groups) => self.construction(groups),
             Operation::Blocks(snapshot) => self.blocks(*snapshot),
+            Operation::Coast { camera_z } => self.coast(camera_z),
         }
     }
 
@@ -407,6 +432,7 @@ impl Player {
             &mut self.train_toot,
             &mut self.road_ambient,
             &mut self.resident_crowd,
+            &mut self.coast,
             &mut self.near_aircraft,
             &mut self.ship_engine,
             &mut self.ship_horn,
@@ -696,6 +722,26 @@ impl Player {
         }
     }
 
+    fn coast(&mut self, camera_z: f32) {
+        if matches!(self.interface_mode, 1 | 3) {
+            stop(&mut self.coast);
+            return;
+        }
+        let level = coast_level(camera_z);
+        if self.coast.is_none() && level.is_some() {
+            let Some(samples) = self.assets.coast.clone() else {
+                return;
+            };
+            if let Some(mixer) = self.mixer() {
+                self.coast = Some(Self::loop_sink(mixer, &samples, 0.));
+            }
+        }
+        if let Some(sink) = &self.coast {
+            // Inland updates mute without stopping or rewinding the loop.
+            sink.set_volume(self.audio.source_gain(level.unwrap_or(0)));
+        }
+    }
+
     fn environment(&mut self, call: EnvironmentCall, distance: f32) {
         if !distance.is_finite() {
             return;
@@ -981,6 +1027,7 @@ mod tests {
             road_ambient: samples.clone(),
             road_motor: samples.clone(),
             resident_crowd: samples.clone(),
+            coast: Some(samples.clone()),
             near_aircraft: samples.clone(),
             ship_engine: samples.clone(),
             ship_horn: samples.clone(),
@@ -1098,6 +1145,7 @@ mod tests {
             road_ambient: samples.clone(),
             road_motor: samples.clone(),
             resident_crowd: samples.clone(),
+            coast: Some(samples.clone()),
             near_aircraft: samples.clone(),
             ship_engine: samples.clone(),
             ship_horn: samples.clone(),
@@ -1261,8 +1309,13 @@ mod tests {
         let exe = std::fs::read(exe).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let assets = Assets::load(&image, Path::new(&installer)).unwrap();
-        // 4afcde presents road ambience first, then category crowd ambience.
-        for (callsite, target) in [(0x4afcb5u32, 0x4af860u32), (0x4afcbc, 0x4afa40)] {
+        // Native frame order: road, crowd, then blocks and coast.
+        for (callsite, target) in [
+            (0x4afcb5u32, 0x4af860u32),
+            (0x4afcbc, 0x4afa40),
+            (0x4afd65, 0x4aec00),
+            (0x4afd6c, 0x4adbe0),
+        ] {
             let code = image.at(callsite, 5).unwrap();
             assert_eq!(code[0], 0xe8);
             assert_eq!(
@@ -1271,6 +1324,20 @@ mod tests {
                 target
             );
         }
+        for (address, expected) in [
+            (0x5265b4, -150.),
+            (0x525034, 1.),
+            (0x5265b0, 150.),
+            (0x5265ac, 1f32 / 150.),
+            (0x52505c, 80.),
+        ] {
+            assert_eq!(image.f32_at(address).unwrap(), expected);
+        }
+        // 4adc29 reads position Z, rather than the camera look-at target.
+        assert_eq!(
+            u32::from_le_bytes(image.at(0x4adc2b, 4).unwrap().try_into().unwrap()),
+            0x93af6c
+        );
         assert_eq!(image.f32_at(0x525248).unwrap(), 50.);
         assert_eq!(image.f32_at(0x525094).unwrap(), 30.);
         assert_eq!(image.f32_at(0x525058).unwrap(), 100.);
@@ -1299,6 +1366,7 @@ mod tests {
         assert_eq!(assets.road_ambient.len(), 220_886);
         assert_eq!(assets.road_motor.len(), 31_981);
         assert_eq!(assets.resident_crowd.len(), 84_446);
+        assert_eq!(assets.coast.as_ref().unwrap().len(), 165_184);
         assert_eq!(assets.near_aircraft.len(), 33_604);
         assert_eq!(assets.ship_engine.len(), 16_689);
         assert_eq!(assets.ship_horn.len(), 215_882);
