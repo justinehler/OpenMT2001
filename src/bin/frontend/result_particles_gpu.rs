@@ -578,6 +578,40 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires GPU adapter; city halo material readback"]
+    fn city_halos_add_light_without_writing_depth() {
+        let descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let quad = |mode, z, color| material_quad(mode, [-1., -1., 1., 1.], z, color);
+        let background = || quad(SurfaceMode::UiDepth, 0.9, [20, 30, 40, 255]);
+        let halo = || quad(SurfaceMode::LightHalos, 0.5, [64, 32, 16, 128]);
+        let center = |bytes: Vec<u8>| {
+            <[u8; 3]>::try_from(&bytes[(32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 3]).unwrap()
+        };
+        let color = center(material_readback(
+            &renderer,
+            &[background(), halo(), halo()],
+        ));
+        for (actual, expected) in color.into_iter().zip([84_u8, 62, 56]) {
+            assert!(actual.abs_diff(expected) <= 2, "{color:?}");
+        }
+        let behind = quad(SurfaceMode::UiDepth, 0.6, [7, 11, 17, 255]);
+        assert_eq!(
+            center(material_readback(
+                &renderer,
+                &[background(), halo(), behind]
+            )),
+            [7, 11, 17]
+        );
+        let front = quad(SurfaceMode::UiDepth, 0.25, [7, 11, 17, 255]);
+        assert_eq!(
+            center(material_readback(&renderer, &[background(), front, halo()])),
+            [7, 11, 17]
+        );
+    }
+
+    #[test]
     #[ignore = "original renderer178 hardware/software vertex oracle /037f"]
     fn original_point_radius_vertices() {
         let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_POINT_VERTICES")).unwrap();

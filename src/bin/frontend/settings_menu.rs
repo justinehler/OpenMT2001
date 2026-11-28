@@ -72,6 +72,7 @@ pub enum Button {
     DistanceLeft,
     DistanceTrack,
     DistanceRight,
+    Halos,
     AutoRotate,
     InvertVertical,
     SensitivityLeft,
@@ -97,6 +98,8 @@ impl Default for Levels {
 pub struct GraphicsLevels {
     /// Original SysSetup Multitexture switch; the in-game page exposes detail.
     pub water_effects: bool,
+    /// SysSetup Halos, enabled by default; controls the city light collectors.
+    pub halos: bool,
     pub detail: u8,
     pub filtering: u8,
     pub distance: u8,
@@ -107,6 +110,7 @@ impl Default for GraphicsLevels {
     fn default() -> Self {
         Self {
             water_effects: true,
+            halos: true,
             detail: 2,
             filtering: 1,
             distance: 35,
@@ -380,6 +384,11 @@ impl Assets {
             let [left, right] = crate::ui::slider_arrows(bounds, false);
             return Some([left, bounds, right][part]);
         }
+        // The original system dialog owns Halos. Expose it in the engine's
+        // in-game Graphics page on the free row below Draw Distance.
+        if page == Page::Graphics && button == Button::Halos {
+            return Some([143., 333., 400., 349.]);
+        }
         let index = match (page, button) {
             (Page::Main, Button::Sound) => 6,
             (Page::Main, Button::Graphics) => 7,
@@ -418,6 +427,7 @@ impl Assets {
                 Button::DetailHigh,
                 Button::Bilinear,
                 Button::Trilinear,
+                Button::Halos,
                 Button::DistanceLeft,
                 Button::DistanceRight,
                 Button::DistanceTrack,
@@ -818,6 +828,20 @@ impl Assets {
                     ],
                 )?;
             } else if page == Page::Graphics {
+                let mut icon = self.checkboxes[if graphics.halos { 0 } else { 1 }].clone();
+                icon.quad(
+                    [[143., 333.], [143., 349.], [159., 349.], [159., 333.]],
+                    [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                    [0xffffffff; 4],
+                );
+                icons.push(icon);
+                crate::ui::text_widget_style9(
+                    &mut font3,
+                    &self.tab3,
+                    b"Halos",
+                    [163., 333., 400., 349.],
+                    0xffffffff,
+                )?;
                 for (index, label_region, selected, label) in [
                     (11, 14, graphics.detail == 0, 1656),
                     (12, 15, graphics.detail == 1, 1655),
@@ -1164,6 +1188,7 @@ impl View {
                 *levels = Levels::default();
                 self.graphics = GraphicsLevels {
                     water_effects: self.graphics.water_effects,
+                    halos: self.graphics.halos,
                     ..GraphicsLevels::default()
                 };
                 self.gameplay = GameplayLevels::default();
@@ -1193,6 +1218,7 @@ impl View {
             Some(Button::DistanceRight) => {
                 self.graphics.distance = (self.graphics.distance + 1).min(100)
             }
+            Some(Button::Halos) => self.graphics.halos = !self.graphics.halos,
             Some(Button::AutoRotate) => self.gameplay.auto_rotate = !self.gameplay.auto_rotate,
             Some(Button::InvertVertical) => {
                 self.gameplay.invert_vertical = !self.gameplay.invert_vertical
@@ -1439,6 +1465,7 @@ mod graphics_tests {
             GraphicsLevels::default(),
             GraphicsLevels {
                 water_effects: true,
+                halos: true,
                 detail: 2,
                 filtering: 1,
                 distance: 35

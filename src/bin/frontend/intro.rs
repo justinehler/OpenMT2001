@@ -94,13 +94,14 @@ fn normal_city_scene_updates(
     Ok(changed)
 }
 
-fn sync_water_options(
+fn sync_graphics_options(
     scene: &mut Scene,
     renderer: &Renderer,
     prepared: &mut PreparedScene,
     graphics: crate::settings_menu::GraphicsLevels,
 ) -> Result<(), String> {
-    let changed = scene.apply_water_options(graphics.water_effects, graphics.detail)?;
+    let mut changed = scene.apply_water_options(graphics.water_effects, graphics.detail)?;
+    changed.extend(scene.apply_halo_options(graphics.halos, graphics.detail)?);
     let updates = changed
         .into_iter()
         .map(|i| (i, scene.draws[i].borrowed()))

@@ -139,6 +139,7 @@ pub struct Scene {
     street_furniture: Vec<(crate::street_furniture::Kind, usize)>,
     street_furniture_era: u32,
     street_furniture_detail: u8,
+    halos: Option<crate::light_halos::Layer>,
 }
 
 /// Original model-space inputs for the portions of shared material batches
@@ -341,6 +342,7 @@ fn assemble_with_style_internal(
     let mut saved_phase = None;
     let mut street_furniture_era = 0;
     let mut furniture_families = BTreeMap::new();
+    let mut halo_instances = Vec::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
     let mut saved_commodity_rows = None;
@@ -890,6 +892,7 @@ fn assemble_with_style_internal(
         if let Some(style) = style {
             style.apply_board(&mut board)?;
         }
+        halo_instances = crate::light_halos::lamps(&board.blocks);
         // 0044a0a0 creates this quad; 0044faf0 places the owning scene
         // object at the block center. 004b8760/004b8870 exclude flag 1
         // objects and flag 2 ground. 00689624 is BuildingTextures index 1.
@@ -1748,7 +1751,7 @@ fn assemble_with_style_internal(
         SurfaceMode::StaticLit => 8,
         SurfaceMode::FacadeBlend => 9,
         SurfaceMode::TreeFoliage => 10,
-        SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks => 10,
+        SurfaceMode::ResultParticles | SurfaceMode::ResultFireworks | SurfaceMode::LightHalos => 10,
         SurfaceMode::Overlay | SurfaceMode::UiDepth => 10,
     });
     // Reproduce the original FOGTABLE + WFOG device path. Camera pose remains
@@ -1934,7 +1937,25 @@ fn assemble_with_style_internal(
         street_furniture,
         street_furniture_era,
         street_furniture_detail: 2,
+        halos: None,
     };
+    if scene_mode && let Some(original) = request.original {
+        let layer = crate::light_halos::Layer::load(
+            original,
+            halo_instances,
+            &mut scene.draws,
+            light.as_ref().map_or(255, |l| l.night_threshold),
+            crate::flyby::CameraSample {
+                eye: camera_position.to_array(),
+                target: center.to_array(),
+                up: camera_up,
+                vertical_fov: fov,
+            },
+            [width, height_pixels],
+        )?;
+        layer.fill(&mut scene.draws)?;
+        scene.halos = Some(layer);
+    }
     scene.apply_street_furniture_options(street_furniture_era, 2)?;
     Ok(scene)
 }
@@ -2116,6 +2137,24 @@ struct Animation {
 }
 
 impl Scene {
+    /// The user's Halos preference gates both static night-light collectors.
+    pub fn set_halos_enabled(&mut self, enabled: bool) -> Result<Vec<usize>, String> {
+        let detail = self.halos.as_ref().map_or(2, |layer| layer.detail);
+        self.apply_halo_options(enabled, detail)
+    }
+
+    pub fn apply_halo_options(&mut self, enabled: bool, detail: u8) -> Result<Vec<usize>, String> {
+        let Some(layer) = &mut self.halos else {
+            return Ok(Vec::new());
+        };
+        if layer.enabled == enabled && layer.detail == detail {
+            return Ok(Vec::new());
+        }
+        layer.enabled = enabled;
+        layer.detail = detail;
+        layer.fill(&mut self.draws)
+    }
+
     ///4b6940's era selection and452600's nonzero-detail bench gate.
     pub fn apply_street_furniture_options(
         &mut self,
@@ -2372,6 +2411,11 @@ impl Scene {
             light.scale,
         );
         let mut changed = relight_city(&mut self.draws, &state.lighting, &palette, sun)?;
+        if let Some(layer) = &mut self.halos {
+            layer.threshold = light.night_threshold;
+            layer.camera = camera;
+            changed.extend(layer.fill(&mut self.draws)?);
+        }
         let scene_view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
         changed.extend(relight_facades(
             &mut self.draws,
@@ -2651,6 +2695,10 @@ impl Scene {
                 }
                 _ => (),
             }
+        }
+        if let Some(layer) = &mut self.halos {
+            layer.camera = sample;
+            changed.extend(layer.fill(&mut self.draws)?);
         }
         Ok(changed)
     }
@@ -4102,5 +4150,10 @@ mod temporal_city_lighting_regressions {
 mod street_furniture_tests;
 
 #[cfg(test)]
+#[cfg(test)]
 #[path = "render_scene/city_structures_tests.rs"]
 mod city_structures_tests;
+
+#[cfg(test)]
+#[path = "render_scene/light_halos_tests.rs"]
+mod light_halos_tests;

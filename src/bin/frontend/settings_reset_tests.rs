@@ -32,6 +32,7 @@ fn original_defaults() -> Snapshot {
         },
         graphics: GraphicsLevels {
             water_effects: true,
+            halos: true,
             detail: 2,
             filtering: 1,
             distance: 35,
@@ -278,4 +279,25 @@ fn settings_reset_original_defaults_and_controls() {
             }
         }
     }
+}
+
+#[test]
+fn graphics_halos_toggle_is_clickable_and_persisted() {
+    let assets = synthetic_assets();
+    let mut view = View {
+        page: Some(Page::Graphics),
+        ..View::default()
+    };
+    let mut audio = Levels::default();
+    assert!(view.graphics.halos);
+    let pointer = point(&assets, Page::Graphics, Button::Halos);
+    view.mouse(&assets, Some(pointer), true, &mut audio);
+    view.mouse(&assets, Some(pointer), false, &mut audio);
+    assert!(!view.graphics.halos);
+    let root = openmt2001::fixtures::scratch("TEST_SCRATCH")
+        .join(format!("halo-options-{}", std::process::id()));
+    let path = profile_path(&root, b"Halos");
+    snapshot(&view, audio).save(&path).unwrap();
+    assert!(!Snapshot::load(&path).unwrap().graphics.halos);
+    std::fs::remove_dir_all(root).unwrap();
 }

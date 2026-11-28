@@ -44,6 +44,7 @@ impl Intro {
                         Inspection::normal_star_detail);
                     let mut scene = loaded.scene;
                     scene.apply_water_options(graphics_levels.water_effects, graphics_levels.detail)?;
+                    scene.apply_halo_options(graphics_levels.halos, graphics_levels.detail)?;
                     let mut detail_visibility = loaded.detail_visibility;
                     if refreshing && let Some(previous) = &self.inspection {
                         scene.retain_environment(&previous.scene)?;
