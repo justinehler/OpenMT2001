@@ -539,8 +539,10 @@ pub fn text(
 ) -> Result<(), String> {
     text_scaled(pages, tab, encoded, bounds, center, color, 1.)
 }
-/// Character palette entry 16 (440ad0), shared by green section captions.
-pub const SECTION_HEADER_COLOR: u32 = 0xff00ff00;
+/// Text palette 0x536288 entry 16 (mint, via 440ad0), the attribute every
+/// original section caption passes. 0xff00ff00 is entry 4, which no caption
+/// uses.
+pub const SECTION_HEADER_COLOR: u32 = 0xff3afd87;
 /// Text palette 0x536288 entry 16 (mint), the attribute that Save 496c70
 /// and Load 4940f0 give the captions on their green field bars.
 pub const FIELD_CAPTION_COLOR: u32 = 0xff3afd87;
@@ -1484,13 +1486,16 @@ pub fn synthetic_text_font(width: i32, height: i32) -> Vec<u8> {
 }
 
 #[test]
-fn singleplayer_text_style_section_header_preserves_campaign_green_centered_glyphs() {
+fn singleplayer_text_style_section_header_draws_palette_entry_16_mint() {
     let tab = synthetic_text_font(7, 10);
     let mut pages = vec![Surface::solid(); 2];
     section_header(&mut pages, &tab, &[33, 34], [10., 20., 110., 40.]).unwrap();
     assert_eq!(pages[0].vertices.len(), 12);
+    let mint = [0x3a, 0xfd, 0x87].map(|c: u8| f32::from(c) / 255.);
     for vertex in &pages[0].vertices {
-        assert_eq!(&vertex[3..6], &[0., 1., 0.]);
+        for (actual, expected) in vertex[3..6].iter().zip(mint) {
+            assert!((actual - expected).abs() < 1e-6, "{:?}", &vertex[3..6]);
+        }
     }
     assert_eq!(pages[0].alpha, [255; 12]);
     assert_eq!(pages[0].vertices[0][0], 53.5);

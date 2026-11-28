@@ -212,7 +212,10 @@ fn refurbish_draws_centered_white_header_and_each_price_without_cost_row() {
     assert_eq!(view.selected, Some(1));
     let surfaces = assets.surfaces(&view, 128).unwrap();
     let mut highlight = Surface::solid();
-    highlight.rect(list.highlight(1), [0xff008ed0; 4]);
+    highlight.rect(
+        list.highlight(1),
+        [openmt2001::frontend_list::SELECTED_COLOR; 4],
+    );
     assert!(surfaces.iter().any(|s| s.vertices == highlight.vertices));
     click(&mut view, &assets, assets.layout.action);
     assert_eq!(

@@ -751,7 +751,11 @@ impl Profile {
                 // Profile's separate 42e430 widget uses a full-pitch bar at +2.
                 let pitch = self.assets.list_layout.pitch;
                 let top = t + (i - self.first) as f32 * pitch + 2.;
-                shapes.rect([l, top, r, top + pitch], [0xff008ed0; 4]);
+                // 0x42e430 paints this list itself but reads the shared selection colour at 0x536294.
+                shapes.rect(
+                    [l, top, r, top + pitch],
+                    [openmt2001::frontend_list::SELECTED_COLOR; 4],
+                );
             }
             let encoded = self.name_glyphs(name);
             ui::text_widget_style0(

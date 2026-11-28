@@ -382,7 +382,11 @@ impl SinglePlayer {
                 Row::Space => vec![],
                 Row::Level(i) => {
                     if c.selected == Some(*i) {
-                        shapes.rect(layout.highlight(row), [0xff008ed0; 4]);
+                        // The shared list painter 0x430b50 (called at 0x49a229) and its selection colour.
+                        shapes.rect(
+                            layout.highlight(row),
+                            [openmt2001::frontend_list::SELECTED_COLOR; 4],
+                        );
                     }
                     self.custom_label(&self.catalog.as_ref().unwrap().levels[*i], true)
                 }
