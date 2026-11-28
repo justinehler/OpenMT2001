@@ -15,7 +15,8 @@ use crate::{
 use glam::{Mat4, Vec3};
 use std::{collections::BTreeMap, sync::Arc};
 
-mod station_factories;
+mod park_railings;
+mod station_details;
 
 /// Original zero-rotation auxiliary pose used by initialized buildings.
 /// 4f24d0 negates the matrix's local-Z row before submitting vertices.
@@ -142,7 +143,7 @@ pub struct Scene {
     street_furniture_era: u32,
     street_furniture_detail: u8,
     halos: Option<crate::light_halos::Layer>,
-    station_factories: Vec<usize>,
+    station_details: Vec<usize>,
 }
 
 /// Original model-space inputs for the portions of shared material batches
@@ -346,7 +347,7 @@ fn assemble_with_style_internal(
     let mut street_furniture_era = 0;
     let mut furniture_families = BTreeMap::new();
     let mut halo_instances = Vec::new();
-    let mut station_factory_families = std::collections::BTreeSet::new();
+    let mut station_detail_families = std::collections::BTreeSet::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
     let mut saved_commodity_rows = None;
@@ -1031,9 +1032,11 @@ fn assemble_with_style_internal(
             crate::street_furniture::BENCH,
             crate::street_furniture::SUBWAY,
             crate::street_furniture::PARKING,
+            // The park fences and Reading bridge girders (00686198).
+            park_railings::PATH,
         ]
         .into_iter()
-        .chain(station_factories::paths())
+        .chain(station_details::paths())
         {
             let entry = directory
                 .find(mesh_path)
@@ -1085,7 +1088,7 @@ fn assemble_with_style_internal(
                 }
             }
             use crate::street_furniture::{self, Kind, Pose};
-            let factory_pose = station_factories::pose(mesh_path);
+            let detail_pose = station_details::pose(mesh_path);
             let kind = match mesh_path {
                 street_furniture::EARLY_LAMP => Some(Kind::EarlyLamp),
                 street_furniture::LATE_LAMP => Some(Kind::LateLamp),
@@ -1136,7 +1139,7 @@ fn assemble_with_style_internal(
                         )
                     })
                     .collect()
-            } else if let Some(pose) = factory_pose {
+            } else if let Some(pose) = detail_pose {
                 vec![(pose, 0xffffffff)]
             } else {
                 vec![(Pose::identity([0.; 3]), 0xffffffff)]
@@ -1167,8 +1170,8 @@ fn assemble_with_style_internal(
                         return Err("city mesh texture index out of bounds".into());
                     }
                     let family = first_family + usize::from(part.texture);
-                    if factory_pose.is_some() {
-                        station_factory_families.insert((family, 0));
+                    if detail_pose.is_some() {
+                        station_detail_families.insert((family, 0));
                     }
                     let start = batches.get(&(family, 0)).map_or(0, Vec::len);
                     let mut source_normals = Vec::new();
@@ -1914,14 +1917,14 @@ fn assemble_with_style_internal(
             Ok((kind, index))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let station_factories = station_factory_families
+    let station_details = station_detail_families
         .into_iter()
         .map(|key| {
-            let vertices = batches.get(&key).ok_or("station factory batch missing")?;
+            let vertices = batches.get(&key).ok_or("station detail batch missing")?;
             draws
                 .iter()
                 .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
-                .ok_or_else(|| "station factory draw missing".to_owned())
+                .ok_or_else(|| "station detail draw missing".to_owned())
         })
         .collect::<Result<Vec<_>, String>>()?;
     let draws = draws
@@ -1968,7 +1971,7 @@ fn assemble_with_style_internal(
         street_furniture_era,
         street_furniture_detail: 2,
         halos: None,
-        station_factories,
+        station_details,
     };
     if scene_mode && let Some(original) = request.original {
         let layer = crate::light_halos::Layer::load(
@@ -1988,7 +1991,7 @@ fn assemble_with_style_internal(
         scene.halos = Some(layer);
     }
     scene.apply_street_furniture_options(street_furniture_era, 2)?;
-    scene.set_station_factory_detail(2)?;
+    scene.set_station_detail_level(2)?;
     Ok(scene)
 }
 
@@ -2188,8 +2191,8 @@ impl Scene {
     }
 
     /// 452570 submits the fixed station-detail list at Medium and High detail.
-    pub fn set_station_factory_detail(&mut self, detail: u8) -> Result<Vec<usize>, String> {
-        station_factories::set_detail(&mut self.draws, &self.station_factories, detail)
+    pub fn set_station_detail_level(&mut self, detail: u8) -> Result<Vec<usize>, String> {
+        station_details::set_detail(&mut self.draws, &self.station_details, detail)
     }
 
     ///4b6940's era selection and452600's nonzero-detail bench gate.

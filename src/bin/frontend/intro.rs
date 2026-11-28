@@ -90,7 +90,7 @@ fn normal_city_scene_updates(
     if let Some(detail) = detail {
         changed.extend(scene.apply_normal_star_detail(detail, camera)?);
         changed.extend(scene.set_street_furniture_detail(detail)?);
-        changed.extend(scene.set_station_factory_detail(detail)?);
+        changed.extend(scene.set_station_detail_level(detail)?);
     }
     changed.sort_unstable();
     changed.dedup();
