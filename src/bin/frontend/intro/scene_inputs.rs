@@ -1387,7 +1387,7 @@ impl SceneInputs {
         let saved_prior_mode = saved_interface_mode
             .or_else(|| saved_auction.as_ref().map(|auction| auction.prior_mode))
             .or_else(|| {
-                (session.saved_game_mode == Some(2)
+                (session.saved_logic_mode == Some(2)
                     && session.world.city.auction.controller.reference != 0)
                     .then(|| {
                         u32::from_le_bytes(
@@ -1902,7 +1902,7 @@ impl SceneInputs {
             )?;
             assembly_elapsed = assembly_started.elapsed();
             let appearance_started = Instant::now();
-            if session.saved_game_mode.is_some() {
+            if session.saved_logic_mode.is_some() {
                 self.append_saved_appearance(session, &mut scene, &mut detail_visibility, cache)?;
                 self.append_current_appearance(
                     session,
@@ -2066,7 +2066,7 @@ impl SceneInputs {
             )?;
         }
         let board = self.styled_board(&image)?;
-        let runtime_locator = (session.saved_game_mode.is_none())
+        let runtime_locator = (session.saved_logic_mode.is_none())
             .then(|| crate::locator::RuntimeInputs::from_world(&session.world));
         let consumer_polls = Some(crate::consumer_polls::Poll::from_runtime(&session.world)?);
         let city_ownership = Some(crate::city_ownership::Ownership::from_runtime(

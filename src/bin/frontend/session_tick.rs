@@ -388,6 +388,7 @@ impl Session<'_> {
                                                 pulse_lights: &self.pulse_lights,
                                                 demolition_effects: &self.demolition_effects,
                                                 policy: &self.policy,
+                                                session_option_word: self.session_option_word,
                                                 difficulty: self.difficulty,
                                                 tutorial_state: self.tutorial_state,
                                                 result_present: self.result_presentation.is_some(),

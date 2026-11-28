@@ -661,7 +661,7 @@ fn skirmish_map_cold_reload_continuation(map: &'static str) {
             let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
             check_selection(&save);
             assert_eq!(save.level_metadata().unwrap()[0], 300001);
-            assert_eq!(save.game_mode().unwrap(), 1);
+            assert_eq!(save.session_option_word().unwrap(), 1);
             let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
             resumed
                 .restore_v2_extension_with_image(&save, &image)

@@ -689,7 +689,7 @@ fn write_save(
     let cameras = session
         .saved_cameras
         .ok_or("the loaded save has no camera records to write back")?;
-    let mode = session.saved_game_mode.unwrap_or(0);
+    let mode = session.world.clock.timing[5];
     let bytes = session.save_v2(image, cameras, mode)?;
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }

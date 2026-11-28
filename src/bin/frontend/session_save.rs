@@ -406,7 +406,7 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
                         // deadline at or before the saved total clock. The native
                         // load stream would dispatch an overdue packet here too.
                         if outer_due && packet_due {
-                            if save.game_mode()? != 1 || save.auction()?.is_some() {
+                            if save.clock()?.timing[5] != 1 || save.auction()?.is_some() {
                                 return Err(
                                     "V2 due-now takeover requires normal non-auction continuation"
                                         .into(),
@@ -468,7 +468,7 @@ pub(crate) fn verified_modern_presentation_queue(save: &SaveFile<'_>) -> Result<
 
 pub struct Metadata {
     pub profile_filename: Option<String>,
-    /// V2 host view, independent of the original saved game-mode global.
+    /// V2 host view, independent of the clock's logic mode.
     pub interface_mode: Option<u32>,
     pub auction: Option<AuctionContinuation>,
 }
@@ -566,6 +566,7 @@ impl<'data> Session<'data> {
             pulse_lights: &self.pulse_lights,
             demolition_effects: &self.demolition_effects,
             policy: &self.policy,
+            session_option_word: self.session_option_word,
             difficulty: self.difficulty,
             tutorial_state: self.tutorial_state,
             result_present: self.result_presentation.is_some(),
@@ -653,7 +654,9 @@ impl<'data> Session<'data> {
             None
         };
         let interface_mode = if has_view {
-            if ext.records.contains_key(&14) || save.game_mode()? != 1 || save.auction()?.is_some()
+            if ext.records.contains_key(&14)
+                || save.clock()?.timing[5] != 1
+                || save.auction()?.is_some()
             {
                 return Err("V2 normal view disagrees with native game/auction mode".into());
             }
@@ -1146,6 +1149,7 @@ pub(crate) struct SaveProjection<'a> {
     pub pulse_lights: &'a openmt2001::pulse_lights::PulseLights,
     pub demolition_effects: &'a openmt2001::demolition_effect::Manager,
     pub policy: &'a crate::fresh_city::Policy,
+    pub session_option_word: u32,
     pub difficulty: usize,
     pub tutorial_state: u8,
     pub result_present: bool,
@@ -1341,7 +1345,7 @@ impl SaveProjection<'_> {
                 .as_bytes()
                 .try_into()
                 .map_err(|_| "history size mismatch")?,
-            game_mode,
+            session_option_word: self.session_option_word,
         };
         let mut bytes = writer::encode(&mut state, 0x7fffff, [0; 4])?;
         let profile = self

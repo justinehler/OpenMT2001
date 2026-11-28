@@ -131,7 +131,8 @@ impl<'a> SaveFile<'a> {
         ))
     }
 
-    pub fn game_mode(&self) -> Result<u32, String> {
+    /// Raw session option word at 0x8fca9c (tag 0x400000).
+    pub fn session_option_word(&self) -> Result<u32, String> {
         Ok(u32::from_le_bytes(
             self.table(0x400000, 4)?.try_into().unwrap(),
         ))

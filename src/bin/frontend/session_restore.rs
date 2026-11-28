@@ -284,7 +284,7 @@ impl<'data> Session<'data> {
     fn restore_immediate_open(
         &mut self,
         command: openmt2001::business_open::Command,
-        game_mode: u32,
+        session_option_word: u32,
         canonical_queue_position: bool,
         scripted_catalog_matches_saved: bool,
         assets: &CommandAssets<'_, '_>,
@@ -314,7 +314,7 @@ impl<'data> Session<'data> {
                 "saved immediate open pre-queue BusinessInfo differs from restored row42".into(),
             );
         }
-        if game_mode != 0
+        if session_option_word != 0
             || command.kind != 42
             || command.owner != 1
             || command.stock_argument != 1
@@ -911,7 +911,7 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         mut presentation: Option<&mut Vec<openmt2001::economy::AccountPosting>>,
     ) -> Result<(), String> {
-        if self.saved_game_mode.is_some() {
+        if self.saved_logic_mode.is_some() {
             return Err("save records require a newly prepared load-mode Session".into());
         }
         save.validate_compatibility(assets.image)?;
@@ -1152,7 +1152,7 @@ impl<'data> Session<'data> {
                         return Err("saved immediate property release requires original pools-before-queue order".into());
                     }
                     if event.packet.is_some_and(|packet| packet[20..24] != [0; 4])
-                        && (save.auction()?.is_some() || save.game_mode()? == 2)
+                        && (save.auction()?.is_some() || saved_clock.timing[5] == 2)
                     {
                         return Err("priced saved self-transfer requires normal original load without auction activation".into());
                     }
@@ -1198,7 +1198,8 @@ impl<'data> Session<'data> {
         let saved_objective = save.scenario_objective()?;
         let saved_history = save.player_history()?;
         let cameras = save.cameras()?.map(|row| *row);
-        let game_mode = save.game_mode()?;
+        let session_option_word = save.session_option_word()?;
+        let game_mode = saved_clock.timing[5];
 
         // 4bcd34..4bcd57 reset before the full 4bc290 stream. The category
         // list disposal has no renderer here; all linked records are released
@@ -1451,7 +1452,7 @@ impl<'data> Session<'data> {
         if let Some((command, canonical_queue_position)) = immediate_open {
             self.restore_immediate_open(
                 command,
-                game_mode,
+                session_option_word,
                 canonical_queue_position,
                 scripted_catalog_matches_saved,
                 assets,
@@ -1568,7 +1569,8 @@ impl<'data> Session<'data> {
         self.world.objective = saved_objective;
         self.history = saved_history;
         self.saved_cameras = Some(cameras);
-        self.saved_game_mode = Some(game_mode);
+        self.session_option_word = session_option_word;
+        self.saved_logic_mode = Some(game_mode);
 
         self.world.ai_demand.ready = ready;
         // 4b9f00 runs before 4bbd20 in the original load caller.

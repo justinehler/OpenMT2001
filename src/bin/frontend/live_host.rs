@@ -425,7 +425,7 @@ impl Host {
     /// The renderer exists only after the loaded inspection reaches the UI,
     /// so the worker performs this ordered presentation step at that seam.
     pub fn activate_saved_auction(&mut self, session: &mut Session<'_>) -> Result<(), String> {
-        if session.saved_game_mode != Some(2)
+        if session.saved_logic_mode != Some(2)
             || session.world.city.auction.controller.reference == 0
             || session.world.city.auction.controller.record[0x7d] == 0
         {
@@ -992,7 +992,7 @@ impl Host {
         if let Some(state) = state {
             self.interface_ticks = state.interface_ticks;
             self.auction_seconds = state.announcement_seconds;
-            if session.saved_game_mode == Some(2) {
+            if session.saved_logic_mode == Some(2) {
                 let auction = self
                     .auction
                     .as_mut()

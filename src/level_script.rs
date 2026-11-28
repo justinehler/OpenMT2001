@@ -1288,7 +1288,7 @@ mod calendar_binding_tests {
             business_info: &[[0; 116]; 45],
             commodities: &[[0; 28]; 32],
             history: &[0; 0x10f44],
-            game_mode: 0,
+            session_option_word: 0,
         };
         let bytes = crate::save::writer::encode(&mut saved, 0x600, [0; 4]).unwrap();
         let mut cold = crate::save::SaveFile::parse(&bytes)
