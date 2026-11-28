@@ -618,9 +618,6 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         mut event: impl FnMut(openmt2001::live_commands::Event) -> Result<u32, String>,
     ) -> Result<(), String> {
-        if self.connected.is_some() {
-            return Err(openmt2001::network::Error::Unsupported.to_string());
-        }
         let mut descriptor = [0; 52];
         descriptor[4..8].copy_from_slice(&0x1fu32.to_le_bytes());
         for (off, value) in [
@@ -629,6 +626,19 @@ impl<'data> Session<'data> {
             (28, command.amount),
         ] {
             descriptor[off..off + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        if let Some(connection) = &mut self.connected {
+            if connection.synchronization.barrier.active {
+                return Ok(());
+            }
+            return connection.commands.submit_auction(
+                &connection.worker,
+                descriptor,
+                0,
+                &mut self.live_commands,
+                &mut self.world.city.categories,
+                self.world.clock.timing[0],
+            );
         }
         if self.tutorial_state != 1 {
             let mut messages = openmt2001::player_messages::Context {

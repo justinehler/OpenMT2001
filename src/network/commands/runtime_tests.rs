@@ -1339,6 +1339,9 @@ fn loopback_authority_completes_remote_human_building_without_client_rebroadcast
     );
 }
 
+#[path = "auction_tests.rs"]
+mod auction_tests;
+
 #[test]
 fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {
     use std::{

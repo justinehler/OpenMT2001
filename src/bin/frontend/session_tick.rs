@@ -97,6 +97,7 @@ impl Session<'_> {
             &mut self.hooks.timers,
         )?;
         policy.scheduler.network_enabled = true;
+        policy.scheduler.network_override = connection.commands.is_host();
         connection.commands.configure_hourly(&mut policy.hourly);
         policy.scheduler.deadline = connection.commands.deadline();
         Ok(())
@@ -776,18 +777,30 @@ impl Session<'_> {
                             dispatch.population.refresh_city(city, board)?;
                         }
                         scheduler::Event::Helper(0x465230)=>{
+                            if self.connected.as_ref().is_some_and(|c|c.commands.auction_control_pending()){return Ok(0);}
                             let hooks=std::cell::RefCell::new(&mut self.hooks);
                             let mut announcement=super::tutorial_announcement::Bridge{
                                 scripts:&mut self.scripts,hooks:&hooks,context:&mut script_context};
                             let mut runtime=live_commands::Runtime{city,roster:&mut self.roster,population:dispatch.population,
                                 utilities:context.utilities,board,event_cards:&mut self.event_cards,message_context:&mut messages.borrow_mut()};
+                            let mut outgoing=Vec::new();
                             runtime.advance_auction_with_tutorial(clock,[scheduler.network_enabled,scheduler.network_override],
                                 Some((self.tutorial_state,&mut geometry,&mut announcement)),|event,clock|{
                                 if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event{
-                                    self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},clock.timing[0],descriptor[16]!=0,additional_delay,
-                                        |_|Err("auction update command wrapped into immediate dispatch".into())).map(|_|0)
+                                    if self.connected.is_some(){outgoing.push((descriptor,additional_delay));Ok(0)}else{
+                                        self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},clock.timing[0],descriptor[16]!=0,additional_delay,
+                                            |_|Err("auction update command wrapped into immediate dispatch".into())).map(|_|0)
+                                    }
+                                }else if let live_commands::Event::PlayerMessageRoute{route:openmt2001::player_messages::Route::NetworkRecipient{..},packet}=event
+                                    && self.connected.is_some() && matches!(u32::from_le_bytes(packet[4..8].try_into().unwrap()),0x27..=0x2a){
+                                    let mut descriptor=[0;52];descriptor[..48].copy_from_slice(&packet);outgoing.push((descriptor,0));Ok(0)
                                 }else{boundary(Event::Command(event),clock)}
                             })?;
+                            if let Some(connection)=&mut self.connected {
+                                for (descriptor,additional) in outgoing {
+                                    connection.commands.submit_auction(&connection.worker,descriptor,additional,&mut self.live_commands,&mut runtime.city.categories,clock.timing[0])?;
+                                }
+                            }
                         }
                         scheduler::Event::Helper(0x480ec0) => {
                             let mut clocks = clock.timing[..2].try_into().unwrap();
@@ -800,8 +813,10 @@ impl Session<'_> {
                                 event_cards: &mut self.event_cards,
                                 message_context: &mut messages.borrow_mut(),
                             };
+                            let mut outgoing_auctions=Vec::new();
+                            let mut prepared_room=false;
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)) {
                                     return Err(openmt2001::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
@@ -812,8 +827,15 @@ impl Session<'_> {
                                         return runtime.auction_phase_with_tutorial(descriptor,clock,[scheduler.network_enabled,scheduler.network_override],
                                             Some((self.tutorial_state,&mut geometry,&mut announcement)),|event,clock|{
                                             if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event {
-                                                enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay}).map(|_|0)
+                                                if self.connected.is_some(){outgoing_auctions.push((descriptor,additional_delay));Ok(0)}else{
+                                                    enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay}).map(|_|0)
+                                                }
                                             }else{
+                                                if let live_commands::Event::PlayerMessageRoute{route:openmt2001::player_messages::Route::NetworkRecipient{..},packet}=event
+                                                    && self.connected.is_some() && matches!(u32::from_le_bytes(packet[4..8].try_into().unwrap()),0x27..=0x2a){
+                                                    let mut descriptor=[0;52];descriptor[..48].copy_from_slice(&packet);outgoing_auctions.push((descriptor,0));return Ok(0);
+                                                }
+                                                if matches!(event,live_commands::Event::AuctionNetworkBarrier){prepared_room=true;return Ok(0);}
                                                 if matches!(event,live_commands::Event::AuctionActivation(openmt2001::ai_messages::offers::auction::activation::Call::NormalSpeed)){scheduler.iterations=1;}
                                                 boundary(Event::Command(event),clock)
                                             }
@@ -834,7 +856,9 @@ impl Session<'_> {
                                     scripts:&mut self.scripts,hooks:&hooks,context:&mut script_context};
                                 let result = runtime.apply_with_announcement(command, &mut command_context, &mut geometry, Some(&mut announcement), |event,clock| {
                                     if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event {
-                                        enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
+                                        if self.connected.is_some(){outgoing_auctions.push((descriptor,additional_delay));Ok(())}else{
+                                            enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
+                                        }
                                     }else if let live_commands::Event::CategoryReadyAt{category,normal_tick}=event{
                                         enqueue(live_commands::Command::CategoryReady{category},openmt2001::local_commands::Schedule::Normal{due:normal_tick})
                                     }else if let live_commands::Event::Outcome(openmt2001::outcome_notice::Call::Timers(timers))=event {
@@ -850,6 +874,15 @@ impl Session<'_> {
                                 announcement.context.update_clock(command_context.clock);
                                 result
                             })?;
+                            if let Some(connection)=&mut self.connected {
+                                if prepared_room {
+                                    connection.synchronization.auction_prepared(&mut runtime.city.pause,&mut self.hooks.timers)?;
+                                }
+                                for (descriptor,additional) in outgoing_auctions {
+                                    connection.commands.submit_auction(&connection.worker,descriptor,additional,&mut self.live_commands,&mut runtime.city.categories,clock.timing[0])?;
+                                }
+                            }
+
                         }
                         scheduler::Event::Helper(0x4b0810) => {
                             let mut removed = false;
@@ -1049,8 +1082,12 @@ impl Session<'_> {
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::AuctionCommand{descriptor,additional_delay}=call {
+                                                    if let Some(connection)=&mut self.connected {
+                                                        connection.commands.submit_auction(&connection.worker,descriptor,additional_delay,&mut self.live_commands,world.categories,clock.timing[0])?;
+                                                    }else{
                                                     self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},clock.timing[0],descriptor[16]!=0,additional_delay,
                                                         |_|Err("AI auction command delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::Management(openmt2001::ai_dispatch::Event::Helper(0x4683f0)) = call {

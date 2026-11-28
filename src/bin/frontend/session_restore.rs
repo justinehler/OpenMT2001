@@ -230,9 +230,11 @@ pub(crate) fn saved_command(packet: &[u8]) -> Result<openmt2001::live_commands::
             category: i16::from_le_bytes(packet[24..26].try_into().unwrap()),
             owner: packet[26],
         }),
-        0x19 | 0x1d | 0x1e | 0x1f | 0x20 if packet.len() == 52 => Ok(Command::Auction {
-            descriptor: packet.try_into().unwrap(),
-        }),
+        0x19 | 0x1d | 0x1e | 0x1f | 0x20 | 0x27..=0x2a if packet.len() == 52 => {
+            Ok(Command::Auction {
+                descriptor: packet.try_into().unwrap(),
+            })
+        }
         _ => Err(format!(
             "saved command {kind:02x} has no retained packet consumer"
         )),

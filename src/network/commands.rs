@@ -2,8 +2,8 @@
 //!
 //! Native payload schemas below exclude the common 20-byte header (kind at +4,
 //! size +8, Total due +12, delayed byte +16). Construction, business lifecycle/settings and the short
-//! command16 transfer are qualified. The 52-byte command16 auction descriptor is
-//! a DIFFERENT schema, not an alternative way to submit a property transfer.
+//! command16 transfer are qualified. Native auction descriptors use a separate
+//! envelope retaining their delayed flag and additional announcement delay.
 //!
 //! | Family | Native payload | Remote support |
 //! |---|---|---|
@@ -14,7 +14,8 @@
 //! | 13 business sale | +0 business u32, +4 zero-based player u8, +5 padding[3] (8 bytes) | supported; business owner authorizes |
 //! | 15 takeover | +0 building u32 (4 bytes) | supported; category landlord authorizes as buyer |
 //! | 16 property transfer | amount i32, category i16, new owner u8 | supported |
-//! | 16/19/1d/1e/1f/20 auction | 52-byte auction descriptor | unsupported |
+//! | 16/19/1d/1e/1f/20 auction | native descriptor plus announcement delay | supported; host control, participant-owned actions |
+//! | 27..2a auction notifications | addressed 48-byte inbox descriptor | supported; authority only |
 //! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
 //! | 1a event card | card u32, player u32, target i32 | unsupported |
 //! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | unsupported |
@@ -22,8 +23,10 @@
 //! | other native IDs / shapes | no qualified decoder | unsupported |
 //!
 //! Every other kind/schema returns Unsupported. This is not full multiplayer
-//! command coverage or auction/offer admission. The submitting gameplay caller
+//! command coverage. Property offer negotiation remains unqualified. The submitting gameplay caller
 //! still owns its original quote/offer policy; a wire owner is never authority.
+mod auction;
+
 use super::{Connection, Error, Message, Owner, Result, SLOTS, SessionBinding, Transfer};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +232,9 @@ impl Request {
         Ok(command)
     }
     pub(super) fn validate(&self) -> Result<()> {
+        if self.is_auction() {
+            return self.auction_payload().map(|_| ());
+        }
         match self.kind {
             0x0f => self.construction_payload().map(|_| ()),
             0x10 => self.demolition_payload().map(|_| ()),
@@ -519,6 +525,9 @@ impl Adapter {
         controls.network_override = self.host;
     }
     fn authorize(&self, peer: u8, request: &Request) -> Result<()> {
+        if request.is_auction() {
+            return self.authorize_auction(peer, request);
+        }
         let player = usize::from(request.owner)
             .checked_sub(1)
             .ok_or(Error::Row)?;
@@ -574,12 +583,9 @@ impl Adapter {
         self.commit_authorized(peer, request, tick)
     }
     fn commit_authorized(&mut self, peer: u8, request: Request, tick: u32) -> Result<Message> {
-        // 451720 adds authority Total+25; clients never call that producer.
-        // Reject the unresolved native -1/wrapped deadline instead of applying early.
-        let due = tick
-            .checked_add(25)
-            .filter(|due| *due != u32::MAX)
-            .ok_or(Error::Exhausted)?;
+        // 451720 adds authority Total+25 and any announcement delay once.
+        // Flag-zero auction actions retain zero, the native immediate sentinel.
+        let due = request.command_due(tick)?;
         let order = self.next_commit;
         self.next_commit = order.checked_add(1).ok_or(Error::Exhausted)?;
         self.requests[peer as usize] = Some(request.serial);
@@ -670,6 +676,9 @@ impl Adapter {
         tick: u32,
     ) -> std::result::Result<(), String> {
         let request = match command {
+            crate::live_commands::Command::Auction { descriptor } => {
+                return self.submit_auction(worker, descriptor, 0, queue, categories, tick);
+            }
             crate::live_commands::Command::Build(command) => self.next_construction(&command),
             crate::live_commands::Command::Demolish(command) => {
                 let owner = targets
@@ -782,7 +791,11 @@ impl Adapter {
         self.authorize_local(&request, completion)
             .map_err(|e| e.to_string())?;
         targets.check(&request).map_err(|e| e.to_string())?;
-        if self.host && self.closed_tick == Some(tick) {
+        if self.host
+            && ((self.closed_tick == Some(tick)
+                && request.command_due(tick).map_err(|e| e.to_string())? != 0)
+                || !self.pending_local.is_empty())
+        {
             if self.pending_local.len() >= 64 {
                 return Err("Authority command queue is full".into());
             }
@@ -939,52 +952,71 @@ impl Adapter {
         // Authority incremented its order when minting this commit. Clients
         // advance only after admitting it into the actual live queue.
         let expected = self.next_enqueued;
-        if commit.order != expected || commit.due <= tick || commit.due == u32::MAX {
+        if commit.order != expected
+            || (commit.due != 0 && commit.due <= tick)
+            || commit.due == u32::MAX
+        {
             return Err(Error::Sequence);
         }
         let request = &commit.request;
         request.validate()?;
-        if self
-            .owners
-            .get(usize::from(request.owner).wrapping_sub(1))
-            .is_none()
+        if commit.due == 0 && !request.is_auction() {
+            return Err(Error::Sequence);
+        }
+        if request.is_auction() {
+            let (d, _) = request.auction_payload()?;
+            if (d[16] == 0) != (commit.due == 0) {
+                return Err(Error::Row);
+            }
+        }
+        if !request.is_auction()
+            && self
+                .owners
+                .get(usize::from(request.owner).wrapping_sub(1))
+                .is_none()
         {
             return Err(Error::Row);
         }
         let next = self.next_enqueued.checked_add(1).ok_or(Error::Exhausted)?;
-        let command = match request.kind {
-            0x0f => {
-                check_placement(request, categories)?;
-                let command = request.construction_payload()?;
-                // Original Build0f reserves occupancy before the delayed consumer.
-                // Reserve on every peer only after authority admission, never on
-                // a speculative client request. The quote is never recomputed.
-                let occupancy = (&mut categories[command.category as usize][0x9c..0xcd])
-                    .try_into()
+        let command = if request.is_auction() {
+            self.enqueue_auction(request, commit.due)?
+        } else {
+            match request.kind {
+                0x0f => {
+                    check_placement(request, categories)?;
+                    let command = request.construction_payload()?;
+                    // Original Build0f reserves occupancy before the delayed consumer.
+                    // Reserve on every peer only after authority admission, never on
+                    // a speculative client request. The quote is never recomputed.
+                    let occupancy = (&mut categories[command.category as usize][0x9c..0xcd])
+                        .try_into()
+                        .map_err(|_| Error::Row)?;
+                    crate::building_pool::fill_occupancy(
+                        occupancy,
+                        command.rectangle.map(i32::from),
+                        command.height as u8,
+                    )
                     .map_err(|_| Error::Row)?;
-                crate::building_pool::fill_occupancy(
-                    occupancy,
-                    command.rectangle.map(i32::from),
-                    command.height as u8,
-                )
-                .map_err(|_| Error::Row)?;
-                crate::live_commands::Command::Build(command)
-            }
-            0x10 => crate::live_commands::Command::Demolish(request.demolition_payload()?),
-            0x11 => crate::live_commands::Command::Open(request.business_open_payload()?),
-            0x12 => crate::live_commands::Command::Convert(request.conversion_payload()?),
-            0x13 => crate::live_commands::Command::SellBusiness(request.business_sale_payload()?),
-            0x15 => crate::live_commands::Command::Takeover(request.takeover_payload()?),
-            0x18 => crate::live_commands::Command::Terms(request.terms_payload()?),
-            0x16 => {
-                let t = request.transfer_payload()?;
-                crate::live_commands::Command::PropertyTransfer {
-                    category: i16::from(t.category),
-                    owner: t.owner,
-                    amount: t.amount,
+                    crate::live_commands::Command::Build(command)
                 }
+                0x10 => crate::live_commands::Command::Demolish(request.demolition_payload()?),
+                0x11 => crate::live_commands::Command::Open(request.business_open_payload()?),
+                0x12 => crate::live_commands::Command::Convert(request.conversion_payload()?),
+                0x13 => {
+                    crate::live_commands::Command::SellBusiness(request.business_sale_payload()?)
+                }
+                0x15 => crate::live_commands::Command::Takeover(request.takeover_payload()?),
+                0x18 => crate::live_commands::Command::Terms(request.terms_payload()?),
+                0x16 => {
+                    let t = request.transfer_payload()?;
+                    crate::live_commands::Command::PropertyTransfer {
+                        category: i16::from(t.category),
+                        owner: t.owner,
+                        amount: t.amount,
+                    }
+                }
+                _ => return Err(Error::Unsupported),
             }
-            _ => return Err(Error::Unsupported),
         };
         queue.restore_queued(
             command,
