@@ -79,6 +79,17 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
             continuation_test::allocation_cursor(&mut session, &restored, native_allocation_next);
             assert_eq!(metadata.interface_mode, Some(3)); assert!(metadata.auction.is_none());
             assert_eq!(restored.saved_cameras, Some(cameras));
+            // This save has no auction continuation. Native load keeps the
+            // reset deadline (4bbd20 -> 4d7a80(false)), whereas a fresh game
+            // randomizes it. Apply that known load effect to the control before
+            // comparing every byte; live auction snapshots below stay exact.
+            for (fresh, loaded) in session.roster.manager.players.iter_mut().zip(&restored.roster.manager.players) {
+                if word(&fresh.bytes, 0x154) == 1 {
+                    assert_ne!(&fresh.bytes[0xb4c..0xb4e], &[0; 2]);
+                    assert_eq!(&loaded.bytes[0xb4c..0xb4e], &[0; 2]);
+                    fresh.bytes[0xb4c..0xb4e].fill(0);
+                }
+            }
             let mut restored_host = crate::live_host::Host::new(camera.eye); restored_host.running = true;
             for _ in 0..100 {
                 frame(&mut session, &mut host, &assets); frame(&mut restored, &mut restored_host, &assets);
@@ -86,7 +97,12 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
             }
             paths.push(path);
         }
-        for _ in 0..3000 {
+        // A fresh start's randomized strategy deadline reaches an auction within
+        // the first game hours. The strategic control carries the native load
+        // reset above, so its opponents start developing on the first morning
+        // and bid on the next day instead.
+        let horizon = if prior_mode == 3 { 26000 } else { 3000 };
+        for _ in 0..horizon {
             frame(&mut session, &mut host, &assets);
             if session.world.auction.controller.reference != 0 && session.world.auction.presentation.countdown < 700 { break; }
         }

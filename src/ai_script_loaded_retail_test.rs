@@ -222,3 +222,114 @@ function EVENT_LoadScoreData() end
     assert_eq!(word(&businesses[0], 0x1c4), 33f32.to_bits());
     assert_eq!(word(&businesses[0], 0x1ec), 33f32.to_bits());
 }
+
+#[test]
+fn loaded_ai_prepares_auction_on_next_strategy_deadline() {
+    let mut player = Player {
+        reference: 0x20000000,
+        bytes: vec![0; 0x1e50],
+        auxiliaries: vec![],
+    };
+    put(&mut player.bytes, 0, 0x401000);
+    put(&mut player.bytes, 0x154, 1);
+    put(&mut player.bytes, 0x240, 2);
+    player.bytes[0x1401] = 1;
+    put(&mut player.bytes, 0x224, 7);
+    put(&mut player.bytes, 0x228, 0x343fd);
+    put(&mut player.bytes, 0x22c, 0x269ec3);
+    let mut manager = Manager::initialize([0; 40]);
+    manager.players.push(player);
+    let mut profiles = [[0; 0x650]; 10];
+    put(&mut profiles[0], 0, 0x20000000);
+    profiles[0][4] = 1;
+    let source = br#"
+function EVENT_LoadHseKeepingTimetable(a) AiChars[a]:ResetTimeTable(HSE) end
+function EVENT_LoadBuyBlockTimetable(a) AiChars[a]:ResetTimeTable(BLK) end
+function EVENT_LoadDifficultyVariables(a) end
+function EVENT_LoadBuildTimes(a) end
+function EVENT_LoadScoreData() end
+"#;
+    AiScript::new()
+        .unwrap()
+        .initialize_loaded(
+            &mut Initialization::<64> {
+                precision: crate::x87::Precision::Pc64,
+                profiles: &mut profiles,
+                manager: &mut manager,
+                category_counts: &mut [0; 52 * 45],
+                chains: &std::array::from_fn(|_| vec![]),
+                buildings: &[],
+                businesses: &[],
+                difficulty: 0,
+                current_hour: 0,
+                count_tick: Some(10002),
+            },
+            source,
+            None,
+        )
+        .unwrap();
+    assert_eq!(word(&manager.players[0].bytes, 0x224), 7);
+    assert_eq!(&manager.players[0].bytes[0xb4c..0xb4e], &[0; 2]);
+    let bytes = controller_image();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let mut selected = vec![];
+    let mut prepared = vec![];
+    for tick in 10002..=10127 {
+        crate::ai_tick::advance(
+            &mut manager.players[0],
+            &mut profiles,
+            &mut crate::ai_tick::Controls {
+                normal_tick: tick,
+                day_tick: 0,
+                event_gate: false,
+            },
+            &image,
+            |call, player, profiles, controls| {
+                match call.address {
+                    0x47d6a0 => return Ok(controls.normal_tick + 125),
+                    0x47b8f0 => return Ok(1),
+                    0x47b240 => {
+                        selected.push(tick);
+                        // Control the selected target, then use real action
+                        // initiation and continuation to reach auction admission.
+                        put(&mut player.bytes, 0x1040, 2);
+                        put(&mut player.bytes, 0xb68, 3);
+                        put(&mut player.bytes, 0xcb8, 500);
+                    }
+                    0x47b3e0 => {
+                        assert!(crate::ai_strategy::initiate(player, &image, |call, _| {
+                            assert_eq!(call, crate::ai_strategy::Call::CategoryPrice(3));
+                            Ok(100)
+                        })?);
+                    }
+                    0x467690 => {
+                        crate::ai_strategy::continue_strategy(player, profiles, |call, _, _| {
+                            match call {
+                                crate::ai_strategy::ContinuationCall::Viable => return Ok(1),
+                                crate::ai_strategy::ContinuationCall::Prepare {
+                                    category,
+                                    amount,
+                                } => {
+                                    prepared.push((tick, category, amount));
+                                }
+                                crate::ai_strategy::ContinuationCall::Action(_) => {}
+                            }
+                            Ok(0)
+                        })?
+                    }
+                    _ => {}
+                }
+                Ok(0)
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(selected, [10002]);
+    assert_eq!(prepared, [(10127, 3, 100)]);
+    assert_eq!(word(&manager.players[0].bytes, 0x240), 4);
+    assert_eq!(manager.players[0].bytes[0x13c5], 1);
+    assert_eq!(
+        u16::from_le_bytes(manager.players[0].bytes[0xb4c..0xb4e].try_into().unwrap()),
+        10252
+    );
+}

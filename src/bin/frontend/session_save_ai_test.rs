@@ -231,8 +231,33 @@ fn natural_ai_session_continues_after_host_save() {
             assert_eq!(resumed.population.market.prices, fresh.prices);
             let mut resumed_host = crate::live_host::Host::new(camera.eye);
             resumed_host.running = true;
+            // Native load resets every opponent (478ea0 -> 466870: idle state 2,
+            // strategy deadline 0) and 4bbd20 then calls 4d7a80(false), which
+            // skips the fresh-game build delay (47d5f0) and keeps the saved RNG.
+            let opponents = |session: &Session<'_>| {
+                session
+                    .roster
+                    .manager
+                    .players
+                    .iter()
+                    .filter(|player| word(&player.bytes, 0x154) == 1)
+                    .map(|player| {
+                        (
+                            word(&player.bytes, 0x240),
+                            player.bytes[0xb4c..0xb4e].to_vec(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(opponents(&resumed), vec![(2, vec![0, 0]); 3]);
+            let loaded_tick = resumed.world.clock.timing[0];
+            let mut first_selection = None;
             let mut auction_admission = None;
-            while resumed.world.clock.timing[0] < 2000 {
+            // The rebuilt opponents therefore choose a strategy on their first
+            // controller pass. Here that is a first-morning development
+            // choice, not the acquisition a regenerated deadline used to draw
+            // an hour later, so their first natural auction comes the next day.
+            while resumed.world.clock.timing[0] < 24000 {
                 resumed_host.tick(&mut resumed, &assets);
                 assert!(resumed_host.failure.is_none(), "{:?}", resumed_host.failure);
                 for prompt in resumed_host.take_prompts(&resumed) {
@@ -245,11 +270,20 @@ fn natural_ai_session_continues_after_host_save() {
                         )
                         .unwrap();
                 }
+                if first_selection.is_none()
+                    && opponents(&resumed).iter().all(|(state, _)| *state != 2)
+                {
+                    first_selection = Some(resumed.world.clock.timing[0]);
+                }
                 if resumed.world.auction.controller.reference != 0 {
                     auction_admission = Some(resumed.world.clock.timing[0]);
                     break;
                 }
             }
+            assert!(
+                first_selection.is_some_and(|tick| tick < loaded_tick + 125),
+                "rebuilt opponents must select a strategy on their first pass: {first_selection:?}"
+            );
             assert!(
                 auction_admission.is_some(),
                 "rebuilt opponents must make an auction decision"
