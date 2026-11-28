@@ -19,9 +19,16 @@ pub struct Profiles {
     path: PathBuf,
 }
 impl Profiles {
+    /// The selected player's name as original code-page bytes: the identity
+    /// that keys every V2 file of the profile, and the player name sessions
+    /// draw through the language's glyph row.
+    pub fn current_code_page(&self) -> Option<Vec<u8>> {
+        let name = self.names.get(self.current?)?;
+        Some(ui::text_field::code_page(name))
+    }
     fn clear_orphan_progress(&self, name: &str) -> Result<(), String> {
         let root = self.path.parent().ok_or("profile directory")?;
-        let path = crate::campaign_store::profile_path(root, name.as_bytes());
+        let path = crate::campaign_store::profile_path(root, &ui::text_field::code_page(name));
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -30,8 +37,9 @@ impl Profiles {
     }
     fn clear_orphan_options(&self, name: &str) -> Result<(), String> {
         let root = self.path.parent().ok_or("profile directory")?;
-        crate::preferred_token::clear(root, name.as_bytes())?;
-        let path = crate::profile_settings::profile_path(root, name.as_bytes());
+        let identity = ui::text_field::code_page(name);
+        crate::preferred_token::clear(root, &identity)?;
+        let path = crate::profile_settings::profile_path(root, &identity);
         match fs::remove_file(path.with_extension("board")) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -45,7 +53,7 @@ impl Profiles {
     }
     fn clear_orphan_saves(&self, name: &str) -> Result<(), String> {
         let root = self.path.parent().ok_or("profile directory")?;
-        crate::save_menu::clear_profile_saves(root, name.as_bytes())
+        crate::save_menu::clear_profile_saves(root, &ui::text_field::code_page(name))
     }
     fn delete_chosen(&mut self, index: usize) -> Result<(), String> {
         let name = self.names.remove(index);
@@ -134,8 +142,15 @@ impl Profiles {
         fs::rename(&temporary, &self.path).map_err(|e| e.to_string())
     }
 }
+/// A stored or entered profile name: printable Windows-1252 text within the
+/// editor's 128-byte hard cap. Width and the filename filter are input rules
+/// (443aa0), so names saved before they applied still load.
 fn valid_name(name: &str) -> bool {
-    !name.trim().is_empty() && name.len() <= 31 && name.bytes().all(|c| (32..127).contains(&c))
+    !name.trim().is_empty()
+        && name.chars().count() <= ui::text_field::HARD_CAP
+        && name
+            .chars()
+            .all(|c| ui::text_field::windows_1252(c).is_some_and(|b| b >= 32))
 }
 pub fn default_directory() -> PathBuf {
     if cfg!(windows) {
@@ -167,6 +182,8 @@ struct Assets {
     confirm: Vec<[f32; 4]>,
     fonts: Vec<Surface>,
     tab: Vec<u8>,
+    /// Language row 0: code-page byte minus 32 to glyph index.
+    glyph_map: Vec<u8>,
     list_fonts: Vec<Surface>,
     list_tab: Vec<u8>,
     list_layout: openmt2001::frontend_list::Layout,
@@ -307,6 +324,10 @@ impl Profile {
                 confirm,
                 fonts,
                 tab,
+                glyph_map: strings
+                    .first()
+                    .ok_or("profile language glyph row missing")?
+                    .to_vec(),
                 list_fonts,
                 list_tab,
                 list_layout,
@@ -470,6 +491,14 @@ impl Profile {
             self.visible = false;
         }
     }
+    /// Glyph indices for a player name in any of the original fonts.
+    pub fn name_glyphs(&self, name: &str) -> Vec<u8> {
+        ui::text_field::FieldFont {
+            tab: &self.assets.tab,
+            map: &self.assets.glyph_map,
+        }
+        .glyphs(name)
+    }
     pub fn select_all(&mut self) {
         if self.notice.is_some() {
             return;
@@ -485,11 +514,12 @@ impl Profile {
                 name.clear();
                 self.selected_all = false;
             }
-            for c in text.chars() {
-                if c.is_ascii() && !c.is_control() && name.len() < 31 {
-                    name.push(c);
-                }
-            }
+            // 495b50 configures the registration field filename-safe, 90 px.
+            let font = ui::text_field::FieldFont {
+                tab: &self.assets.tab,
+                map: &self.assets.glyph_map,
+            };
+            ui::text_field::Rule::PROFILE_NAME.type_text(name, text, font);
             self.error = None;
         }
     }
@@ -619,7 +649,7 @@ impl Profile {
                     return Ok(());
                 }
                 if !valid_name(name) {
-                    return Err("Enter a name (1-31 ASCII characters)".into());
+                    return Err("Enter a player name".into());
                 }
                 if self.store.names.contains(name) {
                     self.open_notice(Notice::Duplicate);
@@ -740,7 +770,7 @@ impl Profile {
                 let top = t + (i - self.first) as f32 * pitch + 2.;
                 shapes.rect([l, top, r, top + pitch], [0xff008ed0; 4]);
             }
-            let encoded: Vec<_> = name.bytes().map(|c| c - 32).collect();
+            let encoded = self.name_glyphs(name);
             ui::text_widget_style0(
                 &mut list_fonts,
                 &self.assets.list_tab,
@@ -825,8 +855,7 @@ impl Profile {
                     0xff002896 // Registration painter 495e5e.
                 }; 4],
             );
-            let name = self.name.as_deref().unwrap_or("");
-            let encoded: Vec<_> = name.bytes().map(|c| c - 32).collect();
+            let encoded = self.name_glyphs(self.name.as_deref().unwrap_or(""));
             // Registration configures style 4 on the full CONFIRM_TEXT region.
             ui::text_entry(
                 &mut modal_fonts,
@@ -930,13 +959,15 @@ mod tests {
         let mut confirm = vec![[0.; 4]; 7];
         confirm[4] = [200., 265., 300., 290.];
         confirm[6] = [340., 265., 440., 290.];
+        let (tab, glyph_map) = ui::text_field::synthetic_font();
         Assets {
             base: vec![],
             modal: vec![],
             bounds: vec![[0.; 4]; 14],
             confirm,
             fonts: vec![],
-            tab: vec![],
+            tab,
+            glyph_map,
             list_fonts: vec![],
             list_tab: vec![],
             list_layout: openmt2001::frontend_list::Layout::new([198., 200., 440., 285.], 11., 0.)
@@ -1008,6 +1039,40 @@ mod tests {
         relaunched.store.current = None;
         relaunched.store.save().unwrap();
         assert!(!scratch.load().visible);
+    }
+
+    #[test]
+    fn registration_field_applies_the_shared_name_rule() {
+        let scratch = Scratch::new();
+        let mut profile = scratch.load();
+        // 90 px of the registration font: 7 W (84 px), or exactly 30 i.
+        profile.input(&"W".repeat(20));
+        assert_eq!(profile.name.as_deref(), Some("W".repeat(7).as_str()));
+        profile.select_all();
+        profile.input(&"i".repeat(40));
+        assert_eq!(profile.name.as_deref(), Some("i".repeat(30).as_str()));
+        profile.select_all();
+        profile.input("Ren\u{e9}e: A/B?");
+        assert_eq!(profile.name.as_deref(), Some("Ren\u{e9}e AB"));
+        assert_eq!(
+            profile.name_glyphs("\u{e9}"),
+            [0xe9 - 0xc0 + 112],
+            "high bytes draw through the language row"
+        );
+        profile.activate(0);
+        assert!(profile.error.is_none());
+        // The name round-trips through profiles.txt, and its files are keyed
+        // by its code-page bytes.
+        let relaunched = scratch.load();
+        assert_eq!(relaunched.store.names, ["Ren\u{e9}e AB"]);
+        let identity = relaunched.store.current_code_page().unwrap();
+        assert_eq!(identity, b"Ren\xe9e AB");
+        assert_eq!(
+            crate::campaign_store::profile_path(&scratch.0, &identity)
+                .file_name()
+                .unwrap(),
+            "52656ee965204142.lua"
+        );
     }
 
     #[test]
@@ -1097,6 +1162,7 @@ mod tests {
     }
 
     fn profile(root: PathBuf) -> Profile {
+        let (tab, glyph_map) = ui::text_field::synthetic_font();
         Profile {
             assets: Assets {
                 base: vec![],
@@ -1104,7 +1170,8 @@ mod tests {
                 bounds: vec![[0.; 4]; 14],
                 confirm: vec![[0.; 4]; 7],
                 fonts: vec![],
-                tab: vec![],
+                tab,
+                glyph_map,
                 list_fonts: vec![],
                 list_tab: vec![],
                 list_layout: openmt2001::frontend_list::Layout::new(
@@ -1340,6 +1407,7 @@ mod tests {
     fn profile_scrollbar_hits_and_moves_without_selecting_a_hidden_row() {
         let mut bounds = vec![[0.; 4]; 14];
         bounds[5] = [198., 200., 440., 287.];
+        let (tab, glyph_map) = ui::text_field::synthetic_font();
         let mut profile = Profile {
             assets: Assets {
                 base: vec![],
@@ -1347,7 +1415,8 @@ mod tests {
                 bounds,
                 confirm: vec![],
                 fonts: vec![],
-                tab: vec![],
+                tab,
+                glyph_map,
                 list_fonts: vec![],
                 list_tab: vec![],
                 list_layout: openmt2001::frontend_list::Layout::new(
