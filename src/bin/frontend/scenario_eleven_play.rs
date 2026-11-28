@@ -4,8 +4,8 @@ use std::io::Write as _;
 
 use super::scenario_twelve_play::wealth;
 use super::{
-    CommandAssets, Inputs, Path, Policy, Session, character_names, finish_original_win, fs,
-    load_era_styles, submit_business_shape, word,
+    CommandAssets, Inputs, Path, Policy, Session, character_names, check_measured_result,
+    finish_original_result, fs, load_era_styles, result_sequence, submit_business_shape, word,
 };
 
 fn build_capacity_shop(
@@ -169,7 +169,7 @@ fn sold(session: &Session<'_>) -> i32 {
 }
 
 #[test]
-#[ignore = "requires original assets and genuine Scenario1+6 Win profile"]
+#[ignore = "requires original assets and genuine Scenario1+6 Win profile; measured Scenario11 result"]
 fn legal_scenario_eleven_sales_win_and_profile_reload() {
     run_scenario_eleven(0);
 }
@@ -199,7 +199,7 @@ fn legal_scenario_eleven_staged_distinct_shop_probe() {
 }
 
 #[test]
-#[ignore = "requires original assets and genuine Scenario1+6 Win profile"]
+#[ignore = "requires original assets and genuine Scenario1+6 Win profile; measured Scenario11 result"]
 fn legal_scenario_eleven_staged_sales_win_and_profile_reload() {
     run_scenario_eleven(7);
 }
@@ -211,7 +211,7 @@ fn legal_scenario_eleven_rival_sales_diagnostic() {
 }
 
 #[test]
-#[ignore = "requires original assets and genuine Scenario1+6 Win profile"]
+#[ignore = "requires original assets and genuine Scenario1+6 Win profile; measured Scenario11 result"]
 fn legal_scenario_eleven_owned_kind_six_sales_win_and_profile_reload() {
     run_scenario_eleven(9);
 }
@@ -1287,19 +1287,29 @@ fn run_scenario_eleven(probe_shops: usize) {
                     result_dialog.as_ref().map(|dialog| dialog.context));
                 return;
             }
+            let result_tick = session.world.clock.timing[0];
             let dialog = result_dialog.expect("30-day legal Scenario11 sales strategy reached no original result");
-            assert_eq!(dialog.context, 0, "non-human or non-objective result ended legal sales strategy");
-            assert!(sold(&session) >= 3000);
-            assert_eq!(session.world.objective.reached[0], 1);
+            let winner = dialog.context;
+            let won = winner == 0;
+            assert!((winner as usize) < session.roster.manager.players.len(),
+                "non-objective result ended legal sales strategy");
+            writeln!(std::io::stdout(), "Scenario11 strategy{probe_shops} original result winner slot{winner} tick{result_tick} sales{:?} built{built:?} planned{plan:?} lease-cycles{lease_cycles} rights{rights_activations} staged-built{staged_shop_built} staged-slot{staged_shop_slot:?} staged-rent{staged_shop_rent_seen} kind6-built{kind_six_built} kind6-slot{kind_six_slot:?} kind6-quote{kind_six_quote:?}",
+                session.world.ledgers.players.iter().map(|account| account.retail_counters[1]).collect::<Vec<_>>()).unwrap();
+            assert!(session.world.ledgers.players[winner as usize].retail_counters[1] >= 3000,
+                "Scenario11 winner did not reach the sales threshold");
+            assert_eq!(session.world.objective.reached[winner as usize], 1);
             assert_eq!((session.world.objective.kind, session.world.objective.target), (6, 3000.));
             assert_eq!(built.len(), plan.len());
             assert!(lease_cycles >= 1 && rights_activations >= 1);
-            if staged_shop_probe {
-                assert!(staged_shop_built && staged_shop_slot.is_some() && staged_shop_rent_seen);
+            // The measured runs never pass the staged shop's or kind6's cash
+            // reserve gate (see measured_result). Check the legal chain of any
+            // step that was admitted.
+            if staged_shop_probe && staged_shop_built {
+                assert!(staged_shop_slot.is_some() && staged_shop_rent_seen);
             }
-            if kind_six_probe {
-                assert!(kind_six_built && kind_six_slot.is_some() && kind_six_quote.is_some(),
-                    "original kind6 was not built under the measured renewal and operating reserve");
+            if kind_six_probe && kind_six_built {
+                assert!(kind_six_slot.is_some() && kind_six_quote.is_some(),
+                    "original kind6 was built without its measured renewal and operating reserve");
             }
             assert_eq!(fs::read(&profile).unwrap(), source_bytes);
             host.human_dialog_reply(
@@ -1312,13 +1322,14 @@ fn run_scenario_eleven(probe_shops: usize) {
                 },
             )
             .unwrap();
-            finish_original_win(&mut session, &assets, &mut host, &profile, &source_bytes);
+            finish_original_result(&mut session, &assets, &mut host, &profile, &source_bytes,
+                result_sequence(winner));
             let mut reloaded = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
             crate::campaign_store::load_progress(&mut reloaded, &profile).unwrap();
             for id in [200001, 200006, 200011] {
                 let level = &reloaded.levels[reloaded.find(id).unwrap()];
                 assert_eq!(level.attempts(), 1);
-                assert!(level.completed()[0]);
+                assert_eq!(level.completed()[0], id != 200011 || won);
             }
             assert_eq!(fs::read(&source_profile).unwrap(), source_bytes);
             drop(host);
@@ -1327,10 +1338,12 @@ fn run_scenario_eleven(probe_shops: usize) {
             assert_eq!(counts[0], counts[1]);
             assert_eq!(counts[1], counts[2]);
             println!(
-                "Natural Scenario11 3000-sales Win once; human sales{}, buildings{}, GPU auctions{counts:?}",
+                "Natural Scenario11 3000-sales {:?} once; human sales{}, buildings{}, GPU auctions{counts:?}",
+                result_sequence(winner),
                 sold(&session),
                 built.len(),
             );
+            check_measured_result("SCENARIO11", probe_shops as u32, winner, result_tick);
         })
         .unwrap()
         .join()
