@@ -14,6 +14,7 @@ autobins = false
 name = "headless"
 path = "src/main.rs"
 # The runner's tests need the game's interface layer; they run in openmt-game.
+# src/main.rs is empty in test builds.
 test = false
 
 [dependencies]

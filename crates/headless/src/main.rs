@@ -4,6 +4,10 @@
 //!
 //! `headless ARGS` and `headless headless ARGS` both work, so it drops in for
 //! `game headless ARGS`.
+// The mounted sources' tests need the interface layer; they run in
+// openmt-game. `cargo test --bins` and `--all-targets` still build this
+// binary as a test, so that build is empty.
+#![cfg(not(test))]
 // The game drives the rest of the Host and session API; only the runner's
 // path is live here.
 #![allow(dead_code, unused_imports)]
