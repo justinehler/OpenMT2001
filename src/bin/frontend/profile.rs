@@ -583,9 +583,9 @@ impl Profile {
                 self.notice = None;
                 self.notice_keys = Default::default();
                 // 42a2dc delivers Backspace even to one-button records;
-                // 495ea0 reopens registration only for reply zero. The startup
-                // flag (495cd0 +498) is cleared only by a successful name
-                // submission at 495f35, so no warning reply admits selection.
+                // 495ea0 reopens registration only for reply zero. Original
+                // +498 marks New from selection (the inverse of startup);
+                // neither warning reply changes it or opens Player Selection.
                 if notice == Notice::Duplicate && index == 1 && !self.first_registration {
                     self.name = None;
                 }
