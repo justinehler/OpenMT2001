@@ -499,6 +499,16 @@ pub fn text(
 ) -> Result<(), String> {
     text_scaled(pages, tab, encoded, bounds, center, color, 1.)
 }
+/// Green section captions shared by the single-player setup screens.
+/// The original widgets select per-character palette entry16 (440ad0).
+pub fn section_header(
+    pages: &mut [Surface],
+    tab: &[u8],
+    encoded: &[u8],
+    bounds: [f32; 4],
+) -> Result<(), String> {
+    text(pages, tab, encoded, bounds, true, 0xff00ff00)
+}
 pub fn text_fit(
     pages: &mut [Surface],
     tab: &[u8],
@@ -1393,4 +1403,30 @@ mod tests {
         }
         assert_eq!(at, bytes.len());
     }
+}
+
+#[cfg(test)]
+pub(crate) fn synthetic_text_font(width: i32, height: i32) -> Vec<u8> {
+    let mut tab = 96u32.to_le_bytes().to_vec();
+    for _ in 0..96 {
+        tab.extend([0; 32]);
+        tab.extend(width.to_le_bytes());
+        tab.extend(height.to_le_bytes());
+        tab.extend(0i32.to_le_bytes());
+    }
+    tab
+}
+
+#[test]
+fn singleplayer_text_style_section_header_preserves_campaign_green_centered_glyphs() {
+    let tab = synthetic_text_font(7, 10);
+    let mut pages = vec![Surface::solid(); 2];
+    section_header(&mut pages, &tab, &[33, 34], [10., 20., 110., 40.]).unwrap();
+    assert_eq!(pages[0].vertices.len(), 12);
+    for vertex in &pages[0].vertices {
+        assert_eq!(&vertex[3..6], &[0., 1., 0.]);
+    }
+    assert_eq!(pages[0].alpha, [255; 12]);
+    assert_eq!(pages[0].vertices[0][0], 53.5);
+    assert_eq!(pages[0].vertices[2][1], 19.5);
 }

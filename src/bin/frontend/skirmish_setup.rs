@@ -252,6 +252,7 @@ struct Typeface {
 }
 pub struct SetupPanel {
     headings: [usize; 2],
+    green_headers: bool,
     base: Vec<Surface>,
     regions: Vec<Region>,
     generic: Vec<Surface>,
@@ -278,6 +279,7 @@ impl SetupPanel {
             strings: vec![],
             options,
             headings: [2226, 2228],
+            green_headers: true,
             backing: 0,
         }
     }
@@ -352,6 +354,7 @@ impl SetupPanel {
             .collect();
         let panel = Self {
             headings: [2226, 2228],
+            green_headers: true,
             base,
             regions,
             generic,
@@ -440,6 +443,7 @@ impl SetupPanel {
         Ok(outcome)
     }
     pub fn network_mode(&mut self) {
+        self.green_headers = false;
         self.headings = [1683, 1692]; // Network Game / New Network Session.
     }
     pub fn options(&self) -> &Options {
@@ -717,6 +721,24 @@ impl SetupPanel {
         out.push(s);
         Ok(())
     }
+    fn section_header(&self, pages: &mut [Surface], id: usize, name: &str) -> Result<(), String> {
+        if self.green_headers {
+            ui::section_header(
+                pages,
+                &self.fonts[0].tab,
+                self.label(id)?,
+                self.bounds(name)?,
+            )
+        } else {
+            ui::text_widget_style9(
+                pages,
+                &self.fonts[0].tab,
+                self.label(id)?,
+                self.bounds(name)?,
+                0xffffffff,
+            )
+        }
+    }
     fn surfaces(
         &self,
         state: &State,
@@ -779,9 +801,6 @@ impl SetupPanel {
             for (font, name, id) in [
                 (3, "TITLE_AREA", self.headings[0]),
                 (0, "SESS_TITLE_AREA", self.headings[1]),
-                (0, "LABEL1", 1880),
-                (0, "LABEL2", 1879),
-                (0, "LABEL7", 1883),
             ] {
                 ui::text_widget_style9(
                     &mut pages[font],
@@ -790,6 +809,10 @@ impl SetupPanel {
                     self.bounds(name)?,
                     0xffffffff,
                 )?;
+            }
+            // 4a3244..4a326b apply palette16 to these section captions.
+            for (name, id) in [("LABEL1", 1880), ("LABEL2", 1879), ("LABEL7", 1883)] {
+                self.section_header(&mut pages[0], id, name)?;
             }
             if let Some(level) = state.catalog.selected_level() {
                 ui::text_widget_style9(
@@ -827,13 +850,7 @@ impl SetupPanel {
                 )?;
             }
             if let Some(label) = state.modifier.label(&self.options) {
-                ui::text_widget_style9(
-                    &mut pages[0],
-                    &self.fonts[0].tab,
-                    self.label(label as usize)?,
-                    self.bounds("LABEL4")?,
-                    0xffffffff,
-                )?;
+                self.section_header(&mut pages[0], label as usize, "LABEL4")?;
             }
             let value = match state.modifier.display(&self.options) {
                 Display::Hidden => vec![],
