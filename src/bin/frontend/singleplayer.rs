@@ -155,7 +155,7 @@ mod campaign_picker_tests {
             let mut expected = vec![Surface::solid(); 2];
             ui::text_widget_style3(&mut expected, &panel.slot_tab, &text, bounds, 0xffffffff)
                 .unwrap();
-            assert_eq!(label, expected[0].vertices);
+            assert_eq!(label.as_slice(), expected[0].vertices);
             assert_eq!(label[0][0], 11.5);
             assert_eq!(label[1][0] - label[0][0], 5.);
             assert_eq!(label[0][1] - label[2][1], 8.);
