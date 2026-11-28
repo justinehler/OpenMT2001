@@ -243,6 +243,10 @@ fn test_board_style(executable: &[u8]) -> openmt2001::board_style::Style {
     .unwrap()
 }
 
+mod pause_save_test {
+    include!("../intro_pause_save_test.rs");
+}
+
 #[cfg(feature = "capture")]
 mod rights_worker_test {
     include!("../intro_rights_test.rs");

@@ -1,7 +1,8 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
 //! Direct-IP transport is pumped by the lobby worker through this owner.
 //! The lobby worker validates staged startup content before binding an actual
-//! city. Command/deadline exchange remains the next slice in #30.
+//! city. The command adapter qualifies short property transfers and deadlines;
+//! remaining command families explicitly remain unsupported.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{
     Mutex, MutexGuard, OnceLock,
@@ -9,6 +10,7 @@ use std::sync::{
 };
 
 pub mod codec;
+pub mod commands;
 pub mod lobby;
 pub mod stream;
 #[cfg(test)]
@@ -20,6 +22,7 @@ pub const SLOTS: usize = 6;
 pub struct SessionLink {
     pub binding: SessionBinding,
     pub worker: lobby::worker::Handle,
+    pub commands: commands::Adapter,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -41,6 +44,7 @@ pub enum Error {
     Sequence,
     Row,
     Content,
+    Unsupported,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -183,7 +187,11 @@ impl State {
                     return Err(Error::Phase);
                 }
             }
-            Message::Transfer(_) => self.binding(binding.ok_or(Error::World)?)?,
+            Message::Transfer(_)
+            | Message::CommandRequest(_)
+            | Message::CommandCommit(_)
+            | Message::CommandDeadline { .. }
+            | Message::CommandRejected { .. } => self.binding(binding.ok_or(Error::World)?)?,
             Message::Hello | Message::Probe | Message::Welcome { .. } => return Err(Error::Tag),
         }
         let peer = self.peers[usize::from(connection.slot)]
@@ -191,7 +199,7 @@ impl State {
             .ok_or(Error::Peer)?;
         let request = matches!(
             frame.message,
-            Message::LobbyRequest(_) | Message::StartReady(_)
+            Message::LobbyRequest(_) | Message::StartReady(_) | Message::CommandRequest(_)
         ) || (matches!(frame.message, Message::StartFailure) && !peer.authority);
         if peer.identity != connection.identity || peer.authority == request {
             return Err(Error::Peer);
@@ -288,6 +296,25 @@ impl Owner {
         state.binding = Some(binding);
         state.phase = Phase::Playing;
         Ok(binding)
+    }
+    pub(crate) fn validate_connection(
+        &self,
+        binding: SessionBinding,
+        connection: Connection,
+        authority: bool,
+    ) -> Result<()> {
+        let state = self.lock()?;
+        state.binding(binding)?;
+        state.attempt(connection.attempt)?;
+        let peer = state
+            .peers
+            .get(usize::from(connection.slot))
+            .and_then(Option::as_ref)
+            .ok_or(Error::Peer)?;
+        if peer.identity != connection.identity || peer.authority != authority {
+            return Err(Error::Peer);
+        }
+        Ok(())
     }
     pub fn validate_binding(&self, binding: SessionBinding) -> Result<()> {
         self.lock()?.binding(binding)
@@ -414,6 +441,17 @@ pub enum Message {
     StartCommit,
     StartFailure,
     Transfer(Transfer),
+    CommandRequest(commands::Request),
+    CommandCommit(commands::Commit),
+    /// Original kind8 deadline, following `after` shared commits.
+    CommandDeadline {
+        after: u64,
+        tick: u32,
+    },
+    CommandRejected {
+        serial: u64,
+        unsupported: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {

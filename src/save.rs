@@ -8,6 +8,41 @@ pub mod extension;
 pub mod restore;
 pub mod writer;
 
+/// Read the native level/year/cash/difficulty record used by both save lists
+/// (4bbc60 / 4bc290). V2 saves retain this record before their runtime extension.
+/// Validate framing up to and including the first metadata record, then stop:
+/// compatibility, later records, and the final terminator belong to full loading.
+pub fn read_level_metadata(bytes: &[u8]) -> Result<[u32; 4], String> {
+    let mut at = 0usize;
+    loop {
+        let header_end = at.checked_add(8).ok_or("save offset overflow")?;
+        let header = bytes
+            .get(at..header_end)
+            .ok_or("truncated save section header or missing terminator")?;
+        let tag = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+        if tag == u32::MAX {
+            return Err("missing save table 2000".into());
+        }
+        let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+        let end = header_end
+            .checked_add(length)
+            .ok_or("save section length overflow")?;
+        let payload = bytes
+            .get(header_end..end)
+            .ok_or("truncated save section payload")?;
+        if tag == 0x2000 {
+            let words: &[u8; 16] = payload
+                .try_into()
+                .map_err(|_| "incorrect length for save table 2000")?;
+            return Ok(std::array::from_fn(|i| {
+                let at = i * 4;
+                u32::from_le_bytes([words[at], words[at + 1], words[at + 2], words[at + 3]])
+            }));
+        }
+        at = end;
+    }
+}
+
 #[derive(Debug)]
 pub struct Section<'a> {
     pub tag: u32,

@@ -4,7 +4,8 @@
 //! [8..12] payload byte length u32, [12..28] session bytes, [28..36] sequence u64.
 //! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
 //! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe,
-//! 10=validated startup content, 11=start commit, 12=start content failure.
+//! 10=validated startup content, 11=start commit, 12=start content failure,
+//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected.
 //! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
@@ -80,6 +81,13 @@ fn validate(message: &Message) -> Result<()> {
         }
         Message::Start(start) => start.content.validate()?,
         Message::StartReady(content) => content.validate()?,
+        Message::CommandRequest(request) => {
+            if request.payload.len() > 128 {
+                return Err(Error::Oversized);
+            }
+        }
+        Message::CommandRejected { .. } | Message::CommandDeadline { .. } => {}
+        Message::CommandCommit(commit) => validate(&Message::Transfer(commit.transfer))?,
         Message::Transfer(transfer) => {
             if transfer.category >= 52 || !(1..=6).contains(&transfer.owner) {
                 return Err(Error::Row);
@@ -179,6 +187,33 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
             content(&mut payload, start.content);
             payload.extend_from_slice(&start.seed.to_le_bytes());
             2
+        }
+        Message::CommandRequest(request) => {
+            payload.extend_from_slice(&request.serial.to_le_bytes());
+            payload.push(request.owner);
+            payload.extend_from_slice(&request.kind.to_le_bytes());
+            blob(&mut payload, &request.payload);
+            13
+        }
+        Message::CommandCommit(commit) => {
+            payload.extend_from_slice(&commit.order.to_le_bytes());
+            payload.extend_from_slice(&[commit.transfer.category, commit.transfer.owner]);
+            payload.extend_from_slice(&commit.transfer.amount.to_le_bytes());
+            payload.extend_from_slice(&commit.transfer.due.to_le_bytes());
+            14
+        }
+        Message::CommandDeadline { after, tick } => {
+            payload.extend_from_slice(&after.to_le_bytes());
+            payload.extend_from_slice(&tick.to_le_bytes());
+            15
+        }
+        Message::CommandRejected {
+            serial,
+            unsupported,
+        } => {
+            payload.extend_from_slice(&serial.to_le_bytes());
+            payload.push(u8::from(*unsupported));
+            16
         }
         Message::Transfer(transfer) => {
             // category u8, owner u8, amount i32, Total due u32.
@@ -310,6 +345,29 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
         at: 0,
     };
     let message = match tag {
+        13 => Message::CommandRequest(super::commands::Request {
+            serial: u64::from_le_bytes(reader.take()?),
+            owner: reader.byte()?,
+            kind: reader.word()?,
+            payload: reader.blob()?,
+        }),
+        14 => Message::CommandCommit(super::commands::Commit {
+            order: u64::from_le_bytes(reader.take()?),
+            transfer: Transfer {
+                category: reader.byte()?,
+                owner: reader.byte()?,
+                amount: reader.word()? as i32,
+                due: reader.word()?,
+            },
+        }),
+        15 => Message::CommandDeadline {
+            after: u64::from_le_bytes(reader.take()?),
+            tick: reader.word()?,
+        },
+        16 => Message::CommandRejected {
+            serial: u64::from_le_bytes(reader.take()?),
+            unsupported: reader.boolean()?,
+        },
         10 => Message::StartReady(reader.content()?),
         11 => Message::StartCommit,
         12 => Message::StartFailure,

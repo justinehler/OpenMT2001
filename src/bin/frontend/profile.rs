@@ -623,19 +623,30 @@ impl Profile {
                     .map(|i| self.store.names[i].as_str())
                     .unwrap_or("")
             });
-            let encoded: Vec<_> = format!("{name}{}", if self.name.is_some() { "|" } else { "" })
-                .bytes()
-                .map(|c| c - 32)
-                .collect();
-            input[1] += 5.;
-            ui::text(
-                &mut modal_fonts,
-                &self.assets.tab,
-                &encoded,
-                input,
-                true,
-                0xffffffff,
-            )?;
+            let encoded: Vec<_> = name.bytes().map(|c| c - 32).collect();
+            if self.name.is_some() {
+                // Registration configures style 4 on the full CONFIRM_TEXT
+                // region (495c89..495cb2), not the inset blue backing.
+                ui::text_entry(
+                    &mut modal_fonts,
+                    &mut modal,
+                    &self.assets.tab,
+                    &encoded,
+                    self.assets.confirm[3],
+                    true,
+                    true,
+                )?;
+            } else {
+                input[1] += 5.;
+                ui::text(
+                    &mut modal_fonts,
+                    &self.assets.tab,
+                    &encoded,
+                    input,
+                    true,
+                    0xffffffff,
+                )?;
+            }
             for (i, part) in [4, 6].iter().enumerate() {
                 let bounds = self.assets.confirm[*part];
                 ui::button(

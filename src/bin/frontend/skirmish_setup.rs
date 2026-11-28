@@ -1,6 +1,6 @@
 //! Private offline setup component. No menu route, roster construction or launch.
 use crate::{
-    load::{ascii, wrap_lines},
+    singleplayer::CampaignDescription,
     ui::{self, Surface},
 };
 use openmt2001::{
@@ -252,6 +252,7 @@ struct Typeface {
 }
 pub struct SetupPanel {
     headings: [usize; 2],
+    green_headers: bool,
     base: Vec<Surface>,
     regions: Vec<Region>,
     generic: Vec<Surface>,
@@ -278,6 +279,7 @@ impl SetupPanel {
             strings: vec![],
             options,
             headings: [2226, 2228],
+            green_headers: true,
             backing: 0,
         }
     }
@@ -352,6 +354,7 @@ impl SetupPanel {
             .collect();
         let panel = Self {
             headings: [2226, 2228],
+            green_headers: true,
             base,
             regions,
             generic,
@@ -440,6 +443,7 @@ impl SetupPanel {
         Ok(outcome)
     }
     pub fn network_mode(&mut self) {
+        self.green_headers = false;
         self.headings = [1683, 1692]; // Network Game / New Network Session.
     }
     pub fn options(&self) -> &Options {
@@ -524,32 +528,32 @@ impl SetupPanel {
         let b = self.map_viewport()?;
         Ok([b[2], b[1], b[2] + 16., b[3]])
     }
-    fn lines(&self, state: &State) -> Result<Vec<Vec<u8>>, String> {
-        let Some(level) = state.catalog.selected_level() else {
-            return Ok(vec![]);
-        };
-        let b = self.viewport(true)?;
-        wrap_lines(
-            &self.fonts[1].tab,
-            &self.record_text(level, false)?,
-            b[2] - b[0],
-        )
+    fn description(&self, state: &State) -> Result<CampaignDescription, String> {
+        let text = state
+            .catalog
+            .selected_level()
+            .map(|level| self.record_text(level, false))
+            .transpose()?
+            .unwrap_or_default();
+        // INFO7 is a rich-text child, like the campaign's Info8, not a LIST BOX.
+        // Pass the full mesh bounds: the shared layout reserves the scrollbar.
+        CampaignDescription::new(&self.fonts[1].tab, &text, self.bounds("INFO7")?)
     }
     fn capacity(&self, description: bool) -> Result<usize, String> {
-        let b = self.viewport(description)?;
-        // Font2's W height supplies the list row advance.
-        let tab = &self.fonts[1].tab;
-        let at = 4 + usize::from(b'W' - 32) * 44 + 36;
-        let h = i32::from_le_bytes(tab[at..at + 4].try_into().unwrap()).max(1) as f32;
-        Ok(((b[3] - b[1]) / h).floor() as usize)
+        if description {
+            return Ok(
+                CampaignDescription::new(&self.fonts[1].tab, &[], self.bounds("INFO7")?)?
+                    .capacity(),
+            );
+        }
+        let b = self.viewport(false)?;
+        Ok(((b[3] - b[1]) / self.row_height()).floor() as usize)
     }
     fn limit(&self, state: &State, description: bool) -> Result<usize, String> {
-        Ok(if description {
-            self.lines(state)?.len()
-        } else {
-            state.rows.len()
+        if description {
+            return Ok(self.description(state)?.limit());
         }
-        .saturating_sub(self.capacity(description)?))
+        Ok(state.rows.len().saturating_sub(self.capacity(false)?))
     }
     pub fn scroll(&self, state: &mut State, point: [f32; 2], delta: i32) -> Result<(), String> {
         if !state.visible {
@@ -717,6 +721,24 @@ impl SetupPanel {
         out.push(s);
         Ok(())
     }
+    fn section_header(&self, pages: &mut [Surface], id: usize, name: &str) -> Result<(), String> {
+        if self.green_headers {
+            ui::section_header(
+                pages,
+                &self.fonts[0].tab,
+                self.label(id)?,
+                self.bounds(name)?,
+            )
+        } else {
+            ui::text_widget_style9(
+                pages,
+                &self.fonts[0].tab,
+                self.label(id)?,
+                self.bounds(name)?,
+                0xffffffff,
+            )
+        }
+    }
     fn surfaces(
         &self,
         state: &State,
@@ -779,9 +801,6 @@ impl SetupPanel {
             for (font, name, id) in [
                 (3, "TITLE_AREA", self.headings[0]),
                 (0, "SESS_TITLE_AREA", self.headings[1]),
-                (0, "LABEL1", 1880),
-                (0, "LABEL2", 1879),
-                (0, "LABEL7", 1883),
             ] {
                 ui::text_widget_style9(
                     &mut pages[font],
@@ -790,6 +809,10 @@ impl SetupPanel {
                     self.bounds(name)?,
                     0xffffffff,
                 )?;
+            }
+            // 4a3244..4a326b apply palette16 to these section captions.
+            for (name, id) in [("LABEL1", 1880), ("LABEL2", 1879), ("LABEL7", 1883)] {
+                self.section_header(&mut pages[0], id, name)?;
             }
             if let Some(level) = state.catalog.selected_level() {
                 ui::text_widget_style9(
@@ -800,12 +823,14 @@ impl SetupPanel {
                     0xffffffff,
                 )?;
             }
-            ui::text_widget_style3(
+            ui::text_entry(
                 &mut pages[2],
+                &mut shapes,
                 &self.fonts[2].tab,
                 &self.encoded(&state.name)?,
                 self.bounds("INFO1")?,
-                0xffffffff,
+                false,
+                state.name_focused,
             )?;
             for (i, name) in ["EASY", "MEDIUM", "HARD"].iter().enumerate() {
                 self.image(&mut images, 293 + i, self.bounds(&format!("{name}_CUP"))?)?;
@@ -827,13 +852,7 @@ impl SetupPanel {
                 )?;
             }
             if let Some(label) = state.modifier.label(&self.options) {
-                ui::text_widget_style9(
-                    &mut pages[0],
-                    &self.fonts[0].tab,
-                    self.label(label as usize)?,
-                    self.bounds("LABEL4")?,
-                    0xffffffff,
-                )?;
+                self.section_header(&mut pages[0], label as usize, "LABEL4")?;
             }
             let value = match state.modifier.display(&self.options) {
                 Display::Hidden => vec![],
@@ -845,8 +864,8 @@ impl SetupPanel {
                 ),
             };
             ui::text_widget_style9(
-                &mut pages[2],
-                &self.fonts[2].tab,
+                &mut pages[0],
+                &self.fonts[0].tab,
                 &value,
                 self.bounds("INFO4")?,
                 0xffffffff,
@@ -871,37 +890,39 @@ impl SetupPanel {
             let at = 4 + usize::from(b'W' - 32) * 44 + 36;
             let height = i32::from_le_bytes(tab[at..at + 4].try_into().unwrap()).max(1) as f32;
             for description in [false, true] {
-                let b = self.viewport(description)?;
                 let first = if description {
                     state.description_first
                 } else {
                     state.first
                 };
-                let lines = if description {
-                    self.lines(state)?
+                if description {
+                    self.description(state)?.paint(&mut pages[1], tab, first)?;
                 } else {
-                    state
+                    let b = self.viewport(false)?;
+                    for (i, &level) in state
                         .rows
                         .iter()
-                        .map(|&i| self.record_text(&state.catalog.levels[i], true))
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                for (i, text) in lines
-                    .iter()
-                    .enumerate()
-                    .skip(first)
-                    .take(self.capacity(description)?)
-                {
-                    let row = [
-                        b[0],
-                        b[1] + (i - first) as f32 * height,
-                        b[2],
-                        b[1] + (i - first + 1) as f32 * height,
-                    ];
-                    if !description && state.selected == Some(i) {
-                        shapes.rect(row, [0xff008ed0; 4]);
+                        .enumerate()
+                        .skip(first)
+                        .take(self.capacity(false)?)
+                    {
+                        let row = [
+                            b[0],
+                            b[1] + (i - first) as f32 * height,
+                            b[2],
+                            b[1] + (i - first + 1) as f32 * height,
+                        ];
+                        if state.selected == Some(i) {
+                            shapes.rect(row, [0xff008ed0; 4]);
+                        }
+                        ui::text_widget_style0(
+                            &mut pages[1],
+                            tab,
+                            &self.record_text(&state.catalog.levels[level], true)?,
+                            row,
+                            0xffffffff,
+                        )?;
                     }
-                    ui::text_widget_style0(&mut pages[1], tab, text, row, 0xffffffff)?;
                 }
                 let maximum = self.limit(state, description)?;
                 ui::Slider {bounds:self.slider(description)?,vertical:true,value:first as f32,
@@ -1018,6 +1039,163 @@ impl SetupPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::load::ascii;
+    #[test]
+    fn description_uses_rich_text_width_pitch_and_scroll_capacity() {
+        let mut tab = vec![0; 4 + 96 * 44];
+        tab[..4].copy_from_slice(&96u32.to_le_bytes());
+        for glyph in 0..96 {
+            let at = 4 + glyph * 44;
+            tab[at + 32..at + 36].copy_from_slice(&5i32.to_le_bytes());
+            tab[at + 36..at + 40].copy_from_slice(&10i32.to_le_bytes());
+        }
+        // INFO7-style full box width40 reserves the16-unit strip and two
+        // three-unit insets. Gap -1 fits one two-letter word per line.
+        let layout =
+            CampaignDescription::new(&tab, &ascii("AA BB CC DD"), [10., 20., 50., 44.]).unwrap();
+        assert_eq!(
+            layout.rows().collect::<Vec<_>>(),
+            [ascii("AA"), ascii("BB"), ascii("CC"), ascii("DD")]
+        );
+        assert_eq!(layout.capacity(), 2); // rich-text pitch12, not W height10
+        assert_eq!(layout.limit(), 2);
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, 0).unwrap();
+        let quads = pages[0]
+            .vertices
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(quads.len(), 4); // only two visible lines
+        assert_eq!(quads[0][0][0], 14.5); // left + inset3 + style0 inset2 - half pixel
+        assert_eq!(quads[2][2][1] - quads[0][2][1], 12.);
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        layout.paint(&mut pages, &tab, layout.limit()).unwrap();
+        assert_eq!(pages[0].vertices.len(), 24);
+    }
+
+    fn daily_profit() -> (SetupPanel, State) {
+        let panel = original_panel();
+        let (options, catalog) = original();
+        let row = skirmish::scenario_rows(&catalog)
+            .iter()
+            .position(|&i| catalog.levels[i].id() == 300000)
+            .unwrap();
+        let mut state = State::open(
+            catalog,
+            b"Justin2",
+            Some(b"empty.lua".to_vec()),
+            &options,
+            |_| Ok(3),
+        )
+        .unwrap();
+        state.select(row, &options, &mut |_| Ok(3)).unwrap();
+        (panel, state)
+    }
+
+    #[test]
+    #[ignore = "requires original archive, installer fonts, language, PE and scripts"]
+    fn original_daily_profit_description_wrap_and_objective_font() {
+        let (panel, state) = daily_profit();
+        let layout = panel.description(&state).unwrap();
+        let expected = [
+            "Be the first player to earn a daily",
+            "profit in excess of the selected value.",
+            "You can reduce the value to create a",
+            "shorter, easier game, or increase it to",
+            "make a longer, harder game. You can",
+            "find Daily Profit in the Player",
+            "Comparison Panel.",
+        ]
+        .map(ascii);
+        assert_eq!(layout.rows().collect::<Vec<_>>(), expected);
+        assert_eq!(panel.limit(&state, true).unwrap(), 0);
+        // Check the actual panel surface builder, including the objective font.
+        let surfaces = panel.surfaces(&state, None, false, None).unwrap();
+        let value_bounds = panel.bounds("INFO4").unwrap();
+        let expected_value = ui::integer_money(10000, panel.label(2243).unwrap(), false);
+        let mut expected_pages = panel.fonts[0].pages.clone();
+        ui::text_widget_style9(
+            &mut expected_pages,
+            &panel.fonts[0].tab,
+            &expected_value,
+            value_bounds,
+            0xffffffff,
+        )
+        .unwrap();
+        let expected_vertices = expected_pages
+            .iter()
+            .flat_map(|p| &p.vertices)
+            .copied()
+            .collect::<Vec<_>>();
+        let actual = surfaces
+            .iter()
+            .filter(|surface| {
+                panel.fonts[0].pages.iter().any(|font| {
+                    surface.width == font.width
+                        && surface.height == font.height
+                        && surface.pixels == font.pixels
+                })
+            })
+            .flat_map(|p| p.vertices.as_chunks::<6>().0.iter())
+            .filter(|q| {
+                q.iter().all(|v| {
+                    v[0] >= value_bounds[0]
+                        && v[0] <= value_bounds[2]
+                        && v[1] >= value_bounds[1]
+                        && v[1] <= value_bounds[3]
+                })
+            })
+            .filter(|q| q.iter().all(|v| v[3..6] == [1., 1., 1.]))
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected_vertices);
+        let mut pages = panel.fonts[1].pages.clone();
+        layout.paint(&mut pages, &panel.fonts[1].tab, 0).unwrap();
+        // Inspect the first glyph of every line in the production paint path.
+        let ys = pages
+            .iter()
+            .flat_map(|p| p.vertices.as_chunks::<6>().0.iter())
+            .filter(|q| q[0][0] == panel.bounds("INFO7").unwrap()[0].trunc() + 4.5)
+            .map(|q| q[2][1])
+            .collect::<Vec<_>>();
+        let expected_ys = expected
+            .iter()
+            .enumerate()
+            .map(|(line, text)| {
+                let at = 4 + usize::from(text[0]) * 44 + 40;
+                let baseline =
+                    i32::from_le_bytes(panel.fonts[1].tab[at..at + 4].try_into().unwrap());
+                (panel.bounds("INFO7").unwrap()[1] + 3.).trunc()
+                    + line as f32 * 12.
+                    + baseline as f32
+                    - 0.5
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ys, expected_ys);
+        println!(
+            "Daily Profit: 7 lines, 12 game units (19.2 px at 1024x768) pitch; first-glyph y coordinates {ys:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires original assets, offscreen GPU and capture scratch"]
+    fn capture_daily_profit_setup() {
+        let (panel, state) = daily_profit();
+        let output =
+            openmt2001::fixtures::scratch("SKIRMISH_CAPTURE").join("daily-profit-setup.png");
+        let renderer = pollster::block_on(Renderer::new(
+            wgpu::InstanceDescriptor::new_without_display_handle(),
+        ))
+        .unwrap();
+        let prepared = panel.draw(&state, &renderer, None, false, None).unwrap();
+        crate::capture_test::capture_standalone(&renderer, &prepared, output.to_str().unwrap());
+        println!("Captured {}", output.display());
+    }
+
     fn original() -> (Options, Catalog) {
         let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
@@ -1093,9 +1271,7 @@ mod tests {
             Outcome::Back
         );
     }
-    #[test]
-    #[ignore = "player-supplied original archive, installer, PE, language and scripts"]
-    fn original_v5_regions_labels_and_scroll_geometry() {
+    fn original_panel() -> SetupPanel {
         let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -1115,7 +1291,7 @@ mod tests {
         let localized = crate::tooltip::localized_strings(&installer, &strings).unwrap();
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
         assert_eq!(strings[2243], crate::load::ascii("$"));
-        let panel = SetupPanel::new(
+        SetupPanel::new(
             &index,
             &archive,
             Path::new(&openmt2001::fixtures::path("INSTALLER")),
@@ -1123,7 +1299,12 @@ mod tests {
             &read("OPENMT2001_EXE"),
             0xbb000a28,
         )
-        .unwrap();
+        .unwrap()
+    }
+    #[test]
+    #[ignore = "player-supplied original archive, installer, PE, language and scripts"]
+    fn original_v5_regions_labels_and_scroll_geometry() {
+        let panel = original_panel();
         assert_eq!(panel.bounds("TITLE_AREA").unwrap(), [25., 25., 615., 56.]);
         assert_eq!(
             panel.bounds("TOGGLE1").unwrap()[2] - panel.bounds("TOGGLE1").unwrap()[0],

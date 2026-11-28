@@ -1,8 +1,11 @@
 //! Native UI surfaces; original asset parsing stays in shared core modules.
+#[path = "ui/text_entry.rs"]
+mod text_entry;
 use openmt2001::{
     render::{SurfaceMode, TexturedDraw},
     texture::{TextureRecord, loader_pixels},
 };
+pub use text_entry::text_entry;
 
 /// Original43a8c0. The symbol and result use the game's glyph-byte encoding.
 /// NEG wraps at signed MIN, including the original double-negative rendering.
@@ -499,6 +502,16 @@ pub fn text(
 ) -> Result<(), String> {
     text_scaled(pages, tab, encoded, bounds, center, color, 1.)
 }
+/// Green section captions shared by the single-player setup screens.
+/// The original widgets select per-character palette entry16 (440ad0).
+pub fn section_header(
+    pages: &mut [Surface],
+    tab: &[u8],
+    encoded: &[u8],
+    bounds: [f32; 4],
+) -> Result<(), String> {
+    text(pages, tab, encoded, bounds, true, 0xff00ff00)
+}
 pub fn text_fit(
     pages: &mut [Surface],
     tab: &[u8],
@@ -830,13 +843,28 @@ fn text_scaled(
         baseline: 0,
     };
     let width = text_width(tab, encoded, scale)? as f32;
-    for q in font.layout(
+    text_at(
+        pages,
+        &font,
         encoded,
+        bounds,
+        color,
         Layout {
             origin: [if center { (l + r - width) / 2. } else { l }, t],
             ..layout
         },
-    )? {
+    )
+}
+
+fn text_at(
+    pages: &mut [Surface],
+    font: &openmt2001::font::Font<'_>,
+    encoded: &[u8],
+    bounds: [f32; 4],
+    color: u32,
+    layout: openmt2001::font::Layout,
+) -> Result<(), String> {
+    for q in font.layout(encoded, layout)? {
         // Host clipping keeps long names inside their original widget bounds.
         // Glyph order is bottom-left, bottom-right, top-right, top-left.
         let left = q.positions[0][0];
@@ -1393,4 +1421,30 @@ mod tests {
         }
         assert_eq!(at, bytes.len());
     }
+}
+
+#[cfg(test)]
+pub(crate) fn synthetic_text_font(width: i32, height: i32) -> Vec<u8> {
+    let mut tab = 96u32.to_le_bytes().to_vec();
+    for _ in 0..96 {
+        tab.extend([0; 32]);
+        tab.extend(width.to_le_bytes());
+        tab.extend(height.to_le_bytes());
+        tab.extend(0i32.to_le_bytes());
+    }
+    tab
+}
+
+#[test]
+fn singleplayer_text_style_section_header_preserves_campaign_green_centered_glyphs() {
+    let tab = synthetic_text_font(7, 10);
+    let mut pages = vec![Surface::solid(); 2];
+    section_header(&mut pages, &tab, &[33, 34], [10., 20., 110., 40.]).unwrap();
+    assert_eq!(pages[0].vertices.len(), 12);
+    for vertex in &pages[0].vertices {
+        assert_eq!(&vertex[3..6], &[0., 1., 0.]);
+    }
+    assert_eq!(pages[0].alpha, [255; 12]);
+    assert_eq!(pages[0].vertices[0][0], 53.5);
+    assert_eq!(pages[0].vertices[2][1], 19.5);
 }

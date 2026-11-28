@@ -164,6 +164,7 @@ pub struct Presentation<'a> {
     pub enabled: [bool; 26],
     pub start_enabled: bool,
     pub local_row: usize,
+    pub name_focused: bool,
     pub closed: [bool; 6],
     pub details: &'a [Vec<u8>],
 }
@@ -382,7 +383,8 @@ impl RosterPanel {
         encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        self.draw_rows(
+        self.draw_rows_with_headers(
+            true,
             renderer,
             selected,
             pressed,
@@ -395,6 +397,7 @@ impl RosterPanel {
                 enabled: std::array::from_fn(|id| state.enabled(id)),
                 start_enabled: state.roster.start_enabled(),
                 local_row: 0,
+                name_focused: state.name_focused,
                 closed: [false; 6],
                 details: &[],
             },
@@ -493,6 +496,19 @@ impl RosterPanel {
         selected: Option<usize>,
         pressed: bool,
         metadata: [&[u8]; 2],
+        encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+        view: Presentation<'_>,
+    ) -> Result<PreparedScene, String> {
+        self.draw_rows_with_headers(false, renderer, selected, pressed, metadata, encode, view)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn draw_rows_with_headers(
+        &self,
+        green_headers: bool,
+        renderer: &Renderer,
+        selected: Option<usize>,
+        pressed: bool,
+        metadata: [&[u8]; 2],
         mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         view: Presentation<'_>,
         panel_alpha: u8,
@@ -530,9 +546,6 @@ impl RosterPanel {
                 ("PLAYERS_TITLE_AREA", 1684, 0),
                 ("SESS_TITLE_AREA", 1685, 0),
                 ("CHAT_TITLE_AREA", 1686, 0),
-                ("SESS_LABEL1", 1615, 0),
-                ("SESS_LABEL2", 1879, 0),
-                ("SESS_LABEL3", 1616, 0),
             ] {
                 ui::text_widget_style9(
                     &mut pages[font],
@@ -541,6 +554,29 @@ impl RosterPanel {
                     self.bounds(name)?,
                     0xffffffff,
                 )?;
+            }
+            // 4a08ed/4a08fa/4a0903 select the campaign's green caption style.
+            for (name, id) in [
+                ("SESS_LABEL1", 1615),
+                ("SESS_LABEL2", 1879),
+                ("SESS_LABEL3", 1616),
+            ] {
+                if green_headers {
+                    ui::section_header(
+                        &mut pages[0],
+                        &self.fonts[0].tab,
+                        self.label(id)?,
+                        self.bounds(name)?,
+                    )?;
+                } else {
+                    ui::text_widget_style9(
+                        &mut pages[0],
+                        &self.fonts[0].tab,
+                        self.label(id)?,
+                        self.bounds(name)?,
+                        0xffffffff,
+                    )?;
+                }
             }
             for (i, text) in metadata.iter().enumerate() {
                 let b = self.bounds(&format!("SESS_INFO{}", i + 1))?;
@@ -585,7 +621,15 @@ impl RosterPanel {
                 } else {
                     encode(&p.name)?
                 };
-                ui::text_widget_style3(&mut pages[1], &self.fonts[1].tab, &text, name, 0xffffffff)?;
+                ui::text_entry(
+                    &mut pages[1],
+                    &mut shapes,
+                    &self.fonts[1].tab,
+                    &text,
+                    name,
+                    false,
+                    view.name_focused && i == view.local_row,
+                )?;
                 let tint = self.bounds(&format!("TINT_SLOT{row}"))?;
                 if let Some(token) = p.token {
                     let c = self

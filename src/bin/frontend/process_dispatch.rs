@@ -24,8 +24,8 @@ pub(crate) fn custody_from_session(
 }
 
 ///4bcd6d..4bcd7b: native load completes with ONE unpause0, not fresh's
-///positive-count drain. The later modern record12 transaction supersedes this
-///numeric image literally, so this MUST run before restore_v2_extension.
+///positive-count drain. Modern record12 leaves these process-owned pause and
+///timer fields intact, including any remaining load-time script owners.
 pub(crate) fn native_load_completed(
     session: &mut crate::fresh_city::Session<'_>,
 ) -> Result<(), String> {
