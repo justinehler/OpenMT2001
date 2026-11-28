@@ -615,23 +615,6 @@ impl Route {
             let difficulty = self.strings
                 [[1654, 1655, 1658][view.snapshot.settings.difficulty as usize]]
                 .clone();
-            let mut details = vec![view.snapshot.settings.name.clone()];
-            for (i, row) in view
-                .snapshot
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|(_, r)| r.player.kind == RowKind::Ai)
-            {
-                details.push(
-                    format!(
-                        "Row {} AI difficulty: {}",
-                        i + 1,
-                        ["Easy", "Medium", "Hard"][row.difficulty as usize]
-                    )
-                    .into_bytes(),
-                );
-            }
             let selected = match self.keyboard.or_else(|| p.and_then(|p| self.target(p))) {
                 Some(Target::Lobby(id)) => Some(id),
                 _ => None,
@@ -643,6 +626,7 @@ impl Route {
                 [&title, &difficulty],
                 |b| encode(&self.map, b),
                 roster::Presentation {
+                    network_host: Some(view.host),
                     visible: true,
                     busy: false,
                     name_focused: false,
@@ -653,7 +637,6 @@ impl Route {
                     closed: std::array::from_fn(|i| {
                         view.snapshot.rows[i].player.kind == RowKind::Closed
                     }),
-                    details: &details,
                 },
                 panel_alpha,
             );
