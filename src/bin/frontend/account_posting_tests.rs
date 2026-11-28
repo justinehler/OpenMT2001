@@ -468,14 +468,17 @@ fn morning_owner_postings_reach_live_feedback_in_order() {
 #[test]
 #[ignore = "requires original scripts and assets"]
 fn attachment_postings_reach_live_feedback_at_their_command_positions() {
-    for (hour, landlord, proprietor, conversion) in [
-        (9, 1, 2, false),
-        (5, 1, 2, false),
-        (9, 2, 2, false),
-        (9, 0, 2, false),
-        (9, 2, 1, true),
-        (9, 1, 2, true),
-        (5, 2, 1, true),
+    for (hour, landlord, proprietor, conversion, free_conversion) in [
+        (9, 1, 2, false, false),
+        (5, 1, 2, false, false),
+        (9, 2, 2, false, false),
+        (9, 0, 2, false, false),
+        (9, 2, 1, true, false),
+        (9, 1, 2, true, false),
+        (5, 2, 1, true, false),
+        (5, 1, 2, true, false),
+        (9, 2, 1, true, true),
+        (5, 2, 1, true, true),
     ] {
         with_session(|session, assets| {
             session.world.ledgers.residents.active_count = 0;
@@ -518,6 +521,32 @@ fn attachment_postings_reach_live_feedback_at_their_command_positions() {
             session.world.categories[35][5] = 2;
             session.hooks.utilities.totals = [400., 800., 0., 0.];
             session.world.clock.calendar[0] = hour;
+            let command = if conversion {
+                live_commands::Command::Convert(openmt2001::business_conversion::Command {
+                    kind,
+                    building: building as u32,
+                    owner: proprietor as u32,
+                })
+            } else {
+                live_commands::Command::Open(openmt2001::business_open::Command {
+                    kind,
+                    building: building as u32,
+                    owner: proprietor as u32,
+                    stock_argument: 1,
+                })
+            };
+            session
+                .submit_command(command, assets, |_| {
+                    panic!("command executed before its delay")
+                })
+                .unwrap();
+            if conversion {
+                // Execution must use the live refurbishment cost after the delay.
+                let info = session.world.catalog.info.row_mut(kind as usize).unwrap();
+                let cost = word(info, 0x54);
+                assert_ne!(cost, 0);
+                put(info, 0x54, if free_conversion { 0 } else { cost + 7 });
+            }
             let b = &session.world.buildings[building];
             let rent = openmt2001::building_binding::initial_rent(
                 b,
@@ -558,6 +587,22 @@ fn attachment_postings_reach_live_feedback_at_their_command_positions() {
             );
             let mut expected = session.world.ledgers.players.clone();
             let mut expected_postings = vec![];
+            if conversion {
+                let quote = openmt2001::business_conversion::quote(
+                    building as u32,
+                    kind,
+                    &session.world.categories,
+                    &session.world.buildings,
+                    &session.world.catalog.info,
+                    assets.image,
+                )
+                .unwrap();
+                let amount = -quote.to_f32();
+                assert_eq!(amount == 0., free_conversion);
+                let player = proprietor as usize - 1;
+                expected[player].post(amount, 0x14).unwrap();
+                expected_postings.push(AccountPosting { player, amount });
+            }
             if hour >= 6 {
                 if landlord != 0 && landlord != proprietor {
                     let player = landlord as usize - 1;
@@ -582,37 +627,6 @@ fn attachment_postings_reach_live_feedback_at_their_command_positions() {
                     });
                 }
             }
-            let command = if conversion {
-                let quote = openmt2001::business_conversion::quote(
-                    building as u32,
-                    kind,
-                    &session.world.categories,
-                    &session.world.buildings,
-                    &session.world.catalog.info,
-                    assets.image,
-                )
-                .unwrap();
-                expected[proprietor as usize - 1]
-                    .post(-quote.to_f32(), 0x14)
-                    .unwrap();
-                live_commands::Command::Convert(openmt2001::business_conversion::Command {
-                    kind,
-                    building: building as u32,
-                    owner: proprietor as u32,
-                })
-            } else {
-                live_commands::Command::Open(openmt2001::business_open::Command {
-                    kind,
-                    building: building as u32,
-                    owner: proprietor as u32,
-                    stock_argument: 1,
-                })
-            };
-            session
-                .submit_command(command, assets, |_| {
-                    panic!("command executed before its delay")
-                })
-                .unwrap();
             session.world.clock.timing[0] += 25;
             let mut feedback = Feedback::default();
             let mut events = vec![];
@@ -632,6 +646,12 @@ fn attachment_postings_reach_live_feedback_at_their_command_positions() {
                 .map(|p| p.amount > 0.)
                 .collect();
             feedback.assert_calls(&credits);
+            if conversion {
+                assert_eq!(
+                    events.first(),
+                    Some(&live_commands::Event::AccountPosted(expected_postings[0]))
+                );
+            }
             let refreshed = events
                 .iter()
                 .position(|e| {
@@ -690,6 +710,75 @@ fn attachment_postings_reach_live_feedback_at_their_command_positions() {
             }
         });
     }
+}
+
+#[test]
+#[ignore = "requires original scripts and assets"]
+fn conversion_feedback_follows_debit_before_business_replacement() {
+    with_session(|session, assets| {
+        let (building, kind) = session
+            .world
+            .ledgers
+            .businesses
+            .iter()
+            .find_map(|row| {
+                (row[0x21c] != 0 && word(row, 0) == 0).then(|| {
+                    (
+                        u16::from_le_bytes(row[8..10].try_into().unwrap()) as usize,
+                        word(row, 4),
+                    )
+                })
+            })
+            .unwrap();
+        let quote = openmt2001::business_conversion::quote(
+            building as u32,
+            kind,
+            &session.world.categories,
+            &session.world.buildings,
+            &session.world.catalog.info,
+            assets.image,
+        )
+        .unwrap();
+        let posting = AccountPosting {
+            player: 0,
+            amount: -quote.to_f32(),
+        };
+        assert!(posting.amount < 0.);
+        let mut expected = session.world.ledgers.players.clone();
+        expected[0].post(posting.amount, 0x14).unwrap();
+        let buildings = session.world.buildings.clone();
+        let businesses = session.world.ledgers.businesses.clone();
+        session
+            .submit_command(
+                live_commands::Command::Convert(openmt2001::business_conversion::Command {
+                    kind,
+                    building: building as u32,
+                    owner: 1,
+                }),
+                assets,
+                |_| panic!("command executed before its delay"),
+            )
+            .unwrap();
+        session.world.clock.timing[0] += 25;
+        let mut feedback = Feedback::default();
+        let result = session.drain_commands(assets, |event| {
+            assert_eq!(event, live_commands::Event::AccountPosted(posting));
+            feedback.receive(&Event::Command(event))?;
+            // Stop at the presentation boundary to inspect the preceding stores.
+            Err("stop after refurbishment feedback".into())
+        });
+        assert_eq!(result, Err("stop after refurbishment feedback".into()));
+        assert_eq!(feedback.postings, [posting]);
+        feedback.assert_calls(&[false]);
+        for (actual, expected) in session.world.ledgers.players.iter().zip(expected) {
+            assert_eq!(actual.cash, expected.cash);
+            for category in 0..38 {
+                assert_eq!(actual.ledger(category), expected.ledger(category));
+            }
+        }
+        assert_eq!(session.world.buildings, buildings);
+        assert_eq!(session.world.ledgers.businesses, businesses);
+    });
 }
 fn simulation_test_policy() -> fresh_city::tick::Policy {
     use openmt2001::{hourly, scheduler};

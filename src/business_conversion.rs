@@ -89,11 +89,14 @@ pub fn debit(
     command: &Command,
     quote: Sum,
     players: &mut [crate::economy::PlayerAccount],
-) -> Result<(), String> {
+) -> Result<crate::economy::AccountPosting, String> {
+    let player = command.owner.wrapping_sub(1) as usize;
+    let amount = -quote.to_f32();
     players
-        .get_mut(command.owner.wrapping_sub(1) as usize)
+        .get_mut(player)
         .ok_or("conversion owner unresolved")?
-        .post(-quote.to_f32(), 0x14)
+        .post(amount, 0x14)?;
+    Ok(crate::economy::AccountPosting { player, amount })
 }
 ///463bb0 checks the live catalog flag, footprint, height and longest side.
 /// The side length is a wrapped BYTE; area uses signed arithmetic followed by
