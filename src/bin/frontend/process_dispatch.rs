@@ -1,8 +1,9 @@
-//! Move-only process dispatch image. Per-World callback context never travels.
-use openmt2001::{pause, timers};
+//! Move-only process controllers and dispatch. World callback context never travels.
+use openmt2001::{pause, scenario_objective, timers};
 use std::time::Instant;
 
 pub(crate) struct DispatchCustody {
+    pub objective: scenario_objective::State,
     pub pause: pause::State,
     pub tasks: Vec<timers::Task>,
     pub frequency: timers::CalendarFrequency,
@@ -10,6 +11,7 @@ pub(crate) struct DispatchCustody {
     pub epoch: Instant,
 }
 pub(crate) struct Seed {
+    pub objective: scenario_objective::State,
     pub pause: pause::State,
     pub tasks: Vec<timers::Task>,
     pub frequency: timers::CalendarFrequency,
@@ -22,6 +24,7 @@ impl DispatchCustody {
     pub(crate) fn startup(pause: pause::State) -> Result<Self, String> {
         // Explicit modern prior padding policy, not recovered native heap data.
         let mut value = Self {
+            objective: scenario_objective::State::default(),
             pause,
             tasks: timers::startup_tasks([0; 20]),
             frequency: timers::CalendarFrequency {
@@ -45,6 +48,7 @@ impl DispatchCustody {
         }
         Ok((
             Seed {
+                objective: self.objective,
                 pause: self.pause,
                 tasks: self.tasks,
                 frequency: self.frequency,
@@ -60,6 +64,7 @@ impl DispatchCustody {
         timing: Timing,
     ) -> Result<Self, String> {
         let mut value = Self {
+            objective: std::mem::take(&mut session.world.objective),
             pause: std::mem::take(&mut session.world.pause),
             tasks: std::mem::take(&mut session.hooks.timers),
             frequency: std::mem::replace(
