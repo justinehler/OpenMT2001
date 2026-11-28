@@ -198,6 +198,11 @@ fn run(controlled_retail: bool) {
         assert_eq!(session.roster.manager.players.len(), 2);
         assert!(session.roster.status.has_ai);
         let ai = &mut session.roster.manager.players[1];
+        assert_eq!(
+            &ai.bytes[0xb4c..0xb4e],
+            &[0; 2],
+            "load must retain the reset strategy deadline, not a fresh-game build delay"
+        );
         // The copied human row is disabled for AI ticking until this byte is cleared.
         ai.bytes[0x1403] = 0;
         let initial_cash = f32::from_le_bytes(ai.bytes[4..8].try_into().unwrap());
