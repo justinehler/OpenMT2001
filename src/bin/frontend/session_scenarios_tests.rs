@@ -4704,9 +4704,24 @@ fn original_tutorial_ten_eleven_utility_railroad_flow() {
                 ),
                 Some(1)
             );
-            if (id == 100010 && i == 0) || (id == 100011 && i == 1) {
+            if (id == 100010 && i == 0) || (id == 100011 && i >= 1) {
                 // The actual Navigator commits control103 after choosing a
                 // target. The scripts also admit the 3D block-entry path.
+                if id == 100011 {
+                    assert!(status.tutorial_controls.picking_disabled);
+                    assert!(
+                        !host
+                            .tutorial_pick(
+                                &mut session,
+                                &assets,
+                                crate::tutorial_two_interaction::Pick::BlockEntry {
+                                    category_id: target,
+                                },
+                            )
+                            .unwrap(),
+                        "outer disable blocks the next world pick"
+                    );
+                }
                 host.tutorial_event(&mut session, &assets, 103).unwrap();
             } else {
                 assert!(
@@ -4721,6 +4736,23 @@ fn original_tutorial_ten_eleven_utility_railroad_flow() {
                 );
             }
             status = host.status(&session);
+            if id == 100011 {
+                assert!(status.tutorial_controls.picking_disabled);
+                assert_eq!(
+                    session.scripts.runtime.number("g_currentprompt").unwrap(),
+                    Some((10 + i) as f64)
+                );
+                if let Some(next) = subsequent.get(i + 1) {
+                    let next = session.scripts.runtime.number(next).unwrap().unwrap() as u32;
+                    assert_eq!(
+                        status.tutorial_interaction.callback(
+                            crate::tutorial_two_interaction::Pick::BlockEntry { category_id: next }
+                        ),
+                        Some(1),
+                        "nested catch retains the next filter"
+                    );
+                }
+            }
             if id == 100010 && i == 0 {
                 assert_eq!(status.prompts[0].dismissal_id, 8);
                 session
