@@ -4416,59 +4416,74 @@ impl SpendingAccount {
         {
             return Err("invalid resident redistribution input".into());
         }
-        let mut remaining = f64::from(self.balance()) - f64::from(self.float(0x8c));
+        let mut remaining = crate::x87::Sum::from_f32(self.balance())?;
+        remaining.add_f32(-self.float(0x8c))?;
+        let zero = crate::x87::Sum::default();
         let mut mask = u32::from_le_bytes(self.bytes[0x84..0x88].try_into().unwrap());
-        let adjust = |account: &mut Self, id: usize, delta: f64, mask: &mut u32| {
+        let adjust = |account: &mut Self,
+                      id: usize,
+                      delta: crate::x87::Sum,
+                      mask: &mut u32|
+         -> Result<(), String> {
             let at = 4 + id * 4;
-            let cell = (delta + f64::from(account.float(at))) as f32;
+            let mut cell = delta;
+            cell.add_f32(account.float(at))?;
+            let cell = cell.to_f32();
             account.set_float(at, cell);
-            account.set_float(0x8c, (delta + f64::from(account.float(0x8c))) as f32);
+            let mut allocated = delta;
+            allocated.add_f32(account.float(0x8c))?;
+            account.set_float(0x8c, allocated.to_f32());
             if cell == 0. {
                 *mask &= !(1 << id);
             } else {
                 *mask |= 1 << id;
             }
+            Ok(())
         };
-        if remaining < 0. {
+        if remaining.compare(zero).is_lt() {
             if self.float(0x8c) == 0. {
                 return Ok(());
             }
             for preference in preferences.iter().rev() {
-                if remaining >= 0. {
+                if !remaining.compare(zero).is_lt() {
                     break;
                 }
                 let id = preference.commodity as usize;
-                let negative_cell = -f64::from(self.float(4 + id * 4));
-                let delta = if negative_cell <= remaining {
+                let negative_cell = crate::x87::Sum::from_f32(-self.float(4 + id * 4))?;
+                let delta = if !negative_cell.compare(remaining).is_gt() {
                     remaining
                 } else {
                     negative_cell
                 };
-                adjust(self, id, delta, &mut mask);
-                remaining -= delta;
+                adjust(self, id, delta, &mut mask)?;
+                remaining.add(delta.negated());
             }
         } else {
             mask = 0;
-            let mut count = preferences.len() as f64;
+            // 0x45b226/0x45b2be/0x45b2ca keep the quota, count and
+            // remaining gap at PC64, with no binary64 spills between entries.
+            let mut count = crate::x87::Sum::from_i32(preferences.len() as i32);
             for preference in preferences {
                 let id = preference.commodity as usize;
                 let commodity = commodities[id];
-                let quota = remaining / count;
-                let gap = ((f64::from(commodity.markup) * f64::from(commodity.value))
-                    * f64::from(preference.factor))
-                    - f64::from(self.float(4 + id * 4));
+                let mut quota = remaining;
+                quota.div(count)?;
+                let mut gap = crate::x87::Sum::from_f32(commodity.markup)?;
+                gap.mul_f32(commodity.value)?;
+                gap.mul_f32(preference.factor)?;
+                gap.add_f32(-self.float(4 + id * 4))?;
                 // FST at0045b24e retains the unrounded gap for comparison.
                 // Only the selected gap branch reloads that f32 store.
-                let delta = if gap < quota {
-                    f64::from(gap as f32)
+                let delta = if gap.compare(quota).is_lt() {
+                    crate::x87::Sum::from_f32(gap.to_f32())?
                 } else {
                     quota
                 };
                 if commodity.active {
-                    adjust(self, id, delta, &mut mask);
+                    adjust(self, id, delta, &mut mask)?;
                 }
-                count -= 1.;
-                remaining -= delta;
+                count.add_f32(-1.)?;
+                remaining.add(delta.negated());
             }
         }
         self.bytes[0x84..0x88].copy_from_slice(&mask.to_le_bytes());
@@ -7699,6 +7714,26 @@ mod tests {
 
     use super::*;
 
+    fn pc64_daily_financial_expectation(
+        pc53_row: &[u8],
+        save_two: bool,
+        account: usize,
+    ) -> [u8; 0x90] {
+        let mut expected: [u8; 0x90] = pc53_row.try_into().unwrap();
+        if save_two && account == 176 {
+            // These historical daily-loop captures declare CW 0x027f. The
+            // normal tick resets it to 0x037f before calling the same routine.
+            // Original 0x45b120 at both controls differs only in this cell;
+            // retain the captured PC53 assertion and check the PC64 result.
+            assert_eq!(
+                u32::from_le_bytes(expected[0x80..0x84].try_into().unwrap()),
+                0x41ef_ae71
+            );
+            expected[0x80..0x84].copy_from_slice(&0x41ef_ae70_u32.to_le_bytes());
+        }
+        expected
+    }
+
     #[test]
     #[ignore = "requires original saves and complete native daily-loop observations"]
     fn matches_native_resident_daily_update() {
@@ -7752,7 +7787,9 @@ mod tests {
                 .zip(expected_accounts.chunks_exact(0x90))
                 .enumerate()
             {
-                assert_eq!(account.as_bytes().as_slice(), expected, "{name} account{i}");
+                let expected =
+                    pc64_daily_financial_expectation(expected, name == "OPENMT2001_SAVE_TWO", i);
+                assert_eq!(account.as_bytes(), &expected, "{name} account{i}");
             }
             for (i, node) in residents.nodes.iter().enumerate() {
                 assert_eq!(
@@ -8050,11 +8087,9 @@ mod tests {
                 .zip(expected.chunks_exact(0x90))
                 .enumerate()
             {
-                assert_eq!(
-                    account.as_bytes().as_slice(),
-                    native,
-                    "save{case} account{i}"
-                );
+                let expected =
+                    pc64_daily_financial_expectation(native, *variable == "OPENMT2001_SAVE_TWO", i);
+                assert_eq!(account.as_bytes(), &expected, "save{case} account{i}");
             }
             for (node, original) in residents.nodes.iter().zip(&saved.nodes) {
                 assert_eq!(
@@ -8072,6 +8107,69 @@ mod tests {
             at += 4;
         }
         assert_eq!(at, bytes.len());
+    }
+
+    #[test]
+    #[ignore = "requires original save and resident financial settings"]
+    fn resident_reconcile_save_two_account_176_precision() {
+        let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
+        let preferences = Preferences::from_v14_defaults(&source, &image).unwrap();
+        let welfare = Welfare::from_v14_defaults(&source).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("SAVE_TWO")).unwrap();
+        let save = crate::save::SaveFile::parse(&bytes).unwrap();
+        let saved = save.residents().unwrap();
+        let mut residents = crate::economy::ResidentAccounts::from_saved(&saved);
+        assert_eq!(residents.accounts[176].float(4 + 31 * 4), 7.5);
+
+        // This unchanged starting budget reaches its first hour-5 credit on
+        // day 1. The original's second-midnight result is reported in #276.
+        residents
+            .update_daily_finances(
+                &welfare,
+                &preferences,
+                &save.economy().unwrap().resident_commodities(),
+            )
+            .unwrap();
+        assert_eq!(
+            residents.accounts[176].float(4 + 31 * 4).to_bits(),
+            0x41ef_ae70
+        );
+    }
+
+    #[test]
+    fn resident_redistribution_retains_pc64_gap_and_quota() {
+        let mut account = SpendingAccount::from_bytes([0; 0x90]);
+        account.set_balance(2_f32.powi(60));
+        account.set_float(8, -2_f32.powi(59));
+        let mut commodities = [Commodity::default(); 32];
+        for (id, commodity) in commodities[..3].iter_mut().enumerate() {
+            *commodity = Commodity {
+                active: true,
+                value: if id == 0 { 1. } else { 0. },
+                markup: 1.,
+            };
+        }
+        let preferences = std::array::from_fn::<_, 3, _>(|id| Preference {
+            commodity: id as u32,
+            factor: 1.,
+        });
+
+        account.redistribute(&preferences, &commodities).unwrap();
+
+        // Original 0x45b120 at PC64: after the first cap, the gap is
+        // 2^60 - 1 and the next quota is 2^59 - 0.5. Binary64 loses the
+        // subtraction of 1 and incorrectly leaves this spending cell at 0.
+        assert_eq!(account.float(4).to_bits(), 1_f32.to_bits());
+        assert_eq!(account.float(8).to_bits(), (-0.5_f32).to_bits());
+        assert_eq!(account.float(12).to_bits(), 0);
+        assert_eq!(account.float(0x8c).to_bits(), 2_f32.powi(59).to_bits());
+        assert_eq!(account.balance().to_bits(), 2_f32.powi(60).to_bits());
+        assert_eq!(
+            u32::from_le_bytes(account.bytes[0x84..0x88].try_into().unwrap()),
+            3
+        );
     }
 
     #[test]
