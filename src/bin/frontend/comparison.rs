@@ -371,6 +371,48 @@ fn background_palette(frame: usize, body: u32) -> Vec<(&'static str, [u32; 4])> 
     }
     result
 }
+// The original mesh pass (43c4e0) includes the bar rings and selector
+// backing. Reverse-facing regions remain layout-only, culled by the loader.
+fn panel_frame(
+    index: &openmt2001::archive::ArchiveIndex,
+    archive: &[u8],
+    frame: usize,
+) -> Result<(Vec<crate::ui::Surface>, Vec<[f32; 4]>), String> {
+    let parts: Vec<_> = (0..68).collect();
+    crate::ui::panel_frame_base(
+        index,
+        archive,
+        "gamedata2/brand_new_panels/stats_panel.tm",
+        &parts,
+        frame,
+    )
+}
+
+fn add_background(
+    surfaces: &mut Vec<crate::ui::Surface>,
+    bounds: &[[f32; 4]],
+    frame: usize,
+    body: u32,
+) -> Result<(), String> {
+    let mut side = crate::ui::Surface::solid();
+    let mut backing = crate::ui::Surface::solid();
+    for ((_, colors), region) in background_palette(frame, body).into_iter().zip([54, 4, 5]) {
+        let rect = *bounds.get(region).ok_or("comparison background region")?;
+        if region == 54 {
+            side.rect(rect, colors);
+        } else {
+            backing.rect(rect, colors);
+        }
+    }
+    if frame == 9 {
+        // 426ca0 submits the translucent fills behind the mesh artwork;
+        // the opaque selector backing and all six rings precede row fills.
+        surfaces.insert(0, backing);
+    }
+    surfaces.push(side);
+    Ok(())
+}
+
 pub struct Assets {
     base: [Vec<crate::ui::Surface>; 2],
     regions: [Vec<[f32; 4]>; 2],
@@ -427,24 +469,9 @@ impl Assets {
         strings: &[&[u8]],
         exe: &[u8],
     ) -> Result<Self, String> {
-        use crate::ui::{self, Surface};
-        // Parts4/5 are named runtime backings, not border artwork.
-        // Their opaque gray texture would obscure the city beneath the palette.
-        let parts: Vec<_> = (0..12).filter(|&part| part != 4 && part != 5).collect();
-        let (mut closed, closed_regions) = ui::panel_frame_base(
-            index,
-            archive,
-            "gamedata2/brand_new_panels/stats_panel.tm",
-            &parts,
-            0,
-        )?;
-        let (mut open, open_regions) = ui::panel_frame_base(
-            index,
-            archive,
-            "gamedata2/brand_new_panels/stats_panel.tm",
-            &parts,
-            9,
-        )?;
+        use crate::ui::Surface;
+        let (mut closed, closed_regions) = panel_frame(index, archive, 0)?;
+        let (mut open, open_regions) = panel_frame(index, archive, 9)?;
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index.find(name).ok_or("missing comparison asset")?;
             archive
@@ -468,31 +495,8 @@ impl Assets {
                 .collect();
         let image = openmt2001::pe::PeImage::parse(exe)?;
         let body = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
-        let mesh = openmt2001::mesh::CachedMesh::parse(payload(
-            "gamedata2/brand_new_panels/stats_panel.tm",
-        )?)?;
-        for (frame, surfaces) in [(0, &mut closed), (9, &mut open)] {
-            let regions = openmt2001::ui_mesh::regions(&mesh, frame)?;
-            let mut fill = Surface::solid();
-            let mut backing = Surface::solid();
-            for (name, colors) in background_palette(frame, body) {
-                let region = regions
-                    .iter()
-                    .find(|r| r.name == name)
-                    .ok_or("comparison background region")?;
-                if name == "P_STATS_LEFT_VERT" {
-                    fill.rect(region.bounds, colors);
-                } else {
-                    backing.rect(region.bounds, colors);
-                }
-            }
-            // Restore borders over the runtime body; retain the side gradient's
-            // existing order and all later dynamic row/widget surfaces.
-            if frame == 9 {
-                surfaces.insert(0, backing);
-            }
-            surfaces.push(fill);
-        }
+        add_background(&mut closed, &closed_regions, 0, body)?;
+        add_background(&mut open, &open_regions, 9, body)?;
         let mut colors = [0; 10];
         let mut icons = [0; 10];
         for i in 0..10 {
@@ -536,6 +540,40 @@ impl Assets {
         hover: Option<usize>,
         pressed: Option<usize>,
     ) -> Result<openmt2001::render::PreparedScene, String> {
+        let surfaces = self.surfaces(state, players, rows, up, hover, pressed)?;
+        let draws: Vec<_> = surfaces.iter().map(crate::ui::Surface::draw).collect();
+        renderer.prepare(
+            &draws,
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+    fn surfaces(
+        &self,
+        state: &State,
+        players: &[[u8; 440]],
+        rows: &[(usize, f32)],
+        up: &[bool; 6],
+        hover: Option<usize>,
+        pressed: Option<usize>,
+    ) -> Result<Vec<crate::ui::Surface>, String> {
         use crate::ui::{self, Surface};
         let bounds = &self.regions[usize::from(state.open)];
         let mut surfaces = self.base[usize::from(state.open)].clone();
@@ -716,29 +754,7 @@ impl Assets {
         surfaces.push(solid);
         surfaces.extend(row_icons);
         surfaces.extend(fonts);
-        let draws: Vec<_> = surfaces.iter().map(Surface::draw).collect();
-        renderer.prepare(
-            &draws,
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        Ok(surfaces)
     }
 }
 #[cfg(test)]
@@ -872,15 +888,57 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(body, 0xbb000a28);
-        for (state, frame) in [(0, 0), (1, 9)] {
-            let (border, _) = ui::panel_frame_base(
-                &index,
-                &archive,
-                path,
-                &[0, 1, 2, 3, 6, 7, 8, 9, 10, 11],
-                frame,
+        // The selector and bar rings are opaque mesh textures, not extra
+        // runtime rectangles or sampled screenshot colours.
+        let positions = mesh.positions(9).unwrap();
+        for (part, source_color, vertex_count) in [
+            (55, [0, 23, 111, 255], 6),
+            (12, [146, 144, 144, 255], 24),
+            (19, [146, 144, 144, 255], 24),
+            (26, [146, 144, 144, 255], 24),
+            (33, [146, 144, 144, 255], 24),
+            (40, [146, 144, 144, 255], 24),
+            (47, [146, 144, 144, 255], 24),
+        ] {
+            let entry = index
+                .find(mesh.texture_names[mesh.parts[part].texture as usize])
+                .unwrap();
+            let texture = openmt2001::texture::TextureSet::parse(
+                &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
             )
             .unwrap();
+            assert!(
+                texture.textures[0]
+                    .texels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|pixel| *pixel == source_color)
+            );
+            let actual = &assets.base[1][if part == 55 { 17 } else { 11 + (part - 12) / 7 }];
+            assert_eq!(actual.vertices.len(), vertex_count);
+            assert!(actual.alpha.iter().all(|alpha| *alpha == 255));
+            assert_eq!(
+                actual.pixels,
+                openmt2001::texture::loader_pixels(&texture.textures[0])
+            );
+            let expected: Vec<_> = mesh.parts[part]
+                .vertex_indices()
+                .map(|i| [positions[i][0], -positions[i][1]])
+                .collect();
+            assert_eq!(
+                actual
+                    .vertices
+                    .iter()
+                    .map(|v| [v[0], v[1]])
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        assert_eq!(assets.base[1].len(), 19);
+        for (state, frame) in [(0, 0), (1, 9)] {
+            let parts: Vec<_> = (0..68).collect();
+            let (border, _) = ui::panel_frame_base(&index, &archive, path, &parts, frame).unwrap();
             let submitted = &assets.base[state];
             let offset = usize::from(frame == 9);
             assert_eq!(submitted.len(), border.len() + offset + 1);
@@ -1190,3 +1248,7 @@ mod refresh_ui_tests {
         assert_eq!(fallback.state.mode, 6);
     }
 }
+
+#[cfg(test)]
+#[path = "comparison_draw_tests.rs"]
+mod draw_tests;
