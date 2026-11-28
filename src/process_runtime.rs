@@ -504,7 +504,7 @@ impl Handle {
         })
     }
     /// Test support: the seed the last connected city drew.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn last_city_seed(&self) -> Result<u32> {
         self.with(|r| Ok(r.last_seed940834))
     }
@@ -663,18 +663,18 @@ impl Handle {
                 && matches!(r.quit.obligation, None | Some(TailObligation::Completed(_))))
         })
     }
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mutex_available(&self) -> bool {
         self.0.try_lock().is_ok()
     }
 }
 /// Test support: a runtime born from a synthetic loader image.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn test_fixture() -> Handle {
     startup(&synthetic_loader(), "").unwrap().0
 }
 /// Test support: the smallest i386 PE whose process cells pass `startup`.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn synthetic_loader() -> Vec<u8> {
     let mut pe = vec![0; 0x200];
     pe[..2].copy_from_slice(b"MZ");
@@ -743,7 +743,7 @@ impl FrontendStartup {
 }
 
 /// Test support: a runtime and its single-use frontend receipt.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn test_frontend_startup() -> (Handle, FrontendStartup) {
     let (process, mut activity) = startup(&synthetic_loader(), "").unwrap();
     (process, activity.take_frontend_startup().unwrap())

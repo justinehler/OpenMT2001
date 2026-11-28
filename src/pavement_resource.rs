@@ -92,6 +92,7 @@ impl LoadedPavement {
             }),
         })
     }
+    #[cfg(any(test, feature = "test-support"))]
     fn synthetic(definition: [u8; 116]) -> Self {
         Self {
             definition,
@@ -277,12 +278,12 @@ impl Directory {
         Ok(state.entry(binding.handle)?.resource.source_bytes.len())
     }
     /// Test support: a directory holding an authored definition.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic(definition: [u8; 116]) -> Self {
         Self::install(LoadedPavement::synthetic(definition)).unwrap()
     }
     /// Test support: replace the definition with an authored one.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn replace_synthetic(&mut self, definition: [u8; 116]) -> Result<()> {
         self.replace(LoadedPavement::synthetic(definition))
     }

@@ -184,7 +184,7 @@ pub struct Renderer {
 impl Renderer {
     /// Compare original upload work with resident textures in capture benchmarks.
     #[cfg(feature = "capture")]
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bypass_texture_cache_for_capture(&self, bypass: bool) {
         self.bypass_texture_cache.set(bypass);
     }

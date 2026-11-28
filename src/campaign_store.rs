@@ -278,7 +278,7 @@ pub fn save_progress(catalog: &Catalog, path: &Path) -> Result<(), String> {
 /// won once on Easy, through the same `Catalog::finish` path a real Win takes.
 /// Each call writes its own file, so tests never depend on another test's
 /// output or share progress. Test support: panics on any failure.
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn checkpoint_profile(image: &PeImage<'_>, scripts: &Path, level_id: u32) -> PathBuf {
     let mut catalog = load_catalog(image, scripts).unwrap();
     catalog.reset_progress();

@@ -93,7 +93,7 @@ impl PackedLanguage {
         self.ranges = ranges;
         Ok(())
     }
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_rows(rows: Vec<Vec<u8>>) -> Self {
         let off = rows
             .iter()
@@ -101,7 +101,7 @@ impl PackedLanguage {
             .collect::<Vec<_>>();
         Self::parse(&off, rows.concat()).unwrap()
     }
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_replace(&mut self, id: u32, row: Vec<u8>) {
         let mut rows = self
             .rows()
@@ -111,7 +111,7 @@ impl PackedLanguage {
         rows[id as usize] = row;
         *self = Self::test_rows(rows);
     }
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_byte(&mut self, at: usize, value: u8) {
         self.bytes[at] = value;
     }
