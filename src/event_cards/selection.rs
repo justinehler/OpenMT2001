@@ -19,7 +19,24 @@ pub struct World<'a> {
     pub hour: i32,
     pub tick: u32,
     /// Original signed word at7a3f90, read when no candidate was accepted.
+    /// Bind it with [`unselected_building`].
     pub unselected_building: i16,
+}
+
+/// The building 0x46f610 reports when the row it picked holds no candidate.
+///
+/// The selector fills 100 rows with all-ones padding, records successive
+/// record-breaking businesses, sorts all 100 rows and then picks one of the
+/// top `min(retained, 3)`. NaN padding compares equal, so the sort can leave a
+/// padding row on top, and with nothing retained only padding is left. A
+/// padding row names business index -1, whose building field is the i16 at
+/// 0x7a3f90 (pool 0x7a41a8, stride 0x220, +8). That word is the low half of
+/// resident timetable row 94, hour 16 (table 0x7a1c10, 24 i32 cells per row).
+/// Startup resets the table to -1 (0x4605d0) before it reads timetable.prm,
+/// and the shipped file never binds row 94, so the selector reports no target
+/// and the AI keeps holding its card.
+pub fn unselected_building(timetables: &crate::resident::Timetables) -> i16 {
+    timetables.action(94, 16).unwrap_or(-1) as i16
 }
 fn short(bytes: &[u8], at: usize) -> i32 {
     i32::from(i16::from_le_bytes(bytes[at..at + 2].try_into().unwrap()))
@@ -436,6 +453,184 @@ mod tests {
             self.take(n)
         }
     }
+    /// A one-section PE image holding only the category colour table: category
+    /// 3 is an ordinary street, every other category is unused (colour 0).
+    fn street_image() -> Vec<u8> {
+        let mut bytes = vec![0; 0x150000];
+        bytes[..2].copy_from_slice(b"MZ");
+        put(&mut bytes, 0x3c, 0x80);
+        bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
+        bytes[0x84..0x86].copy_from_slice(&0x14cu16.to_le_bytes());
+        bytes[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        bytes[0x94..0x96].copy_from_slice(&32u16.to_le_bytes());
+        bytes[0x98..0x9a].copy_from_slice(&0x10bu16.to_le_bytes());
+        put(&mut bytes, 0xb4, 0x400000);
+        put(&mut bytes, 0xc8, 0x14f000);
+        put(&mut bytes, 0xcc, 0x1000);
+        bytes[0x5385a4 + 3 * 88 - 0x400000 + 0x1000] = 1;
+        bytes
+    }
+
+    struct Street {
+        buildings: Vec<[u8; 0x394]>,
+        businesses: Vec<[u8; 544]>,
+        categories: Vec<[u8; 0x17c]>,
+        catalog: BusinessCatalog,
+        products: [[[u32; 2]; 6]; 45],
+        commodities: [[u8; 0x1c]; 32],
+    }
+
+    impl Street {
+        /// Business 0 is a city business on building 0. Businesses 1.. belong
+        /// to player slot 1 (owner byte 2), each on the building of the same
+        /// index, with the given prior-period values. All are stocked day
+        /// businesses (catalog +0x5c < 18) on one chain in category 3.
+        fn new(priors: &[f32]) -> Self {
+            let count = priors.len() + 1;
+            let mut buildings = vec![[0; 0x394]; count];
+            let mut businesses = vec![[0; 544]; count];
+            for i in 0..count {
+                put(&mut buildings[i], 0x1c, i as u32);
+                let next = if i + 1 < count {
+                    0x591318 + (i as u32 + 1) * 0x394
+                } else {
+                    0
+                };
+                put(&mut buildings[i], 0x44, next);
+                let b = &mut businesses[i];
+                put(b, 0, 1);
+                b[8..10].copy_from_slice(&(i as i16).to_le_bytes());
+                b[0xa] = if i == 0 { 0 } else { 2 };
+                // +0x209 period 0: the prior period is slot 3.
+                let prior = if i == 0 { 900. } else { priors[i - 1] };
+                put(b, 0x64, prior.to_bits());
+            }
+            let mut categories = vec![[0; 0x17c]; 52];
+            put(&mut categories[3], 0x15c, 0x591318);
+            Self {
+                buildings,
+                businesses,
+                categories,
+                catalog: BusinessCatalog::from_rows([[0; 116]; 45]),
+                products: [[[0; 2]; 6]; 45],
+                commodities: [[0; 0x1c]; 32],
+            }
+        }
+
+        fn world(&self, unselected_building: i16) -> World<'_> {
+            World {
+                buildings: &self.buildings,
+                businesses: &self.businesses,
+                categories: &self.categories,
+                catalog: &self.catalog,
+                products: &self.products,
+                commodities: &self.commodities,
+                utilities: [0; 4],
+                hour: 6,
+                tick: 0,
+                unselected_building,
+            }
+        }
+    }
+
+    /// Player slot 0 past its holding waiver, with an LCG whose next state is
+    /// `draw` (multiplier 1, increment 0).
+    fn holder(draw: u32) -> Player {
+        let mut bytes = vec![0; 0x1400];
+        bytes[0x13dd] = 1;
+        put(&mut bytes, 0x224, draw);
+        put(&mut bytes, 0x228, 1);
+        Player {
+            reference: 0x10010000,
+            bytes,
+            auxiliaries: vec![],
+        }
+    }
+
+    fn shipped_unselected_building() -> i16 {
+        let timetables = crate::resident::Timetables::from_timetable(
+            "Timetable 7 hour16 Main_Shopping\nTimetable 63 hour16 Entertainment",
+        )
+        .unwrap();
+        unselected_building(&timetables)
+    }
+
+    #[test]
+    fn unselected_building_reads_timetable_row_94_hour_16() {
+        assert_eq!(shipped_unselected_building(), -1);
+        let bound =
+            crate::resident::Timetables::from_timetable("Timetable 94 hour16 Main_Shopping")
+                .unwrap();
+        assert_eq!(unselected_building(&bound), 12);
+        let other_hour =
+            crate::resident::Timetables::from_timetable("Timetable 94 hour15 Main_Shopping")
+                .unwrap();
+        assert_eq!(unselected_building(&other_hour), -1);
+    }
+
+    #[test]
+    fn external_business_selector_draws_among_the_top_three_rows() {
+        let bytes = street_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        // Three record-breakers fill rows 0..2. The sort's first pivot is the
+        // padding moved up from row 50, which compares equal to everything,
+        // so it leaves [padding, business 2, business 3, ...] in place.
+        let street = Street::new(&[100., 200., 300.]);
+        let world = street.world(shipped_unselected_building());
+        for (draw, target) in [(1 << 16, 2), (2 << 16, 3), (0, -1), (3 << 16, -1)] {
+            let mut p = holder(draw);
+            let choice = choose(0, &mut p, &world, &image).unwrap();
+            assert_eq!((choice.target, choice.count), (target, 3), "draw {draw:#x}");
+            assert_eq!(word(&p.bytes, 0x224), draw);
+            assert!(choice.score.is_nan());
+        }
+    }
+
+    #[test]
+    fn external_business_selector_skips_city_and_own_businesses() {
+        let bytes = street_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        // City business 0 (900) and the holder's own business 3 (999) would
+        // both beat every rival, but neither is a candidate.
+        let mut street = Street::new(&[100., 200., 999., 300.]);
+        street.businesses[3][0xa] = 1;
+        let world = street.world(shipped_unselected_building());
+        let choice = choose(0, &mut holder(2 << 16), &world, &image).unwrap();
+        assert_eq!((choice.target, choice.count), (4, 3));
+    }
+
+    #[test]
+    fn external_business_selector_never_picks_a_lone_candidate() {
+        let bytes = street_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        // The sort swaps the only retained row (row 0) with padding row 50
+        // and stops there, so the pick reads padding.
+        let street = Street::new(&[100.]);
+        let world = street.world(shipped_unselected_building());
+        let mut p = holder(0x1234_5678);
+        let choice = choose(0, &mut p, &world, &image).unwrap();
+        assert_eq!((choice.target, choice.count), (-1, 1));
+        assert_eq!(word(&p.bytes, 0x224), 0x1234_5678, "one row draws nothing");
+    }
+
+    #[test]
+    fn external_business_selector_without_a_candidate_never_targets_building_0() {
+        let bytes = street_image();
+        let image = PeImage::parse(&bytes).unwrap();
+        // Counted but never retained: no score beats the starting best of 0.
+        let street = Street::new(&[-50., 0.]);
+        let world = street.world(shipped_unselected_building());
+        let mut p = holder(0x1234_5678);
+        let choice = choose(0, &mut p, &world, &image).unwrap();
+        assert_eq!((choice.target, choice.count), (-1, 2));
+        assert_eq!(word(&p.bytes, 0x224), 0x1234_5678, "no draw without a row");
+        // After 15:00 only non-day businesses qualify, so none is counted.
+        let mut late = street.world(shipped_unselected_building());
+        late.hour = 15;
+        let choice = choose(0, &mut holder(0), &late, &image).unwrap();
+        assert_eq!((choice.target, choice.count), (-1, 0));
+    }
+
     #[test]
     #[ignore = "requires complete original event-selector observations"]
     fn matches_native_selection() {
