@@ -713,6 +713,20 @@ impl Assets {
             &crate::utility_report::View::default(),
         )
     }
+    /// The caption in the green title bar under a panel's tab row. The block
+    /// panel's parent+0x4b8 text (0x41dcf0: created at 0x41e699, font 3 at
+    /// 0x41e6b3, 0x440650 style 4 at 0x41e6e1) and the city window's +0x394
+    /// text (0x40d080: style 4 at 0x40dbf7) are both centred on both axes.
+    /// The business panel draws the block panel's control the same way.
+    fn bar_title(&self, fonts: &mut [Surface], encoded: &[u8]) -> Result<(), String> {
+        ui::text_widget_style4(
+            fonts,
+            &self.tab,
+            encoded,
+            self.city_layout.header,
+            self.text_palette[16],
+        )
+    }
     pub fn utility_pointer(
         &self,
         state: &mut crate::utility_report::View,
@@ -1062,9 +1076,8 @@ impl Assets {
             let mut section = Surface::solid();
             section.rect(self.city_layout.header, [self.text_palette[17]; 4]);
             surfaces.push(section);
-            ui::text_fit(
+            self.bar_title(
                 &mut fonts,
-                &self.tab,
                 &self.strings[match state.property_tab {
                     1 => 1402,
                     2 => 1403,
@@ -1072,14 +1085,6 @@ impl Assets {
                     4 => 1405,
                     _ => 28,
                 }],
-                [
-                    32.,
-                    self.city_layout.header[1] + 1.,
-                    184.,
-                    self.city_layout.header[3],
-                ],
-                false,
-                self.text_palette[16],
             )?;
         }
         if state.property_rights_open() {
@@ -1889,18 +1894,9 @@ impl Assets {
             let layout = crate::utility_report::Layout::new(self.bounds);
             let mut heading_background = Surface::solid();
             heading_background.rect(self.city_layout.header, [self.text_palette[17]; 4]);
-            ui::text_fit(
+            self.bar_title(
                 &mut fonts,
-                &self.tab,
                 &self.strings[state.title((!railroad).then_some(utility))],
-                [
-                    32.,
-                    self.city_layout.header[1] + 1.,
-                    184.,
-                    self.city_layout.header[3],
-                ],
-                false,
-                self.text_palette[16],
             )?;
             let owner_name = |owner: u8| -> Result<Vec<u8>, String> {
                 if owner == 0 {
@@ -2696,19 +2692,7 @@ impl Assets {
                     surfaces.push(icon);
                 }
                 solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
-                ui::text_fit(
-                    &mut fonts,
-                    &self.tab,
-                    &self.strings[1447 + mode],
-                    [
-                        32.,
-                        self.city_layout.header[1] + 1.,
-                        184.,
-                        self.city_layout.header[3],
-                    ],
-                    false,
-                    self.text_palette[16],
-                )?;
+                self.bar_title(&mut fonts, &self.strings[1447 + mode])?;
                 if state.my_business {
                     let list = self.owned_list();
                     let mut owned_fonts = self.ownership_fonts.clone();
@@ -2962,13 +2946,9 @@ impl Assets {
         Ok(())
     }
     fn city_report(&self, state: &Locator, fonts: &mut [Surface]) -> Result<Vec<Surface>, String> {
-        ui::text(
+        self.bar_title(
             fonts,
-            &self.tab,
             &self.strings[if state.prestige_mode { 1443 } else { 1445 }],
-            self.city_layout.header,
-            true,
-            self.text_palette[16],
         )?;
         navigator_report::City {
             list: self.navigator_list(),
@@ -2984,14 +2964,7 @@ impl Assets {
         ));
     }
     fn rights_report(&self, fonts: &mut [Surface]) -> Result<Vec<Surface>, String> {
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1444],
-            self.city_layout.header,
-            true,
-            self.text_palette[16],
-        )?;
+        self.bar_title(fonts, &self.strings[1444])?;
         navigator_report::Rights {
             pages: &self.fonts,
             tab: &self.tab,
@@ -3010,14 +2983,7 @@ impl Assets {
         solid: &mut Surface,
     ) -> Result<(), String> {
         // Original 410f89 names the page; 4105ef sets its People caption.
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1442],
-            self.city_layout.header,
-            true,
-            self.text_palette[16],
-        )?;
+        self.bar_title(fonts, &self.strings[1442])?;
         let [l, top, r, bottom] = self.people_selector;
         ui::text_fit(
             fonts,
@@ -3147,14 +3113,7 @@ impl Assets {
         let mut title = format[..at].to_vec();
         title.extend(name);
         title.extend_from_slice(&format[at + 2..]);
-        ui::text(
-            fonts,
-            &self.tab,
-            &title,
-            self.city_layout.header,
-            true,
-            self.text_palette[16],
-        )?;
+        self.bar_title(fonts, &title)?;
         for (i, rect) in self.player_period_rects().into_iter().enumerate() {
             let action = Action::PeriodStep(i != 0);
             let variant = if state.pressed == Some(action) {
@@ -6233,5 +6192,58 @@ mod open_facing_fixture {
                 &format!("{prefix}-toolbar-closed.png"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod main_title_tests {
+    use super::*;
+
+    fn glyph_extent(pages: &[Surface]) -> [f32; 4] {
+        pages.iter().flat_map(|p| p.vertices.iter()).fold(
+            [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            |b, v| {
+                [
+                    b[0].min(v[0]),
+                    b[1].min(v[1]),
+                    b[2].max(v[0]),
+                    b[3].max(v[1]),
+                ]
+            },
+        )
+    }
+
+    #[test]
+    #[ignore = "requires the supplied archive, installer fonts and v1.4 language"]
+    fn panel_titles_are_centred_in_the_green_bar() {
+        let f = crate::business_view::facing_fixture::Inputs::read();
+        let index = f.index();
+        let strings = f.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let assets =
+            Assets::load(&index, &f.archive, &f.installer, &strings, &f.executable).unwrap();
+        let [left, _, right, _] = assets.city_layout.header;
+        let title = |id: usize| {
+            let mut fonts = assets.fonts.clone();
+            assets.bar_title(&mut fonts, &assets.strings[id]).unwrap();
+            glyph_extent(&fonts)
+        };
+        // Block tabs (28, 1402..1405), utility details (1806..1808), railroad
+        // details (1812), City Information (1442..1445) and the business
+        // locator modes (1447..1449).
+        for id in [
+            28, 1402, 1403, 1404, 1405, 1806, 1807, 1808, 1812, 1442, 1443, 1444, 1445, 1447, 1448,
+            1449,
+        ] {
+            let [l, _, r, _] = title(id);
+            assert!(l >= left && r <= right, "{id}: {l}..{r}");
+            assert!(((l + r) - (left + right)).abs() <= 2., "{id}: {l}..{r}");
+        }
+        // The original v1.4 at 640x480 draws "PEOPLE" with lit pixels at about
+        // x 90..125 and y 62..67, in the same rows as the block title.
+        assert_eq!(title(1442), [88.5, 60.5, 129.5, 69.5]);
+        // The original v1.4 at 640x480 draws "BLOCK INFORMATION" with lit
+        // pixels at x 52..167 and y 62..68 (about 82..270 at 1024x768). Its
+        // glyph cells, one pixel wider on each side, cover x 51..168, y 61..69.
+        assert_eq!(title(28), [50.5, 60.5, 168.5, 69.5]);
     }
 }
