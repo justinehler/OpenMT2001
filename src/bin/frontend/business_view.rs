@@ -631,7 +631,18 @@ impl Assets {
                 _ => (0, None, false),
             };
             if matches!(state.mode, 2..=4) {
-                if matches!(state.mode, 3 | 4) {
+                if state.mode == 4 && !data.owned {
+                    // 4085e0 writes 82 into the description widget +c4 when the
+                    // business owner is not the current player. The Demolish
+                    // tab is owner-only, so normal play never reaches this.
+                    ui::text_widget_style4(
+                        &mut font,
+                        &self.tabs[0],
+                        &self.strings[82],
+                        self.layout.description,
+                        0xffffffff,
+                    )?;
+                } else if matches!(state.mode, 3 | 4) {
                     let dialog = crate::human_dialog::Dialog {
                         body: 9,
                         arguments: [
@@ -655,13 +666,12 @@ impl Assets {
                         self.layout.description,
                         0xffffffff,
                     )?;
-                } else if state.mode == 2 && !sell {
-                    //4085e0 writes Buy82 into+c4 when the owner is not current.
-                    text(&mut font, &self.strings[82], self.layout.description, false)?;
                 }
 
-                if state.mode == 2 && sell {
-                    // 407f60 fills the same capital/lease/sale rows as 408c50.
+                if state.mode == 2 {
+                    // 407f60 fills the same capital/lease rows as 408c50, then
+                    // 1413 Selling Price for the owner or 1414 Buy Out Cost for
+                    // a landlord's takeover. It never writes the description.
                     for (row, (label, value)) in self.value_rows(data)?.into_iter().enumerate() {
                         let y = self.bounds[1] + 3. + row as f32 * self.report_line_height as f32;
                         let rect = [

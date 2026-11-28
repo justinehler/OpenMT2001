@@ -14,6 +14,10 @@ fn assets() -> Assets {
     let mut strings = vec![vec![]; 2245];
     for (id, text) in [
         (9, "%s: %s"),
+        (
+            82,
+            "As you do not own this business, you cannot demolish it.",
+        ),
         (84, "Cost to Demolish:"),
         (85, "REFURBISH"),
         (87, "Cost to Refurbish:"),
@@ -24,6 +28,8 @@ fn assets() -> Assets {
         (130, "Clothes Store"),
         (1118, "Business Value"),
         (1413, "Selling Price"),
+        (1414, "Buy Out Cost"),
+        (1415, "BUY OUT"),
         (1416, "SELL"),
         (2243, "$"),
     ] {
@@ -162,6 +168,80 @@ fn sell_draws_three_bold_rows_with_live_values_and_submits_trade() {
     assert_eq!(
         view.action,
         Some(openmt2001::business_controls::Action::Trade)
+    );
+}
+
+fn button(surfaces: &[Surface]) -> &Surface {
+    surfaces
+        .iter()
+        .find(|s| s.pixels[0] == 241 && !s.vertices.is_empty())
+        .unwrap()
+}
+/// A landlord's takeover page (Deli, video jF7L4owegzM 16:00): 407f60 fills
+/// the same three rows as the owner's sale page with 1414 Buy Out Cost, then
+/// the 1415 button, and never writes the description sentence.
+#[test]
+fn takeover_draws_three_rows_with_buy_out_cost_and_no_sentence_then_submits_trade() {
+    let assets = assets();
+    let mut data = inspection();
+    data.owned = false;
+    data.base_value = 447.11;
+    data.rent_age = 0;
+    data.trade_price = Some(268.266);
+    data.permissions.modes = [true, true, true, false, false, true];
+    data.permissions.trade = Some(openmt2001::business_permissions::Trade::Takeover);
+    data.permissions.convert = false;
+    data.permissions.demolish = false;
+    let mut view = View {
+        mode: 2,
+        inspection: Some(data),
+        ..Default::default()
+    };
+    let surfaces = assets.surfaces(&view, 128).unwrap();
+    let font = bold(&surfaces);
+    assert_eq!(
+        text(font),
+        "Business Value$447.11Business Lease0Buy Out Cost$268.27"
+    );
+    let quads = font.vertices.as_chunks::<6>().0;
+    for (offset, y) in [(0, 23.), (21, 33.), (36, 43.)] {
+        let top = quads[offset]
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::INFINITY, f32::min);
+        assert_eq!(top, y - 0.5);
+    }
+    assert_eq!(text(button(&surfaces)), "BUY OUT");
+    assert!(
+        surfaces
+            .iter()
+            .any(|s| s.pixels[0] == 76 && !s.vertices.is_empty())
+    );
+    click(&mut view, &assets, assets.layout.action);
+    assert_eq!(
+        view.action,
+        Some(openmt2001::business_controls::Action::Trade)
+    );
+}
+/// 4085e0 writes 82 only on the Demolish page, when the business owner is not
+/// the current player, and still writes the demolition quote. The tab is
+/// owner-only, so this exercises the gate alone.
+#[test]
+fn demolish_page_shows_not_owner_sentence_instead_of_owner_caption() {
+    let assets = assets();
+    let mut data = inspection();
+    data.owned = false;
+    let view = View {
+        mode: 4,
+        inspection: Some(data),
+        ..Default::default()
+    };
+    let surfaces = assets.surfaces(&view, 128).unwrap();
+    // The sentence wraps inside the description box; the break eats a space.
+    assert_eq!(
+        text(bold(&surfaces)).replace(' ', ""),
+        "As you do not own this business, you cannot demolish it.Cost to Demolish:$252.00"
+            .replace(' ', "")
     );
 }
 #[test]
