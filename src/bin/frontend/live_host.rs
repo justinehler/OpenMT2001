@@ -13,7 +13,8 @@ use crate::{
 };
 use openmt2001::{
     audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests,
-    audio_requests::transport as transport_requests, hourly, level_script, lua4::Value, scheduler,
+    audio_requests::transport as transport_requests, hourly, level_script, lua4::Value,
+    render_requests::auction as auction_requests, scheduler,
 };
 
 fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
@@ -332,8 +333,8 @@ pub struct Host {
     card_visible: bool,
     day_night_flags: [u8; 3],
     notices: crate::notifications::Queue,
-    pub auction_renderer: Option<std::sync::mpsc::Sender<crate::auction_bridge::Request>>,
-    auction_actor_events: Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
+    pub auction_renderer: Option<std::sync::mpsc::Sender<auction_requests::Request>>,
+    auction_actor_events: Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
     pub transport_audio: Option<std::sync::mpsc::Sender<transport_requests::Request>>,
     pub era_audio: Option<std::sync::mpsc::Sender<era_requests::Request>>,
@@ -467,9 +468,9 @@ impl Host {
             .map(|player| u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()))
             .collect::<Vec<_>>();
         let (actor_sender, actor_events) = std::sync::mpsc::channel();
-        crate::auction_bridge::request(
+        auction_requests::request(
             &self.auction_renderer,
-            crate::auction_bridge::Operation::Prepare {
+            auction_requests::Operation::Prepare {
                 characters,
                 actor_events,
             },
@@ -499,10 +500,9 @@ impl Host {
                         gameplay_sound,
                         gameplay_requests::Operation::AuctionAmbientCreate,
                     ),
-                    Call::Camera => crate::auction_bridge::request(
-                        renderer,
-                        crate::auction_bridge::Operation::Activate,
-                    ),
+                    Call::Camera => {
+                        auction_requests::request(renderer, auction_requests::Operation::Activate)
+                    }
                     Call::Action(action) => {
                         if action
                             == openmt2001::ai_messages::offers::auction::Call::ShowPanel(0x565ba8)
@@ -2218,7 +2218,7 @@ impl Host {
             || {
                 cash_arrow.borrow_mut().advance();
                 if let Some(sender) = auction_actor_events.borrow().as_ref() {
-                    sender.send(crate::auction_bridge::ActorEvent::Advance)
+                    sender.send(auction_requests::ActorEvent::Advance)
                         .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
                 }
                 Ok(())
@@ -2428,9 +2428,9 @@ impl Host {
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     let (actor_sender, actor_receiver) = std::sync::mpsc::channel();
-                    let previous = crate::auction_bridge::request(
+                    let previous = auction_requests::request(
                         auction_renderer,
-                        crate::auction_bridge::Operation::Prepare { characters,
+                        auction_requests::Operation::Prepare { characters,
                             actor_events: actor_receiver },
                     )?;
                     *auction_actor_events.borrow_mut() = Some(actor_sender);
@@ -2440,9 +2440,9 @@ impl Host {
                 }
                 Event::Command(openmt2001::live_commands::Event::AuctionActivation(
                     openmt2001::ai_messages::offers::auction::activation::Call::Camera,
-                )) => crate::auction_bridge::request(
+                )) => auction_requests::request(
                     auction_renderer,
-                    crate::auction_bridge::Operation::Activate,
+                    auction_requests::Operation::Activate,
                 ),
                 Event::Command(openmt2001::live_commands::Event::AuctionActivation(
                     openmt2001::ai_messages::offers::auction::activation::Call::Ambient,
@@ -2599,9 +2599,9 @@ impl Host {
                 Event::Command(openmt2001::live_commands::Event::AuctionClosure(
                     openmt2001::ai_messages::offers::auction::closure::Call::RestorePresentation,
                 )) => {
-                    let result = crate::auction_bridge::request(
+                    let result = auction_requests::request(
                         auction_renderer,
-                        crate::auction_bridge::Operation::Restore,
+                        auction_requests::Operation::Restore,
                     )?;
                     time_runtime.lock().map_err(|_| "Time runtime poisoned")?.hide(1)?;
                     *auction = None;
@@ -3267,7 +3267,7 @@ impl Host {
             let next = !self.policy.ai_event_gate;
             if let Some(sender) = &self.auction_actor_events {
                 sender
-                    .send(crate::auction_bridge::ActorEvent::BidVoiceGate(next))
+                    .send(auction_requests::ActorEvent::BidVoiceGate(next))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
             self.policy.ai_event_gate = next;
@@ -3697,7 +3697,7 @@ pub(crate) fn auction_action(
     auction: &mut Option<Auction>,
     omitted: &mut std::collections::BTreeSet<u32>,
     tutorial_state: u8,
-    actor_events: &Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
+    actor_events: &Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
     bid_gate: &std::cell::Cell<bool>,
 ) -> Result<u32, String> {
     use openmt2001::ai_messages::offers::auction::Call;
@@ -3712,7 +3712,7 @@ pub(crate) fn auction_action(
             auction.bid_voice_gate = false;
             if let Some(sender) = actor_events {
                 sender
-                    .send(crate::auction_bridge::ActorEvent::BidVoiceGate(false))
+                    .send(auction_requests::ActorEvent::BidVoiceGate(false))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             }
         }
@@ -3724,7 +3724,7 @@ pub(crate) fn auction_action(
         Call::ParticipantEffect { participant, kind } => {
             if let Some(sender) = actor_events {
                 sender
-                    .send(crate::auction_bridge::ActorEvent::Effect { participant, kind })
+                    .send(auction_requests::ActorEvent::Effect { participant, kind })
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             } else {
                 omitted.insert(0x465980);
@@ -3742,9 +3742,7 @@ pub(crate) fn auction_action(
         Call::WithdrawNotice(participant) => {
             if let Some(sender) = actor_events {
                 sender
-                    .send(crate::auction_bridge::ActorEvent::WithdrawNotice(
-                        participant,
-                    ))
+                    .send(auction_requests::ActorEvent::WithdrawNotice(participant))
                     .map_err(|_| "Auction actor renderer disconnected".to_owned())?;
             } else {
                 omitted.insert(0x464769);
@@ -4007,7 +4005,7 @@ mod tests {
         assert!(!gate.get());
         assert!(matches!(
             receiver.try_recv().unwrap(),
-            crate::auction_bridge::ActorEvent::BidVoiceGate(false)
+            auction_requests::ActorEvent::BidVoiceGate(false)
         ));
     }
     #[test]
