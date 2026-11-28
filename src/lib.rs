@@ -178,3 +178,6 @@ pub mod level_catalog;
 pub mod skirmish;
 
 pub mod native_input;
+
+#[doc(hidden)]
+pub mod fixtures;
