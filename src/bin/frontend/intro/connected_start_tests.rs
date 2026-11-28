@@ -484,6 +484,36 @@ fn link<'s>(
 /// A host and a client brought up through the real lobby over loopback and
 /// linked as a connected start links them: host slot 0, client slot 1.
 fn with_linked_pair(body: impl for<'s> FnOnce(&mut LinkedPair<'s, '_>)) {
+    with_linked_peers(|[host, client], assets, image| {
+        let mut frames = [
+            crate::live_host::Host::new([100., 120., 100.]),
+            crate::live_host::Host::new([120., 140., 120.]),
+        ];
+        for frame in &mut frames {
+            frame.running = true;
+            frame.policy.scheduler.network_enabled = true;
+            frame.policy.scheduler.deadline = 25;
+        }
+        body(&mut LinkedPair {
+            sessions: [host, client],
+            frames,
+            assets,
+            image,
+        });
+    });
+}
+
+/// A host and `PEERS - 1` clients, each on its own transport owner as
+/// separate processes would be, brought up through the real lobby over
+/// loopback and linked as a connected start links them. Peer `n` is compact
+/// player slot `n`; the host is peer 0.
+fn with_linked_peers<const PEERS: usize>(
+    body: impl for<'s> FnOnce(
+        [crate::fresh_city::Session<'s>; PEERS],
+        &crate::fresh_city::CommandAssets<'_, '_>,
+        &openmt2001::pe::PeImage<'_>,
+    ),
+) {
     use openmt2001::network::lobby::{
         Action,
         worker::{Open, Update},
@@ -513,65 +543,62 @@ fn with_linked_pair(body: impl for<'s> FnOnce(&mut LinkedPair<'s, '_>)) {
     let Update::Lobby(initial) = wait(&host_worker, |u| matches!(u, Update::Lobby(_))) else {
         unreachable!()
     };
-    let probe = Handle::open_isolated(Open::Probe(initial.address)).unwrap();
-    let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
-        unreachable!()
-    };
-    drop(probe);
-    let client_worker = Handle::open_isolated(Open::Join {
-        selection,
-        name: b"Client".to_vec(),
-        token: 3,
-    })
-    .unwrap();
-    wait(&client_worker, |u| matches!(u, Update::Lobby(_)));
-    client_worker.action(Action::Ready).unwrap();
-    wait(
-        &host_worker,
-        |u| matches!(u, Update::Lobby(v) if v.snapshot.start_enabled()),
-    );
-    host_worker.action(Action::Start).unwrap();
-    let host_inputs = inputs();
-    let client_inputs = inputs();
-    let Update::Prepare(host_ticket) = wait(&host_worker, |u| matches!(u, Update::Prepare(_)))
-    else {
-        unreachable!()
-    };
-    let host_stage = host_inputs.stage_connected(&host_ticket).unwrap();
-    host_worker.prepared(Ok(host_stage.content)).unwrap();
-    let Update::Prepare(client_ticket) = wait(&client_worker, |u| matches!(u, Update::Prepare(_)))
-    else {
-        unreachable!()
-    };
-    let client_stage = client_inputs.stage_connected(&client_ticket).unwrap();
-    client_worker.prepared(Ok(client_stage.content)).unwrap();
-    wait(&host_worker, |u| matches!(u, Update::Validated));
-    wait(&client_worker, |u| matches!(u, Update::Validated));
-    let host = link(&host_inputs, &host_ticket, &host_stage, host_worker);
-    let client = link(&client_inputs, &client_ticket, &client_stage, client_worker);
-    let image = openmt2001::pe::PeImage::parse(&host_inputs.executable).unwrap();
-    let board = host_inputs.styled_board(&image).unwrap();
-    let file = openmt2001::build_file::BuildFile::parse(&host_inputs.build_file).unwrap();
+    let mut workers = vec![host_worker];
+    for client in 1..PEERS {
+        let probe = Handle::open_isolated(Open::Probe(initial.address)).unwrap();
+        let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+            unreachable!()
+        };
+        drop(probe);
+        let worker = Handle::open_isolated(Open::Join {
+            selection,
+            name: if client == 1 {
+                b"Client".to_vec()
+            } else {
+                format!("Client {client}").into_bytes()
+            },
+            token: 4 - client as i8,
+        })
+        .unwrap();
+        wait(&worker, |u| matches!(u, Update::Lobby(_)));
+        worker.action(Action::Ready).unwrap();
+        workers.push(worker);
+    }
+    wait(&workers[0], |u| {
+        matches!(u, Update::Lobby(v)
+            if v.snapshot.capacity().0 == PEERS && v.snapshot.start_enabled())
+    });
+    workers[0].action(Action::Start).unwrap();
+    let inputs: [_; PEERS] = std::array::from_fn(|_| inputs());
+    let staged: Vec<_> = workers
+        .iter()
+        .zip(&inputs)
+        .map(|(worker, inputs)| {
+            let Update::Prepare(ticket) = wait(worker, |u| matches!(u, Update::Prepare(_))) else {
+                unreachable!()
+            };
+            let stage = inputs.stage_connected(&ticket).unwrap();
+            worker.prepared(Ok(stage.content)).unwrap();
+            (ticket, stage)
+        })
+        .collect();
+    for worker in &workers {
+        wait(worker, |u| matches!(u, Update::Validated));
+    }
+    let mut peers = workers.into_iter().zip(&staged).zip(&inputs);
+    let sessions: [_; PEERS] = std::array::from_fn(|_| {
+        let ((worker, (ticket, stage)), inputs) = peers.next().unwrap();
+        link(inputs, ticket, stage, worker)
+    });
+    let image = openmt2001::pe::PeImage::parse(&inputs[0].executable).unwrap();
+    let board = inputs[0].styled_board(&image).unwrap();
+    let file = openmt2001::build_file::BuildFile::parse(&inputs[0].build_file).unwrap();
     let assets = crate::fresh_city::CommandAssets {
         image: &image,
         board: &board,
         file: &file,
     };
-    let mut frames = [
-        crate::live_host::Host::new([100., 120., 100.]),
-        crate::live_host::Host::new([120., 140., 120.]),
-    ];
-    for frame in &mut frames {
-        frame.running = true;
-        frame.policy.scheduler.network_enabled = true;
-        frame.policy.scheduler.deadline = 25;
-    }
-    body(&mut LinkedPair {
-        sessions: [host, client],
-        frames,
-        assets: &assets,
-        image: &image,
-    });
+    body(sessions, &assets, &image);
 }
 
 /// Record 12 without its activity timer list. Those timers accumulate each
@@ -841,6 +868,149 @@ fn human_to_human_offers_accepted_and_rejected_match_on_both_peers() {
                     }
                     pair.sample(&label);
                 }
+            });
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// Frame every peer by the same 40 ms until `done` holds; any simulation
+/// failure ends the test.
+fn run_connected(
+    sessions: &mut [crate::fresh_city::Session<'_>],
+    frames: &mut [crate::live_host::Host],
+    assets: &crate::fresh_city::CommandAssets<'_, '_>,
+    label: &str,
+    mut done: impl FnMut(&[crate::fresh_city::Session<'_>], &mut [crate::live_host::Host]) -> bool,
+) {
+    let start = std::time::Instant::now();
+    while !done(sessions, frames) {
+        let ticks: Vec<_> = sessions.iter().map(|s| s.world.clock.timing[0]).collect();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(600),
+            "{label}: never happened, peers at {ticks:?}"
+        );
+        for (peer, (frame, session)) in frames.iter_mut().zip(sessions.iter_mut()).enumerate() {
+            frame.frame(session, assets, 40);
+            assert!(frame.failure.is_none(), "peer {peer}: {:?}", frame.failure);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// 0x4e2740 -> 0x450670 during play, through the real lobby, transport and
+/// Session drain: a client's connection ends mid-game. The host schedules
+/// status (player, 3) and removal for one Total+25 tick; the host and the
+/// remaining client both apply them there, show the "left the game" notice
+/// (0x743/0x744), release the departed player's property, and play on.
+#[test]
+#[ignore = "requires original assets; three connected Sessions over the real loopback lobby"]
+fn client_lost_mid_game_is_removed_at_the_same_tick_and_the_host_plays_on() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            with_linked_peers(|sessions: [_; 3], assets, image| {
+                use openmt2001::live_commands::Command;
+                let mut sessions = Vec::from(sessions);
+                let mut frames: Vec<_> = (0..3)
+                    .map(|_| {
+                        let mut frame = crate::live_host::Host::new([100., 120., 100.]);
+                        frame.running = true;
+                        frame
+                    })
+                    .collect();
+                run_connected(&mut sessions, &mut frames, assets, "start", |sessions, _| {
+                    sessions.iter().all(|s| s.world.clock.timing[0] > 200)
+                });
+                // Peer 1 departs; its human is compact slot 1 on every peer.
+                const DEPARTED: usize = 1;
+                const CATEGORY: usize = 7;
+                let owner = sessions[DEPARTED].roster.manager.players[DEPARTED].bytes[0x1bc] + 1;
+                // The departing human first buys a property through the
+                // connected command path.
+                sessions[DEPARTED]
+                    .submit_command(
+                        Command::PropertyTransfer {
+                            category: CATEGORY as i16,
+                            owner,
+                            amount: 500,
+                        },
+                        assets,
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+                run_connected(&mut sessions, &mut frames, assets, "purchase", |sessions, _| {
+                    sessions
+                        .iter()
+                        .all(|s| s.world.categories[CATEGORY][5] == owner)
+                });
+                // The departing client's process ends mid-game.
+                drop(sessions.remove(DEPARTED));
+                frames.remove(DEPARTED);
+                let mut removal = [None; 2];
+                let mut notice = [false; 2];
+                run_connected(&mut sessions, &mut frames, assets, "removal", |sessions, frames| {
+                    for (peer, (session, frame)) in
+                        sessions.iter().zip(frames.iter_mut()).enumerate()
+                    {
+                        for (_, due, _, _, command) in session.live_commands.snapshot().unwrap() {
+                            if matches!(command, Command::Eliminate { slot } if *slot == DEPARTED) {
+                                removal[peer] = Some(due);
+                            }
+                        }
+                        notice[peer] |= frame.status(session).prompts.iter().any(|request| {
+                            request
+                                .dialog
+                                .as_ref()
+                                .is_some_and(|d| (d.title, d.body) == (0x743, 0x744))
+                        });
+                    }
+                    sessions
+                        .iter()
+                        .all(|s| s.roster.manager.players[DEPARTED].bytes[0x10] == 0)
+                });
+                // Host and remaining client scheduled the removal for one tick.
+                assert!(removal[0].is_some(), "the host never queued the removal");
+                assert_eq!(removal[0], removal[1]);
+                let due = removal[0].unwrap();
+                for session in &sessions {
+                    assert!(session.world.clock.timing[0] >= due);
+                    let player = &session.roster.manager.players[DEPARTED];
+                    assert_eq!(player.bytes[0x10], 0);
+                    assert_eq!(
+                        u32::from_le_bytes(player.bytes[0x154..0x158].try_into().unwrap()),
+                        2
+                    );
+                    assert!(
+                        session
+                            .world
+                            .categories
+                            .iter()
+                            .all(|category| category[5] != owner),
+                        "the departed player still owns land"
+                    );
+                }
+                assert_eq!(notice, [true; 2], "the left-the-game notice was not shown");
+                // The host plays on for at least one more game hour (625 ticks).
+                let resumed = sessions[0].world.clock.timing[0];
+                run_connected(&mut sessions, &mut frames, assets, "next hour", |sessions, _| {
+                    sessions
+                        .iter()
+                        .all(|s| s.world.clock.timing[0] >= resumed + 625)
+                });
+                let client = sessions.pop().unwrap();
+                let host = sessions.pop().unwrap();
+                let client_frame = frames.pop().unwrap();
+                let host_frame = frames.pop().unwrap();
+                let mut pair = LinkedPair {
+                    sessions: [host, client],
+                    frames: [host_frame, client_frame],
+                    assets,
+                    image,
+                };
+                pair.sample("an hour after the removal");
+                assert!(pair.frames.iter().all(|frame| frame.running));
             });
         })
         .unwrap()
