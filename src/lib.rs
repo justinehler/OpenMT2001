@@ -25,6 +25,7 @@ pub mod market;
 pub mod material;
 pub mod mesh;
 pub mod network;
+pub mod opening_sequence;
 pub mod panels;
 pub mod pause;
 pub mod pe;

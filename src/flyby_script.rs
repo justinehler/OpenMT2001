@@ -4,6 +4,7 @@ use crate::lua4::{Runtime, Value};
 #[derive(Debug, PartialEq, Eq)]
 pub struct Selection {
     pub hour: u32,
+    pub logos: bool,
     /// Filename below the installer's Standard/Cut_scenes directory.
     pub track: String,
 }
@@ -17,8 +18,8 @@ pub fn performance_cap(quality: &str) -> Result<i32, String> {
     }
 }
 
-/// The map has already been assembled by the frontend. Only EVENT_Level runs
-/// here: EVENTINITIALISE_Level would load that map again and enable logos.
+/// The map is already assembled by the frontend. The initialization callback
+/// acknowledges that load and retains Game.SetLogos for the opening controller.
 /// With no CLI quality the live process performance is read unchanged. An
 /// explicit quality caps it without overwriting the process value.
 /// `random_state` is the caller-owned 93aee8 stream, seeded through startup_rng.
@@ -30,20 +31,26 @@ pub fn select(
 ) -> Result<Selection, String> {
     let cap = quality.map(performance_cap).transpose()?;
     let mut vm = Runtime::new()?;
+    // The ordinary script bootstrap publishes Lua4's numeric true constant.
+    vm.set_number("true", 1.)?;
     vm.register_number_properties("Game", 1)?;
     vm.register_number_properties("Calendar", 3)?;
     vm.register_coerced("C_FlybyRandom", 5, "n")?;
     vm.register_coerced("C_FlybyTrack", 6, "S")?;
+    vm.register_coerced("C_RunScript", 7, "S")?;
+    vm.register_coerced("C_FlybyLogos", 8, "S")?;
     vm.execute("flyby tables", b"Random={}; Camera={}", &mut |_, _| {
         Err("unexpected flyby initialization callback".into())
     })?;
     vm.alias_function("Random", "ZeroTo", "C_FlybyRandom")?;
     vm.alias_function("Camera", "SetFlybyMode", "C_FlybyTrack")?;
+    vm.alias_function("Game", "SetLogos", "C_FlybyLogos")?;
     for hour in 0..24 {
         vm.set_number(&format!("HOUR_{hour}"), f64::from(hour))?;
     }
     let mut hour = None;
     let mut track = None;
+    let mut logos = false;
     let mut handler = |id, args: &[Value]| match (id, args) {
         (1, [Value::Bytes(key)]) if key == b"performance" => {
             let value = performance()?;
@@ -70,12 +77,26 @@ pub fn select(
             track = Some(name.to_owned());
             Ok(None)
         }
+        (7, [Value::Bytes(path)]) if path.eq_ignore_ascii_case(b"scripts\\maps\\intromap.lua") => {
+            Ok(None)
+        }
+        (8, [value]) => {
+            // Original4dad90 tests lua_tostring(-1), including numeric zero.
+            logos = matches!(value, Value::Bytes(_));
+            Ok(None)
+        }
         _ => Err(format!("unsupported frontend flyby callback {id}")),
     };
     vm.execute("FLYBY1/hub.lua", source, &mut handler)?;
+    vm.execute(
+        "FLYBY1 initialization event",
+        b"if EVENTINITIALISE_Level then EVENTINITIALISE_Level() end",
+        &mut handler,
+    )?;
     vm.execute("FLYBY1 level event", b"EVENT_Level()", &mut handler)?;
     Ok(Selection {
         hour: hour.ok_or("flyby level event did not set an hour")?,
+        logos,
         track: track.ok_or("flyby level event did not select a track")?,
     })
 }
@@ -86,7 +107,10 @@ mod tests {
 
     // Authored fixture: independent table dispatch exercises the host API in CI.
     const HUB: &[u8] = br#"
-        function EVENTINITIALISE_Level() unavailable_map_loader() end
+        function EVENTINITIALISE_Level()
+            C_RunScript("scripts\\maps\\intromap.lua")
+            Game.SetLogos(true)
+        end
         function EVENT_Level()
             local index = Random.ZeroTo(Game.performance) + 1
             local hours = {HOUR_12, HOUR_20, HOUR_8}
@@ -117,6 +141,7 @@ mod tests {
                     .unwrap() as usize;
                     let selected = select(source, quality, &mut state, || Ok(performance)).unwrap();
                     assert_eq!(selected.hour, [12, 20, 8][draw]);
+                    assert!(selected.logos);
                     assert_eq!(
                         selected.track,
                         ["intro_low.tm", "intro_medium.tm", "intro_high.tm"][draw]
@@ -175,6 +200,20 @@ mod tests {
         assert_eq!(selected.hour, 3);
         assert_eq!(selected.track, "custom.tm");
         assert_eq!(state, 123);
+        assert!(!selected.logos);
+    }
+
+    #[test]
+    fn initialization_controls_logos_using_native_string_convertibility() {
+        for (value, expected) in [("nil", false), ("0", true), ("true", true), ("''", true)] {
+            let source = format!(
+                "function EVENTINITIALISE_Level() Game.SetLogos({value}) end\n\
+                 function EVENT_Level() Calendar.hour=HOUR_3\n\
+                 Camera.SetFlybyMode('gamedata/cut_scenes/custom.tm') end"
+            );
+            let selected = select(source.as_bytes(), None, &mut 0, || Ok(0)).unwrap();
+            assert_eq!(selected.logos, expected, "{value}");
+        }
     }
 
     #[test]

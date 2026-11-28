@@ -596,11 +596,8 @@ impl App {
                                     }
                                     _ => (),
                                 }
-                            } else if matches!(
-                                key,
-                                NamedKey::Escape | NamedKey::Space | NamedKey::Enter
-                            ) {
-                                intro.open_menu();
+                            } else {
+                                intro.skip_opening(key);
                             }
                         } else if key == NamedKey::Escape {
                             event_loop.exit();
