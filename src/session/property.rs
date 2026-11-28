@@ -1,6 +1,6 @@
 //! Human property offer admission and synchronous retained message routing.
 use super::{CommandAssets, Session};
-use openmt2001::{live_commands, player_messages, property_offer};
+use crate::{live_commands, player_messages, property_offer};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inspection {
@@ -14,16 +14,16 @@ impl Session<'_> {
         &mut self,
         context: u32,
         assets: &CommandAssets<'_, '_>,
-        mut event: impl FnMut(openmt2001::outcome_notice::Response) -> Result<(), String>,
+        mut event: impl FnMut(crate::outcome_notice::Response) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut responses = Vec::new();
-        openmt2001::outcome_notice::respond(
+        crate::outcome_notice::respond(
             context,
             self.catalog
                 .selected_level()
                 .ok_or("outcome selected level identity unresolved")?
                 .id(),
-            &openmt2001::outcome_notice::World {
+            &crate::outcome_notice::World {
                 image: assets.image,
                 players: &self.roster.manager.players,
                 current_reference: self.roster.status.current_player,
@@ -37,18 +37,18 @@ impl Session<'_> {
         let mut characters = None;
         for response in responses {
             match response {
-                openmt2001::outcome_notice::Response::Characters { winner, loser } => {
+                crate::outcome_notice::Response::Characters { winner, loser } => {
                     characters = Some((winner, loser));
                 }
-                openmt2001::outcome_notice::Response::Sequence(sequence) => {
+                crate::outcome_notice::Response::Sequence(sequence) => {
                     self.begin_result_sequence(
                         sequence,
                         characters.ok_or("Result sequence character assignment missing")?,
                         assets,
                     )?;
                 }
-                openmt2001::outcome_notice::Response::Unlock(id) => self.catalog.unlock(id),
-                openmt2001::outcome_notice::Response::Music { .. } => (),
+                crate::outcome_notice::Response::Unlock(id) => self.catalog.unlock(id),
+                crate::outcome_notice::Response::Music { .. } => (),
             }
             event(response)?;
         }
@@ -58,7 +58,7 @@ impl Session<'_> {
         &self,
         category: u32,
         panel_mode: u8,
-    ) -> Result<openmt2001::property_rights::Inspection, String> {
+    ) -> Result<crate::property_rights::Inspection, String> {
         let row = self
             .world
             .city
@@ -76,7 +76,7 @@ impl Session<'_> {
                 .ok_or("rights owner outside roster")?
                 .reference
         };
-        Ok(openmt2001::property_rights::inspect(
+        Ok(crate::property_rights::inspect(
             Some(row),
             owner_reference,
             self.roster.status.current_player,
@@ -89,16 +89,16 @@ impl Session<'_> {
         &mut self,
         category: u32,
         panel_mode: u8,
-    ) -> Result<openmt2001::property_rights::Inspection, String> {
+    ) -> Result<crate::property_rights::Inspection, String> {
         if self.connected.is_some() {
-            return Err(openmt2001::network::Error::Unsupported.to_string());
+            return Err(crate::network::Error::Unsupported.to_string());
         }
         let inspection = self.inspect_property_rights(category, panel_mode)?;
         if !inspection.activate_visible {
             return Ok(inspection);
         }
         let mut selected = Some(category);
-        openmt2001::property_rights::activate(
+        crate::property_rights::activate(
             &mut self.world.city.categories,
             &mut selected,
             [0; 24],
@@ -222,7 +222,7 @@ impl Session<'_> {
         mut event: impl FnMut(live_commands::Event) -> Result<(), String>,
     ) -> Result<Inspection, String> {
         if self.connected.is_some() {
-            return Err(openmt2001::network::Error::Unsupported.to_string());
+            return Err(crate::network::Error::Unsupported.to_string());
         }
         let amount = panel.amount;
         let mut inspection = self.inspect_property_offer_panel(category, panel, assets)?;
@@ -269,7 +269,7 @@ impl Session<'_> {
             |call, _, world| {
                 match call {
                     property_offer::Call::Producer { address, arguments } => {
-                        let args = openmt2001::ai_messages::offers::producers::property(
+                        let args = crate::ai_messages::offers::producers::property(
                             address,
                             world.current.bytes[0x1bc],
                             arguments[0],
