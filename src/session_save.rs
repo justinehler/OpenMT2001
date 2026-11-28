@@ -1507,13 +1507,13 @@ impl SaveProjection<'_> {
         // Older extension records and native serialization retain their layout.
         records.push((16, words([self.build_random_state])));
         validate_dust_bindings(
-            &self.demolition_effects,
+            self.demolition_effects,
             &self.city.pending_world,
             &self.city.buildings,
         )?;
         records.push((
             17,
-            crate::save::demolition::encode(&self.demolition_effects)?,
+            crate::save::demolition::encode(self.demolition_effects)?,
         ));
         if let Some(auction) = auction {
             records.push((14, auction.encode()));

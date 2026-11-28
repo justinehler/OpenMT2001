@@ -252,7 +252,7 @@ impl Session<'_> {
                 &city.categories,
                 self.world.clock.timing[1],
                 image,
-            )? as i32,
+            )?,
             report: crate::business_report::inspect(
                 &crate::business_report::Inputs {
                     business,
