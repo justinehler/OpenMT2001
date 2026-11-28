@@ -1038,6 +1038,7 @@ impl Locator {
         });
         self.player.records = s.input.financial.records.clone();
         self.player.current = s.input.financial.current;
+        self.player.current_roster_slot = s.input.financial.current_roster_slot;
         self.player.players = s
             .roster_pages
             .iter()
@@ -1463,6 +1464,7 @@ pub mod selector_boundary_tests {
             financial: crate::player_info::Snapshot {
                 records: vec![p],
                 current: Some(0),
+                current_roster_slot: Some(0),
             },
             current_reference: 0x1234,
             human_enabled: 1,

@@ -164,6 +164,10 @@ pub fn period_layout(bounds: [f32; 4], dimensions: [u32; 2]) -> [[f32; 4]; 3] {
 pub struct Snapshot {
     pub records: Vec<[u8; 440]>,
     pub current: Option<usize>,
+    /// The current player's byte at original `+0x1bc`, just past the copied
+    /// prefix: its zero-based roster slot, which the roster stores when it
+    /// adds the player (0x48c5d0).
+    pub current_roster_slot: Option<u8>,
 }
 impl Snapshot {
     pub fn from_runtime(
@@ -192,9 +196,19 @@ impl Snapshot {
         if current != 0 && current_index.is_none() {
             return Err("current financial player leaves roster".into());
         }
+        let current_roster_slot = current_index
+            .map(|index| {
+                manager.players[index]
+                    .bytes
+                    .get(0x1bc)
+                    .copied()
+                    .ok_or("current player roster slot missing")
+            })
+            .transpose()?;
         Ok(Self {
             records,
             current: current_index,
+            current_roster_slot,
         })
     }
 }
@@ -202,6 +216,8 @@ pub struct State {
     /// Shared runtime+4 prefix, retained independently of scene save metadata.
     pub records: Vec<[u8; 440]>,
     pub current: Option<usize>,
+    /// See [`Snapshot::current_roster_slot`].
+    pub current_roster_slot: Option<u8>,
     pub fresh: bool,
     pub players: Vec<usize>,
     pub selected: usize,
@@ -215,6 +231,7 @@ impl State {
         let mut state = Self {
             records: players.to_vec(),
             current: None,
+            current_roster_slot: None,
             fresh: false,
             players: players
                 .iter()
@@ -239,6 +256,7 @@ impl State {
         let mut state = Self::new(&snapshot.records)?;
         state.fresh = true;
         state.current = snapshot.current;
+        state.current_roster_slot = snapshot.current_roster_slot;
         if let Some(position) = state.players.iter().position(|p| Some(*p) == state.current) {
             state.selected = position;
             state.refresh()?;
@@ -248,7 +266,10 @@ impl State {
     /// Refresh 412810's report from a retained session without resetting the
     /// user's selected roster slot, period, or scroll position.
     pub fn apply_snapshot(&mut self, snapshot: Snapshot) -> Result<bool, String> {
-        if self.records == snapshot.records && self.current == snapshot.current {
+        if self.records == snapshot.records
+            && self.current == snapshot.current
+            && self.current_roster_slot == snapshot.current_roster_slot
+        {
             return Ok(false);
         }
         let selected_slot = self.players.get(self.selected).copied();
@@ -273,6 +294,7 @@ impl State {
         };
         self.records = snapshot.records;
         self.current = snapshot.current;
+        self.current_roster_slot = snapshot.current_roster_slot;
         self.players = players;
         self.selected = selected;
         self.rows = rows;
@@ -349,6 +371,7 @@ mod tests {
         let snapshot = Snapshot {
             records,
             current: Some(0),
+            current_roster_slot: Some(0),
         };
         assert!(state.apply_snapshot(snapshot.clone()).unwrap());
         assert_eq!(state.selected, 1);
