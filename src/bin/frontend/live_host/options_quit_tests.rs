@@ -36,9 +36,11 @@ fn original_live_options_quit_no_keeps_city_and_yes_returns_to_picker() {
             let bytes = std::fs::read(language.join("tycoon.bin")).unwrap();
             let mut at = 0;
             let strings = offsets
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|n| {
-                    let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                    let end = at + usize::from(u16::from_le_bytes(*n));
                     let row = &bytes[at..end];
                     at = end;
                     row
