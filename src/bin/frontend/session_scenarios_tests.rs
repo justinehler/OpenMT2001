@@ -3257,13 +3257,17 @@ fn original_tutorial_six_management_flow() {
         host.status(&session).tutorial_message.unwrap().dismissal_id,
         16
     );
+    // Prompt 15 asks for OK only. Original 0x419938/0x40c890 OK dismisses the
+    // panel without Apply (#196): the edited term stays in the city record and
+    // no terms command is scheduled, so the record keeps its dirty byte.
+    let edited = session.world.ledgers.businesses[target.business];
     let control = adjustment_control(&mut adjustment, 53).unwrap();
-    let action = adjustment.edit_request.take().unwrap();
-    assert_eq!(action, crate::business_edit::Action::Apply);
-    let result = crate::business_edit::edit(&mut session, &assets, target, action);
-    adjustment.edit_inflight = Some(action);
-    adjustment.receive_edit(result);
+    assert!(
+        adjustment.edit_request.is_none(),
+        "owned retail OK closes without Apply"
+    );
     host.tutorial_event(&mut session, &assets, control).unwrap();
+    assert_eq!(session.world.ledgers.businesses[target.business], edited);
     assert_eq!(host.status(&session).tutorial_enabled_controls, vec![11]);
     let control = business_control(&mut business, 11);
     host.tutorial_event(&mut session, &assets, control).unwrap();
@@ -3548,10 +3552,10 @@ fn original_tutorial_six_management_flow() {
     assert_eq!(next.tutorial_state, 1);
     assert!(status.tutorial_controls.all_disabled && status.tutorial_controls.picking_disabled);
     assert!(!status.tutorial_controls.camera_disabled);
+    // Script messages share the modal queue with prompts (#225); apply the
+    // reported Interface.DismissPrompt closes as the live presenter does.
     let mut modal = crate::prompt::State::default();
-    for request in status.prompts {
-        let _ = modal.submit(request);
-    }
+    modal.apply_requests(status.prompts, &status.prompt_closes);
     for dismissal in [2, 3] {
         assert_eq!(modal.request().unwrap().dismissal_id, dismissal);
         let bounds =
@@ -3567,9 +3571,8 @@ fn original_tutorial_six_management_flow() {
                     false,
                 )
                 .unwrap();
-                for request in next_host.status(&next).prompts {
-                    let _ = presenter.submit(request);
-                }
+                let status = next_host.status(&next);
+                presenter.apply_requests(status.prompts, &status.prompt_closes);
             }),
             Some(dismissal)
         );
@@ -3657,9 +3660,7 @@ fn original_tutorial_six_management_flow() {
     );
     assert!(!status.event_list_visible);
     let mut modal = crate::prompt::State::default();
-    for request in status.prompts {
-        let _ = modal.submit(request);
-    }
+    modal.apply_requests(status.prompts, &status.prompt_closes);
     for dismissal in 2..=7 {
         assert_eq!(modal.request().unwrap().dismissal_id, dismissal);
         let bounds = prompt_assets.button_at(
@@ -3680,9 +3681,8 @@ fn original_tutorial_six_management_flow() {
                         false,
                     )
                     .unwrap();
-                for request in seventh_host.status(&seventh).prompts {
-                    let _ = presenter.submit(request);
-                }
+                let status = seventh_host.status(&seventh);
+                presenter.apply_requests(status.prompts, &status.prompt_closes);
             }),
             Some(dismissal)
         );
@@ -3748,9 +3748,7 @@ fn original_tutorial_six_management_flow() {
     assert_eq!(comparison.state.label(), 1535);
     let status = seventh_host.status(&seventh);
     assert!(!status.tutorial_enabled_controls.contains(&78));
-    for request in status.prompts {
-        let _ = modal.submit(request);
-    }
+    modal.apply_requests(status.prompts, &status.prompt_closes);
     for dismissal in 9..=16 {
         assert_eq!(modal.request().unwrap().dismissal_id, dismissal);
         let bounds = prompt_assets.button_at(
@@ -3771,9 +3769,8 @@ fn original_tutorial_six_management_flow() {
                         false,
                     )
                     .unwrap();
-                for request in seventh_host.status(&seventh).prompts {
-                    let _ = presenter.submit(request);
-                }
+                let status = seventh_host.status(&seventh);
+                presenter.apply_requests(status.prompts, &status.prompt_closes);
             }),
             Some(dismissal)
         );
@@ -4945,10 +4942,11 @@ fn original_tutorial_nine_auction_flow() {
     let auction_assets =
         crate::auction_panel::Assets::load(&index, &archive, installer, &strings, &executable)
             .unwrap();
+    // Mirror the live presenter: since #225 CreateMessage and CreatePrompt
+    // share the 0x429b50 modal queue, and Interface.DismissPrompt closes are
+    // reported beside the created requests (intro/draw/session_replies.rs).
     let mut modal = crate::prompt::State::default();
-    for request in status.prompts {
-        let _ = modal.submit(request);
-    }
+    modal.apply_requests(status.prompts, &status.prompt_closes);
     let modal_continue = |session: &mut Session<'_>,
                           host: &mut crate::live_host::Host,
                           modal: &mut crate::prompt::State,
@@ -4973,9 +4971,8 @@ fn original_tutorial_nine_auction_flow() {
                         false,
                     )
                     .unwrap();
-                for request in host.status(session).prompts {
-                    let _ = presenter.submit(request);
-                }
+                let status = host.status(session);
+                presenter.apply_requests(status.prompts, &status.prompt_closes);
             }),
             Some(id)
         );
@@ -5023,10 +5020,10 @@ fn original_tutorial_nine_auction_flow() {
         assert!(property.mouse(false));
         property.take_tutorial_control().unwrap()
     };
-    assert_eq!(
-        host.status(&session).tutorial_message.unwrap().dismissal_id,
-        4
-    );
+    let status = host.status(&session);
+    assert_eq!(status.tutorial_message.unwrap().dismissal_id, 4);
+    modal.apply_requests(status.prompts, &status.prompt_closes);
+    assert_eq!(modal.request().unwrap().dismissal_id, 4);
     let control = property_click(&mut property, 10);
     host.tutorial_event(&mut session, &assets, control).unwrap();
     let request = property.take_property_request().unwrap();
@@ -5036,10 +5033,10 @@ fn original_tutorial_nine_auction_flow() {
         .unwrap();
     assert_eq!(inspected.panel.action_visible, 1);
     property.apply_property_inspection(request.category, Ok(inspected));
-    assert_eq!(
-        host.status(&session).tutorial_message.unwrap().dismissal_id,
-        5
-    );
+    let status = host.status(&session);
+    assert_eq!(status.tutorial_message.unwrap().dismissal_id, 5);
+    modal.apply_requests(status.prompts, &status.prompt_closes);
+    assert_eq!(modal.request().unwrap().dismissal_id, 5);
     let control = property_click(&mut property, 35);
     host.tutorial_event(&mut session, &assets, control).unwrap();
     let request = property.take_property_request().unwrap();
@@ -5051,9 +5048,7 @@ fn original_tutorial_nine_auction_flow() {
     property.apply_property_inspection(request.category, Ok(submitted));
     let status = host.status(&session);
     assert!(status.failure.is_none());
-    for request in status.prompts {
-        let _ = modal.submit(request);
-    }
+    modal.apply_requests(status.prompts, &status.prompt_closes);
     modal_continue(&mut session, &mut host, &mut modal, 6);
     modal_continue(&mut session, &mut host, &mut modal, 7);
     assert_eq!(session.hooks.forced_auction_handlers.len(), 3);
@@ -5067,9 +5062,7 @@ fn original_tutorial_nine_auction_flow() {
             "original9 auction start: {:?}",
             status.failure
         );
-        for request in status.prompts {
-            let _ = modal.submit(request);
-        }
+        modal.apply_requests(status.prompts, &status.prompt_closes);
         if modal
             .request()
             .is_some_and(|request| request.dismissal_id == 8)
@@ -5110,9 +5103,7 @@ fn original_tutorial_nine_auction_flow() {
                     "the actual scheduled-script prompt{id} publishes once through the command cursor"
                 );
             }
-            for request in status.prompts {
-                let _ = modal.submit(request);
-            }
+            modal.apply_requests(status.prompts, &status.prompt_closes);
             if modal
                 .request()
                 .is_some_and(|request| request.dismissal_id == id)
