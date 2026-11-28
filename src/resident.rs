@@ -1,5 +1,6 @@
 //! Resident spending accounts and preference allocation, separate from scheduling.
 
+use crate::x87::Sum;
 use std::sync::{Arc, Weak};
 
 /// Nonserialized identity. Only the real pool owns strong references. No
@@ -169,6 +170,8 @@ impl AuxiliaryPool {
 #[cfg(test)]
 #[path = "resident/auxiliary_identity_tests.rs"]
 mod auxiliary_identity_tests;
+#[cfg(test)]
+mod precision_tests;
 
 /// Bind a registered model as004dfa40 does. `reference` is an opaque model
 /// table reference; `definition` is the model's116-byte block at native+5c.
@@ -305,7 +308,8 @@ pub struct HousingScoreInputs {
 
 /// Residential portion of 0047faa0. Supply active buildings in original slot
 /// order, resolving each to its business; omit buildings without a business.
-/// Original zero total capacity produces NaN, retained here for score clamping.
+/// This entry models callers after the first precision reset. Original zero
+/// total capacity produces NaN, retained here for score clamping.
 pub fn average_residential_rent<'a>(
     buildings: impl IntoIterator<Item = &'a HousingCandidate>,
 ) -> f32 {
@@ -314,15 +318,36 @@ pub fn average_residential_rent<'a>(
     for business in buildings {
         if business.residential {
             capacity = capacity.wrapping_add(i32::from(business.capacity));
-            weighted_rent = (f64::from(business.rent) * f64::from(business.capacity)
-                + f64::from(weighted_rent)) as f32;
+            weighted_rent =
+                housing_weighted_rent(weighted_rent, i32::from(business.capacity), business.rent);
         }
     }
-    (f64::from(weighted_rent) / f64::from(capacity)) as f32
+    let mut average = match Sum::from_f32(weighted_rent) {
+        Ok(value) if capacity != 0 => value,
+        _ => return (f64::from(weighted_rent) / f64::from(capacity)) as f32,
+    };
+    // The signed wrapping capacity is loaded with FILD, including negatives.
+    if average.div(Sum::from_i32(capacity)).is_err() {
+        return f32::NAN;
+    }
+    average.to_f32()
+}
+
+fn housing_weighted_rent(previous: f32, capacity: i32, rent: f32) -> f32 {
+    let retained = || -> Result<f32, &'static str> {
+        let mut value = Sum::from_i32(capacity);
+        value.mul_f32(rent)?;
+        value.add_f32(previous)?;
+        Ok(value.to_f32())
+    };
+    retained()
+        .unwrap_or_else(|_| (f64::from(capacity) * f64::from(rent) + f64::from(previous)) as f32)
 }
 
 /// Original 0045a4b0 district score. `current` is the current building's index
 /// within this category, if present. No qualifying capacity returns -99_999_999.
+/// Housing APIs model ordinary simulation/menu loads after the precision reset;
+/// the original direct-start world creation before that reset is a separate entry.
 pub fn score_housing_category(
     candidates: &[HousingCandidate],
     current: Option<usize>,
@@ -369,21 +394,15 @@ pub fn score_housing_category_cached(
             continue;
         }
         capacity = capacity.wrapping_add(available);
-        weighted_rent =
-            (f64::from(available) * f64::from(candidate.rent) + f64::from(weighted_rent)) as f32;
+        weighted_rent = housing_weighted_rent(weighted_rent, available, candidate.rent);
     }
     if capacity == 0 {
         return Ok(-99_999_999);
     }
-    let truncate = |value: f64| -> Result<i32, String> {
-        let value = value.trunc();
-        if !value.is_finite() || value < f64::from(i32::MIN) || value > f64::from(i32::MAX) {
-            return Err("housing score outside supported integer range".into());
-        }
-        Ok(value as i32)
-    };
-    let district =
-        truncate(f64::from(inputs.district_weight) * f64::from(inputs.district_value) * 40.0)?;
+    let mut district = Sum::from_f32(inputs.district_weight)?;
+    district.mul_f32(inputs.district_value)?;
+    district.mul_f32(40.)?;
+    let district = district.ftol_low_word();
     let base = district.wrapping_add(if inputs.current_category {
         50
     } else {
@@ -393,13 +412,38 @@ pub fn score_housing_category_cached(
     // times capacity. FCOM's unordered result also selects the zero clamp.
     let scaled_rent = (f64::from(weighted_rent) * 100.0) as f32;
     let average_rent = average()?;
-    let rent_term =
-        (200.0 - f64::from(scaled_rent) / (f64::from(average_rent) * f64::from(capacity))).max(0.0);
-    truncate(rent_term * f64::from(inputs.rent_weight) + f64::from(base))
+    let retained = || -> Result<Sum, &'static str> {
+        let mut denominator = Sum::from_f32(average_rent)?;
+        denominator.mul(Sum::from_i32(capacity));
+        let mut ratio = Sum::from_f32(scaled_rent)?;
+        ratio.div(denominator)?;
+        let mut term = Sum::from_i32(200);
+        term.add(ratio.negated());
+        Ok(term)
+    };
+    let mut rent_term = match retained() {
+        Ok(term) if term.compare(Sum::default()).is_gt() => term,
+        Ok(_) => Sum::default(),
+        Err(_) => {
+            // Zero capacity-weighted average and nonfinite f32 spills still
+            // follow FCOM's clamp. A positive infinity reaches invalid FTOL.
+            let term = (200.
+                - f64::from(scaled_rent) / (f64::from(average_rent) * f64::from(capacity)))
+            .max(0.);
+            if term.is_infinite() {
+                return Ok(0);
+            }
+            Sum::from_f64(term)?
+        }
+    };
+    rent_term.mul_f32(inputs.rent_weight)?;
+    rent_term.add(Sum::from_i32(base));
+    Ok(rent_term.ftol_low_word())
 }
 
 /// Original 0045a640 residence selection within one category.
 /// `current` identifies the resident's existing building in this ordered slice.
+/// Like the category score, this entry models callers after the precision reset.
 pub fn select_residence(
     candidates: &[HousingCandidate],
     current: Option<usize>,
@@ -415,13 +459,6 @@ pub fn select_residence(
     {
         return Err("invalid housing selection inputs".into());
     }
-    let truncate = |value: f64| -> Result<i32, String> {
-        let value = value.trunc();
-        if !value.is_finite() || value < f64::from(i32::MIN) || value > f64::from(i32::MAX) {
-            return Err("housing score outside supported integer range".into());
-        }
-        Ok(value as i32)
-    };
     let mut best = -99_999_999;
     let mut selected = None;
     for (index, candidate) in candidates.iter().enumerate() {
@@ -439,10 +476,12 @@ pub fn select_residence(
         }
         // Original selection accepts negative capacity and truncates the rent
         // contribution before adding it to the retained attribute contribution.
-        let attribute =
-            f64::from((i32::from(candidate.attribute_2c) + 1) * 33) * f64::from(attribute_weight);
-        let rent = truncate(f64::from(candidate.rent) * f64::from(rent_weight))?;
-        let mut score = truncate(attribute + f64::from(rent))?;
+        let mut attribute = Sum::from_i32((i32::from(candidate.attribute_2c) + 1) * 33);
+        attribute.mul_f32(attribute_weight)?;
+        let mut rent = Sum::from_f32(candidate.rent)?;
+        rent.mul_f32(rent_weight)?;
+        attribute.add(Sum::from_i32(rent.ftol_low_word()));
+        let mut score = attribute.ftol_low_word();
         if is_current {
             score = score.wrapping_add(50);
         }
@@ -1005,10 +1044,20 @@ pub struct InitializationRng {
     pub objective: u32,
 }
 
+/// Entry context for the speed calculation in0045b720 only. CRT startup can
+/// reach world construction before004b9c3c; ordinary menu loads and simulation
+/// creation run after the reset. This does not change host/global FP state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MovementSpeedPrecision {
+    BeforeFirstReset,
+    AfterReset,
+}
+
 /// Runtime inputs for0045c750. Speed rows and variation are configuration,
 /// not welfare payments; the resulting field is consumed by movement.
 pub struct InitializationInputs<'a> {
     pub movement: &'a MovementSettings,
+    pub movement_precision: MovementSpeedPrecision,
     pub preferences: &'a Preferences,
     pub objectives: &'a DailyObjectives,
     pub timetables: &'a Timetables,
@@ -1066,6 +1115,9 @@ impl Configuration {
         })
     }
 
+    /// Ordinary creation after the game precision reset. A caller modeling
+    /// the original early-startup entry must select BeforeFirstReset on the
+    /// returned movement-speed input explicitly.
     pub fn inputs<'a>(
         &'a self,
         commodities: &'a [Commodity; 32],
@@ -1074,6 +1126,7 @@ impl Configuration {
     ) -> InitializationInputs<'a> {
         InitializationInputs {
             movement: &self.movement,
+            movement_precision: MovementSpeedPrecision::AfterReset,
             preferences: &self.preferences,
             objectives: &self.objectives,
             timetables: &self.timetables,
@@ -2566,6 +2619,7 @@ impl Resident {
     /// Original0045b770/0045b850: advance the embedded movement state and
     /// publish position/yaw. Completion is reported on the following call;
     /// the original does not snap a short remaining segment to its target.
+    /// This models post-reset simulation and ordinary menu-triggered loads.
     pub fn advance_movement(&mut self, auxiliary: &mut [u8; 284]) -> bool {
         let read =
             |bytes: &[u8], at| f64::from(f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()));
@@ -2582,32 +2636,90 @@ impl Resident {
                 self.bytes[0x10c] = 1;
                 done = true;
             } else {
-                let dx = read(&self.bytes, 0x130) - read(&self.bytes, 0x124);
+                let start_x = read(&self.bytes, 0x124);
+                let target_x = read(&self.bytes, 0x130);
+                let retained_dx = Sum::from_f64(target_x).and_then(|mut value| {
+                    value.add(Sum::from_f64(start_x)?.negated());
+                    Ok(value)
+                });
+                let dx = target_x - start_x;
                 let dz = (read(&self.bytes, 0x138) - read(&self.bytes, 0x12c)) as f32;
-                write(&mut self.bytes, 0x13c, dx);
+                write(
+                    &mut self.bytes,
+                    0x13c,
+                    retained_dx.map_or(dx, |v| f64::from(v.to_f32())),
+                );
                 write(&mut self.bytes, 0x140, 0.);
                 write(&mut self.bytes, 0x144, f64::from(dz));
-                let x = dx + read(&self.bytes, 0x124);
+                // FST leaves X retained across its store; Z is reloaded from
+                // its f32 spill before adding the previous target position.
+                let x = retained_dx
+                    .and_then(|mut value| {
+                        value.add(Sum::from_f64(start_x)?);
+                        Ok(value.to_f32())
+                    })
+                    .map_or(dx + start_x, f64::from);
                 let z = f64::from(dz) + read(&self.bytes, 0x12c);
                 write(&mut self.bytes, 0x124, x);
                 write(&mut self.bytes, 0x12c, z);
                 self.bytes.copy_within(0x124..0x130, 0x100);
                 let vx = (read(&self.bytes, 0x100) - read(&self.bytes, 0xf4)) as f32;
                 let vz = (read(&self.bytes, 0x108) - read(&self.bytes, 0xfc)) as f32;
-                let length = (f64::from(vx) * f64::from(vx) + f64::from(vz) * f64::from(vz)).sqrt();
-                let inverse = 1. / length;
-                write(&mut self.bytes, 0x110, inverse * f64::from(vx));
-                write(&mut self.bytes, 0x114, inverse * 0.);
-                write(&mut self.bytes, 0x118, inverse * f64::from(vz));
-                write(&mut self.bytes, 0x11c, length);
+                let normalized = || -> Result<([f32; 3], f32), &'static str> {
+                    let vector = [Sum::from_f32(vx)?, Sum::default(), Sum::from_f32(vz)?];
+                    let squares = vector.map(|mut value| {
+                        value.mul(value);
+                        value
+                    });
+                    let mut length = squares[0];
+                    length.add(squares[1]);
+                    length.add(squares[2]);
+                    let length = length.sqrt()?;
+                    let mut inverse = Sum::from_i32(1);
+                    inverse.div(length)?;
+                    let vector = vector.map(|value| {
+                        let mut component = inverse;
+                        component.mul(value);
+                        component.to_f32()
+                    });
+                    Ok((vector, length.to_f32()))
+                };
+                let (vector, length) = normalized().unwrap_or_else(|_| {
+                    // Preserve the original masked-invalid zero/nonfinite
+                    // behavior outside the finite PC64 arithmetic helper.
+                    let length =
+                        (f64::from(vx) * f64::from(vx) + f64::from(vz) * f64::from(vz)).sqrt();
+                    let inverse = 1. / length;
+                    (
+                        [
+                            (inverse * f64::from(vx)) as f32,
+                            (inverse * 0.) as f32,
+                            (inverse * f64::from(vz)) as f32,
+                        ],
+                        length as f32,
+                    )
+                });
+                for (axis, value) in vector.into_iter().enumerate() {
+                    write(&mut self.bytes, 0x110 + axis * 4, f64::from(value));
+                }
+                write(&mut self.bytes, 0x11c, f64::from(length));
             }
         }
         if !done {
             let remaining = read(&self.bytes, 0x11c);
             let speed = read(&self.bytes, 0x120);
             if remaining > speed {
-                let x = read(&self.bytes, 0x110) * speed + read(&self.bytes, 0xf4);
-                let z = read(&self.bytes, 0x118) * speed + read(&self.bytes, 0xfc);
+                let step = |velocity, position| {
+                    let retained = || -> Result<f32, &'static str> {
+                        let mut value = Sum::from_f64(velocity)?;
+                        value.mul(Sum::from_f64(speed)?);
+                        value.add(Sum::from_f64(position)?);
+                        Ok(value.to_f32())
+                    };
+                    retained().map_or(velocity * speed + position, f64::from)
+                };
+                let x = step(read(&self.bytes, 0x110), read(&self.bytes, 0xf4));
+                let z = step(read(&self.bytes, 0x118), read(&self.bytes, 0xfc));
                 write(&mut self.bytes, 0xf4, x);
                 write(&mut self.bytes, 0xfc, z);
                 write(&mut self.bytes, 0x11c, remaining - speed);
@@ -3877,10 +3989,22 @@ impl Resident {
         self.initialize_personal_fields(age, class, &mut rng.constructor)?;
         rng.movement = rng.movement.wrapping_mul(0x343fd).wrapping_add(0x269ec3);
         let remainder = ((rng.movement >> 16) & 0x7fff) % 101;
-        //0045b720 retains each product in53-bit precision before its f32 store.
-        let speed = ((f64::from(remainder) * f64::from(f32::from_bits(0x3c23d70a)))
-            * f64::from(inputs.movement.variation)
-            + f64::from(inputs.movement.speed_by_age[age as usize])) as f32;
+        //0045b720 retains both products and the age-speed addition until FSTP.
+        // Only construction before the first game reset inherits CRT PC53.
+        let speed = match inputs.movement_precision {
+            MovementSpeedPrecision::BeforeFirstReset => {
+                ((f64::from(remainder) * f64::from(f32::from_bits(0x3c23d70a)))
+                    * f64::from(inputs.movement.variation)
+                    + f64::from(inputs.movement.speed_by_age[age as usize])) as f32
+            }
+            MovementSpeedPrecision::AfterReset => {
+                let mut speed = Sum::from_i32(remainder as i32);
+                speed.mul_f32(f32::from_bits(0x3c23d70a))?;
+                speed.mul_f32(inputs.movement.variation)?;
+                speed.add_f32(inputs.movement.speed_by_age[age as usize])?;
+                speed.to_f32()
+            }
+        };
         self.bytes[0x120..0x124].copy_from_slice(&speed.to_le_bytes());
         self.bytes[0x6a] = preference as u8;
         self.bytes[0x2c..0x3a].fill(0);
@@ -5507,6 +5631,8 @@ mod tests {
     #[test]
     #[ignore = "requires original repeated movement observations"]
     fn matches_native_resident_movement() {
+        // The producer uses PC53. Replaying its same inputs through the
+        // original at PC64 leaves all stored movement observations unchanged.
         let data = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_MOVEMENT")).unwrap();
         assert_eq!(&data[..8], b"MTMOTION");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
@@ -7195,6 +7321,7 @@ mod tests {
             };
             let personal = super::InitializationInputs {
                 movement: &movement,
+                movement_precision: MovementSpeedPrecision::AfterReset,
                 preferences: &preferences,
                 objectives: &objectives,
                 timetables: &timetables,
@@ -7419,6 +7546,8 @@ mod tests {
     #[test]
     #[ignore = "requires original complete resident constructor observations"]
     fn matches_native_resident_constructor() {
+        // This isolated producer inherits PC53. Original0045b720 at PC64
+        // gives the same speed stores for every retained constructor input.
         let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_CONSTRUCTOR")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRCTOR2");
@@ -7466,6 +7595,7 @@ mod tests {
             at += 0x90;
             let inputs = super::InitializationInputs {
                 movement: &movement,
+                movement_precision: MovementSpeedPrecision::AfterReset,
                 preferences: &preferences,
                 objectives: &objectives,
                 timetables: &timetables,
