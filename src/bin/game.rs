@@ -70,6 +70,8 @@ mod navigation;
 mod navigator;
 #[path = "frontend/notice_panel.rs"]
 pub mod notice_panel;
+#[path = "frontend/pause_banner.rs"]
+mod pause_banner;
 #[path = "frontend/preferred_token.rs"]
 mod preferred_token;
 #[path = "frontend/present.rs"]
