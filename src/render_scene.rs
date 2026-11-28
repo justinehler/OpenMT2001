@@ -15,6 +15,8 @@ use crate::{
 use glam::{Mat4, Vec3};
 use std::{collections::BTreeMap, sync::Arc};
 
+mod station_factories;
+
 /// Original zero-rotation auxiliary pose used by initialized buildings.
 /// 4f24d0 negates the matrix's local-Z row before submitting vertices.
 #[derive(Clone, Copy, Debug)]
@@ -139,6 +141,7 @@ pub struct Scene {
     street_furniture: Vec<(crate::street_furniture::Kind, usize)>,
     street_furniture_era: u32,
     street_furniture_detail: u8,
+    station_factories: Vec<usize>,
 }
 
 /// Original model-space inputs for the portions of shared material batches
@@ -341,6 +344,7 @@ fn assemble_with_style_internal(
     let mut saved_phase = None;
     let mut street_furniture_era = 0;
     let mut furniture_families = BTreeMap::new();
+    let mut station_factory_families = std::collections::BTreeSet::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
     let mut saved_commodity_rows = None;
@@ -920,8 +924,10 @@ fn assemble_with_style_internal(
         let archive = archive.unwrap();
         let directory = ArchiveIndex::parse(directory.unwrap(), archive.len() as u64)
             .map_err(|e| e.to_string())?;
+        // Station factories reuse industrial textures first registered in
+        // group 11, before the City Surround group (4c0240) is loaded.
         let scenery_records =
-            crate::scene_assets::scenery_textures(&image, &directory, archive, 1280)?;
+            crate::scene_assets::static_detail_textures(&image, &directory, archive, 1280)?;
         let (pages, scenery_regions) =
             crate::scene_assets::scenery_pages_with_material_loader(&scenery_records, |image| {
                 textures.as_deref_mut().map_or_else(
@@ -1022,7 +1028,10 @@ fn assemble_with_style_internal(
             crate::street_furniture::BENCH,
             crate::street_furniture::SUBWAY,
             crate::street_furniture::PARKING,
-        ] {
+        ]
+        .into_iter()
+        .chain(station_factories::paths())
+        {
             let entry = directory
                 .find(mesh_path)
                 .ok_or_else(|| format!("missing original city mesh {mesh_path}"))?;
@@ -1073,6 +1082,7 @@ fn assemble_with_style_internal(
                 }
             }
             use crate::street_furniture::{self, Kind, Pose};
+            let factory_pose = station_factories::pose(mesh_path);
             let kind = match mesh_path {
                 street_furniture::EARLY_LAMP => Some(Kind::EarlyLamp),
                 street_furniture::LATE_LAMP => Some(Kind::LateLamp),
@@ -1123,6 +1133,8 @@ fn assemble_with_style_internal(
                         )
                     })
                     .collect()
+            } else if let Some(pose) = factory_pose {
+                vec![(pose, 0xffffffff)]
             } else {
                 vec![(Pose::identity([0.; 3]), 0xffffffff)]
             };
@@ -1152,6 +1164,9 @@ fn assemble_with_style_internal(
                         return Err("city mesh texture index out of bounds".into());
                     }
                     let family = first_family + usize::from(part.texture);
+                    if factory_pose.is_some() {
+                        station_factory_families.insert((family, 0));
+                    }
                     let start = batches.get(&(family, 0)).map_or(0, Vec::len);
                     let mut source_normals = Vec::new();
                     for index in part.vertex_indices() {
@@ -1893,6 +1908,16 @@ fn assemble_with_style_internal(
             Ok((kind, index))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let station_factories = station_factory_families
+        .into_iter()
+        .map(|key| {
+            let vertices = batches.get(&key).ok_or("station factory batch missing")?;
+            draws
+                .iter()
+                .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
+                .ok_or_else(|| "station factory draw missing".to_owned())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let draws = draws
         .into_iter()
         .map(|draw| OwnedDraw {
@@ -1936,8 +1961,10 @@ fn assemble_with_style_internal(
         street_furniture,
         street_furniture_era,
         street_furniture_detail: 2,
+        station_factories,
     };
     scene.apply_street_furniture_options(street_furniture_era, 2)?;
+    scene.set_station_factory_detail(2)?;
     Ok(scene)
 }
 
@@ -2118,6 +2145,11 @@ struct Animation {
 }
 
 impl Scene {
+    /// 452570 submits the fixed station-detail list at Medium and High detail.
+    pub fn set_station_factory_detail(&mut self, detail: u8) -> Result<Vec<usize>, String> {
+        station_factories::set_detail(&mut self.draws, &self.station_factories, detail)
+    }
+
     ///4b6940's era selection and452600's nonzero-detail bench gate.
     pub fn apply_street_furniture_options(
         &mut self,
