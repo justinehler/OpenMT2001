@@ -652,3 +652,91 @@ fn ordinary_level_blockcam_uses_player_block_entry_and_information_target() {
         matches!(super::super::information_target(scripted.active.selected, &[]), super::super::InformationTarget::Block(hit) if hit == selected)
     );
 }
+
+#[test]
+fn tutorial_blockcam_flies_into_block_view_while_camera_control_is_disabled() {
+    use super::super::{CameraCallbackInput, LegacyCamera, legacy_camera_callback};
+    let assets = crate::selection::Assets::descriptor_test_assets(
+        vec![openmt2001::board::Block {
+            id: 7,
+            name: "Authored block 7".into(),
+            text_id: 0,
+            kind: 0,
+            center: [200., -150.],
+            size: [82.; 2],
+            pavement_color: 0,
+            flags: 0,
+            street_sides: 0,
+        }],
+        [0; 116],
+    );
+    // A fresh tutorial starts on the passive mode6 overview.
+    let mut view = View {
+        active: fresh(),
+        strategic: false,
+        normal_return: None,
+    };
+    let overview = view.active.camera;
+    // The same reset boundaries as Producer::attach on a fresh world.
+    let mut owner = new_process_owner().unwrap();
+    owner.reset_yaw();
+    owner.world_reset_final_fields();
+    let mut core = Core::new(owner);
+    core.project(overview).unwrap();
+    assert_eq!(core.kind(), 6);
+    assert!(!core.legacy_callback_enabled(view.strategic));
+    // EVENT_Level: BlockCam (Camera.SetMode(BLOCKCAM, 7)), then
+    // Interface.DisableCameraControl before the first callback.
+    core.event(
+        &mut view,
+        Event::script_block(7, &assets).unwrap(),
+        Resolved::Local,
+        &assets,
+    )
+    .unwrap();
+    assert_eq!(core.kind(), 12);
+    assert!(core.legacy_callback_enabled(view.strategic));
+    let mut active = view.active;
+    let mut block_view = active.controls;
+    let (block_eye, block_target) = block_view.tick([false; 4]);
+    // The player holds every key and drags with both buttons: none of it may
+    // reach the camera, but the callback still eases toward the block.
+    let held = CameraCallbackInput {
+        keys: [true; 4],
+        drag: [14, 9],
+        buttons: [true, true],
+    }
+    .gated(true);
+    let mut sampled = Vec::new();
+    for _ in 0..250 {
+        legacy_camera_callback(
+            LegacyCamera {
+                controls: &mut active.controls,
+                building_angle: &mut active.building_angle,
+                building_camera: active.building,
+                saved_camera: active.saved,
+                inertia: &mut active.inertia,
+            },
+            held,
+            50,
+            false,
+            false,
+        )
+        .unwrap();
+        sampled.push(active.inertia.sample(0.).unwrap());
+    }
+    assert_eq!(active.controls.center, view.active.controls.center);
+    assert_eq!(active.controls.angle, view.active.controls.angle);
+    // The camera has left the overview within the first second ...
+    assert!(sampled[50].0[1] < overview.eye[1] - 200.);
+    // ... and after five seconds holds the close, low block view.
+    let (eye, target) = *sampled.last().unwrap();
+    for (actual, expected) in eye
+        .into_iter()
+        .zip(block_eye)
+        .chain(target.into_iter().zip(block_target))
+    {
+        assert!((actual - expected).abs() < 0.01, "{eye:?} {target:?}");
+    }
+    assert!(eye[1] < 200.);
+}
