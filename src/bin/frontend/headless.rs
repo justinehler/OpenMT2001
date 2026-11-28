@@ -1004,6 +1004,8 @@ mod tests {
         assert!(with(&["--scenario", "x", "--autosave-dir", "d"]).is_err());
         assert!(with(&["--save", "y", "--autosaves", "1"]).is_err());
         assert!(with(&["--save", "y", "--autosave-dir", "d", "--autosaves", "0"]).is_err());
+        assert!(with(&["--scenario", "x", "--checkpoint-saves", "d"]).is_err());
+        assert!(with(&["--save", "y", "--checkpoint-saves", "d", "--rng"]).is_ok());
     }
 
     #[test]
