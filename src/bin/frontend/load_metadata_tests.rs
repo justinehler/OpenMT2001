@@ -22,7 +22,7 @@ fn load_panel_entries_read_metadata_independently_of_world_payloads() {
             fs::write(&path, &case.bytes).unwrap();
             let save_entries = openmt2001::save_menu::list_slots(&root).unwrap();
             assert_eq!(save_entries.len(), 1);
-            let entry = Entry::read(path, ascii("test"), None, None);
+            let entry = Entry::read(path, "test".into(), None, None);
             (case, save_entries[0].metadata.clone(), entry.metadata)
         })
         .collect::<Vec<_>>();

@@ -144,9 +144,10 @@ impl Profiles {
 }
 /// A stored or entered profile name: printable Windows-1252 text within the
 /// editor's 128-byte hard cap. Width and the filename filter are input rules
-/// (443aa0), so names saved before they applied still load.
+/// (443aa0), so names saved before they applied still load. 495ed0 refuses
+/// only an empty name: one made of spaces is a name like any other.
 fn valid_name(name: &str) -> bool {
-    !name.trim().is_empty()
+    !name.is_empty()
         && name.chars().count() <= ui::text_field::HARD_CAP
         && name
             .chars()
@@ -390,10 +391,9 @@ impl Profile {
                 dialog.buttons = [0x664, 0x665];
                 dialog.button_count = 2;
                 dialog.callback = 0x498c70;
+                // 498f15 passes the stored code-page name itself to 441150.
                 let name = self.store.names.get(self.chosen?)?;
-                let mut argument = [0; 96];
-                argument[..name.len()].copy_from_slice(name.as_bytes());
-                dialog.arguments[0] = Argument::Name(argument);
+                dialog.arguments[0] = Argument::name(&ui::text_field::code_page(name));
                 dialog.argument_count = 1;
             }
         }
@@ -1192,6 +1192,7 @@ mod tests {
     }
     fn strings() -> Vec<Vec<u8>> {
         let mut strings = vec![vec![]; 0x6cf];
+        strings[0] = ui::text_field::synthetic_font().1;
         for (id, text) in [
             (0x663, "Delete Profile"),
             (0x664, "Yes"),
@@ -1209,7 +1210,63 @@ mod tests {
         strings
     }
     fn text(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| char::from(b + 32)).collect()
+        bytes
+            .iter()
+            .map(|&glyph| match glyph {
+                112..=175 => char::from(glyph - 112 + 0xc0),
+                _ => char::from(glyph + 32),
+            })
+            .collect()
+    }
+    fn delete_prompt_text(name: &str) -> String {
+        let mut profile = profile(PathBuf::from("unused"));
+        profile.store.names[1] = name.into();
+        profile.activate(1);
+        let dialog = profile.generic_prompt().unwrap();
+        text(&dialog.paragraphs(&strings()).unwrap()[0])
+    }
+    #[test]
+    fn delete_prompt_shows_an_accented_name_through_row_0() {
+        assert_eq!(
+            delete_prompt_text("Ren\u{e9}e"),
+            "Do you want to delete profile Ren\u{e9}e?"
+        );
+    }
+    #[test]
+    fn delete_prompt_shows_a_full_128_byte_name() {
+        // Since #535 a stored name may fill the field's 128-byte cap; the
+        // original passes the whole stored name (498f15).
+        let name = format!("{}\u{e9}", "N".repeat(127));
+        assert_eq!(name.len(), 129, "two UTF-8 bytes, one code-page byte");
+        assert_eq!(
+            delete_prompt_text(&name),
+            format!("Do you want to delete profile {name}?")
+        );
+    }
+    #[test]
+    fn all_space_name_registers_and_names_compare_exactly() {
+        let root = std::env::temp_dir().join(format!(
+            "openmt-profile-names-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut profile = profile(root.clone());
+        // 495ed0 refuses only an empty name, and 498580 compares names byte
+        // for byte, so `bob` is a different player from `Bob`.
+        for name in ["   ", "bob"] {
+            profile.activate(0);
+            profile.input(name);
+            profile.activate(0);
+            assert!(profile.error.is_none(), "{name:?}: {:?}", profile.error);
+            assert!(!profile.prompt_pending(), "{name:?} is not a duplicate");
+        }
+        assert_eq!(profile.store.names, ["Alice", "Bob", "   ", "bob"]);
+        let reloaded = Profiles::load(root.clone()).unwrap();
+        assert_eq!(reloaded.names, profile.store.names);
+        let _ = fs::remove_dir_all(root);
     }
     #[test]
     fn duplicate_warning_restores_editable_name_and_keeps_modal_frame_faded() {

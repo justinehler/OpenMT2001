@@ -413,9 +413,41 @@ pub fn write_new(profile_root: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     Err("Unable to allocate a unique V2 save slot".into())
 }
 
-fn validate_stem(name: &str, max_bytes: usize) -> Result<(), String> {
+/// The only save-name length the original has: the name field's 128-byte
+/// hard cap (443aa0). Its 155 px width limit (496250) is an input rule.
+pub const NAME_CAP: usize = 128;
+
+/// Whether two save filenames name the same file on a case-insensitive file
+/// system (Windows, macOS by default). Those fold accented letters as well,
+/// so `CAFÉ.sav` and `café.sav` are one file there.
+pub fn same_file_name(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .eq(b.chars().flat_map(char::to_lowercase))
+}
+
+/// `new_name` is a typed name, which must be Windows-1252 text like the
+/// field's. An existing slot's stem is already a real file (an imported V2
+/// save may have any Unicode name), so only its length is checked.
+fn validate_stem(name: &str, new_name: bool) -> Result<(), String> {
+    if new_name
+        && name
+            .chars()
+            .any(|c| crate::code_page::windows_1252(c).is_none())
+    {
+        return Err("Save name has characters outside Windows-1252".into());
+    }
+    // One code-page byte per character; an unmapped character in an
+    // imported stem stands for its `?` byte.
+    if name.chars().count() > NAME_CAP {
+        return Err(format!("Save name is longer than {NAME_CAP} characters"));
+    }
+    // Most file systems allow 255 bytes per name, counted in UTF-8 on
+    // Linux and macOS: 128 accented letters need 256.
+    if name.len() + ".sav".len() > 255 {
+        return Err("Save name is too long for the file system".into());
+    }
     if name.is_empty()
-        || name.len() > max_bytes
         || name == "."
         || name == ".."
         || name.ends_with(' ')
@@ -476,14 +508,11 @@ fn write_target_inner(
             stem
         }
     };
-    validate_stem(name, 120)?;
+    validate_stem(name, matches!(target, Target::NewName(_)))?;
     let existing = list_slots(profile_root)?;
     let destination_id = match target {
         Target::NewName(_) => {
-            if existing
-                .iter()
-                .any(|slot| slot.name.eq_ignore_ascii_case(name))
-            {
+            if existing.iter().any(|slot| same_file_name(&slot.name, name)) {
                 return Err("A saved game with this name already exists".into());
             }
             format!("{name}.sav")
@@ -1013,7 +1042,24 @@ mod tests {
             .is_err()
         );
         assert!(write_target(&root, &Target::NewName("CON".into()), &revised).is_err());
-        assert!(write_target(&root, &Target::NewName("x".repeat(121)), &revised).is_err());
+        // 443aa0's 128-byte cap counts code-page bytes, one per character.
+        assert!(
+            write_target(&root, &Target::NewName("x".repeat(129)), &revised)
+                .unwrap_err()
+                .contains("longer than 128")
+        );
+        assert!(
+            write_target(&root, &Target::NewName("\u{4e2d}".into()), &revised)
+                .unwrap_err()
+                .contains("Windows-1252")
+        );
+        // 126 accented letters are 252 UTF-8 bytes: with `.sav`, past the
+        // 255 bytes Linux and macOS allow in one name.
+        assert!(
+            write_target(&root, &Target::NewName("\u{e9}".repeat(126)), &revised)
+                .unwrap_err()
+                .contains("file system")
+        );
         assert_eq!(fs::read(&path).unwrap(), first);
         let id = list_slots(&root).unwrap().remove(0).id;
         assert_eq!(
@@ -1029,6 +1075,31 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), revised);
         delete_slot(&root, "test1-inprogressgame.sav").unwrap();
         assert!(list_slots(&root).unwrap().is_empty());
+
+        for name in ["x".repeat(128), "\u{e9}".repeat(125)] {
+            let path = write_target(&root, &Target::NewName(name.clone()), &first).unwrap();
+            assert_eq!(path.file_name().unwrap(), format!("{name}.sav").as_str());
+            delete_slot(&root, &format!("{name}.sav")).unwrap();
+        }
+        // A name that differs only in case, accented letters included, is
+        // the same file on Windows and macOS.
+        write_target(&root, &Target::NewName("caf\u{e9}".into()), &first).unwrap();
+        assert!(
+            write_target(&root, &Target::NewName("CAF\u{c9}".into()), &revised)
+                .unwrap_err()
+                .contains("already exists")
+        );
+        // An imported save's Unicode stem is already a file: it may be
+        // rewritten though a typed name could not use it.
+        let imported = root.join("saves").join("\u{4e2d}.sav");
+        fs::write(&imported, &first).unwrap();
+        write_target(
+            &root,
+            &Target::ExistingSlot("\u{4e2d}.sav".into()),
+            &revised,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&imported).unwrap(), revised);
         fs::remove_dir_all(root).unwrap();
     }
 }

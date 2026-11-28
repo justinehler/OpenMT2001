@@ -16,6 +16,7 @@ pub mod category_reset;
 pub mod chimney_smoke;
 pub mod city_structures;
 pub mod clock;
+pub mod code_page;
 pub mod compatibility;
 pub mod decimal_text;
 pub mod economy;

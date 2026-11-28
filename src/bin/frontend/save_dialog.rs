@@ -599,18 +599,10 @@ impl View {
             Modal::Delete => (0x65e, 0x660),
             Modal::Name => return None,
         };
-        let selected_name = self.selected_name()?;
-        let mut name = [0u8; 96];
-        // The original prompt font accepts printable ASCII only. Imported V2
-        // saves may have Unicode names; keep the opaque slot ID intact and
-        // substitute unsupported glyphs in the confirmation text alone.
-        for (at, character) in name.iter_mut().take(95).zip(selected_name.chars()) {
-            *at = if (' '..='~').contains(&character) {
-                character as u8
-            } else {
-                b'?'
-            };
-        }
+        // 497f60 and 4981d0 pass the selected stem's code-page bytes, drawn
+        // through language row 0. A character outside Windows-1252 (an
+        // imported V2 save) shows as `?`; the slot ID itself is untouched.
+        let name = ui::text_field::code_page(self.selected_name()?);
         Some((
             crate::human_dialog::Dialog {
                 // 497f60 and 4981d0 never set a portrait on the 88c0d4 owner.
@@ -618,7 +610,7 @@ impl View {
                 title,
                 body,
                 arguments: [
-                    crate::human_dialog::Argument::Name(name),
+                    crate::human_dialog::Argument::name(&name),
                     crate::human_dialog::Argument::Integer(0),
                     crate::human_dialog::Argument::Integer(0),
                 ],
@@ -803,12 +795,13 @@ impl View {
             return None;
         }
         // The original's direct write replaces an existing file whose name
-        // differs only in case, since Windows filenames ignore case.
+        // differs only in case, since Windows filenames ignore case,
+        // accented letters included.
         Some(
             match self
                 .slots
                 .iter()
-                .find(|slot| slot.id.eq_ignore_ascii_case(&file))
+                .find(|slot| crate::save_menu::same_file_name(&slot.id, &file))
             {
                 Some(slot) => Action::ExistingSlot(slot.id.clone()),
                 None => Action::NewName(self.name.clone()),
@@ -1206,10 +1199,12 @@ mod tests {
         view.mouse(&assets, Some([150., 375.]), true);
         view.mouse(&assets, Some([150., 375.]), false);
         assert_eq!(view.modal, Some(Modal::Overwrite));
-        view.slots[0].name = "caf\u{e9}".into();
+        // 497f60 passes code-page bytes; a character outside Windows-1252
+        // (an imported V2 name) is the only one shown as `?`.
+        view.slots[0].name = "caf\u{e9} \u{4e2d}".into();
         let (unicode_dialog, _) = view.generic_prompt().unwrap();
         assert!(matches!(unicode_dialog.arguments[0],
-            crate::human_dialog::Argument::Name(name) if &name[..5] == b"caf?\0"));
+            crate::human_dialog::Argument::Name(name) if &name[..7] == b"caf\xe9 ?\0"));
         assert_eq!(
             view.slots[0].id, "prior.sav",
             "display fallback cannot change the target"
@@ -1384,6 +1379,17 @@ mod tests {
         view.name = "PRIOR".into();
         assert_eq!(view.enter(), Some(Action::ExistingSlot("prior.sav".into())));
         assert_eq!(view.modal, None);
+
+        // Windows folds accented letters too, so CAF\u{c9} is caf\u{e9}.sav's
+        // file: Return replaces it rather than writing a second file that
+        // would collide there.
+        view.slots[0].id = "caf\u{e9}.sav".into();
+        view.modal = Some(Modal::Name);
+        view.name = "CAF\u{c9}".into();
+        assert_eq!(
+            view.enter(),
+            Some(Action::ExistingSlot("caf\u{e9}.sav".into()))
+        );
     }
     #[test]
     #[ignore = "requires original v1.4 Save Game mesh, fonts, USA language and a supplied save"]
