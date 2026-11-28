@@ -42,8 +42,13 @@ They contain only the engine; you still need your own game files.
    `libxkbcommon0`) if they are missing.
 3. Run `openmt2001` (or `openmt2001.exe`) from a terminal with the same
    arguments as `game` below, pointing at your extracted v1.4 files, for
-   example `./openmt2001 --menu --assets … --scene-root … --executable …`.
-   Install FFmpeg for movies and compressed audio.
+   example `./openmt2001 --menu --assets /path/to/installer --scene-root /path/to/max
+   --executable /path/to/v1.4/mc.exe --intro-map /path/to/v1.4/scripts/MAPS/intromap.lua
+   --language /path/to/v1.4/language/usa` (on one line).
+   Install FFmpeg on PATH, or pass `--ffmpeg /path/to/ffmpeg`; it is required
+   for movies and compressed audio, including when using `--menu`.
+   Without flags, paths are relative to the current directory: `assets/`,
+   `max/`, `mc.exe`, `scripts/MAPS/intromap.lua` and `language/usa/`.
 
 ## Running a source build
 

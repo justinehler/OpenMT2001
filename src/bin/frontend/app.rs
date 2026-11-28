@@ -900,30 +900,17 @@ impl App {
     }
 }
 pub fn run() -> Result<(), Error> {
-    let mut root = PathBuf::from(
-        "Original Distribution/Monopoly Tycoon ISO 2001 Archive.org/Extracted Installer",
-    );
-    let local_ffmpeg = PathBuf::from(
-        "work/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe",
-    );
+    let mut root = PathBuf::from("assets");
     let mut ffmpeg = std::env::var_os("OPENMT2001_FFMPEG")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if cfg!(windows) && local_ffmpeg.exists() {
-                local_ffmpeg
-            } else {
-                PathBuf::from("ffmpeg")
-            }
-        });
-    let mut scene_root = PathBuf::from(
-        "Original Distribution/Monopoly Tycoon ISO 2001 Archive.org/Extracted Disc/Monopoly Tycoon/max",
-    );
-    let mut executable = PathBuf::from("work/patch14/payload/Essential/mc.exe");
-    let mut intro_map = PathBuf::from("work/patch14/payload/Essential/scripts/MAPS/intromap.lua");
+        .unwrap_or_else(|| PathBuf::from("ffmpeg"));
+    let mut scene_root = PathBuf::from("max");
+    let mut executable = PathBuf::from("mc.exe");
+    let mut intro_map = PathBuf::from("scripts/MAPS/intromap.lua");
     let mut quality = String::from("low");
     let mut save_root = None;
     let mut profile_root = crate::profile::default_directory();
-    let mut language = PathBuf::from("work/patch14/payload/US/language/usa");
+    let mut language = PathBuf::from("language/usa");
     let mut compatibility = crate::compatibility::Mode::default();
     let mut skip_splash = false;
     let mut menu_onload = false;
@@ -1014,6 +1001,19 @@ pub fn run() -> Result<(), Error> {
     if !matches!(quality.as_str(), "low" | "medium" | "high") {
         return Err("intro quality must be low, medium or high".into());
     }
+    let root = std::path::absolute(root)?;
+    let scene_root = std::path::absolute(scene_root)?;
+    let executable = std::path::absolute(executable)?;
+    let intro_map = std::path::absolute(intro_map)?;
+    let language = std::path::absolute(language)?;
+    openmt2001::player_startup::validate_paths(
+        &root,
+        &scene_root,
+        &executable,
+        &intro_map,
+        &language,
+    )?;
+    openmt2001::player_startup::check_ffmpeg(&ffmpeg)?;
     let assets = Assets::load(&root, &ffmpeg, skip_splash)?;
     let music_path = root.join("Standard/sound/music/music_intro.wma");
     let music_decoder = ffmpeg.clone();
