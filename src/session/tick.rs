@@ -883,7 +883,9 @@ impl Session<'_> {
                             let mut outgoing_auctions=Vec::new();
                             let mut prepared_room=false;
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)|live_commands::Command::EventCard(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::Auction{..}|live_commands::Command::CategoryReady{..}|live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)|live_commands::Command::EventCard(_)
+                                    // Kind 9 status and kind 10 removal of a departed player (0x450670).
+                                    |live_commands::Command::OutcomeNotice{..}|live_commands::Command::Eliminate{..}) {
                                     return Err(crate::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
