@@ -242,6 +242,11 @@ fn every_message_roundtrips_and_transfer_has_independent_wire_bytes() {
             seed: u32::MAX,
         }),
         transfer(),
+        Message::Chat(chat::Packet {
+            sender: 2,
+            recipients: 0b100100,
+            text: b"hello".to_vec(),
+        }),
     ] {
         let expected = frame(message, 0x0807060504030201);
         assert_eq!(
@@ -254,6 +259,29 @@ fn every_message_roundtrips_and_transfer_has_independent_wire_bytes() {
     expected.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     expected.extend_from_slice(&[51, 6, 0x85, 0xff, 0xff, 0xff, 0x78, 0x56, 0x34, 0x12]);
     assert_eq!(bytes(transfer(), 0x0807060504030201), expected);
+}
+
+#[test]
+fn chat_outside_the_six_rows_or_text_domain_is_rejected() {
+    for packet in [
+        chat::Packet {
+            sender: 1,
+            recipients: 0b100_0000,
+            text: b"x".to_vec(),
+        },
+        chat::Packet {
+            sender: 1,
+            recipients: 0,
+            text: vec![b'x'; chat::Packet::MAX_TEXT + 1],
+        },
+        chat::Packet {
+            sender: 1,
+            recipients: 0,
+            text: b"a\0b".to_vec(),
+        },
+    ] {
+        assert!(codec::encode(&frame(Message::Chat(packet), 1)).is_err());
+    }
 }
 
 #[test]

@@ -836,6 +836,14 @@ impl SceneInputs {
                             }
                             FreshRequest::DismissMarketShare => host.dismiss_market_share(),
                             FreshRequest::ToggleSpeed => host.toggle_speed(),
+                            FreshRequest::Chat(text, recipients) => {
+                                if let Some(connection) = &session.connected
+                                    && let Err(error) =
+                                        connection.worker.submit_chat(text, Some(recipients))
+                                {
+                                    host.fail(error);
+                                }
+                            }
                             FreshRequest::ComparisonMode(mode) => {
                                 if let Err(error) = host.select_comparison(&session, &assets, mode)
                                 {

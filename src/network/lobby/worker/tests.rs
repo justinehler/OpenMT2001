@@ -610,3 +610,214 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
             .is_err()
     );
 }
+
+fn chat_lines(handle: &Handle, count: usize) -> network::chat::View {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Some(view) = handle.chat_view()
+            && view.lines.len() == count
+        {
+            return view;
+        }
+        if let Some(Update::Failed(error)) = handle.poll() {
+            panic!("{error}");
+        }
+        assert!(
+            Instant::now() < deadline,
+            "chat ring did not reach {count} lines"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+fn chat_join(host: &Handle, name: &[u8], token: i8) -> Handle {
+    let initial = host.chat_view().unwrap();
+    let view = match wait(host, |u| matches!(u, Update::Lobby(_))) {
+        Update::Lobby(view) => view,
+        _ => unreachable!(),
+    };
+    let join = spawn_worker(
+        owner(),
+        Open::Join {
+            selection: Selection {
+                address: view.address,
+                session: session(host.owner, host.attempt).unwrap(),
+                snapshot: initial.snapshot,
+            },
+            name: name.to_vec(),
+            token,
+        },
+    )
+    .unwrap();
+    wait(&join, |u| matches!(u, Update::Lobby(_)));
+    join
+}
+#[test]
+fn chat_submit_transport_receive_ring_group_selected_and_admitted_identity() {
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
+    // Keep the initial update for chat_join, which also waits for admission.
+    let deadline = Instant::now() + WAIT;
+    while host.chat_view().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let first = chat_join(&host, b"Blue", 3);
+    let second = chat_join(&host, b"Green", 4);
+    let deadline = Instant::now() + WAIT;
+    while first.chat_view().unwrap().snapshot.capacity().0 != 3 {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(host.submit_chat(b"lobby".to_vec(), None).unwrap());
+    for peer in [&host, &first, &second] {
+        let view = chat_lines(peer, 1);
+        assert_eq!(view.lines[0].text, b"Host: lobby");
+        assert_eq!(view.lines[0].token, 0);
+    }
+    let first_view = first.chat_view().unwrap();
+    let local = first_view
+        .snapshot
+        .local_row(first_view.local_peer)
+        .unwrap();
+    let target = first_view
+        .snapshot
+        .local_row(second.chat_view().unwrap().local_peer)
+        .unwrap();
+    let mut recipients = network::chat::Recipients::default();
+    recipients.all();
+    assert_eq!(recipients.0, [true; SLOTS]);
+    assert_eq!(recipients.mask(local).count_ones(), 5);
+    recipients.clear();
+    assert_eq!(recipients.0, [false; SLOTS]);
+    assert!(
+        !first
+            .submit_chat(b"nobody".to_vec(), Some(recipients))
+            .unwrap()
+    );
+    recipients.0[local] = true;
+    assert!(
+        !first
+            .submit_chat(b"self".to_vec(), Some(recipients))
+            .unwrap()
+    );
+    recipients.0[target] = true;
+    assert!(
+        first
+            .submit_chat(b"private".to_vec(), Some(recipients))
+            .unwrap()
+    );
+    for peer in [&first, &second] {
+        let view = chat_lines(peer, 2);
+        assert_eq!(view.lines[1].text, b"Blue: private");
+        assert_eq!((view.lines[1].row, view.lines[1].token), (local, 3));
+        let colors = [
+            0xffbd0000, 0xff0d00f1, 0xff00bd00, 0xff0000bd, 0xff00bdbd, 0xffbdbd00, 0xffbd00bd,
+            0xff7f7f7f, 0xffbd7f00, 0xffbd7f7f,
+        ];
+        assert_eq!(view.lines[1].color(&colors), 0xff0000bd);
+    }
+    // The relay host was not selected and did not display the private line.
+    assert_eq!(host.chat_view().unwrap().lines.len(), 1);
+    assert!(!first.submit_chat(vec![], None).unwrap());
+    assert!(first.submit_chat(b"everyone".to_vec(), None).unwrap());
+    chat_lines(&host, 2);
+    chat_lines(&first, 3);
+    chat_lines(&second, 3);
+    // Earlier lines follow the sender's current admitted row: a character change
+    // recolours them on every peer.
+    first
+        .action(Action::Character {
+            row: local,
+            direction: 1,
+        })
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    let token = loop {
+        let token = first.chat_view().unwrap().snapshot.rows[local].player.token;
+        if token != 3 {
+            break token;
+        }
+        assert!(Instant::now() < deadline, "character change not admitted");
+        thread::sleep(Duration::from_millis(10));
+    };
+    for peer in [&host, &first, &second] {
+        let deadline = Instant::now() + WAIT;
+        while peer
+            .chat_view()
+            .unwrap()
+            .lines
+            .iter()
+            .any(|l| l.row == local && l.token != token)
+        {
+            assert!(Instant::now() < deadline, "chat line kept stale colour");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    // The same worker and ring survive lobby -> validated city binding.
+    first.action(Action::Ready).unwrap();
+    second.action(Action::Ready).unwrap();
+    wait(
+        &host,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.start_enabled()),
+    );
+    host.action(Action::Start).unwrap();
+    wait(&host, |u| matches!(u, Update::Prepare(_)));
+    let content = network::Content {
+        level: settings().level,
+        parameter_bits: settings().parameter_bits,
+        difficulty: settings().difficulty,
+        fingerprint: [7; 32],
+    };
+    host.prepared(Ok(content)).unwrap();
+    for peer in [&first, &second] {
+        wait(peer, |u| matches!(u, Update::Prepare(_)));
+        peer.prepared(Ok(content)).unwrap();
+    }
+    for peer in [&host, &first, &second] {
+        wait(peer, |u| matches!(u, Update::Validated));
+        peer.bind_world(42).unwrap();
+    }
+    assert_eq!(host.chat_view().unwrap().lines[0].text, b"Host: lobby");
+    // Selected submission after actual binding uses the same production route.
+    assert!(
+        first
+            .submit_chat(b"city".to_vec(), Some(recipients))
+            .unwrap()
+    );
+    chat_lines(&first, 4);
+    chat_lines(&second, 4);
+    // A client cannot choose who a line is from: the host attributes it to the admitted
+    // connection it arrived on, whatever sender the payload names, and never relays it
+    // back to that connection.
+    let connection = {
+        let state = first.owner.lock().unwrap();
+        Connection {
+            attempt: first.attempt,
+            slot: 0,
+            identity: state.peers[0].as_ref().unwrap().identity,
+        }
+    };
+    for sender in [1, 0xdeadbeef] {
+        first
+            .owner
+            .send(
+                connection,
+                Message::Chat(network::chat::Packet {
+                    sender,
+                    recipients: 0,
+                    text: b"forged".to_vec(),
+                }),
+            )
+            .unwrap();
+    }
+    for (peer, count) in [(&host, 4), (&second, 6)] {
+        let view = chat_lines(peer, count);
+        for line in &view.lines[count - 2..] {
+            assert_eq!(line.text, b"Blue: forged");
+            assert_eq!((line.row, line.token), (local, token));
+        }
+    }
+    // No relay returns to first: its four submits each echoed exactly once;
+    // no-recipient, self-only and empty submits never occupied the ring.
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(first.chat_view().unwrap().lines.len(), 4);
+}

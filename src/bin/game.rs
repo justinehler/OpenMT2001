@@ -160,6 +160,8 @@ mod tutorial_visual;
 #[path = "frontend/vehicle_scene.rs"]
 pub mod vehicle_scene;
 
+#[path = "frontend/chat_panel.rs"]
+pub mod chat_panel;
 #[path = "frontend/city_ownership.rs"]
 pub mod city_ownership;
 #[path = "frontend/city_people.rs"]

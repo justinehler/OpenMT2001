@@ -43,6 +43,7 @@ pub struct Ticket {
     pub expected: Option<network::Content>,
 }
 enum Command {
+    Chat(Vec<u8>, Option<network::chat::Recipients>),
     Gameplay(network::SessionBinding, Option<Connection>, Box<Message>),
     Stage(Box<dyn FnOnce() -> Result<network::Content, String> + Send>),
     Edit(Action),
@@ -73,6 +74,7 @@ impl Cancellation {
     }
 }
 pub struct Handle {
+    chat: std::sync::Arc<std::sync::Mutex<network::chat::Display>>,
     owner: &'static Owner,
     attempt: Attempt,
     cancel: std::sync::Arc<AtomicBool>,
@@ -93,6 +95,8 @@ impl Handle {
         open: Open,
         network_timeout: Duration,
     ) -> Result<Self, String> {
+        let chat = std::sync::Arc::new(std::sync::Mutex::new(network::chat::Display::new()));
+        let worker_chat = chat.clone();
         let attempt = owner.begin().map_err(|e| e.to_string())?;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let stopped = cancel.clone();
@@ -113,6 +117,7 @@ impl Handle {
                         lobby: &publish,
                         gameplay: &gameplay_tx,
                         synchronization: &synchronization_tx,
+                        chat: &worker_chat,
                     },
                     &stopped,
                     network_timeout,
@@ -131,6 +136,7 @@ impl Handle {
             return Err(error.to_string());
         }
         Ok(Self {
+            chat,
             owner,
             attempt,
             cancel,
@@ -139,6 +145,46 @@ impl Handle {
             gameplay,
             synchronization,
         })
+    }
+    /// The retained chat lines, named and coloured from the current admitted roster.
+    /// `None` until this peer is admitted.
+    pub fn chat_view(&self) -> Option<network::chat::View> {
+        self.chat.lock().ok()?.view()
+    }
+    /// Submits one chat line: group delivery with `None` (lobby), or the selected
+    /// recipients (in-game Chat panel). Returns false, sending and echoing nothing, for
+    /// empty text or a selection with no recipient other than this player. Otherwise the
+    /// worker sends it and appends the one local echo. A full command queue also
+    /// returns false.
+    pub fn submit_chat(
+        &self,
+        text: Vec<u8>,
+        recipients: Option<network::chat::Recipients>,
+    ) -> Result<bool, String> {
+        self.validate()?;
+        let view = self.chat_view().ok_or("Chat has no admitted lobby")?;
+        let local = view
+            .snapshot
+            .local_row(view.local_peer)
+            .ok_or("Chat sender absent")?;
+        if text.is_empty() || recipients.is_some_and(|r| r.mask(local) == 0) {
+            return Ok(false);
+        }
+        if text.len() > network::chat::Packet::MAX_TEXT || text.contains(&0) {
+            return Err("Chat text is too long".into());
+        }
+        match self.commands.try_send(Command::Chat(text, recipients)) {
+            Ok(()) => Ok(true),
+            // A full queue drops the line; with no echo the sender sees it was not sent.
+            Err(TrySendError::Full(_)) => Ok(false),
+            Err(TrySendError::Disconnected(_)) => Err("Chat worker stopped".into()),
+        }
+    }
+    /// One interface tick of the chat display countdown (0x452110).
+    pub fn tick_chat(&self) {
+        if let Ok(mut chat) = self.chat.lock() {
+            chat.ring.tick452110();
+        }
     }
     pub fn action(&self, action: Action) -> Result<(), String> {
         self.commands
@@ -295,6 +341,7 @@ struct Publications<'a> {
     lobby: &'a SyncSender<Update>,
     gameplay: &'a SyncSender<network::commands::Ingress>,
     synchronization: &'a SyncSender<network::synchronization::Ingress>,
+    chat: &'a std::sync::Mutex<network::chat::Display>,
 }
 fn run(
     owner: &Owner,
@@ -309,6 +356,7 @@ fn run(
         lobby: publish,
         gameplay,
         synchronization,
+        chat,
     } = publications;
     if let Open::Probe(address) = &open {
         let (session, snapshot) =
@@ -418,6 +466,42 @@ fn run(
                     connection,
                     message,
                 } => match *message {
+                    Message::Chat(mut packet) => {
+                        // Chat before admission, or from a peer without a roster row, is
+                        // ignored. The host attributes a line to the connection it arrived
+                        // on; a client only hears the host, which stamped the sender.
+                        let Some(roster) = snapshot.as_ref().filter(|_| admitted) else {
+                            continue;
+                        };
+                        let origin = if host {
+                            connection.slot()
+                        } else {
+                            match packet.sender_peer() {
+                                Some(peer) if peer != local_peer => peer,
+                                _ => continue,
+                            }
+                        };
+                        let Some(row) = roster.local_row(origin) else {
+                            continue;
+                        };
+                        if host {
+                            packet.sender = u32::from(origin) + 1;
+                            // TCP is a star: relay to the selected rows, never back to
+                            // the sender, whose own echo is already in its ring.
+                            send_chat(owner, &peers, roster, &packet, Some(origin))?;
+                        }
+                        let local = roster
+                            .local_row(local_peer)
+                            .ok_or("Chat local row absent")?;
+                        if packet.reaches(local) {
+                            let mut display = chat.lock().map_err(|_| "Chat lock poisoned")?;
+                            display.snapshot = Some(roster.clone());
+                            display.local_peer = local_peer;
+                            display
+                                .append(row, &packet.text)
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
                     message @ (Message::Barrier { .. } | Message::StateSample(_)) => {
                         synchronization
                             .try_send(network::synchronization::Ingress {
@@ -581,6 +665,39 @@ fn run(
                 other => other,
             };
             let action = match command {
+                Command::Chat(text, recipients) => {
+                    let roster = snapshot
+                        .as_ref()
+                        .filter(|_| admitted)
+                        .ok_or("Chat without admitted roster")?;
+                    let local = roster.local_row(local_peer).ok_or("Chat sender absent")?;
+                    let mask = recipients.map_or(0, |r| r.mask(local));
+                    if text.is_empty() || recipients.is_some() && mask == 0 {
+                        continue;
+                    }
+                    let packet = network::chat::Packet {
+                        sender: if host { 1 } else { 0 },
+                        recipients: mask,
+                        text,
+                    };
+                    if host {
+                        send_chat(owner, &peers, roster, &packet, None)?;
+                    } else {
+                        let authority = peers[0].ok_or("Chat authority absent")?;
+                        match owner.send(authority, Message::Chat(packet.clone())) {
+                            Ok(()) | Err(network::transport::Error::QueueFull) => (),
+                            Err(error) => return Err(error.to_string()),
+                        }
+                    }
+                    // The sender's one echo; no copy comes back from the host.
+                    let mut display = chat.lock().map_err(|_| "Chat lock poisoned")?;
+                    display.snapshot = Some(roster.clone());
+                    display.local_peer = local_peer;
+                    display
+                        .append(local, &packet.text)
+                        .map_err(|e| e.to_string())?;
+                    continue;
+                }
                 Command::Gameplay(binding, target, message) => {
                     let message = *message;
                     owner.validate_binding(binding).map_err(|e| e.to_string())?;
@@ -790,6 +907,14 @@ fn run(
                 }
             }
         }
+        if admitted {
+            // Chat lines take their name and colour from the current admitted roster.
+            let mut display = chat.lock().map_err(|_| "Chat lock poisoned")?;
+            if display.snapshot != snapshot {
+                display.snapshot = snapshot.clone();
+            }
+            display.local_peer = local_peer;
+        }
         if let Some(update) = pending.take() {
             match publish.try_send(update) {
                 Ok(()) => (),
@@ -803,3 +928,28 @@ fn run(
 }
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// Host relay: sends `packet` to the connected peer of every row it reaches, except the
+/// host itself and `exclude` (the originating peer).
+fn send_chat(
+    owner: &Owner,
+    peers: &[Option<Connection>; SLOTS],
+    roster: &Snapshot,
+    packet: &network::chat::Packet,
+    exclude: Option<u8>,
+) -> Result<(), String> {
+    for (row, slot) in roster.rows.iter().enumerate() {
+        let Some(peer) = slot.peer.filter(|&p| p != 0 && Some(p) != exclude) else {
+            continue;
+        };
+        // A peer whose connection already ended leaves the roster on its failure event.
+        let Some(connection) = peers[usize::from(peer)].filter(|_| packet.reaches(row)) else {
+            continue;
+        };
+        match owner.send(connection, Message::Chat(packet.clone())) {
+            Ok(()) | Err(network::transport::Error::QueueFull) => (),
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
