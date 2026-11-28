@@ -1,6 +1,5 @@
 //! Host controls for the retained session. A failed simulation boundary latches
 //! a stop: resuming must never replay a partially completed original tick.
-pub use openmt_frontend::auction_audio;
 #[path = "live_host/camera_bridge.rs"]
 pub mod camera_bridge;
 #[path = "live_host/camera_session_service.rs"]
@@ -9,9 +8,9 @@ mod camera_session_service;
 pub mod process_runtime;
 use openmt2001::auction_panel::Auction;
 use openmt2001::{
-    audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests,
-    audio_requests::transport as transport_requests, hourly, level_script, lua4::Value,
-    render_requests::auction as auction_requests, scheduler,
+    audio_requests::auction as auction_audio, audio_requests::era as era_requests,
+    audio_requests::gameplay as gameplay_requests, audio_requests::transport as transport_requests,
+    hourly, level_script, lua4::Value, render_requests::auction as auction_requests, scheduler,
 };
 use openmt2001::{
     prompt_queue,

@@ -12,7 +12,7 @@ pub(crate) fn audio_view(root: PathBuf) -> (Inspection, process_frontend::Owner)
         )
         .unwrap();
     drop(session);
-    let auction = crate::live_host::auction_audio::Assets::load(&image, &inputs.installer).unwrap();
+    let auction = crate::auction_audio::Assets::load(&image, &inputs.installer).unwrap();
     let transport = crate::transport_audio::Assets::load(&image, &inputs.installer).unwrap();
     let era = crate::era_audio::Assets::load(
         &image,

@@ -179,7 +179,7 @@ pub(crate) fn drive<T: Send + 'static>(
         47,
         [[0; 380]; 52],
         52,
-        &assets,
+        assets.pavement_resource().binding().unwrap().handle(),
     ));
     let mut endpoint = Endpoint::with_property_install(
         Owner::new(Bank::loader_zero_storage(), 9),
@@ -524,7 +524,7 @@ fn drive_session(mut ui: Ui) -> (Result<Observation, bridge::RequestError>, u8, 
         912,
         [[0; 380]; 52],
         52,
-        &assets,
+        assets.pavement_resource().binding().unwrap().handle(),
     ));
     let mut endpoint = Endpoint::with_property_install(
         Owner::new(Bank::loader_zero_storage(), 9),
@@ -766,7 +766,7 @@ fn camera_sample_and_ready_result_keep_pcm_behind_unavailable_newer_focus_prefix
         47,
         [[0; 380]; 52],
         52,
-        &assets,
+        assets.pavement_resource().binding().unwrap().handle(),
     ));
     let mut endpoint = Endpoint::with_property_install(
         Owner::new(Bank::loader_zero_storage(), 9),

@@ -25,8 +25,13 @@ fn source(
         row[..4].copy_from_slice(&(i as u32).to_le_bytes());
     }
     Arc::new(
-        bridge::PropertySource::synthetic(epoch, rows, 52, assets)
-            .test_with_resident(bridge::ResidentSource::synthetic(epoch, pool)),
+        bridge::PropertySource::synthetic(
+            epoch,
+            rows,
+            52,
+            assets.pavement_resource().binding().unwrap().handle(),
+        )
+        .test_with_resident(bridge::ResidentSource::synthetic(epoch, pool)),
     )
 }
 fn install(
@@ -128,8 +133,13 @@ fn mismatched_resident_source_rejects_actual_install_before_any_restore() {
         row[..4].copy_from_slice(&(i as u32).to_le_bytes());
     }
     let captured = Arc::new(
-        bridge::PropertySource::synthetic(950, rows, 52, &assets)
-            .test_with_resident(bridge::ResidentSource::synthetic(951, &pool)),
+        bridge::PropertySource::synthetic(
+            950,
+            rows,
+            52,
+            assets.pavement_resource().binding().unwrap().handle(),
+        )
+        .test_with_resident(bridge::ResidentSource::synthetic(951, &pool)),
     );
     let (mut endpoint, mut worker) = make_endpoint(owner, 950, &assets);
     let before = endpoint.capture();

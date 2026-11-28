@@ -20,7 +20,12 @@ fn source(epoch: u64, assets: &crate::selection::Assets) -> Arc<bridge::Property
         row[0..4].copy_from_slice(&(i as u32).to_le_bytes());
         row[0x94..0x98].copy_from_slice(&(0xff004000 + i as u32).to_le_bytes());
     }
-    Arc::new(bridge::PropertySource::synthetic(epoch, rows, 52, assets))
+    Arc::new(bridge::PropertySource::synthetic(
+        epoch,
+        rows,
+        52,
+        assets.pavement_resource().binding().unwrap().handle(),
+    ))
 }
 fn selection() -> SelectionState {
     SelectionState::installed(
@@ -348,7 +353,7 @@ fn wrong_count_from_install_is_not_a_pool_replacement_or_camera_write() {
         1002,
         [[0; 380]; 52],
         53,
-        &assets,
+        assets.pavement_resource().binding().unwrap().handle(),
     ));
     let before = next.capture();
     let dirty = next.owner.kind_dirty();

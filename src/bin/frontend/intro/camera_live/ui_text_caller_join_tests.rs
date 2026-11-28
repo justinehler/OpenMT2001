@@ -77,9 +77,7 @@ fn inspection(assets: &Assets) -> Inspection {
         result: None,
         auction_requests: None,
         auction_audio_requests: None,
-        auction_audio_player: crate::live_host::auction_audio::Player::new(
-            assets.auction_audio.clone(),
-        ),
+        auction_audio_player: crate::auction_audio::Player::new(assets.auction_audio.clone()),
         transport_audio_requests: None,
         transport_audio_player: crate::transport_audio::Player::new(assets.transport_audio.clone()),
         era_audio_requests: None,

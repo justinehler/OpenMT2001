@@ -12,16 +12,16 @@ use openmt2001::{city_people, player_info};
 // The acyclic interface layer lives in crates/frontend (#99); kept nameable
 // as crate::<module> in the binary.
 use openmt_frontend::{
-    auction_bridge, auction_notice, auction_panel, auction_scene, audio_bus, block_information,
-    block_sidewalk_labels, board_selection, business_adjustment, business_edit, business_view,
-    cash_arrow, category_distance, chat_panel, chimney_smoke_scene, city_ownership, city_prestige,
-    city_pulse_scene, city_rights, comparison, cursor, desktop_quit, dust_scene, era_audio,
-    event_list, game_options, gameplay_sound, locator, market_share_panel, modal_frame, navigation,
-    notice_panel, object_scene, ownership_badges, pause_banner, people_scene, preferred_token,
-    present, profile, profile_settings, prompt, result_presentation, save_appearance, save_dialog,
-    scenarios, selection, settings_menu, static_detail, stats_panel, strategic_scene, tooltip,
-    transport_audio, transport_scene, tree_scene, tutorial_visual, ui, ui_text, utility_report,
-    vehicle_scene,
+    auction_audio, auction_bridge, auction_notice, auction_panel, auction_scene, audio_bus,
+    block_information, block_sidewalk_labels, board_selection, business_adjustment, business_edit,
+    business_view, cash_arrow, category_distance, chat_panel, chimney_smoke_scene, city_ownership,
+    city_prestige, city_pulse_scene, city_rights, comparison, cursor, desktop_quit, dust_scene,
+    era_audio, event_list, game_options, gameplay_sound, locator, market_share_panel, modal_frame,
+    navigation, notice_panel, object_scene, ownership_badges, pause_banner, people_scene,
+    preferred_token, present, profile, profile_settings, prompt, result_presentation,
+    save_appearance, save_dialog, scenarios, selection, settings_menu, static_detail, stats_panel,
+    strategic_scene, tooltip, transport_audio, transport_scene, tree_scene, tutorial_visual, ui,
+    ui_text, utility_report, vehicle_scene,
 };
 #[cfg(test)]
 use openmt_frontend::{music_gain, saved_current_player};

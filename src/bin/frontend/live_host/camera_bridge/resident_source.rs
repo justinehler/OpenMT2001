@@ -9,7 +9,7 @@ pub struct ResidentSource {
     pool: AuxiliarySource,
 }
 impl ResidentSource {
-    pub fn capture(session: &crate::fresh_city::Session<'_>) -> Self {
+    pub fn capture(session: &openmt2001::session::Session<'_>) -> Self {
         Self::from_world(&session.world)
     }
     pub fn from_world(world: &openmt2001::level_startup::World) -> Self {
