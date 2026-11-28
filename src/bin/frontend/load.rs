@@ -80,6 +80,13 @@ pub struct Load {
     refusal_prompt: Option<crate::prompt::Request>,
 }
 impl Load {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)
+    }
+
     pub fn new(
         index: &ArchiveIndex,
         archive: &[u8],

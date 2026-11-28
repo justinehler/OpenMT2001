@@ -19,6 +19,8 @@ pub mod auction_panel;
 pub mod auction_scene;
 #[path = "frontend/block_sidewalk_labels.rs"]
 pub mod block_sidewalk_labels;
+#[path = "frontend/board_selection.rs"]
+mod board_selection;
 #[cfg(test)]
 #[path = "frontend/building_models_tests.rs"]
 mod building_models_tests;

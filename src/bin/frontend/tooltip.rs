@@ -17,6 +17,13 @@ pub struct Tooltip {
     speed_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) {
+        self.names = board.rows().into_iter().map(<[u8]>::to_vec).collect();
+    }
+
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],

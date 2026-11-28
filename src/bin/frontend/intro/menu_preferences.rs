@@ -42,6 +42,11 @@ impl Cells<'_> {
         *self.graphics = snapshot.graphics;
         *self.gameplay = snapshot.gameplay;
         if let Some(menu) = menu {
+            let board = match self.profile.as_ref() {
+                Some(path) => crate::board_selection::Name::load(path)?,
+                None => crate::board_selection::Name::initial(),
+            };
+            menu.settings.set_board(board);
             menu.settings_audio = snapshot.audio;
             menu.settings.graphics = snapshot.graphics;
             menu.settings.gameplay = snapshot.gameplay;
@@ -54,6 +59,9 @@ impl Cells<'_> {
         process: Option<&Owner>,
     ) -> Result<(), String> {
         self.sync_profile(Some(&mut *menu), process)?;
+        if let Some(path) = menu.current_settings_path() {
+            menu.settings.persist_board(&path)?;
+        }
         let snapshot = menu.settings_snapshot();
         if *self.audio != snapshot.audio {
             if let Some(process) = process {

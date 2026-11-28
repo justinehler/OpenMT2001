@@ -389,6 +389,33 @@ fn main_button_state(
     }
 }
 impl Menu {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        blocks: &[openmt2001::board::Block],
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.assets.language, board)?;
+        self.load.apply_board(board)?;
+        self.single.apply_board_language(&self.assets.language)?;
+        self.skirmish.apply_board(board, &self.assets.language)?;
+        self.multiplayer.apply_board(board, &self.assets.language)?;
+        self.assets.locator.apply_board(board, blocks)?;
+        self.assets.planning.apply_board(board)?;
+        self.assets.prompts.apply_board(board)?;
+        self.assets.event_list.apply_board(board)?;
+        self.assets.stats.apply_board(board)?;
+        self.assets.market_share.apply_board(board)?;
+        self.assets.cards.apply_board(board)?;
+        self.assets.business.apply_board(board)?;
+        self.assets.auction_notice.apply_board(board)?;
+        self.assets.auction_panel.apply_board(board)?;
+        self.assets.notifications.apply_board(board)?;
+        self.assets.comparison.apply_board(board)?;
+        self.assets.adjustment.apply_board(board)?;
+        self.dirty = true;
+        Ok(())
+    }
+
     fn main_panel_shown(&self) -> bool {
         !self.profile.visible
             && !self.load.visible
@@ -1312,6 +1339,7 @@ impl Menu {
             return;
         }
         if self.settings.page.is_some() {
+            self.settings.scroll_boards(&self.assets.settings, delta);
             return;
         }
         if self.single.visible {
@@ -1923,6 +1951,28 @@ mod settings_route_tests {
         );
         menu.selected = Some(5);
         menu.activate();
+        click(&mut menu, Button::Board);
+        menu.scroll(100);
+        let german = crate::board_selection::Name::parse(b"ger").unwrap();
+        menu.pointer(menu.assets.settings.board_point_for_test(german).unwrap());
+        menu.mouse_button(true);
+        menu.mouse_button(false);
+        click(&mut menu, Button::Back);
+        assert_eq!(menu.settings.board, german);
+        let chosen = menu.settings.board_language(installer).unwrap();
+        let board = openmt2001::board::Board::from_v14(
+            &openmt2001::pe::PeImage::parse(&executable).unwrap(),
+        )
+        .unwrap();
+        menu.apply_board(&chosen, &board.blocks).unwrap();
+        for id in 2242..menu.assets.language.len() {
+            assert_eq!(
+                menu.assets.language[id],
+                chosen.row((id - 2241) as u32).unwrap()
+            );
+        }
+        menu.settings.persist_board(&path).unwrap();
+        assert_eq!(crate::board_selection::Name::load(&path).unwrap(), german);
         menu.back(); // Escape directly from Settings to menu
         assert_eq!(menu.settings.page, None);
         assert_eq!(menu.pending, None);

@@ -117,6 +117,25 @@ pub struct Assets {
     scrollbar_textures: [[Surface; 4]; 2],
 }
 impl Assets {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        blocks: &[openmt2001::board::Block],
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)?;
+        for block in blocks {
+            let row = block.text_id - 2242 + 1;
+            self.block_labels[block.id] = board.row(row)?.to_vec();
+            self.short_labels[block.id] = board.row(row + 1)?.to_vec();
+            self.title_labels[block.id] = board.row(row + 3)?.to_vec();
+            self.ownership_label_widths[block.id] =
+                ui::text_width(&self.ownership_tab, board.row(row + 1)?, 1.)? as f32;
+        }
+        self.board_currency = board.row(2)?.to_vec();
+        self.currency_suffix = board.row(3)?.first() != Some(&0x4c);
+        Ok(())
+    }
+
     #[cfg(all(test, feature = "capture"))]
     pub fn verify_fresh_property(
         &self,
