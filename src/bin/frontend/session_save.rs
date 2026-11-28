@@ -90,6 +90,114 @@ impl<'a> Input<'a> {
     }
 }
 
+/// Recover runtime data absent from tag10 without rewinding 45be80's movement
+/// fixup or retiring the actor allocations it just created. Saved model/frame/
+/// controller state is not recoverable from the native resident identity alone.
+fn restore_resident_runtime(
+    residents: &mut openmt2001::economy::ResidentAccounts,
+    auxiliary: &mut openmt2001::resident::AuxiliaryPool,
+    bytes: &[u8],
+) -> Result<Vec<u32>, String> {
+    use openmt2001::resident::Resident;
+    let mut input = Input::new(bytes);
+    let count = input.word()?;
+    let n = input.word()? as usize;
+    if n != 2000
+        || count > 2000
+        || residents.nodes.len() != n
+        || auxiliary.slots().len() != n
+        || count != residents.active_count
+    {
+        return Err("V2/native resident pool counts disagree".into());
+    }
+    let mut saved = Vec::with_capacity(n);
+    for _ in 0..n {
+        let bytes = input
+            .take(330)?
+            .try_into()
+            .map_err(|_| "V2 resident size invalid")?;
+        let active = u8::try_from(input.word()?).map_err(|_| "V2 resident active byte invalid")?;
+        saved.push(Resident::from_runtime_bytes(bytes, active, input.word()?));
+    }
+    let used = input.word()? as usize;
+    let slots = input.blob()?;
+    if slots.len() != 2000 * 284 || used > 2000 {
+        return Err("V2 resident auxiliary pool size invalid".into());
+    }
+    input.end()?;
+    let mut references = vec![0; used];
+    let mut native_slots = vec![false; auxiliary.used()];
+    for (native, saved) in residents.nodes.iter().zip(&saved) {
+        if native.is_active() != saved.is_active() {
+            return Err("V2/native resident occupancy disagrees".into());
+        }
+        if !native.is_active() {
+            continue;
+        }
+        let old = saved
+            .auxiliary_reference()
+            .checked_sub(1)
+            .and_then(|slot| references.get_mut(slot as usize))
+            .ok_or("V2 resident auxiliary is not allocated")?;
+        let new = native.auxiliary_reference();
+        let occupied = new
+            .checked_sub(1)
+            .and_then(|slot| native_slots.get_mut(slot as usize))
+            .ok_or("native resident auxiliary is not allocated")?;
+        if *old != 0 || *occupied {
+            return Err("resident auxiliary shared by multiple residents".into());
+        }
+        *old = new;
+        *occupied = true;
+    }
+    // Keep any saved allocations not owned by live residents too. Native tag10
+    // omits those, inactive resident bytes and the unused auxiliary tail.
+    for (index, reference) in references.iter_mut().enumerate() {
+        let mut row: [u8; 284] = slots[index * 284..(index + 1) * 284]
+            .try_into()
+            .map_err(|_| "V2 resident auxiliary size invalid")?;
+        if *reference == 0 {
+            let slot = auxiliary
+                .allocate(&row)
+                .ok_or("V2 resident auxiliary pool exhausted")?;
+            *reference = slot as u32 + 1;
+        } else {
+            let dst = auxiliary
+                .get_mut((*reference - 1) as usize)
+                .ok_or("native resident auxiliary disappeared")?;
+            // Native load owns world position, movement yaw and visibility.
+            // Retain the saved visual model, animation and other runtime bytes.
+            row[4..16].copy_from_slice(&dst[4..16]);
+            row[0x14..0x18].copy_from_slice(&dst[0x14..0x18]);
+            row[0xb8] = (row[0xb8] & !1) | (dst[0xb8] & 1);
+            *dst = row;
+        }
+    }
+    let tail = auxiliary.used() * 284;
+    auxiliary.slots_mut().as_flattened_mut()[tail..].copy_from_slice(&slots[tail..]);
+    for (native, saved) in residents.nodes.iter_mut().zip(saved) {
+        if !native.is_active() {
+            let reference = saved.auxiliary_reference();
+            let reference = if reference == 0 {
+                0
+            } else {
+                remap_resident_auxiliary(reference, &references)?
+            };
+            *native =
+                Resident::from_runtime_bytes(*saved.as_bytes(), saved.active_byte(), reference);
+        }
+    }
+    Ok(references)
+}
+
+fn remap_resident_auxiliary(reference: u32, references: &[u32]) -> Result<u32, String> {
+    reference
+        .checked_sub(1)
+        .and_then(|slot| references.get(slot as usize))
+        .copied()
+        .ok_or_else(|| "V2 resident reference leaves allocated auxiliary pool".into())
+}
+
 fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
     let mut bytes = match command {
         Command::Build(c) => c.packet().to_vec(),
@@ -578,40 +686,12 @@ impl<'data> Session<'data> {
             }
             dst[0x58..0x80].copy_from_slice(&src[0x58..0x80]);
         }
-        let mut r = Input::new(ext.required(5)?);
-        self.world.ledgers.residents.active_count = r.word()?;
-        let n = r.word()? as usize;
-        if n != 2000 || self.world.ledgers.residents.active_count > 2000 {
-            return Err("V2 resident pool count invalid".into());
-        }
-        let mut nodes = Vec::with_capacity(n);
-        for _ in 0..n {
-            let b = r.take(330)?.try_into().unwrap();
-            let active = u8::try_from(r.word()?).map_err(|_| "V2 resident active byte invalid")?;
-            nodes.push(openmt2001::resident::Resident::from_runtime_bytes(
-                b,
-                active,
-                r.word()?,
-            ));
-        }
-        let used = r.word()? as usize;
-        let slots = r.blob()?;
-        if slots.len() != 2000 * 284 {
-            return Err("V2 resident auxiliary pool size invalid".into());
-        }
-        let imported_auxiliary = openmt2001::resident::AuxiliaryPool::from_slots(
-            slots
-                .chunks_exact(284)
-                .map(|b| b.try_into().unwrap())
-                .collect(),
-            used,
+        let city = &mut self.world.city;
+        let resident_auxiliaries = restore_resident_runtime(
+            &mut city.ledgers.residents,
+            &mut city.creation.auxiliary,
+            ext.required(5)?,
         )?;
-        self.world
-            .creation
-            .auxiliary
-            .replace_with(imported_auxiliary);
-        self.world.ledgers.residents.nodes = nodes;
-        r.end()?;
         let mut a = Input::new(ext.required(6)?);
         let profiles = a.blob()?;
         if profiles.len() != self.roster.profiles.len() * 0x650 {
@@ -778,12 +858,15 @@ impl<'data> Session<'data> {
         if animations.len() % 44 != 0 {
             return Err("V2 animation pool size invalid".into());
         }
-        self.population.animations = openmt2001::resident::ResidentAnimationPool::from_records(
-            animations
-                .chunks_exact(44)
-                .map(|r| r.try_into().unwrap())
-                .collect(),
-        )?;
+        let mut animations = animations.as_chunks::<44>().0.to_vec();
+        for record in &mut animations {
+            if record[4] != 0 && word(record, 0) <= 3 {
+                let reference = remap_resident_auxiliary(word(record, 8), &resident_auxiliaries)?;
+                put(record, 8, reference);
+            }
+        }
+        self.population.animations =
+            openmt2001::resident::ResidentAnimationPool::from_records(animations)?;
         let n = runtime.word()?;
         if n > 2000 {
             return Err("V2 resident binding count invalid".into());
@@ -791,13 +874,16 @@ impl<'data> Session<'data> {
         self.population.bindings.clear();
         for _ in 0..n {
             let resident_reference = runtime.word()?;
-            let auxiliary_reference = runtime.word()?;
-            let auxiliary_slot = runtime.word()? as usize;
+            let saved_reference = runtime.word()?;
+            let saved_slot = runtime.word()? as usize;
             let model_frame_count =
                 u16::try_from(runtime.word()?).map_err(|_| "V2 model frame count invalid")?;
-            if auxiliary_slot >= 2000 {
-                return Err("V2 resident auxiliary slot leaves pool".into());
+            if saved_reference.checked_sub(1).map(|slot| slot as usize) != Some(saved_slot) {
+                return Err("V2 resident auxiliary binding disagrees with slot".into());
             }
+            let auxiliary_reference =
+                remap_resident_auxiliary(saved_reference, &resident_auxiliaries)?;
+            let auxiliary_slot = (auxiliary_reference - 1) as usize;
             self.population
                 .bindings
                 .push(openmt2001::shopping::ResidentBinding {
@@ -897,8 +983,8 @@ impl<'data> Session<'data> {
             self.scripts.events.append(event);
         }
         // Native import recreates resident placement and increments category
-        // counters. V2 replaced those resident records with their live state,
-        // so retain the serialized placement counters and both derived caches.
+        // counters. Placement is a constructor side effect, independent of the
+        // retained movement fixup; recover saved counters and both derived caches.
         for category in 0..52 {
             let count = save.category_resident_counter(category)?;
             put(&mut self.world.categories[category], 0x88, count);
@@ -944,6 +1030,10 @@ pub(crate) mod auction_test;
 #[cfg(test)]
 #[path = "session_save_terms_test.rs"]
 mod terms_test;
+
+#[cfg(test)]
+#[path = "session_save_resident_test.rs"]
+mod resident_test;
 
 #[cfg(test)]
 mod tests {
