@@ -1489,7 +1489,7 @@ impl State {
             variants: self.styles.qualities[self.quality].clone(),
             kind: self.kind,
             business,
-            displayed_quote: 0.,
+            displayed_quote: self.quote.as_ref().map_or(0., |quote| quote.total),
         };
         form.request(false, true, true)?
             .map_err(|e| format!("Planning form: {e:?}"))
@@ -1499,7 +1499,18 @@ impl State {
             && !self.needs_quote
             && self.pending.is_none()
             && self.quote.as_ref().is_some_and(BuildInspection::allowed)
-            && self.request().ok() == self.quote_request
+            && self.quote_matches_request()
+    }
+    pub fn quote_matches_request(&self) -> bool {
+        let (Ok(mut request), Some(mut quoted)) = (self.request(), self.quote_request.clone())
+        else {
+            return false;
+        };
+        // The quote is reply metadata, not part of the selected building.
+        // Receiving a price must not invalidate the request that produced it.
+        request.displayed_quote = 0.;
+        quoted.displayed_quote = 0.;
+        request == quoted
     }
     /// Reports a completed panel widget activation. The base-plate drag and
     /// slider drags do not emit the generic UI click cue.
@@ -2206,6 +2217,11 @@ pub fn verify_live_context(
         state.quote_request = Some(request);
         state.quote = Some(quote);
         state.needs_quote = false;
+        assert_eq!(
+            state.request().unwrap().displayed_quote,
+            state.quote.as_ref().unwrap().total,
+            "confirmation retains the displayed preview price"
+        );
         assert!(
             state.can_submit(),
             "type {kind} native Accept button is enabled"

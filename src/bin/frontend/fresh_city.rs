@@ -291,7 +291,8 @@ impl<'data> Session<'data> {
             return Ok(None);
         }
         if submit {
-            self.submit_build(request, assets, event).map(Some)
+            self.submit_build_with_quote(request, assets, Some(request.displayed_quote), event)
+                .map(Some)
         } else {
             self.inspect_build(request, assets).map(Some)
         }
@@ -303,6 +304,15 @@ impl<'data> Session<'data> {
         &mut self,
         request: &crate::build_panel::Request,
         assets: &CommandAssets<'_, '_>,
+    ) -> Result<BuildInspection, String> {
+        self.inspect_build_with_quote(request, assets, None)
+    }
+
+    fn inspect_build_with_quote(
+        &mut self,
+        request: &crate::build_panel::Request,
+        assets: &CommandAssets<'_, '_>,
+        displayed_quote: Option<f32>,
     ) -> Result<BuildInspection, String> {
         let category = usize::try_from(request.category).map_err(|_| "negative build category")?;
         let row = self
@@ -431,20 +441,23 @@ impl<'data> Session<'data> {
         } else {
             None
         };
-        let total = openmt2001::live_commands::quote(
-            &mut command,
-            &mut self.world.city,
-            &self.roster,
-            assets.image,
-            self.world.clock.hour(),
-        )? as f32;
         let allowance = i32::from_le_bytes(assets.image.at(0x541c7c, 4)?.try_into().unwrap());
-        let affordable = openmt2001::construction::affordable(
+        let hour = self.world.clock.hour();
+        let (total, affordable) = openmt2001::construction::confirmation_quote(
             self.world.ledgers.players[player].cash,
             allowance,
-            total,
-            false,
-        );
+            displayed_quote,
+            || {
+                openmt2001::live_commands::quote(
+                    &mut command,
+                    &mut self.world.city,
+                    &self.roster,
+                    assets.image,
+                    hour,
+                )
+                .map(|total| total as f32)
+            },
+        )?;
         Ok(BuildInspection {
             total,
             category_locked,
@@ -464,7 +477,18 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
     ) -> Result<BuildInspection, String> {
-        let mut result = self.inspect_build(request, assets)?;
+        // Scripted producers do not retain a displayed planner quote.
+        self.submit_build_with_quote(request, assets, None, event)
+    }
+
+    fn submit_build_with_quote(
+        &mut self,
+        request: &crate::build_panel::Request,
+        assets: &CommandAssets<'_, '_>,
+        displayed_quote: Option<f32>,
+        event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
+    ) -> Result<BuildInspection, String> {
+        let mut result = self.inspect_build_with_quote(request, assets, displayed_quote)?;
         if result.allowed() {
             self.submit_command(
                 openmt2001::live_commands::Command::Build(result.command.clone()),
@@ -5515,6 +5539,54 @@ mod tests {
                     "special Hotel has original model preview"
                 );
                 assert!(quote.allowed(), "owned group permits Hotel construction");
+                for (preview_hour, current_hour, admitted) in [(5, 6, true), (6, 5, false)] {
+                    let mut confirmation = Session::initialize(inputs(), policy()).unwrap();
+                    confirmation.world.categories = session.world.categories;
+                    let mut retained = request.clone();
+                    confirmation.world.clock.calendar[0] = preview_hour;
+                    retained.displayed_quote = confirmation
+                        .plan_build(&retained, &assets, false, |_| Ok(()))
+                        .unwrap()
+                        .unwrap()
+                        .total;
+                    confirmation.world.clock.calendar[0] = current_hour;
+                    let current = confirmation.inspect_build(&retained, &assets).unwrap();
+                    let allowance =
+                        i32::from_le_bytes(image.at(0x541c7c, 4).unwrap().try_into().unwrap());
+                    let cash = (retained.displayed_quote + current.total) / 2. - allowance as f32;
+                    confirmation.world.ledgers.players[0].cash = cash;
+                    assert_eq!(
+                        construction::affordable(cash, allowance, retained.displayed_quote, false),
+                        admitted
+                    );
+                    assert_eq!(
+                        construction::affordable(cash, allowance, current.total, false),
+                        !admitted
+                    );
+                    let occupancy = confirmation.world.categories[category];
+                    let queued = confirmation.live_commands.snapshot().unwrap().len();
+                    let result = confirmation
+                        .plan_build(&retained, &assets, true, |event| {
+                            panic!("planner confirmation executed prematurely: {event:?}")
+                        })
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(result.submitted, admitted);
+                    assert_eq!(result.affordable, admitted);
+                    assert_eq!(confirmation.world.ledgers.players[0].cash, cash);
+                    let pending = confirmation.live_commands.snapshot().unwrap();
+                    assert_eq!(pending.len(), queued + usize::from(admitted));
+                    if admitted {
+                        let live_commands::Command::Build(command) = pending.last().unwrap().4
+                        else {
+                            panic!("planner did not enqueue construction")
+                        };
+                        assert_eq!(command.components, current.command.components);
+                        assert_ne!(confirmation.world.categories[category], occupancy);
+                    } else {
+                        assert_eq!(confirmation.world.categories[category], occupancy);
+                    }
+                }
                 let cash = session.world.ledgers.players[0].cash.to_bits();
                 let pending = session.live_commands.snapshot().unwrap().len();
                 let occupancy = session.world.categories[category];
