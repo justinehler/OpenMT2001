@@ -558,7 +558,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied patched original OPENMT2001_SCRIPTS; no Lua execution"]
     fn supplied_25_catalog_and_monopolymap_owned_launch_bytes() {
-        let root = openmt2001::fixtures::path("SCRIPTS");
+        let root = crate::fixtures::path("SCRIPTS");
         let catalog = Catalog::discover(&root).unwrap();
         assert_eq!(catalog.names().len(), 25);
         assert_eq!(
