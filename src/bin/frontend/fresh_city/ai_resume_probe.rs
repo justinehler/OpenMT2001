@@ -246,6 +246,7 @@ fn run(controlled_retail: bool) {
         let mut ai_business_opened = false;
         let mut construction_notice = None;
         let mut construction_postings = Vec::new();
+        let mut recent_postings = std::collections::VecDeque::new();
         let mut prior_retail = std::collections::BTreeMap::new();
         let mut settings_change = None;
         let mut settings_applied = None;
@@ -285,19 +286,20 @@ fn run(controlled_retail: bool) {
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::Appearance(_),
                 )) => Ok(0),
-                tick::Event::Command(openmt2001::live_commands::Event::Construction(
-                    openmt2001::construction::Event::Posted {
-                        player,
-                        amount,
-                        ledger,
-                    },
-                )) => {
-                    construction_postings.push((player, amount, ledger));
+                tick::Event::Command(openmt2001::live_commands::Event::AccountPosted(posting)) => {
+                    if recent_postings.len() == 4 {
+                        recent_postings.pop_front();
+                    }
+                    recent_postings.push_back((posting.player, posting.amount));
                     Ok(0)
                 }
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::RefreshInterface,
-                )) => Ok(0),
+                )) => {
+                    assert_eq!(recent_postings.len(), 4);
+                    construction_postings.extend(recent_postings.drain(..));
+                    Ok(0)
+                }
                 tick::Event::Pending(
                     openmt2001::live_commands::PendingCall::World(
                         openmt2001::pending_world::Event::Progress { .. },
@@ -512,17 +514,8 @@ fn run(controlled_retail: bool) {
             assert!(
                 construction_postings
                     .iter()
-                    .all(|(player, amount, _)| *player == 1 && *amount <= 0.)
+                    .all(|(player, amount)| *player == 1 && *amount <= 0.)
             );
-            for batch in construction_postings.chunks_exact(4) {
-                assert_eq!(
-                    batch
-                        .iter()
-                        .map(|(_, _, ledger)| *ledger)
-                        .collect::<Vec<_>>(),
-                    [0xc, 0xe, 0x11, 7]
-                );
-            }
             assert!(
                 f32::from_le_bytes(ai.bytes[4..8].try_into().unwrap()) < initial_cash,
                 "AI construction did not charge restored player"

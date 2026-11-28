@@ -177,7 +177,7 @@ fn execute(kind: u32, raw: u32, current: usize, zero_price: bool) -> Vec<Observe
         &mut utilities,
         |event, world| {
             match event {
-                live_commands::Event::EventCardEffect(effects::Call::AccountPosted(posting)) => {
+                live_commands::Event::AccountPosted(posting) => {
                     let (player, amount, _) = postings[posted];
                     posted += 1;
                     assert_eq!(posting, AccountPosting { player, amount });

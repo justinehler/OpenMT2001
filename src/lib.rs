@@ -190,3 +190,6 @@ pub mod skirmish;
 pub mod native_input;
 
 pub mod window_texture;
+
+#[cfg(test)]
+mod account_posting_test_support;

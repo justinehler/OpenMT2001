@@ -501,7 +501,7 @@ impl<'data> Session<'data> {
         input: Inputs<'_, 'data>,
         policy: Policy,
         saved_bytes: &[u8],
-    ) -> Result<(Self, Vec<openmt2001::category_ownership::Seam>), String> {
+    ) -> Result<(Self, Vec<openmt2001::economy::AccountPosting>), String> {
         Self::load_original_with_presentation_style(input, policy, saved_bytes, None)
     }
 
@@ -510,7 +510,7 @@ impl<'data> Session<'data> {
         policy: Policy,
         saved_bytes: &[u8],
         style: Option<&openmt2001::board_style::Style>,
-    ) -> Result<(Self, Vec<openmt2001::category_ownership::Seam>), String> {
+    ) -> Result<(Self, Vec<openmt2001::economy::AccountPosting>), String> {
         let mut calls = Vec::new();
         let session = Self::load_original_with_catalog(
             input,
@@ -550,7 +550,7 @@ impl<'data> Session<'data> {
         saved_bytes: &[u8],
         style: Option<&openmt2001::board_style::Style>,
         process: Option<crate::live_host::process_runtime::Handle>,
-    ) -> Result<(Self, Vec<openmt2001::category_ownership::Seam>), String> {
+    ) -> Result<(Self, Vec<openmt2001::economy::AccountPosting>), String> {
         let mut calls = Vec::new();
         let session = Self::load_original_with_catalog(
             input,
@@ -571,7 +571,7 @@ impl<'data> Session<'data> {
         saved_bytes: &[u8],
         catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
-        presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
+        presentation: Option<&mut Vec<openmt2001::economy::AccountPosting>>,
         style: Option<&openmt2001::board_style::Style>,
         process: Option<crate::live_host::process_runtime::Handle>,
     ) -> Result<Self, String> {
@@ -593,7 +593,7 @@ impl<'data> Session<'data> {
         saved_bytes: &[u8],
         catalog: Option<openmt2001::level_catalog::Catalog>,
         profile_path: Option<std::path::PathBuf>,
-        presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
+        presentation: Option<&mut Vec<openmt2001::economy::AccountPosting>>,
         style: Option<&openmt2001::board_style::Style>,
         process: Option<crate::live_host::process_runtime::Handle>,
         dispatch: Option<crate::process_dispatch::Seed>,
@@ -680,7 +680,7 @@ impl<'data> Session<'data> {
         owner: u8,
         amount: i32,
         assets: &CommandAssets<'_, '_>,
-        mut presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
+        mut presentation: Option<&mut Vec<openmt2001::economy::AccountPosting>>,
     ) -> Result<(), String> {
         use openmt2001::live_commands::{self, Event};
         let word =
@@ -749,26 +749,15 @@ impl<'data> Session<'data> {
             &context,
             |event| match event {
                 Event::RefreshInterface | Event::PropertyView(_) => Ok(()),
-                Event::PropertyOwnership(openmt2001::category_ownership::Seam::NativeUiCall {
-                    address,
-                    args,
-                    argument_count,
-                }) if (address == 0x4ad760
-                    && argument_count == 6
-                    && matches!(args[0], 0x541cc8 | 0x541cb4)
-                    && args[1..] == [0, 0, 0, 1, 0x3c])
-                    || (matches!(address, 0x4c6290 | 0x4c62d0)
-                        && argument_count == 0
-                        && args == [0; 6]) =>
-                {
-                    presentation
-                        .as_mut()
-                        .ok_or("saved immediate property cash cue lacks presentation owner")?
-                        .push(openmt2001::category_ownership::Seam::NativeUiCall {
-                            address,
-                            args,
-                            argument_count,
-                        });
+                Event::AccountPosted(posting) => {
+                    if posting.amount != 0.
+                        && self_buyer.map(|owner| usize::from(owner) - 1) == Some(posting.player)
+                    {
+                        presentation
+                            .as_mut()
+                            .ok_or("saved immediate property cash cue lacks presentation owner")?
+                            .push(posting);
+                    }
                     Ok(())
                 }
                 // Actual 4504e0 -> 420500 returns before inserting a notice
@@ -791,12 +780,9 @@ impl<'data> Session<'data> {
         &mut self,
         command: openmt2001::business_sale::Command,
         assets: &CommandAssets<'_, '_>,
-        calls: &mut Vec<openmt2001::category_ownership::Seam>,
+        calls: &mut Vec<openmt2001::economy::AccountPosting>,
     ) -> Result<(), String> {
-        use openmt2001::{
-            business_sale::{self, Call},
-            category_ownership::Seam,
-        };
+        use openmt2001::business_sale::{self, Call};
         let business = self
             .world
             .ledgers
@@ -868,23 +854,10 @@ impl<'data> Session<'data> {
             &controls,
             assets.image,
             |call, world| match call {
-                Call::NativeUiCall {
-                    address,
-                    args,
-                    argument_count,
-                } if (address == 0x4ad760
-                    && argument_count == 6
-                    && matches!(args[0], 0x541cc8 | 0x541cb4)
-                    && args[1..] == [0, 0, 0, 1, 0x3c])
-                    || (matches!(address, 0x4c6290 | 0x4c62d0)
-                        && argument_count == 0
-                        && args == [0; 6]) =>
-                {
-                    calls.push(Seam::NativeUiCall {
-                        address,
-                        args,
-                        argument_count,
-                    });
+                Call::AccountPosted(posting) => {
+                    if posting.amount != 0. && current_player == Some(posting.player) {
+                        calls.push(posting);
+                    }
                     Ok(())
                 }
                 Call::BuildingAppearance(id) if appearance && id == building => {
@@ -936,7 +909,7 @@ impl<'data> Session<'data> {
         &mut self,
         save: &SaveFile<'_>,
         assets: &CommandAssets<'_, '_>,
-        mut presentation: Option<&mut Vec<openmt2001::category_ownership::Seam>>,
+        mut presentation: Option<&mut Vec<openmt2001::economy::AccountPosting>>,
     ) -> Result<(), String> {
         if self.saved_game_mode.is_some() {
             return Err("save records require a newly prepared load-mode Session".into());
@@ -2460,9 +2433,11 @@ mod tests {
                         &mut messages,
                         &context,
                         |event| {
-                            if let openmt2001::live_commands::Event::PropertyOwnership(call) = event
+                            if let openmt2001::live_commands::Event::AccountPosted(posting) = event
+                                && posting.player == usize::from(current_slot)
+                                && posting.amount != 0.
                             {
-                                expected_calls.push(call);
+                                expected_calls.push(posting);
                             }
                             Ok(())
                         },

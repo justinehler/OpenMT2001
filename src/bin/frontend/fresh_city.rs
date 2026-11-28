@@ -1972,6 +1972,7 @@ impl<'data> Session<'data> {
                 roster.initialize_ownership(&mut world, input.image, &mut |ownership, event| {
                     use openmt2001::category_ownership::Seam;
                     match event {
+                        Seam::AccountPosted(posting) if posting.amount == 0. => Ok(()),
                         Seam::BuildingAppearance { building } => {
                             // Initial scene submission materializes these retained records.
                             hooks.notifications.push((0x485520, building));
@@ -5929,10 +5930,7 @@ mod tests {
             assert_eq!(
                 events
                     .iter()
-                    .filter(|e| matches!(
-                        e,
-                        live_commands::Event::Construction(construction::Event::Posted { .. })
-                    ))
+                    .filter(|e| matches!(e, live_commands::Event::AccountPosted(_)))
                     .count(),
                 4
             );

@@ -37,13 +37,9 @@ pub struct Controls {
     pub network: [bool; 2],
     pub current_player: Option<usize>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Call {
-    NativeUiCall {
-        address: u32,
-        args: [u32; 6],
-        argument_count: u8,
-    },
+    AccountPosted(crate::economy::AccountPosting),
     BuildingAppearance(usize),
     Message([i32; 8]),
     RefreshInterface,
@@ -203,17 +199,25 @@ pub fn apply(
             .get_mut(seller)
             .ok_or("takeover seller missing")?
             .post(amount, 0x16)?;
-        if controls.current_player == Some(seller) {
-            notify_post(amount, w, image, &mut callback)?;
-        }
+        callback(
+            Call::AccountPosted(crate::economy::AccountPosting {
+                player: seller,
+                amount,
+            }),
+            w,
+        )?;
     }
     w.players
         .get_mut(buyer)
         .ok_or("takeover buyer missing")?
         .post(-amount, 3)?;
-    if controls.current_player == Some(buyer) {
-        notify_post(-amount, w, image, &mut callback)?;
-    }
+    callback(
+        Call::AccountPosted(crate::economy::AccountPosting {
+            player: buyer,
+            amount: -amount,
+        }),
+        w,
+    )?;
     let buyer_slot = *w
         .player_slots
         .get(buyer)
@@ -264,35 +268,6 @@ pub fn apply(
     callback(Call::RefreshInterface, w)?;
     w.buildings[id][0x3e] = 0;
     callback(Call::BuildingPanel(id), w)
-}
-
-// Native48a5a0 presents each posting immediately. A same-player takeover has
-// two postings; the Host pulse latch decides whether its second pulse starts.
-fn notify_post(
-    value: f32,
-    w: &mut World<'_>,
-    image: &PeImage<'_>,
-    callback: &mut impl FnMut(Call, &mut World<'_>) -> Result<(), String>,
-) -> Result<(), String> {
-    let threshold = image.f32_at(0x525040)?;
-    let sound = |asset| Call::NativeUiCall {
-        address: 0x4ad760,
-        args: [asset, 0, 0, 0, 1, 0x3c],
-        argument_count: 6,
-    };
-    let pulse = |address| Call::NativeUiCall {
-        address,
-        args: [0; 6],
-        argument_count: 0,
-    };
-    if value > threshold {
-        callback(sound(0x541cc8), w)?;
-        callback(pulse(0x4c6290), w)?;
-    } else if value < threshold || value.is_nan() {
-        callback(pulse(0x4c62d0), w)?;
-        callback(sound(0x541cb4), w)?;
-    }
-    Ok(())
 }
 
 #[test]
@@ -517,12 +492,16 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
             },
             &image,
             |call, w| {
+                if let Call::AccountPosted(posting) = call {
+                    actual.extend(crate::account_posting_test_support::cash_calls(
+                        posting.amount,
+                        current == Some(posting.player),
+                        image.f32_at(0x525040)?,
+                    ));
+                    return Ok(());
+                }
                 actual.push(match call {
-                    Call::NativeUiCall {
-                        address,
-                        args,
-                        argument_count,
-                    } => (address, args[..usize::from(argument_count)].to_vec()),
+                    Call::AccountPosted(_) => unreachable!(),
                     Call::BuildingAppearance(id) => (0x485520, vec![0x591318 + id as u32 * 916]),
                     Call::RefreshInterface => (0x41f410, vec![]),
                     Call::BuildingPanel(id) => (0x407660, vec![id as u32]),

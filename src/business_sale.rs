@@ -17,16 +17,12 @@ impl Command {
         row[24] = self.player;
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Call {
     BuildingAppearance(usize),
     RefreshInterface,
     BuildingPanel(usize),
-    NativeUiCall {
-        address: u32,
-        args: [u32; 6],
-        argument_count: u8,
-    },
+    AccountPosted(crate::economy::AccountPosting),
 }
 pub struct World<'a> {
     pub businesses: &'a mut [[u8; 544]],
@@ -62,28 +58,14 @@ pub fn apply(
             .get_mut((i32::from(owner) - 1) as usize)
             .ok_or("sale owner unresolved")?
             .post(value, 0x18)?;
-        // Native48a5a0 posts first, then current-player sound/pulse calls.
-        // These callbacks precede business owner transfer and initialization.
-        if controls.current_player == Some((i32::from(owner) - 1) as usize) {
-            let threshold = image.f32_at(0x525040)?;
-            let sound = |asset| Call::NativeUiCall {
-                address: 0x4ad760,
-                args: [asset, 0, 0, 0, 1, 0x3c],
-                argument_count: 6,
-            };
-            let pulse = |address| Call::NativeUiCall {
-                address,
-                args: [0; 6],
-                argument_count: 0,
-            };
-            if value > threshold {
-                callback(sound(0x541cc8), w)?;
-                callback(pulse(0x4c6290), w)?;
-            } else if value < threshold || value.is_nan() {
-                callback(pulse(0x4c62d0), w)?;
-                callback(sound(0x541cb4), w)?;
-            }
-        }
+        // Keep feedback before ownership transfer and initialization.
+        callback(
+            Call::AccountPosted(crate::economy::AccountPosting {
+                player: (i32::from(owner) - 1) as usize,
+                amount: value,
+            }),
+            w,
+        )?;
     }
     let building = i16::from_le_bytes(w.businesses[id][8..10].try_into().unwrap()) as usize;
     let prefix = w.buildings.get(building).ok_or("sale building missing")?[..64]
@@ -134,31 +116,43 @@ pub fn apply(
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    crate::business_initialize::initialize(
+    let input = crate::business_initialize::Inputs {
+        hour: controls.hour,
+        timestamp: controls.timestamp,
+        initializer: 0,
+        info,
+        products: &products,
+    };
+    let initialization = crate::business_initialize::initialize_before_charge(
         business,
         w.buildings
             .get_mut(building)
             .ok_or("sale initialization building missing")?,
-        &crate::business_initialize::Inputs {
-            hour: controls.hour,
-            timestamp: controls.timestamp,
-            initializer: 0,
-            info,
-            products: &products,
-        },
+        &input,
         image,
-        &mut |b, amount| {
-            let mut value = crate::x87::Sum::from_f32(f32::from_bits(word(b, 0x1c)))?;
-            value.add_f32(amount)?;
-            put(b, 0x1c, value.to_f32().to_bits());
-            if b[10] != 0 {
-                w.players
-                    .get_mut((i32::from(b[10] as i8) - 1) as usize)
-                    .ok_or("sale stock owner missing")?
-                    .post(amount, 0x11)?;
-            }
-            Ok(())
-        },
+    )?;
+    if let Some(amount) = initialization.charge {
+        let b = &mut w.businesses[id];
+        let mut value = crate::x87::Sum::from_f32(f32::from_bits(word(b, 0x1c)))?;
+        value.add_f32(amount)?;
+        put(b, 0x1c, value.to_f32().to_bits());
+        if b[10] != 0 {
+            let player = (i32::from(b[10] as i8) - 1) as usize;
+            w.players
+                .get_mut(player)
+                .ok_or("sale stock owner missing")?
+                .post(amount, 0x11)?;
+            callback(
+                Call::AccountPosted(crate::economy::AccountPosting { player, amount }),
+                w,
+            )?;
+        }
+    }
+    crate::business_initialize::initialize_after_charge(
+        &mut w.businesses[id],
+        &input,
+        image,
+        initialization,
     )?;
     *w.age = w.age.wrapping_add(100);
     callback(Call::RefreshInterface, w)?;
@@ -262,15 +256,19 @@ fn matches_native_sales() {
             },
             &image,
             |call, _| {
+                if let Call::AccountPosted(posting) = call {
+                    actual.extend(crate::account_posting_test_support::cash_calls(
+                        posting.amount,
+                        false,
+                        0.,
+                    ));
+                    return Ok(());
+                }
                 actual.push(match call {
                     Call::BuildingAppearance(id) => (0x485520, vec![0x591318 + id as u32 * 916]),
                     Call::RefreshInterface => (0x41f410, vec![]),
                     Call::BuildingPanel(id) => (0x407660, vec![id as u32]),
-                    Call::NativeUiCall {
-                        address,
-                        args,
-                        argument_count,
-                    } => (address, args[..usize::from(argument_count)].to_vec()),
+                    Call::AccountPosted(_) => unreachable!(),
                 });
                 Ok(())
             },
