@@ -1571,6 +1571,10 @@ impl Intro {
         if view.game_options.quit_prompt.request().is_some() {
             self.dialog_keys
                 .event1(Some(&mut view.game_options.quit_prompt));
+        } else if view.options_visible() {
+            // 0x49e860 switches to UI mode 4, which stops the city's interface
+            // group: a prompt left under Options gets no Return or Backspace.
+            self.dialog_keys.event1(None);
         } else if let Some(id) = self.dialog_keys.event1(Some(&mut view.prompts)) {
             view.dismiss_prompt(id)?;
         }

@@ -109,17 +109,37 @@ impl Intro {
                 }
                 return Ok(());
             }
-            if view.prompts.blocks_controls() {
-                // A notice's Return is the physical edge sampled by dialog_keys.
-                return Ok(());
-            }
-            if view.options_visible() {
-                match city_keys::options_key(key, view.settings_visible()) {
-                    Some(city_keys::OptionsKey::Back) => view.settings_menu.back(),
-                    Some(city_keys::OptionsKey::Close) => view.close_options()?,
-                    None => (),
+            // The worker's pause latch, 0x8b22d8. Its status counts every
+            // held reason, so it reads the same while the window has focus.
+            let pause_active = view
+                .live_status
+                .as_ref()
+                .is_some_and(|status| status.script_paused);
+            match city_keys::modal_key(
+                key,
+                view.options_visible(),
+                view.settings_visible(),
+                view.prompts.blocks_controls(),
+                pause_active,
+            ) {
+                city_keys::ModalKey::Options(city_keys::OptionsKey::Back) => {
+                    view.settings_menu.back();
+                    return Ok(());
                 }
-                return Ok(());
+                city_keys::ModalKey::Options(city_keys::OptionsKey::Close) => {
+                    view.close_options()?;
+                    return Ok(());
+                }
+                // The prompt stays queued underneath, keeping its state.
+                city_keys::ModalKey::OpenOptions => {
+                    if view._fresh_session.is_some() {
+                        view.open_options()?;
+                    }
+                    return Ok(());
+                }
+                // A notice's Return is the physical edge sampled by dialog_keys.
+                city_keys::ModalKey::Consumed => return Ok(()),
+                city_keys::ModalKey::Pass => (),
             }
             if view.chat_panel.open {
                 match key {
@@ -146,7 +166,9 @@ impl Intro {
                 && view.planning_pending.is_none()
                 && view.adjustment.is_none()
             {
-                view.open_options()?;
+                if city_keys::escape_opens_options(pause_active) {
+                    view.open_options()?;
+                }
                 return Ok(());
             }
             if view
@@ -731,7 +753,10 @@ impl Intro {
                 view.toolbar_bounds,
                 view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
             );
-            if view.settings_visible() || view.options_visible() || view.prompts.blocks_controls() {
+            if view.settings_visible()
+                || view.options_visible()
+                || view.prompts.blocks_controls() && !view.options_button_pressed()
+            {
                 view.time_panel.cancel_input();
                 view.time_pressed = None;
             }
@@ -1026,7 +1051,14 @@ impl Intro {
                             .is_some_and(|a| a.tutorial_control_pressed())
                         || view.operations.tutorial_control_pressed()
                 });
+            // The clock's Options button stays live over a prompt and with
+            // the tutorial's controls disabled: in the original it opens In-Game
+            // Options over Tutorial 1's first prompt.
+            let options_button = button == winit::event::MouseButton::Left
+                && !prompt_input_occupied
+                && view.options_button_input(&self.assets.time_panel);
             if (view.prompts.blocks_controls() || prompt_input_occupied)
+                && !options_button
                 && !tutorial_locator_hit
                 && !tutorial_property_hit
                 && !tutorial_planning_hit
@@ -1111,6 +1143,7 @@ impl Intro {
                 .as_ref()
                 .is_some_and(|status| status.tutorial_controls.all_disabled)
                 && !tutorial_control_hit
+                && !options_button
             {
                 view.mouse_buttons = [false; 2];
                 view.drag = [0; 2];

@@ -240,6 +240,33 @@ impl Inspection {
             }
         }
     }
+    /// A press of the clock's Options button is in progress.
+    pub(super) fn options_button_pressed(&self) -> bool {
+        self.time_pressed == Some(crate::time_panel::Button::Options)
+    }
+    /// Whether this left-button edge belongs to the clock's Options button:
+    /// a press over it, or the release of a press that began on it.
+    pub(super) fn options_button_input(&self, assets: &crate::time_panel::Assets) -> bool {
+        if self._fresh_session.is_none()
+            || !self
+                .live_status
+                .as_ref()
+                .is_some_and(|status| status.time_display.visible)
+        {
+            return false;
+        }
+        if self.options_button_pressed() {
+            return true;
+        }
+        let auction = self
+            .live_status
+            .as_ref()
+            .is_some_and(|status| status.auction.is_some());
+        self.pointer
+            .map(|p| p.map(|v| v as f32 * 0.5))
+            .and_then(|point| self.time_target(assets, point, auction))
+            == Some(crate::time_panel::Button::Options)
+    }
     pub(super) fn time_tooltip(
         &self,
         assets: &crate::time_panel::Assets,

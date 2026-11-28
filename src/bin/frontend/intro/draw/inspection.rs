@@ -690,7 +690,7 @@ impl Intro {
                 // The bottom-right round controls share the navigation backing;
                 // draw their original-texture faces after it, along with the clock.
                 if let Some(status) = &view.live_status {
-                    if view.prompts.request().is_some()
+                    if view.prompts.request().is_some() && !view.options_button_pressed()
                         || view.stats_requested
                         || status.stats.is_some()
                     {

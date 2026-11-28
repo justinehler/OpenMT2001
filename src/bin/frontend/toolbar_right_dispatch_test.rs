@@ -531,3 +531,198 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
         .join()
         .unwrap();
 }
+
+/// Same fixture as above, with a stand-in Session worker that owns the real
+/// Options pause transition (`Host::options`). It drives Escape and the
+/// clock's Options button over an open prompt through the production
+/// keyboard, mouse and dialog-key paths (#416).
+#[test]
+#[ignore = "requires X11/GPU, supplied original assets/SAVE_ONE, ffmpeg and OPENMT2001_TOOLBAR_RIGHT_TEST_ROOT; actual dispatcher integration"]
+#[allow(deprecated)]
+fn escape_and_options_button_open_options_over_a_prompt_and_continue_returns_to_it() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let root = openmt2001::fixtures::scratch("TOOLBAR_RIGHT_TEST_ROOT");
+            assert!(root.is_dir(), "supply an existing owned disk scratch parent");
+            let scratch = root.join(format!(
+                "options-over-prompt-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&scratch).unwrap();
+            struct Cleanup(PathBuf);
+            impl Drop for Cleanup {
+                fn drop(&mut self) {
+                    let _ = fs::remove_dir_all(&self.0);
+                }
+            }
+            let cleanup = Cleanup(scratch.clone());
+            let save = scratch.join("fixture.sav");
+            fs::write(&save, fs::read(openmt2001::fixtures::path("SAVE_ONE")).unwrap()).unwrap();
+            let exe = openmt2001::fixtures::path("EXE");
+            let params = openmt2001::fixtures::path("PARAMETERS");
+            let directory = openmt2001::fixtures::path("ARCHIVE_DIR");
+            let mut builder = EventLoop::builder();
+            builder.with_x11().with_any_thread(true);
+            let event_loop = builder.build().unwrap();
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_inner_size(winit::dpi::PhysicalSize::new(1280, 960)),
+                    )
+                    .unwrap(),
+            );
+            let presenter = pollster::block_on(Presenter::new(window)).unwrap();
+            let assets = Assets::load(Paths {
+                compatibility: crate::compatibility::Mode::Modern,
+                installer: params.parent().unwrap().parent().unwrap().to_path_buf(),
+                ffmpeg: PathBuf::from(
+                    std::env::var("OPENMT2001_FFMPEG").unwrap_or_else(|_| "ffmpeg".into()),
+                ),
+                scene: directory.parent().unwrap().to_path_buf(),
+                executable: exe.clone(),
+                map: openmt2001::fixtures::path("MAP"),
+                quality: Some("low".into()),
+                language: exe.parent().unwrap().parent().unwrap().join("US/language/usa"),
+                profile_root: scratch.join("profiles"),
+                save_root: scratch.join("saves"),
+            })
+            .unwrap();
+            let mut intro = Intro::new(&presenter, assets).unwrap();
+            intro.open_menu();
+            install_snapshot(&mut intro, &presenter, &save, false);
+
+            // Stand-in Session worker: the real Host owns the Options hold.
+            let (tx, rx) = mpsc::channel::<FreshRequest>();
+            let (pause_tx, pauses) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let mut host = crate::live_host::Host::new([0.; 3]);
+                host.set_running(true);
+                let mut pause = openmt2001::pause::State::default();
+                let mut timers = openmt2001::timers::startup_tasks([0; 20]);
+                while let Ok(request) = rx.recv() {
+                    if let FreshRequest::Options { open, reply } = request {
+                        reply.send(host.options(&mut pause, &mut timers, open)).unwrap();
+                        pause_tx.send((pause.clone(), host.running)).unwrap();
+                    }
+                }
+            });
+            let unpaused = (openmt2001::pause::State::default(), true);
+            let pause_after = |pauses: &mpsc::Receiver<(openmt2001::pause::State, bool)>| {
+                pauses.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+            };
+            {
+                let view = intro.inspection.as_mut().unwrap();
+                view._fresh_session = Some(tx.clone());
+                let status = view.live_status.as_mut().unwrap();
+                status.script_paused = false;
+                assert!(status.tutorial_controls.all_disabled);
+                assert!(view.prompts.blocks_controls());
+                assert!(!view.options_visible());
+            }
+            let prompt = intro.inspection.as_ref().unwrap().prompts.request().unwrap();
+            let escape = |intro: &mut Intro, pressed: bool| {
+                let admitted = intro.admit_city_key(NamedKey::Escape, pressed, false, false);
+                intro.inspection_keyboard(NamedKey::Escape, pressed, admitted).unwrap();
+            };
+            use process_frontend::PhysicalSample;
+            use winit::keyboard::{KeyCode, NamedKey, PhysicalKey};
+            let enter = |intro: &mut Intro, down: bool| {
+                intro.dialog_physical_sample(PhysicalSample::Key {
+                    key: PhysicalKey::Code(KeyCode::Enter),
+                    down,
+                    repeat: false,
+                });
+                intro.dialog_ui_event1().unwrap();
+            };
+            // Arm the prompt's Return shortcut (its first update only arms it).
+            intro.dialog_ui_event1().unwrap();
+
+            // Escape over the prompt opens Options and holds reason 0 once.
+            escape(&mut intro, true);
+            let view = intro.inspection.as_ref().unwrap();
+            assert!(view.options_visible(), "Escape opens Options over the prompt");
+            assert_eq!(view.prompts.request(), Some(prompt.clone()));
+            let (held, running) = pause_after(&pauses);
+            assert_eq!(&held.bytes[..4], &[1, 0, 0, 0]);
+            assert!(!running);
+            // A held Escape repeats nothing; Return under Options leaves the prompt.
+            escape(&mut intro, true);
+            enter(&mut intro, true);
+            enter(&mut intro, false);
+            let view = intro.inspection.as_mut().unwrap();
+            assert!(view.options_visible());
+            assert_eq!(view.prompts.request(), Some(prompt.clone()));
+            assert!(view.prompts.take_dialog_replies().is_empty());
+            assert!(pauses.try_recv().is_err(), "held Escape acts once");
+            escape(&mut intro, false);
+
+            // Continue returns to the prompt with the pause state restored.
+            let continue_button = intro.assets.game_options.bounds()[0];
+            let click = |intro: &mut Intro, logical: [f32; 2]| {
+                intro.inspection_cursor(
+                    [f64::from(logical[0] * 2.), f64::from(logical[1] * 2.)],
+                    [1280, 960],
+                );
+                intro.inspection_mouse(MouseButton::Left, true);
+                intro.inspection_mouse(MouseButton::Left, false);
+            };
+            let centre = |b: [f32; 4]| [(b[0] + b[2]) * 0.5, (b[1] + b[3]) * 0.5];
+            click(&mut intro, centre(continue_button));
+            let view = intro.inspection.as_ref().unwrap();
+            assert!(!view.options_visible(), "Continue closes Options");
+            assert_eq!(view.prompts.request(), Some(prompt.clone()));
+            assert_eq!(pause_after(&pauses), unpaused);
+
+            // The clock's Options button also opens Options over the prompt,
+            // with the tutorial's controls disabled.
+            assert!(
+                intro.inspection.as_ref().unwrap().live_status.as_ref().unwrap().time_display.visible,
+                "fixture shows the clock"
+            );
+            let options_point = internal_pointer([880., 26.], [960, 720])
+                .unwrap()
+                .map(|v| v as f32 * 0.5);
+            click(&mut intro, options_point);
+            let view = intro.inspection.as_ref().unwrap();
+            assert!(view.options_visible(), "the Options button opens Options");
+            assert_eq!(view.prompts.request(), Some(prompt.clone()));
+            assert_eq!(&pause_after(&pauses).0.bytes[..4], &[1, 0, 0, 0]);
+            click(&mut intro, centre(continue_button));
+            assert!(!intro.inspection.as_ref().unwrap().options_visible());
+            assert_eq!(pause_after(&pauses), unpaused);
+
+            // With Options gone, the prompt's Return answers it again.
+            enter(&mut intro, true);
+            enter(&mut intro, false);
+            let view = intro.inspection.as_mut().unwrap();
+            assert_eq!(view.prompts.take_dialog_replies().len(), 1);
+
+            // A held pause reason (0x8b22d8) stops Escape over the prompt.
+            view.prompts = crate::prompt::State::default();
+            view.prompts.submit(prompt.clone());
+            view.live_status.as_mut().unwrap().script_paused = true;
+            escape(&mut intro, true);
+            escape(&mut intro, false);
+            assert!(!intro.inspection.as_ref().unwrap().options_visible());
+            assert!(pauses.try_recv().is_err());
+
+            intro.inspection.as_mut().unwrap()._fresh_session = None;
+            drop(tx);
+            worker.join().unwrap();
+            drop(intro);
+            drop(presenter);
+            drop(event_loop);
+            drop(cleanup);
+            assert!(!scratch.exists());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
