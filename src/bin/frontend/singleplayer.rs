@@ -145,7 +145,7 @@ mod campaign_picker_tests {
         let pages = panel.slot_labels().unwrap();
         assert!(pages[1].vertices.is_empty());
         assert_eq!(pages[0].vertices.len(), 6 * 6 * 6);
-        for (slot, label) in pages[0].vertices.chunks_exact(36).enumerate() {
+        for (slot, label) in pages[0].vertices.as_chunks::<36>().0.iter().enumerate() {
             let bounds = panel.character_panel.bounds[34 - slot];
             let text = if slot == 0 {
                 ascii("Player")
