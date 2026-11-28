@@ -8,6 +8,51 @@ use openmt2001::{
     player_manager::{Auxiliary, Manager, Player},
 };
 
+#[test]
+fn synthetic_warnings_accumulate_and_replace_the_last_message() {
+    let mut host = Host::new([0.; 3]);
+    assert_eq!(host.ai_warnings.count, 0);
+    assert_eq!(host.ai_warnings.last_message, None);
+    host.expect_ai_warnings(2);
+    host.running = true;
+    for diagnostic in [
+        openmt2001::ai_diagnostic::Diagnostic::warning(0x53da30),
+        openmt2001::ai_diagnostic::Diagnostic::timetable(false, 99),
+    ] {
+        assert_eq!(
+            ai_callback(
+                ai_runtime::Call::Diagnostic(diagnostic),
+                &mut host.ai_warnings
+            ),
+            Ok(0)
+        );
+        assert_eq!(host.ai_warnings.last_message, Some(diagnostic.to_string()));
+        assert!(host.running && host.failure.is_none());
+    }
+    assert_eq!(host.ai_warnings.count, 2);
+    // Dropping the host accepts only the declared count.
+}
+
+#[test]
+#[should_panic(expected = "unexpected AI warning count")]
+fn unexpected_ai_warning_fails_when_host_is_dropped() {
+    let mut host = Host::new([0.; 3]);
+    ai_callback(
+        ai_runtime::Call::Diagnostic(openmt2001::ai_diagnostic::Diagnostic::warning(0x53da30)),
+        &mut host.ai_warnings,
+    )
+    .unwrap();
+    drop(host);
+}
+
+#[test]
+#[should_panic(expected = "unexpected AI warning count")]
+fn expected_ai_warning_must_actually_occur() {
+    let mut host = Host::new([0.; 3]);
+    host.expect_ai_warnings(1);
+    drop(host);
+}
+
 fn put(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
@@ -156,7 +201,8 @@ fn tick(
             if let ai_runtime::Call::Diagnostic(diagnostic) = call {
                 seen.push(diagnostic);
             }
-            ai_callback(call).map(|value| ai_messages::Reply { value, offer: 0 })
+            ai_callback(call, &mut host.ai_warnings)
+                .map(|value| ai_messages::Reply { value, offer: 0 })
         },
     );
     if let Err(error) = result {
@@ -191,6 +237,8 @@ fn ai_warnings_advance_both_live_timetables_and_keep_ticking() {
             manager.players[0].bytes[enabled] = 1;
         }
         let mut host = Host::new([0.; 3]);
+        // This fixture deliberately injects two unsupported timetable codes.
+        host.expect_ai_warnings(2);
         host.running = true;
         let mut seen = vec![];
         tick(
@@ -232,6 +280,11 @@ fn ai_warnings_advance_both_live_timetables_and_keep_ticking() {
         assert_eq!(word(&manager.players[0].bytes, 0x1e48), age + 1);
         assert_eq!(seen.len(), 2);
         assert!(host.running && host.failure.is_none());
+        assert_eq!(host.ai_warnings.count, 2);
+        assert_eq!(
+            host.ai_warnings.last_message,
+            seen.last().map(ToString::to_string)
+        );
     });
 }
 
@@ -257,6 +310,8 @@ fn ai_warning_for_missing_offer_preserves_cleanup_and_keeps_ticking() {
             players: vec![player],
         };
         let mut host = Host::new([0.; 3]);
+        // This fixture deliberately injects completion for a missing offer.
+        host.expect_ai_warnings(1);
         host.running = true;
         let mut seen = vec![];
         let mut profiles = [[0; 0x650]];
@@ -331,6 +386,8 @@ fn ai_fatal_kind_zero_stops_live_host() {
             vec![openmt2001::ai_diagnostic::Diagnostic::original(0, 0x53cc80).unwrap()]
         );
         assert!(!host.running);
+        assert_eq!(host.ai_warnings.count, 0);
+        assert_eq!(host.ai_warnings.last_message, None);
         assert!(
             host.failure
                 .as_ref()

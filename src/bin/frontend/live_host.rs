@@ -83,6 +83,10 @@ pub struct Status {
     /// Original822d48 fraction within the625-tick hour.
     pub hour_fraction: u32,
     pub failure: Option<String>,
+    /// Recoverable AI script diagnostics since this host was created.
+    pub ai_warning_count: u64,
+    /// Most recent warning, formatted like the retained stderr diagnostic.
+    pub last_ai_warning: Option<String>,
     pub pending_presentation: Vec<u32>,
     pub prompts: Vec<prompt::Request>,
     pub auction_seconds: Option<i32>,
@@ -152,13 +156,40 @@ pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
         }
     );
 }
+#[derive(Default)]
+struct AiWarnings {
+    count: u64,
+    last_message: Option<String>,
+    #[cfg(test)]
+    expected_count: u64,
+}
+
+#[cfg(test)]
+impl Drop for AiWarnings {
+    fn drop(&mut self) {
+        // Preserve an existing test failure instead of panicking during unwind.
+        if !std::thread::panicking() {
+            assert_eq!(
+                self.count, self.expected_count,
+                "unexpected AI warning count; last warning: {:?}",
+                self.last_message
+            );
+        }
+    }
+}
+
 /// Native 4e6960 kind 1 returns after acknowledgement; kind 0 terminates.
 /// The frontend's game prompts need resource IDs and gameplay dismissal events,
 /// so native debug dialogs are recorded in the terminal instead.
-fn ai_diagnostic(diagnostic: openmt2001::ai_diagnostic::Diagnostic) -> Result<u32, String> {
+fn ai_diagnostic(
+    diagnostic: openmt2001::ai_diagnostic::Diagnostic,
+    warnings: &mut AiWarnings,
+) -> Result<u32, String> {
     use openmt2001::ai_diagnostic::Kind;
     match diagnostic.kind {
         Kind::RecoverableWarning => {
+            warnings.count = warnings.count.saturating_add(1);
+            warnings.last_message = Some(diagnostic.to_string());
             eprintln!("[AI warning] {diagnostic}");
             Ok(0)
         }
@@ -166,9 +197,12 @@ fn ai_diagnostic(diagnostic: openmt2001::ai_diagnostic::Diagnostic) -> Result<u3
     }
 }
 
-fn ai_callback(call: openmt2001::ai_runtime::Call) -> Result<u32, String> {
+fn ai_callback(
+    call: openmt2001::ai_runtime::Call,
+    warnings: &mut AiWarnings,
+) -> Result<u32, String> {
     match call {
-        openmt2001::ai_runtime::Call::Diagnostic(diagnostic) => ai_diagnostic(diagnostic),
+        openmt2001::ai_runtime::Call::Diagnostic(diagnostic) => ai_diagnostic(diagnostic, warnings),
         other => Err(format!("Live session requires Ai({other:?})")),
     }
 }
@@ -251,6 +285,7 @@ enum CameraSuppliers {
 }
 
 pub struct Host {
+    ai_warnings: AiWarnings,
     //Missing process source is explicit for legacy CPU Hosts. Production binds
     //the SAME Assets-born handle before commands/startup are consumed.
     pub process_runtime: Option<process_runtime::Handle>,
@@ -318,6 +353,12 @@ pub struct Host {
     result_context: Option<u32>,
 }
 impl Host {
+    /// Declare the exact number of deliberately injected warnings in a test.
+    /// All other session tests reject warnings when their host is dropped.
+    #[cfg(test)]
+    pub(crate) fn expect_ai_warnings(&mut self, count: u64) {
+        self.ai_warnings.expected_count = count;
+    }
     ///4ba17e (fresh) /4bbd6b (loaded) shows the persistent normal Time
     /// instance. Re-showing an already visible widget has no activation call.
     pub fn begin_presentation(&mut self, session: &Session<'_>) -> Result<(), String> {
@@ -482,6 +523,7 @@ impl Host {
 
     pub fn new(camera: [f32; 3]) -> Self {
         Self {
+            ai_warnings: AiWarnings::default(),
             process_runtime: None,
             camera_bridge: None,
             ui_camera_source: None,
@@ -1488,6 +1530,8 @@ impl Host {
             hour: session.world.clock.hour(),
             hour_fraction: session.world.clock.timing[2],
             failure: self.failure.clone(),
+            ai_warning_count: self.ai_warnings.count,
+            last_ai_warning: self.ai_warnings.last_message.clone(),
             pending_presentation: self.pending_presentation.iter().copied().collect(),
             prompts,
             auction_seconds: self.auction_seconds,
@@ -2143,6 +2187,7 @@ impl Host {
         self.policy.calendar.autosave_disabled = self.policy.scheduler.network_enabled;
         let autosave_root = &self.autosave_profile_root;
         let autosave_status = &mut self.autosave_status;
+        let ai_warnings = &mut self.ai_warnings;
         let camera_bridge = &mut self.camera_bridge;
         let ui_camera_source = &self.ui_camera_source;
         let ui_camera_epoch = session.world.topology.epoch();
@@ -2741,7 +2786,7 @@ impl Host {
                         &mut construction_sounds, group, position, camera)?;
                     Ok(0)
                 }
-                Event::Ai(call) => ai_callback(call),
+                Event::Ai(call) => ai_callback(call, ai_warnings),
                 // Every other callback must be bound deliberately. In particular,
                 // controller/transaction outcomes may not be faked with success.
                 other => Err(format!("Live session requires {other:?}")),
