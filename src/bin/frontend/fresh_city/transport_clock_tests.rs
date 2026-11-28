@@ -91,6 +91,17 @@ fn just_before_ten(session: &mut Session<'_>) {
     clock.timing[5] = 1;
 }
 
+/// Scheduler boundaries for a test run: the auction room scene and camera
+/// are prepared as the host would, and every other host call is a no-op.
+fn boundary(event: tick::Event<'_>, _: &openmt2001::clock::Clock) -> Result<u32, String> {
+    use openmt2001::{ai_messages::offers::auction, live_commands::Event};
+    Ok(match event {
+        tick::Event::Command(Event::AuctionScenePrepare)
+        | tick::Event::Command(Event::AuctionActivation(auction::activation::Call::Camera)) => 1,
+        _ => 0,
+    })
+}
+
 fn iterate(session: &mut Session<'_>, assets: &CommandAssets<'_, '_>, count: u32) {
     let mut policy = super::tests::simulation_test_policy();
     for _ in 0..count {
@@ -109,7 +120,7 @@ fn iterate(session: &mut Session<'_>, assets: &CommandAssets<'_, '_>, count: u32
         );
         let before = session.world.clock.timing[0];
         session
-            .advance_session(assets, &mut policy, |_, _| Ok(0))
+            .advance_session(assets, &mut policy, boundary)
             .unwrap();
         assert_eq!(session.world.clock.timing[0], before.wrapping_add(1));
     }
@@ -141,9 +152,58 @@ fn translation(auxiliary: &[u8; 284]) -> [u32; 3] {
 #[test]
 #[ignore = "requires original assets"]
 fn aircraft_keep_flying_through_auction_mode_while_trains_wait() {
+    use openmt2001::{ai_messages::offers::auction, live_commands};
     with_session(|session, assets| {
-        just_before_ten(session);
+        // Keep the opponents out of strategy so only the auction runs.
+        for player in &mut session.roster.manager.players {
+            if word(&player.bytes, 0x154) == 1 {
+                player.bytes[0x1403] = 1;
+            }
+        }
+        // A real auction: the 0x1d announcement is admitted 25 ticks after
+        // submission, and its 0x1e start, 3025 ticks later, enters mode 2.
+        let category = (0..52)
+            .find(|&i| session.world.categories[i][5] == 0)
+            .unwrap();
+        let initiator = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .position(|p| p.reference == session.roster.status.current_player)
+            .unwrap();
+        let mut descriptor = [0; 52];
+        for (at, value) in [
+            (4, 0x1d),
+            (20, category as u32),
+            (24, initiator as u32),
+            (28, 100),
+        ] {
+            descriptor[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        descriptor[16] = 1;
+        let admitted_at = session.world.clock.timing[0] + 25;
+        session
+            .submit_command(
+                live_commands::Command::Auction { descriptor },
+                assets,
+                |_| Err("auction admission ran early".into()),
+            )
+            .unwrap();
+        while session.world.clock.timing[0] < admitted_at {
+            iterate(session, assets, 1);
+        }
+        assert_eq!(session.world.auction.controller.active_count, 1);
+
+        // The last city tick before the auction is 10:00, which creates an
+        // aircraft and a train (44f2a0).
+        let auction_start = admitted_at + 3025;
+        let clock = &mut session.world.clock;
+        clock.calendar[0] = 9;
+        clock.timing[1] = (clock.timing[1] / 625 + 1) * 625 - 1;
+        clock.timing[0] = auction_start - 2;
         iterate(session, assets, 1);
+        assert_eq!(session.world.clock.timing[5], 1);
         assert_eq!(session.world.clock.hour(), 10);
         let aircraft = active_aircraft(session);
         assert_eq!(aircraft.len(), 1, "10:00 creates one aircraft");
@@ -160,9 +220,12 @@ fn aircraft_keep_flying_through_auction_mode_while_trains_wait() {
                 .unwrap();
             std::array::from_fn::<_, 3, _>(|axis| matrix[9 + axis].to_bits())
         };
-        let first = render(session);
-        assert!(first.iter().any(|a| translation(a) == expected(session, 1)));
-
+        let before = render(session);
+        assert!(
+            before
+                .iter()
+                .any(|a| translation(a) == expected(session, 1))
+        );
         let trains = session.transport.trains;
         assert!(
             trains.iter().any(|row| word(row, 0) != 0),
@@ -173,22 +236,66 @@ fn aircraft_keep_flying_through_auction_mode_while_trains_wait() {
         let global = session.world.clock.timing[0];
 
         // Auction mode: 481680 still increments the global tick each
-        // iteration, but skips the city branch with 44ec50 and the normal tick.
-        let auction_iterations = 100;
-        assert!(auction_iterations + 1 < frames);
-        session.world.clock.timing[5] = 2;
-        iterate(session, assets, auction_iterations);
-        assert_eq!(session.world.clock.timing[0], global + auction_iterations);
-        assert_eq!(session.world.clock.timing[1], normal);
-        assert_eq!(session.transport.trains, trains, "trains wait in auctions");
-        assert_eq!(session.transport.environment.frame, ship_frame);
+        // iteration but skips the city branch, 44ec50 and the normal tick.
+        iterate(session, assets, 1);
+        assert_eq!(session.world.clock.timing[5], 2, "the auction started");
+        iterate(session, assets, 99);
+        assert_eq!(session.world.clock.timing[5], 2);
+        // Every participant withdraws; the closure returns the city to mode 1.
+        for _ in 0..6 {
+            if session.world.clock.timing[5] != 2
+                || word(&session.world.auction.controller.record, 0x60) != u32::MAX
+            {
+                break;
+            }
+            let participant = word(&session.world.auction.controller.record, 0x58);
+            session
+                .apply_auction_action(
+                    auction::Command {
+                        action: 2,
+                        participant,
+                        amount: 0,
+                    },
+                    assets,
+                    |_| Ok(0),
+                )
+                .unwrap();
+        }
+        // Commands run in 480ec0 before the mode dispatch, so the iteration
+        // whose closure restores mode 1 already runs the city branch.
+        let mut closing = 0;
+        loop {
+            iterate(session, assets, 1);
+            if session.world.clock.timing[5] != 2 {
+                break;
+            }
+            assert_eq!(session.world.clock.timing[1], normal, "no city ticks ran");
+            assert_eq!(session.transport.trains, trains, "trains wait in auctions");
+            assert_eq!(session.transport.environment.frame, ship_frame);
+            closing += 1;
+            assert!(closing < 400, "the auction did not close");
+        }
+        assert_eq!(session.world.clock.timing[1], normal + 1);
+        assert_ne!(
+            session.transport.trains, trains,
+            "trains move on city ticks"
+        );
+        let auction_iterations = session.world.clock.timing[0] - global - 1;
+        assert!(auction_iterations >= 100);
+        assert!(
+            auction_iterations + 2 < frames,
+            "the flight outlasts the auction"
+        );
 
-        session.world.clock.timing[5] = 1;
+        // Back in the city, the aircraft is drawn as many frames further on
+        // as the auction ran scheduler iterations (plus the closing tick).
+        let elapsed = session.world.clock.timing[0].wrapping_sub(start);
+        assert_eq!(elapsed, auction_iterations + 2);
         let after = render(session);
         assert!(
             after
                 .iter()
-                .any(|a| translation(a) == expected(session, 1 + auction_iterations)),
+                .any(|a| translation(a) == expected(session, elapsed)),
             "the aircraft is drawn {auction_iterations} frames further along"
         );
         assert!(
@@ -196,27 +303,16 @@ fn aircraft_keep_flying_through_auction_mode_while_trains_wait() {
             "the aircraft did not stay where the auction found it"
         );
 
-        // A long enough auction outlasts the flight: the next city render
-        // expires the aircraft without drawing it (44e000).
-        session.world.clock.timing[5] = 2;
-        iterate(session, assets, frames - 1 - auction_iterations);
-        session.world.clock.timing[5] = 1;
-        let elapsed = session.world.clock.timing[0].wrapping_sub(start);
-        assert_eq!(elapsed, frames);
+        // Once the global tick reaches the locator frame count, the next
+        // render expires the aircraft without drawing it (44e000).
+        let remaining = frames - session.world.clock.timing[0].wrapping_sub(start);
+        session.world.clock.timing[0] += remaining;
         let expired = render(session);
         assert_eq!(word(&session.transport.aircraft[slot], 0), 0);
         assert!(
             !expired
                 .iter()
                 .any(|a| translation(a) == expected(session, frames))
-        );
-
-        // Back in the city, trains move again on normal ticks.
-        iterate(session, assets, 1);
-        assert_eq!(session.world.clock.timing[1], normal + 1);
-        assert_ne!(
-            session.transport.trains, trains,
-            "trains move on city ticks"
         );
     });
 }
