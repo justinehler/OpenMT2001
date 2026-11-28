@@ -124,12 +124,14 @@ fn retained(
     c.cache = 0x1234;
     c.poll.counters[3] = 17;
     c.dirty_writeback = true;
-    Arc::make_mut(&mut c.input).owned.push(strategic::Owned {
-        category: 3,
-        label: 4,
-        building_slot: 8,
-        building_reference: 0x591318 + 8 * 916,
-    });
+    Arc::make_mut(&mut c.input)
+        .owned
+        .push(openmt2001::strategic_inputs::Owned {
+            category: 3,
+            label: 4,
+            building_slot: 8,
+            building_reference: 0x591318 + 8 * 916,
+        });
     h.locator.as_mut().unwrap().install_strategic(c).unwrap();
     let mut colors = h
         .locator
