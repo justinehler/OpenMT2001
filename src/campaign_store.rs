@@ -365,8 +365,8 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let root = PathBuf::from(format!(
-                "work/custom-import-{}-{nonce}-{serial}",
+            let root = crate::fixtures::scratch("CUSTOM_IMPORT").join(format!(
+                "custom-import-{}-{nonce}-{serial}",
                 std::process::id()
             ));
             fs::create_dir_all(root.join("GAMESTART")).unwrap();
@@ -715,10 +715,8 @@ mod tests {
         catalog.unlock_first();
         assert!(catalog.select(200003, false));
         catalog.difficulty = 2;
-        let root = PathBuf::from(format!(
-            "work/economy/campaign-write-retry-{}",
-            std::process::id()
-        ));
+        let root = crate::fixtures::scratch("ECONOMY")
+            .join(format!("campaign-write-retry-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let occupied = root.join("occupied");
         fs::write(&occupied, b"not a directory").unwrap();
@@ -813,10 +811,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = PathBuf::from(format!(
-            "work/economy/campaign-abort-{}-{nonce}",
-            std::process::id()
-        ));
+        let root = crate::fixtures::scratch("ECONOMY")
+            .join(format!("campaign-abort-{}-{nonce}", std::process::id()));
         let path = root.join("progress.lua");
         let mut active = base.clone();
         load_progress(&mut active, &path).unwrap();
@@ -873,7 +869,7 @@ mod tests {
                 .map(|level| level.id())
                 .collect::<Vec<_>>()
         );
-        let root = PathBuf::from("work/economy/catalog-profile-roundtrip");
+        let root = crate::fixtures::scratch("ECONOMY").join("catalog-profile-roundtrip");
         let path = profile_path(&root, b"Campaign / Test");
         assert_eq!(path.parent(), Some(root.join("campaign").as_path()));
         catalog.reset_progress();

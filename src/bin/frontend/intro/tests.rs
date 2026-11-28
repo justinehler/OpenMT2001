@@ -1152,16 +1152,19 @@ fn verify_menu_vertex_upload_phase(phase: u32) {
             .unwrap();
         batch_time += started.elapsed();
         if [0, 50, 99].contains(&tick) {
-            let reference = format!("work/frontend/vertex-individual-{tick}.png");
-            let actual = format!("work/frontend/vertex-batch-{tick}.png");
+            let reference = format!("frontend/vertex-individual-{tick}.png");
+            let actual = format!("frontend/vertex-batch-{tick}.png");
             crate::capture_test::capture_standalone(&renderer, &individual, &reference);
             crate::capture_test::capture_standalone(&renderer, &batch, &actual);
-            assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap());
-            let fresh = format!("work/frontend/vertex-fresh-{tick}.png");
+            assert_eq!(
+                fs::read(crate::capture_test::output_path(&reference)).unwrap(),
+                fs::read(crate::capture_test::output_path(&actual)).unwrap()
+            );
+            let fresh = format!("frontend/vertex-fresh-{tick}.png");
             crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
             assert_eq!(
-                fs::read(fresh).unwrap(),
-                fs::read(format!("work/frontend/vertex-batch-{tick}.png")).unwrap()
+                fs::read(crate::capture_test::output_path(&fresh)).unwrap(),
+                fs::read(crate::capture_test::output_path(&actual)).unwrap()
             );
         } else {
             // Flush staging uploads equally without adding offscreen rendering
@@ -1187,16 +1190,18 @@ fn verify_menu_vertex_upload_phase(phase: u32) {
     crate::capture_test::capture_standalone(
         &renderer,
         &individual,
-        "work/frontend/vertex-individual-fog.png",
+        "frontend/vertex-individual-fog.png",
     );
-    crate::capture_test::capture_standalone(
-        &renderer,
-        &batch,
-        "work/frontend/vertex-batch-fog.png",
-    );
+    crate::capture_test::capture_standalone(&renderer, &batch, "frontend/vertex-batch-fog.png");
     assert_eq!(
-        fs::read("work/frontend/vertex-individual-fog.png").unwrap(),
-        fs::read("work/frontend/vertex-batch-fog.png").unwrap()
+        fs::read(crate::capture_test::output_path(
+            "frontend/vertex-individual-fog.png"
+        ))
+        .unwrap(),
+        fs::read(crate::capture_test::output_path(
+            "frontend/vertex-batch-fog.png"
+        ))
+        .unwrap()
     );
     // A material replacement introduces a standalone uniform buffer. The
     // batch API must update that live buffer as well as the retained arena.
@@ -1278,16 +1283,22 @@ fn verify_menu_vertex_upload_phase(phase: u32) {
     crate::capture_test::capture_standalone(
         &renderer,
         &individual,
-        "work/frontend/vertex-individual-replaced.png",
+        "frontend/vertex-individual-replaced.png",
     );
     crate::capture_test::capture_standalone(
         &renderer,
         &batch,
-        "work/frontend/vertex-batch-replaced.png",
+        "frontend/vertex-batch-replaced.png",
     );
     assert_eq!(
-        fs::read("work/frontend/vertex-individual-replaced.png").unwrap(),
-        fs::read("work/frontend/vertex-batch-replaced.png").unwrap()
+        fs::read(crate::capture_test::output_path(
+            "frontend/vertex-individual-replaced.png"
+        ))
+        .unwrap(),
+        fs::read(crate::capture_test::output_path(
+            "frontend/vertex-batch-replaced.png"
+        ))
+        .unwrap()
     );
     eprintln!(
         "Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}",
@@ -1392,16 +1403,19 @@ fn menu_batch_camera_upload_matches_individual_updates() {
             .unwrap();
         batch_time += started.elapsed();
         if [0, 50, 99].contains(&tick) {
-            let reference = format!("work/frontend/menu-individual-{tick}.png");
-            let actual = format!("work/frontend/menu-batch-{tick}.png");
+            let reference = format!("frontend/menu-individual-{tick}.png");
+            let actual = format!("frontend/menu-batch-{tick}.png");
             crate::capture_test::capture_standalone(&renderer, &individual, &reference);
             crate::capture_test::capture_standalone(&renderer, &batch, &actual);
-            assert_eq!(fs::read(reference).unwrap(), fs::read(actual).unwrap());
-            let fresh = format!("work/frontend/menu-fresh-{tick}.png");
+            assert_eq!(
+                fs::read(crate::capture_test::output_path(&reference)).unwrap(),
+                fs::read(crate::capture_test::output_path(&actual)).unwrap()
+            );
+            let fresh = format!("frontend/menu-fresh-{tick}.png");
             crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
             assert_eq!(
-                fs::read(fresh).unwrap(),
-                fs::read(format!("work/frontend/menu-batch-{tick}.png")).unwrap()
+                fs::read(crate::capture_test::output_path(&fresh)).unwrap(),
+                fs::read(crate::capture_test::output_path(&actual)).unwrap()
             );
         } else {
             // Flush staging uploads equally without adding offscreen rendering
@@ -1427,9 +1441,9 @@ fn menu_batch_camera_upload_matches_individual_updates() {
     crate::capture_test::capture_standalone(
         &renderer,
         &individual,
-        "work/frontend/menu-individual-fog.png",
+        "frontend/menu-individual-fog.png",
     );
-    crate::capture_test::capture_standalone(&renderer, &batch, "work/frontend/menu-batch-fog.png");
+    crate::capture_test::capture_standalone(&renderer, &batch, "frontend/menu-batch-fog.png");
     assert_eq!(
         fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_FOG")).unwrap(),
         fs::read(openmt2001::fixtures::path("MENU_BATCH_FOG")).unwrap()
@@ -1510,13 +1524,9 @@ fn menu_batch_camera_upload_matches_individual_updates() {
     crate::capture_test::capture_standalone(
         &renderer,
         &individual,
-        "work/frontend/menu-individual-replaced.png",
+        "frontend/menu-individual-replaced.png",
     );
-    crate::capture_test::capture_standalone(
-        &renderer,
-        &batch,
-        "work/frontend/menu-batch-replaced.png",
-    );
+    crate::capture_test::capture_standalone(&renderer, &batch, "frontend/menu-batch-replaced.png");
     assert_eq!(
         fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_REPLACED")).unwrap(),
         fs::read(openmt2001::fixtures::path("MENU_BATCH_REPLACED")).unwrap()
@@ -1593,7 +1603,7 @@ fn capture_mr_monopoly_in_intro_city() {
         )
         .unwrap();
     let path = std::env::var("OPENMT2001_MR_MONOPOLY_CAPTURE")
-        .unwrap_or_else(|_| "work/frontend/mr-monopoly-menu-capture.png".into());
+        .unwrap_or_else(|_| "frontend/mr-monopoly-menu-capture.png".into());
     crate::capture_test::capture_prepared_world_overlays(&renderer, &city, &[&actor], &[], &path);
     let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
@@ -1630,7 +1640,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[&navigation[0], &time],
-        "work/frontend/time-panel-city-corrected.png",
+        "frontend/time-panel-city-corrected.png",
     );
     let language = openmt2001::fixtures::path("EXE")
         .parent()
@@ -1648,7 +1658,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[&options],
-        "work/frontend/game-options-city.png",
+        "frontend/game-options-city.png",
     );
     let mut save_feedback = crate::game_options::View::default();
     save_feedback.open(false);
@@ -1661,7 +1671,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[save_feedback.prepared.as_ref().unwrap()],
-        "work/frontend/game-options-save-feedback.png",
+        "frontend/game-options-save-feedback.png",
     );
     let mut tutorial_options = crate::game_options::View::default();
     tutorial_options.open(false);
@@ -1674,7 +1684,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[tutorial_options.prepared.as_ref().unwrap()],
-        "work/frontend/game-options-tutorial-save-disabled.png",
+        "frontend/game-options-tutorial-save-disabled.png",
     );
     let settings_assets =
         crate::settings_menu::Assets::load(&index, &archive, installer, &language).unwrap();
@@ -1692,7 +1702,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[&settings],
-        "work/frontend/settings-menu-city.png",
+        "frontend/settings-menu-city.png",
     );
     let sound = settings_assets
         .prepare(
@@ -1711,7 +1721,7 @@ fn capture_mr_monopoly_in_intro_city() {
         &city,
         &[&actor],
         &[&sound],
-        "work/frontend/sound-settings-city.png",
+        "frontend/sound-settings-city.png",
     );
     for (name, page) in [
         ("graphics", crate::settings_menu::Page::Graphics),
@@ -1731,7 +1741,7 @@ fn capture_mr_monopoly_in_intro_city() {
             &city,
             &[&actor],
             &[&panel],
-            &format!("work/frontend/{name}-settings-city.png"),
+            &format!("frontend/{name}-settings-city.png"),
         );
     }
     // Controlled flyby-to-menu frames. The original recording has splash
@@ -1751,7 +1761,7 @@ fn capture_mr_monopoly_in_intro_city() {
             &scene,
             &[&actor],
             &[],
-            &format!("work/frontend/mr-monopoly-intro-frame-{frame:04}.png"),
+            &format!("frontend/mr-monopoly-intro-frame-{frame:04}.png"),
         );
     }
     city = renderer
@@ -1802,7 +1812,7 @@ fn capture_mr_monopoly_in_intro_city() {
             &city,
             &[&actor],
             &[],
-            &format!("work/frontend/menu-camera-transition-{tick:02}.png"),
+            &format!("frontend/menu-camera-transition-{tick:02}.png"),
         );
     }
 }
@@ -2099,14 +2109,21 @@ fn right_drag_mode12_reframes_retained_gpu_city() {
             .unwrap();
         #[cfg(feature = "capture")]
         {
-            let reference = format!("work/frontend/city-individual-phase-{phase}.png");
-            let actual = format!("work/frontend/city-batch-phase-{phase}.png");
-            let fresh = format!("work/frontend/city-fresh-phase-{phase}.png");
+            let reference = format!("frontend/city-individual-phase-{phase}.png");
+            let actual = format!("frontend/city-batch-phase-{phase}.png");
+            let fresh = format!("frontend/city-fresh-phase-{phase}.png");
             crate::capture_test::capture_standalone(&renderer, &prepared, &reference);
             crate::capture_test::capture_standalone(&renderer, &batch, &actual);
             crate::capture_test::capture_scene_world_overlays(&renderer, &scene, &[], &[], &fresh);
-            assert_eq!(fs::read(reference).unwrap(), fs::read(&actual).unwrap());
-            assert_eq!(fs::read(fresh).unwrap(), fs::read(actual).unwrap());
+            let actual = crate::capture_test::output_path(&actual);
+            assert_eq!(
+                fs::read(crate::capture_test::output_path(&reference)).unwrap(),
+                fs::read(&actual).unwrap()
+            );
+            assert_eq!(
+                fs::read(crate::capture_test::output_path(&fresh)).unwrap(),
+                fs::read(actual).unwrap()
+            );
         }
     }
 }
@@ -2208,7 +2225,8 @@ fn sandbox_and_bonus_launch_use_retained_hubs() {
                     character_index: 4,
                     profile_name: b"Launch test".to_vec(),
                     catalog: catalog.clone(),
-                    profile_path: PathBuf::from("work/frontend/launch-test-profile.lua"),
+                    profile_path: openmt2001::fixtures::scratch("FRONTEND")
+                        .join("launch-test-profile.lua"),
                 };
                 let mut cache = SnapshotCache::default();
                 let (loaded, session) = inputs.fresh_preview(setup, camera, &mut cache).unwrap();
@@ -2738,12 +2756,12 @@ fn capture_saved_appearance_against_plain_city() {
                 descriptor.backends = wgpu::Backends::DX12;
             }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            crate::capture_test::capture(&renderer, None, &plain, "work/save/plain-saved-city.png");
+            crate::capture_test::capture(&renderer, None, &plain, "save/plain-saved-city.png");
             crate::capture_test::capture(
                 &renderer,
                 None,
                 cache.city.as_ref().unwrap(),
-                "work/save/appearance-saved-city.png",
+                "save/appearance-saved-city.png",
             );
         })
         .unwrap()
@@ -2783,7 +2801,7 @@ fn capture_static_details_against_fresh_city() {
                 preview: crate::singleplayer::Preview::Scenario(200001),
                 difficulty: crate::singleplayer::Difficulty::Easy,
                 character_index: 4, profile_name: b"Static detail capture".to_vec(), catalog,
-                profile_path: PathBuf::from("work/frontend/static-capture-profile.lua"),
+                profile_path: openmt2001::fixtures::scratch("FRONTEND").join("static-capture-profile.lua"),
             };
             let camera = CameraSample { eye: [0., 180., 220.], target: [0.; 3],
                 up: [0., 1., 0.], vertical_fov: 45. };
@@ -2810,13 +2828,13 @@ fn capture_static_details_against_fresh_city() {
             let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
             if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            let before_path = "work/frontend/static-city-before.png";
-            let after_path = "work/frontend/static-city-after.png";
+            let before_path = "frontend/static-city-before.png";
+            let after_path = "frontend/static-city-after.png";
             crate::capture_test::capture(&renderer, None, &before, before_path);
             crate::capture_test::capture(&renderer, None, &after, after_path);
             let pixels = |path| {
                 let mut reader = png::Decoder::new(std::io::BufReader::new(
-                    fs::File::open(path).unwrap())).read_info().unwrap();
+                    fs::File::open(crate::capture_test::output_path(path)).unwrap())).read_info().unwrap();
                 let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
                 let frame = reader.next_frame(&mut rgba).unwrap();
                 rgba.truncate(frame.buffer_size());

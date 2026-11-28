@@ -1,9 +1,40 @@
 //! Shared offscreen frontend integration-test capture.
+//!
+//! Every helper takes the PNG path to write as a string. An absolute path is
+//! written as given; a relative one, such as `"frontend/intro.png"`, lands
+//! under the `CAPTURE` scratch directory (see [`output_path`]), never under the
+//! current directory.
 use openmt2001::{
     render::{PreparedScene, Renderer},
     render_scene::Scene,
 };
 use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Resolves where a capture named `path` is written, creating its parent
+/// directory.
+///
+/// Absolute paths are returned unchanged. A relative path is placed under
+/// `openmt2001::fixtures::scratch("CAPTURE")`; a leading `work/` is dropped so
+/// older names keep their layout. Tests that read a capture back use this to
+/// find it.
+pub(crate) fn output_path(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        openmt2001::fixtures::scratch("CAPTURE").join(path.strip_prefix("work").unwrap_or(path))
+    };
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|error| {
+            panic!(
+                "cannot create capture directory {}: {error}",
+                parent.display()
+            )
+        });
+    }
+    resolved
+}
 pub(crate) fn capture(
     renderer: &Renderer,
     panel: Option<&PreparedScene>,
@@ -189,7 +220,7 @@ fn capture_impl_at_size(
         p[3] = 255;
     }
     let mut png = png::Encoder::new(
-        std::io::BufWriter::new(fs::File::create(path).unwrap()),
+        std::io::BufWriter::new(fs::File::create(output_path(path)).unwrap()),
         width,
         height,
     );
@@ -232,4 +263,15 @@ pub(crate) fn construction_stage(
     }
     let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
     capture(&renderer, None, &scene, path);
+}
+
+#[test]
+fn relative_capture_paths_land_in_scratch_not_the_current_directory() {
+    let scratch = openmt2001::fixtures::scratch("CAPTURE");
+    let resolved = output_path("frontend/resolver-check.png");
+    assert_eq!(resolved, scratch.join("frontend/resolver-check.png"));
+    assert!(resolved.parent().unwrap().is_dir());
+    assert_eq!(output_path("work/frontend/resolver-check.png"), resolved);
+    let absolute = scratch.join("absolute/resolver-check.png");
+    assert_eq!(output_path(absolute.to_str().unwrap()), absolute);
 }

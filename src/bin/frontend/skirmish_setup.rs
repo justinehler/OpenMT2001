@@ -1524,7 +1524,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &scene,
-                "work/frontend/skirmish-setup.png",
+                "frontend/skirmish-setup.png",
             );
             // Component captures: synthetic trusted fixture names, actual supplied
             // panel/fonts/colors/renderer. No map startup or compatibility claim.
@@ -1544,7 +1544,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &selected_scene,
-                "work/frontend/skirmish-map-selected.png",
+                "frontend/skirmish-map-selected.png",
             );
             state.set_maps(vec![], None).unwrap();
             let empty_scene = panel
@@ -1553,7 +1553,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &empty_scene,
-                "work/frontend/skirmish-map-empty.png",
+                "frontend/skirmish-map-empty.png",
             );
         }
     }

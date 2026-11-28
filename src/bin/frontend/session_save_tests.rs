@@ -183,7 +183,7 @@ fn retained_save_host_roundtrip_and_delayed_terms() {
             let style_counts=session.era_styles[session.world.clock.calendar[2] as usize].qualities.each_ref().map(Vec::len);
             crate::build_panel::placement_choices(&mut session.build_random_state,style_counts).unwrap();
             assert_ne!(session.build_random_state,cold_build_state);
-            session.campaign_profile=Some(std::path::PathBuf::from("work/save/campaign/536176652066697874757265.lua"));
+            session.campaign_profile=Some(openmt2001::fixtures::scratch("SAVE").join("campaign/536176652066697874757265.lua"));
             let camera=openmt2001::flyby::CameraSample{eye:[100.,120.,100.],target:[0.,0.,0.],up:[0.,1.,0.],vertical_fov:0.7};
             let cameras=crate::save_menu::cameras(None,camera).unwrap();
             let assets=CommandAssets{image:&image,board:&board,file:&file};
@@ -191,7 +191,7 @@ fn retained_save_host_roundtrip_and_delayed_terms() {
             let terms=openmt2001::economy::PendingBusinessTerms{business_index:word(&session.world.ledgers.businesses[business],0x210),terms:openmt2001::economy::BusinessTerms{stock_targets:[7;6],prices:[2.;6],rent:123.}};
             session.live_commands.submit(Command::Terms(terms),session.world.clock.timing[0],true,|_|Err("terms dispatched early".into())).unwrap();
             let bytes=session.save_v2(&image,cameras,1).unwrap();
-            let root=std::path::PathBuf::from("work/save/v2-roundtrip-profile");let path=crate::save_menu::write_new(&root,&bytes).unwrap();
+            let root=openmt2001::fixtures::scratch("SAVE").join("v2-roundtrip-profile");let path=crate::save_menu::write_new(&root,&bytes).unwrap();
             let loaded=std::fs::read(&path).unwrap();let save=SaveFile::parse(&loaded).unwrap();
             let mut resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
             let native_allocation_next = resumed.allocation_next;

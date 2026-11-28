@@ -14,7 +14,7 @@ fn capture_saved_preview_manager_stats() {
         let inputs=SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,style:test_board_style(&executable),time_runtime:Default::default(),
-            profile_root:PathBuf::from("work/frontend/stats-capture-profile"),
+            profile_root:openmt2001::fixtures::scratch("FRONTEND").join("stats-capture-profile"),
             character_names:crate::fresh_city::character_names(&openmt2001::pe::PeImage::parse(&executable).unwrap(),&language).unwrap(),
             installer:parameter.parent().unwrap().parent().unwrap().to_path_buf(),language,
             maps:openmt2001::fixtures::path("MAP").parent().unwrap().to_path_buf(),
@@ -37,7 +37,7 @@ fn capture_saved_preview_manager_stats() {
             assert_eq!(session.world.pause.bytes[0],original_pause[0].wrapping_add(1));
             assert_eq!(snapshot.history,session.history.as_bytes());
             let mut view=crate::stats_panel::View::default();view.update(&assets,&renderer,Some(snapshot)).unwrap();
-            crate::capture_test::capture_standalone(&renderer,view.prepared.as_ref().unwrap(),&format!("work/frontend/stats-saved-preview-{suffix}.png"));
+            crate::capture_test::capture_standalone(&renderer,view.prepared.as_ref().unwrap(),&format!("frontend/stats-saved-preview-{suffix}.png"));
             let point=Some([433.,86.]); //actual STATS_RIGHT_CHANGER interior
             assert!(view.pointer(&assets,point,true,snapshot).is_none());
             let action=view.pointer(&assets,point,false,snapshot).unwrap();
@@ -45,7 +45,7 @@ fn capture_saved_preview_manager_stats() {
             host.stats_action(&mut session,action).unwrap();
             let status=host.status(&session);let snapshot=status.stats.as_ref().unwrap();
             view.update(&assets,&renderer,Some(snapshot)).unwrap();
-            crate::capture_test::capture_standalone(&renderer,view.prepared.as_ref().unwrap(),&format!("work/frontend/stats-saved-preview-{suffix}-next.png"));
+            crate::capture_test::capture_standalone(&renderer,view.prepared.as_ref().unwrap(),&format!("frontend/stats-saved-preview-{suffix}-next.png"));
             //A press outside cannot acquire a widget by moving into it while held.
             assert!(view.pointer(&assets,Some([0.,0.]),true,snapshot).is_none());
             assert!(view.pointer(&assets,point,true,snapshot).is_none());
@@ -71,7 +71,7 @@ fn capture_saved_preview_strategic_composition() {
             compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable),
             time_runtime: Default::default(),
-            profile_root: PathBuf::from("work/frontend/strategic-capture-profile"),
+            profile_root: openmt2001::fixtures::scratch("FRONTEND").join("strategic-capture-profile"),
             character_names: crate::fresh_city::character_names(
                 &openmt2001::pe::PeImage::parse(&executable).unwrap(), &language).unwrap(),
             installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
@@ -171,7 +171,7 @@ fn capture_saved_preview_strategic_composition() {
                 crate::capture_test::capture_prepared_world_overlays(&renderer, &map, &[],
                     &[&mini, &panel, comparison.prepared.as_ref().unwrap(), &compass[0],
                         time.prepared.as_ref().unwrap(), &chance],
-                    &format!("work/frontend/strategic-preview-{suffix}-{name}.png"));
+                    &format!("frontend/strategic-preview-{suffix}-{name}.png"));
             }
             // Actual Locator toggle exposes the existing business footprint producer.
             let point = Some([34, 226]);
@@ -182,7 +182,7 @@ fn capture_saved_preview_strategic_composition() {
             crate::capture_test::capture_prepared_world_overlays(&renderer, &map, &[],
                 &[&mini, &panel, comparison.prepared.as_ref().unwrap(), &compass[0],
                         time.prepared.as_ref().unwrap(), &chance],
-                &format!("work/frontend/strategic-preview-{suffix}-businesses.png"));
+                &format!("frontend/strategic-preview-{suffix}-businesses.png"));
             eprintln!("{key}: actual saved-preview {} buildings, {markers} People markers",
                 loaded.scene.inspection_buildings.len());
         }

@@ -194,7 +194,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
             let scripts = exe.parent().unwrap().join("scripts");
             let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let root=PathBuf::from("work/validation").join(format!("scenario3-human-play-{}-{nonce}",std::process::id()));
+            let root=openmt2001::fixtures::scratch("VALIDATION").join(format!("scenario3-human-play-{}-{nonce}",std::process::id()));
             let profile=crate::campaign_store::profile_path(&root,b"Scenario3 Legal Sales");
             assert!(!profile.exists());
             let mut catalog=crate::campaign_store::load_catalog(&image,&scripts).unwrap();

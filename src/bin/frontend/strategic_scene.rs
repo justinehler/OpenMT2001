@@ -369,7 +369,7 @@ mod tests {
         crate::capture_test::capture_standalone(
             &renderer,
             &prepared,
-            "work/frontend/strategic-original-map.png",
+            "frontend/strategic-original-map.png",
         );
     }
 }

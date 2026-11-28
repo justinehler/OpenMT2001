@@ -1147,7 +1147,7 @@ pub(crate) fn capture_auction_status(status: &crate::live_host::Status, label: &
     crate::capture_test::capture_standalone(
         &renderer,
         view.prepared.as_ref().unwrap(),
-        &format!("work/frontend/time-auction-{label}.png"),
+        &format!("frontend/time-auction-{label}.png"),
     );
     view.cursor(&assets, Some(option), true);
     view.mouse(true);
@@ -1155,7 +1155,7 @@ pub(crate) fn capture_auction_status(status: &crate::live_host::Status, label: &
     crate::capture_test::capture_standalone(
         &renderer,
         view.prepared.as_ref().unwrap(),
-        &format!("work/frontend/time-auction-{label}-options-pressed.png"),
+        &format!("frontend/time-auction-{label}-options-pressed.png"),
     );
     view.cursor(&assets, Some(center(assets.manager_bounds)), true);
     assert!(view.hover.is_none());
@@ -1578,12 +1578,13 @@ mod tests {
             } else {
                 retained = Some(renderer.prepare(&draws, VIEW, None).unwrap());
             }
-            let reference = format!("work/frontend/time-retained-{case}-fresh.png");
-            let actual = format!("work/frontend/time-retained-{case}-updated.png");
+            let reference = format!("frontend/time-retained-{case}-fresh.png");
+            let actual = format!("frontend/time-retained-{case}-updated.png");
             crate::capture_test::capture_standalone(&renderer, &fresh, &reference);
             crate::capture_test::capture_standalone(&renderer, retained.as_ref().unwrap(), &actual);
             assert!(
-                fs::read(reference).unwrap() == fs::read(actual).unwrap(),
+                fs::read(crate::capture_test::output_path(&reference)).unwrap()
+                    == fs::read(crate::capture_test::output_path(&actual)).unwrap(),
                 "Time GPU pixels differ for case{case}"
             );
         }
@@ -1640,13 +1641,13 @@ mod tests {
                 None,
             )
             .unwrap();
-        let reference = "work/frontend/time-lightweight-fresh.png";
-        let actual = "work/frontend/time-lightweight-updated.png";
+        let reference = "frontend/time-lightweight-fresh.png";
+        let actual = "frontend/time-lightweight-updated.png";
         crate::capture_test::capture_standalone(&renderer, &fresh, reference);
         crate::capture_test::capture_standalone(&renderer, view.prepared.as_ref().unwrap(), actual);
         assert_eq!(
-            fs::read(reference).unwrap(),
-            fs::read(actual).unwrap(),
+            fs::read(crate::capture_test::output_path(reference)).unwrap(),
+            fs::read(crate::capture_test::output_path(actual)).unwrap(),
             "authoritative lightweight clock must retain identity/cash and match full HUD pixels"
         );
     }
@@ -2396,7 +2397,7 @@ mod tests {
         crate::capture_test::capture_standalone(
             &renderer,
             &prepared,
-            "work/frontend/time-panel-all-parts.png",
+            "frontend/time-panel-all-parts.png",
         );
         let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
@@ -2423,10 +2424,6 @@ mod tests {
                 },
             )
             .unwrap();
-        crate::capture_test::capture_standalone(
-            &renderer,
-            &live,
-            "work/frontend/time-panel-live.png",
-        );
+        crate::capture_test::capture_standalone(&renderer, &live, "frontend/time-panel-live.png");
     }
 }

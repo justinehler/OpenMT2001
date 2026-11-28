@@ -147,7 +147,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
                                 &renderer,
                                 &view.scene.as_ref().unwrap().0,
                                 panel,
-                                &format!("work/save/auction-worker-ui-{prior}-{phase}.png"),
+                                &format!("save/auction-worker-ui-{prior}-{phase}.png"),
                             );
                             done.send(()).unwrap();
                         }
@@ -176,7 +176,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
                             crate::capture_test::capture_standalone(
                                 &renderer,
                                 &view.scene.as_ref().unwrap().0,
-                                &format!("work/save/auction-worker-{prior}-{phase}.png"),
+                                &format!("save/auction-worker-{prior}-{phase}.png"),
                             );
                         }
                         request.reply.send(result).unwrap();

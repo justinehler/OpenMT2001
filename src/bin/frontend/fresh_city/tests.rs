@@ -4235,7 +4235,7 @@ fn run_unrestricted_ai(
             let natural_win_source=crate::campaign_store::checkpoint_profile(&image,scripts,if capacity_mode==5 {200011} else {200006});
             let profile_path=(capacity_mode>=3).then(|| {
                 let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-                let root=std::path::PathBuf::from("work/validation").join(format!("natural-win-profile-{}-{nonce}",std::process::id()));
+                let root=openmt2001::fixtures::scratch("VALIDATION").join(format!("natural-win-profile-{}-{nonce}",std::process::id()));
                 crate::campaign_store::profile_path(&root,b"Natural Win Validation")
             });
             let mut next_level=None;

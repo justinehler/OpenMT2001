@@ -267,7 +267,7 @@ fn property_reports_and_offer_input() {
             &renderer,
             Some(&_panel),
             &scene,
-            &format!("work/frontend/property-tab-{tab}.png"),
+            &format!("frontend/property-tab-{tab}.png"),
         );
         if matches!(tab, 2 | 3) {
             for i in 0..2 {
@@ -337,7 +337,7 @@ fn property_reports_and_offer_input() {
             Some(&_panel),
             &scene,
             &format!(
-                "work/frontend/property-offer-{}.png",
+                "frontend/property-offer-{}.png",
                 if pressed { "pressed" } else { "released" }
             ),
         );
@@ -373,7 +373,7 @@ fn property_reports_and_offer_input() {
         &renderer,
         Some(&_owned_panel),
         &scene,
-        "work/frontend/property-sell-lease.png",
+        "frontend/property-sell-lease.png",
     );
     assets.property_pointer(
         &mut view,
@@ -412,7 +412,7 @@ fn property_reports_and_offer_input() {
             Some(&_panel),
             &scene,
             &format!(
-                "work/frontend/property-rights-{}.png",
+                "frontend/property-rights-{}.png",
                 if pressed { "pressed" } else { "released" }
             ),
         );

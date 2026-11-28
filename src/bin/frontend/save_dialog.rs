@@ -1261,7 +1261,7 @@ mod tests {
                 &renderer,
                 &scene,
                 &[&panel],
-                "work/frontend/save-game-empty-city.png",
+                "frontend/save-game-empty-city.png",
             );
             let saved = read("OPENMT2001_SAVE_ONE");
             let metadata = openmt2001::save::SaveFile::parse(&saved)
@@ -1281,7 +1281,7 @@ mod tests {
                 &renderer,
                 &scene,
                 &[&panel],
-                "work/frontend/save-game-selected-city.png",
+                "frontend/save-game-selected-city.png",
             );
             let strings = assets.strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
             let generic = crate::prompt::Assets::load(
@@ -1307,12 +1307,9 @@ mod tests {
             for (modal, output) in [
                 (
                     Modal::Overwrite,
-                    "work/frontend/save-game-overwrite-modal-city.png",
+                    "frontend/save-game-overwrite-modal-city.png",
                 ),
-                (
-                    Modal::Delete,
-                    "work/frontend/save-game-delete-modal-city.png",
-                ),
+                (Modal::Delete, "frontend/save-game-delete-modal-city.png"),
             ] {
                 view.modal = Some(modal);
                 let (dialog, pressed_button) = view.generic_prompt().unwrap();
@@ -1341,7 +1338,7 @@ mod tests {
                 &renderer,
                 &scene,
                 &[&panel, &modal],
-                "work/frontend/save-game-named-modal-city.png",
+                "frontend/save-game-named-modal-city.png",
             );
         }
     }

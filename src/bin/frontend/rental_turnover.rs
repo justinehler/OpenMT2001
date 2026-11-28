@@ -698,7 +698,11 @@ fn check_rental_turnover(
             .amount,
         next_income.to_bits()
     );
-    fs::write("work/economy/natural-rental-turnover.bin", export).unwrap();
+    fs::write(
+        openmt2001::fixtures::scratch("ECONOMY").join("natural-rental-turnover.bin"),
+        export,
+    )
+    .unwrap();
     println!(
         "legal rental turnover: {tenant_count} evicted, {rehoused} paying rent next cycle, day{} hour{}, rental income{} -> {}",
         session.world.clock.calendar[4],

@@ -568,7 +568,7 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
             compatibility: crate::compatibility::Mode::StrictV14,
             style: test_board_style(&executable),
             time_runtime: Default::default(),
-            profile_root: PathBuf::from("work/frontend/tutorial-disabled-rights-profile"),
+            profile_root: openmt2001::fixtures::scratch("FRONTEND").join("tutorial-disabled-rights-profile"),
             character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
             installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
             language,

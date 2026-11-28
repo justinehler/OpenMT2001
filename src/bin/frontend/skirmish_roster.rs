@@ -1363,7 +1363,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &draw,
-                "work/frontend/skirmish-roster-empty.png",
+                "frontend/skirmish-roster-empty.png",
             );
         }
         state.activate(13).unwrap();
@@ -1401,7 +1401,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &draw,
-                "work/frontend/skirmish-roster-one-ai.png",
+                "frontend/skirmish-roster-one-ai.png",
             );
         }
         let Outcome::Start {

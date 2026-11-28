@@ -1387,7 +1387,7 @@ fn original_human_dialog_resources() {
         crate::capture_test::capture_standalone(
             &renderer,
             &panel,
-            "work/frontend/popup-starting-out-native-text.png",
+            "frontend/popup-starting-out-native-text.png",
         );
         let panel = assets
             .prepare_message_positioned(&renderer, &tip, [0., -140.])
@@ -1395,7 +1395,7 @@ fn original_human_dialog_resources() {
         crate::capture_test::capture_standalone(
             &renderer,
             &panel,
-            "work/frontend/popup-positioned-message-native-text.png",
+            "frontend/popup-positioned-message-native-text.png",
         );
         let mut actor = vec![0; 0x220];
         actor[0x150..0x154].copy_from_slice(&2u32.to_le_bytes());
@@ -1420,7 +1420,7 @@ fn original_human_dialog_resources() {
         crate::capture_test::capture_standalone(
             &renderer,
             &panel,
-            "work/frontend/popup-card-native-text.png",
+            "frontend/popup-card-native-text.png",
         );
     }
     state.finish_dismiss(Vec::new());
