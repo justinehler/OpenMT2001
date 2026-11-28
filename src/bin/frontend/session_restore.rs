@@ -1738,6 +1738,7 @@ impl<'data> Session<'data> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_observers::{assert_account_postings, cash};
     use super::*;
     use std::{fs, path::Path};
     #[test]
@@ -3551,6 +3552,8 @@ mod tests {
             let mut completed = 0;
             let start_hour = session.world.clock.hour();
             for _ in 0..700 {
+                let before_cash = cash(&session);
+                let mut postings = Vec::new();
                 result = session.advance_session(&assets, &mut policy, |event, _| match event {
                     super::super::tick::Event::Tick(openmt2001::scheduler::Event::Helper(
                         0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0 | 0x4b5d50,
@@ -3558,11 +3561,16 @@ mod tests {
                     super::super::tick::Event::Script { commands: [], .. } => Ok(0),
                     super::super::tick::Event::ScriptCommands([]) => Ok(0),
                     super::super::tick::Event::TransportSound(_) => Ok(0),
+                    super::super::tick::Event::AccountPosted(posting) => {
+                        postings.push(posting);
+                        Ok(0)
+                    }
                     _ => Err(format!("unbound post-load event {event:?}")),
                 });
                 if result.is_err() {
                     break;
                 }
+                assert_account_postings(&before_cash, &cash(&session), &postings);
                 completed += 1;
                 if completed == 25 {
                     assert_eq!(session.world.clock.timing[0], before + 25);
@@ -3764,6 +3772,8 @@ mod tests {
             let mut completed = 0;
             let start_hour = session.world.clock.hour();
             for _ in 0..700 {
+                let before_cash = cash(&session);
+                let mut postings = Vec::new();
                 result = session.advance_session(&assets, &mut policy, |event, _| match event {
                     super::super::tick::Event::Tick(openmt2001::scheduler::Event::Helper(
                         0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0 | 0x4b5d50,
@@ -3771,11 +3781,16 @@ mod tests {
                     super::super::tick::Event::Script { commands: [], .. } => Ok(0),
                     super::super::tick::Event::ScriptCommands([]) => Ok(0),
                     super::super::tick::Event::TransportSound(_) => Ok(0),
+                    super::super::tick::Event::AccountPosted(posting) => {
+                        postings.push(posting);
+                        Ok(0)
+                    }
                     _ => Err(format!("unbound post-load event {event:?}")),
                 });
                 if result.is_err() {
                     break;
                 }
+                assert_account_postings(&before_cash, &cash(&session), &postings);
                 completed += 1;
                 if completed == 25 {
                     assert_eq!(session.world.clock.timing[0], before + 25);
@@ -3846,8 +3861,8 @@ mod tests {
             );
 
             // Same explicit bounded host abstractions as the natural-hour test:
-            // named scheduler helpers, empty script dispatch and transport audio.
-            // Every other event fails; no new gameplay callback is stubbed.
+            // named scheduler helpers, empty script dispatch, transport audio
+            // and account notifications checked against authoritative cash.
             let camera = openmt2001::flyby::CameraSample {
                 eye: [100., 120., 100.],
                 target: [0., 0., 0.],
@@ -3900,6 +3915,8 @@ mod tests {
                     (&mut session, &mut policy),
                     (&mut resumed, &mut resumed_policy),
                 ] {
+                    let before_cash = cash(branch);
+                    let mut postings = Vec::new();
                     branch
                         .advance_session(&assets, controls, |event, _| match event {
                             super::super::tick::Event::Tick(
@@ -3910,11 +3927,16 @@ mod tests {
                             super::super::tick::Event::Script { commands: [], .. } => Ok(0),
                             super::super::tick::Event::ScriptCommands([]) => Ok(0),
                             super::super::tick::Event::TransportSound(_) => Ok(0),
+                            super::super::tick::Event::AccountPosted(posting) => {
+                                postings.push(posting);
+                                Ok(0)
+                            }
                             _ => Err(format!(
                                 "unbound supplied-save continuation event {event:?}"
                             )),
                         })
                         .unwrap();
+                    assert_account_postings(&before_cash, &cash(branch), &postings);
                 }
             }
             println!(

@@ -1,7 +1,9 @@
 //! Two supplied human saves with a native-format AI player pair appended to
 //! exercise the retained AI controller against both restored city states.
 //! This is a controlled synthetic opponent, not a supplied AI save.
+use super::test_observers::{assert_account_postings, cash};
 use super::*;
+use openmt2001::ai_messages::offers::auction::admission;
 use openmt2001::save::SaveFile;
 
 #[test]
@@ -252,12 +254,16 @@ fn run(controlled_retail: bool) {
         let mut settings_applied = None;
         let mut retail_restocked = false;
         let mut controlled_bakery = None;
+        let mut auction_announcements = 0;
         let horizon = if key == "OPENMT2001_SAVE_TWO" {
             14_200
         } else {
             6_700
         };
         for _ in 0..horizon {
+            let before_cash = cash(&session);
+            let mut postings = Vec::new();
+            let mut auction_admission = Vec::new();
             let result = session.advance_session(&assets, &mut policy, |event, _| match event {
                 tick::Event::Tick(openmt2001::scheduler::Event::Helper(
                     0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0 | 0x4b5d50,
@@ -287,10 +293,21 @@ fn run(controlled_retail: bool) {
                     openmt2001::construction::Event::Appearance(_),
                 )) => Ok(0),
                 tick::Event::Command(openmt2001::live_commands::Event::AccountPosted(posting)) => {
+                    postings.push(posting);
                     if recent_postings.len() == 4 {
                         recent_postings.pop_front();
                     }
                     recent_postings.push_back((posting.player, posting.amount));
+                    Ok(0)
+                }
+                tick::Event::AccountPosted(posting) => {
+                    postings.push(posting);
+                    Ok(0)
+                }
+                tick::Event::Command(openmt2001::live_commands::Event::AuctionAdmission(
+                    call @ (admission::Call::ShowAnnouncement | admission::Call::CategoryStatus(_)),
+                )) => {
+                    auction_admission.push(call);
                     Ok(0)
                 }
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
@@ -333,6 +350,34 @@ fn run(controlled_retail: bool) {
             if let Err(error) = result {
                 first_error = Some(error);
                 break;
+            }
+            assert_account_postings(&before_cash, &cash(&session), &postings);
+            if !auction_admission.is_empty() {
+                let auction = &session.world.city.auction;
+                let word = |at| {
+                    u32::from_le_bytes(auction.controller.record[at..at + 4].try_into().unwrap())
+                };
+                let category = word(4);
+                assert_eq!(
+                    auction_admission,
+                    [
+                        admission::Call::ShowAnnouncement,
+                        admission::Call::CategoryStatus(category)
+                    ],
+                    "auction admission must announce before publishing category status"
+                );
+                assert_ne!(auction.controller.reference, 0);
+                assert_eq!(auction.controller.active_count, 1);
+                assert_eq!(auction.controller.record[0x7d], 1);
+                assert!(auction.presentation.visible);
+                assert_eq!(
+                    auction.presentation.announcement,
+                    [category, word(0x5c), word(0x88)]
+                );
+                assert!((word(0x5c) as usize) < session.roster.manager.players.len());
+                assert_eq!(auction.presentation.countdown, 120 * 50);
+                assert_eq!(session.world.categories[category as usize][0x6c], 1);
+                auction_announcements += 1;
             }
             completed += 1;
             if outcome_notice.is_some() {
@@ -497,6 +542,10 @@ fn run(controlled_retail: bool) {
             "saved AI stopped before a real controller interval"
         );
         if key == "OPENMT2001_SAVE_TWO" {
+            assert!(
+                auction_announcements > 0,
+                "resumed AI never announced an auction"
+            );
             assert!(
                 ai_business_opened,
                 "resumed AI did not open an owned business"
