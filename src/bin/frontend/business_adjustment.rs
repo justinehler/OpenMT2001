@@ -211,6 +211,82 @@ pub struct Assets {
     numeric_arrows: Vec<Surface>,
     block_names: Vec<u32>,
 }
+// 417830 resolves these rectangles from bap_v2.tm in 640x480 units.
+// The supplied mesh's BAP_BACKING starts at x=34.56726; the cost, selling,
+// yesterday, wanted, held and today titles start at 151.48628, 222.42181,
+// 315.3493, 399.3493, 481.21707 and 553.90466 respectively. Keep the mesh
+// origin: at 1024x768 these are x=55.3 and 242.4/355.9/504.6/639/770/886.2.
+const RETAIL_FRAME: usize = 9;
+const RETAIL_CAMERA: [f32; 16] = [
+    2. / 640.,
+    0.,
+    0.,
+    0.,
+    0.,
+    -2. / 480.,
+    0.,
+    0.,
+    0.,
+    0.,
+    1.,
+    0.,
+    -1.,
+    1.,
+    0.,
+    1.,
+];
+const RETAIL_HEADERS: [usize; 7] = [1421, 1470, 1471, 1472, 1473, 1474, 1475];
+// 417830's OK control initialization passes language ID 0x59b ("Ok").
+const RETAIL_CONFIRM: usize = 0x59b;
+fn retail_panel_frame(
+    index: &ArchiveIndex,
+    archive: &[u8],
+) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
+    ui::panel_frame_base(
+        index,
+        archive,
+        "gamedata2/brand_new_panels/bap_v2.tm",
+        &[0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 22, 23, 24, 25, 26, 27],
+        RETAIL_FRAME,
+    )
+}
+fn retail_header_text(
+    fonts: &mut [Surface],
+    tab: &[u8],
+    strings: &[Vec<u8>],
+    regions: &[[f32; 4]],
+) -> Result<(), String> {
+    for (column, id) in RETAIL_HEADERS.into_iter().enumerate() {
+        let text = strings.get(id).ok_or("adjustment header language ID")?;
+        // 417830 configures style 4 and applies the whole named rectangle.
+        // An artificial inset narrows Stock I Have enough to wrap its last word.
+        ui::text_widget_style4(fonts, tab, text, regions[8 + column], 0xffffffff)?;
+    }
+    Ok(())
+}
+fn retail_confirm_text(
+    fonts: &mut [Surface],
+    tab: &[u8],
+    strings: &[Vec<u8>],
+    bounds: [f32; 4],
+) -> Result<(), String> {
+    let text = strings
+        .get(RETAIL_CONFIRM)
+        .ok_or("adjustment confirm language ID")?;
+    ui::text(
+        fonts,
+        tab,
+        text,
+        [
+            bounds[0] + 2.,
+            (bounds[1] + bounds[3] - 10.) * 0.5,
+            bounds[2] - 2.,
+            bounds[3],
+        ],
+        true,
+        0xffffffff,
+    )
+}
 // 4162c0/443080 store normal, hover, down and disabled images separately.
 const APPLY_TEXTURES: [usize; 4] = [85, 87, 86, 143];
 fn apply_presentation(disabled: bool, hover: bool, pressed: bool) -> (usize, u32) {
@@ -912,14 +988,7 @@ impl Assets {
         strings: &[&[u8]],
         exe: &[u8],
     ) -> Result<Self, String> {
-        let parts = [0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 22, 23, 24, 25, 26, 27];
-        let (base, regions) = ui::panel_frame_base(
-            index,
-            archive,
-            "gamedata2/brand_new_panels/bap_v2.tm",
-            &parts,
-            9,
-        )?;
+        let (base, regions) = retail_panel_frame(index, archive)?;
         let (apartment_base, apartment_regions) = ui::panel_frame_base(
             index,
             archive,
@@ -937,7 +1006,7 @@ impl Assets {
         };
         let mesh =
             openmt2001::mesh::CachedMesh::parse(payload("gamedata2/brand_new_panels/bap_v2.tm")?)?;
-        let retail_bounds: Vec<_> = openmt2001::ui_mesh::regions(&mesh, 9)?
+        let retail_bounds: Vec<_> = openmt2001::ui_mesh::regions(&mesh, RETAIL_FRAME)?
             .into_iter()
             .map(|r| (r.name, r.bounds))
             .collect();
@@ -1231,16 +1300,6 @@ impl Assets {
                 .map(Vec::as_slice)
                 .ok_or("adjustment language ID")
         };
-        let centered = |fonts: &mut [Surface], text: &[u8], b: [f32; 4], color: u32| {
-            ui::text(
-                fonts,
-                &self.tab,
-                text,
-                [b[0] + 2., (b[1] + b[3] - 10.) * 0.5, b[2] - 2., b[3]],
-                true,
-                color,
-            )
-        };
         let mut title = label(state.name)?.to_vec();
         title.extend_from_slice(&[b':' - 32, 0]);
         title.extend_from_slice(label(state.block_name)?);
@@ -1271,24 +1330,7 @@ impl Assets {
             );
             surfaces.push(arrow);
         }
-        let titles = [1421, 1470, 1471, 1472, 1473, 1474, 1475];
-        for (i, id) in titles.into_iter().enumerate() {
-            let b = self.regions[8 + i];
-            let text = label(id)?;
-            let (offsets, copy) =
-                crate::prompt::wrap_with_gap(&self.tab, text, (b[2] - b[0] - 4.) as i32, -1)?;
-            for (line, pair) in offsets.windows(2).enumerate() {
-                let end = (pair[1] - 1).min(copy.len());
-                ui::text(
-                    &mut fonts,
-                    &self.tab,
-                    &copy[pair[0].min(end)..end],
-                    [b[0] + 2., b[1] + 2. + line as f32 * 10., b[2] - 2., b[3]],
-                    true,
-                    0xffffffff,
-                )?;
-            }
-        }
+        retail_header_text(&mut fonts, &self.tab, &self.strings, &self.regions)?;
         let currency = label(2243)?;
         let currency_suffix = label(2244)?.first() != Some(&0x4c);
         surfaces.push(retail_row_band(&self.regions, state.row_hover));
@@ -1356,7 +1398,7 @@ impl Assets {
             [0xffffffff; 4],
         );
         surfaces.push(button);
-        centered(&mut fonts, &[b'O' - 32, b'K' - 32], b, 0xffffffff)?;
+        retail_confirm_text(&mut fonts, &self.tab, &self.strings, b)?;
         let note = state
             .provenance()
             .iter()
@@ -1379,24 +1421,7 @@ impl Assets {
         surfaces.extend(fonts);
         renderer.prepare(
             &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
+            RETAIL_CAMERA,
             None,
         )
     }
@@ -1835,6 +1860,243 @@ pub(crate) fn refresh_assets_fixture() -> Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn retail_screen_x(x: f32) -> i32 {
+        let clip_x = RETAIL_CAMERA[0] * x + RETAIL_CAMERA[12];
+        let clip_w = RETAIL_CAMERA[3] * x + RETAIL_CAMERA[15];
+        ((clip_x / clip_w + 1.) * 0.5 * 1024.).round() as i32
+    }
+
+    fn header_strings() -> Vec<Vec<u8>> {
+        let mut strings = vec![Vec::new(); 1476];
+        for (id, text) in RETAIL_HEADERS.into_iter().zip([
+            "Commodity",
+            "Cost Per Item",
+            "Selling Price",
+            "Yesterday's Sales",
+            "Stock I Want",
+            "Stock I Have",
+            "Today's Sales",
+        ]) {
+            strings[id] = text.bytes().map(|b| b - 32).collect();
+        }
+        strings[RETAIL_CONFIRM] = vec![b'O' - 32, b'k' - 32];
+        strings
+    }
+
+    fn check_header_lines(tab: &[u8], strings: &[Vec<u8>], regions: &[[f32; 4]]) {
+        // Preserve the supplied advances (and therefore actual wrapping), but
+        // normalize glyph heights/bearings so descenders cannot count as rows.
+        let mut tab = tab.to_vec();
+        for glyph in tab[4..].as_chunks_mut::<44>().0 {
+            glyph[36..40].copy_from_slice(&10i32.to_le_bytes());
+            glyph[40..44].copy_from_slice(&0i32.to_le_bytes());
+        }
+        for (column, id) in RETAIL_HEADERS.into_iter().enumerate() {
+            let mut isolated = vec![Vec::new(); strings.len()];
+            isolated[id] = strings[id].clone();
+            let mut fonts = [Surface::solid(), Surface::solid()];
+            retail_header_text(&mut fonts, &tab, &isolated, regions).unwrap();
+            let mut baselines = fonts
+                .iter()
+                .flat_map(|f| {
+                    f.vertices
+                        .as_chunks::<6>()
+                        .0
+                        .iter()
+                        .map(|q| q[0][1].to_bits())
+                })
+                .collect::<Vec<_>>();
+            baselines.sort_unstable();
+            baselines.dedup();
+            assert_eq!(
+                baselines.len(),
+                if matches!(column, 1 | 3) { 2 } else { 1 },
+                "header {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn retail_layout_preserves_mesh_columns_and_uses_full_header_widths() {
+        // A generated ten-frame mesh goes through the same archive, frame,
+        // region and textured-panel path as Assets::load. Earlier frames have
+        // different coordinates so selecting one accidentally fails this test.
+        let columns = [35., 151., 222., 315., 399., 481., 554., 635.];
+        let mut rectangles = vec![[35f32, 120., 635., 145.]; 30];
+        for column in 0..7 {
+            rectangles[8 + column] = [columns[column], 120., columns[column + 1] - 1., 145.];
+            rectangles[15 + column] = [columns[column], 145., columns[column + 1] - 1., 247.];
+        }
+        rectangles[13][2] = 552.; // A 71-unit held-stock title, close to the original.
+        let mut mesh = vec![0u8; 164];
+        for (at, value) in [(0, 120u16), (2, 30), (4, 10), (6, 9)] {
+            mesh[at..at + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        mesh[8..12].copy_from_slice(&30u32.to_le_bytes());
+        for frame in 0..10 {
+            for &[left, top, right, bottom] in &rectangles {
+                for [x, y] in [
+                    [left, -top],
+                    [left, -bottom],
+                    [right, -bottom],
+                    [right, -top],
+                ] {
+                    for value in [x + if frame == 9 { 0. } else { 10. }, y, 0.5] {
+                        mesh.extend(value.to_le_bytes());
+                    }
+                }
+            }
+        }
+        mesh.extend(vec![0; 120 * 20]); // UVs and normals.
+        for part in 0..30 {
+            let mut region = [0u8; 35];
+            let name = format!("REGION_{part}");
+            region[..name.len()].copy_from_slice(name.as_bytes());
+            region[33] = part;
+            mesh.extend(region);
+        }
+        for part in 0..30u32 {
+            let mut header = [0u8; 20];
+            header[6..8].copy_from_slice(&6u16.to_le_bytes());
+            header[12..16].copy_from_slice(&(part * 4).to_le_bytes());
+            header[16..20].copy_from_slice(&(part * 4 + 3).to_le_bytes());
+            mesh.extend(header);
+        }
+        mesh.extend(180u32.to_le_bytes());
+        for _ in 0..30 {
+            for index in [0u16, 1, 2, 0, 2, 3] {
+                mesh.extend(index.to_le_bytes());
+            }
+        }
+        mesh.extend(b"solid.tt\0");
+        let mut archive = mesh.clone();
+        let mut texture = vec![0u8; 60];
+        for (at, value) in [
+            (0, 1u32),
+            (8, 1),
+            (12, 1),
+            (16, 1f32.to_bits()),
+            (20, 1f32.to_bits()),
+        ] {
+            texture[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        texture.extend([255; 4]);
+        archive.extend(texture);
+        let mut directory = vec![0u8; 32 + 2 * 308];
+        directory[..4].copy_from_slice(&3u32.to_le_bytes());
+        directory[4..8].copy_from_slice(&2u32.to_le_bytes());
+        for (i, name, offset, length) in [
+            (0, "gamedata2/brand_new_panels/bap_v2.tm", 0, mesh.len()),
+            (1, "solid.tt", mesh.len(), archive.len() - mesh.len()),
+        ] {
+            let at = 32 + i * 308;
+            directory[at..at + name.len()].copy_from_slice(name.as_bytes());
+            directory[at + 260..at + 264].copy_from_slice(&(offset as u32).to_le_bytes());
+            directory[at + 264..at + 268].copy_from_slice(&(length as u32).to_le_bytes());
+        }
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let (surfaces, regions) = retail_panel_frame(&index, &archive).unwrap();
+        assert!(!surfaces.is_empty());
+        assert_eq!(regions, rectangles);
+        assert_eq!(
+            columns.map(retail_screen_x),
+            [56, 242, 355, 504, 638, 770, 886, 1016]
+        );
+        let mut tab = ui::synthetic_text_font(7, 10);
+        // Spaces advance four units; Stock I Have needs 68 units, so the
+        // previous four-unit inset fails while the 71-unit region fits it.
+        tab[36..40].copy_from_slice(&5i32.to_le_bytes());
+        check_header_lines(&tab, &header_strings(), &regions);
+    }
+
+    #[test]
+    fn retail_confirm_uses_original_localized_string_id() {
+        let mut strings = header_strings();
+        assert_eq!(RETAIL_CONFIRM, 1435);
+        let mut tab = ui::synthetic_text_font(7, 10);
+        // Give k and K different UVs so the emitted quads identify the string.
+        let k = 4 + usize::from(b'k' - 32) * 44;
+        tab[k..k + 4].copy_from_slice(&0.75f32.to_le_bytes());
+        let mut fonts = [Surface::solid(), Surface::solid()];
+        retail_confirm_text(&mut fonts, &tab, &strings, [10., 10., 60., 34.]).unwrap();
+        assert_eq!(fonts[0].vertices.len(), 12);
+        assert_eq!(fonts[0].vertices[6][6], 0.75);
+        // A localization change must reach the actual button glyphs.
+        strings[1435] = vec![b'k' - 32];
+        let mut fonts = [Surface::solid(), Surface::solid()];
+        retail_confirm_text(&mut fonts, &tab, &strings, [10., 10., 60., 34.]).unwrap();
+        assert_eq!(fonts[0].vertices.len(), 6);
+        assert_eq!(fonts[0].vertices[0][6], 0.75);
+    }
+
+    #[test]
+    #[ignore = "requires original panel mesh, font and language table"]
+    fn retail_layout_matches_original_mesh_and_language() {
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let archive = read("ARCHIVE_BIN");
+        let index = ArchiveIndex::parse(&read("ARCHIVE_DIR"), archive.len() as u64).unwrap();
+        let (_, regions) = retail_panel_frame(&index, &archive).unwrap();
+        let entry = index.find("gamedata2/brand_new_panels/bap_v2.tm").unwrap();
+        let mesh = openmt2001::mesh::CachedMesh::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
+        let named = openmt2001::ui_mesh::regions(&mesh, RETAIL_FRAME).unwrap();
+        assert_eq!(named[2].name, "BAP_BACKING");
+        for (column, name) in [
+            "BAP_COMMODIDTY_TITLE",
+            "BAP_COST_TITLE",
+            "BAP_SELLING_TITLE",
+            "BAP_YESTERDAY_TITLE",
+            "BAP_STOCK_I_WANT_TITLE",
+            "BAP_STOCK_I_HAVE_TITLE",
+            "BAP_TODAY_TITLE",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(named[8 + column].name, name);
+            assert_eq!(regions[8 + column], named[8 + column].bounds);
+        }
+        assert_eq!(
+            [
+                retail_screen_x(regions[2][0]),
+                retail_screen_x(regions[2][2])
+            ],
+            [55, 1016]
+        );
+        assert_eq!(
+            std::array::from_fn::<_, 6, _>(|i| retail_screen_x(regions[9 + i][0])),
+            [242, 356, 505, 639, 770, 886]
+        );
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        let tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab")).unwrap();
+        let exe = openmt2001::fixtures::path("EXE");
+        let language = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+        let offsets = fs::read(language.join("tycoon.off")).unwrap();
+        let bytes = fs::read(language.join("tycoon.bin")).unwrap();
+        let mut at = 0;
+        let strings = offsets
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|n| {
+                let end = at + u16::from_le_bytes(*n) as usize;
+                let text = bytes[at..end].to_vec();
+                at = end;
+                text
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(strings[RETAIL_CONFIRM], vec![b'O' - 32, b'k' - 32]);
+        check_header_lines(&tab, &strings, &regions);
+    }
 
     fn retail_fixture() -> (Vec<Row>, [u8; 544]) {
         let mut catalog = [[0; 116]; 45];
