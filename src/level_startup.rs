@@ -46,6 +46,36 @@ impl SourceEpoch {
         self.0
     }
 }
+/// World identity a property source was captured from. Production values come
+/// only from World::fresh's checked topology writer; `Synthetic` identities are
+/// test fixtures (the binary's tests build them, so the variant cannot be
+/// `cfg(test)` here) and never follow or precede a World epoch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PropertyEpoch {
+    World(SourceEpoch),
+    #[doc(hidden)]
+    Synthetic(u64),
+}
+impl PropertyEpoch {
+    pub fn serial(self) -> u64 {
+        match self {
+            Self::World(epoch) => epoch.serial(),
+            Self::Synthetic(value) => value,
+        }
+    }
+    pub fn follows(self, old: Self) -> bool {
+        match (self, old) {
+            (Self::World(a), Self::World(b)) => a > b,
+            (Self::Synthetic(a), Self::Synthetic(b)) => a > b,
+            _ => false,
+        }
+    }
+    /// Test support: a synthetic identity.
+    #[doc(hidden)]
+    pub fn synthetic(value: u64) -> Self {
+        Self::Synthetic(value)
+    }
+}
 #[derive(Debug)]
 pub struct Topology {
     count617624: i32,

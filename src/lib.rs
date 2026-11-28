@@ -170,6 +170,8 @@ pub mod comparison;
 #[cfg(feature = "lua4")]
 pub mod level_startup;
 #[cfg(feature = "lua4")]
+pub mod navigator_inputs;
+#[cfg(feature = "lua4")]
 pub mod notifications;
 #[cfg(feature = "lua4")]
 pub mod people_markers;

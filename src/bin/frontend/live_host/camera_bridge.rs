@@ -17,36 +17,7 @@ pub use openmt2001::process_runtime::{
     CameraGeneration as Generation, CameraSequence as Sequence, CentralIdentity,
 };
 
-/// Synthetic identities exist ONLY in binary test fixtures. Production values
-/// can be obtained only from World::fresh's checked topology writer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PropertyEpoch {
-    World(openmt2001::level_startup::SourceEpoch),
-    #[cfg(test)]
-    Synthetic(u64),
-}
-impl PropertyEpoch {
-    pub fn serial(self) -> u64 {
-        match self {
-            Self::World(epoch) => epoch.serial(),
-            #[cfg(test)]
-            Self::Synthetic(value) => value,
-        }
-    }
-    pub fn follows(self, old: Self) -> bool {
-        match (self, old) {
-            (Self::World(a), Self::World(b)) => a > b,
-            #[cfg(test)]
-            (Self::Synthetic(a), Self::Synthetic(b)) => a > b,
-            #[cfg(test)]
-            _ => false,
-        }
-    }
-    #[cfg(test)]
-    pub fn synthetic(value: u64) -> Self {
-        Self::Synthetic(value)
-    }
-}
+pub use openmt2001::level_startup::PropertyEpoch;
 
 /// An immutable install-only copy of the completed Session's actual World.
 /// No Manager, C/F tables, Scene, camera or status fallback is captured here.
@@ -58,14 +29,14 @@ impl PropertyEpoch {
 pub struct PropertySource {
     resident: Option<ResidentSource>,
     epoch: PropertyEpoch,
-    resource: crate::selection::pavement_resource::LocalPavementHandle,
+    resource: openmt2001::pavement_resource::LocalPavementHandle,
     rows: [[u8; 380]; 52],
     count: i32,
 }
 impl PropertySource {
     pub fn capture(
         session: &openmt2001::session::Session<'_>,
-        resource: crate::selection::pavement_resource::LocalPavementHandle,
+        resource: openmt2001::pavement_resource::LocalPavementHandle,
     ) -> Self {
         Self {
             resident: Some(ResidentSource::capture(session)),
@@ -102,7 +73,7 @@ impl PropertySource {
     pub fn epoch(&self) -> PropertyEpoch {
         self.epoch
     }
-    pub fn resource(&self) -> crate::selection::pavement_resource::LocalPavementHandle {
+    pub fn resource(&self) -> openmt2001::pavement_resource::LocalPavementHandle {
         self.resource
     }
     pub fn rows(&self) -> &[[u8; 380]; 52] {
@@ -164,8 +135,8 @@ pub struct Pose {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Admission {
-    pub upper: Option<std::sync::Arc<crate::navigator::upper::Inputs>>,
-    pub strategic: Option<std::sync::Arc<crate::locator::strategic::Inputs>>,
+    pub upper: Option<std::sync::Arc<openmt2001::navigator_inputs::Inputs>>,
+    pub strategic: Option<std::sync::Arc<openmt2001::strategic_inputs::Inputs>>,
     pub tutorial_session: bool,
     pub all_disabled: bool,
     pub camera_disabled: bool,
@@ -254,7 +225,7 @@ pub struct Observation {
     /// Core boundary completed; Host must apply TaskEffects before surfacing
     /// this real fatal error. No save success was published for this boundary.
     pub finalization_fault: Option<String>,
-    pub strategic_writeback: Option<crate::locator::strategic::Writeback>,
+    pub strategic_writeback: Option<openmt2001::strategic_inputs::Writeback>,
     pub current: Pose,
     /// Present exactly on Sample, from the completed primary sample and stored
     /// up. Save captures the bank separately without requesting another sample.
