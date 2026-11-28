@@ -755,7 +755,10 @@ fn sound_settings_original_slider_input_and_dispatch() {
     assert!(state.drag(
         &assets,
         Some([
-            native_track[0] + (native_track[2] - native_track[0]) * 0.37,
+            // 432260 truncates the pointer to an integer pixel before
+            // selecting one of maximum+1 bins. Pick the first pixel in
+            // value 37's bin, rather than assuming 37% of any track width.
+            (native_track[0] + (native_track[2] - native_track[0]) * 37. / 101.).ceil(),
             y
         ]),
         &mut levels
