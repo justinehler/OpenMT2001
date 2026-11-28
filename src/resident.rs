@@ -1234,9 +1234,130 @@ pub struct PurchaseCandidateInputs {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PurchaseCandidateScore {
-    pub value: f64,
+    pub value: PurchaseValue,
     pub ratio: Option<f32>,
     pub category_factor: Option<f32>,
+}
+
+/// A purchase score retained in ST0 across helper calls. Exceptional operands
+/// keep the previous host-float behavior; finite arithmetic uses x87 PC64.
+#[derive(Clone, Copy, Debug)]
+pub enum PurchaseValue {
+    Finite(crate::x87::Sum),
+    Nonfinite(f64),
+}
+
+impl Default for PurchaseValue {
+    fn default() -> Self {
+        Self::Finite(crate::x87::Sum::default())
+    }
+}
+
+impl From<f64> for PurchaseValue {
+    fn from(value: f64) -> Self {
+        match crate::x87::Sum::from_f64(value) {
+            Ok(value) => Self::Finite(value),
+            Err(_) => Self::Nonfinite(value),
+        }
+    }
+}
+
+impl From<f32> for PurchaseValue {
+    fn from(value: f32) -> Self {
+        Self::from(f64::from(value))
+    }
+}
+
+impl From<i32> for PurchaseValue {
+    fn from(value: i32) -> Self {
+        Self::Finite(crate::x87::Sum::from_i32(value))
+    }
+}
+
+impl PurchaseValue {
+    /// Round only for an actual binary64 observation or exceptional fallback.
+    pub fn to_f64(self) -> f64 {
+        match self {
+            Self::Finite(value) => value.to_f64(),
+            Self::Nonfinite(value) => value,
+        }
+    }
+
+    pub fn to_f32(self) -> f32 {
+        match self {
+            Self::Finite(value) => value.to_f32(),
+            Self::Nonfinite(value) => value as f32,
+        }
+    }
+
+    pub fn ftol_low_word(self) -> i32 {
+        match self {
+            Self::Finite(value) => value.ftol_low_word(),
+            Self::Nonfinite(value) => crate::economy::ftol_low_word(value),
+        }
+    }
+
+    fn compare(self, other: Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::Finite(a), Self::Finite(b)) => Some(a.compare(b)),
+            _ => self.to_f64().partial_cmp(&other.to_f64()),
+        }
+    }
+
+    fn negated(self) -> Self {
+        match self {
+            Self::Finite(value) => Self::Finite(value.negated()),
+            Self::Nonfinite(value) => Self::Nonfinite(-value),
+        }
+    }
+
+    fn plus(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Finite(mut a), Self::Finite(b)) => {
+                a.add(b);
+                Self::Finite(a)
+            }
+            _ => (self.to_f64() + other.to_f64()).into(),
+        }
+    }
+
+    fn minus(self, other: Self) -> Self {
+        self.plus(other.negated())
+    }
+
+    fn times(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Finite(mut a), Self::Finite(b)) => {
+                a.mul(b);
+                Self::Finite(a)
+            }
+            _ => (self.to_f64() * other.to_f64()).into(),
+        }
+    }
+
+    fn over(self, other: Self) -> Self {
+        if let (Self::Finite(mut a), Self::Finite(b)) = (self, other)
+            && a.div(b).is_ok()
+        {
+            return Self::Finite(a);
+        }
+        (self.to_f64() / other.to_f64()).into()
+    }
+
+    fn sqrt(self) -> Self {
+        if let Self::Finite(a) = self
+            && let Ok(root) = a.sqrt()
+        {
+            return Self::Finite(root);
+        }
+        self.to_f64().sqrt().into()
+    }
+}
+
+fn purchase_distance(source: [f32; 2], target: [f32; 2]) -> PurchaseValue {
+    let dx = PurchaseValue::from(source[0]).minus(target[0].into());
+    let dz = PurchaseValue::from(source[1]).minus(target[1].into());
+    dx.times(dx).plus(dz.times(dz)).sqrt()
 }
 
 /// Resolved category-list node used by0045ac90, preserving original list order.
@@ -2977,7 +3098,7 @@ impl Resident {
     pub fn select_purchase_business(
         &mut self,
         inputs: PurchaseBusinessInputs<'_>,
-        mut score: impl FnMut(&Self, usize, u32) -> Result<f64, String>,
+        mut score: impl FnMut(&Self, usize, u32) -> Result<PurchaseValue, String>,
         finish_destination: impl FnOnce(&mut Self) -> Result<(), String>,
     ) -> Result<bool, String> {
         let PurchaseBusinessInputs {
@@ -3003,13 +3124,20 @@ impl Resident {
                 let mut value = score(self, index, commodity)?;
                 // Native distance bonus is conditional on the raw score's
                 // difference from the retained best, not simply always added.
-                if value != 0. && !value.is_nan() && (best == 0. || value - f64::from(best) < 1.) {
-                    let dx = f64::from(auxiliary_position[0]) - f64::from(node.position[0]);
-                    let dz = f64::from(auxiliary_position[1]) - f64::from(node.position[1]);
-                    value += (100. - (dx * dx + dz * dz).sqrt()) * f64::from(distance_weight);
+                if value
+                    .compare(PurchaseValue::default())
+                    .is_some_and(|c| !c.is_eq())
+                    && (best == 0.
+                        || value.minus(best.into()).compare(1.0.into())
+                            == Some(std::cmp::Ordering::Less))
+                {
+                    let bonus = PurchaseValue::from(100.)
+                        .minus(purchase_distance(auxiliary_position, node.position))
+                        .times(distance_weight.into());
+                    value = value.plus(bonus);
                 }
-                if value > f64::from(best) {
-                    best = value as f32;
+                if value.compare(best.into()) == Some(std::cmp::Ordering::Greater) {
+                    best = value.to_f32();
                     selected = node.building;
                 }
             }
@@ -3081,7 +3209,7 @@ impl Resident {
         accounts: &[SpendingAccount],
         business: &[u8; 544],
         commodity: usize,
-    ) -> Result<f64, String> {
+    ) -> Result<PurchaseValue, String> {
         let row = u32::from_le_bytes(self.bytes[0x3c..0x40].try_into().unwrap()) as usize;
         let weights = world
             .weights
@@ -3144,9 +3272,9 @@ impl Resident {
         auxiliary_position: [f32; 2],
         weight: f32,
         disabled: bool,
-    ) -> Result<f64, String> {
+    ) -> Result<PurchaseValue, String> {
         if disabled {
-            return Ok(0.);
+            return Ok(PurchaseValue::default());
         }
         let target = centers
             .get(category)
@@ -3160,9 +3288,10 @@ impl Resident {
                 .and_then(|i| centers.get(i))
                 .ok_or("purchase distance source leaves category table")?
         };
-        let dx = f64::from(source[0]) - f64::from(target[0]);
-        let dz = f64::from(source[1]) - f64::from(target[1]);
-        Ok((100. - (dx * dx + dz * dz).sqrt() * 0.1) * f64::from(weight))
+        // 0x45abb9 loads a binary64 scale; the return remains in ST0.
+        Ok(PurchaseValue::from(100.)
+            .minus(purchase_distance(source, *target).times(0.1.into()))
+            .times(weight.into()))
     }
 
     /// Original0045a880 with catalog/map/settings resolved by the caller.
@@ -3185,18 +3314,21 @@ impl Resident {
         }
         let modified = business[0x74] != 0;
         let mode = word(0x78) as i32;
-        let multiplier = f64::from(f32::from_bits(word(0x7c)));
-        let mut first = price(business, inputs.commodity)?;
+        let multiplier = PurchaseValue::from(f32::from_bits(word(0x7c)));
+        let mut first = PurchaseValue::from(price(business, inputs.commodity)?);
         if modified && mode == 3 {
-            first *= multiplier;
+            first = first.times(multiplier);
         }
-        let threshold = f64::from(inputs.markup)
-            * f64::from(inputs.value)
-            * f64::from(f32::from_le_bytes(
-                self.bytes[0x70..0x74].try_into().unwrap(),
-            ));
+        let threshold = PurchaseValue::from(inputs.markup)
+            .times(inputs.value.into())
+            .times(
+                f64::from(f32::from_le_bytes(
+                    self.bytes[0x70..0x74].try_into().unwrap(),
+                ))
+                .into(),
+            );
         // The first native comparison permits unordered operands.
-        if first > threshold {
+        if first.compare(threshold) == Some(std::cmp::Ordering::Greater) {
             return Ok(result);
         }
         let index = i16::from_le_bytes(self.bytes[0x68..0x6a].try_into().unwrap());
@@ -3205,21 +3337,25 @@ impl Resident {
             .and_then(|index| accounts.get(index))
             .ok_or("purchase candidate account leaves spending pool")?;
         let cell = account.float(4 + inputs.commodity * 4);
-        let ratio = f64::from(cell) / price(business, inputs.commodity)? * 80.;
-        result.ratio = Some(ratio as f32);
+        let ratio = PurchaseValue::from(cell)
+            .over(price(business, inputs.commodity)?.into())
+            .times(80.0.into());
+        result.ratio = Some(ratio.to_f32());
         // Compare the retained value, before the output's f32 rounding.
-        if ratio.is_nan() || ratio < 80. || word(0x6c) != 0 {
+        if ratio.compare(80.0.into()).is_none_or(|c| c.is_lt()) || word(0x6c) != 0 {
             return Ok(result);
         }
-        let factor = f64::from(category_factor(business)?) * 20.;
-        result.category_factor = Some(factor as f32);
-        let map_term = f64::from(33 * (i32::from(inputs.building_attribute) + 1))
-            * f64::from(inputs.weights[2]);
-        let ratio_term = f64::from(result.ratio.unwrap()) * f64::from(inputs.weights[0]);
-        let factor_term = factor * f64::from(inputs.weights[1]);
-        result.value = ratio_term + (map_term + factor_term);
+        let factor = PurchaseValue::from(category_factor(business)?).times(20.0.into());
+        result.category_factor = Some(factor.to_f32());
+        let map_term = PurchaseValue::from(33 * (i32::from(inputs.building_attribute) + 1))
+            .times(inputs.weights[2].into());
+        // The ratio output is reloaded, while the factor's unrounded copy
+        // survives its output store (0x45a95c..0x45a9b7).
+        let ratio_term = PurchaseValue::from(result.ratio.unwrap()).times(inputs.weights[0].into());
+        let factor_term = factor.times(inputs.weights[1].into());
+        result.value = ratio_term.plus(map_term.plus(factor_term));
         if modified && (1..=2).contains(&mode) {
-            result.value *= multiplier;
+            result.value = result.value.times(multiplier);
         }
         Ok(result)
     }
@@ -3233,10 +3369,10 @@ impl Resident {
         accounts: &[SpendingAccount],
         category_mask: u32,
         candidate_masks: &[Option<u32>],
-        mut candidate_score: impl FnMut(&Self, usize, usize) -> Result<f64, String>,
-        adjustment: impl FnOnce(&Self, usize) -> Result<f64, String>,
-    ) -> Result<f64, String> {
-        let default = f64::from(f32::from_bits(0xccbebc20));
+        mut candidate_score: impl FnMut(&Self, usize, usize) -> Result<PurchaseValue, String>,
+        adjustment: impl FnOnce(&Self, usize) -> Result<PurchaseValue, String>,
+    ) -> Result<PurchaseValue, String> {
+        let default = PurchaseValue::from(f32::from_bits(0xccbebc20));
         if category >= 52 {
             return Err("purchase category exceeds category table".into());
         }
@@ -3263,9 +3399,7 @@ impl Resident {
             if mask & bit != 0 {
                 for (candidate, candidate_mask) in candidate_masks.iter().enumerate() {
                     if candidate_mask.is_some_and(|mask| mask & bit != 0) {
-                        let score = crate::economy::ftol_low_word(candidate_score(
-                            self, candidate, commodity,
-                        )?);
+                        let score = candidate_score(self, candidate, commodity)?.ftol_low_word();
                         if f64::from(score) > f64::from(best) {
                             best = score as f32;
                         }
@@ -3277,7 +3411,7 @@ impl Resident {
         if total == 0. {
             Ok(default)
         } else {
-            Ok(adjustment(self, category)? + f64::from(total))
+            Ok(adjustment(self, category)?.plus(total.into()))
         }
     }
 
@@ -3287,14 +3421,14 @@ impl Resident {
         &mut self,
         category_owners: &[Option<usize>; 52],
         owners: &mut [crate::economy::PlayerAccount],
-        mut score: impl FnMut(&mut Self, usize) -> Result<f64, String>,
+        mut score: impl FnMut(&mut Self, usize) -> Result<PurchaseValue, String>,
     ) -> Result<bool, String> {
         let mut best = 0_f32;
         let mut selected = None;
         for category in 0..52 {
             let value = score(self, category)?;
-            if value > f64::from(best) {
-                best = value as f32;
+            if value.compare(best.into()) == Some(std::cmp::Ordering::Greater) {
+                best = value.to_f32();
                 selected = Some(category);
             }
         }
@@ -3372,8 +3506,9 @@ impl Resident {
         let price_at = 0x1c4 + inputs.slot * 4;
         let price = f32::from_le_bytes(business[price_at..price_at + 4].try_into().unwrap());
         let cell_at = 4 + commodity as usize * 4;
-        let mut quantity =
-            crate::economy::ftol_low_word(f64::from(account.float(cell_at)) / f64::from(price));
+        let mut quantity = PurchaseValue::from(account.float(cell_at))
+            .over(price.into())
+            .ftol_low_word();
         let stock_at = 0x80 + inputs.slot * 0x34;
         let stock = u16::from_le_bytes(business[stock_at..stock_at + 2].try_into().unwrap());
         if quantity >= i32::from(stock) {
@@ -3387,10 +3522,10 @@ impl Resident {
         seller(business, commodity, quantity)?;
         // The native routine rereads the price after the seller returns.
         let price = f32::from_le_bytes(business[price_at..price_at + 4].try_into().unwrap());
-        let amount = f64::from(quantity) * f64::from(price);
+        let amount = PurchaseValue::from(quantity).times(price.into());
         account.debit_purchase(commodity as usize, amount);
         if capped {
-            let remainder = f64::from(account.float(cell_at));
+            let remainder = PurchaseValue::from(account.float(cell_at));
             account.debit_purchase(commodity as usize, remainder);
         }
         self.bytes[0xb8..0xbc].copy_from_slice(&3_u32.to_le_bytes());
@@ -4344,12 +4479,14 @@ pub struct SpendingAccount {
 }
 
 impl SpendingAccount {
-    fn debit_purchase(&mut self, commodity: usize, amount: f64) {
-        self.set_float(0x88, (f64::from(self.float(0x88)) - amount) as f32);
+    fn debit_purchase(&mut self, commodity: usize, amount: PurchaseValue) {
+        let cash = PurchaseValue::from(self.float(0x88)).minus(amount);
+        self.set_float(0x88, cash.to_f32());
         let at = 4 + commodity * 4;
-        let cell = (-amount + f64::from(self.float(at))) as f32;
+        let cell = amount.negated().plus(self.float(at).into()).to_f32();
         self.set_float(at, cell);
-        self.set_float(0x8c, (-amount + f64::from(self.float(0x8c))) as f32);
+        let allocated = amount.negated().plus(self.float(0x8c).into());
+        self.set_float(0x8c, allocated.to_f32());
         let mut mask = u32::from_le_bytes(self.bytes[0x84..0x88].try_into().unwrap());
         if cell == 0. || cell.is_nan() {
             mask &= !(1 << commodity);
@@ -5759,7 +5896,7 @@ mod tests {
                     },
                     |_, i, c| {
                         calls.push((i, c));
-                        Ok(scores[i])
+                        Ok(scores[i].into())
                     },
                     |resident| {
                         finishes += 1;
@@ -5803,7 +5940,7 @@ mod tests {
                     },
                     |_, node, commodity| {
                         calls.push((node, commodity));
-                        Ok(if node == 0 { 10. } else { 12. })
+                        Ok((if node == 0 { 10. } else { 12. }).into())
                     },
                     |resident| {
                         assert_eq!(
@@ -5832,7 +5969,7 @@ mod tests {
                         auxiliary_position: [0.; 2],
                         distance_weight: 100.,
                     },
-                    |_, _, _| Ok(0.),
+                    |_, _, _| Ok(0.0.into()),
                     |_| panic!("unexpected destination")
                 )
                 .unwrap()
@@ -6235,6 +6372,7 @@ mod tests {
                 resident
                     .purchase_distance_adjustment(category, &centers, auxiliary, weight, disabled)
                     .unwrap()
+                    .to_f64()
                     .to_bits(),
                 expected.to_bits(),
                 "case{case}"
@@ -6272,6 +6410,83 @@ mod tests {
         }
         business[8..10].copy_from_slice(&(-2_i16).to_le_bytes());
         assert!(super::purchase_business_category(&business, &[0x1234, -32767]).is_err());
+    }
+
+    #[test]
+    fn purchase_rereads_seller_price_and_debits_capped_remainder() {
+        for capped in [false, true] {
+            let mut resident = super::Resident::from_bytes([0; 330]);
+            let mut account = super::SpendingAccount::from_bytes([0; 144]);
+            account.set_float(4, 6.);
+            account.set_float(0x88, 10.);
+            account.set_float(0x8c, 6.);
+            let mut business = [0; 544];
+            business[0x80..0x82].copy_from_slice(&10_u16.to_le_bytes());
+            business[0x1c4..0x1c8].copy_from_slice(&1_f32.to_le_bytes());
+            let quantity = resident
+                .purchase_with_seller(
+                    &mut business,
+                    &mut account,
+                    super::RetailInputs {
+                        slot: 0,
+                        preference_limit: if capped { 2. } else { 10. },
+                        interaction_delay: 0.,
+                        unit_cost: 0.,
+                        tick: 0,
+                    },
+                    |business, commodity, quantity| {
+                        assert_eq!(commodity, 0);
+                        assert_eq!(quantity, if capped { 4 } else { 6 });
+                        business[0x1c4..0x1c8].copy_from_slice(&2_f32.to_le_bytes());
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(quantity, Some(if capped { 4 } else { 6 }));
+            assert_eq!(account.float(0x88), if capped { 4. } else { -2. });
+            assert_eq!(account.float(4), if capped { 0. } else { -6. });
+            assert_eq!(account.float(0x8c), if capped { 0. } else { -6. });
+            assert_eq!(account.bytes[0x84], u8::from(!capped));
+        }
+    }
+
+    #[test]
+    fn purchase_scores_preserve_nonfinite_fallback() {
+        let resident = super::Resident::from_bytes([0; 330]);
+        let mut business = [0; 544];
+        business[0x218..0x21c].copy_from_slice(&1_u32.to_le_bytes());
+        let mut account = super::SpendingAccount::from_bytes([0; 144]);
+        account.set_float(4, 1.);
+        let mut queries = 0;
+        let score = resident
+            .score_purchase_candidate(
+                &business,
+                &[account],
+                super::PurchaseCandidateInputs {
+                    commodity: 0,
+                    value: 1.,
+                    markup: 1.,
+                    building_attribute: 0,
+                    weights: [0.; 3],
+                },
+                |_, _| {
+                    queries += 1;
+                    Ok(0.)
+                },
+                |_| Ok(1.),
+            )
+            .unwrap();
+        assert_eq!(queries, 2);
+        assert_eq!(score.ratio, Some(f32::INFINITY));
+        assert!(score.value.to_f64().is_nan());
+        assert_eq!(score.value.ftol_low_word(), 0);
+        assert!(
+            resident
+                .purchase_distance_adjustment(0, &[[0.; 2]; 52], [0.; 2], f32::NAN, false)
+                .unwrap()
+                .to_f64()
+                .is_nan()
+        );
     }
     #[test]
     #[ignore = "requires original purchase score observations"]
@@ -6344,10 +6559,10 @@ mod tests {
                 );
             }
             assert!(
-                result.value.to_bits() == expected_score.to_bits()
-                    || (result.value.is_nan() && expected_score.is_nan()),
+                result.value.to_f64().to_bits() == expected_score.to_bits()
+                    || (result.value.to_f64().is_nan() && expected_score.is_nan()),
                 "case{case}: {} != {expected_score}",
-                result.value
+                result.value.to_f64()
             );
         }
         assert_eq!(at, data.len());
@@ -6401,12 +6616,12 @@ mod tests {
                     &masks,
                     |_, candidate, commodity| {
                         calls.push((candidate, commodity));
-                        Ok(scores[candidate * 32 + commodity])
+                        Ok(scores[candidate * 32 + commodity].into())
                     },
                     |_, cat| {
                         assert_eq!(cat, category);
                         adjustments += 1;
-                        Ok(adjustment)
+                        Ok(adjustment.into())
                     },
                 )
             };
@@ -6420,7 +6635,7 @@ mod tests {
                 );
             } else {
                 assert_eq!(
-                    scorer(&mut resident, category).unwrap().to_bits(),
+                    scorer(&mut resident, category).unwrap().to_f64().to_bits(),
                     expected_score.to_bits(),
                     "case{case}"
                 );
@@ -6469,10 +6684,10 @@ mod tests {
             let mut owners = [owner];
             let links = [linked.then_some(0); 52];
             let mut seen = 0;
-            let mut score = |_: &mut super::Resident, category| {
+            let mut score = |_: &mut super::Resident, category: usize| {
                 assert_eq!(category, seen);
                 seen += 1;
-                Ok(scores[category])
+                Ok(scores[category].into())
             };
             if chain {
                 resident
