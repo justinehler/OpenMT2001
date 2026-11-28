@@ -11,7 +11,9 @@ use crate::{
     fresh_city::{self, CommandAssets, Session},
     prompt,
 };
-use openmt2001::{hourly, level_script, lua4::Value, scheduler};
+use openmt2001::{
+    audio_requests::era as era_requests, hourly, level_script, lua4::Value, scheduler,
+};
 
 fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
     u32::from_le_bytes(packet[4..8].try_into().unwrap()) == 0x26
@@ -333,7 +335,7 @@ pub struct Host {
     auction_actor_events: Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
     pub transport_audio: Option<std::sync::mpsc::Sender<crate::transport_audio::Request>>,
-    pub era_audio: Option<std::sync::mpsc::Sender<crate::era_audio::Request>>,
+    pub era_audio: Option<std::sync::mpsc::Sender<era_requests::Request>>,
     pub gameplay_sound: Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
     auction: Option<Auction>,
     pub running: bool,
@@ -2412,8 +2414,8 @@ impl Host {
                 }
                 Event::Calendar(openmt2001::level_runtime::CalendarEvent::Hourly(
                     openmt2001::hourly::Event::StopSound(handle),
-                )) => crate::era_audio::request(
-                    &era_audio, crate::era_audio::Operation::BeforeSixRelease(handle)),
+                )) => era_requests::request(
+                    &era_audio, era_requests::Operation::BeforeSixRelease(handle)),
                 Event::Command(openmt2001::live_commands::Event::AuctionScenePrepare) => {
                     let characters = players
                         .iter()
@@ -2664,8 +2666,8 @@ impl Host {
                     Ok(0)
                 }
                 Event::Tick(scheduler::Event::BeforeSixSound) => {
-                    crate::era_audio::request(
-                        &era_audio, crate::era_audio::Operation::BeforeSixCreate)
+                    era_requests::request(
+                        &era_audio, era_requests::Operation::BeforeSixCreate)
                 }
                 Event::TransportSound(call) => {
                     if !matches!(call.id, 0 | 7 | 8 | 11) {
@@ -2677,8 +2679,8 @@ impl Host {
                     )?;
                     Ok(0)
                 }
-                Event::EraMusic { era, repeat } => crate::era_audio::request(
-                    &era_audio, crate::era_audio::Operation::Select { era, repeat }),
+                Event::EraMusic { era, repeat } => era_requests::request(
+                    &era_audio, era_requests::Operation::Select { era, repeat }),
                 Event::TransportEnvironment { call, position } => {
                     let distance = camera.into_iter().zip(position)
                         .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
