@@ -1,6 +1,11 @@
 //! Frontend WAV admission (4a9f60/4aa880), independent of device ownership.
 use rodio::{Source, mixer::Mixer};
-use std::{cell::Cell, collections::HashMap, ops::Deref, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    ops::Deref,
+    rc::Rc,
+};
 
 pub struct Request<'a> {
     pub name: &'a str,
@@ -15,7 +20,12 @@ impl Request<'_> {
     }
 }
 
+use super::spatial::{Emitter, Gains, Listener, Stereo};
+
 struct Voice {
+    spatial: RefCell<Option<Emitter>>,
+    listener: Rc<Cell<Listener>>,
+    gains: std::sync::Arc<Gains>,
     sink: rodio::Sink,
     stopped: Cell<bool>,
 }
@@ -24,6 +34,19 @@ struct Voice {
 #[derive(Clone)]
 pub struct Handle(Rc<Voice>);
 impl Handle {
+    pub fn set_spatial(&self, emitter: Emitter) {
+        *self.0.spatial.borrow_mut() = Some(emitter);
+        self.refresh_spatial();
+    }
+    fn refresh_spatial(&self) {
+        if let Some(emitter) = *self.0.spatial.borrow() {
+            self.0.gains.store(emitter.gains(self.0.listener.get()));
+        }
+    }
+    #[cfg(test)]
+    pub fn spatial_gains(&self) -> [f32; 2] {
+        self.0.gains.load()
+    }
     pub fn empty(&self) -> bool {
         self.0.stopped.get() || self.0.sink.empty()
     }
@@ -44,6 +67,9 @@ impl Deref for Handle {
 impl From<rodio::Sink> for Handle {
     fn from(sink: rodio::Sink) -> Self {
         Self(Rc::new(Voice {
+            spatial: RefCell::new(None),
+            listener: Rc::default(),
+            gains: Gains::shared(),
             sink,
             stopped: Cell::new(false),
         }))
@@ -56,11 +82,24 @@ struct Entry {
 }
 #[derive(Default)]
 pub struct Owner {
+    listener: Rc<Cell<Listener>>,
     // Cached voices compete only within their case-sensitive sample group.
     cached: HashMap<String, [Option<Entry>; 4]>,
     streamed: [Option<Entry>; 10],
 }
 impl Owner {
+    pub fn set_listener(&mut self, listener: Listener) {
+        self.listener.set(listener);
+        for entry in self
+            .cached
+            .values()
+            .flatten()
+            .chain(self.streamed.iter())
+            .flatten()
+        {
+            entry.handle.refresh_spatial();
+        }
+    }
     /// Once per frontend audio frame, independently of simulation ticks.
     pub fn service(&mut self) {
         for slot in self
@@ -136,12 +175,18 @@ impl Owner {
         let sink = rodio::Sink::connect_new(mixer);
         sink.set_volume(gain);
         let source = rodio::buffer::SamplesBuffer::new(1, 22_050, samples.to_vec());
+        let gains = Gains::shared();
+        // Repeat raw PCM, not rendered stereo: rodio buffers repeat input,
+        // and caching spatial gains there would freeze them after one loop.
         if request.looping {
-            sink.append(source.repeat_infinite());
+            sink.append(Stereo::new(source.repeat_infinite(), gains.clone()));
         } else {
-            sink.append(source);
+            sink.append(Stereo::new(source, gains.clone()));
         }
         let voice = Rc::new(Voice {
+            spatial: RefCell::new(None),
+            listener: self.listener.clone(),
+            gains,
             sink,
             stopped: Cell::new(false),
         });

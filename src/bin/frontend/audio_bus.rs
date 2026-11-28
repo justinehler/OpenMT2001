@@ -4,6 +4,9 @@
 //! until combined preference/source gain and application timing are implemented.
 use rodio::{mixer::Mixer, source::Zero};
 
+#[path = "spatial_audio.rs"]
+pub mod spatial;
+
 #[path = "effect_voices.rs"]
 pub mod effects;
 

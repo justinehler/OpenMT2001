@@ -171,6 +171,9 @@ pub struct Assets {
     strategic_scene: crate::strategic_scene::Assets,
 }
 impl Assets {
+    pub(crate) fn set_spatial_audio(&mut self, enabled: bool) {
+        self.transport_audio.spatial_enabled = enabled;
+    }
     pub fn load(paths: Paths) -> Result<Self, String> {
         Self::load_with_source_options(paths, "")
     }

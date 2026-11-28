@@ -918,6 +918,7 @@ pub fn run() -> Result<(), Error> {
     let mut exit_after = None;
     let mut window_size = None;
     let mut source_options = String::new();
+    let mut spatial_audio = true;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -962,6 +963,7 @@ pub fn run() -> Result<(), Error> {
                     .ok_or("--language requires patched language directory")?
                     .into()
             }
+            "--no-3d" => spatial_audio = false,
             "--strict-v14" => compatibility = crate::compatibility::Mode::StrictV14,
             "--skip-splash" => skip_splash = true,
             "--menu" => {
@@ -1004,7 +1006,7 @@ pub fn run() -> Result<(), Error> {
             }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\n--window-size <WIDTHxHEIGHT> (initial physical window size; captures under Xvfb should start at their target size instead of resizing the window)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--no-3d (original NO3D fallback sound presentation)\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\n--window-size <WIDTHxHEIGHT> (initial physical window size; captures under Xvfb should start at their target size instead of resizing the window)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names currently support 1-31 ASCII characters. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }
@@ -1046,10 +1048,14 @@ pub fn run() -> Result<(), Error> {
         profile_root,
     };
     std::thread::spawn(move || {
-        let _ = intro_sender.send(crate::intro::Assets::load_with_source_options(
-            paths,
-            &source_options,
-        ));
+        let _ = intro_sender.send(
+            crate::intro::Assets::load_with_source_options(paths, &source_options).map(
+                |mut assets| {
+                    assets.set_spatial_audio(spatial_audio);
+                    assets
+                },
+            ),
+        );
     });
     let now = Instant::now();
     let mut app = App {

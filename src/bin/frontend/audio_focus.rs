@@ -135,6 +135,9 @@ impl SharedAudio {
             .effects
             .request(mixer, request, samples, gain)
     }
+    pub fn set_listener(&self, listener: super::spatial::Listener) {
+        self.0.borrow_mut().effects.set_listener(listener);
+    }
     pub fn service_effects(&self) {
         self.0.borrow_mut().effects.service();
     }

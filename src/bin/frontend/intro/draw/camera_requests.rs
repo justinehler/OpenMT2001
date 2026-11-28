@@ -55,7 +55,7 @@ impl Intro {
                         &mut self.camera_physical,
                         &mut self.assets,
                         &joins,
-                        camera_live::SoundBoundary::Existing2d,
+                        camera_live::SoundBoundary::RequireOriginalListener,
                     )?;
                     // A direct ack wakes the worker, which produces the next
                     // ordered request. Do not force a full software-rendered
