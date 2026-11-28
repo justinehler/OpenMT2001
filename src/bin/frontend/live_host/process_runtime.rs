@@ -24,7 +24,7 @@ mod tests {
     #[test]
     fn actual_lua_command_consumer_writes_source_before_projection() {
         use crate::live_host::apply_source_picking_command as apply;
-        use crate::{level_script::Command as C, lua4::Value};
+        use openmt2001::{level_script::Command as C, lua4::Value};
         let p = fixture();
         apply(&p, &C::TutorialDisableAllPicking, &[]).unwrap();
         assert_eq!(p.byte(Byte::Controller920888).unwrap(), 0);
@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn actual_picking_conversion_keeps_native_low_word_and_indefinite_semantics() {
         use crate::live_host::{picking_ftol, tutorial_pick_target};
-        use crate::lua4::Value;
+        use openmt2001::lua4::Value;
         for (value, expected) in [
             (3.9, 3),
             (-2.9, -2),

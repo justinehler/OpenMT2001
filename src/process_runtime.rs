@@ -503,7 +503,8 @@ impl Handle {
             Ok(())
         })
     }
-    #[cfg(test)]
+    /// Test support: the seed the last connected city drew.
+    #[doc(hidden)]
     pub fn last_city_seed(&self) -> Result<u32> {
         self.with(|r| Ok(r.last_seed940834))
     }
