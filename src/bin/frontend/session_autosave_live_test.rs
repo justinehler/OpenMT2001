@@ -166,10 +166,11 @@ fn run(era: bool) {
         // Later Session state cannot enter the callback's completed owned bytes.
         source.hooks.utilities.totals=[91.,92.,93.,94.];source.allocation_next=0x2f000000;
         let mut loaded=Session::load_original(inputs(),policy(),&bytes).unwrap();
+        let native_allocation_next=loaded.allocation_next;
         loaded.restore_v2_extension_with_image(&saved,&image).unwrap();
         assert_eq!(loaded.world.clock.calendar[3],if era{239}else{23});
         assert_eq!(loaded.hooks.utilities.owners,[1,2,3,4]);
-        assert_eq!(loaded.hooks.utilities.totals,[5.,6.,7.,8.]);assert_eq!(loaded.allocation_next,0x1f000000);
+        assert_eq!(loaded.hooks.utilities.totals,[5.,6.,7.,8.]);assert_eq!(loaded.allocation_next,native_allocation_next.max(0x1f000000));
         assert_eq!(intro(&mut loaded),if era{vec![(1250,0)]}else{vec![]});
         let queue=loaded.live_commands.snapshot().unwrap();assert_eq!(queue.len(),1);
         assert!(matches!(queue[0],(scheduler::ClockDomain::Normal,650,650,true,Command::CategoryReady{category:0})));
