@@ -206,6 +206,8 @@ impl Performance {
     }
 }
 struct ProcessRuntime {
+    start_seed8fca84: Option<u32>,
+    last_seed940834: u32,
     performance: Performance,
     options: Options,
     network: Network,
@@ -291,6 +293,8 @@ fn startup_from_loader(
     let mut options = Options::defaults4b9140();
     options.parse4c7500(command).map_err(|e| e.to_string())?;
     let mut runtime = ProcessRuntime {
+        start_seed8fca84: None,
+        last_seed940834: 0,
         performance: Performance::constructor4b9140(),
         options,
         network: Network::constructor4e1290(),
@@ -463,6 +467,31 @@ impl Handle {
         self.with(|r| {
             r.scene_error = Some(Error::SourceLoadOrderUnavailable);
             Ok(())
+        })
+    }
+    /// Authority selection/received start seed (0x4a229e / 0x450c22).
+    pub fn select_connected_seed(&self, seed: u32) -> Result<()> {
+        self.with(|r| {
+            r.start_seed8fca84 = Some(seed);
+            r.network.enabled = 1;
+            Ok(())
+        })
+    }
+    #[cfg(test)]
+    pub fn last_city_seed(&self) -> Result<u32> {
+        self.with(|r| Ok(r.last_seed940834))
+    }
+    /// 0x4b9fa0 reads the process seed before 0x4e5580 traverses the registry.
+    /// The returned states are transferred to live owners by the constructor.
+    pub fn reseed_connected_city(&self) -> Result<openmt2001::startup_rng::Snapshot> {
+        self.with(|r| {
+            let seed = r
+                .start_seed8fca84
+                .take()
+                .ok_or(Error::SourceLoadOrderUnavailable)?;
+            let startup = openmt2001::startup_rng::Snapshot::from_seed(seed);
+            r.last_seed940834 = startup.last_seed;
+            Ok(startup)
         })
     }
     pub fn source_fresh_world(&self) -> Result<()> {

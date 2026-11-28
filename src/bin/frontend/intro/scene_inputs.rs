@@ -112,11 +112,14 @@ impl SceneInputs {
         custody: Option<crate::process_dispatch::DispatchCustody>,
     ) -> Option<crate::process_dispatch::DispatchCustody> {
         let joined = custody.is_some();
-        let fresh_completion = matches!(&start, WorkerStart::Fresh(_) | WorkerStart::Skirmish(_));
+        let fresh_completion = matches!(
+            &start,
+            WorkerStart::Fresh(_) | WorkerStart::Skirmish(_) | WorkerStart::Connected(_)
+        );
         let (mut dispatch, mut timing) = if let Some(custody) = custody {
             match custody.prepare_start(matches!(
                 &start,
-                WorkerStart::Fresh(_) | WorkerStart::Skirmish(_)
+                WorkerStart::Fresh(_) | WorkerStart::Skirmish(_) | WorkerStart::Connected(_)
             )) {
                 Ok((seed, timing)) => (Some(seed), timing),
                 Err(error) => {
@@ -147,16 +150,18 @@ impl SceneInputs {
             process: self.process_runtime.clone(),
             failures: Arc::clone(&exit_failures),
         };
-        if matches!(&start, WorkerStart::Fresh(_) | WorkerStart::Skirmish(_)) {
-            if let Some(process) = &self.process_runtime {
-                if let Err(error) = process.source_fresh_world() {
-                    let _ = tx.send(Err(error.to_string()));
-                    return None;
-                }
-            }
+        if matches!(
+            &start,
+            WorkerStart::Fresh(_) | WorkerStart::Skirmish(_) | WorkerStart::Connected(_)
+        ) && let Some(process) = &self.process_runtime
+            && let Err(error) = process.source_fresh_world()
+        {
+            let _ = tx.send(Err(error.to_string()));
+            return None;
         }
         let mut cache = SnapshotCache::default();
         let selected_save_root = match &start {
+            WorkerStart::Connected(_) => None,
             WorkerStart::Saved(_, root) => root.clone(),
             WorkerStart::Skirmish(request) => Some(request.save_root.clone()),
             WorkerStart::Fresh(setup) => {
@@ -169,6 +174,9 @@ impl SceneInputs {
         let review_camera = matches!(&start, WorkerStart::Saved(..))
             && std::env::var_os("OPENMT2001_CAMERA_OWNER_NATIVE_REVIEW").is_some();
         let result = match start {
+            WorkerStart::Connected(request) => {
+                self.fresh_connected_joined(*request, camera, &mut cache, dispatch.take())
+            }
             WorkerStart::Skirmish(request) => {
                 self.fresh_skirmish_joined(request, camera, &mut cache, dispatch.take())
             }
@@ -318,6 +326,10 @@ impl SceneInputs {
                             host.fail(error);
                             return None;
                         }
+                    }
+                    if session.connected.is_some() {
+                        host.policy.scheduler.network_enabled = true;
+                        host.policy.scheduler.deadline = 25;
                     }
                     host.autosave_profile_root = save_profile_root.clone();
                     host.process_runtime = self.process_runtime.clone();

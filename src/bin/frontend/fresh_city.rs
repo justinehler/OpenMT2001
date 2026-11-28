@@ -120,6 +120,7 @@ pub fn load_era_styles(
 }
 /// Confirmed setup and full compact participants, separate from ordinary Inputs.
 /// Offline local peer0 is an adapter identity, not a recovered native peer ID.
+#[derive(Clone)]
 pub struct SkirmishLaunch {
     pub level_id: u32,
     pub directory: String,
@@ -131,6 +132,9 @@ pub struct SkirmishLaunch {
 }
 impl SkirmishLaunch {
     fn validate(&self) -> Result<(), String> {
+        self.validate_roster(false)
+    }
+    pub(crate) fn validate_roster(&self, connected: bool) -> Result<(), String> {
         use openmt2001::skirmish::roster::Kind;
         // Bounded original supplied map support; never join a caller path.
         if !(0..=2).contains(&self.difficulty)
@@ -154,7 +158,8 @@ impl SkirmishLaunch {
                 || p.name.is_empty()
                 || p.name.len() >= 32
                 || p.name.contains(&0)
-                || (slot > 0 && p.kind != Kind::Ai)
+                || (slot > 0 && p.kind != Kind::Ai && !(connected && p.kind == Kind::Human))
+                || !(0..=2).contains(&p.difficulty)
             {
                 return Err("invalid compact offline participant".into());
             }
@@ -165,6 +170,7 @@ impl SkirmishLaunch {
 }
 
 pub struct Session<'data> {
+    pub connected: Option<crate::intro::connected_start::Connection>,
     pub building_styles: openmt2001::building_styles::Styles,
     pub era_styles: [openmt2001::building_styles::Styles; 8],
     pub player_style_indices: [i32; 6],
@@ -1407,6 +1413,59 @@ impl<'data> Session<'data> {
     }
 
     pub(crate) fn initialize_joined(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
+        profile_path: Option<std::path::PathBuf>,
+        load_mode: bool,
+        style: Option<&openmt2001::board_style::Style>,
+        compatibility: crate::compatibility::Mode,
+        skirmish: Option<SkirmishLaunch>,
+        process: Option<crate::live_host::process_runtime::Handle>,
+        dispatch: Option<crate::process_dispatch::Seed>,
+    ) -> Result<Self, String> {
+        Self::initialize_joined_inner(
+            input,
+            policy,
+            supplied_catalog,
+            profile_path,
+            load_mode,
+            style,
+            compatibility,
+            skirmish,
+            process,
+            dispatch,
+            None,
+        )
+    }
+    pub(crate) fn initialize_connected_joined(
+        input: Inputs<'_, 'data>,
+        policy: Policy,
+        stage: &crate::intro::connected_start::Staged,
+        style: Option<&openmt2001::board_style::Style>,
+        process: crate::live_host::process_runtime::Handle,
+        dispatch: Option<crate::process_dispatch::Seed>,
+    ) -> Result<Self, String> {
+        stage.launch.validate_roster(true)?;
+        process
+            .select_connected_seed(policy.seed)
+            .map_err(|e| e.to_string())?;
+        Self::initialize_joined_inner(
+            input,
+            policy,
+            Some(stage.catalog.clone()),
+            None,
+            false,
+            style,
+            crate::compatibility::Mode::StrictV14,
+            Some(stage.launch.clone()),
+            Some(process),
+            dispatch,
+            Some(stage),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn initialize_joined_inner(
         mut input: Inputs<'_, 'data>,
         policy: Policy,
         supplied_catalog: Option<openmt2001::level_catalog::Catalog>,
@@ -1417,6 +1476,7 @@ impl<'data> Session<'data> {
         skirmish: Option<SkirmishLaunch>,
         process: Option<crate::live_host::process_runtime::Handle>,
         mut dispatch: Option<crate::process_dispatch::Seed>,
+        connected: Option<&crate::intro::connected_start::Staged>,
     ) -> Result<Self, String> {
         if !load_mode
             && dispatch
@@ -1426,7 +1486,7 @@ impl<'data> Session<'data> {
             return Err("Unsupported negative reason0 before World reset".into());
         }
         if let Some(launch) = &skirmish {
-            launch.validate()?;
+            launch.validate_roster(connected.is_some())?;
             let options = openmt2001::skirmish::Options::from_pe(input.image)?;
             let rule = options
                 .rules()
@@ -1492,10 +1552,12 @@ impl<'data> Session<'data> {
         }
         catalog.difficulty = input.difficulty as u32;
         let resolved_skirmish_map = if let Some(launch) = &skirmish {
-            Some(
+            Some(if let Some(stage) = connected {
+                stage.map.clone()
+            } else {
                 crate::skirmish_maps::Catalog::discover(input.scripts)?
-                    .resolve(input.scripts, &launch.map)?,
-            )
+                    .resolve(input.scripts, &launch.map)?
+            })
         } else {
             None
         };
@@ -1510,8 +1572,17 @@ impl<'data> Session<'data> {
             input.timetable,
             input.image,
         )?;
-        let creation = openmt2001::startup_rng::Snapshot::from_seed(policy.seed)
-            .resident_creation(openmt2001::resident::AuxiliaryPool::for_residents());
+        let startup = if connected.is_some() {
+            process
+                .as_ref()
+                .ok_or("Connected startup has no process seed owner")?
+                .reseed_connected_city()
+                .map_err(|e| e.to_string())?
+        } else {
+            openmt2001::startup_rng::Snapshot::from_seed(policy.seed)
+        };
+        let creation =
+            startup.resident_creation(openmt2001::resident::AuxiliaryPool::for_residents());
         let objective = dispatch
             .as_mut()
             .map(|seed| std::mem::take(&mut seed.objective))
@@ -1533,7 +1604,9 @@ impl<'data> Session<'data> {
         }
         let mut scripts = level_startup::Scripts::new(input.image)?;
         let read = |relative: &str| {
-            if is_custom {
+            if let Some(stage) = connected {
+                stage.read(relative)
+            } else if is_custom {
                 custom::read(input.scripts, relative)
             } else {
                 fs::read(input.scripts.join(relative)).map_err(|e| format!("{relative}: {e}"))
@@ -1697,7 +1770,6 @@ impl<'data> Session<'data> {
             }
         }
         let models = std::mem::take(geometry.registrar_mut());
-        let startup = openmt2001::startup_rng::Snapshot::from_seed(policy.seed);
         let mut roster = level_startup::Roster::new([0; 0x28])?;
         let mut random_registry = openmt2001::player_manager::RandomRegistry {
             process: startup.process,
@@ -1805,6 +1877,14 @@ impl<'data> Session<'data> {
                     } else {
                         0
                     };
+                    let peer = connected.map_or(peer, |stage| {
+                        stage
+                            .peers
+                            .get(registration.index as usize)
+                            .copied()
+                            .flatten()
+                            .map_or(-1, i32::from)
+                    });
                     metadata[40..44].copy_from_slice(&peer.to_le_bytes());
                 }
                 metadata[44..48].copy_from_slice(&registration.difficulty.to_le_bytes());
@@ -1812,7 +1892,12 @@ impl<'data> Session<'data> {
             // Explicit fresh host arena: zero-filled allocations and opaque,
             // nonoverlapping logical identities, never native host addresses.
             let mut demand_ready = world.city.ai_demand.ready;
-            let scenario_ai = if is_custom {
+            let scenario_ai = if let Some(stage) = connected {
+                stage
+                    .scripts
+                    .get(&format!("{}/ai.lua", input.scenario).to_ascii_lowercase())
+                    .cloned()
+            } else if is_custom {
                 custom::read_optional(input.scripts, &format!("{}/ai.lua", input.scenario))?
             } else {
                 match fs::read(input.scripts.join(format!("{}/ai.lua", input.scenario))) {
@@ -1840,6 +1925,7 @@ impl<'data> Session<'data> {
             roster.initialize_world_with_ownership_allocator(
                 &pending,
                 openmt2001::player_script::RosterInputs {
+                    local_slot: connected.map(|stage| stage.local_slot),
                     names,
                     initial_cash: cash,
                     default_ai: &read("DEFAULT/ai.lua")?,
@@ -2035,6 +2121,7 @@ impl<'data> Session<'data> {
             skirmish_map,
             campaign_profile: profile_path,
             setup: None,
+            connected: None,
             network_command_timer: None,
             world,
             scripts,

@@ -75,18 +75,34 @@ fn loopback_probe_join_edit_revision_start_and_leave_over_real_transport() {
         |u| matches!(u, Update::Lobby(v) if v.snapshot.revision == ready.snapshot.revision),
     );
     host.action(Action::Start).unwrap();
-    let Update::Notice(message) = wait(&host, |u| matches!(u, Update::Notice(_))) else {
+    let Update::Prepare(ticket) = wait(&host, |u| matches!(u, Update::Prepare(_))) else {
         panic!()
     };
-    assert_eq!(message, crate::network::lobby::START_BOUNDARY);
+    assert_eq!(ticket.view.snapshot, ready.snapshot);
+    let content = network::Content {
+        level: ticket.view.snapshot.settings.level,
+        parameter_bits: ticket.view.snapshot.settings.parameter_bits,
+        difficulty: ticket.view.snapshot.settings.difficulty,
+        fingerprint: [4; 32],
+    };
+    host.prepared(Ok(content)).unwrap();
+    let Update::Prepare(client_ticket) = wait(&join, |u| matches!(u, Update::Prepare(_))) else {
+        panic!()
+    };
+    assert_eq!(client_ticket.seed, ticket.seed);
+    assert_eq!(client_ticket.expected, Some(content));
+    assert_eq!(client_ticket.view.snapshot, ticket.view.snapshot);
+    assert_eq!(host.owner.phase(), Ok(network::Phase::Lobby));
+    join.prepared(Ok(content)).unwrap();
+    wait(&host, |u| matches!(u, Update::Validated));
+    wait(&join, |u| matches!(u, Update::Validated));
+    assert_eq!(host.owner.phase(), Ok(network::Phase::Starting));
+    let binding = host.bind_world(10).unwrap();
+    let other = join.bind_world(11).unwrap();
+    assert_eq!(host.validate_binding(binding), Ok(()));
+    assert_eq!(join.validate_binding(other), Ok(()));
     drop(join);
-    let Update::Lobby(left) = wait(
-        &host,
-        |u| matches!(u, Update::Lobby(v) if v.snapshot.capacity().0 == 1),
-    ) else {
-        panic!()
-    };
-    assert!(left.snapshot.revision > ready.snapshot.revision);
+    drop(host);
 }
 #[test]
 fn stale_worker_retirement_cannot_close_replacement() {
@@ -237,4 +253,96 @@ fn cancelling_an_unjoined_connection_keeps_existing_lobby_peers() {
     };
     assert_eq!(next.snapshot.capacity().0, 2);
     assert_eq!(next.snapshot.revision, joined.snapshot.revision + 1);
+}
+
+#[test]
+fn mismatched_content_never_releases_construction() {
+    let host = Handle::spawn(owner(), host_open(settings())).unwrap();
+    let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
+        panic!()
+    };
+    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+        panic!()
+    };
+    drop(probe);
+    let join = Handle::spawn(
+        owner(),
+        Open::Join {
+            selection,
+            name: b"Other".to_vec(),
+            token: 2,
+        },
+    )
+    .unwrap();
+    wait(&join, |u| matches!(u, Update::Lobby(_)));
+    join.action(Action::Ready).unwrap();
+    wait(
+        &host,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.start_enabled()),
+    );
+    host.action(Action::Start).unwrap();
+    let Update::Prepare(ticket) = wait(&host, |u| matches!(u, Update::Prepare(_))) else {
+        panic!()
+    };
+    let mut content = network::Content {
+        level: ticket.view.snapshot.settings.level,
+        parameter_bits: ticket.view.snapshot.settings.parameter_bits,
+        difficulty: ticket.view.snapshot.settings.difficulty,
+        fingerprint: [3; 32],
+    };
+    host.prepared(Ok(content)).unwrap();
+    wait(&join, |u| matches!(u, Update::Prepare(_)));
+    content.fingerprint[0] ^= 1;
+    join.prepared(Ok(content)).unwrap();
+    let Update::Failed(error) = wait(&join, |u| matches!(u, Update::Failed(_))) else {
+        panic!()
+    };
+    assert!(error.contains("digest mismatch"));
+    let Update::Failed(error) = wait(&host, |u| matches!(u, Update::Failed(_))) else {
+        panic!()
+    };
+    assert!(error.contains("could not validate") || error.contains("connection ended"));
+    assert!(host.bind_world(1).is_err());
+    assert!(join.bind_world(2).is_err());
+}
+
+#[test]
+fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
+    let owner = owner();
+    let old = Handle::spawn(owner, host_open(settings())).unwrap();
+    wait(&old, |u| matches!(u, Update::Lobby(_)));
+    old.action(Action::Kind(1)).unwrap();
+    wait(
+        &old,
+        |u| matches!(u, Update::Lobby(v) if v.snapshot.start_enabled()),
+    );
+    old.action(Action::Start).unwrap();
+    let Update::Prepare(ticket) = wait(&old, |u| matches!(u, Update::Prepare(_))) else {
+        panic!()
+    };
+    let (entered, staged) = mpsc::sync_channel(1);
+    let (release, resume) = mpsc::sync_channel(1);
+    let ui_thread = thread::current().id();
+    old.stage(move || {
+        assert_ne!(thread::current().id(), ui_thread);
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(network::Content {
+            level: ticket.view.snapshot.settings.level,
+            parameter_bits: ticket.view.snapshot.settings.parameter_bits,
+            difficulty: ticket.view.snapshot.settings.difficulty,
+            fingerprint: [8; 32],
+        })
+    })
+    .unwrap();
+    staged.recv_timeout(Duration::from_secs(5)).unwrap();
+    old.cancellation().cancel();
+    assert!(old.validate().is_err());
+    let next = Handle::spawn(owner, host_open(settings())).unwrap();
+    wait(&next, |u| matches!(u, Update::Lobby(_)));
+    release.send(()).unwrap();
+    drop(old);
+    assert_eq!(owner.phase(), Ok(network::Phase::Lobby));
+    assert!(next.validate().is_ok());
 }

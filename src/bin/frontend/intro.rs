@@ -1,3 +1,5 @@
+#[path = "intro/connected_start.rs"]
+pub(crate) mod connected_start;
 use crate::present::Presenter;
 
 #[path = "intro/camera_keys.rs"]
@@ -828,6 +830,7 @@ struct SnapshotCache {
     scaffolds_active: bool,
 }
 enum WorkerStart {
+    Connected(Box<connected_start::Prepared>),
     Skirmish(crate::menu::skirmish_route::Request),
     Fresh(crate::singleplayer::Setup),
     Saved(PathBuf, Option<PathBuf>),
@@ -1325,6 +1328,8 @@ pub struct Intro {
     menu_camera: Option<MenuCamera>,
     loading: Option<mpsc::Receiver<Result<LoadedInspection, String>>>,
     loading_from_setup: bool,
+    pending_connected: Option<connected_start::Pending>,
+    loading_connected: bool,
     loading_skirmish: bool,
     refreshing_fresh: bool,
     refresh_retry: refresh::Retry,
@@ -1729,6 +1734,8 @@ impl Intro {
             menu_camera: None,
             loading: None,
             loading_from_setup: false,
+            pending_connected: None,
+            loading_connected: false,
             loading_skirmish: false,
             refreshing_fresh: false,
             refresh_retry: refresh::Retry::default(),
@@ -4835,7 +4842,9 @@ impl Intro {
         // The worker retains its Lua VM and world until inspection is dismissed.
         if !self.refreshing_fresh
             && self.menu.as_ref().is_some_and(|m| {
-                if self.loading_skirmish {
+                if self.loading_connected {
+                    !m.multiplayer.busy
+                } else if self.loading_skirmish {
                     !m.skirmish.busy
                 } else if self.loading_from_setup {
                     !m.single.visible || !m.single.busy
@@ -4868,6 +4877,7 @@ impl Intro {
             && self.loading.is_none()
             && let Some(path) = self.menu.as_mut().and_then(|m| m.load.request.take())
         {
+            self.loading_connected = false;
             self.loading_skirmish = false;
             self.loading_from_setup = false;
             let save_profile_root = self.menu.as_ref().and_then(|m| m.current_save_root());
@@ -4892,6 +4902,80 @@ impl Intro {
                 focus_enabled,
                 custody,
             )?);
+        }
+        // A cancelled preparation belongs to its captured attempt. Discard it
+        // before a replacement route can receive an old worker's completion.
+        if self.pending_connected.is_some()
+            && self
+                .menu
+                .as_ref()
+                .is_none_or(|m| !m.multiplayer.busy || m.multiplayer.request.is_some())
+        {
+            self.pending_connected = None;
+        }
+        if self.pending_connected.is_none()
+            && let Some(request) = self
+                .menu
+                .as_mut()
+                .and_then(|m| m.multiplayer.request.take())
+        {
+            match connected_start::Pending::start(request, self.assets.inputs.clone()) {
+                Ok(pending) => self.pending_connected = Some(pending),
+                Err(error) => {
+                    if let Some(menu) = &mut self.menu {
+                        menu.multiplayer.finish(Some(error));
+                    }
+                }
+            }
+        }
+        if let Some(pending) = &mut self.pending_connected
+            && let Err(error) = pending.poll()
+        {
+            self.pending_connected = None;
+            if let Some(menu) = &mut self.menu {
+                menu.multiplayer.finish(Some(error));
+            }
+        }
+        if self.process_start_ready()
+            && self.loading.is_none()
+            && let Some(request) = self
+                .pending_connected
+                .as_mut()
+                .and_then(connected_start::Pending::take_ready)
+        {
+            self.pending_connected = None;
+            self.loading_connected = true;
+            self.loading_skirmish = false;
+            self.loading_from_setup = true;
+            let inputs = self.assets.inputs.clone();
+            let focus_enabled = self.focus.enabled();
+            let custody = self.start_custody(true)?;
+            let (tx, rx) = mpsc::channel();
+            self.loading = Some(rx);
+            match camera_producer::spawn_session_joined(
+                "connected-city-simulation",
+                inputs,
+                WorkerStart::Connected(Box::new(request)),
+                inspection_camera,
+                tx,
+                None,
+                focus_enabled,
+                custody,
+            ) {
+                Ok(worker) => self.camera_worker = Some(worker),
+                Err(error) => {
+                    self.camera_worker_failure = Some(error.clone());
+                    if let Some(process) = &self.process_frontend {
+                        process.borrow_mut().fail(error.clone());
+                    }
+                    self.loading = None;
+                    self.loading_connected = false;
+                    self.loading_from_setup = false;
+                    if let Some(menu) = &mut self.menu {
+                        menu.multiplayer.finish(Some(error));
+                    }
+                }
+            }
         }
         if self.process_start_ready()
             && self.loading.is_none()
@@ -4921,6 +5005,7 @@ impl Intro {
                         process.borrow_mut().fail(error.clone());
                     }
                     self.loading = None;
+                    self.loading_connected = false;
                     self.loading_skirmish = false;
                     self.loading_from_setup = false;
                     if let Some(menu) = self.menu.as_mut() {
@@ -4934,6 +5019,7 @@ impl Intro {
             && self.loading.is_none()
             && let Some(preview) = self.menu.as_mut().and_then(|m| m.single.request.take())
         {
+            self.loading_connected = false;
             self.loading_skirmish = false;
             self.loading_from_setup = true;
             let inputs = self.assets.inputs.clone();
@@ -5606,7 +5692,9 @@ impl Intro {
                                     process.borrow_mut().note_sent(self.focus.sent());
                                 }
                             }
-                            if self.loading_skirmish {
+                            if self.loading_connected {
+                                menu.multiplayer.finish(None);
+                            } else if self.loading_skirmish {
                                 menu.skirmish.finish(None);
                             } else if self.loading_from_setup {
                                 menu.single.message = None;
@@ -5623,7 +5711,9 @@ impl Intro {
                                 self.refresh_retry.reject(e.clone());
                                 eprintln!("Scene refresh deferred: {e}");
                             }
-                            if self.loading_skirmish {
+                            if self.loading_connected {
+                                menu.multiplayer.finish(Some(e));
+                            } else if self.loading_skirmish {
                                 menu.skirmish.finish(Some(e));
                             } else if self.loading_from_setup {
                                 menu.single.message = Some(e)

@@ -10,6 +10,7 @@ repository = "https://github.com/justinehler/OpenMT2001"
 path = "src/lib.rs"
 
 [dependencies]
+sha2 = "0.10"
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"], optional = true }
 bytemuck = { version = "1.25.2", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }

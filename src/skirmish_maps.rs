@@ -23,7 +23,7 @@ pub enum MapIdentity {
     },
     MaterializedUnknown,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ResolvedMap {
     pub identity: MapIdentity,
     pub bytes: Vec<u8>,

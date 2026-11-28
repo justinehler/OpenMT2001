@@ -3,7 +3,8 @@
 //! [0..4] "OMT1", [4..6] version u16, [6..8] tag u16,
 //! [8..12] payload byte length u32, [12..28] session bytes, [28..36] sequence u64.
 //! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
-//! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe.
+//! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe,
+//! 10=validated startup content, 11=start commit, 12=start content failure.
 //! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
@@ -53,7 +54,11 @@ fn validate(message: &Message) -> Result<()> {
     match message {
         Message::Lobby(snapshot) => snapshot.validate()?,
         Message::LobbyRequest(request) => request.validate()?,
-        Message::Hello | Message::Probe | Message::LobbyDenied => {}
+        Message::Hello
+        | Message::Probe
+        | Message::LobbyDenied
+        | Message::StartCommit
+        | Message::StartFailure => {}
         Message::Welcome { slot } => {
             if !(1..SLOTS as u8).contains(slot) {
                 return Err(Error::Peer);
@@ -74,6 +79,7 @@ fn validate(message: &Message) -> Result<()> {
             }
         }
         Message::Start(start) => start.content.validate()?,
+        Message::StartReady(content) => content.validate()?,
         Message::Transfer(transfer) => {
             if transfer.category >= 52 || !(1..=6).contains(&transfer.owner) {
                 return Err(Error::Row);
@@ -131,6 +137,12 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
             }
             7
         }
+        Message::StartReady(setup) => {
+            content(&mut payload, *setup);
+            10
+        }
+        Message::StartCommit => 11,
+        Message::StartFailure => 12,
         Message::LobbyDenied => 8,
         Message::Probe => 9,
         Message::Hello => 4,
@@ -298,6 +310,9 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
         at: 0,
     };
     let message = match tag {
+        10 => Message::StartReady(reader.content()?),
+        11 => Message::StartCommit,
+        12 => Message::StartFailure,
         6 => {
             let settings = Settings {
                 name: reader.blob()?,

@@ -297,7 +297,7 @@ impl Assets {
 }
 pub struct Menu {
     pub skirmish: skirmish_route::Route,
-    multiplayer: multiplayer_route::Route,
+    pub multiplayer: multiplayer_route::Route,
 
     pub settings: crate::settings_menu::View,
     pub settings_audio: crate::settings_menu::Levels,

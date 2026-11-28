@@ -3,7 +3,6 @@
 use super::{Error, Result, Row, RowKind, SLOTS};
 pub mod worker;
 
-pub const START_BOUNDARY: &str = "Connected game startup is not available yet (issue #34).";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub name: Vec<u8>,

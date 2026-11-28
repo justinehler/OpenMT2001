@@ -26,6 +26,8 @@ pub struct RosterStatus {
 }
 
 pub struct RosterInputs<'a> {
+    /// Connected local compact row, selected before AI reset and script callbacks.
+    pub local_slot: Option<usize>,
     pub names: [&'a [u8]; 6],
     /// Live InitialValue.playermoney after the level initializer has run.
     /// Original48c712 reads mutable541c78, not the executable's default bytes.
@@ -86,7 +88,11 @@ impl PendingRoster {
                 status.has_ai = true;
             }
         }
-        status.current_player = word(&state.manager.bytes, 0x10);
+        let local_slot = inputs.local_slot.unwrap_or(0);
+        if inputs.local_slot.is_some() && (local_slot >= 6 || self.records[local_slot].kind != 0) {
+            return Err("local connected player is not an active human".into());
+        }
+        status.current_player = word(&state.manager.bytes, 0x10 + local_slot * 4);
         for (slot, record) in self.records.iter().enumerate() {
             if record.kind != 1 {
                 continue;
@@ -324,6 +330,7 @@ mod tests {
                 roster
                     .initialize_created(
                         RosterInputs {
+                            local_slot: None,
                             names: [b"Fixture Player"; 6],
                             initial_cash,
                             default_ai: &default_ai,
