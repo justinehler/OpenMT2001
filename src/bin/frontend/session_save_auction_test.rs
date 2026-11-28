@@ -4,16 +4,22 @@ use super::*;
 #[test]
 #[ignore = "requires original v1.4 game assets and audited scripts"]
 fn natural_auction_countdown_and_bidding_resume() {
-    natural_auction_resume(0);
+    let paths = auction_continuation_saves(0);
+    std::fs::remove_dir_all(paths[0].parent().unwrap().parent().unwrap()).unwrap();
 }
 #[test]
 #[ignore = "requires original v1.4 game assets and audited scripts"]
 fn strategic_auction_countdown_and_bidding_resume() {
-    natural_auction_resume(3);
+    let paths = auction_continuation_saves(3);
+    std::fs::remove_dir_all(paths[0].parent().unwrap().parent().unwrap()).unwrap();
 }
-fn natural_auction_resume(prior_mode: u32) {
+pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::PathBuf> {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
         use crate::fresh_city::{CommandAssets, Inputs, Policy};
+        let root = openmt2001::fixtures::scratch("AUCTION_SAVES").join(format!(
+            "auction-{}-{}-{prior_mode}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut paths = Vec::new();
         let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = std::sync::Arc::new(read("OPENMT2001_EXE"));
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
@@ -60,7 +66,7 @@ fn natural_auction_resume(prior_mode: u32) {
         host.auction_renderer = Some(source_renderer); host.running = true;
         if prior_mode == 3 {
             let bytes = session.save_v2_with_auction_view(&image, cameras, 1, host.auction_save_state(), 3).unwrap();
-            let path = crate::save_menu::write_new(std::path::Path::new("work/save/v2-strategic-profile"), &bytes).unwrap();
+            let path = crate::save_menu::write_new(&root, &bytes).unwrap();
             let save = SaveFile::parse(&bytes).unwrap();
             assert_eq!(save.game_mode().unwrap(), 1);
             assert!(save.auction().unwrap().is_none());
@@ -75,7 +81,7 @@ fn natural_auction_resume(prior_mode: u32) {
                 frame(&mut session, &mut host, &assets); frame(&mut restored, &mut restored_host, &assets);
                 compare(&session, &mut host, &restored, &mut restored_host);
             }
-            std::fs::write("work/save/normal-strategic-view-path.txt", path.to_string_lossy().as_bytes()).unwrap();
+            paths.push(path);
         }
         for _ in 0..3000 {
             frame(&mut session, &mut host, &assets);
@@ -83,7 +89,7 @@ fn natural_auction_resume(prior_mode: u32) {
         }
         assert_ne!(session.world.auction.controller.reference, 0, "natural auction never admitted");
         assert!(session.world.auction.presentation.countdown > 0, "announcement phase not observed");
-        let root = std::path::Path::new("work/save/v2-auction-profile");
+
         let countdown_bytes = session.save_v2_with_auction_view(&image, cameras, 1, host.auction_save_state(), prior_mode).unwrap();
         // The shared encoder commits native+80
         // directly before record14 captures its exact subsecond continuation.
@@ -93,7 +99,7 @@ fn natural_auction_resume(prior_mode: u32) {
         let continuation=extension::Extension::parse(&captured).unwrap().unwrap();
         assert_eq!(word(continuation.required(14).unwrap(),20),session.world.auction.presentation.countdown);
         assert_eq!(word(continuation.required(14).unwrap(),28+0x80),session.world.auction.presentation.countdown);
-        let countdown_path = crate::save_menu::write_new(root, &countdown_bytes).unwrap();
+        let countdown_path = crate::save_menu::write_new(&root, &countdown_bytes).unwrap();
         let countdown_bytes = std::fs::read(&countdown_path).unwrap();
         let countdown_save = SaveFile::parse(&countdown_bytes).unwrap();
         let mut resumed = Session::load_original(inputs(), policy(), &countdown_bytes).unwrap();
@@ -117,7 +123,7 @@ fn natural_auction_resume(prior_mode: u32) {
                 let actor = crate::auction_panel::Info::from_session(&session).unwrap().actor;
                 assert_ne!(actor[0], 0, "active auction bidder must have a visible supplied name");
                 let bytes = session.save_v2_with_auction_view(&image, cameras, 2, state, prior_mode).unwrap();
-                let path = crate::save_menu::write_new(root, &bytes).unwrap(); let active_path = path.clone();
+                let path = crate::save_menu::write_new(&root, &bytes).unwrap(); let active_path = path.clone();
                 // Release the first loaded scene after its verified countdown activation.
                 drop(resumed_host); reloaded_thread.join().unwrap();
                 let bytes = std::fs::read(path).unwrap(); let save = SaveFile::parse(&bytes).unwrap();
@@ -153,7 +159,7 @@ fn natural_auction_resume(prior_mode: u32) {
                 // Save before the delayed ownership transfer consumes its exact
                 // admission deadline; native format deliberately has no auction.
                 let dormant_bytes = session.save_v2_with_auction_view(&image, cameras, 1, host.auction_save_state(), prior_mode).unwrap();
-                let dormant_path = crate::save_menu::write_new(root, &dormant_bytes).unwrap();
+                let dormant_path = crate::save_menu::write_new(&root, &dormant_bytes).unwrap();
                 let dormant_save = SaveFile::parse(&dormant_bytes).unwrap();
                 assert!(dormant_save.auction().unwrap().is_none());
                 resumed = Session::load_original(inputs(), policy(), &dormant_bytes).unwrap();
@@ -165,15 +171,14 @@ fn natural_auction_resume(prior_mode: u32) {
                 for _ in 0..100 { frame(&mut session, &mut host, &assets); frame(&mut resumed, &mut resumed_host, &assets); compare(&session, &mut host, &resumed, &mut resumed_host); }
                 assert_ne!(session.world.categories[category][5], 0, "settled winning bid must transfer ownership");
                 println!("Normal auction host continuation: countdown {:?}, active {:?}, closed tick{}, owner{}", countdown_path, active_path, session.world.clock.timing[0], session.world.categories[category][5]);
-                std::fs::create_dir_all("work/save").unwrap();
-                std::fs::write(format!("work/save/auction-continuation-paths-{prior_mode}.txt"), format!("{}\n{}\n{}\n", countdown_path.display(), active_path.display(), dormant_path.display())).unwrap();
+                paths.splice(0..0, [countdown_path, active_path, dormant_path]);
                 drop(resumed_host); thread.join().unwrap();
                 drop(host); source_thread.join().unwrap();
-                return;
+                return paths;
             }
         }
         panic!("natural auction never reached a live local bidding timer");
-    }).unwrap().join().unwrap();
+    }).unwrap().join().unwrap()
 }
 fn bridge(
     exe: std::sync::Arc<Vec<u8>>,

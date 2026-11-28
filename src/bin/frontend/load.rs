@@ -1272,7 +1272,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("omt-v2-load-capture-{stamp}"));
+        let root = openmt2001::fixtures::scratch("LOAD_CAPTURE").join(format!(
+            "omt-v2-load-capture-{}-{stamp}",
+            std::process::id()
+        ));
         fs::create_dir_all(&root).unwrap();
         let original = openmt2001::fixtures::path("SAVE_ONE");
         let mut load = Load::new(
@@ -1284,6 +1287,9 @@ mod tests {
             root.clone(),
         )
         .unwrap();
+        let selected = crate::save_menu::selected_profile_root(&root, b"Load capture");
+        crate::save_menu::write_new(&selected, &fs::read(&original).unwrap()).unwrap();
+        load.select_profile(Some(b"Load capture"));
         load.open();
         assert!(load.entries.len() >= 2);
         for (i, entry) in load.entries.iter_mut().enumerate() {
@@ -1338,7 +1344,7 @@ mod tests {
             "work/frontend/load-import-selected-city.png",
         );
         crate::save_menu::write_target(
-            &root,
+            &selected,
             &crate::save_menu::Target::NewName("V2 Delete Capture".into()),
             &read("OPENMT2001_SAVE_ONE"),
         )

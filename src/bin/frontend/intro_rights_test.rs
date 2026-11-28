@@ -97,7 +97,7 @@ fn rights_acquisition_prompts(
 }
 
 #[test]
-#[ignore = "requires original Scenario2/assets and the retained saved worker"]
+#[ignore = "requires original Scenario2/assets and an offscreen graphics device"]
 fn saved_worker_rights_input_and_native_delay() {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
@@ -109,12 +109,16 @@ fn saved_worker_rights_input_and_native_delay() {
         .parent()
         .unwrap()
         .join("US/language/usa");
+    let scratch = openmt2001::fixtures::scratch("RIGHTS_WORKER").join(format!(
+        "worker-{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let selected = crate::save_menu::selected_profile_root(&scratch, b"Rights worker");
     let inputs = Arc::new(SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
         style: test_board_style(&executable),
         time_runtime: Default::default(),
-        profile_root: PathBuf::from("work/frontend/rights-worker-profile"),
+        profile_root: scratch.clone(),
         character_names: crate::fresh_city::character_names(
             &openmt2001::pe::PeImage::parse(&executable).unwrap(),
             &language,
@@ -139,6 +143,7 @@ fn saved_worker_rights_input_and_native_delay() {
         .unwrap()
         .camera;
     let prepare_inputs = inputs.clone();
+    let prepare_selected = selected.clone();
     let (path, category, controlled) = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
@@ -259,7 +264,7 @@ fn saved_worker_rights_input_and_native_delay() {
             );
             let cameras = crate::save_menu::cameras(session.saved_cameras, camera).unwrap();
             let bytes = session.save_v2_with_auction(&image, cameras, 1, auction_state).unwrap();
-            let path = crate::save_menu::write_new(&prepare_inputs.profile_root, &bytes).unwrap();
+            let path = crate::save_menu::write_new(&prepare_selected, &bytes).unwrap();
             (path, category, controlled)
         })
         .unwrap()
@@ -272,7 +277,7 @@ fn saved_worker_rights_input_and_native_delay() {
     // Legacy saved-session coverage; this does not activate camera-owner review.
     let worker = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
-        .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(worker_path, None), camera, reply, None))
+        .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(worker_path, Some(selected)), camera, reply, None))
         .unwrap();
     let loaded = result
         .recv_timeout(std::time::Duration::from_secs(60))
@@ -545,6 +550,7 @@ fn saved_worker_rights_input_and_native_delay() {
     );
     drop(loaded);
     worker.join().unwrap();
+    fs::remove_dir_all(scratch).unwrap();
 }
 
 #[test]

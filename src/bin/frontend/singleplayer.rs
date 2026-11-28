@@ -2076,7 +2076,7 @@ mod participant_biography_contract_tests {
     /// Real supplied menu/control dispatch and roster data; synthetic nonzero
     /// first-line is explicitly a FIELD contract, not an original wheel flow.
     #[test]
-    #[ignore = "requires original assets/scripts, populated Custom level and owned OPENMT2001_BIOGRAPHY_TEST_ROOT; no game window"]
+    #[ignore = "requires original assets and supplied patch Essential Custom scripts; no game window"]
     fn supplied_participant_press_child_priority_identity_launch_and_first_line() {
         let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -2135,10 +2135,8 @@ mod participant_biography_contract_tests {
         menu.select(Some(3), false);
         menu.activate(); // Custom Scenarios
         assert!(menu.single.visible && !menu.single.character_screen);
-        let id: u32 = std::env::var("OPENMT2001_BIOGRAPHY_LEVEL")
-            .unwrap()
-            .parse()
-            .unwrap();
+        // First authored Custom registration from the supplied patch scripts.
+        let id: u32 = 500000;
         assert_eq!(id / 100000, 5);
         let chosen = menu
             .single
