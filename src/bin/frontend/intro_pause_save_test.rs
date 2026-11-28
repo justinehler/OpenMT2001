@@ -65,7 +65,13 @@ fn menu_cold_load_retires_saved_holds_and_keeps_new_process_holds() {
                 let live_pause = source.world.pause.clone();
                 let live_timers = source.hooks.timers.clone();
                 let bytes = source
-                    .save_v2_with_options_view(&image, cameras, 1, &options, 0)
+                    .save_v2_with_options_view(
+                        &image,
+                        cameras,
+                        1,
+                        options.save_view(&source).unwrap(),
+                        0,
+                    )
                     .unwrap();
                 assert_eq!(source.world.pause, live_pause);
                 assert_eq!(source.hooks.timers, live_timers);

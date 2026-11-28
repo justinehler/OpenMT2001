@@ -652,11 +652,12 @@ impl SceneInputs {
                                             camera,
                                         )?,
                                     };
+                                    let view = host.save_view(&session)?;
                                     let bytes = session.save_v2_with_options_view(
                                         &image,
                                         cameras,
                                         game_mode,
-                                        &host,
+                                        view,
                                         interface_mode,
                                     )?;
                                     crate::save_menu::write_target(root, &target, &bytes)
