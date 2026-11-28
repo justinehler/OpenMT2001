@@ -102,6 +102,8 @@ mod campaign_picker_tests {
             tab: vec![],
             scenario_list_fonts: vec![],
             scenario_list_tab: vec![],
+            slot_fonts: vec![],
+            slot_tab: vec![],
             title_fonts: vec![],
             title_tab: vec![],
             strings: vec![vec![]; 0x800],
@@ -124,6 +126,39 @@ mod campaign_picker_tests {
             message: None,
             description_first: 0,
             pointer_position: None,
+        }
+    }
+
+    #[test]
+    fn singleplayer_text_style_campaign_slots_use_small_font_and_lobby_alignment() {
+        let mut panel = panel();
+        // Generic heading fonts remain absent: every slot must use its own
+        // small font, including the active profile and all five Locked labels.
+        panel.slot_tab = ui::synthetic_text_font(5, 8);
+        panel.slot_fonts = vec![Surface::solid(); 2];
+        panel.name = b"Player".to_vec();
+        panel.strings[0x6db] = ascii("Locked");
+        for slot in 0..6 {
+            panel.character_panel.bounds[34 - slot] =
+                [10., 20. + slot as f32 * 40., 90., 32. + slot as f32 * 40.];
+        }
+        let pages = panel.slot_labels().unwrap();
+        assert!(pages[1].vertices.is_empty());
+        assert_eq!(pages[0].vertices.len(), 6 * 6 * 6);
+        for (slot, label) in pages[0].vertices.chunks_exact(36).enumerate() {
+            let bounds = panel.character_panel.bounds[34 - slot];
+            let text = if slot == 0 {
+                ascii("Player")
+            } else {
+                ascii("Locked")
+            };
+            let mut expected = vec![Surface::solid(); 2];
+            ui::text_widget_style3(&mut expected, &panel.slot_tab, &text, bounds, 0xffffffff)
+                .unwrap();
+            assert_eq!(label, expected[0].vertices);
+            assert_eq!(label[0][0], 11.5);
+            assert_eq!(label[1][0] - label[0][0], 5.);
+            assert_eq!(label[0][1] - label[2][1], 8.);
         }
     }
 
@@ -766,6 +801,8 @@ pub struct SinglePlayer {
     tab: Vec<u8>,
     scenario_list_fonts: Vec<Surface>,
     scenario_list_tab: Vec<u8>,
+    slot_fonts: Vec<Surface>,
+    slot_tab: Vec<u8>,
     title_fonts: Vec<Surface>,
     title_tab: Vec<u8>,
     strings: Vec<Vec<u8>>,
@@ -1017,6 +1054,10 @@ impl SinglePlayer {
             // the Scenario description and list columns.
             scenario_list_fonts: texture.textures[4..6].iter().map(Surface::new).collect(),
             scenario_list_tab: fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
+                .map_err(|e| e.to_string())?,
+            // 4a82ed..4a8388 select font3 for all six name/Locked widgets.
+            slot_fonts: texture.textures[6..8].iter().map(Surface::new).collect(),
+            slot_tab: fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
                 .map_err(|e| e.to_string())?,
             title_fonts: texture.textures[8..10].iter().map(Surface::new).collect(),
             title_tab: fs::read(installer.join("Standard/fonts/coppgoth23p.tab"))
@@ -1765,6 +1806,34 @@ impl SinglePlayer {
             None,
         )
     }
+    fn slot_labels(&self) -> Result<Vec<Surface>, String> {
+        let mut pages = self.slot_fonts.clone();
+        let profile_glyphs = ascii(&String::from_utf8_lossy(&self.name));
+        for slot in 0..6 {
+            ui::text_widget_style3(
+                &mut pages,
+                &self.slot_tab,
+                if slot == 0 {
+                    &profile_glyphs
+                } else {
+                    self.custom
+                        .as_ref()
+                        .and_then(|c| c.roster.as_ref())
+                        .and_then(|r| {
+                            let record = r.records[slot];
+                            (record.kind != -1).then(|| {
+                                self.strings[self.characters[record.character as usize].name]
+                                    .as_slice()
+                            })
+                        })
+                        .unwrap_or(&self.strings[0x6db])
+                },
+                self.character_panel.bounds[34 - slot],
+                0xffffffff,
+            )?;
+        }
+        Ok(pages)
+    }
     pub fn draw(
         &self,
         renderer: &Renderer,
@@ -1785,6 +1854,7 @@ impl SinglePlayer {
         let mut fonts = self.fonts.clone();
         let mut scenario_list_fonts = self.scenario_list_fonts.clone();
         let mut title_fonts = self.title_fonts.clone();
+        let mut slot_labels = vec![];
         let mut images = vec![];
         let mut completion_cups = vec![];
         let mut slider_controls = vec![];
@@ -1826,34 +1896,10 @@ impl SinglePlayer {
                     0xffffffff,
                 )?;
             }
-            let profile_glyphs = ascii(&String::from_utf8_lossy(&self.name));
+            slot_labels = self.slot_labels()?;
             for slot in 0..6 {
                 let namepart = 34 - slot;
                 shapes.rect(b[namepart], [0xff000530; 4]);
-                let mut r = b[namepart];
-                r[0] += 3.;
-                ui::text(
-                    &mut fonts,
-                    &self.tab,
-                    if slot == 0 {
-                        &profile_glyphs
-                    } else {
-                        self.custom
-                            .as_ref()
-                            .and_then(|c| c.roster.as_ref())
-                            .and_then(|r| {
-                                let record = r.records[slot];
-                                (record.kind != -1).then(|| {
-                                    self.strings[self.characters[record.character as usize].name]
-                                        .as_slice()
-                                })
-                            })
-                            .unwrap_or(&self.strings[0x6db])
-                    },
-                    r,
-                    false,
-                    0xffffffff,
-                )?;
                 let mut tint = b[41 + slot];
                 let authored = self
                     .custom
@@ -1953,14 +1999,7 @@ impl SinglePlayer {
             }
             for (part, id) in [(63, 0x64f), (64, 0x757)] {
                 shapes.rect(b[part], [0xff01762f; 4]);
-                ui::text(
-                    &mut fonts,
-                    &self.tab,
-                    &self.strings[id],
-                    b[part],
-                    true,
-                    0xff00ff00,
-                )?;
+                ui::section_header(&mut fonts, &self.tab, &self.strings[id], b[part])?;
             }
             ui::text(
                 &mut fonts,
@@ -2050,14 +2089,7 @@ impl SinglePlayer {
             }
             for (part, id) in [(12, 0x757), (23, 0x75b)] {
                 shapes.rect(b[part], [0xff01762f; 4]);
-                ui::text(
-                    &mut fonts,
-                    &self.tab,
-                    &self.strings[id],
-                    b[part],
-                    true,
-                    0xff00ff00,
-                )?;
+                ui::section_header(&mut fonts, &self.tab, &self.strings[id], b[part])?;
             }
             for i in 0..3 {
                 self.image(&mut images, 293 + i, b[22 - i])?;
@@ -2191,6 +2223,7 @@ impl SinglePlayer {
         surfaces.extend(slider_controls);
         surfaces.extend(fonts);
         surfaces.extend(scenario_list_fonts);
+        surfaces.extend(slot_labels);
         // Original 49b380 submits list text through 430b50, then the
         // per-row completion cups through 432e50.
         surfaces.extend(completion_cups);
@@ -2923,6 +2956,23 @@ mod campaign_description_tests {
             &supplied.archive[e.offset as usize..(e.offset + e.length) as usize]
         };
         let font = TextureSet::parse(payload("gamedata2\\font640\\textures.gtd")).unwrap();
+        assert_eq!(
+            panel.slot_tab,
+            fs::read(
+                supplied
+                    .installer
+                    .join("Standard/fonts/tahoma10bldnoantip.tab")
+            )
+            .unwrap()
+        );
+        for (actual, original) in panel.slot_fonts.iter().zip(&font.textures[6..8]) {
+            assert_eq!(actual.pixels, Surface::new(original).pixels);
+        }
+        // All six original campaign name controls explicitly select font3.
+        for address in [0x4a82d9, 0x4a82f8, 0x4a8317, 0x4a8336, 0x4a8355, 0x4a8374] {
+            assert_eq!(image.at(address, 2).unwrap(), &[0x6a, 3]);
+        }
+
         assert_eq!(panel.scenario_list_fonts.len(), 2);
         for (actual, original) in panel.scenario_list_fonts.iter().zip(&font.textures[4..6]) {
             let expected = Surface::new(original);

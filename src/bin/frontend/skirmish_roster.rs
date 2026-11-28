@@ -380,7 +380,8 @@ impl RosterPanel {
         metadata: [&[u8]; 2],
         encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
     ) -> Result<PreparedScene, String> {
-        self.draw_rows(
+        self.draw_rows_with_headers(
+            true,
             renderer,
             selected,
             pressed,
@@ -490,6 +491,19 @@ impl RosterPanel {
         selected: Option<usize>,
         pressed: bool,
         metadata: [&[u8]; 2],
+        encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+        view: Presentation<'_>,
+    ) -> Result<PreparedScene, String> {
+        self.draw_rows_with_headers(false, renderer, selected, pressed, metadata, encode, view)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn draw_rows_with_headers(
+        &self,
+        green_headers: bool,
+        renderer: &Renderer,
+        selected: Option<usize>,
+        pressed: bool,
+        metadata: [&[u8]; 2],
         mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         view: Presentation<'_>,
     ) -> Result<PreparedScene, String> {
@@ -525,9 +539,6 @@ impl RosterPanel {
                 ("PLAYERS_TITLE_AREA", 1684, 0),
                 ("SESS_TITLE_AREA", 1685, 0),
                 ("CHAT_TITLE_AREA", 1686, 0),
-                ("SESS_LABEL1", 1615, 0),
-                ("SESS_LABEL2", 1879, 0),
-                ("SESS_LABEL3", 1616, 0),
             ] {
                 ui::text_widget_style9(
                     &mut pages[font],
@@ -536,6 +547,29 @@ impl RosterPanel {
                     self.bounds(name)?,
                     0xffffffff,
                 )?;
+            }
+            // 4a08ed/4a08fa/4a0903 select the campaign's green caption style.
+            for (name, id) in [
+                ("SESS_LABEL1", 1615),
+                ("SESS_LABEL2", 1879),
+                ("SESS_LABEL3", 1616),
+            ] {
+                if green_headers {
+                    ui::section_header(
+                        &mut pages[0],
+                        &self.fonts[0].tab,
+                        self.label(id)?,
+                        self.bounds(name)?,
+                    )?;
+                } else {
+                    ui::text_widget_style9(
+                        &mut pages[0],
+                        &self.fonts[0].tab,
+                        self.label(id)?,
+                        self.bounds(name)?,
+                        0xffffffff,
+                    )?;
+                }
             }
             for (i, text) in metadata.iter().enumerate() {
                 let b = self.bounds(&format!("SESS_INFO{}", i + 1))?;
