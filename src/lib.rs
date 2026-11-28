@@ -36,6 +36,7 @@ pub mod network;
 pub mod opening_sequence;
 pub mod panels;
 pub mod pause;
+pub mod pavement_resource;
 pub mod pe;
 pub mod people;
 pub mod picking;
