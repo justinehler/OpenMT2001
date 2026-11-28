@@ -942,8 +942,11 @@ fn write_save(
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// One output line, flushed so a watcher (`tools/mp-soak`) sees it at once.
 fn line(out: &mut dyn Write, text: &str) -> Result<(), String> {
-    writeln!(out, "{text}").map_err(|e| e.to_string())
+    writeln!(out, "{text}")
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())
 }
 
 fn advance(

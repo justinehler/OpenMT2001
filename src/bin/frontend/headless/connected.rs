@@ -376,11 +376,20 @@ fn report_hour(
     shared_dir: Option<&std::path::Path>,
     out: &mut dyn Write,
 ) -> Result<(), String> {
-    let shared = crate::intro::connected_start::shared_state(session, image)?;
-    let tagged: Vec<_> = crate::intro::connected_start::SHARED_TAGS
-        .into_iter()
-        .zip(shared)
-        .collect();
+    // A V2 save, and so a capture, is refused while an auction's bidding
+    // scene is being built. Both peers are then in the same auction phase;
+    // the hour is printed without tags and the comparison skips it.
+    let tagged: Vec<_> = match crate::intro::connected_start::shared_state(session, image) {
+        Ok(shared) => crate::intro::connected_start::SHARED_TAGS
+            .into_iter()
+            .zip(shared)
+            .collect(),
+        Err(error) if session.world.auction.controller.reference != 0 => {
+            eprintln!("hour capture skipped during an auction: {error}");
+            Vec::new()
+        }
+        Err(error) => return Err(error),
+    };
     let clock = &session.world.clock;
     if let Some(dir) = shared_dir {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -520,6 +529,11 @@ fn finish(
     loop {
         let pumped = session.pump_connected_synchronization(&mut host.policy);
         samples.report(session, target, out)?;
+        // The host closing after this client's end is the normal end; the
+        // session reports it as a lost host (0x4e2740) rather than an error.
+        if !peer.host && session.connected_host_lost() {
+            return Ok(End::Ticks);
+        }
         match pumped {
             // The host closing after this client's end is the normal end.
             Err(_) if !peer.host => return Ok(End::Ticks),
@@ -530,7 +544,22 @@ fn finish(
             }
             Ok(_) => (),
         }
-        if peer.host && peer.remote.iter().all(|s| samples.finished.contains(s)) {
+        // A client whose player the authority removed (kind 10 after its
+        // connection ended, 0x450670) sends no final sample.
+        let departed = |slot: &u8| {
+            session
+                .roster
+                .manager
+                .players
+                .get(usize::from(*slot))
+                .is_some_and(|player| player.bytes.get(0x10) == Some(&0))
+        };
+        if peer.host
+            && peer
+                .remote
+                .iter()
+                .all(|s| samples.finished.contains(s) || departed(s))
+        {
             return Ok(End::Ticks);
         }
         if Instant::now() > deadline {
@@ -594,16 +623,29 @@ fn end_reason(log: &str) -> Option<&str> {
 /// desync sample on the host, and a clean end on every peer. Returns the
 /// summary line, or the first problem found.
 pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
+    compare_logs_with(host, clients, &[])
+}
+
+/// `compare_logs` for a run in which the clients numbered in `lost` (from 1)
+/// were cut off on purpose: each must agree with the host on every hour it
+/// printed, but need not reach the end.
+pub fn compare_logs_with(host: &str, clients: &[&str], lost: &[usize]) -> Result<String, String> {
     let host_hours = hours(host);
     let (first, last) = match (host_hours.first(), host_hours.last()) {
         (Some(first), Some(last)) => (first, last),
         _ => return Err("the host printed no hourly lines".into()),
     };
     let mut ticks = Vec::new();
+    let mut skipped = 0;
     for (index, client) in clients.iter().enumerate() {
         let name = format!("client {}", index + 1);
         let client_hours = hours(client);
+        let cut = lost.contains(&(index + 1));
+        let printed = client_hours.last().map(|h| h.tick);
         for expected in &host_hours {
+            if cut && printed.is_none_or(|last| expected.tick > last) {
+                break;
+            }
             let Some(actual) = client_hours
                 .iter()
                 .find(|h| (h.day, h.clock) == (expected.day, expected.clock))
@@ -620,6 +662,12 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
             if actual.tick != expected.tick {
                 return Err(format!("first divergent hour: {at}: Total tick differs"));
             }
+            // An hour captured during an auction carries no tags (see
+            // `report_hour`); only its tick is compared.
+            if expected.shared.is_empty() || actual.shared.is_empty() {
+                skipped += 1;
+                continue;
+            }
             if let Some(((tag, _), _)) = expected
                 .shared
                 .iter()
@@ -635,6 +683,7 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
             }
         }
         match end_reason(client) {
+            _ if cut => (),
             Some("ticks") => (),
             Some(reason) => return Err(format!("{name} ended with {reason}")),
             None => return Err(format!("{name} did not finish")),
@@ -658,8 +707,15 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
     }
     let matched = samples.iter().filter(|l| l.contains("\"match\"")).count();
     let days = (last.tick - first.tick) / super::TICKS_PER_DAY;
+    let skipped = match skipped {
+        0 => String::new(),
+        n => format!(
+            "; {n} hour{} captured during an auction, tick only",
+            if n == 1 { "" } else { "s" }
+        ),
+    };
     Ok(format!(
-        "{days} day{} in sync (host tick {}, {}; {matched} of {} samples compared and matched)",
+        "{days} day{} in sync (host tick {}, {}; {matched} of {} samples compared and matched{skipped})",
         if days == 1 { "" } else { "s" },
         last.tick,
         ticks.join(", "),
@@ -668,7 +724,23 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
 }
 
 /// `game headless --compare HOST_LOG CLIENT_LOG…`: print `compare_logs`.
-pub fn compare_main(paths: &[String]) -> i32 {
+pub fn compare_main(arguments: &[String]) -> i32 {
+    // Leading `--lost N` options name clients cut off on purpose.
+    let mut lost = Vec::new();
+    let mut paths = arguments;
+    while let [flag, number, rest @ ..] = paths
+        && flag == "--lost"
+    {
+        match number.parse() {
+            Ok(n) => lost.push(n),
+            Err(_) => {
+                eprintln!("--lost needs a client number");
+                return 2;
+            }
+        }
+        paths = rest;
+    }
+    let lost = &lost[..];
     let read = |path: &String| std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"));
     let logs = match paths.iter().map(read).collect::<Result<Vec<_>, _>>() {
         Ok(logs) if logs.len() >= 2 => logs,
@@ -682,7 +754,7 @@ pub fn compare_main(paths: &[String]) -> i32 {
         }
     };
     let clients: Vec<&str> = logs[1..].iter().map(String::as_str).collect();
-    match compare_logs(&logs[0], &clients) {
+    match compare_logs_with(&logs[0], &clients, lost) {
         Ok(summary) => {
             println!("{summary}");
             0
@@ -853,6 +925,29 @@ mod tests {
             .starts_with("the host reported a desync")
         );
         assert!(compare_logs("", &[&host]).is_err());
+        // A client cut off on purpose must agree up to its last line, and
+        // need not finish; a divergence before its cut still fails.
+        assert!(compare_logs_with(&host, &[&short], &[1]).is_ok());
+        let cut_divergent = log(
+            &day(Some((2500, 3)))[..10],
+            "failure: Host connection ended",
+        );
+        assert!(
+            compare_logs_with(&host, &[&cut_divergent], &[1])
+                .unwrap_err()
+                .ends_with("shared tag 3")
+        );
+    }
+
+    #[test]
+    fn hour_captured_during_an_auction_compares_its_tick_only() {
+        let host = log(&day(None), "ticks");
+        let mut client = day(None);
+        client[3] = hour_line(1, 12, 1875, &[]);
+        assert_eq!(
+            compare_logs(&host, &[&log(&client, "ticks")]),
+            Ok("1 day in sync (host tick 15000, client 1 tick 15000; 0 of 0 samples compared and matched; 1 hour captured during an auction, tick only)".into())
+        );
     }
 
     /// A short idle Daily Profit game on empty.lua, both peers in this
