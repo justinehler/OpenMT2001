@@ -1,20 +1,24 @@
 // Real saved worker handshake: rebuilt renderer first, continuation, widgets,
-// then another production Save request. Paths come from the natural fixture.
+// then another production Save request. Each run builds its own natural saves.
 use super::*;
 
 #[test]
-#[ignore = "requires generated natural auction saves and original graphics assets"]
+#[ignore = "requires original v1.4 assets/scripts and an offscreen graphics device"]
 fn saved_auction_worker_rebuilds_and_saves() {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let exe_path = openmt2001::fixtures::path("EXE");
     let parameter = openmt2001::fixtures::path("PARAMETERS");
     let executable = read("OPENMT2001_EXE");
+    let scratch = openmt2001::fixtures::scratch("AUCTION_WORKER").join(format!(
+        "worker-{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let selected = crate::save_menu::selected_profile_root(&scratch, b"Auction worker");
     let inputs = Arc::new(SceneInputs {
             process_runtime: None, //legacy fixture, not a process-owner assertion
             compatibility: crate::compatibility::Mode::StrictV14,
         time_runtime: Default::default(),
         style: test_board_style(&executable),
-        profile_root: PathBuf::from("work/save/v2-auction-worker-profile"),
+        profile_root: scratch.clone(),
         character_names: crate::fresh_city::character_names(
             &openmt2001::pe::PeImage::parse(&executable).unwrap(),
             &exe_path
@@ -49,16 +53,9 @@ fn saved_auction_worker_rebuilds_and_saves() {
         vertical_fov: 0.7,
     };
     for prior in [0, 3] {
-        let mut paths =
-            fs::read_to_string(format!("work/save/auction-continuation-paths-{prior}.txt"))
-                .unwrap();
-        if prior == 3 {
-            paths
-                .push_str(&fs::read_to_string("work/save/normal-strategic-view-path.txt").unwrap());
-            paths.push('\n');
-        }
-        for (phase, path) in paths.lines().enumerate() {
-            let path = PathBuf::from(path);
+        let paths = crate::session_save::auction_test::auction_continuation_saves(prior);
+        let source_root = paths[0].parent().unwrap().parent().unwrap().to_path_buf();
+        for (phase, path) in paths.into_iter().enumerate() {
             let expected_inputs = inputs.clone();
             let expected_path = path.clone();
             let expected = std::thread::Builder::new()
@@ -81,10 +78,11 @@ fn saved_auction_worker_rebuilds_and_saves() {
             let expected_host = expected.and_then(|expected| expected.host);
             let (reply, loaded_result) = mpsc::channel();
             let worker_inputs = inputs.clone();
+            let worker_selected = selected.clone();
             // Legacy saved-session coverage; this does not activate camera-owner review.
             let worker = std::thread::Builder::new()
                 .stack_size(32 * 1024 * 1024)
-                .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(path, None), camera, reply, None))
+                .spawn(move || worker_inputs.session_worker(WorkerStart::Saved(path, Some(worker_selected)), camera, reply, None))
                 .unwrap();
             let mut loaded = loaded_result
                 .recv_timeout(std::time::Duration::from_secs(60))
@@ -262,7 +260,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
                 .unwrap()
                 .unwrap();
             assert!(
-                saved.starts_with(fs::canonicalize(inputs.profile_root.join("saves")).unwrap())
+                saved.starts_with(fs::canonicalize(selected.join("saves")).unwrap())
             );
             let bytes = fs::read(&saved).unwrap();
             let parsed = openmt2001::save::SaveFile::parse(&bytes).unwrap();
@@ -272,7 +270,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
                 let ext = openmt2001::save::extension::Extension::parse(&parsed)
                     .unwrap()
                     .unwrap();
-                assert_eq!(ext.version, 2);
+                assert_eq!(ext.version, 4);
                 assert_eq!(ext.required(15).unwrap(), &3u32.to_le_bytes());
                 assert!(!ext.records.contains_key(&14));
             }
@@ -287,5 +285,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
             era_thread.join().unwrap();
             transport_thread.join().unwrap();
         }
+        fs::remove_dir_all(source_root).unwrap();
     }
+    fs::remove_dir_all(scratch).unwrap();
 }

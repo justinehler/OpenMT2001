@@ -125,7 +125,7 @@ fn compare(source: &Session<'_>, resumed: &Session<'_>) {
 }
 
 #[test]
-#[ignore = "requires original assets and legal_rental_eviction_rehousing_and_next_income V3 provenance"]
+#[ignore = "requires original assets and scripts for natural rental occupancy"]
 fn modern_overdue_terms_resume_real_tenants() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
         let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
@@ -155,8 +155,9 @@ fn modern_overdue_terms_resume_real_tenants() {
             selected_character: 4, profile_name: b"Rental turnover validation", character_names: &names,
         };
         let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 284] };
-        let path = std::fs::read_to_string("work/save/legal-rental68-v3-path.txt").unwrap();
-        let provenance = std::fs::read(path).unwrap();
+        let path = crate::rental_turnover::legal_rental_save();
+        let root = path.parent().unwrap().parent().unwrap();
+        let provenance = std::fs::read(&path).unwrap();
         let saved = SaveFile::parse(&provenance).unwrap();
         assert!(matches!(extension::Extension::parse(&saved).unwrap().unwrap().version, 3 | 4));
         let mut source = Session::load_original(inputs(), policy(), &provenance).unwrap();
@@ -195,7 +196,7 @@ fn modern_overdue_terms_resume_real_tenants() {
         native_only.extend_from_slice(&bytes[bytes.len() - 8..]);
         assert!(Session::load_original(inputs(), policy(), &native_only)
             .err().unwrap().contains("synchronous tenant callbacks"));
-        let slot = crate::save_menu::write_new(std::path::Path::new("work/save/terms-roundtrip-profile"), &bytes).unwrap();
+        let slot = crate::save_menu::write_new(root, &bytes).unwrap();
         let bytes = std::fs::read(slot).unwrap();
         let saved = SaveFile::parse(&bytes).unwrap();
         let mut resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
@@ -224,6 +225,7 @@ fn modern_overdue_terms_resume_real_tenants() {
             if source.world.clock.hour() != start_hour { break; }
         }
         assert_ne!(source.world.clock.hour(), start_hour, "next natural hour not reached");
+        std::fs::remove_dir_all(root).unwrap();
         println!("V4 overdue terms:68 real tenants retained at load, evicted once, identical demand/accounts/availability and next-hour continuation");
     }).unwrap().join().unwrap();
 }

@@ -342,55 +342,7 @@ fn delayed_terms(
 #[ignore = "requires original assets; legal rental turnover and full native terms replay"]
 fn legal_rental_eviction_rehousing_and_next_income() {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(|| {
-            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
-            let executable = read("OPENMT2001_EXE");
-            let archive = read("OPENMT2001_ARCHIVE_BIN");
-            let directory = read("OPENMT2001_ARCHIVE_DIR");
-            let build = read("OPENMT2001_BUILD_FILE");
-            let parameters = read("OPENMT2001_PARAMETERS");
-            let timetable = read("OPENMT2001_TIMETABLE");
-            let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-            let board = openmt2001::board::Board::from_v14(&image).unwrap();
-            let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
-            let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-            let exe = openmt2001::fixtures::path("EXE");
-            let scripts = exe.parent().unwrap().join("scripts");
-            let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
-            let mut session = Session::initialize(Inputs {
-                tree_locators: None,
-                image: &image, board: &board, file: &file,
-                people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
-                vehicle_models: openmt2001::traffic::road::models::Models::from_original(&image, &index, &archive).unwrap(),
-                transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
-                road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
-                parameters: std::str::from_utf8(&parameters).unwrap(),
-                era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
-                timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO3", difficulty: 0,
-                selected_character: 4, profile_name: b"Rental turnover validation", character_names: &names,
-            }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }).unwrap();
-        let assets = CommandAssets { image: &image, board: &board, file: &file };
-        submit_legal_business(&mut session,&assets,42,None);
-        let mut host = crate::live_host::Host::new([0.,20.,0.]); host.set_running(true);
-        let mut target = None;
-        for _ in 0..16_000 {
-            frame(&mut session,&mut host,&assets);
-            if target.is_none() && let Some(business) = session.world.ledgers.businesses.iter().position(|b|b[0x21c]!=0 && b[10]==1 && word(b,4)==42) {
-                let t = crate::business_edit::Target { business, building: usize::from(u16::from_le_bytes(session.world.ledgers.businesses[business][8..10].try_into().unwrap())) };
-                for _ in 0..501 { crate::business_edit::edit(&mut session,&assets,t,crate::business_edit::Action::Rent { increase:false }).unwrap(); }
-                crate::business_edit::edit(&mut session,&assets,t,crate::business_edit::Action::Apply).unwrap(); target=Some(t);
-            }
-            if session.world.clock.calendar[4]>=1 && session.world.clock.hour()>=7 { break; }
-        }
-        let target=target.unwrap(); assert_apartment_members(&session,target); assert_eq!(occupied(&session,target),68,"initial legal apartment did not naturally fill");
-        // Reuse this legally reached state for the separate save/terms gate.
-        // Host camera stays at its initial eye throughout this headless flow.
-        let camera=openmt2001::flyby::CameraSample {
-            eye:[0.,20.,0.],target:[0.,0.,1.],up:[0.,1.,0.],vertical_fov:0.7,
-        };
-        let cameras=crate::save_menu::cameras(None,camera).unwrap();
-        let bytes=session.save_v2(&image,cameras,1).unwrap();
-        let path=crate::save_menu::write_new(Path::new("work/save/legal-rental-profile"),&bytes).unwrap();
-        fs::write("work/save/legal-rental68-v3-path.txt",path.to_str().unwrap()).unwrap();
+        with_legal_rental_save(|mut session, mut host, assets, target, path| {
         let initial_income=session.world.ledgers.players[0].ledger(0x21).unwrap(); assert!(initial_income>0.);
         let tenants=session.world.ledgers.residents.nodes.iter().enumerate().filter(|(_,r)|r.housing_building()==target.building as i16).map(|(i,_)|i).collect::<Vec<_>>(); assert_eq!(tenants.len(),68);
         let mut export=b"MTRTURN1".to_vec(); for n in [0x37fu32,2] { export.extend_from_slice(&n.to_le_bytes()); }
@@ -422,7 +374,160 @@ fn legal_rental_eviction_rehousing_and_next_income() {
         assert_eq!(crate::player_info::report(&financial.records[0],true).unwrap().iter().find(|r|r.label==0x5bb).unwrap().amount,next_income.to_bits());
         fs::write("work/economy/natural-rental-turnover.bin",export).unwrap();
         println!("legal rental turnover:68 naturally housed ->68 evicted ->68 naturally rehoused, day{} hour{}, rental income{} -> {}, full native term snapshots2",session.world.clock.calendar[4],session.world.clock.hour(),initial_income,next_income);
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+        });
     }).unwrap().join().unwrap();
+}
+
+/// Reach a naturally occupied apartment and publish an isolated input save.
+fn with_legal_rental_save<T>(
+    check: impl FnOnce(
+        Session<'_>,
+        crate::live_host::Host,
+        CommandAssets<'_, '_>,
+        crate::business_edit::Target,
+        std::path::PathBuf,
+    ) -> T,
+) -> T {
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+    let executable = read("OPENMT2001_EXE");
+    let archive = read("OPENMT2001_ARCHIVE_BIN");
+    let directory = read("OPENMT2001_ARCHIVE_DIR");
+    let build = read("OPENMT2001_BUILD_FILE");
+    let parameters = read("OPENMT2001_PARAMETERS");
+    let timetable = read("OPENMT2001_TIMETABLE");
+    let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+    let board = openmt2001::board::Board::from_v14(&image).unwrap();
+    let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+    let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+    let exe = openmt2001::fixtures::path("EXE");
+    let scripts = exe.parent().unwrap().join("scripts");
+    let names = character_names(
+        &image,
+        &exe.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa"),
+    )
+    .unwrap();
+    let mut session = Session::initialize(
+        Inputs {
+            tree_locators: None,
+            image: &image,
+            board: &board,
+            file: &file,
+            people: openmt2001::people::PeopleModels::load(&image, &index, &archive).unwrap(),
+            vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                &image, &index, &archive,
+            )
+            .unwrap(),
+            transport_models: openmt2001::traffic::models::Models::from_original(
+                &image, &index, &archive,
+            )
+            .unwrap(),
+            road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+            scripts: &scripts,
+            parameters: std::str::from_utf8(&parameters).unwrap(),
+            era_styles: load_era_styles(
+                Path::new(&openmt2001::fixtures::path("PARAMETERS"))
+                    .parent()
+                    .unwrap(),
+            )
+            .unwrap(),
+            timetable: std::str::from_utf8(&timetable).unwrap(),
+            scenario: "SCENARIO3",
+            difficulty: 0,
+            selected_character: 4,
+            profile_name: b"Rental turnover validation",
+            character_names: &names,
+        },
+        Policy {
+            seed: 0x12345678,
+            auxiliary_prior_bytes: [0; 0x11c],
+        },
+    )
+    .unwrap();
+    let assets = CommandAssets {
+        image: &image,
+        board: &board,
+        file: &file,
+    };
+    submit_legal_business(&mut session, &assets, 42, None);
+    let mut host = crate::live_host::Host::new([0., 20., 0.]);
+    host.set_running(true);
+    let mut target = None;
+    for _ in 0..16_000 {
+        frame(&mut session, &mut host, &assets);
+        if target.is_none()
+            && let Some(business) = session
+                .world
+                .ledgers
+                .businesses
+                .iter()
+                .position(|b| b[0x21c] != 0 && b[10] == 1 && word(b, 4) == 42)
+        {
+            let t = crate::business_edit::Target {
+                business,
+                building: usize::from(u16::from_le_bytes(
+                    session.world.ledgers.businesses[business][8..10]
+                        .try_into()
+                        .unwrap(),
+                )),
+            };
+            for _ in 0..501 {
+                crate::business_edit::edit(
+                    &mut session,
+                    &assets,
+                    t,
+                    crate::business_edit::Action::Rent { increase: false },
+                )
+                .unwrap();
+            }
+            crate::business_edit::edit(
+                &mut session,
+                &assets,
+                t,
+                crate::business_edit::Action::Apply,
+            )
+            .unwrap();
+            target = Some(t);
+        }
+        if session.world.clock.calendar[4] >= 1 && session.world.clock.hour() >= 7 {
+            break;
+        }
+    }
+    let target = target.unwrap();
+    assert_apartment_members(&session, target);
+    assert_eq!(
+        occupied(&session, target),
+        68,
+        "initial legal apartment did not naturally fill"
+    );
+    // Save the legally reached state for independent continuation tests.
+    // Host camera stays at its initial eye throughout this headless flow.
+    let camera = openmt2001::flyby::CameraSample {
+        eye: [0., 20., 0.],
+        target: [0., 0., 1.],
+        up: [0., 1., 0.],
+        vertical_fov: 0.7,
+    };
+    let cameras = crate::save_menu::cameras(None, camera).unwrap();
+    let bytes = session.save_v2(&image, cameras, 1).unwrap();
+    let root = openmt2001::fixtures::scratch("RENTAL_SAVES").join(format!(
+        "rental-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path = crate::save_menu::write_new(&root, &bytes).unwrap();
+    check(session, host, assets, target, path)
+}
+
+pub(crate) fn legal_rental_save() -> std::path::PathBuf {
+    with_legal_rental_save(|_, _, _, _, path| path)
 }
 
 fn submit_legal_business(

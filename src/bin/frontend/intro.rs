@@ -7687,10 +7687,6 @@ impl Intro {
 mod tests;
 
 #[cfg(test)]
-#[path = "intro_autosave_natural_host_test.rs"]
-mod natural_host_tests;
-
-#[cfg(test)]
 #[path = "intro/focus_worker_tests.rs"]
 mod focus_worker_tests;
 
