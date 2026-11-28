@@ -119,6 +119,8 @@ pub struct Scene {
     pub camera: [f32; 16],
     pub fog: Option<crate::render::EyeFog>,
     pub building_count: usize,
+    /// Fixed utility/marina profiles, independent of the script building pool.
+    pub city_structures: Vec<SceneBuilding>,
     /// Upper model Y per category, before the scene object's Y translation.
     pub category_model_heights: BTreeMap<usize, f32>,
     pub inspection_buildings: Vec<InspectionBuilding>,
@@ -630,6 +632,19 @@ fn assemble_with_style_internal(
         .and_then(|l| FacadeMaterial::select(l.diffuse, true, true));
     let mut facade_inputs = BTreeMap::<(usize, usize), Vec<([f32; 3], [f32; 2])>>::new();
     let building_count = inputs.len();
+    let city_structures = if scene_mode {
+        let board = Board::from_v14(&PeImage::parse(executable.unwrap())?)?;
+        crate::city_structures::buildings(&board, &file)?
+    } else {
+        Vec::new()
+    };
+    inputs.extend(city_structures.iter().cloned().map(|building| {
+        (
+            building.layers.clone(),
+            building.spec.variation,
+            Some(building),
+        )
+    }));
     // Texture family 0 is diagnostic white, 1 facade, 2 roof.
     let mut batches = BTreeMap::<(usize, usize), Vec<[f32; 8]>>::new();
     let mut runtime_spans = Vec::<RuntimeSpan>::new();
@@ -846,24 +861,26 @@ fn assemble_with_style_internal(
             }
             let value =
                 |i: usize| f32::from_le_bytes(definition[i * 4..i * 4 + 4].try_into().unwrap());
-            inspection_buildings.push(InspectionBuilding {
-                category: building.block_id,
-                saved_slot: saved_slots.get(ordinal).copied(),
-                runtime_slot: runtime_slots.get(ordinal).copied(),
-                lot: building.spec.lot,
-                height: building.spec.height,
-                kind: building.spec.kind,
-                quality: building.spec.quality,
-                saved_business: saved_businesses.get_mut(ordinal).and_then(Option::take),
-                initialized_business: None,
-                initialized_apartment: None,
-                saved_owner_character: saved_owner_characters.get(ordinal).copied().flatten(),
-                camera_entrance: camera_entrances[ordinal],
-                bounds: std::array::from_fn(|i| std::array::from_fn(|j| value(i * 3 + j))),
-                center: [value(24), value(25), value(26)],
-                radius: value(28),
-                translation: [building.center[0], 0.5, building.center[1]],
-            });
+            if ordinal < building_count {
+                inspection_buildings.push(InspectionBuilding {
+                    category: building.block_id,
+                    saved_slot: saved_slots.get(ordinal).copied(),
+                    runtime_slot: runtime_slots.get(ordinal).copied(),
+                    lot: building.spec.lot,
+                    height: building.spec.height,
+                    kind: building.spec.kind,
+                    quality: building.spec.quality,
+                    saved_business: saved_businesses.get_mut(ordinal).and_then(Option::take),
+                    initialized_business: None,
+                    initialized_apartment: None,
+                    saved_owner_character: saved_owner_characters.get(ordinal).copied().flatten(),
+                    camera_entrance: camera_entrances[ordinal],
+                    bounds: std::array::from_fn(|i| std::array::from_fn(|j| value(i * 3 + j))),
+                    center: [value(24), value(25), value(26)],
+                    radius: value(28),
+                    translation: [building.center[0], 0.5, building.center[1]],
+                });
+            }
         }
     }
 
@@ -1902,6 +1919,7 @@ fn assemble_with_style_internal(
         camera: camera.to_cols_array(),
         fog,
         building_count,
+        city_structures,
         category_model_heights,
         inspection_buildings,
         saved_category_owners,
@@ -4082,3 +4100,7 @@ mod temporal_city_lighting_regressions {
 #[cfg(test)]
 #[path = "render_scene/street_furniture_tests.rs"]
 mod street_furniture_tests;
+
+#[cfg(test)]
+#[path = "render_scene/city_structures_tests.rs"]
+mod city_structures_tests;

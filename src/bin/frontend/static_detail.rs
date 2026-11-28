@@ -469,6 +469,13 @@ impl Resources {
             ];
             let transform = crate::people_scene::transform_from_matrix(native_matrix);
             let sunlight = crate::people_scene::sunlight(native_matrix, light.direction);
+            // 004b7bbf submits fixed utility details directly, without the
+            // category pass's Y lift or its distance/detail visibility gate.
+            let y_offset = if building.spec.kind == openmt2001::city_structures::FIXED_KIND {
+                0.
+            } else {
+                crate::category_distance::PASS3_Y_OFFSET
+            };
             for part in &model.parts {
                 let draw = draws
                     .get_mut(part.page)
@@ -480,7 +487,7 @@ impl Resources {
                     let diffuse = rgb(shades[0]);
                     draw.vertices.push([
                         position[0],
-                        position[1] + crate::category_distance::PASS3_Y_OFFSET,
+                        position[1] + y_offset,
                         position[2],
                         diffuse[0],
                         diffuse[1],
@@ -495,7 +502,7 @@ impl Resources {
                         building.block_id,
                         part.page,
                         start..draw.vertices.len(),
-                        pose.w_axis.y + crate::category_distance::PASS3_Y_OFFSET,
+                        pose.w_axis.y + y_offset,
                     ));
                 }
             }
@@ -635,6 +642,60 @@ mod tests {
                 .flat_map(|draw| &draw.vertices)
                 .all(|vertex| vertex.iter().all(|value| value.is_finite()))
         );
+    }
+
+    #[test]
+    #[ignore = "requires pinned v1.4 original BuildFile, PE, TM archive and suncols"]
+    fn fixed_city_structures_submit_all_industrial_details_without_category_lift() {
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let executable = read("EXE");
+        let image = PeImage::parse(&executable).unwrap();
+        let file_bytes = read("BUILD_FILE");
+        let file = BuildFile::parse(&file_bytes).unwrap();
+        let board = openmt2001::board::Board::from_v14(&image).unwrap();
+        let buildings = openmt2001::city_structures::buildings(&board, &file).unwrap();
+        let templates = buildings
+            .iter()
+            .map(|building| {
+                openmt2001::save::appearance::renderer_templates(&file, building.selected, 1)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let instances = buildings
+            .iter()
+            .zip(&templates)
+            .flat_map(|(building, rows)| rows.iter().map(move |row| (building, row)))
+            .collect::<Vec<_>>();
+        assert_eq!(instances.len(), 14);
+        assert!(instances.iter().all(|(_, row)| supports(row.descriptor)));
+        let directory = read("ARCHIVE_DIR");
+        let archive = read("ARCHIVE_BIN");
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let resources = Resources::load(&image, &index, &archive).unwrap();
+        let (draws, spans) = resources
+            .draws_with_spans(&instances, &read("SUNCOLS"), 13)
+            .unwrap();
+        let expected_vertices = instances
+            .iter()
+            .map(|(_, row)| {
+                resources.models[resources.descriptor_models[&row.descriptor]]
+                    .parts
+                    .iter()
+                    .map(|part| part.vertices.len())
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+        assert_eq!(
+            draws.iter().map(|draw| draw.vertices.len()).sum::<usize>(),
+            expected_vertices
+        );
+        for span in spans {
+            assert!(instances.iter().any(|(building, row)| {
+                building.block_id == span.category
+                    && save_appearance::saved_detail_origin(building, row).unwrap()[1]
+                        == span.pivot_y
+            }));
+        }
     }
 
     #[test]
