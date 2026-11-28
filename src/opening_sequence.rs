@@ -27,9 +27,22 @@ pub struct Controller {
     height: u8,
     closing: bool,
     ended: bool,
+    credits: usize,
+    credit_index: usize,
 }
 
 impl Controller {
+    /// Settings uses the same logo phases followed by 4b1bc0's credit rows.
+    pub fn with_credits(rows: usize) -> Self {
+        Self {
+            credits: rows,
+            ..Self::default()
+        }
+    }
+    pub fn credit_row(&self) -> Option<(usize, u8)> {
+        (!self.ended && matches!(self.phase, 13 | 14) && self.credit_index < self.credits)
+            .then_some((self.credit_index, self.alpha))
+    }
     pub fn height(&self) -> u8 {
         self.height
     }
@@ -95,9 +108,34 @@ impl Controller {
                 if self.alpha > 0 {
                     self.alpha -= 1;
                 } else if self.phase == 10 {
-                    self.closing = true;
+                    if self.credits > 0 {
+                        self.phase(12);
+                    } else {
+                        self.closing = true;
+                    }
                 } else {
                     self.phase(self.phase + 2);
+                }
+            }
+            12 => self.phase(13),
+            13 => {
+                if self.alpha == 254 {
+                    self.phase(14);
+                } else {
+                    self.alpha = self.alpha.saturating_add(2).min(254);
+                }
+            }
+            14 => {
+                if self.alpha > 0 {
+                    self.alpha = self.alpha.saturating_sub(2);
+                } else {
+                    self.credit_index += 1;
+                    if self.credit_index < self.credits {
+                        self.phase(12);
+                    } else {
+                        self.phase(2);
+                        self.closing = true;
+                    }
                 }
             }
             _ => (),
@@ -108,6 +146,54 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_credits_follow_logos_fade_every_row_then_return() {
+        let mut clock = Controller::with_credits(32);
+        clock.advance_to(1711);
+        assert_eq!(clock.card(), Some((Card::Title, 0)));
+        assert_eq!(clock.credit_row(), None);
+        clock.advance_to(1712);
+        assert_eq!(clock.card(), None);
+        assert_eq!(clock.credit_row(), None);
+        for row in 0..32 {
+            let start = 1713 + row * 257;
+            for (offset, alpha) in [(0, 0), (1, 2), (127, 254), (128, 254), (255, 0)] {
+                clock.advance_to(start + offset);
+                assert_eq!(
+                    clock.credit_row(),
+                    Some((row, alpha)),
+                    "row {row}, offset {offset}"
+                );
+                assert_eq!(clock.height(), 85);
+                assert!(!clock.ended());
+            }
+        }
+        clock.advance_to(9936);
+        assert_eq!(clock.credit_row(), None);
+        clock.advance_to(10021);
+        assert_eq!(clock.height(), 0);
+        assert!(!clock.ended());
+        clock.advance_to(10022);
+        assert!(clock.ended());
+    }
+
+    #[test]
+    fn settings_credits_skip_during_logos_or_staff_retracts_bars_once() {
+        for start in [300, 1800, 8000] {
+            let mut clock = Controller::with_credits(32);
+            clock.advance_to(start);
+            for tick in start + 1..=start + 85 {
+                clock.request_end();
+                clock.advance_to(tick);
+                assert!(!clock.ended());
+            }
+            clock.advance_to(start + 86);
+            assert!(clock.ended());
+            assert_eq!(clock.card(), None);
+            assert_eq!(clock.credit_row(), None);
+        }
+    }
 
     #[test]
     fn attract_skip_retracts_the_shared_bars_without_restarting_on_held_input() {

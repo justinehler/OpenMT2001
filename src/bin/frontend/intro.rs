@@ -1370,6 +1370,8 @@ pub struct Intro {
     last_sample: Option<usize>,
     ended: bool,
     opening: openmt2001::opening_sequence::Controller,
+    credit_rows: Vec<crate::fresh_city::result::CreditRow>,
+    pub(crate) restart_intro_music: bool,
     attract_menu: Option<crate::menu::Menu>,
     attract_input: attract::Input,
     menu_clock: crate::menu::front_main::Clock,
@@ -1602,7 +1604,11 @@ impl Intro {
             graphics: &mut self.graphics_levels,
             gameplay: &mut self.gameplay_levels,
         }
-        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())?;
+        // The presentation retains the selected profile while its menu is hidden.
+        .sync_profile(
+            self.menu.as_mut().or(self.attract_menu.as_mut()),
+            self.process_frontend.as_ref(),
+        )?;
         self.sync_board_names()
     }
     /// App invokes this once after EVERY synchronous window-event dispatch,
@@ -1791,6 +1797,8 @@ impl Intro {
             last_sample: None,
             ended: false,
             opening: Default::default(),
+            credit_rows: Vec::new(),
+            restart_intro_music: false,
             attract_menu: None,
             attract_input: Default::default(),
             menu_clock: Default::default(),
@@ -2314,7 +2322,11 @@ impl Intro {
                 .ok_or("menu camera missing")?
                 .sample(tick, phase)
         } else {
-            self.assets.flyby.advance_to(tick)?;
+            if self.credit_rows.is_empty() {
+                self.assets.flyby.advance_to(tick)?;
+            } else {
+                self.assets.flyby.advance_looping_to(tick)?;
+            }
             self.assets.flyby.sample((time - tick as f64) as f32)?
         };
         self.sidewalk_camera = camera;
@@ -2396,6 +2408,20 @@ impl Intro {
                         let overlay = self.assets.opening.prepare(&self.renderer, &self.opening)?;
                         self.renderer
                             .draw_overlay(&self.color_view, &self.depth_view, &overlay);
+                        if let Some((row, alpha)) = self.opening.credit_row()
+                            && let Some(overlay) = self.assets.result_text.prepare_credit_rows(
+                                &self.renderer,
+                                &self.credit_rows,
+                                row,
+                                alpha,
+                            )?
+                        {
+                            self.renderer.draw_overlay(
+                                &self.color_view,
+                                &self.depth_view,
+                                &overlay,
+                            );
+                        }
                     }
                 }
                 frontend_draw::Layer::Menu => {

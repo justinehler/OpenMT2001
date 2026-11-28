@@ -99,6 +99,53 @@ fn edit_to25(menu: &mut Menu, assets: &SettingsAssets, cells: &mut Cells<'_>, ow
         cells.commit_menu(menu, Some(owner)).unwrap();
     }
 }
+
+#[test]
+#[ignore = "requires supplied original Menu assets; no GPU or audio device"]
+fn settings_credits_retained_menu_preserves_profile_and_audio_levels() {
+    let scratch = Scratch::new();
+    let (mut menu, assets, owner) = fixture(&scratch.0);
+    menu.participant_test_named_profile("Credits Player");
+    let mut profile = None;
+    let mut saved = Snapshot::default();
+    let mut error = None;
+    let mut audio = Levels::default();
+    let mut graphics = GraphicsLevels::default();
+    let mut gameplay = GameplayLevels::default();
+    let mut cells = Cells {
+        profile: &mut profile,
+        saved: &mut saved,
+        error: &mut error,
+        audio: &mut audio,
+        graphics: &mut graphics,
+        gameplay: &mut gameplay,
+    };
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    edit_to25(&mut menu, &assets, &mut cells, &owner);
+    menu.back(); // Sound -> Settings
+    let b = assets.bounds(Page::Main, Button::Credits).unwrap();
+    menu.pointer([(b[0] + b[2]) / 2., (b[1] + b[3]) / 2.]);
+    menu.mouse_button(true);
+    menu.mouse_button(false);
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    assert!(menu.take_credits());
+    let selected = menu.current_settings_path();
+    let mut visible = None;
+    let mut retained = Some(menu);
+    for _ in 0..3 {
+        // Same visible-or-retained loan used by Intro::sync_profile_settings.
+        cells
+            .sync_profile(visible.as_mut().or(retained.as_mut()), Some(&owner))
+            .unwrap();
+        assert_eq!(*cells.profile, selected);
+        assert_eq!(owner.borrow().audio.music_level(), 25);
+    }
+    let mut menu = retained.take().unwrap();
+    menu.return_from_attract();
+    cells.commit_menu(&mut menu, Some(&owner)).unwrap();
+    assert_eq!(menu.current_settings_path(), selected);
+    assert_eq!(menu.settings_audio.music, 25);
+}
 #[test]
 #[ignore = "private original Menu assets, CPU only; same App event commit consumer"]
 fn actual_menu_edit_then_loss_gain_commits_before_prefix_and_unchanged_draw_does_not_reseed() {

@@ -445,6 +445,9 @@ impl Menu {
     pub(crate) fn suspend_attract(&mut self) {
         self.front_main.shown(false);
     }
+    pub(crate) fn take_credits(&mut self) -> bool {
+        self.settings.take_credits()
+    }
     pub(crate) fn return_from_attract(&mut self) {
         self.front_main.shown(false);
         self.cancel_input();
