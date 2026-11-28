@@ -10,7 +10,7 @@ fn word(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }
 
-pub use openmt2001::strategic_inputs::{Inputs, PollScratch, Tables, Writeback};
+pub use openmt2001::strategic_inputs::{Inputs, PollScratch, Writeback};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListRow {
