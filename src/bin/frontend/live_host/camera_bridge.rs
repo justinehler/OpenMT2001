@@ -87,12 +87,12 @@ impl PropertySource {
         epoch: u64,
         rows: [[u8; 380]; 52],
         count: i32,
-        assets: &crate::selection::Assets,
+        resource: openmt2001::pavement_resource::LocalPavementHandle,
     ) -> Self {
         Self {
             resident: None,
             epoch: PropertyEpoch::synthetic(epoch),
-            resource: assets.pavement_resource().binding().unwrap().handle(),
+            resource,
             rows,
             count,
         }

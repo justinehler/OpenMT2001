@@ -2,6 +2,7 @@
 //! audio players. The host sends what to play; the binary owns the rodio
 //! sinks and answers. Keeping the protocol here lets the host build without
 //! the audio stack (#99 step 3).
+pub mod auction;
 pub mod era;
 pub mod gameplay;
 pub mod transport;

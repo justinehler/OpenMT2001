@@ -165,7 +165,7 @@ pub struct Assets {
     result_firework_texture: crate::result_presentation::particles_gpu::FireworkTexture,
     result_medallions: crate::result_presentation::medallions::Assets,
     result_audio: crate::result_presentation::audio::Assets,
-    auction_audio: crate::live_host::auction_audio::Assets,
+    auction_audio: crate::auction_audio::Assets,
     transport_audio: crate::transport_audio::Assets,
     era_audio: crate::era_audio::Assets,
     gameplay_sound: crate::gameplay_sound::Assets,
@@ -307,7 +307,7 @@ impl Assets {
             &paths.installer,
             &paths.ffmpeg,
         )?;
-        let auction_audio = crate::live_host::auction_audio::Assets::load(
+        let auction_audio = crate::auction_audio::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &paths.installer,
         )?;
@@ -907,7 +907,7 @@ struct LoadedInspection {
     saved_auction: Option<crate::session_save::AuctionContinuation>,
     restored_presentation: Vec<openmt2001::economy::AccountPosting>,
     auction_requests: Option<mpsc::Receiver<crate::auction_bridge::Request>>,
-    auction_audio_requests: Option<mpsc::Receiver<crate::live_host::auction_audio::Request>>,
+    auction_audio_requests: Option<mpsc::Receiver<crate::auction_audio::Request>>,
     transport_audio_requests: Option<mpsc::Receiver<crate::transport_audio::Request>>,
     era_audio_requests: Option<mpsc::Receiver<crate::era_audio::Request>>,
     gameplay_sound_requests: Option<mpsc::Receiver<crate::gameplay_sound::Request>>,
@@ -1220,8 +1220,8 @@ struct Inspection {
     result_pending: Option<mpsc::Receiver<Result<ResultSnapshot, String>>>,
     result: Option<ResultView>,
     auction_requests: Option<mpsc::Receiver<crate::auction_bridge::Request>>,
-    auction_audio_requests: Option<mpsc::Receiver<crate::live_host::auction_audio::Request>>,
-    auction_audio_player: crate::live_host::auction_audio::Player,
+    auction_audio_requests: Option<mpsc::Receiver<crate::auction_audio::Request>>,
+    auction_audio_player: crate::auction_audio::Player,
     transport_audio_requests: Option<mpsc::Receiver<crate::transport_audio::Request>>,
     transport_audio_player: crate::transport_audio::Player,
     era_audio_requests: Option<mpsc::Receiver<crate::era_audio::Request>>,

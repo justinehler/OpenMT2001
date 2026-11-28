@@ -10,7 +10,7 @@ fn rights_acquisition_services(
 ) {
     let (graphics_tx, graphics_rx) = mpsc::channel::<crate::auction_bridge::Request>();
     let (sound_tx, sound_rx) = mpsc::channel::<crate::gameplay_sound::Request>();
-    let (auction_tx, auction_rx) = mpsc::channel::<crate::live_host::auction_audio::Request>();
+    let (auction_tx, auction_rx) = mpsc::channel::<crate::auction_audio::Request>();
     let (era_tx, era_rx) = mpsc::channel::<crate::era_audio::Request>();
     let (transport_tx, transport_rx) = mpsc::channel::<crate::transport_audio::Request>();
     host.auction_renderer = Some(graphics_tx);
@@ -29,8 +29,8 @@ fn rights_acquisition_services(
         let mut view = crate::auction_bridge::View::default();
         let mut sound = crate::gameplay_sound::Player::new(
             crate::gameplay_sound::Assets::load(&image, &inputs.installer).unwrap());
-        let mut auction = crate::live_host::auction_audio::Player::new(
-            crate::live_host::auction_audio::Assets::load(&image, &inputs.installer).unwrap());
+        let mut auction = crate::auction_audio::Player::new(
+            crate::auction_audio::Assets::load(&image, &inputs.installer).unwrap());
         let ffmpeg = openmt2001::fixtures::ffmpeg();
         let mut era = crate::era_audio::Player::new(
             crate::era_audio::Assets::load(&image, &inputs.installer, &ffmpeg).unwrap());
@@ -296,8 +296,8 @@ fn saved_worker_rights_input_and_native_delay() {
     let mut sound = crate::gameplay_sound::Player::new(
         crate::gameplay_sound::Assets::load(&image, &inputs.installer).unwrap(),
     );
-    let mut auction = crate::live_host::auction_audio::Player::new(
-        crate::live_host::auction_audio::Assets::load(&image, &inputs.installer).unwrap(),
+    let mut auction = crate::auction_audio::Player::new(
+        crate::auction_audio::Assets::load(&image, &inputs.installer).unwrap(),
     );
     let ffmpeg = openmt2001::fixtures::ffmpeg();
     let mut era = crate::era_audio::Player::new(

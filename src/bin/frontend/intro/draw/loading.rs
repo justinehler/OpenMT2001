@@ -223,7 +223,7 @@ impl Intro {
                         self.assets.era_audio.clone());
                     if let Some(process)=&self.process_frontend {era_audio_player.bind_audio(process.borrow().audio.clone())?;}
                     else {era_audio_player.set_levels(self.audio_levels.music,self.audio_levels.effects);}
-                    let mut auction_audio_player = crate::live_host::auction_audio::Player::new(
+                    let mut auction_audio_player = crate::auction_audio::Player::new(
                         self.assets.auction_audio.clone());
                     if let Some(process)=&self.process_frontend {auction_audio_player.bind_audio(process.borrow().audio.clone());}
                     else {auction_audio_player.set_level(self.audio_levels.effects);}
