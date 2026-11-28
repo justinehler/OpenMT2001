@@ -175,7 +175,7 @@ mod tests {
             input.sample(PhysicalSample::Unfocus);
             assert!(!input.skip());
         }
-        input.sample(PhysicalSample::Pointer([100., 200.]));
+        input.sample(PhysicalSample::Pointer);
         input.sample(PhysicalSample::Key {
             key: PhysicalKey::Code(KeyCode::ArrowDown),
             down: true,

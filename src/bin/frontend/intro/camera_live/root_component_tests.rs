@@ -59,8 +59,7 @@ fn physical_edges_and_delta_survive_routing_and_consume_once() {
     physical.key(PhysicalKey::Code(KeyCode::ArrowRight), true);
     physical.key(PhysicalKey::Code(KeyCode::ArrowRight), false);
     physical.button(MouseButton::Right, true);
-    physical.pointer([10., 20.]);
-    physical.pointer([13., 15.]);
+    physical.motion([3., -5.]);
     assert_eq!(
         physical.snapshot().unwrap(),
         ([true, false, false, false], [false, true], [3, -5])

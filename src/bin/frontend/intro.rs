@@ -2099,9 +2099,6 @@ impl Intro {
             WindowEvent::MouseInput { button, state, .. } => self
                 .camera_physical
                 .button(*button, *state == ElementState::Pressed),
-            WindowEvent::CursorMoved { position, .. } => {
-                self.camera_physical.pointer([position.x, position.y])
-            }
             WindowEvent::Focused(false) => self.camera_physical.unfocus(),
             _ => (),
         }
