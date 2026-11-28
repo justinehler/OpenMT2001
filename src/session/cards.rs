@@ -69,8 +69,26 @@ impl Session<'_> {
             prior: [0; 48],
         };
         let mut outgoing_cards = Vec::new();
-        // A client's card requests and releases go to the authority's deck.
+        // In a connected game a client's card requests and releases go to the
+        // authority's deck, and the authority sends any message or deck reply
+        // addressed to a remote human to that human's peer, as 0x451720 does
+        // for every directed kind (0x4e2590).
+        let carried = self.connected.is_some();
         let mut outgoing_messages = Vec::new();
+        let mut carry = |route: player_messages::Route, packet: &player_messages::Packet| {
+            if carried
+                && matches!(
+                    route,
+                    player_messages::Route::NetworkSend
+                        | player_messages::Route::NetworkRecipient { .. }
+                )
+            {
+                outgoing_messages.push((route, *packet));
+                Ok(())
+            } else {
+                Err(route)
+            }
+        };
         let mut call = |call, player: &mut crate::player_manager::Player| match call {
             human::Call::Submit(command) => {
                 if self.connected.is_some() {
@@ -104,15 +122,10 @@ impl Session<'_> {
                         if route == player_messages::Route::Broadcast {
                             broadcast = Some(*packet);
                             Ok(())
-                        } else if route == player_messages::Route::NetworkSend
-                            && self.connected.is_some()
-                        {
-                            outgoing_messages.push(*packet);
-                            Ok(())
                         } else {
-                            Err(format!(
-                                "human card route {route:?} requires host transport"
-                            ))
+                            carry(route, packet).map_err(|route| {
+                                format!("human card route {route:?} requires host transport")
+                            })
                         }
                     },
                 )?;
@@ -129,10 +142,12 @@ impl Session<'_> {
                                 &mut players,
                                 &mut arena,
                                 routing,
-                                |route, _| {
-                                    Err(format!(
-                                        "human card reply {route:?} requires host transport"
-                                    ))
+                                |route, packet| {
+                                    carry(route, packet).map_err(|route| {
+                                        format!(
+                                            "human card reply {route:?} requires host transport"
+                                        )
+                                    })
                                 },
                             )
                             .map(|_| ())
@@ -178,12 +193,10 @@ impl Session<'_> {
         self.allocation_next = arena.next;
         result?;
         if let Some(connection) = &mut self.connected {
-            for packet in outgoing_messages {
-                connection.commands.send_player_message(
-                    &connection.worker,
-                    player_messages::Route::NetworkSend,
-                    &packet,
-                )?;
+            for (route, packet) in outgoing_messages {
+                connection
+                    .commands
+                    .send_player_message(&connection.worker, route, &packet)?;
             }
             for command in outgoing_cards {
                 let targets = crate::network::commands::Targets::new(
