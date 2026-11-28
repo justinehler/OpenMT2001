@@ -2329,6 +2329,10 @@ fn original_tutorial_one_and_four_start_in_pacific_block_view() {
                         &mut SnapshotCache::default(),
                     )
                     .unwrap();
+                assert!(
+                    loaded.tutorial_session,
+                    "tutorial startup must retain loading until BlockCam"
+                );
                 drop(loaded);
                 let epoch = session.world.topology.epoch();
                 let (publisher, reader) = crate::save_menu::camera_source::channel(epoch);

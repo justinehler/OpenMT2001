@@ -524,6 +524,27 @@ pub(super) fn deliver(
         }
     }
 }
+/// Keep the loading frame until the first authored tutorial camera turn has
+/// committed. Its delayed event must run before either the city or prompt draws.
+#[derive(Default)]
+pub(super) struct TutorialStart {
+    waiting: bool,
+}
+impl TutorialStart {
+    pub(super) fn new(tutorial: bool) -> Self {
+        Self { waiting: tutorial }
+    }
+    pub(super) fn holds_loading(
+        &mut self,
+        events_seen: usize,
+        turns_pending: bool,
+        failed: bool,
+    ) -> bool {
+        self.waiting &= !failed && (events_seen == 0 || turns_pending);
+        self.waiting
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum BlockOrigin {
     Selection,
@@ -1235,4 +1256,5 @@ pub(super) fn commit_refresh(previous: &mut Inspection, next: &mut Inspection) {
     next.camera_epoch = previous.camera_epoch;
     next.camera_turns = std::mem::take(&mut previous.camera_turns);
     next.tutorial_camera_seen = previous.tutorial_camera_seen;
+    next.tutorial_start = std::mem::take(&mut previous.tutorial_start);
 }

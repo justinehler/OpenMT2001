@@ -576,6 +576,10 @@ fn ordinary_level_blockcam_uses_player_block_entry_and_information_target() {
         strategic: true,
         normal_return: Some(fresh()),
     };
+    let mut startup = TutorialStart::new(true);
+    assert!(startup.holds_loading(0, false, false));
+    // Receiving the event alone is insufficient: the UI turn still has to commit.
+    assert!(startup.holds_loading(1, true, false));
     let mut scripted = initial;
     let mut script_core = Core::new(new_process_owner().unwrap());
     script_core.project(initial.active.camera).unwrap();
@@ -628,6 +632,11 @@ fn ordinary_level_blockcam_uses_player_block_entry_and_information_target() {
             &assets,
         )
         .unwrap();
+    assert!(!startup.holds_loading(1, false, false));
+    // Later camera turns must not re-enter startup loading.
+    assert!(!startup.holds_loading(2, true, false));
+    assert!(!TutorialStart::new(false).holds_loading(0, false, false));
+    assert!(!TutorialStart::new(true).holds_loading(0, false, true));
     assert_eq!(script_core.kind(), 12);
     assert_eq!(script_core.capture(), click_core.capture());
     assert_eq!(scripted.active.selected, Some(selected));
