@@ -656,56 +656,27 @@ impl App {
                 {
                     return;
                 }
-                match event.logical_key {
-                    Key::Named(key) if self.stage == 3 => {
-                        if let Some(intro) = &mut self.intro {
-                            if let Some(menu) = &mut intro.menu {
-                                match key {
-                                    NamedKey::Escape => menu.back(),
-                                    NamedKey::ArrowDown | NamedKey::Tab => menu.navigate(1),
-                                    NamedKey::ArrowUp => menu.navigate(-1),
-                                    NamedKey::Backspace => menu.erase(),
-                                    NamedKey::Enter | NamedKey::Space => {
-                                        if key == NamedKey::Space && menu.is_editing() {
-                                            menu.input(" ");
-                                        } else if menu.pending.is_none() {
-                                            menu.activate();
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            } else {
+                let control = self.modifiers.control_key() || self.modifiers.super_key();
+                if self.stage == 3
+                    && let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut())
+                {
+                    menu.key(&event.logical_key, control);
+                } else {
+                    match event.logical_key {
+                        Key::Named(key) if self.stage == 3 => {
+                            if let Some(intro) = &mut self.intro {
                                 intro.skip_opening(key);
+                            } else if key == NamedKey::Escape {
+                                event_loop.exit();
                             }
-                        } else if key == NamedKey::Escape {
-                            event_loop.exit();
                         }
-                    }
-                    Key::Named(NamedKey::Escape | NamedKey::Space | NamedKey::Enter)
-                        if self.stage == 0 =>
-                    {
-                        self.advance()
-                    }
-                    Key::Character(text) if self.stage == 3 => {
-                        if let Some(intro) = &mut self.intro
-                            && let Some(menu) = &mut intro.menu
+                        Key::Named(NamedKey::Escape | NamedKey::Space | NamedKey::Enter)
+                            if self.stage == 0 =>
                         {
-                            if self.modifiers.control_key() || self.modifiers.super_key() {
-                                if text.eq_ignore_ascii_case("v") && menu.is_editing() {
-                                    if let Ok(mut clipboard) = arboard::Clipboard::new()
-                                        && let Ok(text) = clipboard.get_text()
-                                    {
-                                        menu.input(&text);
-                                    }
-                                } else if text.eq_ignore_ascii_case("a") {
-                                    menu.select_all();
-                                }
-                            } else {
-                                menu.input(&text);
-                            }
+                            self.advance()
                         }
+                        _ => (),
                     }
-                    _ => (),
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -1084,7 +1055,7 @@ pub fn run() -> Result<(), Error> {
             }
             "--help" => {
                 println!(
-                    "OpenMT2001 native frontend milestone\n--no-3d (original NO3D fallback sound presentation)\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\n--window-size <WIDTHxHEIGHT> (initial physical window size; captures under Xvfb should start at their target size instead of resizing the window)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names take Windows-1252 characters up to the width of the name box, except \" * / : < > ? \\ |. Backspace edits, Ctrl/Cmd+A selects all, Ctrl/Cmd+V pastes.\nMenu: mouse or arrows/Tab select; Enter activates; Escape returns from pending screens. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
+                    "OpenMT2001 native frontend milestone\n--no-3d (original NO3D fallback sound presentation)\n--strict-v14 (disable documented blocker fixes; default uses modern compatibility)\n--source-options <native options> (DEBUGSTUFF / TESTMODE source parser)\n--assets <extracted-installer-directory>\n--ffmpeg <decoder-executable> (or OPENMT2001_FFMPEG)\n--exit-after <seconds> (smoke check)\n--window-size <WIDTHxHEIGHT> (initial physical window size; captures under Xvfb should start at their target size instead of resizing the window)\nEscape/Space/Enter skips the publisher movie. Escape closes during loading; Escape/Space/Enter opens the menu during the intro.\n--scene-root <original-max-directory>\n--executable <v1.4-mc.exe>\n--intro-map <intromap.lua>\n--intro-quality <low|medium|high> (default: live process performance, no cap; explicit low=0, medium=1, high=2 cap)\n--skip-splash (intro smoke check)\n--menu (direct menu smoke check)\n--language <patched-language-directory>\n--save-dir <directory-containing-original-saves> (default V2-profile-directory/saves)\n--profile-dir <V2-profile-directory> (default per-user application data)\nNAME: creates/selects V2 player profiles; names take Windows-1252 characters up to the width of the name box, except \" * / : < > ? \\ |. Backspace edits; Return commits.\nMenu: mouse only, like the original. Quit: physical main Return confirms Yes; Backspace selects No. LOAD GAME restores original saves into a live retained city and its saved view; arrows pan, PgUp/PgDn change height, Escape returns. Scroll over scenario information to read more. SINGLE PLAYER launches supported unlocked campaign scenarios, Bonus, and Sandbox with difficulty/character setup; campaign results update V2 progression. Win/Lose/Complete result hubs use the retained city and original end callback; credits text uses original records. Winner/loser music uses original source assets. Water and clouds advance with the live logic clock."
                 );
                 return Ok(());
             }

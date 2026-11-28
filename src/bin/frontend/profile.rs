@@ -207,7 +207,6 @@ pub struct Profile {
     error: Option<String>,
     notice: Option<Notice>,
     notice_keys: crate::desktop_quit::Modal,
-    selected_all: bool,
     pointer_position: Option<[f32; 2]>,
 }
 const PROFILE_SCROLL: [f32; 4] = [440., 200., 456., 287.];
@@ -353,7 +352,6 @@ impl Profile {
             error: None,
             notice: None,
             notice_keys: Default::default(),
-            selected_all: false,
             pointer_position: None,
         }
     }
@@ -499,21 +497,11 @@ impl Profile {
         }
         .glyphs(name)
     }
-    pub fn select_all(&mut self) {
-        if self.notice.is_some() {
-            return;
-        }
-        self.selected_all = self.name.is_some();
-    }
     pub fn input(&mut self, text: &str) {
         if self.notice.is_some() {
             return;
         }
         if let Some(name) = &mut self.name {
-            if self.selected_all {
-                name.clear();
-                self.selected_all = false;
-            }
             // 495b50 configures the registration field filename-safe, 90 px.
             let font = ui::text_field::FieldFont {
                 tab: &self.assets.tab,
@@ -528,12 +516,7 @@ impl Profile {
             return;
         }
         if let Some(name) = &mut self.name {
-            if self.selected_all {
-                name.clear();
-                self.selected_all = false;
-            } else {
-                name.pop();
-            }
+            name.pop();
             self.error = None;
         }
     }
@@ -849,11 +832,7 @@ impl Profile {
             input[3] -= 10.;
             modal.rect(
                 input,
-                [if self.selected_all {
-                    0xff0070c0
-                } else {
-                    0xff002896 // Registration painter 495e5e.
-                }; 4],
+                [0xff002896; 4], // Registration painter 495e5e.
             );
             let encoded = self.name_glyphs(self.name.as_deref().unwrap_or(""));
             // Registration configures style 4 on the full CONFIRM_TEXT region.
@@ -976,6 +955,14 @@ mod tests {
             slider_textures: vec![],
         }
     }
+    /// Empty the registration field the only way the original offers:
+    /// Backspace removes one trailing byte at a time (443aa0).
+    fn clear_name(profile: &mut Profile) {
+        for _ in 0..profile.name.as_ref().map_or(0, |name| name.chars().count()) {
+            profile.erase();
+        }
+        assert_eq!(profile.name.as_deref(), Some(""));
+    }
     struct Scratch(PathBuf);
     impl Scratch {
         fn new() -> Self {
@@ -1048,10 +1035,10 @@ mod tests {
         // 90 px of the registration font: 7 W (84 px), or exactly 30 i.
         profile.input(&"W".repeat(20));
         assert_eq!(profile.name.as_deref(), Some("W".repeat(7).as_str()));
-        profile.select_all();
+        clear_name(&mut profile);
         profile.input(&"i".repeat(40));
         assert_eq!(profile.name.as_deref(), Some("i".repeat(30).as_str()));
-        profile.select_all();
+        clear_name(&mut profile);
         profile.input("Ren\u{e9}e: A/B?");
         assert_eq!(profile.name.as_deref(), Some("Ren\u{e9}e AB"));
         assert_eq!(
@@ -1091,7 +1078,7 @@ mod tests {
         assert!(profile.error.is_none());
         assert_eq!(profile.store.names, ["Alice"]);
         profile.activate(0); // Warning OK returns to registration.
-        profile.select_all();
+        clear_name(&mut profile);
         profile.input("Bob");
         profile.activate(0);
         assert!(profile.error.is_none());
@@ -1136,7 +1123,7 @@ mod tests {
             profile.activate(1);
             assert_eq!(profile.name.as_deref(), Some("Alice"));
             assert!(profile.first_registration);
-            profile.select_all();
+            clear_name(&mut profile);
             profile.input("Bob");
             profile.activate(0);
             assert!(!profile.visible && !profile.first_registration);
@@ -1196,7 +1183,6 @@ mod tests {
             error: None,
             notice: None,
             notice_keys: Default::default(),
-            selected_all: false,
             pointer_position: None,
         }
     }
@@ -1241,7 +1227,6 @@ mod tests {
         );
         profile.input("ignored");
         profile.erase();
-        profile.select_all();
         profile.back();
         assert_eq!(profile.name.as_deref(), Some("Alice"));
         let mut fade = crate::modal_frame::Fade::default();
@@ -1441,7 +1426,6 @@ mod tests {
             error: None,
             notice: None,
             notice_keys: Default::default(),
-            selected_all: false,
             pointer_position: None,
         };
         let base = 4 + profile.store.names.len();

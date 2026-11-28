@@ -403,20 +403,6 @@ impl SetupPanel {
         }
         Ok(panel)
     }
-    pub fn keyboard_actions(&self, state: &State) -> Vec<Action> {
-        let mut actions = (0..state.rows.len()).map(Action::Row).collect::<Vec<_>>();
-        actions.extend((0..state.maps.len()).map(Action::MapRow));
-        actions.push(Action::Name);
-        actions.extend((0..3).map(Action::Difficulty));
-        if state.modifier.controls_visible() {
-            actions.extend([Action::Minus, Action::Plus]);
-        }
-        if state.map_ready() {
-            actions.push(Action::Ok);
-        }
-        actions.push(Action::Back);
-        actions
-    }
     pub fn keyboard_activate(
         &self,
         state: &mut State,
@@ -1364,8 +1350,6 @@ mod tests {
             Some(0),
             "current map wins over requested default"
         );
-        let actions = panel.keyboard_actions(&state);
-        assert!(actions.contains(&Action::MapRow(24)) && actions.contains(&Action::Row(0)));
         let mv = panel.map_viewport().unwrap();
         let h = panel.list_layout(mv).unwrap().pitch;
         assert_eq!(h, 12.);
@@ -1479,8 +1463,6 @@ mod tests {
         state.set_maps(vec![], None).unwrap();
         assert_eq!(state.confirm(), Outcome::None);
         assert!(map_highlights(&state).is_empty());
-        assert!(!panel.keyboard_actions(&state).contains(&Action::Ok));
-        assert!(panel.keyboard_actions(&state).contains(&Action::Back));
         let ok = panel.bounds("OK_BUTTON").unwrap();
         let ok_point = [(ok[0] + ok[2]) * 0.5, (ok[1] + ok[3]) * 0.5];
         assert_eq!(panel.hit(&state, ok_point).unwrap(), None);

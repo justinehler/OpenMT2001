@@ -122,7 +122,10 @@ fn settings_credits_retained_menu_preserves_profile_and_audio_levels() {
     };
     cells.commit_menu(&mut menu, Some(&owner)).unwrap();
     edit_to25(&mut menu, &assets, &mut cells, &owner);
-    menu.back(); // Sound -> Settings
+    let b = assets.bounds(Page::Sound, Button::Back).unwrap(); // Sound -> Options
+    menu.pointer([(b[0] + b[2]) / 2., (b[1] + b[3]) / 2.]);
+    menu.mouse_button(true);
+    menu.mouse_button(false);
     let b = assets.bounds(Page::Main, Button::Credits).unwrap();
     menu.pointer([(b[0] + b[2]) / 2., (b[1] + b[3]) / 2.]);
     menu.mouse_button(true);

@@ -333,46 +333,13 @@ impl Route {
                         .as_ref()
                         .is_some_and(|s| s.visible && s.name_focused)))
     }
-    pub fn navigate(&mut self, delta: i32) {
-        if self.busy || self.error.is_some() {
-            return;
-        }
-        let actions = if let Some(r) = self.roster.as_ref().filter(|r| r.visible) {
-            std::iter::once(PointerTarget::Name)
-                .chain(
-                    (0..26)
-                        .filter(|&id| r.enabled(id))
-                        .map(PointerTarget::Roster),
-                )
-                .collect::<Vec<_>>()
-        } else if let Some(s) = self.setup.as_ref().filter(|s| s.visible) {
-            self.setup_panel
-                .keyboard_actions(s)
-                .into_iter()
-                .map(PointerTarget::Setup)
-                .collect()
-        } else {
-            return;
-        };
-        self.keyboard = next_target(&actions, self.keyboard, delta);
-        self.press = None;
+    /// Return on a focused name field: the common editor commits it and
+    /// clears its focus (443aa0).
+    pub fn commit_text(&mut self) {
         if let Some(r) = self.roster.as_mut().filter(|r| r.visible) {
-            r.name_focused = self.keyboard == Some(PointerTarget::Name);
-        } else if let Some(s) = self.setup.as_mut().filter(|s| s.visible) {
-            s.name_focused = self.keyboard == Some(PointerTarget::Setup(setup::Action::Name));
-            if matches!(
-                self.keyboard,
-                Some(PointerTarget::Setup(
-                    setup::Action::Row(_) | setup::Action::MapRow(_)
-                ))
-            ) {
-                self.activate_keyboard();
-            }
-        }
-    }
-    pub fn activate_keyboard(&mut self) {
-        if let Err(e) = self.activate_target(self.keyboard, None) {
-            self.error = Some(e);
+            r.name_focused = false;
+        } else if let Some(s) = self.setup.as_mut() {
+            s.name_focused = false;
         }
     }
     pub fn text(&mut self, text: &str) {
@@ -414,20 +381,6 @@ impl Route {
         if let Some(r) = self.roster.as_mut() {
             r.busy = false;
             r.visible = self.error.is_some();
-        }
-    }
-    pub fn back(&mut self) {
-        if self.busy {
-            return;
-        }
-        self.keyboard = None;
-        if let Some(r) = self.roster.as_mut().filter(|r| r.visible) {
-            r.visible = false;
-            if let Some(s) = self.setup.as_mut() {
-                s.visible = true
-            }
-        } else if let Some(s) = self.setup.as_mut() {
-            s.visible = false
         }
     }
     pub fn scroll(&mut self, p: Option<[f32; 2]>, delta: i32) {
@@ -594,25 +547,11 @@ mod text_tests {
     }
 }
 
-fn next_target(
-    actions: &[PointerTarget],
-    current: Option<PointerTarget>,
-    delta: i32,
-) -> Option<PointerTarget> {
-    if actions.is_empty() {
-        return None;
-    }
-    let at = current
-        .and_then(|v| actions.iter().position(|a| *a == v))
-        .map_or(if delta > 0 { -1 } else { 0 }, |i| i as i64);
-    Some(actions[(at + i64::from(delta)).rem_euclid(actions.len() as i64) as usize])
-}
-
 #[cfg(test)]
-mod keyboard_and_failure_tests {
+mod failure_tests {
     use super::*;
-    // Inert rendering resources deliberately have no pointer hit regions: a
-    // keyboard test cannot accidentally pass by using a last cursor position.
+    // Inert rendering resources have no pointer hit regions, so the test
+    // activates each control target directly, as a click on it would.
     fn fixture() -> Route {
         let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
@@ -647,36 +586,33 @@ mod keyboard_and_failure_tests {
             error: None,
         }
     }
-    fn name_focus(route: &mut Route) {
-        // Backwards from no selection reaches Back, OK, modifiers, difficulty,
-        // then Name without ever depending on any pointer location.
-        for _ in 0..10 {
-            route.navigate(-1);
-            if route.is_editing() {
-                return;
-            }
+    fn click(route: &mut Route, target: PointerTarget) {
+        route.keyboard = Some(target);
+        if let Err(error) = route.activate_target(Some(target), None) {
+            route.error = Some(error);
         }
-        panic!("keyboard name focus missing");
     }
     #[test]
     #[ignore = "original PE/catalog fixture; root integration required"]
-    fn keyboard_names_space_and_failed_handoff_preserve_retry_choice() {
+    fn names_space_and_failed_handoff_preserve_retry_choice() {
         let mut route = fixture();
-        name_focus(&mut route);
-        route.activate_keyboard();
+        click(&mut route, PointerTarget::Setup(setup::Action::Name));
         assert!(route.is_editing());
         route.text(" Smith");
-        route.keyboard = Some(PointerTarget::Setup(setup::Action::Difficulty(2)));
-        route.activate_keyboard();
-        route.keyboard = Some(PointerTarget::Setup(setup::Action::Plus));
-        route.activate_keyboard();
+        route.commit_text();
+        assert!(!route.is_editing(), "Return commits and drops focus");
+        click(
+            &mut route,
+            PointerTarget::Setup(setup::Action::Difficulty(2)),
+        );
+        click(&mut route, PointerTarget::Setup(setup::Action::Plus));
         let setup::Outcome::Roster(before) = route.setup.as_mut().unwrap().confirm() else {
             panic!("handoff");
         };
         assert_eq!(before.session_name, b"Justin Smith");
         assert_eq!(before.difficulty, 2);
-        route.keyboard = Some(PointerTarget::Setup(setup::Action::Ok));
-        route.activate_keyboard(); // unmappable token glyph255 in real initial_roster
+        let ok = PointerTarget::Setup(setup::Action::Ok);
+        click(&mut route, ok); // unmappable token glyph255 in real initial_roster
         assert_eq!(route.error.as_deref(), Some("unmapped token glyph"));
         assert!(route.visible());
         assert!(route.roster.is_none());
@@ -685,27 +621,24 @@ mod keyboard_and_failure_tests {
             panic!("retry");
         };
         assert_eq!(before, after); // level, difficulty, target, map and name
-        // Repair only the injected faulty resource and retry via Enter.
+        // Repair only the injected faulty resource and retry OK.
         route.roster_panel = roster::RosterPanel::inert(vec![vec![1]; 1754]);
-        route.activate_keyboard();
+        click(&mut route, ok);
         assert!(route.error.is_none());
         assert!(!route.setup.as_ref().unwrap().visible);
         assert!(route.roster.as_ref().unwrap().visible);
-        route.navigate(1); // first actual roster target is Name
-        route.activate_keyboard();
+        click(&mut route, PointerTarget::Name);
         assert!(route.is_editing());
         route.text(" Smith");
         assert_eq!(
             route.roster.as_ref().unwrap().roster.slots()[0].name,
             b"Justin Smith"
         );
-        route.navigate(1); // human left selector, not the name nor pointer
-        route.activate_keyboard();
+        click(&mut route, PointerTarget::Roster(0)); // human left selector
         assert_ne!(
             route.roster.as_ref().unwrap().roster.slots()[0].token,
             Some(4)
         );
-        assert!(!route.is_editing());
         route.busy = true;
         route.roster.as_mut().unwrap().busy = true;
         route.finish(Some("injected spawn failure".into()));
@@ -713,9 +646,6 @@ mod keyboard_and_failure_tests {
         assert!(route.roster.as_ref().unwrap().visible);
         assert!(!route.roster.as_ref().unwrap().busy);
         assert!(route.roster.as_ref().unwrap().enabled(24));
-        let selection = route.keyboard;
-        route.navigate(1); // modal guard
-        assert_eq!(route.keyboard, selection);
     }
 }
 

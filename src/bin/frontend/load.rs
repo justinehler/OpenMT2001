@@ -559,11 +559,6 @@ impl Load {
             }
         }
     }
-    pub fn back(&mut self) {
-        if self.refusal_prompt.take().is_none() && self.delete_confirmation.take().is_none() {
-            self.visible = false;
-        }
-    }
     pub fn draw(
         &self,
         renderer: &Renderer,
@@ -1243,9 +1238,6 @@ mod tests {
         );
         load.activate(1); // No
         assert!(slot.exists());
-        load.activate(2);
-        load.back(); // Escape cancels the popup, not Load Game.
-        assert!(load.visible && load.delete_confirmation.is_none() && slot.exists());
         load.activate(2);
         load.activate(0); // Yes; validated V2 slot is deleted and list refreshed.
         assert!(!slot.exists());
