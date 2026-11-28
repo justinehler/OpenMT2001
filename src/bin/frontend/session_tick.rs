@@ -113,6 +113,11 @@ impl Session<'_> {
         assets: &CommandAssets<'_, '_>,
         _notifications: bool,
     ) -> Result<(), String> {
+        let closes_script = name == "InterfacePromptDismiss"
+            && self
+                .hooks
+                .script_prompt()
+                .is_some_and(|r| r.dismissal_id == argument as u32);
         let context = self.world.script_context(
             assets.image,
             &self.resident_models,
@@ -170,6 +175,9 @@ impl Session<'_> {
                     &self.people,
                 )
             });
+        if closes_script {
+            self.hooks.close_script_prompt(false);
+        }
         result.and(refreshed)
     }
     /// Run the original normal logic ordering over the retained session. Host

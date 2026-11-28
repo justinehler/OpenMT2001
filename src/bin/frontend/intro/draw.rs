@@ -591,7 +591,7 @@ impl Intro {
         self.refresh_inspection_projection()?;
         if !self.inspection.as_ref().is_some_and(|v| {
             v.auction.scene.is_some()
-                || v.prompts.request().is_some()
+                || v.prompts.blocks_controls()
                 || v.result.is_some()
                 || v.result_pending.is_some()
                 || v.live_status

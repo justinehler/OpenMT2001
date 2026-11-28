@@ -146,18 +146,16 @@ impl Intro {
                             &self.assets.selection,
                             &self.assets.navigation,
                         )?;
-                        for request in status.prompts.drain(..) {
-                            view.prompts.submit(request);
+                        let created = !status.prompts.is_empty();
+                        view.prompts.apply_requests(
+                            std::mem::take(&mut status.prompts),
+                            &status.prompt_closes,
+                        );
+                        if created {
                             view.keys = [false; 4];
                             view.taps = [false; 4];
                             view.drag = [0; 2];
                             view.mouse_buttons = [false; 2];
-                        }
-                        if status.tutorial_message != view.tutorial_message.request() {
-                            view.tutorial_message = crate::prompt::State::default();
-                            if let Some(message) = status.tutorial_message.clone() {
-                                view.tutorial_message.submit(message);
-                            }
                         }
                         view.auction_notice.update(status.auction_notice.clone());
                         if let Some(planning) = &mut view.planning {

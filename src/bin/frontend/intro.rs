@@ -1114,7 +1114,6 @@ struct Inspection {
     card_input: crate::card_panel::Input,
     card_selection: Option<(i32, i32)>,
     prompts: crate::prompt::State,
-    tutorial_message: crate::prompt::State,
     event_list: crate::event_list::View,
     stats_panel: crate::stats_panel::View,
     market_share_panel: crate::market_share_panel::View,
@@ -1953,7 +1952,7 @@ impl Intro {
             gates.modal = view.options_visible()
                 || view.save_visible()
                 || view.settings_visible()
-                || view.prompts.request().is_some()
+                || view.prompts.blocks_controls()
                 || view.prompt_reply.is_some()
                 || view.auction_visible()
                 || view.stats_requested

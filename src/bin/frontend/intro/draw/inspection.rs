@@ -824,20 +824,6 @@ impl Intro {
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, &panel);
                 }
-                if view.prompts.request().is_none()
-                    && view.tutorial_message.request().is_some()
-                    && let Some(menu) = &self.menu
-                {
-                    let panel = menu.prompt_assets().prepare_message_positioned(
-                        &self.renderer,
-                        &view.tutorial_message,
-                        view.live_status.as_ref().map_or([0.; 2], |status| {
-                            status.tutorial_interaction.prompt_offset()
-                        }),
-                    )?;
-                    self.renderer
-                        .draw_overlay(&self.color_view, &self.depth_view, &panel);
-                }
             }
             if view.options_visible() {
                 if view.save_visible() {

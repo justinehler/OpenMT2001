@@ -74,7 +74,7 @@ use openmt2001::{
 };
 use std::{fs, path::Path};
 
-/// A single original Interface.CreatePrompt request.
+/// A single original modal request, including script messages and prompts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub script: Option<ScriptText>,
@@ -278,6 +278,28 @@ impl State {
     }
     pub fn request(&self) -> Option<Request> {
         self.head.and_then(|i| self.slots[i].request.clone())
+    }
+    /// Tutorial messages leave controls and picking to the independent script gates.
+    pub fn blocks_controls(&self) -> bool {
+        self.request().is_some_and(|r| {
+            !(r.script.is_some_and(|s| !s.timeout) && r.dialog.is_some_and(|d| d.button_count == 0))
+        })
+    }
+    /// Apply script closes at their position among newly created requests.
+    pub fn apply_requests(&mut self, requests: Vec<Request>, closes: &[usize]) {
+        let mut closes = closes.iter().copied().peekable();
+        let count = requests.len();
+        for (index, request) in requests.into_iter().enumerate() {
+            while closes.peek() == Some(&index) {
+                self.dismiss_with(|_, _| {});
+                closes.next();
+            }
+            self.submit(request);
+        }
+        while closes.peek() == Some(&count) {
+            self.dismiss_with(|_, _| {});
+            closes.next();
+        }
     }
     /// Original429b50 reuses the first free slot. A full queue overwrites the
     /// last-created request; return that replaced payload for host diagnostics.
@@ -628,15 +650,15 @@ mod modal_update_tests {
         for tutorial in [true, false] {
             let mut state = State::default();
             state.advance_to(0);
-            let request = crate::live_host::prompt_request(&arguments, tutorial).unwrap();
+            let request = crate::live_host::script_request(&arguments, tutorial, true).unwrap();
             state.submit(request);
-            let callbacks = state.advance_to(1002);
+            assert!(state.advance_to(1002).is_empty());
             if tutorial {
-                assert!(callbacks.is_empty());
-                assert_eq!(state.begin_dismiss(), Some(1));
-            } else {
-                assert_eq!(callbacks, vec![1]);
+                assert!(state.take_dialog_replies().is_empty());
+                state.dialog_event1([false; 2]);
+                state.dialog_event1([true, false]);
             }
+            assert_eq!(state.take_dialog_replies()[0].context, 1);
             assert!(state.request().is_some());
             state.finish_dismiss(vec![]);
             assert!(state.request().is_none());
@@ -2333,5 +2355,222 @@ mod desktop_quit_assets_tests {
                 crate::capture_test::capture_standalone(&renderer, &panel, file.to_str().unwrap());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod script_message_tests {
+    use super::*;
+    use openmt2001::{
+        level_script::Command,
+        lua4::{Runtime, Value},
+    };
+
+    fn request(context: u32, tutorial: bool, button: bool) -> Request {
+        crate::live_host::script_request(
+            &[
+                Value::Number(1.),
+                Value::Number(2.),
+                Value::Number(f64::from(context)),
+                Value::Number(-23.),
+            ],
+            tutorial,
+            button,
+        )
+        .unwrap()
+    }
+    fn record(
+        hooks: &mut crate::fresh_city::Hooks,
+        id: u32,
+        arguments: &[Value],
+    ) -> Result<Option<f64>, String> {
+        let command = match id {
+            5 => Command::Prompt,
+            724 => Command::TutorialMessage,
+            _ => return Ok(None),
+        };
+        openmt2001::level_script::Hooks::command(hooks, command, arguments)?;
+        Ok(None)
+    }
+
+    #[test]
+    fn script_message_mixed_lua_order_and_four_record_reuse() {
+        let mut vm = Runtime::new().unwrap();
+        vm.register_coerced("Message", 724, "ppnn").unwrap();
+        vm.register_coerced("Prompt", 5, "ppnn").unwrap();
+        let mut hooks = crate::fresh_city::Hooks::new();
+        vm.execute("queue", b"Message(1,2,11,-23); Prompt(1,2,12); Message(1,2,13); Prompt(1,2,14); Message(1,2,15)",
+            &mut |id, args| record(&mut hooks, id, args)).unwrap();
+        let mut state = State::default();
+        for (command, args) in &hooks.commands {
+            state.submit(
+                crate::live_host::script_request(args, false, matches!(command, Command::Prompt))
+                    .unwrap(),
+            );
+        }
+        for (context, count) in [(11, 0), (12, 1), (13, 0), (15, 0)] {
+            let current = state.request().unwrap();
+            assert_eq!(
+                (
+                    current.dialog.unwrap().context,
+                    current.dialog.unwrap().button_count
+                ),
+                (context, count)
+            );
+            assert_eq!(hooks.script_prompt().unwrap().dismissal_id, context);
+            if count == 1 {
+                assert_eq!(current.dialog.unwrap().buttons[0], 1707);
+            }
+            state.finish_dismiss(vec![]);
+            hooks.close_script_prompt(false);
+        }
+        assert!(state.request().is_none());
+        assert!(hooks.script_prompt().is_none());
+    }
+
+    #[test]
+    fn script_message_integer_value_is_independent_of_continuation() {
+        let current = request(77, false, false);
+        let rows = vec![
+            (0..224).collect(),
+            b"Value %d".iter().map(|b| b - 32).collect(),
+            b"Body %d".iter().map(|b| b - 32).collect(),
+        ];
+        let encode = |s: &[u8]| s.iter().map(|b| b - 32).collect::<Vec<_>>();
+        assert_eq!(
+            script_field(&current, 0, &rows).unwrap(),
+            Some(vec![encode(b"Value -23")])
+        );
+        assert_eq!(
+            script_field(&current, 1, &rows).unwrap(),
+            Some(vec![encode(b"Body -23")])
+        );
+        assert_eq!(current.dialog.unwrap().context, 77);
+    }
+
+    #[test]
+    fn script_message_timeout_and_keys_deliver_one_continuation() {
+        for key in [None, Some(0), Some(1)] {
+            let mut state = State::default();
+            state.advance_to(0);
+            state.submit(request(77, false, false));
+            state.dialog_button(0);
+            assert!(state.take_dialog_replies().is_empty(), "no mouse button");
+            if let Some(key) = key {
+                let mut edges = [false; 2];
+                edges[key] = true;
+                state.dialog_event1(edges);
+                assert!(state.take_dialog_replies().is_empty(), "first event arms");
+                state.dialog_event1(edges);
+            } else {
+                state.advance_to(1000);
+                assert!(state.take_dialog_replies().is_empty());
+                state.advance_to(1001);
+            }
+            let replies = state.take_dialog_replies();
+            assert_eq!(replies.len(), 1);
+            assert_eq!(
+                (replies[0].context, replies[0].button),
+                (77, key.unwrap_or(0) as u32)
+            );
+            state.advance_to(2002);
+            state.dialog_event1([true, true]);
+            assert!(
+                state.take_dialog_replies().is_empty(),
+                "callback is pending"
+            );
+            let mut vm = Runtime::new().unwrap();
+            vm.execute("continuation", b"calls=0; context=0; function CATCHEVENT_InterfacePromptDismiss(a) calls=calls+1; context=a end; function Count() return calls end; function Context() return context end", &mut |_,_| Ok(None)).unwrap();
+            for reply in replies {
+                vm.call(
+                    "CATCHEVENT_InterfacePromptDismiss",
+                    &[f64::from(reply.context)],
+                    &mut |_, _| Ok(None),
+                )
+                .unwrap();
+            }
+            state.finish_dismiss(vec![]);
+            assert_eq!(
+                vm.call_number("Count", &[], &mut |_, _| Ok(None)).unwrap(),
+                1.
+            );
+            assert_eq!(
+                vm.call_number("Context", &[], &mut |_, _| Ok(None))
+                    .unwrap(),
+                77.
+            );
+            assert!(state.request().is_none());
+        }
+    }
+
+    #[test]
+    fn script_message_tutorial_closes_after_successor_admission() {
+        let mut state = State::default();
+        state.advance_to(0);
+        state.submit(request(11, true, false));
+        assert!(!state.blocks_controls());
+        state.advance_to(100_000);
+        assert!(state.take_dialog_replies().is_empty());
+        // The callback runs while all four records are still occupied.
+        for context in 12..=14 {
+            state.submit(request(context, true, true));
+        }
+        state.apply_requests(vec![request(15, true, false)], &[1]);
+        for context in [12, 13, 15] {
+            assert_eq!(state.request().unwrap().dismissal_id, context);
+            state.finish_dismiss(vec![]);
+        }
+        assert!(state.request().is_none());
+        state.submit(request(16, false, false));
+        assert!(
+            state.blocks_controls(),
+            "ordinary messages use modal admission"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires original v1.4 executable and shipped tutorial Lua"]
+    fn original_script_message_shipped_tutorial_call() {
+        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+        let mut vm = Runtime::new().unwrap();
+        let _bindings = openmt2001::level_script::Bindings::register(&mut vm, &image).unwrap();
+        vm.execute("tutorial globals", b"Tweaks={}", &mut |_, _| Ok(None))
+            .unwrap();
+        let script = openmt2001::fixtures::path("DEFAULT_SETTINGS")
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("TUTORIAL2/hub.lua");
+        let mut hooks = crate::fresh_city::Hooks::new();
+        vm.execute(
+            "shipped tutorial",
+            &fs::read(script).unwrap(),
+            &mut |id, args| record(&mut hooks, id, args),
+        )
+        .unwrap();
+        vm.call("CreatePrompt", &[4.], &mut |id, args| {
+            record(&mut hooks, id, args)
+        })
+        .unwrap();
+        let (command, args) = &hooks.commands[0];
+        assert!(matches!(command, Command::TutorialMessage));
+        let current = crate::live_host::script_request(args, true, false).unwrap();
+        assert_eq!(
+            (current.dialog.unwrap().button_count, current.dismissal_id),
+            (0, 5)
+        );
+        assert!(!current.dialog.unwrap().timeout);
+        assert_eq!(current.body, current.title + 4);
+        assert_eq!(current.script.as_ref().unwrap().format_value, 0);
+        let mut state = State::default();
+        state.advance_to(0);
+        state.submit(current);
+        state.advance_to(1002);
+        assert!(state.take_dialog_replies().is_empty());
+        state.dialog_event1([false; 2]);
+        state.dialog_event1([false, true]);
+        assert_eq!(state.take_dialog_replies()[0].context, 5);
     }
 }
