@@ -32,6 +32,7 @@ pub struct Status {
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
+    pub chat: Option<openmt2001::network::chat::View>,
     pub market_share: Option<crate::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
     pub result_review: Option<ResultReview>,
@@ -1502,6 +1503,10 @@ impl Host {
             demolition_points: session.demolition_points.clone(),
             stats,
             comparison: self.comparison.as_ref().map(|state| state.snapshot.clone()),
+            chat: session
+                .connected
+                .as_ref()
+                .and_then(|c| c.worker.chat_view()),
             market_share: self.market_share.snapshot.clone(),
             result_request: self.result_request,
             result_review: self.result_review(&session.catalog),
@@ -3037,6 +3042,9 @@ impl Host {
         self.begin_presentation(session)?;
         self.event_list_opening = false;
         self.interface_ticks = self.interface_ticks.wrapping_add(1);
+        if let Some(connection) = &session.connected {
+            connection.worker.tick_chat();
+        }
         session.advance_interface_tick(
             self.policy.scheduler.iterations,
             self.policy.calendar.suppress_rollover_query,

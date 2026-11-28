@@ -159,6 +159,8 @@ pub struct RosterPanel {
 }
 /// Shared original roster art, with route-specific controls and per-row records.
 pub struct Presentation<'a> {
+    /// Connected lobby chat: the retained lines and the current input text.
+    pub chat: Option<(&'a openmt2001::network::chat::View, &'a [u8])>,
     /// None for offline Skirmish; network authority determines the ready caption.
     pub network_host: Option<bool>,
     pub visible: bool,
@@ -174,6 +176,9 @@ fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] > b[0] && p[0] < b[2] && p[1] >= b[1] && p[1] <= b[3]
 }
 impl RosterPanel {
+    pub fn chat_bounds(&self) -> Result<[f32; 4], String> {
+        self.bounds("CHAT_TYPEAREA")
+    }
     pub(crate) fn apply_board(
         &mut self,
         board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
@@ -401,6 +406,7 @@ impl RosterPanel {
             metadata,
             encode,
             Presentation {
+                chat: None,
                 network_host: None,
                 visible: state.visible,
                 busy: state.busy,
@@ -646,11 +652,34 @@ impl RosterPanel {
                     &mut pages[0],
                     &mut shapes,
                     &self.fonts[0].tab,
-                    &[],
+                    &encode(view.chat.map_or(&[], |(_, input)| input))?,
                     chat_input,
                     false,
                     true,
                 )?;
+            }
+            if let Some((chat, _)) = view.chat {
+                // Lines stack upward from the input bar in the sender's colour.
+                let area = self.bounds("CHAT_BACKING")?;
+                let mut bottom = chat_input[1] - 2.;
+                for line in chat.lines.iter().rev() {
+                    let top = bottom - 14.;
+                    if top < area[1] {
+                        break;
+                    }
+                    let color = line.color(&std::array::from_fn(|i| {
+                        self.characters.get(i).map_or(0xffffff, |c| c.color)
+                    }));
+                    ui::text_fit(
+                        &mut pages[0],
+                        &self.fonts[0].tab,
+                        &encode(&line.text)?,
+                        [area[0] + 4., top, area[2] - 4., bottom],
+                        false,
+                        color,
+                    )?;
+                    bottom = top;
+                }
             }
             for (i, p) in view.rows.iter().enumerate() {
                 let row = i + 1;
@@ -861,6 +890,7 @@ mod tests {
                 [&[], &[]],
                 |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
                 Presentation {
+                    chat: None,
                     network_host: None,
                     visible: true,
                     busy: false,
@@ -996,6 +1026,7 @@ mod tests {
                         [&[], &[]],
                         |b| Ok(crate::load::ascii(&String::from_utf8_lossy(b))),
                         Presentation {
+                            chat: None,
                             network_host: Some(host),
                             visible: true,
                             busy: false,

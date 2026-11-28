@@ -657,6 +657,21 @@ impl Intro {
                     self.renderer
                         .draw_overlay(&self.color_view, &self.depth_view, panel);
                 }
+                // Connected chat: retained lines along the bottom edge of the 3D view,
+                // and the Chat panel while it is open.
+                if let (Some(chat), Some(menu)) = (
+                    view.live_status.as_ref().and_then(|s| s.chat.as_ref()),
+                    &self.menu,
+                ) && (view.chat_panel.open || !chat.lines.is_empty())
+                {
+                    let panel = menu.comparison_assets().prepare_chat(
+                        &self.renderer,
+                        chat,
+                        &view.chat_panel,
+                    )?;
+                    self.renderer
+                        .draw_overlay(&self.color_view, &self.depth_view, &panel);
+                }
                 let icon = if view.navigation_pressed && view.over_navigation() {
                     2
                 } else if view.over_navigation() {

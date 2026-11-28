@@ -967,6 +967,7 @@ struct DispatchProbe {
     epoch: Instant,
 }
 enum FreshRequest {
+    Chat(Vec<u8>, openmt2001::network::chat::Recipients),
     #[cfg(test)]
     DispatchProbe(mpsc::Sender<DispatchProbe>),
     CameraTurn {
@@ -1160,6 +1161,7 @@ struct Inspection {
     property_pending: Option<PendingPropertyInspection>,
     rights_pending: Option<PendingRightsInspection>,
     comparison: Option<crate::comparison::View>,
+    chat_panel: crate::chat_panel::Panel,
     trees: Option<crate::tree_scene::Layer>,
     people: Option<crate::people_scene::Layer>,
     people_pending: Option<mpsc::Receiver<Result<crate::people_scene::Layer, String>>>,
@@ -2017,6 +2019,7 @@ impl Intro {
             {
                 gates.text_entry = graph.chat_guard57e794_plus345()? != 0;
             }
+            gates.text_entry |= view.chat_panel.open;
             use crate::live_host::process_runtime::Byte;
             gates.suppressed = self
                 .assets
@@ -2090,6 +2093,10 @@ impl Intro {
                     .any(|group| graph.group(group).key_target.is_some());
             }
         }
+        gates.text_entry |= self
+            .inspection
+            .as_ref()
+            .is_some_and(|view| view.chat_panel.open);
         if let Some(action) = self.camera_keys.sample(sample, gates)
             && let Some(view) = &mut self.inspection
         {

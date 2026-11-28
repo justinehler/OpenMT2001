@@ -5,7 +5,7 @@
 //! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
 //! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe,
 //! 10=validated startup content, 11=start commit, 12=start content failure,
-//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected, 17=barrier, 18=state sample.
+//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected, 17=barrier, 18=state sample, 19=chat (payload sender, recipient mask, text).
 //! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
@@ -53,6 +53,7 @@ impl Decoder {
 
 fn validate(message: &Message) -> Result<()> {
     match message {
+        Message::Chat(packet) => packet.validate()?,
         Message::Barrier { sender, .. } => {
             if usize::from(*sender) >= SLOTS {
                 return Err(Error::Peer);
@@ -118,6 +119,12 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
     validate(&frame.message)?;
     let mut payload = Vec::new();
     let tag: u16 = match &frame.message {
+        Message::Chat(packet) => {
+            payload.extend_from_slice(&packet.sender.to_le_bytes());
+            payload.push(packet.recipients);
+            blob(&mut payload, &packet.text);
+            19
+        }
         Message::Lobby(snapshot) => {
             let settings = &snapshot.settings;
             blob(&mut payload, &settings.name);
@@ -367,6 +374,11 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
         at: 0,
     };
     let message = match tag {
+        19 => Message::Chat(super::chat::Packet {
+            sender: reader.word()?,
+            recipients: reader.byte()?,
+            text: reader.blob()?,
+        }),
         13 => Message::CommandRequest(super::commands::Request {
             serial: u64::from_le_bytes(reader.take()?),
             owner: reader.byte()?,

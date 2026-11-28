@@ -48,6 +48,7 @@ enum Target {
     Setup(setup::Action),
     Lobby(usize),
     Difficulty(usize),
+    Chat,
 }
 pub struct Route {
     pub request: Option<crate::intro::connected_start::Request>,
@@ -73,6 +74,9 @@ pub struct Route {
     keyboard: Option<Target>,
     press: Option<Target>,
     status: String,
+    /// The lobby's Chat Window input (0x4a0ff0). It is the lobby's only text field, so
+    /// typing always goes here; Enter sends it unless a keyboard-selected button is active.
+    chat_input: Vec<u8>,
 }
 fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]
@@ -127,6 +131,7 @@ impl Route {
             keyboard: None,
             press: None,
             status: String::new(),
+            chat_input: vec![],
         })
     }
     pub fn open(&mut self, catalog: Catalog, name: &[u8], token: usize) {
@@ -137,6 +142,7 @@ impl Route {
         self.request = None;
         self.busy = false;
         self.view = None;
+        self.chat_input.clear();
         self.catalog = catalog;
         self.name = name.to_vec();
         self.token = token as i8;
@@ -285,6 +291,9 @@ impl Route {
                 .map(Target::Setup),
             Page::Waiting => inside([55., 395., 190., 430.], p).then_some(Target::Browser(5)),
             Page::Lobby => {
+                if inside(self.roster_panel.chat_bounds().ok()?, p) {
+                    return Some(Target::Chat);
+                }
                 for id in 0..26 {
                     if self.enabled(id) && inside(self.roster_panel.action_bounds(id).ok()?, p) {
                         return Some(Target::Lobby(id));
@@ -457,6 +466,15 @@ impl Route {
         Ok(())
     }
     pub fn activate_keyboard(&mut self) {
+        if self.page == Page::Lobby && matches!(self.keyboard, None | Some(Target::Chat)) {
+            let text = std::mem::take(&mut self.chat_input);
+            if let Some(worker) = &self.worker
+                && let Err(error) = worker.submit_chat(text, None)
+            {
+                self.notice = Some(error);
+            }
+            return;
+        }
         self.activate(self.keyboard, None);
     }
     pub fn navigate(&mut self, delta: i32) {
@@ -491,6 +509,7 @@ impl Route {
                             .map(Target::Difficulty),
                     );
                 }
+                targets.push(Target::Chat);
                 targets
             }
         };
@@ -507,6 +526,7 @@ impl Route {
         match self.page {
             Page::Browser => self.browser.editing && self.worker.is_none(),
             Page::Setup => self.setup.as_ref().is_some_and(|s| s.name_focused),
+            Page::Lobby => true,
             _ => false,
         }
     }
@@ -514,7 +534,14 @@ impl Route {
         if self.notice.is_some() {
             return;
         }
-        if self.page == Page::Setup {
+        if self.page == Page::Lobby {
+            self.chat_input.extend(
+                text.chars()
+                    .filter_map(|c| u8::try_from(c as u32).ok())
+                    .filter(|&b| b >= 32 && b != 127)
+                    .take(50usize.saturating_sub(self.chat_input.len())),
+            );
+        } else if self.page == Page::Setup {
             if let Some(s) = &mut self.setup {
                 s.text(text);
             }
@@ -528,6 +555,10 @@ impl Route {
         }
     }
     pub fn erase(&mut self) {
+        if self.page == Page::Lobby {
+            self.chat_input.pop();
+            return;
+        }
         if self.page == Page::Setup {
             if let Some(s) = &mut self.setup {
                 s.backspace();
@@ -560,6 +591,7 @@ impl Route {
         }
         self.request = None;
         self.busy = false;
+        self.chat_input.clear();
         self.worker = None;
         self.view = None;
         self.keyboard = None;
@@ -629,6 +661,7 @@ impl Route {
                 Some(Target::Lobby(id)) => Some(id),
                 _ => None,
             };
+            let chat = self.worker.as_ref().and_then(Handle::chat_view);
             return self.roster_panel.draw_rows(
                 renderer,
                 selected,
@@ -636,6 +669,7 @@ impl Route {
                 [&title, &difficulty],
                 |b| encode(&self.map, b),
                 roster::Presentation {
+                    chat: chat.as_ref().map(|c| (c, self.chat_input.as_slice())),
                     network_host: Some(view.host),
                     visible: true,
                     busy: false,
@@ -724,5 +758,86 @@ mod tests {
         b.invalidate();
         assert!(b.result.is_none());
         assert!(!b.selected);
+    }
+    #[test]
+    #[ignore = "original PE fixture for the inert setup panel's options"]
+    fn lobby_chat_input_holds_typed_text_and_enter_sends_one_echo() {
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let options = openmt2001::skirmish::Options::from_pe(&image).unwrap();
+        let mut route = Route {
+            request: None,
+            busy: false,
+            cancellation: None,
+            visible: true,
+            notice: None,
+            page: Page::Browser,
+            browser: Browser::default(),
+            setup: None,
+            setup_panel: setup::SetupPanel::inert(options),
+            roster_panel: roster::RosterPanel::inert(vec![vec![255]; 1800]),
+            worker: None,
+            view: None,
+            catalog: Catalog::default(),
+            scripts: PathBuf::new(),
+            executable: exe.clone(),
+            strings: vec![vec![]; 2300],
+            map: (0..95).collect(),
+            token_names: std::array::from_fn(|i| vec![b'A' + i as u8]),
+            name: b"Host".to_vec(),
+            token: 1,
+            keyboard: None,
+            press: None,
+            status: String::new(),
+            chat_input: vec![],
+        };
+        route.worker = Some(
+            Handle::open(Open::Host {
+                address: "127.0.0.1:0".parse().unwrap(),
+                snapshot: Snapshot::host(
+                    Settings {
+                        name: b"Game".to_vec(),
+                        level: 300001,
+                        parameter_bits: 2f32.to_bits(),
+                        difficulty: 0,
+                        map: b"default".to_vec(),
+                    },
+                    b"Host".to_vec(),
+                    1,
+                )
+                .unwrap(),
+                token_names: route.token_names.clone(),
+            })
+            .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while route.page != Page::Lobby {
+            assert!(std::time::Instant::now() < deadline, "lobby not opened");
+            route.poll();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(route.is_editing());
+        route.text("hi there\u{7}");
+        route.erase();
+        route.text("e!");
+        assert_eq!(route.chat_input, b"hi there!");
+        route.activate_keyboard();
+        assert!(route.chat_input.is_empty());
+        let chat = |route: &Route| route.worker.as_ref().and_then(Handle::chat_view).unwrap();
+        while chat(&route).lines.is_empty() {
+            assert!(std::time::Instant::now() < deadline, "chat echo missing");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // Empty Enter sends nothing; the one echo is named from the admitted row.
+        route.activate_keyboard();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let lines = chat(&route).lines;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            (lines[0].text.as_slice(), lines[0].token),
+            (&b"Host: hi there!"[..], 1)
+        );
+        route.back();
+        assert!(route.chat_input.is_empty());
     }
 }

@@ -10,6 +10,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+pub mod chat;
+pub mod chat_ring;
 pub mod codec;
 pub mod commands;
 pub mod lobby;
@@ -197,6 +199,11 @@ impl State {
             | Message::CommandRejected { .. }
             | Message::Barrier { .. }
             | Message::StateSample(_) => self.binding(binding.ok_or(Error::World)?)?,
+            Message::Chat(_) => {
+                if !matches!(self.phase, Phase::Lobby | Phase::Starting | Phase::Playing) {
+                    return Err(Error::Phase);
+                }
+            }
             Message::Hello | Message::Probe | Message::Welcome { .. } => return Err(Error::Tag),
         }
         let peer = self.peers[usize::from(connection.slot)]
@@ -210,7 +217,11 @@ impl State {
             frame.message,
             Message::LobbyRequest(_) | Message::StartReady(_) | Message::CommandRequest(_)
         ) || (matches!(frame.message, Message::StartFailure) && !peer.authority);
-        if peer.identity != connection.identity || (!synchronization && peer.authority == request) {
+        if peer.identity != connection.identity
+            || (!synchronization
+                && !matches!(frame.message, Message::Chat(_))
+                && peer.authority == request)
+        {
             return Err(Error::Peer);
         }
         peer.decoder.accept(&frame)?;
@@ -427,6 +438,7 @@ pub struct Transfer {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    Chat(chat::Packet),
     /// Admission only: zero session, zero sequence, no payload or chosen role.
     Hello,
     /// Read-only admission: returns metadata without allocating a player peer.

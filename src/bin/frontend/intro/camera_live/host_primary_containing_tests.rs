@@ -95,6 +95,7 @@ pub(crate) fn inspection_products(
         property_pending: None,
         rights_pending: None,
         comparison: None,
+        chat_panel: crate::chat_panel::Panel::default(),
         trees: None,
         people: None,
         people_pending: None,

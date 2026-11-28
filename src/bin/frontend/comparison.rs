@@ -259,6 +259,7 @@ pub struct View {
     dirty: bool,
     up: [[bool; 6]; 9],
     live: bool,
+    chat_pressed: Option<usize>,
 }
 impl View {
     pub fn new(data: Data) -> Self {
@@ -271,6 +272,7 @@ impl View {
             dirty: true,
             up: [[true; 6]; 9],
             live: false,
+            chat_pressed: None,
         }
     }
     /// Keep fresh data and enabled metrics; retain only valid user choices.
@@ -312,6 +314,20 @@ impl View {
             self.dirty = true;
         }
     }
+    pub fn chat_mouse(
+        &mut self,
+        assets: &Assets,
+        point: Option<[i32; 2]>,
+        down: bool,
+    ) -> Option<usize> {
+        let player = point.and_then(|p| assets.player_at(self, p));
+        if down {
+            self.chat_pressed = player;
+            None
+        } else {
+            self.chat_pressed.take().filter(|p| Some(*p) == player)
+        }
+    }
     pub fn mouse(&mut self, down: bool) -> Option<usize> {
         let mut activated = None;
         if down {
@@ -331,6 +347,7 @@ impl View {
         activated
     }
     pub fn cancel_press(&mut self) {
+        self.chat_pressed = None;
         self.pressed = None;
         self.hover = None;
         self.dirty = true;
@@ -420,6 +437,7 @@ pub struct Assets {
     fonts: Vec<crate::ui::Surface>,
     tab: Vec<u8>,
     strings: Vec<Vec<u8>>,
+    chat_art: crate::chat_panel::Art,
     colors: [u32; 10],
     icons: [usize; 10],
 }
@@ -521,9 +539,166 @@ impl Assets {
             tab: std::fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
                 .map_err(|e| e.to_string())?,
             strings: strings.iter().map(|s| s.to_vec()).collect(),
+            chat_art: crate::chat_panel::Art::load(index, archive, body)?,
             colors,
             icons,
         })
+    }
+    pub fn chat_layout(&self) -> &crate::chat_panel::Layout {
+        &self.chat_art.layout
+    }
+    pub fn player_at(&self, view: &View, point: [i32; 2]) -> Option<usize> {
+        let [x, y] = point.map(|v| v as f32 * 0.5);
+        let values = view.data.values(view.state.mode);
+        let amounts: Vec<_> = values.iter().map(|r| r.1).collect();
+        let order = order(&amounts);
+        for (slot, &row) in order.iter().enumerate() {
+            let [l, t, r, b] = self.regions[usize::from(view.state.open)][59 + slot];
+            if x >= l && x <= r && y >= t && y <= b {
+                return Some(values[row].0);
+            }
+        }
+        None
+    }
+    pub fn prepare_chat(
+        &self,
+        renderer: &openmt2001::render::Renderer,
+        chat: &openmt2001::network::chat::View,
+        panel: &crate::chat_panel::Panel,
+    ) -> Result<openmt2001::render::PreparedScene, String> {
+        let surfaces = self.chat_surfaces(chat, panel)?;
+        renderer.prepare(
+            &surfaces
+                .iter()
+                .map(crate::ui::Surface::draw)
+                .collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+    fn chat_surfaces(
+        &self,
+        chat: &openmt2001::network::chat::View,
+        panel: &crate::chat_panel::Panel,
+    ) -> Result<Vec<crate::ui::Surface>, String> {
+        use crate::ui::{self, Surface};
+        let mut fonts = self.fonts.clone();
+        let mut shapes = Surface::solid();
+        let mut surfaces = Vec::new();
+        let glyphs = |text: &[u8]| {
+            text.iter()
+                .map(|b| b.saturating_sub(32))
+                .collect::<Vec<_>>()
+        };
+        let mut bottom = 478.;
+        for line in chat.lines.iter().rev() {
+            let color = line.color(&self.colors);
+            ui::text_fit(
+                &mut fonts,
+                &self.tab,
+                &glyphs(&line.text),
+                [194., bottom - 14., 636., bottom],
+                false,
+                color,
+            )?;
+            bottom -= 14.;
+        }
+        if panel.open {
+            let layout = &self.chat_art.layout;
+            surfaces.extend(self.chat_art.base.clone());
+            shapes.rect(layout.backing, [self.chat_art.body; 4]);
+            shapes.rect(
+                layout.title,
+                [0xff909090, 0xff909090, 0x80909090, 0x80909090],
+            );
+            shapes.rect(layout.to, [0xff1f2f75; 4]);
+            shapes.rect(layout.input, [0xff1f2f75; 4]);
+            ui::text_fit(
+                &mut fonts,
+                &self.tab,
+                self.strings
+                    .get(1481)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&glyphs(b"Chat")),
+                layout.title,
+                false,
+                0xffffffff,
+            )?;
+            ui::text_fit(
+                &mut fonts,
+                &self.tab,
+                self.strings
+                    .get(1482)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&glyphs(b"To:")),
+                layout.to,
+                false,
+                0xffffffff,
+            )?;
+            for (&bounds, row) in layout.icons.iter().zip(crate::chat_panel::other_rows(chat)) {
+                let token = chat.snapshot.rows[row].player.token;
+                if let Ok(token) = usize::try_from(token)
+                    && let Some(&texture) = self.icons.get(token)
+                {
+                    let mut icon = self.generic[texture].clone();
+                    let [l, t, r, b] = bounds;
+                    let color = if panel.recipients.0[row] {
+                        0xffffffff
+                    } else {
+                        0x607f7f7f
+                    };
+                    icon.quad(
+                        [[l, t], [l, b], [r, b], [r, t]],
+                        [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                        [color; 4],
+                    );
+                    surfaces.push(icon);
+                }
+            }
+            for (id, bounds, color) in [
+                (1483, layout.all, 0xffff8800),
+                (1761, layout.close, 0xffb20c0c),
+            ] {
+                shapes.rect(bounds, [color; 4]);
+                ui::text_fit(
+                    &mut fonts,
+                    &self.tab,
+                    self.strings.get(id).map(Vec::as_slice).unwrap_or(&[]),
+                    bounds,
+                    false,
+                    0xffffffff,
+                )?;
+            }
+            ui::text_entry(
+                &mut fonts,
+                &mut shapes,
+                &self.tab,
+                &glyphs(&panel.input),
+                layout.input,
+                false,
+                true,
+            )?;
+        }
+        surfaces.insert(0, shapes);
+        surfaces.extend(fonts);
+        Ok(surfaces)
     }
     pub fn button_at(&self, state: &State, point: [i32; 2]) -> Option<usize> {
         let x = point[0] as f32 * 0.5;

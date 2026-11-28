@@ -145,6 +145,21 @@ fn synthetic_assets() -> Assets {
         fonts: vec![Surface::solid(); 2],
         tab,
         strings: vec![vec![]; 2245],
+        chat_art: crate::chat_panel::Art {
+            base: vec![],
+            body: 0xff000a4b,
+            layout: crate::chat_panel::Layout {
+                title: [4., 302., 250., 323.],
+                backing: [4., 302., 250., 388.],
+                to: [8., 330., 26., 346.],
+                input: [8., 354., 238., 380.],
+                all: [180., 327., 208., 349.],
+                close: [210., 327., 248., 349.],
+                icons: std::array::from_fn(|i| {
+                    [27. + i as f32 * 25., 329., 50. + i as f32 * 25., 347.]
+                }),
+            },
+        },
         colors: [0x009900; 10],
         icons: [0; 10],
     }
@@ -212,4 +227,66 @@ fn comparison_draw_retains_opaque_title_and_six_authored_bar_outlines() {
         .unwrap();
     assert!(surfaces.last().unwrap().vertices.is_empty());
     assert_eq!(surfaces[0].alpha, [255; 6]); // No translucent body when closed.
+}
+
+#[test]
+fn chat_lines_use_sender_colour_and_stack_up_from_city_bottom() {
+    use openmt2001::network::{chat, lobby};
+    let mut assets = synthetic_assets();
+    assets.colors[3] = 0xff0d00f1;
+    let snapshot = lobby::Snapshot::host(
+        lobby::Settings {
+            name: b"Session".to_vec(),
+            level: 300001,
+            parameter_bits: 10000f32.to_bits(),
+            difficulty: 0,
+            map: b"Map".to_vec(),
+        },
+        b"Host".to_vec(),
+        0,
+    )
+    .unwrap();
+    let chat = chat::View {
+        local_peer: 0,
+        snapshot,
+        lines: vec![
+            chat::Line {
+                row: 0,
+                token: 0,
+                text: b"Host: first".to_vec(),
+            },
+            chat::Line {
+                row: 1,
+                token: 3,
+                text: b"Blue: second".to_vec(),
+            },
+        ],
+    };
+    let out = assets
+        .chat_surfaces(&chat, &crate::chat_panel::Panel::default())
+        .unwrap();
+    let vertices: Vec<_> = out.iter().flat_map(|s| &s.vertices).collect();
+    let blue: Vec<_> = vertices
+        .iter()
+        .copied()
+        .filter(|v| {
+            (v[3] - 13. / 255.).abs() < 0.001 && v[4] == 0. && (v[5] - 241. / 255.).abs() < 0.001
+        })
+        .collect();
+    let green: Vec<_> = vertices
+        .iter()
+        .copied()
+        .filter(|v| v[3] == 0. && (v[4] - 153. / 255.).abs() < 0.001 && v[5] == 0.)
+        .collect();
+    assert!(!blue.is_empty() && !green.is_empty());
+    // Glyph quads sit on half-pixel centres, so each 14-pixel line band starts 0.5 early.
+    assert!(
+        blue.iter()
+            .all(|v| v[0] >= 193.5 && v[1] >= 463.5 && v[1] <= 478.)
+    );
+    assert!(
+        green
+            .iter()
+            .all(|v| v[0] >= 193.5 && v[1] >= 449.5 && v[1] < 463.5)
+    );
 }

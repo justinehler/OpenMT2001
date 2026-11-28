@@ -100,6 +100,25 @@ impl Intro {
                 }
                 return Ok(());
             }
+            if view.chat_panel.open {
+                match key {
+                    NamedKey::Escape => view.chat_panel.close(),
+                    NamedKey::Backspace => {
+                        view.chat_panel.input.pop();
+                    }
+                    NamedKey::Enter => {
+                        if let Some(chat) = view.live_status.as_ref().and_then(|s| s.chat.as_ref())
+                            && let Some((text, recipients)) = view.chat_panel.take_submission(chat)
+                            && let Some(sender) = &view._fresh_session
+                        {
+                            // A closed channel means the session already ended.
+                            let _ = sender.send(FreshRequest::Chat(text, recipients));
+                        }
+                    }
+                    _ => (),
+                }
+                return Ok(());
+            }
             if key == NamedKey::Escape
                 && view._fresh_session.is_some()
                 && view.planning.is_none()
@@ -169,6 +188,12 @@ impl Intro {
         Ok(())
     }
     pub fn inspection_text(&mut self, text: &str) {
+        if let Some(view) = &mut self.inspection
+            && view.chat_panel.open
+        {
+            view.chat_panel.text(text);
+            return;
+        }
         if let Some(view) = &mut self.inspection
             && view.options_visible()
             && view.save_visible()
@@ -818,6 +843,24 @@ impl Intro {
                         }
                     }
                 }
+                return;
+            }
+            if view.chat_panel.open {
+                if button == winit::event::MouseButton::Left
+                    && let (Some(menu), Some(chat)) = (
+                        &self.menu,
+                        view.live_status.as_ref().and_then(|s| s.chat.as_ref()),
+                    )
+                {
+                    view.chat_panel.mouse(
+                        view.pointer,
+                        pressed,
+                        menu.comparison_assets().chat_layout(),
+                        chat,
+                    );
+                }
+                view.mouse_buttons = [false; 2];
+                view.double_click.clear();
                 return;
             }
             let event_list_occupied =
@@ -1490,6 +1533,13 @@ impl Intro {
                 if view.pointer.is_some_and(|p| comparison.contains(p)) || comparison.pressed() {
                     if button == winit::event::MouseButton::Left {
                         let activated = comparison.mouse(pressed);
+                        if let Some(player) =
+                            comparison.chat_mouse(menu.comparison_assets(), view.pointer, pressed)
+                            && let Some(chat) =
+                                view.live_status.as_ref().and_then(|s| s.chat.as_ref())
+                        {
+                            view.chat_panel.select_player(player, chat);
+                        }
                         if matches!(activated, Some(1 | 2))
                             && let Some(sender) = &view._fresh_session
                         {

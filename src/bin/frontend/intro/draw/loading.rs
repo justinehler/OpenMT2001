@@ -308,6 +308,7 @@ impl Intro {
                         utility_report: crate::utility_report::View::default(),
                         property_pending: None,
                         rights_pending: None,
+                        chat_panel: crate::chat_panel::Panel::default(),
                         comparison: loaded.comparison.map(crate::comparison::View::new),
                         trees,
                         people,
