@@ -90,6 +90,23 @@ impl<'a> Input<'a> {
     }
 }
 
+/// Older extensions store process-owned pause bytes, Calendar.SetFrequency
+/// state/IDs and complete timer records here. Consume their unchanged layout,
+/// but keep the registrations and pause effects established by this load.
+/// Native 0x200/0x400 clock words are restored separately by the native reader;
+/// World reset clears timer accumulators rather than loading old timer records.
+fn skip_saved_dispatch(input: &mut Input<'_>) -> Result<(), String> {
+    input.take(9)?;
+    input.word()?; // Calendar.SetFrequency value
+    input.word()?; // calendar timer ID
+    input.word()?; // logic timer ID
+    let timers = input.blob()?;
+    if timers.len() % 20 != 0 || timers.len() > 1000 * 20 {
+        return Err("V2 timer pool size invalid".into());
+    }
+    Ok(())
+}
+
 /// Recover runtime data absent from tag10 without rewinding 45be80's movement
 /// fixup or retiring the actor allocations it just created. Saved model/frame/
 /// controller state is not recoverable from the native resident identity alone.
@@ -916,20 +933,9 @@ impl<'data> Session<'data> {
         for value in &mut self.population.properties.totals {
             *value = f32::from_bits(economy.word()?);
         }
-        self.world.pause.bytes.copy_from_slice(economy.take(9)?);
-        self.hooks.frequency.frequency = f32::from_bits(economy.word()?);
-        let calendar = economy.word()?;
-        let logic = economy.word()?;
-        self.hooks.frequency.calendar_timer = (calendar != u32::MAX).then_some(calendar as usize);
-        self.hooks.frequency.logic_timer = (logic != u32::MAX).then_some(logic as usize);
-        let timers = economy.blob()?;
-        if timers.len() % 20 != 0 || timers.len() > 1000 * 20 {
-            return Err("V2 timer pool size invalid".into());
-        }
-        self.hooks.timers = timers
-            .chunks_exact(20)
-            .map(|b| b.try_into().unwrap())
-            .collect();
+        // Native completion has already released reason0 ONCE. Never replace
+        // current process/load-script owners with those of the saved process.
+        skip_saved_dispatch(&mut economy)?;
         self.building_selection = [economy.word()?, economy.word()?];
         for value in &mut self.world.construction_components {
             *value = f32::from_bits(economy.word()?);
@@ -1036,11 +1042,15 @@ mod terms_test;
 mod resident_test;
 
 #[cfg(test)]
+#[path = "session_save_pause_test.rs"]
+mod pause_test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     #[ignore = "requires original game assets; owned Options save and cold Clock continuation"]
-    fn options_save_cold_load_preserves_independent_pause_owners() {
+    fn options_save_cold_load_retires_saved_pause_owners() {
         std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
             .spawn(|| {
@@ -1114,7 +1124,7 @@ mod tests {
                 // These real Session saves exercise serialization/restore and a fresh
                 // Host's actual registered logic/Clock. Camera/UI admission stays a
                 // separate native containing regression, not a synthetic capture.
-                for other in [None, Some(0usize), Some(1usize)] {
+                for other in [None, Some(0usize), Some(1usize), Some(3usize)] {
                     if let Some(reason) = other {
                         session
                             .world
@@ -1143,29 +1153,20 @@ mod tests {
                     assert!(host.options_save_allowed(&session.world.pause, &session.hooks.timers));
                     let save = SaveFile::parse(&bytes).unwrap();
                     let mut cold = Session::load_original(inputs(), policy(), &bytes).unwrap();
+                    crate::process_dispatch::native_load_completed(&mut cold).unwrap();
+                    let load_pause = cold.world.pause.clone();
+                    let load_timers = cold.hooks.timers.clone();
                     cold.restore_v2_extension_with_image(&save, &image).unwrap();
                     assert_eq!(cold.saved_cameras, Some(cameras));
-                    assert_eq!(cold.world.pause, expected_pause);
-                    assert_eq!(cold.hooks.timers, expected_timers);
+                    assert_eq!(cold.world.pause, load_pause);
+                    assert_eq!(cold.hooks.timers, load_timers);
+                    assert_eq!(cold.world.clock, session.world.clock);
                     let mut fresh = crate::live_host::Host::new(camera.eye);
                     fresh.set_running(true);
                     assert!(!fresh.options_save_allowed(&cold.world.pause, &cold.hooks.timers));
                     let tick = cold.world.clock.timing[0];
                     fresh.frame(&mut cold, &assets, 40);
                     assert!(fresh.failure.is_none(), "{:?}", fresh.failure);
-                    if let Some(reason) = other {
-                        assert_eq!(cold.world.clock.timing[0], tick);
-                        assert_eq!(cold.world.pause, expected_pause);
-                        cold.world
-                            .pause
-                            .unpause(reason, |c, _| {
-                                c.apply(&mut cold.hooks.timers);
-                                Ok(())
-                            })
-                            .unwrap();
-                        fresh.frame(&mut cold, &assets, 40);
-                        assert!(fresh.failure.is_none(), "{:?}", fresh.failure);
-                    }
                     assert!(
                         cold.world.clock.timing[0] > tick,
                         "cold logic must advance without opening/closing a new Options owner"
@@ -2158,6 +2159,8 @@ impl SaveProjection<'_> {
             .map_or((&self.city.pause, self.timers), |c| {
                 (&c.pause, c.timers.as_slice())
             });
+        // Keep record12's historical wire layout for existing readers. New
+        // loaders consume these process fields without reinstating old owners.
         economy.0.extend_from_slice(&pause.bytes);
         economy.word(self.frequency.frequency.to_bits());
         economy.word(self.frequency.calendar_timer.map_or(u32::MAX, |v| v as u32));
