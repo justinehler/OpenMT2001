@@ -635,10 +635,11 @@ fn loads_supplied_original_saves_into_sessions_inner() {
                     .unwrap()
                     .sections
                     .iter()
-                    .find(|section| section.tag == 0x400000)
+                    .find(|section| section.tag == 0x400)
                     .unwrap()
                     .offset
-                    + 8;
+                    + 8
+                    + 5 * 4;
                 let mut modal = priced_save.clone();
                 modal[mode_at..mode_at + 4].copy_from_slice(&2u32.to_le_bytes());
                 assert!(
@@ -1369,13 +1370,14 @@ fn loads_supplied_original_saves_into_sessions_inner() {
                 .unwrap()
                 .sections
                 .iter()
-                .find(|section| section.tag == 0x400000)
+                .find(|section| section.tag == 0x400)
                 .unwrap()
                 .offset
-                + 8;
+                + 8
+                + 5 * 4;
             mode2[mode_record..mode_record + 4].copy_from_slice(&2u32.to_le_bytes());
             let mode2_session = load(&mode2).unwrap();
-            assert_eq!(mode2_session.saved_game_mode, Some(2));
+            assert_eq!(mode2_session.saved_logic_mode, Some(2));
             assert_eq!(
                 mode2_session.world.city.auction.controller.reference,
                 0x7f4758

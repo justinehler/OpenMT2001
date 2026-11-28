@@ -104,6 +104,9 @@ fn run(era: bool) {
         let policy = || Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 284] };
         let assets=CommandAssets{image:&image,board:&board,file:&file};
         let mut source=Session::initialize(inputs(),policy()).unwrap();
+        assert_eq!(source.session_option_word, 0);
+        // Exercise a raw Sandbox option independently of this fixture's level and logic mode.
+        source.session_option_word = 2;
         // Controlled one-step midnight. Literal expected words below are
         // independent of the encoder; this is not a natural midnight claim.
         source.world.clock.calendar=if era{[23,9,0,239,9]}else{[23,0,0,23,0]};
@@ -155,6 +158,7 @@ fn run(era: bool) {
         }
 
         let bytes=captured.unwrap();let saved=SaveFile::parse(&bytes).unwrap();
+        assert_eq!(saved.session_option_word().unwrap(), 2);
         assert_eq!(saved.clock().unwrap().calendar,if era{[0,0,1,239,10]}else{[0,1,0,23,1]});
         let ext=extension::Extension::parse(&saved).unwrap().unwrap();
         let economy=ext.required(12).unwrap();
@@ -166,8 +170,12 @@ fn run(era: bool) {
         // Later Session state cannot enter the callback's completed owned bytes.
         source.hooks.utilities.totals=[91.,92.,93.,94.];source.allocation_next=0x2f000000;
         let mut loaded=Session::load_original(inputs(),policy(),&bytes).unwrap();
+        assert_eq!(loaded.session_option_word, 2);
+        assert_eq!(loaded.saved_logic_mode, Some(1));
         let native_allocation_next=loaded.allocation_next;
         loaded.restore_v2_extension_with_image(&saved,&image).unwrap();
+        let manual = loaded.save_v2(&image, cameras, 1).unwrap();
+        assert_eq!(SaveFile::parse(&manual).unwrap().session_option_word().unwrap(), 2);
         assert_eq!(loaded.world.clock.calendar[3],if era{239}else{23});
         assert_eq!(loaded.hooks.utilities.owners,[1,2,3,4]);
         assert_eq!(loaded.hooks.utilities.totals,[5.,6.,7.,8.]);assert_eq!(loaded.allocation_next,native_allocation_next.max(0x1f000000));
@@ -183,6 +191,7 @@ fn run(era: bool) {
         // The default real Host attempts autosave but honestly reports missing
         // selected authority, and still completes calendar and script tick.
         let mut recovering=Session::initialize(inputs(),policy()).unwrap();
+        recovering.session_option_word = 2;
         recovering.world.clock.calendar=[23,0,0,23,0];
         recovering.world.clock.timing=[1000,624,624,14999,0,1];
         recovering.world.settings.tweaks[4..8].copy_from_slice(&1u32.to_le_bytes());
@@ -246,6 +255,7 @@ fn run(era: bool) {
             assert!(real_host.failure.is_none(),"{:?}",real_host.failure);
             assert!(matches!(&real_host.autosave_status,Some(crate::save_menu::AutosaveStatus::Saved(path)) if path==&prior));
             let automatic=std::fs::read(&prior).unwrap();
+            assert_eq!(SaveFile::parse(&automatic).unwrap().session_option_word().unwrap(), 2);
             assert_eq!(SaveFile::parse(&automatic).unwrap().cameras().unwrap(),[&expected[0],&expected[1]]);
 
             let root=real_host.autosave_profile_root.clone().unwrap();
@@ -256,6 +266,7 @@ fn run(era: bool) {
             let pause=recovering.world.pause.clone();let timers=recovering.hooks.timers.clone();
             let manual=real_host.save_selected_from_ui_snapshot(&mut recovering,&image,&root,&target,1).unwrap();
             let manual_bytes=std::fs::read(&manual).unwrap();
+            assert_eq!(SaveFile::parse(&manual_bytes).unwrap().session_option_word().unwrap(), 2);
             assert_eq!(SaveFile::parse(&manual_bytes).unwrap().cameras().unwrap(),[&expected[0],&expected[1]]);
             assert_eq!(recovering.world.pause,pause,"live Options hold must remain owned");
             assert_eq!(recovering.hooks.timers,timers,"serialization cannot release live timers");
@@ -340,6 +351,8 @@ fn tutorial_midnight_publishes_overwrites_and_restarts_original_scripts() {
         let bytes = std::fs::read(&destination).unwrap();
         let saved = SaveFile::parse(&bytes).unwrap();
         assert_eq!(saved.level_metadata().unwrap()[0], 100000);
+        assert_eq!(source.session_option_word, 0);
+        assert_eq!(saved.session_option_word().unwrap(), 0);
         assert_eq!(saved.clock().unwrap().calendar, [0, 0, 0, 23, 1]);
         assert_eq!(saved.clock().unwrap().timing, [1001, 625, 0, 0, 0, 1]);
         assert_eq!(source.world.clock.calendar, [0, 0, 0, 0, 1]);

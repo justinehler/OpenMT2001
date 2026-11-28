@@ -172,6 +172,26 @@ impl SkirmishLaunch {
     }
 }
 
+/// Original 499160 selects the single-player option; 4956c0 resets it
+/// before tutorials and 4a5c50 resets it on entering network setup.
+fn fresh_session_option_word(level: u32, custom: bool, skirmish: bool, network: bool) -> u32 {
+    if network {
+        0
+    } else if custom {
+        3
+    } else if skirmish {
+        1
+    } else if level == 400002 {
+        2
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+#[path = "session_option_word_test.rs"]
+mod session_option_word_tests;
+
 pub struct Session<'data> {
     pub connected: Option<crate::intro::connected_start::Connection>,
     pub building_styles: openmt2001::building_styles::Styles,
@@ -230,7 +250,10 @@ pub struct Session<'data> {
     /// Exact original presentation records, retained while headless.
     pub saved_cameras: Option<[[u8; 196]; 2]>,
     pub saved_player_metadata: [[u8; 48]; 6],
-    pub saved_game_mode: Option<u32>,
+    /// Raw original 0x8fca9c, retained independently of logic/UI modes.
+    pub session_option_word: u32,
+    /// Loaded clock mode (0x822d30), also marks a restored session.
+    pub saved_logic_mode: Option<u32>,
     /// Host script directory retained for the original load-mode AI replay.
     pub script_directory: std::path::PathBuf,
     pub result_presentation: Option<result::ResultPresentation>,
@@ -2203,7 +2226,13 @@ impl<'data> Session<'data> {
             building_selection: [0; 2],
             saved_cameras: None,
             saved_player_metadata,
-            saved_game_mode: None,
+            session_option_word: fresh_session_option_word(
+                id,
+                is_custom,
+                skirmish.is_some(),
+                connected.is_some(),
+            ),
+            saved_logic_mode: None,
             script_directory: input.scripts.to_path_buf(),
             result_presentation: None,
         })

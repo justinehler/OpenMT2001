@@ -68,7 +68,8 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
             let bytes = session.save_v2_with_auction_view(&image, cameras, 1, host.auction_save_state(), 3).unwrap();
             let path = crate::save_menu::write_new(&root, &bytes).unwrap();
             let save = SaveFile::parse(&bytes).unwrap();
-            assert_eq!(save.game_mode().unwrap(), 1);
+            assert_eq!(save.clock().unwrap().timing[5], 1);
+            assert_eq!(save.session_option_word().unwrap(), 0);
             assert!(save.auction().unwrap().is_none());
             let ext = extension::Extension::parse(&save).unwrap().unwrap();
             assert_eq!(ext.version, 4); assert!(ext.records.contains_key(&15)); assert!(ext.records.contains_key(&16)); assert!(!ext.records.contains_key(&14));
@@ -104,6 +105,7 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
         let countdown_path = crate::save_menu::write_new(&root, &countdown_bytes).unwrap();
         let countdown_bytes = std::fs::read(&countdown_path).unwrap();
         let countdown_save = SaveFile::parse(&countdown_bytes).unwrap();
+        assert_eq!(countdown_save.session_option_word().unwrap(), 0);
         let mut resumed = Session::load_original(inputs(), policy(), &countdown_bytes).unwrap();
         let native_allocation_next = resumed.allocation_next;
         let metadata = resumed.restore_v2_extension(&countdown_save).unwrap().unwrap();
@@ -134,6 +136,7 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
                 let bytes = std::fs::read(path).unwrap(); let save = SaveFile::parse(&bytes).unwrap();
                 resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
                 let native_allocation_next = resumed.allocation_next;
+                assert_eq!(save.session_option_word().unwrap(), 0);
                 let continuation = resumed.restore_v2_extension(&save).unwrap().unwrap().auction.unwrap();
                 continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
                 assert_eq!(continuation.game_mode, 2); assert_eq!(continuation.prior_mode, prior_mode);

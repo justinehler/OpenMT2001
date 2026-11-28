@@ -278,7 +278,7 @@ impl AuctionContinuation {
     /// Countdown mode1 has no scene yet, so the host's activation hook is a no-op.
     pub fn apply(&self, session: &mut Session<'_>) -> Result<(), String> {
         let dormant = self.record[0x7c] == 0 && self.record[0x7d] == 0;
-        if session.saved_game_mode != Some(self.game_mode)
+        if session.saved_logic_mode != Some(self.game_mode)
             || (!dormant && session.world.auction.controller.reference == 0)
         {
             return Err("V2 auction continuation has no checked native restored controller".into());
@@ -334,7 +334,7 @@ impl AuctionContinuation {
     ) -> Result<(), String> {
         let native = save.auction()?;
         let dormant = self.record[0x7c] == 0 && self.record[0x7d] == 0;
-        if save.game_mode()? != self.game_mode
+        if save.clock()?.timing[5] != self.game_mode
             || (dormant && (native.is_some() || self.active_count != 0))
             || (!dormant && native != Some(&self.record))
         {
@@ -348,6 +348,50 @@ impl AuctionContinuation {
 mod tests {
     use super::*;
     use openmt2001::ai_messages::offers::auction::{State as Auction, announcement};
+
+    #[test]
+    fn native_auction_validation_uses_clock_mode_independently_of_session_option() {
+        for (logic_mode, option) in [(1u32, 2u32), (2, 0), (2, 3)] {
+            let mut source = Auction::default();
+            source.controller.reference = 0x7f4758;
+            source.controller.record[0x7c] = u8::from(logic_mode == 2);
+            source.controller.record[0x7d] = u8::from(logic_mode == 1);
+            source.controller.active_count = 1;
+            let host = AuctionHostState {
+                controls: Default::default(),
+                visible: logic_mode == 2,
+                interface_ticks: 0,
+                announcement_seconds: None,
+            };
+            let continuation =
+                AuctionContinuation::capture_state(&source, 0, logic_mode, Some(host), 0).unwrap();
+            let mut bytes = Vec::new();
+            for (tag, payload) in [
+                (0x200u32, vec![0; 20]),
+                (
+                    0x400,
+                    [0, 0, 0, 0, 0, logic_mode]
+                        .into_iter()
+                        .flat_map(u32::to_le_bytes)
+                        .collect(),
+                ),
+                (0x400000, option.to_le_bytes().to_vec()),
+                (0x8000, source.controller.record.to_vec()),
+            ] {
+                bytes.extend_from_slice(&tag.to_le_bytes());
+                bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(&payload);
+            }
+            bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+            bytes.extend_from_slice(&[0; 4]);
+            let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
+            assert_eq!(save.session_option_word().unwrap(), option);
+            continuation.validate_native(&save).unwrap();
+            let mut mismatched = continuation;
+            mismatched.game_mode = if logic_mode == 1 { 2 } else { 1 };
+            assert!(mismatched.validate_native(&save).is_err());
+        }
+    }
 
     #[test]
     fn bidding_and_settled_continuations_keep_omitted_countdown() {

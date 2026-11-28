@@ -2628,7 +2628,7 @@ fn load_menu_uses_retained_original_session() {
             let page_up_height = page_height(controls.height, true);
             assert!((page_up_height - visible.eye[1]).abs() <= 10.);
             assert!(loaded.fresh_session.is_none());
-            assert!(session.saved_game_mode.is_some(), "{key} did not retain saved mode");
+            assert!(session.saved_logic_mode.is_some(), "{key} did not retain saved mode");
             assert!(!loaded.scene.draws.is_empty(), "{key} did not assemble a live city");
             assert!(session.campaign_profile.is_none(), "arbitrary save attached a V2 profile");
             if key == "OPENMT2001_SAVE_ONE" {
@@ -2637,7 +2637,7 @@ fn load_menu_uses_retained_original_session() {
                 // handoff without requiring a GPU in this loader test.
                 let category = session.world.city.categories.iter()
                     .position(|row| row[5] == 0).unwrap();
-                session.saved_game_mode = Some(2);
+                session.saved_logic_mode = Some(2);
                 let controller = &mut session.world.city.auction.controller;
                 controller.reference = 0x7f4758;
                 controller.record[4..8].copy_from_slice(&(category as u32).to_le_bytes());
