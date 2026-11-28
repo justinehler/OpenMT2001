@@ -293,9 +293,6 @@ impl SceneInputs {
                     None
                 };
                 if fresh_completion {
-                    timing
-                        .frame
-                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
                     for task in &mut session.hooks.timers {
                         task[12..16].copy_from_slice(&0f32.to_le_bytes());
                     }
@@ -334,8 +331,8 @@ impl SceneInputs {
                     }
                     host.autosave_profile_root = save_profile_root.clone();
                     host.process_runtime = self.process_runtime.clone();
-                    // SAME process Frame/epoch; fresh completion above uses
-                    //4ebaa0 only. Saved adoption never initializes the manager.
+                    // Keep the process Frame/epoch through city replacement.
+                    // Rebase its clock below, after the cold attachment waits.
                     if let Some((worker, capture, pavement)) = camera_connection {
                         // Host already classifies the typed install result;
                         // explicit retirement is not an incomplete simulation.
@@ -480,6 +477,7 @@ impl SceneInputs {
                             Err(_) => cancelled_session!(),
                         }
                     }
+                    timing.start_city();
                     let mut last_tick = Instant::now();
                     loop {
                         if host.camera_retired()
@@ -548,15 +546,11 @@ impl SceneInputs {
                             Err(_) => break,
                         };
                         if last_tick.elapsed() >= period {
-                            let elapsed = timing
-                                .frame
-                                .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
+                            let elapsed = timing.elapsed_now();
                             last_tick = Instant::now();
                             host.frame(&mut session, &assets, elapsed);
                             if std::mem::take(&mut host.synchronize_time) {
-                                timing
-                                    .frame
-                                    .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                timing.synchronize_now();
                             }
                         }
                         if host.camera_retired() {
@@ -809,14 +803,10 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Run(running) => {
-                                let elapsed = timing
-                                    .frame
-                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.elapsed_now();
                                 host.frame(&mut session, &assets, elapsed);
                                 if std::mem::take(&mut host.synchronize_time) {
-                                    timing
-                                        .frame
-                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                    timing.synchronize_now();
                                 }
                                 if host.camera_retired() {
                                     break;
@@ -825,14 +815,10 @@ impl SceneInputs {
                                 last_tick = Instant::now();
                             }
                             FreshRequest::Options { open, reply } => {
-                                let elapsed = timing
-                                    .frame
-                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.elapsed_now();
                                 host.frame(&mut session, &assets, elapsed);
                                 if std::mem::take(&mut host.synchronize_time) {
-                                    timing
-                                        .frame
-                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                    timing.synchronize_now();
                                 }
                                 if host.camera_retired() {
                                     break;
@@ -867,14 +853,10 @@ impl SceneInputs {
                                 }
                             }
                             FreshRequest::DismissPrompt(id, reply) => {
-                                let elapsed = timing
-                                    .frame
-                                    .elapsed(Some(timing.epoch.elapsed().as_millis() as u32));
+                                let elapsed = timing.elapsed_now();
                                 host.frame(&mut session, &assets, elapsed);
                                 if std::mem::take(&mut host.synchronize_time) {
-                                    timing
-                                        .frame
-                                        .synchronize(timing.epoch.elapsed().as_millis() as u32);
+                                    timing.synchronize_now();
                                 }
                                 if host.camera_retired() {
                                     break;

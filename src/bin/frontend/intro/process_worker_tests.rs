@@ -60,15 +60,29 @@ impl Running {
         start: WorkerStart,
         route: focus::Route,
     ) -> Self {
+        Self::start_after_menu_delay(inputs, owner, start, route, Duration::ZERO)
+    }
+    fn start_after_menu_delay(
+        inputs: Arc<SceneInputs>,
+        owner: Owner,
+        start: WorkerStart,
+        route: focus::Route,
+        delay: Duration,
+    ) -> Self {
         // Production Intro retains this ONE Route across every World. Its
         //sequence must continue with the SAME retained ProcessFrontend.
         let sent_before = route.sent();
         let (camera, controls) = fresh_city_camera();
         let (tx, rx) = mpsc::channel();
-        let custody = owner
+        let mut custody = owner
             .borrow_mut()
             .take_custody(!matches!(&start, WorkerStart::Saved(..)))
             .unwrap();
+        // The process clock was last sampled `delay` ago, as after menus.
+        let now = custody.epoch.elapsed().as_millis() as u32;
+        custody
+            .frame
+            .synchronize(now.wrapping_sub(delay.as_millis() as u32));
         let worker = camera_producer::spawn_session_joined(
             "pf-connected",
             inputs,
@@ -387,7 +401,14 @@ fn options_quit_then_load_and_start_in_one_process_advances_clock() {
         } else {
             WorkerStart::Fresh(camera_producer_live_tests::setup(&inputs))
         };
-        let mut run = Running::start_with_route(inputs.clone(), owner.clone(), start, route);
+        let started = Instant::now();
+        let mut run = Running::start_after_menu_delay(
+            inputs.clone(),
+            owner.clone(),
+            start,
+            route,
+            Duration::from_secs(180),
+        );
         let (reply, probe) = mpsc::channel();
         run.send(FreshRequest::DispatchProbe(reply));
         let probe = probe.recv_timeout(Duration::from_secs(15)).unwrap();
@@ -397,6 +418,13 @@ fn options_quit_then_load_and_start_in_one_process_advances_clock() {
             "no holds from the previous city"
         );
         let before = run.clock();
+        let loaded_tick = run.loaded.as_ref().unwrap().logic_tick.unwrap();
+        let real_time_ticks = (started.elapsed().as_millis() * 25).div_ceil(1000) as u32;
+        assert!(
+            before.ticks - loaded_tick <= real_time_ticks + 1,
+            "menu interval leaked into successor city: {loaded_tick} -> {}",
+            before.ticks
+        );
         std::thread::sleep(Duration::from_millis(120));
         assert!(
             run.clock().ticks > before.ticks,
@@ -541,10 +569,13 @@ fn original_save_releases_one_startup_hold_and_advances_after_ready_focus() {
     let scratch = Scratch::new();
     let (inputs, owner) = inputs(scratch.0.join("profiles"));
     let save = openmt2001::fixtures::path("SAVE_ONE");
-    let mut run = Running::start(
+    let started = Instant::now();
+    let mut run = Running::start_after_menu_delay(
         inputs.clone(),
         owner.clone(),
         WorkerStart::Saved(save.clone(), None),
+        focus::Route::default(),
+        Duration::from_secs(180),
     );
     let (reply, status) = mpsc::channel();
     run.send(FreshRequest::Status {
@@ -571,6 +602,13 @@ fn original_save_releases_one_startup_hold_and_advances_after_ready_focus() {
         "actual inherited logic row remains disabled after native saved completion"
     );
     let before = run.clock();
+    let saved_tick = run.loaded.as_ref().unwrap().logic_tick.unwrap();
+    let real_time_ticks = (started.elapsed().as_millis() * 25).div_ceil(1000) as u32;
+    assert!(
+        before.ticks - saved_tick <= real_time_ticks + 1,
+        "frontend interval advanced the loaded city: {saved_tick} -> {}",
+        before.ticks
+    );
     std::thread::sleep(Duration::from_millis(120));
     let after = run.clock();
     assert!(
