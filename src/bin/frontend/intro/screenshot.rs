@@ -1,4 +1,5 @@
-//! Left Alt + F5 saves the presented city frame as `tycoonNNNN.tga`.
+//! Left Alt + F5 saves the presented city frame, at the window's pixel size,
+//! as `tycoonNNNN.tga`.
 //!
 //! The central input callback tests left Alt (scan 0x38) held and F5 (scan
 //! 0x3f) newly down, and calls the frame capture 0x458af0 with argument 0
@@ -10,13 +11,18 @@
 //! the first `tycoonNNNN.tga` (counting from 0000 each press) that cannot be
 //! opened for reading. The path is relative, so the file lands in the
 //! process's working directory. The file is an 18-byte header (image type 2,
-//! no colour map, zero origin, the frame's width and height, 32 bits per
-//! pixel, descriptor 0) followed by the pixels. The renderer readback that
+//! no colour map, zero origin, the display mode's width and height, 32 bits
+//! per pixel, descriptor 0) followed by the pixels. The renderer readback that
 //! 0x458af0 calls through vtable slot +0x170 stores the bottom row first,
 //! which descriptor 0's bottom-left origin shows upright. 0x458af0 swaps the
 //! first and third bytes, so each pixel is blue, green, red and a zero fourth
 //! byte.
+//!
+//! The original's render target is the display mode. The engine's city frame
+//! has its own internal size, so the capture repaints it through the window's
+//! scaling pass at the window's pixel size and saves exactly what is shown.
 use super::process_frontend::PhysicalSample;
+use crate::present::Presenter;
 use std::{
     fs,
     io::{self, Write},
@@ -80,11 +86,11 @@ impl Input {
     }
 }
 
-/// Read `texture` back and save it in the working directory. Failures are
-/// logged; the game keeps running.
-pub(super) fn capture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) {
-    let saved = read_back(device, queue, texture).and_then(|rgba| {
-        save(Path::new(""), texture.width(), texture.height(), &rgba).map_err(|e| e.to_string())
+/// Repaint the presented frame at the window's pixel size and save it in the
+/// working directory. Failures are logged; the game keeps running.
+pub(super) fn capture(presenter: &Presenter, frame: &wgpu::BindGroup) {
+    let saved = presenter.capture(frame).and_then(|shot| {
+        save(Path::new(""), shot.width, shot.height, &shot.rgba).map_err(|e| e.to_string())
     });
     match saved {
         Ok(path) => {
@@ -148,63 +154,6 @@ pub(super) fn save(dir: &Path, width: u32, height: u32, rgba: &[u8]) -> io::Resu
     let (path, mut file) = create_next(dir)?;
     file.write_all(&bytes)?;
     Ok(path)
-}
-
-/// Copy an RGBA8 render target to the CPU as tightly packed top-down rows.
-fn read_back(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    texture: &wgpu::Texture,
-) -> Result<Vec<u8>, String> {
-    if texture.format() != wgpu::TextureFormat::Rgba8Unorm {
-        return Err(format!("unexpected frame format {:?}", texture.format()));
-    }
-    let (width, height) = (texture.width(), texture.height());
-    let row = width * 4;
-    let padded =
-        row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Screenshot readback"),
-        size: u64::from(padded) * u64::from(height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        texture.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
-                rows_per_image: Some(height),
-            },
-        },
-        texture.size(),
-    );
-    queue.submit([encoder.finish()]);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .map_err(|e| e.to_string())?;
-    receiver
-        .recv()
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-    let mapped = buffer
-        .slice(..)
-        .get_mapped_range()
-        .map_err(|e| e.to_string())?;
-    let mut rgba = Vec::with_capacity(row as usize * height as usize);
-    for line in mapped.chunks_exact(padded as usize) {
-        rgba.extend_from_slice(&line[..row as usize]);
-    }
-    Ok(rgba)
 }
 
 #[cfg(test)]
