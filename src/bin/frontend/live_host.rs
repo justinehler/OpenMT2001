@@ -25,7 +25,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 pub struct Status {
     pub autosave: Option<openmt2001::save_menu::AutosaveStatus>,
     pub time_display: crate::time_panel::DisplayState,
-    pub cash_arrow: crate::cash_arrow::State,
+    pub cash_arrow: openmt2001::cash_arrow::State,
     pub window_texture: Option<openmt2001::window_texture::Publication>,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub chimney_smoke: openmt2001::chimney_smoke::Smoke,
@@ -327,7 +327,7 @@ pub struct Host {
     stats: Option<crate::stats_panel::State>,
     comparison: Option<crate::comparison::Runtime>,
     market_share: crate::market_share_panel::State,
-    cash_arrow: crate::cash_arrow::State,
+    cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<crate::card_panel::Panel>,
     card_visible: bool,
@@ -401,7 +401,7 @@ impl Host {
         Ok(())
     }
     #[cfg(test)]
-    pub(crate) fn cash_arrow_state(&self) -> crate::cash_arrow::State {
+    pub(crate) fn cash_arrow_state(&self) -> openmt2001::cash_arrow::State {
         self.cash_arrow
     }
     /// Consume original load-stage effects once, after the actual UI channels
@@ -559,7 +559,7 @@ impl Host {
             stats: None,
             comparison: None,
             market_share: Default::default(),
-            cash_arrow: crate::cash_arrow::State::default(),
+            cash_arrow: openmt2001::cash_arrow::State::default(),
             player_panels: [true; 2],
             card: None,
             card_visible: false,
@@ -3572,7 +3572,7 @@ fn account_ui_post(
 
 /// Original48a5a0 presentation after the account has already been posted.
 fn ledger_ui_post(
-    cash_arrow: &mut crate::cash_arrow::State,
+    cash_arrow: &mut openmt2001::cash_arrow::State,
     sound: &Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     current: bool,
     amount: f32,
@@ -3620,7 +3620,7 @@ fn ledger_ui_post_with(
 }
 
 fn ledger_ui_call(
-    cash_arrow: &mut crate::cash_arrow::State,
+    cash_arrow: &mut openmt2001::cash_arrow::State,
     sound: &Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     call: openmt2001::category_ownership::Seam,
 ) -> Result<u32, String> {
