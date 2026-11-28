@@ -301,3 +301,48 @@ fn abandonment_prompt_and_unknown_portraits_draw_without_portrait() {
         assert_eq!(portraits_drawn(&surfaces), [width], "portrait {portrait}");
     }
 }
+
+#[test]
+fn save_and_load_confirmations_use_the_portrait_free_owner() {
+    // Overwrite (497f60), Delete Saved Game (4981d0) and Load's Delete
+    // (495191) raise the 88c0d4 owner as Quit does: no portrait, the panel
+    // shifted by (-40, 0) and solid colored Yes/No buttons.
+    let assets = synthetic_assets();
+    let buttons = assets.frontend_dialog_buttons(2);
+    for (title, body) in [(0x661, 0x65f), (0x65e, 0x660)] {
+        // Not even the default portrait word draws Mr. Monopoly here.
+        for portrait in [crate::human_dialog::NO_PORTRAIT, 302] {
+            let dialog = crate::human_dialog::Dialog {
+                portrait,
+                title,
+                body,
+                buttons: [0x664, 0x665],
+                button_count: 2,
+                timeout: false,
+                ..crate::human_dialog::Dialog::default()
+            };
+            let [l, t, r, b] = buttons[0];
+            let surfaces = assets
+                .screen_confirmation_surfaces(dialog, [(l + r) * 0.5, (t + b) * 0.5], Some(0))
+                .unwrap();
+            assert!(portraits_drawn(&surfaces).is_empty(), "portrait {portrait}");
+            let title_bar = &surfaces[assets.base.len()];
+            assert_eq!(title_bar.vertices[0][0], assets.title[0] - 40.);
+            let colored = &surfaces[assets.base.len() + 1..assets.base.len() + 3];
+            for (button, bounds) in colored.iter().zip(&buttons) {
+                assert_eq!(button.width, 1, "solid button background");
+                let xs = button.vertices.iter().map(|v| v[0]);
+                let ys = button.vertices.iter().map(|v| v[1]);
+                let drawn = [
+                    xs.clone().fold(f32::MAX, f32::min),
+                    ys.clone().fold(f32::MAX, f32::min),
+                    xs.fold(f32::MIN, f32::max),
+                    ys.fold(f32::MIN, f32::max),
+                ];
+                for (d, e) in drawn.into_iter().zip(*bounds) {
+                    assert!((d - e).abs() <= 1., "{drawn:?} != {bounds:?}");
+                }
+            }
+        }
+    }
+}

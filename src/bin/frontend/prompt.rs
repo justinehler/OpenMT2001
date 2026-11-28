@@ -463,6 +463,14 @@ impl Assets {
         dialog: crate::human_dialog::Dialog,
         modal: &crate::desktop_quit::Modal,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.frontend_dialog_surfaces(dialog, modal)?;
+        self.prepare_surfaces(renderer, &surfaces)
+    }
+    pub(crate) fn frontend_dialog_surfaces(
+        &self,
+        dialog: crate::human_dialog::Dialog,
+        modal: &crate::desktop_quit::Modal,
+    ) -> Result<Vec<Surface>, String> {
         let mut state = State::default();
         state.submit(Request {
             script: None,
@@ -474,9 +482,31 @@ impl Assets {
         });
         state.cursor(modal.pointer().unwrap_or([-1.; 2]));
         state.pressed_dialog = modal.pressed_button();
-        let surfaces =
-            self.message_surfaces(&state, true, crate::desktop_quit::OFFSET, Some(modal))?;
+        self.message_surfaces(&state, true, crate::desktop_quit::OFFSET, Some(modal))
+    }
+    /// The Save Game Overwrite and Delete Saved Game confirmations (497f60,
+    /// 4981d0) and the Load Game Delete confirmation (495191) raise the same
+    /// portrait-free 88c0d4 owner as Quit: 43b5d0(0,0) and 4295d0 select the
+    /// full-width body and the solid green/red buttons. The screen keeps its
+    /// own reply, so only the pointer and held button are presented here.
+    pub fn prepare_screen_confirmation(
+        &self,
+        renderer: &Renderer,
+        dialog: crate::human_dialog::Dialog,
+        cursor: [f32; 2],
+        pressed_button: Option<usize>,
+    ) -> Result<PreparedScene, String> {
+        let surfaces = self.screen_confirmation_surfaces(dialog, cursor, pressed_button)?;
         self.prepare_surfaces(renderer, &surfaces)
+    }
+    pub(crate) fn screen_confirmation_surfaces(
+        &self,
+        dialog: crate::human_dialog::Dialog,
+        cursor: [f32; 2],
+        pressed_button: Option<usize>,
+    ) -> Result<Vec<Surface>, String> {
+        let modal = crate::desktop_quit::Modal::presented(cursor, pressed_button);
+        self.frontend_dialog_surfaces(dialog, &modal)
     }
     /// In-city Options Quit (49e970) raises the same portrait-free 88c0d4
     /// owner as desktop Quit: 43b5d0(0,0) and 4295d0 select the full-width

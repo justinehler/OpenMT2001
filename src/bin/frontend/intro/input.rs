@@ -474,7 +474,7 @@ impl Intro {
                 let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
                 let cue = if view.save_dialog.generic_prompt().is_some() {
                     self.menu.as_ref().is_some_and(|menu| {
-                        let bounds = menu.prompt_assets().dialog_buttons(2);
+                        let bounds = menu.frontend_prompt_assets().frontend_dialog_buttons(2);
                         bounds.len() == 2
                             && view
                                 .save_dialog
@@ -756,7 +756,7 @@ impl Intro {
                     let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
                     let action = if view.save_dialog.generic_prompt().is_some() {
                         self.menu.as_ref().and_then(|menu| {
-                            let bounds = menu.prompt_assets().dialog_buttons(2);
+                            let bounds = menu.frontend_prompt_assets().frontend_dialog_buttons(2);
                             (bounds.len() == 2)
                                 .then(|| {
                                     view.save_dialog.mouse_generic(
@@ -776,7 +776,7 @@ impl Intro {
                     }
                     let cue = if view.save_dialog.generic_prompt().is_some() {
                         self.menu.as_ref().is_some_and(|menu| {
-                            let bounds = menu.prompt_assets().dialog_buttons(2);
+                            let bounds = menu.frontend_prompt_assets().frontend_dialog_buttons(2);
                             bounds.len() == 2
                                 && view
                                     .save_dialog

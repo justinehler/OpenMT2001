@@ -865,6 +865,10 @@ impl Menu {
             return self.single.hit(p);
         }
         if self.load.visible {
+            if self.load.delete_prompt().is_some() {
+                // The portrait-free 88c0d4 owner, shifted with its buttons.
+                return self.assets.prompts.frontend_dialog_hit_at(p, false, 2);
+            }
             if self.load.prompt_pending() {
                 return self
                     .assets
@@ -1506,15 +1510,24 @@ impl Menu {
                 self.dirty = false;
             }
             renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
-            if let Some(request) = self.load.prompt_request() {
-                let pressed_button = (self.pressed
-                    && self.selected.is_some_and(|i| i < self.load.count()))
-                .then_some(self.selected)
-                .flatten();
+            let pressed_button = (self.pressed
+                && self.selected.is_some_and(|i| i < self.load.count()))
+            .then_some(self.selected)
+            .flatten();
+            let cursor = self.pointer_position.unwrap_or([-1.; 2]);
+            if let Some(dialog) = self.load.delete_prompt() {
+                let panel = self.assets.prompts.prepare_screen_confirmation(
+                    renderer,
+                    dialog,
+                    cursor,
+                    pressed_button,
+                )?;
+                renderer.draw_overlay(color, depth, &panel);
+            } else if let Some(request) = self.load.prompt_request() {
                 let panel = self.assets.prompts.prepare_request(
                     renderer,
                     request,
-                    self.pointer_position.unwrap_or([-1.; 2]),
+                    cursor,
                     pressed_button,
                 )?;
                 renderer.draw_overlay(color, depth, &panel);

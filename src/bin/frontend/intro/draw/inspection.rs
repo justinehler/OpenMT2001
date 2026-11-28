@@ -898,7 +898,7 @@ impl Intro {
                     if let Some((dialog, pressed_button)) = view.save_dialog.generic_prompt()
                         && let Some(menu) = &self.menu
                     {
-                        let panel = menu.prompt_assets().prepare_dialog(
+                        let panel = menu.frontend_prompt_assets().prepare_screen_confirmation(
                             &self.renderer,
                             dialog,
                             view.pointer
