@@ -8,6 +8,10 @@ use openmt2001::{
 };
 use std::{fs, path::PathBuf, time::SystemTime};
 
+#[path = "load/refusal.rs"]
+pub(crate) mod refusal;
+pub(crate) use refusal::Failure;
+
 const LIST_SCROLL: [f32; 4] = [305., 70., 321., 383.];
 const INFO_SCROLL: [f32; 4] = [588., 287., 604., 378.];
 
@@ -72,6 +76,8 @@ pub struct Load {
     pub request: Option<PathBuf>,
     pub message: Option<String>,
     delete_confirmation: Option<String>,
+    refusal_messages: refusal::Messages,
+    refusal_prompt: Option<crate::prompt::Request>,
 }
 impl Load {
     pub fn new(
@@ -81,6 +87,7 @@ impl Load {
         strings: &[&[u8]],
         directory: PathBuf,
         profile_root: PathBuf,
+        image: &openmt2001::pe::PeImage<'_>,
     ) -> Result<Self, String> {
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index
@@ -158,6 +165,8 @@ impl Load {
             request: None,
             message: None,
             delete_confirmation: None,
+            refusal_messages: refusal::Messages::from_original(image)?,
+            refusal_prompt: None,
         })
     }
     /// Retain registered metadata using this panel's active language glyphs.
@@ -191,6 +200,7 @@ impl Load {
         self.request = None;
         self.message = None;
         self.delete_confirmation = None;
+        self.refusal_prompt = None;
         self.entries.clear();
         self.first = 0;
         self.description_first = 0;
@@ -269,7 +279,9 @@ impl Load {
         }
     }
     pub fn count(&self) -> usize {
-        if self.delete_confirmation.is_some() {
+        if self.refusal_prompt.is_some() {
+            1
+        } else if self.delete_confirmation.is_some() {
             2
         } else {
             3 + self.entries.len() + 6
@@ -287,8 +299,30 @@ impl Load {
             _ => false,
         }
     }
-    pub fn delete_pending(&self) -> bool {
-        self.delete_confirmation.is_some()
+    pub fn prompt_pending(&self) -> bool {
+        self.refusal_prompt.is_some() || self.delete_confirmation.is_some()
+    }
+    pub fn prompt_request(&self) -> Option<crate::prompt::Request> {
+        self.refusal_prompt.clone().or_else(|| {
+            let dialog = self.generic_prompt()?;
+            Some(crate::prompt::Request {
+                script: None,
+                dialog: Some(dialog),
+                title: dialog.title,
+                body: dialog.body,
+                dismissal_id: 0,
+                card: None,
+            })
+        })
+    }
+    pub fn refuse(&mut self, failure: Failure) {
+        self.busy = false;
+        self.request = None;
+        self.refusal_prompt = self.refusal_messages.prompt(&failure);
+        self.message = match failure {
+            refusal::Failure::Storage(error) => Some(error),
+            _ => None,
+        };
     }
     /// Original 495191 opens the shared 0x88c0d4 generic prompt. Its
     /// answer callback remains local to Load and deletes only a profile slot.
@@ -319,7 +353,7 @@ impl Load {
         })
     }
     pub fn reveal(&mut self, i: usize) {
-        if self.delete_confirmation.is_none() && i >= 3 && i < 3 + self.entries.len() {
+        if !self.prompt_pending() && i >= 3 && i < 3 + self.entries.len() {
             let row = i - 3;
             if row < self.first {
                 self.first = row;
@@ -345,7 +379,7 @@ impl Load {
             .map_or(0, |(offsets, _)| offsets.len().saturating_sub(1))
     }
     pub fn scroll(&mut self, delta: i32) {
-        if self.delete_confirmation.is_some() {
+        if self.prompt_pending() {
             return;
         }
         if self.over_description {
@@ -365,7 +399,7 @@ impl Load {
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
-        if self.delete_confirmation.is_some() {
+        if self.prompt_pending() {
             return;
         }
         let [l, t, r, b] = self.bounds[21];
@@ -373,7 +407,7 @@ impl Load {
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         let inside = |b: [f32; 4]| p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
-        if self.delete_confirmation.is_some() {
+        if self.prompt_pending() {
             return None;
         }
         for (i, part) in [23, 24, 22].iter().enumerate() {
@@ -404,6 +438,12 @@ impl Load {
         None
     }
     pub fn activate(&mut self, i: usize) {
+        if self.refusal_prompt.is_some() {
+            if i == 0 {
+                self.refusal_prompt = None;
+            }
+            return;
+        }
         if let Some(id) = self.delete_confirmation.take() {
             if i == 0 {
                 match crate::save_menu::delete_slot(&self.profile_root, &id) {
@@ -493,7 +533,7 @@ impl Load {
         }
     }
     pub fn back(&mut self) {
-        if self.delete_confirmation.take().is_none() {
+        if self.refusal_prompt.take().is_none() && self.delete_confirmation.take().is_none() {
             self.visible = false;
         }
     }
@@ -1148,6 +1188,8 @@ mod tests {
             request: None,
             message: None,
             delete_confirmation: None,
+            refusal_messages: refusal::Messages::default(),
+            refusal_prompt: None,
         };
         load.open();
         assert_eq!(
@@ -1350,6 +1392,7 @@ mod tests {
             &refs,
             original.parent().unwrap().to_path_buf(),
             root.clone(),
+            &openmt2001::pe::PeImage::parse(&fs::read(&executable).unwrap()).unwrap(),
         )
         .unwrap();
         let selected = crate::save_menu::selected_profile_root(&root, b"Load capture");

@@ -15,7 +15,7 @@ impl SceneInputs {
         &self,
         setup: crate::singleplayer::Setup,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
     ) {
         self.session_worker(WorkerStart::Fresh(setup), camera, tx, None);
     }
@@ -24,7 +24,7 @@ impl SceneInputs {
         path: PathBuf,
         save_profile_root: Option<PathBuf>,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: crate::selection::pavement_resource::LocalPavementHandle,
     ) {
         self.session_worker(
@@ -38,7 +38,7 @@ impl SceneInputs {
         &self,
         start: WorkerStart,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
     ) {
         self.session_worker_with_focus(start, camera, tx, pavement, false);
@@ -47,7 +47,7 @@ impl SceneInputs {
         &self,
         start: WorkerStart,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
         require_focus_attachment: bool,
     ) {
@@ -64,7 +64,7 @@ impl SceneInputs {
         &self,
         start: WorkerStart,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
         require_focus_attachment: bool,
         produce_camera: bool,
@@ -83,7 +83,7 @@ impl SceneInputs {
         &self,
         start: WorkerStart,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
         require_focus_attachment: bool,
         produce_camera: bool,
@@ -104,7 +104,7 @@ impl SceneInputs {
         &self,
         start: WorkerStart,
         camera: CameraSample,
-        tx: mpsc::Sender<Result<LoadedInspection, String>>,
+        tx: mpsc::Sender<Result<LoadedInspection, crate::load::Failure>>,
         pavement: Option<crate::selection::pavement_resource::LocalPavementHandle>,
         require_focus_attachment: bool,
         produce_camera: bool,
@@ -123,7 +123,7 @@ impl SceneInputs {
             )) {
                 Ok((seed, timing)) => (Some(seed), timing),
                 Err(error) => {
-                    let _ = tx.send(Err(error));
+                    let _ = tx.send(Err(error.into()));
                     return None;
                 }
             }
@@ -142,7 +142,7 @@ impl SceneInputs {
 
         if let Some(process) = &self.process_runtime {
             if let Err(error) = process.world_controller_reset4c2b80() {
-                let _ = tx.send(Err(error.to_string()));
+                let _ = tx.send(Err(error.to_string().into()));
                 return None;
             }
         }
@@ -156,7 +156,7 @@ impl SceneInputs {
         ) && let Some(process) = &self.process_runtime
             && let Err(error) = process.source_fresh_world()
         {
-            let _ = tx.send(Err(error.to_string()));
+            let _ = tx.send(Err(error.to_string().into()));
             return None;
         }
         let mut cache = SnapshotCache::default();
@@ -174,12 +174,12 @@ impl SceneInputs {
         let review_camera = matches!(&start, WorkerStart::Saved(..))
             && std::env::var_os("OPENMT2001_CAMERA_OWNER_NATIVE_REVIEW").is_some();
         let result = match start {
-            WorkerStart::Connected(request) => {
-                self.fresh_connected_joined(*request, camera, &mut cache, dispatch.take())
-            }
-            WorkerStart::Skirmish(request) => {
-                self.fresh_skirmish_joined(request, camera, &mut cache, dispatch.take())
-            }
+            WorkerStart::Connected(request) => self
+                .fresh_connected_joined(*request, camera, &mut cache, dispatch.take())
+                .map_err(Into::into),
+            WorkerStart::Skirmish(request) => self
+                .fresh_skirmish_joined(request, camera, &mut cache, dispatch.take())
+                .map_err(Into::into),
             WorkerStart::Fresh(setup) => {
                 let retained = match setup.preview {
                     crate::singleplayer::Preview::Scenario(id) => {
@@ -193,8 +193,9 @@ impl SceneInputs {
                 };
                 if retained {
                     self.fresh_preview_joined(setup, camera, &mut cache, dispatch.take())
+                        .map_err(Into::into)
                 } else {
-                    let _ = tx.send(self.preview_scene(setup, camera));
+                    let _ = tx.send(self.preview_scene(setup, camera).map_err(Into::into));
                     return None;
                 }
             }
@@ -231,7 +232,7 @@ impl SceneInputs {
                     Ok(())
                 })();
                 if let Err(error) = binding {
-                    let _ = tx.send(Err(error));
+                    let _ = tx.send(Err(error.into()));
                     return None;
                 }
 
@@ -969,11 +970,10 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Inspect { camera, reply } => {
-                                let _ = reply.send(self.inspect_fresh(
-                                    &mut session,
-                                    camera,
-                                    &mut cache,
-                                ));
+                                let _ = reply.send(
+                                    self.inspect_fresh(&mut session, camera, &mut cache)
+                                        .map_err(Into::into),
+                                );
                             }
                         }
                     }
@@ -1246,6 +1246,7 @@ impl SceneInputs {
         selected_root: Option<Option<&std::path::Path>>,
     ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
         self.saved_preview_with_selection_joined(path, camera, cache, selected_root, None)
+            .map_err(|error| error.to_string())
     }
     pub(super) fn saved_preview_with_selection_joined(
         &self,
@@ -1254,25 +1255,17 @@ impl SceneInputs {
         cache: &mut SnapshotCache,
         selected_root: Option<Option<&std::path::Path>>,
         dispatch: Option<crate::process_dispatch::Seed>,
-    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), String> {
+    ) -> Result<(LoadedInspection, crate::fresh_city::Session<'_>), crate::load::Failure> {
         let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let save = openmt2001::save::SaveFile::parse(&bytes)?;
         let image = openmt2001::pe::PeImage::parse(&self.executable)?;
-        save.validate_compatibility(&image)?;
+        let scripts = self.maps.parent().ok_or("script directory missing")?;
+        let catalog = crate::campaign_store::load_catalog(&image, scripts)?;
+        let (save, index, [id, _, _, difficulty]) =
+            crate::load::refusal::validate(&bytes, image.at(0x545d1c, 40)?, &catalog)?;
         if let Some(process) = &self.process_runtime {
             process.source_load_unjoined().map_err(|e| e.to_string())?;
         }
-        let [id, _, _, difficulty] = save.level_metadata()?;
-        let scripts = self.maps.parent().ok_or("script directory missing")?;
-        let catalog = crate::campaign_store::load_catalog(&image, scripts)?;
-        let level = catalog
-            .levels
-            .get(
-                catalog
-                    .find(id)
-                    .ok_or("saved level is absent from original catalog")?,
-            )
-            .ok_or("saved catalog level is missing")?;
+        let level = &catalog.levels[index];
         let scenario = std::str::from_utf8(level.directory())
             .map_err(|_| "saved scenario directory is not UTF-8")?;
         // Catalog names retain Windows casing; use the supplied directory's
@@ -1382,7 +1375,7 @@ impl SceneInputs {
         if let Some(profile) = progress {
             crate::campaign_store::load_progress(&mut session.catalog, &profile)?;
             if !session.catalog.select(id, false) {
-                return Err("Saved level is absent after profile reload".into());
+                return Err(crate::load::Failure::UnavailableLevel(id));
             }
             session.campaign_profile = Some(profile);
         }

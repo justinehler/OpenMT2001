@@ -971,15 +971,30 @@ impl Assets {
         cursor: [f32; 2],
         pressed_button: Option<usize>,
     ) -> Result<PreparedScene, String> {
+        self.prepare_request(
+            renderer,
+            Request {
+                script: None,
+                dialog: Some(dialog),
+                title: dialog.title,
+                body: dialog.body,
+                dismissal_id: 0,
+                card: None,
+            },
+            cursor,
+            pressed_button,
+        )
+    }
+    /// Shared modal preparation, including executable-backed literal fields.
+    pub fn prepare_request(
+        &self,
+        renderer: &Renderer,
+        request: Request,
+        cursor: [f32; 2],
+        pressed_button: Option<usize>,
+    ) -> Result<PreparedScene, String> {
         let mut state = State::default();
-        state.submit(Request {
-            script: None,
-            dialog: Some(dialog),
-            title: dialog.title,
-            body: dialog.body,
-            dismissal_id: 0,
-            card: None,
-        });
+        state.submit(request);
         state.cursor(cursor);
         state.pressed_dialog = pressed_button;
         self.prepare(renderer, &state)

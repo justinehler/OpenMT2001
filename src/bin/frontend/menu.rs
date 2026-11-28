@@ -208,6 +208,7 @@ impl Assets {
             &strings,
             save_root,
             profile_root.clone(),
+            &openmt2001::pe::PeImage::parse(executable)?,
         )?;
         load.set_level_catalog(&catalog);
         let load = Some(load);
@@ -418,7 +419,7 @@ impl Menu {
     fn frontend_modal_open(&self) -> bool {
         self.desktop_quit.active()
             || self.profile.visible && self.profile.modal_open()
-            || self.load.visible && self.load.delete_pending()
+            || self.load.visible && self.load.prompt_pending()
             || self.multiplayer.visible && self.multiplayer.notice.is_some()
             || self.skirmish.error.is_some()
     }
@@ -660,7 +661,7 @@ impl Menu {
                 .pointer_click_cue(&self.assets.settings, self.pointer_position);
         }
         let page = if self.load.visible {
-            if self.load.delete_pending() {
+            if self.load.prompt_pending() {
                 MenuCuePage::LoadPrompt
             } else {
                 MenuCuePage::Load
@@ -731,7 +732,7 @@ impl Menu {
             return false;
         }
         if self.load.visible {
-            if self.load.delete_pending() {
+            if self.load.prompt_pending() {
                 return self.hit(p).is_some();
             }
             // Load/Delete/Back use the existing disabled-state admission. List and
@@ -767,11 +768,11 @@ impl Menu {
             return self.single.hit(p);
         }
         if self.load.visible {
-            if self.load.delete_pending() {
+            if self.load.prompt_pending() {
                 return self
                     .assets
                     .prompts
-                    .dialog_buttons(2)
+                    .dialog_buttons(self.load.count())
                     .iter()
                     .position(|bounds| {
                         p[0] >= bounds[0]
@@ -1384,13 +1385,14 @@ impl Menu {
                 self.dirty = false;
             }
             renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
-            if let Some(dialog) = self.load.generic_prompt() {
-                let pressed_button = (self.pressed && self.selected.is_some_and(|i| i < 2))
-                    .then_some(self.selected)
-                    .flatten();
-                let panel = self.assets.prompts.prepare_dialog(
+            if let Some(request) = self.load.prompt_request() {
+                let pressed_button = (self.pressed
+                    && self.selected.is_some_and(|i| i < self.load.count()))
+                .then_some(self.selected)
+                .flatten();
+                let panel = self.assets.prompts.prepare_request(
                     renderer,
-                    dialog,
+                    request,
                     self.pointer_position.unwrap_or([-1.; 2]),
                     pressed_button,
                 )?;
