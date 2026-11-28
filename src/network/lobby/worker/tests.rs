@@ -443,6 +443,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 },
                 &mut right,
                 &mut [[0; 0x17c]; 52],
+                crate::network::commands::Targets::default(),
                 100,
             )
             .unwrap();
@@ -457,6 +458,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 101,
                 &mut left,
                 &mut [[0; 0x17c]; 52],
+                crate::network::commands::Targets::default(),
                 &mut lp,
                 &mut lt,
             )
@@ -470,6 +472,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
             105,
             &mut left,
             &mut [[0; 0x17c]; 52],
+            crate::network::commands::Targets::default(),
             &mut lp,
             &mut lt,
         )
@@ -483,6 +486,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 125,
                 &mut right,
                 &mut [[0; 0x17c]; 52],
+                crate::network::commands::Targets::default(),
                 &mut rp,
                 &mut rt,
             )
@@ -514,6 +518,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
             },
             &mut right,
             &mut [[0; 0x17c]; 52],
+            crate::network::commands::Targets::default(),
             125,
         )
         .unwrap();
@@ -523,6 +528,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
             105,
             &mut left,
             &mut [[0; 0x17c]; 52],
+            crate::network::commands::Targets::default(),
             &mut lp,
             &mut lt,
         )
@@ -535,6 +541,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 106,
                 &mut left,
                 &mut [[0; 0x17c]; 52],
+                crate::network::commands::Targets::default(),
                 &mut lp,
                 &mut lt,
             )
@@ -563,6 +570,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 106,
                 &mut left,
                 &mut [[0; 0x17c]; 52],
+                crate::network::commands::Targets::default(),
                 &mut lp,
                 &mut lt,
             )
@@ -572,6 +580,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
             125,
             &mut right,
             &mut [[0; 0x17c]; 52],
+            crate::network::commands::Targets::default(),
             &mut rp,
             &mut rt,
         ) {
