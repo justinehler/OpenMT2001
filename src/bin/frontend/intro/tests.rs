@@ -3094,10 +3094,10 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
     // Two opens must add one modal reason, and GUI4 freezes Time while
     // the registered interface timer continues to dispatch.
     sender
-        .send(FreshRequest::Stats(crate::live_host::StatsAction::Open))
+        .send(FreshRequest::Stats(openmt2001::stats_panel::Action::Open))
         .unwrap();
     sender
-        .send(FreshRequest::Stats(crate::live_host::StatsAction::Open))
+        .send(FreshRequest::Stats(openmt2001::stats_panel::Action::Open))
         .unwrap();
     let (reply, opened) = mpsc::channel();
     sender
@@ -3130,7 +3130,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
         "GUI4 suppresses native Time callbacks"
     );
     sender
-        .send(FreshRequest::Stats(crate::live_host::StatsAction::Close))
+        .send(FreshRequest::Stats(openmt2001::stats_panel::Action::Close))
         .unwrap();
     let (reply, closed) = mpsc::channel();
     sender
@@ -3146,7 +3146,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
     );
     sender.send(FreshRequest::Run(false)).unwrap();
     sender
-        .send(FreshRequest::Stats(crate::live_host::StatsAction::Open))
+        .send(FreshRequest::Stats(openmt2001::stats_panel::Action::Open))
         .unwrap();
     let (reply, paused_graph) = mpsc::channel();
     sender
@@ -3161,7 +3161,7 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
         "original session-active flag remains set during a player's pause"
     );
     sender
-        .send(FreshRequest::Stats(crate::live_host::StatsAction::Close))
+        .send(FreshRequest::Stats(openmt2001::stats_panel::Action::Close))
         .unwrap();
     let (reply, paused_status) = mpsc::channel();
     sender

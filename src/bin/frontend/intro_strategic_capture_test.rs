@@ -31,7 +31,7 @@ fn capture_saved_preview_manager_stats() {
             let (_,mut session)=inputs.saved_preview(std::path::Path::new(&openmt2001::fixtures::path(key)),navigation.camera,&mut SnapshotCache::default()).unwrap();
             let mut host=crate::live_host::Host::new(navigation.camera.eye);host.begin_presentation(&session).unwrap();
             let original_pause=session.world.pause.bytes;
-            host.stats_action(&mut session,crate::live_host::StatsAction::Open).unwrap();
+            host.stats_action(&mut session,openmt2001::stats_panel::Action::Open).unwrap();
             let status=host.status(&session);let snapshot=status.stats.as_ref().unwrap();
             assert!(!status.running,"player pause must remain independent of active Manager session");
             assert_eq!(session.world.pause.bytes[0],original_pause[0].wrapping_add(1));
@@ -41,7 +41,7 @@ fn capture_saved_preview_manager_stats() {
             let point=Some([433.,86.]); //actual STATS_RIGHT_CHANGER interior
             assert!(view.pointer(&assets,point,true,snapshot).is_none());
             let action=view.pointer(&assets,point,false,snapshot).unwrap();
-            assert!(matches!(action,crate::live_host::StatsAction::Cycle(true)));
+            assert!(matches!(action,openmt2001::stats_panel::Action::Cycle(true)));
             host.stats_action(&mut session,action).unwrap();
             let status=host.status(&session);let snapshot=status.stats.as_ref().unwrap();
             view.update(&assets,&renderer,Some(snapshot)).unwrap();
@@ -50,7 +50,7 @@ fn capture_saved_preview_manager_stats() {
             assert!(view.pointer(&assets,Some([0.,0.]),true,snapshot).is_none());
             assert!(view.pointer(&assets,point,true,snapshot).is_none());
             assert!(view.pointer(&assets,point,false,snapshot).is_none());
-            host.stats_action(&mut session,crate::live_host::StatsAction::Close).unwrap();
+            host.stats_action(&mut session,openmt2001::stats_panel::Action::Close).unwrap();
             assert_eq!(session.world.pause.bytes,original_pause);
             assert!(host.status(&session).stats.is_none());view.update(&assets,&renderer,None).unwrap();assert!(view.prepared.is_none());
         }

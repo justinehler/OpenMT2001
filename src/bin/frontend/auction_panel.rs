@@ -72,7 +72,7 @@ fn original_auction_panel_resources() {
     for bounds in assets.buttons {
         assert!(bounds[2] > bounds[0] && bounds[3] > bounds[1]);
     }
-    let auction = crate::live_host::Auction {
+    let auction = openmt2001::auction_panel::Auction {
         visible: true,
         hidden_bid_toggle_enabled: true,
         controls: crate::auction_controls::State {
@@ -118,7 +118,7 @@ fn original_auction_panel_resources() {
     assert_eq!(view.mouse(&assets, &auction, Some(point), true), None);
     assert!(view.pointer_click_cue(&assets, &auction, Some(point)));
     assert_eq!(view.mouse(&assets, &auction, Some(point), false), Some(5));
-    let network = crate::live_host::Auction {
+    let network = openmt2001::auction_panel::Auction {
         hidden_bid_toggle_enabled: false,
         ..auction.clone()
     };
@@ -171,7 +171,7 @@ fn original_auction_panel_resources() {
             ("-suppressed.png", false, true),
             ("-reset.png", true, false),
         ] {
-            let auction = crate::live_host::Auction {
+            let auction = openmt2001::auction_panel::Auction {
                 visible: true,
                 controls: state.clone(),
                 hidden_bid_toggle_enabled: enabled,
@@ -217,14 +217,14 @@ pub struct View {
     pressed: Option<usize>,
     held: bool,
     cue_latch: Option<usize>,
-    key: Option<(crate::live_host::Auction, Option<usize>, bool)>,
+    key: Option<(openmt2001::auction_panel::Auction, Option<usize>, bool)>,
     pub prepared: Option<PreparedScene>,
 }
 impl View {
     fn hover(
         assets: &Assets,
         pointer: Option<[f32; 2]>,
-        auction: &crate::live_host::Auction,
+        auction: &openmt2001::auction_panel::Auction,
     ) -> Option<usize> {
         let [x, y] = pointer?;
         assets
@@ -256,7 +256,7 @@ impl View {
         &self,
         assets: &Assets,
         pointer: Option<[f32; 2]>,
-        auction: &crate::live_host::Auction,
+        auction: &openmt2001::auction_panel::Auction,
     ) -> Option<u32> {
         Self::hover(assets, pointer, auction)
             .and_then(|index| [65, 66, 67, 70, 69].get(index).copied())
@@ -274,7 +274,7 @@ impl View {
     pub fn pointer_click_cue(
         &mut self,
         assets: &Assets,
-        auction: &crate::live_host::Auction,
+        auction: &openmt2001::auction_panel::Auction,
         pointer: Option<[f32; 2]>,
     ) -> bool {
         if !self.held {
@@ -289,7 +289,7 @@ impl View {
     pub fn mouse(
         &mut self,
         assets: &Assets,
-        auction: &crate::live_host::Auction,
+        auction: &openmt2001::auction_panel::Auction,
         pointer: Option<[f32; 2]>,
         down: bool,
     ) -> Option<u32> {
@@ -310,7 +310,7 @@ impl View {
         &mut self,
         assets: &Assets,
         renderer: &Renderer,
-        auction: Option<&crate::live_host::Auction>,
+        auction: Option<&openmt2001::auction_panel::Auction>,
         pointer: Option<[f32; 2]>,
     ) -> Result<(), String> {
         let key = auction.filter(|a| a.visible).map(|a| {

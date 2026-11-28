@@ -1190,7 +1190,7 @@ impl Intro {
                             crate::time_panel::Button::Manager => {
                                 if let Some(sender) = &view._fresh_session {
                                     let _ = sender.send(FreshRequest::Stats(
-                                        crate::live_host::StatsAction::Open,
+                                        openmt2001::stats_panel::Action::Open,
                                     ));
                                     view.stats_requested = true;
                                     view.keys = [false; 4];

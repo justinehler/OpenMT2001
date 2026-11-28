@@ -97,7 +97,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
             let renderer_requests = loaded.auction_requests.take().unwrap();
             let render_inputs = inputs.clone();
             let (panel_sender, panel_receiver) =
-                mpsc::channel::<(crate::live_host::Auction, mpsc::Sender<()>)>();
+                mpsc::channel::<(openmt2001::auction_panel::Auction, mpsc::Sender<()>)>();
             let render_thread = std::thread::Builder::new()
                 .stack_size(32 * 1024 * 1024)
                 .spawn(move || {

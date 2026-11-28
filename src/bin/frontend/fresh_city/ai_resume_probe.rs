@@ -10,7 +10,7 @@ use openmt2001::save::SaveFile;
 /// scene return values and detached audio as the headless renderer stand-in.
 #[derive(Default)]
 struct ProbeAuction {
-    scene: Option<crate::live_host::Auction>,
+    scene: Option<openmt2001::auction_panel::Auction>,
     camera_active: bool,
     omitted: std::collections::BTreeSet<u32>,
     bid_gate: std::cell::Cell<bool>,
@@ -25,7 +25,7 @@ impl ProbeAuction {
                 if self.scene.is_some() {
                     return Err("Auction renderer already owns an active scene".into());
                 }
-                self.scene = Some(crate::live_host::Auction::default());
+                self.scene = Some(openmt2001::auction_panel::Auction::default());
                 self.bid_gate.set(false);
                 Ok(0) // Previous interface mode: city view.
             }

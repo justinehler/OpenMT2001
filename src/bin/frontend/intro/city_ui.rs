@@ -1,6 +1,6 @@
 //! The city HUD belongs to the primary group; statistics and Options own the
 //! secondary group in mode4 (49dcb0/4b5370). Keep the retained city view intact.
-use crate::{live_host::StatsAction, stats_panel};
+use crate::stats_panel;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Layers {
@@ -10,7 +10,7 @@ pub(crate) struct Layers {
 
 pub(crate) enum MouseRoute {
     City,
-    Statistics(Option<StatsAction>),
+    Statistics(Option<stats_panel::Action>),
 }
 
 impl Layers {
@@ -119,7 +119,9 @@ mod tests {
                 pressed,
             );
             match route {
-                MouseRoute::Statistics(Some(StatsAction::Close)) if !pressed => closed = true,
+                MouseRoute::Statistics(Some(stats_panel::Action::Close)) if !pressed => {
+                    closed = true
+                }
                 MouseRoute::Statistics(None) if pressed => {}
                 _ => panic!("Ok must close only on release"),
             }
