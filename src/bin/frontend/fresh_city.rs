@@ -2399,6 +2399,16 @@ impl map_script::Hooks for Hooks {
     }
 }
 impl level_script::Hooks for Hooks {
+    fn begin_prompt_dismiss(&mut self) -> Result<Option<i32>, String> {
+        self.command(level_script::Command::TutorialDismissPrompt, &[])?;
+        Ok(self
+            .script_prompt()
+            .map(|request| request.dismissal_id as i32))
+    }
+    fn finish_prompt_dismiss(&mut self) -> Result<(), String> {
+        self.close_script_prompt(true);
+        Ok(())
+    }
     fn performance8b26cc(&mut self) -> Result<i32, String> {
         self.process
             .as_ref()
