@@ -8,6 +8,65 @@ pub struct CameraSample {
     pub up: [f32; 3],
     pub vertical_fov: f32,
 }
+/// Startup kind-17 playback. Track requests advance at the camera's 50 Hz
+/// cadence; presentation only samples the shared primary camera arithmetic.
+pub struct Playback {
+    requests: Vec<CameraSample>,
+    camera: crate::camera::primary::Primary,
+    frame: usize,
+}
+impl Playback {
+    pub fn new(track: &Flyby<'_>) -> Result<Self, String> {
+        let requests = (1..track.frame_count())
+            .map(|frame| track.sample(frame))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut playback = Self {
+            requests,
+            camera: crate::camera::primary::Primary::flyby([[0.; 3]; 2])?,
+            frame: 0,
+        };
+        // The startup epoch presents the first callback, which preincrements
+        // from the basis record to frame 1, just as the track decoder requires.
+        playback.advance_to(0)?;
+        Ok(playback)
+    }
+    pub fn duration_ticks(&self) -> usize {
+        self.requests.len()
+    }
+    /// Catch up every callback, including those between two rendered frames.
+    /// Completion remains the frontend's separate FlybyEnded/menu transition.
+    pub fn advance_to(&mut self, tick: usize) -> Result<(), String> {
+        let frame = tick.saturating_add(1).min(self.requests.len());
+        while self.frame < frame {
+            let request = self.requests[self.frame];
+            self.camera
+                .request_flyby(request.eye, request.target, request.up)?;
+            self.camera.common()?;
+            self.frame += 1;
+        }
+        Ok(())
+    }
+    /// The menu inherits the simulation pose, rather than a render extrapolation.
+    pub fn current(&self) -> CameraSample {
+        let view = self.camera.view();
+        CameraSample {
+            eye: view.current[0],
+            target: view.current[1],
+            up: view.up,
+            vertical_fov: 45.,
+        }
+    }
+    pub fn sample(&self, fraction: f32) -> Result<CameraSample, String> {
+        // Primary::sample writes its renderer output words only. Keep even
+        // those writes out of playback state so sampling is read-only here.
+        let sampled = self.camera.clone().sample(fraction)?;
+        Ok(CameraSample {
+            eye: sampled[0],
+            target: sampled[1],
+            ..self.current()
+        })
+    }
+}
 pub struct Flyby<'a> {
     positions: &'a [u8],
     frames: usize,
@@ -85,6 +144,172 @@ impl<'a> Flyby<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn authored_track(poses: &[CameraSample]) -> Vec<u8> {
+        let frames = poses.len() + 1;
+        let mut bytes = vec![0; 16 + frames * 48 + 52];
+        bytes[..4].copy_from_slice(&0x10000u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&0x47u32.to_le_bytes());
+        bytes[8..10].copy_from_slice(&4u16.to_le_bytes());
+        bytes[10..12].copy_from_slice(&1u16.to_le_bytes());
+        bytes[12..14].copy_from_slice(&(frames as u16).to_le_bytes());
+        for (frame, pose) in poses.iter().enumerate() {
+            let top = std::array::from_fn(|i| pose.eye[i] + pose.up[i]);
+            for (vertex, point) in [pose.target, top, pose.eye, [0.; 3]]
+                .into_iter()
+                .enumerate()
+            {
+                for (axis, value) in point.into_iter().enumerate() {
+                    let value = if axis == 2 { -value } else { value };
+                    let at = 16 + (frame + 1) * 48 + vertex * 12 + axis * 4;
+                    bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        let end = 16 + frames * 48;
+        bytes[end + 32..end + 40].copy_from_slice(&[0, 0, 0, 0, 0, 0, 6, 0]);
+        bytes[end + 40..].copy_from_slice(&[2, 0, 0, 0, 1, 0, 1, 0, 3, 0, 2, 0]);
+        bytes
+    }
+    fn pose(eye: [f32; 3], target: [f32; 3]) -> CameraSample {
+        CameraSample {
+            eye,
+            target,
+            up: [0., 1., 0.],
+            vertical_fov: 45.,
+        }
+    }
+    #[test]
+    fn startup_flyby_preincrements_eases_and_copies_at_strict_l1_boundary() {
+        let poses = [
+            pose([12., 6., -6.], [2., 4., -2.]),
+            pose([16., 13., 7.], [3., 4., -3.]),
+            pose([100., 100., 100.], [-100., -100., -100.]),
+        ];
+        let bytes = authored_track(&poses);
+        let track = Flyby::parse(&bytes).unwrap();
+        let mut playback = Playback::new(&track).unwrap();
+        assert_eq!(playback.frame, 1, "basis frame must be skipped");
+        assert_eq!(
+            playback.camera.view().desired,
+            [poses[0].eye, poses[0].target]
+        );
+        assert_eq!(playback.current(), pose([6., 3., -3.], [1., 2., -1.]));
+        assert_eq!(playback.sample(0.).unwrap(), playback.current());
+        assert_eq!(
+            playback.sample(0.5).unwrap(),
+            pose([7.5, 3.75, -3.75], [1.25, 2.5, -1.25])
+        );
+        assert_eq!(
+            playback.sample(1.).unwrap(),
+            pose([9., 4.5, -4.5], [1.5, 3., -1.5])
+        );
+        playback.advance_to(1).unwrap();
+        // Eye delta is [10,10,10]: equality copies, while target still eases.
+        assert_eq!(playback.current(), pose(poses[1].eye, [2., 3., -2.]));
+        assert_eq!(playback.sample(0.5).unwrap().eye, poses[1].eye);
+        playback.advance_to(2).unwrap();
+        assert_eq!(playback.current(), poses[2]);
+        assert_eq!(playback.sample(0.75).unwrap(), poses[2]);
+    }
+    #[test]
+    fn startup_flyby_render_sampling_is_read_only() {
+        let bytes = authored_track(&[pose([12., 6., -6.], [2., 4., -2.])]);
+        let playback = Playback::new(&Flyby::parse(&bytes).unwrap()).unwrap();
+        let before = playback.camera.clone();
+        for fraction in [0., 0.25, 0.75, 1., 0.5] {
+            playback.sample(fraction).unwrap();
+            assert_eq!(playback.camera, before);
+            assert_eq!(playback.frame, 1);
+        }
+    }
+    #[test]
+    fn startup_flyby_callback_sequence_is_independent_of_render_rate() {
+        let poses = (0..30)
+            .map(|i| pose([i as f32, 6., -6.], [2., i as f32, -2.]))
+            .collect::<Vec<_>>();
+        let bytes = authored_track(&poses);
+        let track = Flyby::parse(&bytes).unwrap();
+        let mut frequent = Playback::new(&track).unwrap();
+        let mut sparse = Playback::new(&track).unwrap();
+        for tick in 0..30 {
+            frequent.advance_to(tick).unwrap();
+            for fraction in [0., 0.25, 0.5, 0.75] {
+                frequent.sample(fraction).unwrap();
+            }
+            if tick % 3 == 2 {
+                sparse.advance_to(tick).unwrap();
+                assert_eq!(sparse.camera, frequent.camera);
+                assert_eq!(sparse.sample(0.6).unwrap(), frequent.sample(0.6).unwrap());
+            }
+        }
+        let final_pose = sparse.current();
+        sparse.advance_to(usize::MAX).unwrap();
+        assert_eq!(
+            sparse.current(),
+            final_pose,
+            "completion must not loop the track"
+        );
+    }
+    #[test]
+    #[ignore = "requires the three supplied startup flyby tracks"]
+    fn startup_flyby_interpolates_all_supplied_tracks_between_callbacks() {
+        let parameter = crate::fixtures::path("PARAMETERS");
+        let installer = parameter.parent().unwrap().parent().unwrap();
+        for name in ["intro_low.tm", "intro_medium.tm", "intro_high.tm"] {
+            let bytes = std::fs::read(installer.join("Standard/Cut_scenes").join(name)).unwrap();
+            let track = Flyby::parse(&bytes).unwrap();
+            let mut playback = Playback::new(&track).unwrap();
+            let mut current = [[0.; 3]; 2];
+            let mut eased = 0;
+            let mut interpolated = 0;
+            for frame in 1..track.frame_count() {
+                let request = track.sample(frame).unwrap();
+                let desired = [request.eye, request.target];
+                for (current, desired) in current.iter_mut().zip(desired) {
+                    let distance = current
+                        .iter()
+                        .zip(desired)
+                        .map(|(c, d)| (f64::from(d) - f64::from(*c)).abs())
+                        .sum::<f64>();
+                    if distance < 30. {
+                        eased += usize::from(distance != 0.);
+                        for (c, d) in current.iter_mut().zip(desired) {
+                            *c = (f64::from(*c) + (f64::from(d) - f64::from(*c)) / 2.) as f32;
+                        }
+                    } else {
+                        *current = desired;
+                    }
+                }
+                playback.advance_to(frame - 1).unwrap();
+                let before = playback.current();
+                assert_eq!([before.eye, before.target], current, "{name} frame {frame}");
+                for fraction in [0., 0.25, 0.5, 0.75] {
+                    let expected: [[f32; 3]; 2] = std::array::from_fn(|vector| {
+                        std::array::from_fn(|axis| {
+                            (f64::from(current[vector][axis])
+                                + (f64::from(desired[vector][axis])
+                                    - f64::from(current[vector][axis]))
+                                    * f64::from(fraction)
+                                    / 2.) as f32
+                        })
+                    });
+                    let rendered = playback.sample(fraction).unwrap();
+                    assert_eq!(
+                        [rendered.eye, rendered.target],
+                        expected,
+                        "{name} frame {frame} fraction {fraction}"
+                    );
+                    assert_eq!(rendered.up, request.up);
+                    assert_eq!(rendered.vertical_fov, request.vertical_fov);
+                    interpolated += usize::from(rendered != before);
+                    assert_eq!(playback.current(), before);
+                }
+            }
+            assert!(eased > 0, "{name} must exercise smoothing");
+            assert!(interpolated > 0, "{name} must move between callbacks");
+        }
+    }
+
     #[test]
     fn rejects_truncated_flyby() {
         assert!(Flyby::parse(&[0; 15]).is_err());
