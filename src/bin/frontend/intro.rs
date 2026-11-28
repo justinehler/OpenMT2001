@@ -10,6 +10,8 @@ mod camera_producer;
 mod dialog_keys;
 #[path = "intro/focus.rs"]
 pub(crate) mod focus;
+#[path = "intro/frontend_draw.rs"]
+mod frontend_draw;
 #[path = "intro/menu_preferences.rs"]
 pub(crate) mod menu_preferences;
 #[path = "intro/options_ack.rs"]
@@ -4276,20 +4278,7 @@ impl Intro {
         {
             match review {
                 crate::live_host::ResultReview::Statistics => {
-                    let menu = self.menu.as_mut().ok_or("Final statistics menu missing")?;
-                    menu.draw(&self.renderer, &self.color_view, &self.depth_view)?;
-                    view.stats_panel.update(
-                        menu.stats_assets(),
-                        &self.renderer,
-                        view.live_status.as_ref().and_then(|s| s.stats.as_ref()),
-                    )?;
-                    if let Some(panel) = &view.stats_panel.prepared {
-                        self.renderer
-                            .draw_overlay(&self.color_view, &self.depth_view, panel);
-                    }
-                    presenter
-                        .present_binding(&self.binding)
-                        .map_err(|error| error.to_string())?;
+                    self.draw_frontend(presenter, Some(review))?;
                     return Ok(true);
                 }
                 crate::live_host::ResultReview::Menu(target) => {
@@ -7591,6 +7580,14 @@ impl Intro {
                 .map_err(|e| e.to_string());
         }
 
+        self.draw_frontend(presenter, None)
+    }
+
+    fn draw_frontend(
+        &mut self,
+        presenter: &Presenter,
+        review: Option<crate::live_host::ResultReview>,
+    ) -> Result<(), String> {
         if self.menu.is_some() && self.last_sample.is_none() {
             presenter
                 .window
@@ -7669,14 +7666,44 @@ impl Intro {
             presenter.window.set_title("OpenMT2001 - main menu");
         }
         let submit_started = presenter.profile_menu_prepare(prepare_started);
-        self.renderer
-            .draw_prepared(&self.color_view, &self.depth_view, &self.prepared);
-        self.renderer
-            .draw_world_overlay(&self.color_view, &self.depth_view, &self.sidewalk_labels);
-        self.renderer
-            .draw_world_overlay(&self.color_view, &self.depth_view, &self.mr_monopoly);
-        if let Some(menu) = &mut self.menu {
-            menu.draw(&self.renderer, &self.color_view, &self.depth_view)?;
+        for layer in frontend_draw::layers(review) {
+            match layer {
+                frontend_draw::Layer::Background => {
+                    self.renderer
+                        .draw_prepared(&self.color_view, &self.depth_view, &self.prepared);
+                    self.renderer.draw_world_overlay(
+                        &self.color_view,
+                        &self.depth_view,
+                        &self.sidewalk_labels,
+                    );
+                    self.renderer.draw_world_overlay(
+                        &self.color_view,
+                        &self.depth_view,
+                        &self.mr_monopoly,
+                    );
+                }
+                frontend_draw::Layer::Menu => {
+                    if let Some(menu) = &mut self.menu {
+                        menu.draw(&self.renderer, &self.color_view, &self.depth_view)?;
+                    }
+                }
+                frontend_draw::Layer::Statistics => {
+                    let menu = self.menu.as_ref().ok_or("Final statistics menu missing")?;
+                    let view = self
+                        .inspection
+                        .as_mut()
+                        .ok_or("Final statistics view missing")?;
+                    view.stats_panel.update(
+                        menu.stats_assets(),
+                        &self.renderer,
+                        view.live_status.as_ref().and_then(|s| s.stats.as_ref()),
+                    )?;
+                    if let Some(panel) = &view.stats_panel.prepared {
+                        self.renderer
+                            .draw_overlay(&self.color_view, &self.depth_view, panel);
+                    }
+                }
+            }
         }
         presenter.profile_menu_submit(submit_started);
         presenter
