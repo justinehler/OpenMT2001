@@ -2926,8 +2926,8 @@ mod preferred_flow_tests {
                 shown, expected,
                 "scenario {scenario} difficulty {difficulty}"
             );
-            for slot in 1..6 {
-                let label = match expected[slot].1 {
+            for (slot, (_, character)) in expected.iter().enumerate().skip(1) {
+                let label = match *character {
                     Some(token) => panel.strings[panel.characters[token].name].clone(),
                     None => panel.strings[0x6db].clone(),
                 };
