@@ -570,12 +570,7 @@ impl Route {
             let difficulty = self.strings
                 [[1654, 1655, 1658][view.snapshot.settings.difficulty as usize]]
                 .clone();
-            let mut details = vec![
-                view.snapshot.settings.name.clone(),
-                format!("TCP {} | Roster {}", view.address, view.snapshot.revision).into_bytes(),
-                b"Host: slot button cycles Open / AI / Closed.".to_vec(),
-                b"Host: click AI name to change its difficulty.".to_vec(),
-            ];
+            let mut details = vec![view.snapshot.settings.name.clone()];
             for (i, row) in view
                 .snapshot
                 .rows
