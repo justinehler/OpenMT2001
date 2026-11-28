@@ -962,7 +962,7 @@ mod bid_facing_tests {
     }
     #[test]
     #[ignore = "SHA-pinned original auction meshes/materials/PE/font/language; CPU fixture, optional capture"]
-    fn supplied_bid_omits_only_reversed_backing_and_preserves_timer_top() {
+    fn supplied_panels_cull_reversed_faces_and_preserve_fills_and_regions() {
         let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -1068,7 +1068,7 @@ mod bid_facing_tests {
         let body = u32::from_le_bytes(image.at(0x5362c0, 4).unwrap().try_into().unwrap());
         assert_eq!(body, 0xbb000a28);
         assert_eq!(assets.background, body);
-        for (panel, name, count, backing, title, parts) in [
+        for (panel, name, count, backing, title, parts, visible_parts) in [
             (
                 &assets.bid,
                 "new_auction_bid_v2.tm",
@@ -1076,6 +1076,7 @@ mod bid_facing_tests {
                 "AUCTION_BID_BACKING",
                 "AUCTION_BID_BID_AMOUNT",
                 &[1][..],
+                1,
             ),
             (
                 &assets.timer,
@@ -1084,6 +1085,7 @@ mod bid_facing_tests {
                 "AUCTION_TIMER_BACKING",
                 "AUCTION_TIMER_TITLE_LABEL",
                 &[0][..],
+                1,
             ),
             (
                 &assets.top,
@@ -1092,6 +1094,7 @@ mod bid_facing_tests {
                 "AUCTION_TOP_BACKING",
                 "AUCTION_TOP_SALE_AREA",
                 &[0][..],
+                0,
             ),
         ] {
             let name = format!("gamedata2/brand_new_panels/{name}");
@@ -1102,7 +1105,13 @@ mod bid_facing_tests {
             assert_eq!(panel.regions, regions);
             let (expected_base, bounds) =
                 ui::panel_frame_base(&index, &archive, &name, parts, 0).unwrap();
-            assert_eq!(panel.base.len(), parts.len());
+            assert_eq!(panel.base.len(), visible_parts, "{name} visible parts");
+            if visible_parts == 0 {
+                // The top panel's selected part0 is a reverse-facing layout
+                // quad. Its runtime fill and all regions still survive below.
+                let ids = mesh.parts[0].vertex_indices().collect::<Vec<_>>();
+                assert!(ids.as_chunks::<3>().0.iter().all(|&t| area(&pos, t) > 0.));
+            }
             assert_eq!(bounds.len(), count);
             for (a, b) in panel.base.iter().zip(&expected_base) {
                 same(a, b);
@@ -1224,8 +1233,8 @@ mod bid_facing_tests {
             assets.hidden_bid_toggle,
             [title[2] - 16., title[1], title[2], title[3]]
         );
-        // All nine regions and live control/fill paths survive the static
-        // border admission; timer/top remain on their old explicit part0.
+        // All regions and live control/fill paths survive face rejection;
+        // the reverse-facing top layout quad does not become a mesh backing.
         #[cfg(feature = "capture")]
         if let Ok(path) = std::env::var("OPENMT2001_AUCTION_BID_FACING_CAPTURE") {
             let mut d = wgpu::InstanceDescriptor::new_without_display_handle();

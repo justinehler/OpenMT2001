@@ -853,14 +853,14 @@ impl Assets {
         exe: &[u8],
     ) -> Result<Self, String> {
         let parts = [0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 22, 23, 24, 25, 26, 27];
-        let (base, regions) = ui::panel_front_base(
+        let (base, regions) = ui::panel_frame_base(
             index,
             archive,
             "gamedata2/brand_new_panels/bap_v2.tm",
             &parts,
             9,
         )?;
-        let (apartment_base, apartment_regions) = ui::panel_front_base(
+        let (apartment_base, apartment_regions) = ui::panel_frame_base(
             index,
             archive,
             "gamedata2/brand_new_panels/bap_apartments_v2.tm",

@@ -309,9 +309,10 @@ pub fn panel_base(
     panel_frame_base(index, archive, name, parts, 0)
 }
 
-/// Original UI CULL_CW in the panel's X/-Y screen pose. Layout regions
-/// have reverse-facing triangles; drawing them would put opaque texture
-/// backings beneath the runtime translucent rectangles.
+/// The original UI preset stores cull state 3 at 0x459237, which becomes
+/// CULL_CW at 0x4efa5e–0x4efa69 for the shared widget mesh pass (0x43c4e0).
+/// In the panel's X/-Y screen pose, reverse-facing triangles mark layout
+/// regions; drawing them would back runtime translucent fills with texture.
 fn panel_triangle_visible(points: [[f32; 3]; 3]) -> bool {
     let [a, b, c] = points.map(|p| [f64::from(p[0]), -f64::from(p[1])]);
     let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
@@ -324,28 +325,6 @@ pub fn panel_frame_base(
     name: &str,
     parts: &[usize],
     frame: usize,
-) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
-    panel_frame_base_impl(index, archive, name, parts, frame, false)
-}
-
-/// Panel mesh submission with the original clockwise-face rejection.
-pub fn panel_front_base(
-    index: &openmt2001::archive::ArchiveIndex,
-    archive: &[u8],
-    name: &str,
-    parts: &[usize],
-    frame: usize,
-) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
-    panel_frame_base_impl(index, archive, name, parts, frame, true)
-}
-
-fn panel_frame_base_impl(
-    index: &openmt2001::archive::ArchiveIndex,
-    archive: &[u8],
-    name: &str,
-    parts: &[usize],
-    frame: usize,
-    cull_clockwise: bool,
 ) -> Result<(Vec<Surface>, Vec<[f32; 4]>), String> {
     let payload = |name: &str| -> Result<&[u8], String> {
         let e = index
@@ -372,7 +351,7 @@ fn panel_frame_base_impl(
         let mut s = Surface::new(&tex.textures[0]);
         let indices = part.vertex_indices().collect::<Vec<_>>();
         for triangle in indices.as_chunks::<3>().0 {
-            if !cull_clockwise || panel_triangle_visible(triangle.map(|v| pos[v])) {
+            if panel_triangle_visible(triangle.map(|v| pos[v])) {
                 for &v in triangle {
                     s.vertices
                         .push([pos[v][0], -pos[v][1], 0.5, 1., 1., 1., uv[v][0], uv[v][1]]);
@@ -380,7 +359,7 @@ fn panel_frame_base_impl(
                 }
             }
         }
-        if !cull_clockwise || !s.vertices.is_empty() {
+        if !s.vertices.is_empty() {
             base.push(s);
         }
     }
@@ -1122,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_backings_cull_layout_quads_without_losing_texture_alpha_or_bounds() {
+    fn default_panel_loaders_cull_layout_quads_without_losing_texture_alpha_or_bounds() {
         // A front-facing textured triangle and a reverse-facing layout
         // triangle share a rectangle, as the original panel meshes do.
         let mut mesh = vec![0u8; 164];
@@ -1176,13 +1155,16 @@ mod tests {
         }
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let (base, bounds) =
-            super::panel_front_base(&index, &archive, "panel.tm", &[0, 1], 0).unwrap();
-        assert_eq!(base.len(), 1);
-        assert_eq!(base[0].vertices.len(), 3);
-        assert_eq!(base[0].alpha, [255; 3]);
-        assert_eq!(base[0].pixels[3], 128);
-        assert_eq!(bounds, [[0., -1., 1., -0.]]);
+        for (base, bounds) in [
+            super::panel_base(&index, &archive, "panel.tm", &[0, 1]).unwrap(),
+            super::panel_frame_base(&index, &archive, "panel.tm", &[0, 1], 0).unwrap(),
+        ] {
+            assert_eq!(base.len(), 1);
+            assert_eq!(base[0].vertices.len(), 3);
+            assert_eq!(base[0].alpha, [255; 3]);
+            assert_eq!(base[0].pixels[3], 128);
+            assert_eq!(bounds, [[0., -1., 1., -0.]]);
+        }
     }
 
     #[test]
