@@ -121,56 +121,8 @@ pub fn load_era_styles(
         .try_into()
         .map_err(|_| "original era style bank size mismatch".into())
 }
-/// Confirmed setup and full compact participants, separate from ordinary Inputs.
-/// Offline local peer0 is an adapter identity, not a recovered native peer ID.
-#[derive(Clone)]
-pub struct SkirmishLaunch {
-    pub level_id: u32,
-    pub directory: String,
-    pub map: String,
-    pub objective_kind: i32,
-    pub target: f32,
-    pub difficulty: i32,
-    pub participants: Vec<openmt2001::skirmish::roster::Participant>,
-}
-impl SkirmishLaunch {
-    fn validate(&self) -> Result<(), String> {
-        self.validate_roster(false)
-    }
-    pub(crate) fn validate_roster(&self, connected: bool) -> Result<(), String> {
-        use openmt2001::skirmish::roster::Kind;
-        // Bounded original supplied map support; never join a caller path.
-        if !(0..=2).contains(&self.difficulty)
-            || !self.target.is_finite()
-            || !(2..=6).contains(&self.participants.len())
-            || self.participants[0].kind != Kind::Human
-        {
-            return Err("invalid offline Skirmish launch".into());
-        }
-        if self.directory.is_empty() || !self.directory.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return Err("invalid selected level directory".into());
-        }
-        let mut used = [false; 10];
-        for (slot, p) in self.participants.iter().enumerate() {
-            let token = p
-                .token
-                .filter(|&t| t < 10)
-                .ok_or("invalid participant token")?;
-            if used[token]
-                || !p.ready
-                || p.name.is_empty()
-                || p.name.len() >= 32
-                || p.name.contains(&0)
-                || (slot > 0 && p.kind != Kind::Ai && !(connected && p.kind == Kind::Human))
-                || !(0..=2).contains(&p.difficulty)
-            {
-                return Err("invalid compact offline participant".into());
-            }
-            used[token] = true;
-        }
-        Ok(())
-    }
-}
+// The Skirmish launch moved into the library (#99).
+pub use openmt2001::skirmish::launch::SkirmishLaunch;
 
 /// Original 499160 selects the single-player option; 4956c0 resets it
 /// before tutorials and 4a5c50 resets it on entering network setup.
