@@ -100,6 +100,7 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
         crate::network::commands::Targets {
             buildings: &left.world.city.buildings,
             businesses: &left.world.city.ledgers.businesses,
+            ..crate::network::commands::Targets::default()
         },
         &mut left.world.city.pause,
         &mut left.tasks,
@@ -125,6 +126,7 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
                     crate::network::commands::Targets {
                         buildings: &session.world.city.buildings,
                         businesses: &session.world.city.ledgers.businesses,
+                        ..crate::network::commands::Targets::default()
                     },
                     &mut session.world.city.pause,
                     &mut session.tasks,

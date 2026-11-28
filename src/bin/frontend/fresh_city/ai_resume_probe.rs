@@ -6,6 +6,184 @@ use super::*;
 use openmt2001::ai_messages::offers::auction::admission;
 use openmt2001::save::SaveFile;
 
+/// Keep the live auction action/controls bindings, with the same city-view
+/// scene return values and detached audio as the headless renderer stand-in.
+#[derive(Default)]
+struct ProbeAuction {
+    scene: Option<crate::live_host::Auction>,
+    camera_active: bool,
+    omitted: std::collections::BTreeSet<u32>,
+    bid_gate: std::cell::Cell<bool>,
+}
+
+impl ProbeAuction {
+    fn event(&mut self, event: openmt2001::live_commands::Event) -> Result<u32, String> {
+        use openmt2001::ai_messages::offers::auction::{activation, closure};
+        use openmt2001::live_commands::Event;
+        match event {
+            Event::AuctionScenePrepare => {
+                if self.scene.is_some() {
+                    return Err("Auction renderer already owns an active scene".into());
+                }
+                self.scene = Some(crate::live_host::Auction::default());
+                self.bid_gate.set(false);
+                Ok(0) // Previous interface mode: city view.
+            }
+            Event::AuctionActivation(activation::Call::Camera) => {
+                if self.scene.is_none() || self.camera_active {
+                    return Err("Auction camera requires an inactive prepared scene".into());
+                }
+                self.camera_active = true;
+                Ok(0) // Previous renderer transition, as in headless::auction_stand_in.
+            }
+            Event::AuctionActivation(activation::Call::Ambient) => Ok(0), // Detached audio.
+            Event::AuctionActivation(activation::Call::Action(call))
+            | Event::AuctionAction(call) => crate::live_host::auction_action(
+                call,
+                &mut self.scene,
+                &mut self.omitted,
+                0, // Both supplied saves are non-tutorial sessions.
+                &None,
+                &self.bid_gate,
+            ),
+            Event::AuctionActivation(activation::Call::RefreshPanel) => {
+                self.scene
+                    .as_mut()
+                    .ok_or("Auction labels have no prepared scene")?
+                    .participants
+                    .clear();
+                Ok(0)
+            }
+            Event::AuctionActivation(activation::Call::NormalSpeed) => Ok(0), // Session owns speed.
+            Event::AuctionTimeShow { .. } => {
+                self.scene.as_ref().ok_or("Auction Time has no scene")?;
+                Ok(0)
+            }
+            Event::AuctionClosure(closure::Call::RestorePresentation) => {
+                if self.scene.is_none() || !self.camera_active {
+                    return Err("Auction restore has no retained scene".into());
+                }
+                self.scene = None;
+                self.camera_active = false;
+                self.bid_gate.set(false);
+                Ok(0)
+            }
+            // The session already owns announcement visibility, category locks,
+            // settlement, messages and queued transfers. These are UI/audio only.
+            Event::AuctionClosure(
+                closure::Call::CloseAnnouncement
+                | closure::Call::CategoryView(_)
+                | closure::Call::CategoryStatus(_)
+                | closure::Call::AudioReset4af140
+                | closure::Call::Tutorial(_)
+                | closure::Call::ReleaseAmbient(_),
+            )
+            | Event::AuctionAdmission(admission::Call::ReleaseAmbient(_)) => Ok(0),
+            other => Err(format!("unbound probe auction event {other:?}")),
+        }
+    }
+
+    fn pass(&mut self, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
+        use crate::auction_controls::{Bidder, Call, TickCall};
+        if !self.scene.as_ref().is_some_and(|scene| scene.visible) {
+            return;
+        }
+        let player = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .find(|p| p.reference == session.roster.status.current_player)
+            .unwrap()
+            .bytes[0x1bc];
+        let record = &session.world.city.auction.controller.record;
+        let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
+        let bidder = Bidder {
+            current: word(0x58),
+            winner: word(0x60),
+            price: word(0x6c),
+            passed: record[usize::from(player) * 12 + 0x10],
+            withdrawn: record[usize::from(player) * 12 + 0x12],
+        };
+        let mut controls = std::mem::take(&mut self.scene.as_mut().unwrap().controls);
+        controls
+            .tick(bidder, player, session.tutorial_state, |call| match call {
+                TickCall::ClearText
+                | TickCall::Price(_)
+                | TickCall::TimerVisible(_)
+                | TickCall::Tutorial(_) => Ok(None),
+                TickCall::Withdraw(_) => Err("probe pass policy missed a human turn".into()),
+            })
+            .unwrap();
+        // headless --auctions pass clicks button 3 only while enabled. That
+        // button withdraws (action 2), rather than the separate pass-bid action.
+        if controls.buttons_enabled & 8 != 0 {
+            controls
+                .button(3, bidder.current, player, bidder.price, |call| match call {
+                    Call::Action(command) => session
+                        .apply_auction_action(command, assets, |event| self.event(event))
+                        .map(|_| true),
+                    Call::HideTimer => Ok(true),
+                    other => Err(format!("unexpected probe pass callback {other:?}")),
+                })
+                .unwrap();
+        }
+        self.scene.as_mut().unwrap().controls = controls;
+    }
+}
+
+#[test]
+fn auction_probe_retains_live_action_and_scene_contract() {
+    use openmt2001::ai_messages::offers::auction::{Call, activation, closure};
+    use openmt2001::live_commands::Event;
+    let mut auction = ProbeAuction::default();
+    assert!(
+        auction
+            .event(Event::AuctionAction(Call::RefreshTurn(0)))
+            .is_err()
+    );
+    assert!(
+        auction
+            .event(Event::AuctionActivation(activation::Call::Camera))
+            .is_err()
+    );
+    assert_eq!(auction.event(Event::AuctionScenePrepare), Ok(0));
+    assert!(auction.event(Event::AuctionScenePrepare).is_err());
+    assert_eq!(
+        auction.event(Event::AuctionActivation(activation::Call::Camera)),
+        Ok(0)
+    );
+    assert!(
+        auction
+            .event(Event::AuctionActivation(activation::Call::Camera))
+            .is_err()
+    );
+    auction.bid_gate.set(true);
+    assert_eq!(
+        auction.event(Event::AuctionAction(Call::ShowPanel(0x565b9c))),
+        Ok(0)
+    );
+    assert!(auction.scene.as_ref().unwrap().visible);
+    assert!(!auction.bid_gate.get());
+    assert!(
+        auction
+            .event(Event::AuctionAction(Call::ShowPanel(0)))
+            .is_err()
+    );
+    assert_eq!(
+        auction.event(Event::AuctionClosure(closure::Call::RestorePresentation)),
+        Ok(0)
+    );
+    assert!(auction.scene.is_none());
+    assert!(!auction.camera_active);
+    assert!(
+        auction
+            .event(Event::AuctionClosure(closure::Call::RestorePresentation))
+            .is_err()
+    );
+    assert_eq!(auction.event(Event::AuctionScenePrepare), Ok(0));
+}
+
 #[test]
 #[ignore = "requires original saves and headless scheduler assets"]
 fn continues_inserted_ai_from_supplied_saves() {
@@ -189,7 +367,8 @@ fn run(controlled_retail: bool) {
                 character_names: &names,
             },
             Policy {
-                seed: 0x12345678,
+                // Exercise auctions, construction and overnight retail after the startup reseed.
+                seed: 2,
                 auxiliary_prior_bytes: [0; 0x11c],
             },
             &with_opponent,
@@ -259,6 +438,7 @@ fn run(controlled_retail: bool) {
         let mut settings_applied = None;
         let mut retail_restocked = false;
         let mut controlled_bakery = None;
+        let mut auction = ProbeAuction::default();
         let horizon = if key == "OPENMT2001_SAVE_TWO" {
             14_200
         } else {
@@ -268,6 +448,7 @@ fn run(controlled_retail: bool) {
             let before_cash = cash(&session);
             let mut postings = Vec::new();
             let mut auction_admission = Vec::new();
+            let mut property_transfers = Vec::new();
             let result = session.advance_session(&assets, &mut policy, |event, _| match event {
                 tick::Event::Tick(openmt2001::scheduler::Event::Helper(
                     0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0 | 0x4b5d50,
@@ -322,6 +503,37 @@ fn run(controlled_retail: bool) {
                     auction_admission.push(call);
                     Ok(0)
                 }
+                tick::Event::Command(
+                    event @ (openmt2001::live_commands::Event::AuctionScenePrepare
+                    | openmt2001::live_commands::Event::AuctionActivation(_)
+                    | openmt2001::live_commands::Event::AuctionAction(_)
+                    | openmt2001::live_commands::Event::AuctionTimeShow { .. }
+                    | openmt2001::live_commands::Event::AuctionClosure(_)
+                    | openmt2001::live_commands::Event::AuctionAdmission(
+                        admission::Call::ReleaseAmbient(_),
+                    )),
+                ) => auction.event(event),
+                tick::Event::Ai(openmt2001::ai_runtime::Call::AuctionAction(call)) => {
+                    auction.event(openmt2001::live_commands::Event::AuctionAction(call))
+                }
+                tick::Event::Command(
+                    openmt2001::live_commands::Event::PropertyTransferNotice {
+                        category,
+                        owner,
+                        amount,
+                    },
+                ) => {
+                    // LiveHost publishes a notice after the session settles the
+                    // transfer. Check that notification against the world below.
+                    property_transfers.push((category, owner, amount));
+                    Ok(0)
+                }
+                tick::Event::Command(openmt2001::live_commands::Event::PropertyOwnership(
+                    openmt2001::category_ownership::Seam::BuildingAppearance { .. },
+                )) => Ok(0), // LiveHost's renderer-only appearance refresh.
+                // Property-view locks are already updated by the session;
+                // LiveHost only refreshes the property panel at this boundary.
+                tick::Event::Command(openmt2001::live_commands::Event::PropertyView(_)) => Ok(0),
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::RefreshInterface,
                 )) => {
@@ -364,6 +576,18 @@ fn run(controlled_retail: bool) {
                 break;
             }
             assert_account_postings(&before_cash, &cash(&session), &postings);
+            for (category, owner, amount) in property_transfers {
+                assert_eq!(session.world.categories[category as usize][5], owner);
+                assert!(
+                    postings.iter().any(|posting| {
+                        posting.player == usize::from(owner) - 1
+                            && posting.amount == -(amount as f32)
+                    }),
+                    "property transfer omitted its purchase posting"
+                );
+            }
+            policy.ai_event_gate = auction.bid_gate.get();
+            auction.pass(&mut session, &assets);
             if !auction_admission.is_empty() {
                 let auction = &session.world.city.auction;
                 let word = |at| {

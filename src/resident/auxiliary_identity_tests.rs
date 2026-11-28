@@ -186,6 +186,7 @@ fn check_retained_owned_creation(load: bool) {
             .collect();
         let personal = super::InitializationInputs {
             movement: &movement,
+            movement_precision: super::MovementSpeedPrecision::AfterReset,
             preferences: &preferences,
             objectives: &objectives,
             timetables: &timetables,

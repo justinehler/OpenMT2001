@@ -170,3 +170,83 @@ fn process_factor_survives_player_transfer_and_next_view_reads_current_state() {
     );
     window(&mut next_output, 0., true); // A retained zero-gain WAV cannot revive.
 }
+
+#[test]
+fn voice_admission_repeated_cash_and_clicks_do_not_layer_and_finished_cues_readmit() {
+    for operation in [
+        Operation::Ledger { sale: false },
+        Operation::Ledger { sale: true },
+        Operation::UiLightClick,
+    ] {
+        let (mut player, _, mut output) = owner(100);
+        for _ in 0..20 {
+            player.apply(operation.clone()).unwrap();
+        }
+        if matches!(operation, Operation::UiLightClick) {
+            assert_eq!(player.ui_click_cues.len(), 1);
+            window(&mut output, 0.5, true);
+        } else {
+            assert_eq!(player.ledger_cues.len(), 1);
+            let gain = player.ledger_cues[0].sink.volume();
+            window(&mut output, gain * 0.5, true);
+        }
+        output.by_ref().take(70_000).for_each(drop);
+        player.apply(operation.clone()).unwrap();
+        assert!(output.by_ref().take(4096).any(|sample| sample > 0.));
+    }
+}
+
+#[test]
+fn voice_admission_streamed_pool_is_shared_across_production_gameplay_families() {
+    let (mut player, audio, mut output) = owner(100);
+    for _ in 0..10 {
+        player
+            .apply(Operation::Targeted {
+                actor_is_current: true,
+            })
+            .unwrap();
+    }
+    let handles: Vec<_> = player.one_shots.to_vec();
+    audio.service_effects(); // All ten have the same positive age.
+    player.assets.positive_pluck.fill(0.25);
+    player
+        .apply(Operation::CardOpen { positive: true })
+        .unwrap();
+    assert!(handles[..9].iter().all(|handle| !handle.empty()));
+    assert!(
+        handles[9].empty(),
+        "streamed equal ages replace the last row"
+    );
+    window(&mut output, 4.75, true);
+}
+
+#[test]
+fn voice_admission_unique_requests_return_no_new_auction_handle() {
+    let (mut first, shared, mut output) = owner(100);
+    let (mut second, _, _second_output) = owner(100);
+    second.bind_audio(shared);
+    let handle = first.apply(Operation::AuctionAmbientCreate).unwrap();
+    assert_ne!(handle, 0);
+    assert_eq!(second.apply(Operation::AuctionAmbientCreate).unwrap(), 0);
+    assert!(second.ambient.is_none());
+    window(&mut output, 0.5, true);
+    first
+        .apply(Operation::AuctionAmbientRelease(handle))
+        .unwrap();
+    assert_ne!(second.apply(Operation::AuctionAmbientCreate).unwrap(), 0);
+}
+
+#[test]
+fn voice_admission_fireworks_use_four_cached_cells_before_the_emitter_handle_cap() {
+    let (mut player, audio, mut output) = owner(100);
+    let cue = Operation::ResultFirework(crate::fresh_city::result::fireworks::Cue::Launch1);
+    for _ in 0..4 {
+        player.apply(cue.clone()).unwrap();
+    }
+    let handles = player.firework_bursts.clone();
+    audio.service_effects();
+    player.apply(cue).unwrap();
+    assert!(handles[0].empty());
+    assert!(handles[1..].iter().all(|handle| !handle.empty()));
+    window(&mut output, 2., true);
+}

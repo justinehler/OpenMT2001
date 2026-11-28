@@ -1,7 +1,7 @@
 //! Bounded remote command qualification (0x450490 -> 0x451720 -> 0x450a30).
 //!
 //! Native payload schemas below exclude the common 20-byte header (kind at +4,
-//! size +8, Total due +12, delayed byte +16). Construction, demolition, business open and the short
+//! size +8, Total due +12, delayed byte +16). Construction, business lifecycle/settings and the short
 //! command16 transfer are qualified. The 52-byte command16 auction descriptor is
 //! a DIFFERENT schema, not an alternative way to submit a property transfer.
 //!
@@ -10,12 +10,12 @@
 //! | 0f construction | category i8, rectangle i8[4], height i8, variation/business/kind u32, quality/owner i8, components f32[4] (construction::Command::packet) | supported; quote components retained |
 //! | 10 demolition | +0 category i8, +1 padding, +2 building u16, +4 amount f32 (8 bytes) | supported; linked business owner authorizes; quote retained |
 //! | 11 business open | +0 kind u32, +4 building u32, +8 owner u32, +12 stock_argument u8, +13 padding[3] (16 bytes) | supported; building owner authorizes; authority generates completions |
-//! | 12 conversion | kind u32, building u32, owner u32 | unsupported |
-//! | 13 business sale | business u32, player u8 | unsupported |
-//! | 15 takeover | building u32 | unsupported |
+//! | 12 conversion | +0 kind u32, +4 building u32, +8 owner u32 (12 bytes) | supported; linked business owner authorizes |
+//! | 13 business sale | +0 business u32, +4 zero-based player u8, +5 padding[3] (8 bytes) | supported; business owner authorizes |
+//! | 15 takeover | +0 building u32 (4 bytes) | supported; category landlord authorizes as buyer |
 //! | 16 property transfer | amount i32, category i16, new owner u8 | supported |
 //! | 16/19/1d/1e/1f/20 auction | 52-byte auction descriptor | unsupported |
-//! | 18 terms | business u32, stock i16[6], prices f32[6], rent f32 | unsupported |
+//! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
 //! | 1a event card | card u32, player u32, target i32 | unsupported |
 //! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | unsupported |
 //! | category-ready/elimination/outcome | internal runtime events | unsupported |
@@ -87,6 +87,117 @@ impl Request {
         }
         Ok(command)
     }
+    pub fn conversion(serial: u64, command: &crate::business_conversion::Command) -> Self {
+        let mut packet = [0; 32];
+        command.write_packet(&mut packet);
+        Self {
+            serial,
+            owner: command.owner as u8,
+            kind: 0x12,
+            payload: packet[20..].to_vec(),
+        }
+    }
+    pub fn conversion_payload(&self) -> Result<crate::business_conversion::Command> {
+        if self.kind != 0x12 || self.payload.len() != 12 {
+            return Err(Error::Unsupported);
+        }
+        let command = crate::business_conversion::Command {
+            kind: crate::player_manager::word(&self.payload, 0),
+            building: crate::player_manager::word(&self.payload, 4),
+            owner: crate::player_manager::word(&self.payload, 8),
+        };
+        if command.kind >= 45
+            || !(1..=6).contains(&self.owner)
+            || command.owner != u32::from(self.owner)
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
+    pub fn business_sale(serial: u64, command: &crate::business_sale::Command) -> Self {
+        let mut packet = [0; 28];
+        command.write_packet(&mut packet);
+        Self {
+            serial,
+            owner: command.player.wrapping_add(1),
+            kind: 0x13,
+            payload: packet[20..].to_vec(),
+        }
+    }
+    pub fn business_sale_payload(&self) -> Result<crate::business_sale::Command> {
+        if self.kind != 0x13 || self.payload.len() != 8 {
+            return Err(Error::Unsupported);
+        }
+        let command = crate::business_sale::Command {
+            business: crate::player_manager::word(&self.payload, 0),
+            player: self.payload[4],
+        };
+        if !(1..=6).contains(&self.owner) || command.player != self.owner - 1 {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
+    pub fn takeover(serial: u64, owner: u8, command: &crate::business_takeover::Command) -> Self {
+        let mut packet = [0; 24];
+        command.write_packet(&mut packet);
+        Self {
+            serial,
+            owner,
+            kind: 0x15,
+            payload: packet[20..].to_vec(),
+        }
+    }
+    pub fn takeover_payload(&self) -> Result<crate::business_takeover::Command> {
+        if self.kind != 0x15 || self.payload.len() != 4 {
+            return Err(Error::Unsupported);
+        }
+        if !(1..=6).contains(&self.owner) {
+            return Err(Error::Row);
+        }
+        Ok(crate::business_takeover::Command {
+            building: crate::player_manager::word(&self.payload, 0),
+        })
+    }
+    pub fn terms(serial: u64, owner: u8, command: &crate::economy::PendingBusinessTerms) -> Self {
+        let mut payload = command.business_index.to_le_bytes().to_vec();
+        for value in command.terms.stock_targets {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in command.terms.prices {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        payload.extend_from_slice(&command.terms.rent.to_le_bytes());
+        Self {
+            serial,
+            owner,
+            kind: 0x18,
+            payload,
+        }
+    }
+    pub fn terms_payload(&self) -> Result<crate::economy::PendingBusinessTerms> {
+        if self.kind != 0x18 || self.payload.len() != 44 {
+            return Err(Error::Unsupported);
+        }
+        let command = crate::economy::PendingBusinessTerms {
+            business_index: crate::player_manager::word(&self.payload, 0),
+            terms: crate::economy::BusinessTerms {
+                stock_targets: std::array::from_fn(|i| {
+                    i16::from_le_bytes([self.payload[4 + i * 2], self.payload[5 + i * 2]])
+                }),
+                prices: std::array::from_fn(|i| {
+                    f32::from_bits(crate::player_manager::word(&self.payload, 16 + i * 4))
+                }),
+                rent: f32::from_bits(crate::player_manager::word(&self.payload, 40)),
+            },
+        };
+        if !(1..=6).contains(&self.owner)
+            || !command.terms.rent.is_finite()
+            || command.terms.prices.iter().any(|price| !price.is_finite())
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
     pub fn construction(serial: u64, command: &crate::construction::Command) -> Self {
         Self {
             serial,
@@ -122,6 +233,10 @@ impl Request {
             0x0f => self.construction_payload().map(|_| ()),
             0x10 => self.demolition_payload().map(|_| ()),
             0x11 => self.business_open_payload().map(|_| ()),
+            0x12 => self.conversion_payload().map(|_| ()),
+            0x13 => self.business_sale_payload().map(|_| ()),
+            0x15 => self.takeover_payload().map(|_| ()),
+            0x18 => self.terms_payload().map(|_| ()),
             0x16 => self.transfer_payload().map(|_| ()),
             _ => Err(Error::Unsupported),
         }
@@ -179,12 +294,76 @@ pub struct Ingress {
 
 /// Read-only target records borrowed from the actual Session, including when
 /// AI dispatch already holds the mutable category and business fields separately.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Targets<'a> {
     pub buildings: &'a [[u8; 0x394]],
     pub businesses: &'a [[u8; 0x220]],
+    /// Copied from the live categories before borrowing their mutable occupancy.
+    pub category_owners: [u8; 52],
 }
-impl Targets<'_> {
+impl Default for Targets<'_> {
+    fn default() -> Self {
+        Self {
+            buildings: &[],
+            businesses: &[],
+            category_owners: [0; 52],
+        }
+    }
+}
+impl<'a> Targets<'a> {
+    pub fn new(
+        buildings: &'a [[u8; 0x394]],
+        businesses: &'a [[u8; 0x220]],
+        categories: &[[u8; 0x17c]; 52],
+    ) -> Self {
+        Self {
+            buildings,
+            businesses,
+            category_owners: categories.map(|row| row[5]),
+        }
+    }
+    fn business(&self, id: u32) -> Result<&[u8; 0x220]> {
+        let row = self.businesses.get(id as usize).ok_or(Error::Row)?;
+        if row[0x21c] == 0 {
+            return Err(Error::Row);
+        }
+        let building_id = u32::from(u16::from_le_bytes([row[8], row[9]]));
+        let building = self.building(building_id)?;
+        if crate::player_manager::word(building, 0x14) != 4
+            || crate::player_manager::word(building, 0x1c) != id
+        {
+            return Err(Error::Row);
+        }
+        Ok(row)
+    }
+    fn linked_business(&self, building: u32) -> Result<&[u8; 0x220]> {
+        let row = self.building(building)?;
+        let business = self.business(crate::player_manager::word(row, 0x1c))?;
+        if u32::from(u16::from_le_bytes([business[8], business[9]])) != building {
+            return Err(Error::Row);
+        }
+        Ok(business)
+    }
+    fn takeover_owner(&self, command: &crate::business_takeover::Command) -> Result<u8> {
+        let row = self.building(command.building)?;
+        let business = self.linked_business(command.building)?;
+        // 451264 derives the buyer from the category landlord, not either
+        // building/business owner and not a sender field in the native payload.
+        let offset = crate::player_manager::word(row, 0x40)
+            .checked_sub(0x617628)
+            .ok_or(Error::Row)?;
+        if !offset.is_multiple_of(380) {
+            return Err(Error::Row);
+        }
+        let owner = *self
+            .category_owners
+            .get(offset as usize / 380)
+            .ok_or(Error::Row)?;
+        if !(1..=6).contains(&owner) || business[0xa] == owner {
+            return Err(Error::Row);
+        }
+        Ok(owner)
+    }
     fn building(&self, id: u32) -> Result<&[u8; 0x394]> {
         let row = self.buildings.get(id as usize).ok_or(Error::Row)?;
         if row[0x3f] == 0 || crate::player_manager::word(row, 0) != id {
@@ -230,6 +409,33 @@ impl Targets<'_> {
                     || crate::player_manager::word(row, 0x1c) != u32::MAX
                 {
                     return Err(Error::Row);
+                }
+            }
+            0x12 => {
+                let command = request.conversion_payload()?;
+                let business = self.linked_business(command.building)?;
+                if business[0xa] != request.owner {
+                    return Err(Error::Peer);
+                }
+                if crate::player_manager::word(business, 4) == command.kind {
+                    return Err(Error::Row);
+                }
+            }
+            0x13 => {
+                let command = request.business_sale_payload()?;
+                if self.business(command.business)?[0xa] != request.owner {
+                    return Err(Error::Peer);
+                }
+            }
+            0x15 => {
+                if self.takeover_owner(&request.takeover_payload()?)? != request.owner {
+                    return Err(Error::Peer);
+                }
+            }
+            0x18 => {
+                let command = request.terms_payload()?;
+                if self.business(command.business_index)?[0xa] != request.owner {
+                    return Err(Error::Peer);
                 }
             }
             _ => (),
@@ -475,6 +681,26 @@ impl Adapter {
             crate::live_commands::Command::Open(command) => self
                 .next_serial()
                 .map(|serial| Request::business_open(serial, &command)),
+            crate::live_commands::Command::Convert(command) => self
+                .next_serial()
+                .map(|serial| Request::conversion(serial, &command)),
+            crate::live_commands::Command::SellBusiness(command) => self
+                .next_serial()
+                .map(|serial| Request::business_sale(serial, &command)),
+            crate::live_commands::Command::Takeover(command) => {
+                let owner = targets
+                    .takeover_owner(&command)
+                    .map_err(|e| e.to_string())?;
+                self.next_serial()
+                    .map(|serial| Request::takeover(serial, owner, &command))
+            }
+            crate::live_commands::Command::Terms(command) => {
+                let owner = targets
+                    .business(command.business_index)
+                    .map_err(|e| e.to_string())?[0xa];
+                self.next_serial()
+                    .map(|serial| Request::terms(serial, owner, &command))
+            }
             crate::live_commands::Command::PropertyTransfer {
                 category,
                 owner,
@@ -746,6 +972,10 @@ impl Adapter {
             }
             0x10 => crate::live_commands::Command::Demolish(request.demolition_payload()?),
             0x11 => crate::live_commands::Command::Open(request.business_open_payload()?),
+            0x12 => crate::live_commands::Command::Convert(request.conversion_payload()?),
+            0x13 => crate::live_commands::Command::SellBusiness(request.business_sale_payload()?),
+            0x15 => crate::live_commands::Command::Takeover(request.takeover_payload()?),
+            0x18 => crate::live_commands::Command::Terms(request.terms_payload()?),
             0x16 => {
                 let t = request.transfer_payload()?;
                 crate::live_commands::Command::PropertyTransfer {

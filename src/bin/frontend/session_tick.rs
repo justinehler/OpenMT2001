@@ -22,6 +22,19 @@ pub struct Policy {
     /// independent of card/modal visibility and remainsfalse until its control is bound.
     pub ai_event_gate: bool,
 }
+
+/// Both dispatchers refer to the original retained cue at 0x822964. Preserve
+/// stores made before a failed hourly boundary, just like other live controls.
+pub(crate) fn advance_scheduled_hour(
+    scheduler: &mut scheduler::Controls,
+    context: &mut HourlyContext<'_>,
+    advance: impl FnOnce(&mut scheduler::Controls, &mut HourlyContext<'_>) -> Result<(), String>,
+) -> Result<(), String> {
+    context.hourly.before_six_sound = scheduler.before_six_sound;
+    let result = advance(scheduler, context);
+    scheduler.before_six_sound = context.hourly.before_six_sound;
+    result
+}
 #[derive(Debug)]
 pub enum Event<'a> {
     ScriptCommands(
@@ -69,15 +82,17 @@ impl Session<'_> {
             return Ok(());
         };
         let tick = self.world.clock.timing[0];
+        let targets = openmt2001::network::commands::Targets::new(
+            &self.world.city.buildings,
+            &self.world.city.ledgers.businesses,
+            &self.world.city.categories,
+        );
         connection.commands.pump(
             &connection.worker,
             tick,
             &mut self.live_commands,
             &mut self.world.city.categories,
-            openmt2001::network::commands::Targets {
-                buildings: &self.world.city.buildings,
-                businesses: &self.world.city.ledgers.businesses,
-            },
+            targets,
             &mut self.world.city.pause,
             &mut self.hooks.timers,
         )?;
@@ -315,7 +330,7 @@ impl Session<'_> {
                 camera: policy.camera,
                 distance_disabled: policy.distance_disabled,
             };
-            dispatch.advance_with_animations(
+            let result = dispatch.advance_with_animations(
                 &mut self.world,
                 &mut policy.scheduler,
                 animations,
@@ -350,10 +365,11 @@ impl Session<'_> {
                             self.demolition_points=self.demolition_effects.points(image)?;
                         }
                         scheduler::Event::AdvanceHour => {
+                            advance_scheduled_hour(scheduler, &mut context, |scheduler, context|
                             dispatch.population.advance_hour(
                                 clock,
                                 city,
-                                &mut context,
+                                context,
                                 |event, clock, city, population, context| {
                                     match event {
                                         CalendarEvent::AccountPosted(posting) => {
@@ -661,7 +677,7 @@ impl Session<'_> {
                                     }
                                     Ok(false)
                                 },
-                            )?;
+                            ))?;
                         }
                         scheduler::Event::Helper(0x4805b0) => self.window_texture.tick(clock.hour()),
                         scheduler::Event::Helper(0x4b5d50) => self.pulse_lights.tick(),
@@ -787,7 +803,7 @@ impl Session<'_> {
                                 message_context: &mut messages.borrow_mut(),
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)) {
                                     return Err(openmt2001::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
@@ -895,8 +911,9 @@ impl Session<'_> {
                                     let live_commands::Command::Open(command) = command else {
                                         return Err("pending completion did not produce a business open command".into());
                                     };
+                                    let targets = openmt2001::network::commands::Targets::new(&city.buildings, &city.ledgers.businesses, &city.categories);
                                     connection.commands.submit_completion(&connection.worker, &command, &mut self.live_commands, &mut city.categories,
-                                        openmt2001::network::commands::Targets { buildings: &city.buildings, businesses: &city.ledgers.businesses }, clock.timing[0])?;
+                                        targets, clock.timing[0])?;
                                 }
                             }
                             if removed {
@@ -995,8 +1012,9 @@ impl Session<'_> {
                                                 if let openmt2001::ai_runtime::Call::ConstructionCommand{descriptor}=call {
                                                     let command=openmt2001::construction::Command::from_packet(&descriptor)?;
                                                     if let Some(connection) = &mut self.connected {
+                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker,live_commands::Command::Build(command),
-                                                            &mut self.live_commands,world.categories, openmt2001::network::commands::Targets { buildings: world.buildings, businesses: world.businesses },clock.timing[0])?;
+                                                            &mut self.live_commands,world.categories, targets,clock.timing[0])?;
                                                     } else {
                                                         self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
                                                             |_|Err("AI construction delay wrapped into immediate execution".into()))?;
@@ -1005,9 +1023,14 @@ impl Session<'_> {
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48ae60,arguments,count:1})=call {
                                                     let routing=world.message_routing.ok_or("AI sale command routing unresolved")?;
-                                                    if routing.network[0]&&!routing.network[1]{return Err("AI sale command requires network transport".into());}
                                                     let command=live_commands::Command::SellBusiness(openmt2001::business_sale::Command{business:arguments[0],player:player.bytes[0x1bc]});
-                                                    self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI sale delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
+                                                    } else {
+                                                        if routing.network[0]&&!routing.network[1]{return Err("AI sale command requires network transport".into());}
+                                                        self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI sale delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:address @ (0x48ad20|0x48ad80),arguments,count:3})=call {
@@ -1018,8 +1041,9 @@ impl Session<'_> {
                                                         live_commands::Command::Open(openmt2001::business_open::Command::from_completion(player,arguments[0],arguments[1],arguments[2] as u8)?)
                                                     };
                                                     if let Some(connection) = &mut self.connected {
+                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories,
-                                                            openmt2001::network::commands::Targets { buildings: world.buildings, businesses: world.businesses }, clock.timing[0])?;
+                                                            targets, clock.timing[0])?;
                                                     } else {
                                                         if routing.network[0]&&!routing.network[1]{return Err("AI business command requires network transport".into());}
                                                         self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI business command delay wrapped into immediate execution".into()))?;
@@ -1032,23 +1056,38 @@ impl Session<'_> {
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::Management(openmt2001::ai_dispatch::Event::Helper(0x4683f0)) = call {
-                                                    openmt2001::ai_maintenance::late_pricing(player,world.businesses,|command,_|{
-                                                        self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|Err("AI late pricing at wrapped clock requires synchronous housing context".into()))
+                                                    openmt2001::ai_maintenance::late_pricing(player,world.businesses,|command,businesses|{
+                                                        if let Some(connection) = &mut self.connected {
+                                                            let targets = openmt2001::network::commands::Targets::new(world.buildings, businesses, world.categories);
+                                                            connection.commands.submit(&connection.worker, live_commands::Command::Terms(command), &mut self.live_commands, world.categories, targets, clock.timing[0])
+                                                        } else {
+                                                            self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|Err("AI late pricing at wrapped clock requires synchronous housing context".into()))
+                                                        }
                                                     })?;
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48adf0,arguments,count:2})=call {
                                                     let routing=world.message_routing.ok_or("AI conversion command routing unresolved")?;
-                                                    if routing.network[0]&&!routing.network[1]{return Err("AI conversion command requires network transport".into());}
                                                     let command=live_commands::Command::Convert(openmt2001::business_conversion::Command{kind:arguments[0],building:arguments[1],owner:u32::from(player.bytes[0x1bc])+1});
-                                                    self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI conversion delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
+                                                    } else {
+                                                        if routing.network[0]&&!routing.network[1]{return Err("AI conversion command requires network transport".into());}
+                                                        self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI conversion delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::TakeoverCommand{building}=call {
                                                     let routing=world.message_routing.ok_or("AI takeover command routing unresolved")?;
-                                                    if routing.network[0]&&!routing.network[1]{return Err("AI takeover command requires network transport".into());}
                                                     let command=live_commands::Command::Takeover(openmt2001::business_takeover::Command{building});
-                                                    self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI takeover delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
+                                                    } else {
+                                                        if routing.network[0]&&!routing.network[1]{return Err("AI takeover command requires network transport".into());}
+                                                        self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI takeover delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::Management(event @ (openmt2001::ai_dispatch::Event::BusinessSettings | openmt2001::ai_dispatch::Event::RentSettings)) = call {
@@ -1072,10 +1111,15 @@ impl Session<'_> {
                                                         openmt2001::ai_rent::adjust_owned(&ownership.lists[0],world.businesses,&rent)?
                                                     };
                                                     if submit {
-                                                        economy::submit_business_terms(world.businesses,i32::from(player.bytes[0x1bc]),|command,_|{
-                                                            self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|{
-                                                                Err("AI terms at wrapped immediate-admission clock require synchronous housing context".into())
-                                                            })
+                                                        economy::submit_business_terms(world.businesses,i32::from(player.bytes[0x1bc]),|command,businesses|{
+                                                            if let Some(connection) = &mut self.connected {
+                                                                let targets = openmt2001::network::commands::Targets::new(world.buildings, businesses, world.categories);
+                                                                connection.commands.submit(&connection.worker, live_commands::Command::Terms(command), &mut self.live_commands, world.categories, targets, clock.timing[0])
+                                                            } else {
+                                                                self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|{
+                                                                    Err("AI terms at wrapped immediate-admission clock require synchronous housing context".into())
+                                                                })
+                                                            }
                                                         })?;
                                                     }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
@@ -1119,7 +1163,10 @@ impl Session<'_> {
                     }
                     Ok(0)
                 },
-            )
+            );
+            context.hourly.before_six_sound = policy.scheduler.before_six_sound;
+            policy.hourly = context.hourly;
+            result
         })();
         if policy.scheduler.iterations == admitted_iterations {
             policy.scheduler.iterations = requested_iterations;

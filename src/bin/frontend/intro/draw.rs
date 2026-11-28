@@ -503,6 +503,7 @@ impl Intro {
     }
 
     pub fn draw(&mut self, presenter: &Presenter) -> Result<(), String> {
+        self.service_attract(Instant::now())?;
         if let Some(view) = &mut self.inspection {
             sync_water_options(
                 &mut view.scene,

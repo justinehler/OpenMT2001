@@ -59,11 +59,9 @@ pub fn adjust_owned(
         let old = ftol_low_word(f64::from(f32::from_le_bytes(
             record[0x1dc..0x1e0].try_into().unwrap(),
         )));
-        let cost = ftol_low_word(crate::ai_business::estimate_cost(
-            record,
-            inputs.business,
-            inputs.utilities,
-        )?);
+        let cost =
+            crate::ai_business::estimate_cost_extended(record, inputs.business, inputs.utilities)?
+                .ftol_low_word();
         let minimum = cost
             .checked_div(capacity)
             .ok_or("original AI rent divides by zero capacity")?;

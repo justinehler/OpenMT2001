@@ -7,6 +7,8 @@
 use crate::ui::Surface;
 #[path = "desktop_quit.rs"]
 pub(crate) mod desktop_quit;
+#[path = "front_main.rs"]
+pub(crate) mod front_main;
 #[path = "modal_frame.rs"]
 pub(crate) mod modal_frame;
 #[path = "multiplayer_route.rs"]
@@ -25,6 +27,9 @@ use openmt2001::{
     ui_mesh,
 };
 use std::{fs, path::Path};
+#[cfg(test)]
+#[path = "menu_attract_tests.rs"]
+mod attract_tests;
 
 pub struct Assets {
     skirmish: Option<skirmish_route::Route>,
@@ -299,6 +304,7 @@ impl Assets {
     }
 }
 pub struct Menu {
+    front_main: front_main::FrontMain,
     pub skirmish: skirmish_route::Route,
     pub multiplayer: multiplayer_route::Route,
 
@@ -383,6 +389,34 @@ fn main_button_state(
     }
 }
 impl Menu {
+    fn main_panel_shown(&self) -> bool {
+        !self.profile.visible
+            && !self.load.visible
+            && !self.single.visible
+            && !self.single_mode
+            && self.settings.page.is_none()
+            && !self.skirmish.visible()
+            && !self.multiplayer.visible
+            && self.pending.is_none()
+            && !self.desktop_exit_requested
+    }
+    fn sync_main_panel(&mut self) {
+        self.front_main.shown(self.main_panel_shown());
+    }
+    pub(crate) fn attract_event1(&mut self) -> bool {
+        self.sync_main_panel();
+        self.front_main.event1()
+    }
+    pub(crate) fn suspend_attract(&mut self) {
+        self.front_main.shown(false);
+    }
+    pub(crate) fn return_from_attract(&mut self) {
+        self.front_main.shown(false);
+        self.cancel_input();
+        self.selected = None;
+        self.sync_main_panel();
+        self.dirty = true;
+    }
     // Retained single-mode background is valid while SinglePlayer owns hit/draw.
     #[cfg(test)]
     pub(crate) fn participant_test_single_mode_background(&self) -> bool {
@@ -496,6 +530,7 @@ impl Menu {
     }
     ///49e630 returns the stopped graph to scenarios or the main menu.
     pub fn finish_result(&mut self, target: crate::live_host::ResultMenu) -> Result<(), String> {
+        self.front_main.shown(false);
         self.skirmish.finish(None);
         self.load.visible = false;
         self.profile.visible = false;
@@ -575,6 +610,7 @@ impl Menu {
     }
     pub fn new(mut assets: Assets) -> Self {
         Self {
+            front_main: Default::default(),
             skirmish: assets.skirmish.take().unwrap(),
             multiplayer: assets.multiplayer.take().unwrap(),
 
@@ -827,6 +863,10 @@ impl Menu {
         pressed: bool,
         participant_down: bool,
     ) {
+        self.mouse_button_inner(pressed, participant_down);
+        self.sync_main_panel();
+    }
+    fn mouse_button_inner(&mut self, pressed: bool, participant_down: bool) {
         if self.desktop_exit_requested {
             return;
         }
@@ -922,6 +962,10 @@ impl Menu {
         self.select(self.selected, pressed);
     }
     pub fn activate(&mut self) {
+        self.activate_inner();
+        self.sync_main_panel();
+    }
+    fn activate_inner(&mut self) {
         if self.desktop_input_blocked() {
             return;
         }
@@ -1288,6 +1332,10 @@ impl Menu {
         self.dirty = true;
     }
     pub fn back(&mut self) {
+        self.back_inner();
+        self.sync_main_panel();
+    }
+    fn back_inner(&mut self) {
         if self.desktop_input_blocked() {
             return;
         }

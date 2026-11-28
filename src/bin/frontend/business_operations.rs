@@ -377,6 +377,7 @@ impl Session<'_> {
             products: &self.world.city.catalog.products,
             commodities: &self.world.city.commodities.rows,
         };
+        let mut commands = Vec::new();
         let mut submitted = false;
         business_controls::activate(action, &mut world, |call, _| {
             let command = match call {
@@ -410,19 +411,40 @@ impl Session<'_> {
                 _ => None,
             };
             if let Some(command) = command {
-                if network[0] && !network[1] {
-                    return Err("building action requires network command transport".into());
+                if self.connected.is_some() {
+                    commands.push(command);
+                } else {
+                    if network[0] && !network[1] {
+                        return Err("building action requires network command transport".into());
+                    }
+                    self.live_commands
+                        .submit_with_delay(command, tick, true, 0, |_| {
+                            Err("building action delay wrapped into synchronous execution".into())
+                        })?;
                 }
-                self.live_commands
-                    .submit_with_delay(command, tick, true, 0, |_| {
-                        Err("building action delay wrapped into synchronous execution".into())
-                    })?;
                 submitted = true;
                 Ok(())
             } else {
                 presentation(call)
             }
         })?;
+        for command in commands {
+            if let Some(connection) = &mut self.connected {
+                let targets = openmt2001::network::commands::Targets::new(
+                    &self.world.city.buildings,
+                    &self.world.city.ledgers.businesses,
+                    &self.world.city.categories,
+                );
+                connection.commands.submit(
+                    &connection.worker,
+                    command,
+                    &mut self.live_commands,
+                    &mut self.world.city.categories,
+                    targets,
+                    tick,
+                )?;
+            }
+        }
         Ok(submitted)
     }
 }

@@ -93,6 +93,7 @@ struct RegisteredMusic {
     token: MusicToken,
 }
 struct Mix {
+    effects: super::effects::Owner,
     factor: f32,
     music: u8,
     saved_factor: f32,
@@ -110,6 +111,7 @@ impl SharedAudio {
         let music = music.min(100);
         let factor = crate::music_gain::normalized_percentage(effects);
         Self(Rc::new(RefCell::new(Mix {
+            effects: super::effects::Owner::default(),
             factor,
             music,
             // 4a9500 constructor sets saved+8=1 and saved+c=75. Profile/
@@ -120,6 +122,24 @@ impl SharedAudio {
             paused: false,
             music_sinks: Vec::new(),
         })))
+    }
+    pub fn effect(
+        &self,
+        mixer: &rodio::mixer::Mixer,
+        request: super::effects::Request<'_>,
+        samples: &[f32],
+        gain: f32,
+    ) -> Option<super::effects::Handle> {
+        self.0
+            .borrow_mut()
+            .effects
+            .request(mixer, request, samples, gain)
+    }
+    pub fn service_effects(&self) {
+        self.0.borrow_mut().effects.service();
+    }
+    pub fn reset_effects(&self) {
+        self.0.borrow_mut().effects.reset();
     }
     pub fn same_owner(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
