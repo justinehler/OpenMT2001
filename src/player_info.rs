@@ -393,7 +393,7 @@ mod tests {
     }
     #[test]
     fn runtime_snapshot_uses_authoritative_account_without_mutating_identity() {
-        let mut bytes = vec![0; 444];
+        let mut bytes = vec![0; 0x1c0];
         bytes[0x10] = 1;
         bytes[0x150..0x154].copy_from_slice(&4u32.to_le_bytes());
         bytes[0x158..0x15d].copy_from_slice(b"Human");
