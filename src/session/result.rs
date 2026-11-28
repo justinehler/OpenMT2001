@@ -221,6 +221,7 @@ impl Session<'_> {
             assets.image,
             &self.resident_models,
             level_startup::HostContext {
+                precision: crate::x87::Precision::Pc64,
                 accounting_enabled: true,
                 difficulty: self.difficulty as i32,
                 notifications: self.world.city.ai_demand.ready != 0,

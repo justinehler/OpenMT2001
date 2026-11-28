@@ -594,9 +594,6 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         mut event: impl FnMut(crate::live_commands::Event) -> Result<u32, String>,
     ) -> Result<(), String> {
-        if self.connected.is_some() {
-            return Err(crate::network::Error::Unsupported.to_string());
-        }
         let mut descriptor = [0; 52];
         descriptor[4..8].copy_from_slice(&0x1fu32.to_le_bytes());
         for (off, value) in [
@@ -605,6 +602,19 @@ impl<'data> Session<'data> {
             (28, command.amount),
         ] {
             descriptor[off..off + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        if let Some(connection) = &mut self.connected {
+            if connection.synchronization.barrier.active {
+                return Ok(());
+            }
+            return connection.commands.submit_auction(
+                &connection.worker,
+                descriptor,
+                0,
+                &mut self.live_commands,
+                &mut self.world.city.categories,
+                self.world.clock.timing[0],
+            );
         }
         if self.tutorial_state != 1 {
             let mut messages = crate::player_messages::Context {
@@ -637,6 +647,7 @@ impl<'data> Session<'data> {
             assets.image,
             &self.resident_models,
             level_startup::HostContext {
+                precision: crate::x87::Precision::Pc64,
                 accounting_enabled: true,
                 difficulty: self.difficulty as i32,
                 notifications: self.world.city.ai_demand.ready != 0,
@@ -702,6 +713,7 @@ impl<'data> Session<'data> {
                 assets.image,
                 &self.resident_models,
                 level_startup::HostContext {
+                    precision: crate::x87::Precision::Pc64,
                     accounting_enabled: true,
                     difficulty: self.difficulty as i32,
                     notifications: self.world.city.ai_demand.ready != 0,
@@ -1662,10 +1674,14 @@ impl<'data> Session<'data> {
             Hooks::new()
         };
         hooks.process = process; // Before top-level, initialize and Level dispatch.
+        // Session launches (campaign, Sandbox, Skirmish, network, tutorial
+        // and restore) originate after 4b9c3c. The pre-reset boot/flyby
+        // invocation instead supplies PC53 to the shared startup contexts.
         let context = world.script_context(
             input.image,
             &resident_models,
             level_startup::HostContext {
+                precision: crate::x87::Precision::Pc64,
                 accounting_enabled: false,
                 difficulty: input.difficulty,
                 notifications: false,
@@ -1922,6 +1938,7 @@ impl<'data> Session<'data> {
             roster.initialize_world_with_ownership_allocator(
                 &pending,
                 crate::player_script::RosterInputs {
+                    precision: crate::x87::Precision::Pc64,
                     local_slot: connected.map(|stage| stage.local_slot),
                     names,
                     initial_cash: cash,
@@ -2173,17 +2190,12 @@ impl<'data> Session<'data> {
         if self.tutorial_state != 1 {
             return Ok(());
         }
-        if self
-            .catalog
-            .selected_level()
-            .is_some_and(|level| matches!(level.id(), 100001..=100012))
-        {
-            self.scripts.bind_tutorial_camera()?;
-        }
+        self.scripts.bind_tutorial_camera()?;
         let context = self.world.script_context(
             assets.image,
             &self.resident_models,
             level_startup::HostContext {
+                precision: crate::x87::Precision::Pc64,
                 accounting_enabled: true,
                 difficulty: self.difficulty as i32,
                 notifications: self.world.city.ai_demand.ready != 0,

@@ -222,9 +222,11 @@ pub fn saved_command(packet: &[u8]) -> Result<crate::live_commands::Command, Str
             category: i16::from_le_bytes(packet[24..26].try_into().unwrap()),
             owner: packet[26],
         }),
-        0x19 | 0x1d | 0x1e | 0x1f | 0x20 if packet.len() == 52 => Ok(Command::Auction {
-            descriptor: packet.try_into().unwrap(),
-        }),
+        0x19 | 0x1d | 0x1e | 0x1f | 0x20 | 0x27..=0x2a if packet.len() == 52 => {
+            Ok(Command::Auction {
+                descriptor: packet.try_into().unwrap(),
+            })
+        }
         _ => Err(format!(
             "saved command {kind:02x} has no retained packet consumer"
         )),
@@ -1685,6 +1687,7 @@ impl<'data> Session<'data> {
             )?;
             self.roster.scripts.initialize_loaded(
                 &mut crate::ai_script::Initialization {
+                    precision: crate::x87::Precision::Pc64,
                     profiles: &mut self.roster.profiles,
                     manager: &mut self.roster.manager,
                     category_counts: &mut self.roster.category_counts,
