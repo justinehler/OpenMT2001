@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Two-instance connected soak: run a host and its clients headless on
+localhost and check that every peer stays in sync.
+
+usage: tools/mp-soak GAME [--days N | --ticks N] [--players N] [--ai N]
+                     [--scenario NET] [--map NAME] [--target N]
+                     [--difficulty 0|1|2] [--pace-ms N] [--out DIR]
+                     [--timeout SECONDS]
+                     -- PEER_OPTIONS...
+
+GAME is the `game` binary (cargo build --release -p openmt-game --features
+native --bin game). Everything after `--` goes to every peer's
+`game headless`, for example the original files and the idle-human policy:
+
+  OPENMT2001_FIXTURES=/path/to/fixtures tools/mp-soak target/release/game \\
+      --days 1 -- --fixtures --dialogs last --auctions pass
+
+The host runs `--host PORT` on a free localhost port, each client
+`--join 127.0.0.1:PORT`. Each peer's stdout (one line per game hour with a
+digest per shared gameplay save tag, plus the host's desync sample lines) and
+stderr are kept in DIR (default: a new temporary directory). When all peers
+have exited, `game headless --compare` prints either
+"N days in sync (host tick X, client 1 tick Y; ...)" or the first divergent
+hour and tag. The exit status is 0 only when every peer ended cleanly and the
+outputs agree.
+"""
+import argparse
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+
+def free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def first_byte(summary, out, names):
+    """Name the first differing byte of a divergent hour's shared tag."""
+    match = re.search(r"\(host tick (\d+), client (\d+) tick \d+\): shared tag (\d+)", summary)
+    if not match:
+        return
+    tick, client, tag = match.groups()
+    files = [
+        os.path.join(out, f"{name}-shared", f"{tick}-{tag}.bin")
+        for name in (names[0], names[int(client)])
+    ]
+    try:
+        host, other = (open(path, "rb").read() for path in files)
+    except OSError:
+        return
+    offset = next(
+        (i for i, (a, b) in enumerate(zip(host, other)) if a != b), min(len(host), len(other))
+    )
+    print(
+        f"tag {tag} at tick {tick}: first difference at byte {offset} "
+        f"(host {host[offset:offset + 8].hex()}, client {other[offset:offset + 8].hex()}; "
+        f"lengths {len(host)} and {len(other)})"
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run a headless connected soak and compare the peers.",
+        usage="%(prog)s GAME [options] -- PEER_OPTIONS...",
+    )
+    parser.add_argument("game", help="the game binary")
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument("--days", type=int, help="game days to run (default 1)")
+    length.add_argument("--ticks", type=int, help="logic ticks (multiple of 200)")
+    parser.add_argument("--players", type=int, default=2, help="humans, host included")
+    parser.add_argument("--ai", type=int, default=0, help="computer rows")
+    parser.add_argument("--scenario", default="net0", help="multiplayer level (net0: Daily Profit)")
+    parser.add_argument("--map", default="empty.lua")
+    parser.add_argument("--target", type=int, help="objective target")
+    parser.add_argument("--difficulty", default="1", choices=["0", "1", "2"])
+    parser.add_argument(
+        "--pace-ms", type=int, default=2,
+        help="minimum wall ms per frame on every peer (default 2, about 30 s per "
+        "game day; 0 runs as fast as the CPU allows, but the host may then run "
+        "more than its 2000-tick sample window ahead and skip comparisons)",
+    )
+    parser.add_argument("--out", help="directory for the peer logs")
+    parser.add_argument("--timeout", type=float, help="stop the peers after SECONDS")
+    argv = sys.argv[1:]
+    peer_options = []
+    if "--" in argv:
+        split = argv.index("--")
+        argv, peer_options = argv[:split], argv[split + 1:]
+    args = parser.parse_args(argv)
+
+    out = args.out or tempfile.mkdtemp(prefix="mp-soak-")
+    os.makedirs(out, exist_ok=True)
+    port = free_port()
+    length = ["--ticks", str(args.ticks)] if args.ticks else ["--days", str(args.days or 1)]
+    common = [args.game, "headless", *length, "--pace-ms", str(args.pace_ms), *peer_options]
+    host = common + [
+        "--host", str(port),
+        "--scenario", args.scenario,
+        "--map", args.map,
+        "--difficulty", args.difficulty,
+        "--players", str(args.players),
+        "--ai", str(args.ai),
+    ]
+    if args.target is not None:
+        host += ["--target", str(args.target)]
+    commands = [("host", host)] + [
+        (f"client{n}", common + ["--join", f"127.0.0.1:{port}"])
+        for n in range(1, args.players)
+    ]
+    # Each peer also keeps its hourly shared tag bytes, to locate a divergence.
+    commands = [
+        (name, command + ["--shared-dir", os.path.join(out, f"{name}-shared")])
+        for name, command in commands
+    ]
+
+    peers = []
+    started = time.monotonic()
+    for name, command in commands:
+        stdout = open(os.path.join(out, f"{name}.log"), "w")
+        stderr = open(os.path.join(out, f"{name}.err"), "w")
+        process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
+        peers.append((name, process, stdout, stderr))
+        print(f"started {name} (pid {process.pid}): {' '.join(command)}", file=sys.stderr)
+
+    failed = False
+    try:
+        running = list(peers)
+        while running:
+            for peer in list(running):
+                name, process = peer[0], peer[1]
+                status = process.poll()
+                if status is None:
+                    continue
+                running.remove(peer)
+                print(f"{name} exited with status {status}", file=sys.stderr)
+                if status != 0:
+                    failed = True
+            if failed or (args.timeout and time.monotonic() - started > args.timeout):
+                if not failed:
+                    print(f"timed out after {args.timeout} s", file=sys.stderr)
+                    failed = True
+                break
+            time.sleep(0.5)
+        # A failed peer usually takes the others with it; give them a moment
+        # to report, then stop only the processes this script started.
+        deadline = time.monotonic() + 10
+        for name, process, _, _ in peers:
+            if process.poll() is None:
+                try:
+                    process.wait(max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    print(f"stopping {name} (pid {process.pid})", file=sys.stderr)
+                    process.kill()
+                    process.wait()
+    finally:
+        for _, process, stdout, stderr in peers:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            stdout.close()
+            stderr.close()
+
+    logs = [os.path.join(out, f"{name}.log") for name, _ in commands]
+    compare = subprocess.run(
+        [args.game, "headless", "--compare", *logs], capture_output=True, text=True
+    )
+    print(compare.stdout, end="")
+    first_byte(compare.stdout, out, [name for name, _ in commands])
+    print(f"logs: {out} ({time.monotonic() - started:.0f} s)", file=sys.stderr)
+    if failed or compare.returncode != 0:
+        for name, _ in commands:
+            print(f"--- {name}.err (tail)", file=sys.stderr)
+            with open(os.path.join(out, f"{name}.err")) as err:
+                for line in err.readlines()[-5:]:
+                    print(line.rstrip(), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

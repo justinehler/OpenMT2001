@@ -23,4 +23,4 @@ sha2 = "0.10"
 
 # The mounted sources gate some tests on the game's `capture` feature.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("capture"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("capture", "native"))'] }

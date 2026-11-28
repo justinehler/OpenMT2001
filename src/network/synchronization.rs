@@ -3,7 +3,7 @@
 use super::{Error, Message, Result, SLOTS, SessionBinding};
 
 pub mod sample;
-pub use sample::{Field, Mismatch, Sample, Status};
+pub use sample::{Comparison, Comparisons, Field, Mismatch, Sample, Status};
 
 #[derive(Debug)]
 pub struct Ingress {

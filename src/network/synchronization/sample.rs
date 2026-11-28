@@ -50,10 +50,49 @@ pub struct Status {
     /// Every individual difference from the most recent mismatched sample.
     pub last_mismatches: Vec<Mismatch>,
 }
+/// One 0x481520 comparison of a received sample. `local` is false when the
+/// host no longer (or not yet) retains its own sample for that tick, so
+/// nothing was compared; `differences` is empty for a matching sample.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Comparison {
+    pub sender: u8,
+    pub tick: u32,
+    pub local: bool,
+    pub differences: Vec<Mismatch>,
+}
+/// The most recent comparisons, for diagnostics such as `game headless`. It
+/// keeps a bounded window; `count` numbers every comparison ever made, so a
+/// reader can tell which entries are new since its last look.
+#[derive(Clone, Debug, Default)]
+pub struct Comparisons {
+    pub count: u64,
+    recent: std::collections::VecDeque<Comparison>,
+}
+impl Comparisons {
+    const RETAINED: usize = 64;
+    fn push(&mut self, comparison: Comparison) {
+        if self.recent.len() == Self::RETAINED {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(comparison);
+        self.count += 1;
+    }
+    /// Comparisons made after the first `seen`, oldest first. Entries that
+    /// have already left the window are skipped.
+    pub fn since(&self, seen: u64) -> impl Iterator<Item = &Comparison> {
+        let new = self.count.saturating_sub(seen);
+        let skip = self
+            .recent
+            .len()
+            .saturating_sub(usize::try_from(new).unwrap_or(usize::MAX));
+        self.recent.iter().skip(skip)
+    }
+}
 #[derive(Default)]
 pub struct Samples {
     ring: [Option<Sample>; 10],
     pub status: Status,
+    pub comparisons: Comparisons,
 }
 fn index(tick: u32) -> usize {
     ((tick % 2000) / 200) as usize
@@ -70,6 +109,12 @@ impl Samples {
             return;
         }
         let Some(local) = self.retained(remote.tick) else {
+            self.comparisons.push(Comparison {
+                sender: remote.sender,
+                tick: remote.tick,
+                local: false,
+                differences: Vec::new(),
+            });
             return;
         };
         let mut differences = Vec::new();
@@ -121,8 +166,14 @@ impl Samples {
                 .status
                 .mismatch_count
                 .saturating_add(differences.len() as u64);
-            self.status.last_mismatches = differences;
+            self.status.last_mismatches = differences.clone();
         }
+        self.comparisons.push(Comparison {
+            sender: remote.sender,
+            tick: remote.tick,
+            local: true,
+            differences,
+        });
     }
 }
 fn word(bytes: &[u8], at: usize) -> u32 {

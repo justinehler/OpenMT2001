@@ -9,16 +9,54 @@
 //! detached. Auctions get a renderer stand-in that returns the live renderer's
 //! transition values. Human input is replaced by a fixed policy, and the run
 //! prints one JSON line per checkpoint so two runs can be diffed.
+//!
+//! `--host`/`--join` run one peer of a connected game the same way: the real
+//! lobby worker and TCP transport, the windowed game's connected start
+//! (`intro::connected_start`) and the same frame path (`connected.rs`).
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+// Connected play needs the interface layer's connected start
+// (`intro::connected_start`), so only `game headless` has it; the native-free
+// `headless` package refuses --host/--join.
+#[cfg(feature = "native")]
+#[path = "headless/connected.rs"]
+mod connected;
+#[cfg(not(feature = "native"))]
+#[path = "headless/connected_unavailable.rs"]
+mod connected;
 
 const USAGE: &str = "\
 usage: game headless (--scenario TOKEN | --save FILE) [options]
        headless (--scenario TOKEN | --save FILE) [options]
+       game headless --host PORT --scenario NET [connected options] [options]
+       game headless --join ADDRESS:PORT [options]
 
 start (exactly one):
   --scenario TOKEN      fresh city, e.g. SCENARIO3, sandbox
   --save FILE           original v1.4 or V2 save
+  --host PORT           host a connected game on TCP PORT with --scenario, a
+                        multiplayer level directory or id (net0 is Daily
+                        Profit); the lobby starts once every human is ready
+  --join ADDRESS:PORT   join the connected game hosted there
+
+connected options (--host only):
+  --players N           humans, host included, to wait for (default 2)
+  --ai N                computer rows added after the humans (default 0)
+  --map NAME            map script under scripts/MAPS (default empty.lua)
+  --target N            objective target (default: the objective's initial)
+  --shared-dir DIR      (any connected peer) also write each hourly line's
+                        shared tag bytes to DIR/<tick>-<tag>.bin
+  --pace-ms N           (any connected peer) spend at least N wall ms per
+                        frame (default 0: as fast as the CPU allows). The host
+                        keeps its last 10 samples (2000 ticks), so peers that
+                        drift further apart skip comparisons
+`game headless --compare HOST_LOG CLIENT_LOG...` checks connected outputs
+hour by hour (tools/mp-soak runs a whole soak).
+A connected peer prints one line per game hour with a digest of each shared
+gameplay save tag, a line for every desync sample comparison the host makes,
+and stops with a nonzero status on a reported desync or a lost peer. Its tick
+count must be a multiple of 200 (a sample tick) and defaults to one day.
 
 original files (either --fixtures, or --assets/--scene-root/--executable):
   --fixtures            resolve files through OPENMT2001_FIXTURES
@@ -31,6 +69,7 @@ original files (either --fixtures, or --assets/--scene-root/--executable):
 run:
   --ticks N             logic ticks to advance (default 250; no limit with
                         --autosaves)
+  --days N              advance N game days (15000 ticks each)
   --every N             report every N ticks (default: on each new hour)
   --difficulty 0|1|2    fresh city only (default 1)
   --character N         fresh city only (default 4)
@@ -49,6 +88,9 @@ run:
                         registry address, at the start, at each checkpoint,
                         at each autosave and at the end
 ";
+
+/// 24 game hours of 625 logic ticks (the hour counter, clock timing word 2).
+pub const TICKS_PER_DAY: u32 = 15_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogPolicy {
@@ -74,6 +116,26 @@ pub enum Start {
         path: PathBuf,
         seed: u32,
     },
+    /// Host a connected game. The lobby worker mints the seed, as the original.
+    Host {
+        port: u16,
+        level: String,
+        map: String,
+        target: Option<u32>,
+        difficulty: u8,
+        character: usize,
+        players: usize,
+        ai: usize,
+    },
+    Join {
+        address: std::net::SocketAddr,
+        character: usize,
+    },
+}
+impl Start {
+    pub fn connected(&self) -> bool {
+        matches!(self, Self::Host { .. } | Self::Join { .. })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Paths {
@@ -97,6 +159,11 @@ pub struct Options {
     pub autosaves: Option<u32>,
     pub rng: bool,
     pub checkpoint_saves: Option<PathBuf>,
+    /// Connected runs: write each hourly line's shared tag bytes to
+    /// DIR/<tick>-<tag>.bin.
+    pub shared_dir: Option<PathBuf>,
+    /// Connected runs: minimum wall milliseconds per frame (0: no pacing).
+    pub pace_ms: u32,
 }
 
 impl Paths {
@@ -165,6 +232,10 @@ impl Options {
         let (mut scripts, mut language) = (None, None);
         let (mut difficulty, mut character, mut seed) = (1, 4, 0);
         let mut ticks = None;
+        let mut days = None;
+        let (mut host, mut join) = (None, None);
+        let (mut players, mut ai, mut map, mut target) = (None, None, None, None);
+        let mut seeded = false;
         let mut options = Self {
             start: Start::Save {
                 path: PathBuf::new(),
@@ -187,6 +258,8 @@ impl Options {
             autosaves: None,
             rng: false,
             checkpoint_saves: None,
+            shared_dir: None,
+            pace_ms: 0,
         };
         while let Some(arg) = args.next() {
             let mut value = || args.next().ok_or(format!("{arg} requires a value"));
@@ -216,7 +289,37 @@ impl Options {
                     }
                 }
                 "--character" => character = number(&value()?)? as usize,
-                "--seed" => seed = number(&value()?)?,
+                "--seed" => {
+                    seed = number(&value()?)?;
+                    seeded = true;
+                }
+                "--days" => {
+                    let count = number(&value()?)?;
+                    if count == 0 {
+                        return Err("--days must be positive".into());
+                    }
+                    days = Some(count);
+                }
+                "--host" => {
+                    host = Some(
+                        value()?
+                            .parse::<u16>()
+                            .map_err(|_| "--host takes a TCP port")?,
+                    )
+                }
+                "--join" => {
+                    join = Some(
+                        value()?
+                            .parse::<std::net::SocketAddr>()
+                            .map_err(|_| "--join takes an IP ADDRESS:PORT")?,
+                    )
+                }
+                "--players" => players = Some(number(&value()?)? as usize),
+                "--ai" => ai = Some(number(&value()?)? as usize),
+                "--map" => map = Some(value()?),
+                "--shared-dir" => options.shared_dir = Some(PathBuf::from(value()?)),
+                "--pace-ms" => options.pace_ms = number(&value()?)?,
+                "--target" => target = Some(number(&value()?)?),
                 "--frame-ms" => {
                     options.frame_ms = i32::try_from(number(&value()?)?)
                         .ok()
@@ -258,23 +361,85 @@ impl Options {
                 other => return Err(format!("unknown option {other}\n{USAGE}")),
             }
         }
-        options.start = match (scenario, save) {
-            (Some(token), None) => Start::Scenario {
+        let host_only = players.is_some() || ai.is_some() || map.is_some() || target.is_some();
+        options.start = match (scenario, save, host, join) {
+            (Some(token), None, None, None) if !host_only => Start::Scenario {
                 token,
                 difficulty,
                 character,
                 seed,
             },
-            (None, Some(path)) => Start::Save { path, seed },
-            _ => return Err(format!("give exactly one of --scenario or --save\n{USAGE}")),
+            (None, Some(path), None, None) if !host_only => Start::Save { path, seed },
+            (Some(level), None, Some(port), None) => {
+                let (players, ai) = (players.unwrap_or(2), ai.unwrap_or(0));
+                if !(2..=6).contains(&players) || players + ai > 6 {
+                    return Err(
+                        "--players must be 2 to 6, and --players plus --ai at most 6".into(),
+                    );
+                }
+                Start::Host {
+                    port,
+                    level,
+                    map: map.unwrap_or_else(|| "empty.lua".into()),
+                    target,
+                    difficulty: difficulty as u8,
+                    character,
+                    players,
+                    ai,
+                }
+            }
+            (None, None, None, Some(address)) if !host_only => Start::Join { address, character },
+            (_, _, None, None) => {
+                return Err(format!("give exactly one of --scenario or --save\n{USAGE}"));
+            }
+            _ => {
+                return Err(format!(
+                    "--host needs --scenario; --join takes no start or lobby options; \
+                     --players, --ai, --map and --target need --host\n{USAGE}"
+                ));
+            }
+        };
+        let connected = options.start.connected();
+        if days.is_some() && ticks.is_some() {
+            return Err("give at most one of --ticks and --days".into());
+        }
+        let ticks = match days {
+            Some(days) => Some(
+                days.checked_mul(TICKS_PER_DAY)
+                    .ok_or("--days is too large")?,
+            ),
+            None => ticks,
         };
         // A run that stops at autosaves has no tick budget unless one is given.
         options.ticks = ticks.unwrap_or(if options.autosaves.is_some() {
             u32::MAX
+        } else if connected {
+            TICKS_PER_DAY
         } else {
             250
         });
+        if (options.shared_dir.is_some() || options.pace_ms != 0) && !connected {
+            return Err("--shared-dir and --pace-ms need --host or --join".into());
+        }
+        if connected {
+            if seeded {
+                return Err("--seed: the host's lobby chooses a connected game's seed".into());
+            }
+            if options.ticks == 0 || !options.ticks.is_multiple_of(200) {
+                // Both peers end on a sample tick, so the host compares the
+                // client's last sample before either stops.
+                return Err("a connected run's --ticks must be a positive multiple of 200".into());
+            }
+        }
         let save_start = matches!(options.start, Start::Save { .. });
+        if connected
+            && (options.write_save.is_some()
+                || options.autosave_dir.is_some()
+                || options.checkpoint_saves.is_some()
+                || options.rng)
+        {
+            return Err("a connected game never saves; --rng needs a local start".into());
+        }
         if options.write_save.is_some() && !save_start {
             // A fresh city has no camera records to save; no camera owner runs headless.
             return Err("--write-save needs a run started with --save".into());
@@ -322,6 +487,11 @@ pub enum End {
     /// The logic clock did not move for `frames` consecutive frames.
     Stalled {
         frames: u32,
+    },
+    /// A connected run reached its end, but the host reported `count`
+    /// desync differences on the way.
+    Desync {
+        count: u64,
     },
     Failure(String),
 }
@@ -580,10 +750,22 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
         crate::live_host::process_runtime::startup(&files.executable, "")?;
     let custody =
         crate::process_dispatch::DispatchCustody::startup(activity.take_frontend_startup()?.pause)?;
+    // A connected start first runs the lobby and validates the staged content
+    // with every peer, as the windowed game does before its session worker.
+    let connected_inputs = match options.start.connected() {
+        true => Some(connected::inputs(paths, process.clone())?),
+        false => None,
+    };
+    let (mut connected_start, mut peer) = (None, None);
+    if let Some(inputs) = &connected_inputs {
+        let (request, local) = connected::lobby(&options.start, &image, paths, &names)?;
+        connected_start = Some(connected::stage(inputs, request)?);
+        peer = Some(local);
+    }
     process
         .world_controller_reset4c2b80()
         .map_err(|e| e.to_string())?;
-    let fresh = matches!(options.start, Start::Scenario { .. });
+    let fresh = !matches!(options.start, Start::Save { .. });
     let (dispatch, _timing) = custody.prepare_start(fresh)?;
     let tables = Tables {
         files: &files,
@@ -625,6 +807,19 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
             )?;
             // Fresh completion: the live worker zeroes the task accumulators
             // after synchronizing its frame timer.
+            for task in &mut session.hooks.timers {
+                task[12..16].copy_from_slice(&0f32.to_le_bytes());
+            }
+        }
+        Start::Host { .. } | Start::Join { .. } => {
+            let prepared = connected_start
+                .take()
+                .ok_or("connected start was not staged")?;
+            let inputs = connected_inputs
+                .as_ref()
+                .ok_or("connected start has no inputs")?;
+            process.source_fresh_world().map_err(|e| e.to_string())?;
+            session = connected::connect(inputs, prepared, Some(dispatch))?;
             for task in &mut session.hooks.timers {
                 task[12..16].copy_from_slice(&0f32.to_le_bytes());
             }
@@ -696,6 +891,11 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         host.autosave_profile_root = Some(dir.join("profile"));
     }
+    if session.connected.is_some() {
+        // The session worker opens the first tick-ceiling window this way.
+        host.policy.scheduler.network_enabled = true;
+        host.policy.scheduler.deadline = 25;
+    }
     let setup = (|| {
         host.begin_presentation(&session)?;
         host.set_running(true);
@@ -707,9 +907,12 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
         }
         Ok::<_, String>(())
     })();
-    let end = match setup {
-        Ok(()) => advance(&mut host, &mut session, &assets, options, out),
-        Err(error) => Ok(End::Failure(error)),
+    let end = match (setup, &peer) {
+        (Ok(()), None) => advance(&mut host, &mut session, &assets, options, out),
+        (Ok(()), Some(peer)) => {
+            connected::advance(&mut host, &mut session, &assets, options, peer, out)
+        }
+        (Err(error), _) => Ok(End::Failure(error)),
     };
     let saved = match (&end, &options.write_save) {
         (Ok(_), Some(path)) => write_save(&host, &mut session, &image, path),
@@ -815,23 +1018,27 @@ fn advance(
     if options.rng {
         line(out, &rng_report(session, session.world.clock.timing[0]))?;
     }
+    end_line(out, &end, session.world.clock.timing[0] - start)?;
+    Ok(end)
+}
+
+fn end_line(out: &mut dyn Write, end: &End, ticks: u32) -> Result<(), String> {
     line(
         out,
         &format!(
-            "{{\"end\":\"{}\",\"ticks\":{}}}",
-            match &end {
+            "{{\"end\":\"{}\",\"ticks\":{ticks}}}",
+            match end {
                 End::Ticks => "ticks".to_owned(),
                 End::Result { context } => format!("result {context}"),
                 End::Dialog { callback } => format!("dialog {callback:#x}"),
                 End::Auction => "auction".to_owned(),
                 End::Autosaves { count } => format!("autosaves {count}"),
                 End::Stalled { frames } => format!("stalled {frames} frames"),
+                End::Desync { count } => format!("desync {count} differences"),
                 End::Failure(error) => format!("failure: {}", error.escape_debug()),
             },
-            session.world.clock.timing[0] - start
         ),
-    )?;
-    Ok(end)
+    )
 }
 
 /// Copy a written autosave to `autosave-N.sav` and report it.
@@ -948,6 +1155,10 @@ fn respond(
 /// the tick budget or a result is reached, 1 on a failure or a policy stop,
 /// 2 on bad arguments.
 pub fn main(args: impl IntoIterator<Item = String>) -> i32 {
+    let args: Vec<String> = args.into_iter().collect();
+    if let Some(("--compare", logs)) = args.split_first().map(|(a, rest)| (a.as_str(), rest)) {
+        return connected::compare_main(logs);
+    }
     let options = match Options::parse(args) {
         Ok(options) => options,
         Err(error) => {
@@ -1137,6 +1348,81 @@ mod tests {
     }
 
     #[test]
+    fn parses_connected_host_and_join_options() {
+        let paths = ["--assets", "a", "--scene-root", "b", "--executable", "c/d"];
+        let with = |extra: &[&str]| {
+            let mut args = extra.to_vec();
+            args.extend(paths);
+            parse(&args)
+        };
+        let host = with(&[
+            "--host",
+            "2300",
+            "--scenario",
+            "net0",
+            "--ai",
+            "2",
+            "--days",
+            "2",
+        ])
+        .unwrap();
+        assert_eq!(
+            host.start,
+            Start::Host {
+                port: 2300,
+                level: "net0".into(),
+                map: "empty.lua".into(),
+                target: None,
+                difficulty: 1,
+                character: 4,
+                players: 2,
+                ai: 2,
+            }
+        );
+        assert_eq!(host.ticks, 2 * TICKS_PER_DAY);
+        let join = with(&["--join", "127.0.0.1:2300", "--auctions", "wait"]).unwrap();
+        assert_eq!(
+            join.start,
+            Start::Join {
+                address: "127.0.0.1:2300".parse().unwrap(),
+                character: 4,
+            }
+        );
+        // One day by default; any budget must end on a sample tick.
+        assert_eq!(join.ticks, TICKS_PER_DAY);
+        assert_eq!(join.auctions, AuctionPolicy::Wait);
+        assert!(with(&["--join", "127.0.0.1:2300", "--ticks", "400"]).is_ok());
+        assert!(with(&["--join", "127.0.0.1:2300", "--ticks", "250"]).is_err());
+        assert!(with(&["--host", "2300"]).is_err());
+        assert!(with(&["--host", "x", "--scenario", "net0"]).is_err());
+        assert!(with(&["--join", "localhost"]).is_err());
+        assert!(with(&["--join", "127.0.0.1:1", "--scenario", "net0"]).is_err());
+        assert!(with(&["--join", "127.0.0.1:1", "--ai", "1"]).is_err());
+        assert!(with(&["--scenario", "net0", "--players", "3"]).is_err());
+        assert!(with(&["--host", "1", "--scenario", "net0", "--players", "1"]).is_err());
+        assert!(
+            with(&[
+                "--host",
+                "1",
+                "--scenario",
+                "net0",
+                "--players",
+                "4",
+                "--ai",
+                "3"
+            ])
+            .is_err()
+        );
+        assert!(with(&["--host", "1", "--scenario", "net0", "--seed", "3"]).is_err());
+        assert!(with(&["--host", "1", "--scenario", "net0", "--rng"]).is_err());
+        assert!(with(&["--join", "127.0.0.1:1", "--days", "1", "--ticks", "400"]).is_err());
+        assert_eq!(
+            with(&["--scenario", "x", "--days", "1"]).unwrap().ticks,
+            TICKS_PER_DAY
+        );
+    }
+
+    #[test]
     fn save_starts_take_a_seed_and_autosave_limits() {
         let options = parse(&[
             "--save",
@@ -1198,6 +1484,8 @@ mod tests {
             autosaves: None,
             rng: false,
             checkpoint_saves: None,
+            shared_dir: None,
+            pace_ms: 0,
         }
     }
 

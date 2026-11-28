@@ -494,7 +494,7 @@ impl Assets {
 }
 
 #[derive(Clone)]
-struct SceneInputs {
+pub(crate) struct SceneInputs {
     process_runtime: Option<crate::live_host::process_runtime::Handle>,
     compatibility: crate::compatibility::Mode,
     style: openmt2001::board_style::Style,

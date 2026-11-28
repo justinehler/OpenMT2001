@@ -370,3 +370,33 @@ fn admitted_loss_is_observed_before_barrier_work() {
     assert!(synchronization.barrier.active);
     assert_eq!(pause.bytes[2], 1);
 }
+#[test]
+fn comparisons_record_every_received_sample_in_order() {
+    let mut samples = sample::Samples::default();
+    samples.retain(sample(200));
+    samples.compare(sample(200));
+    let mut differing = sample(200);
+    differing.sums[0] = 11;
+    samples.compare(differing);
+    // No retained host sample for 400: recorded, nothing compared.
+    samples.compare(sample(400));
+    // An invalid tick is not a comparison at all.
+    samples.compare(sample(201));
+    let all: Vec<_> = samples.comparisons.since(0).collect();
+    assert_eq!(samples.comparisons.count, 3);
+    assert_eq!(
+        all.iter().map(|c| (c.tick, c.local)).collect::<Vec<_>>(),
+        [(200, true), (200, true), (400, false)]
+    );
+    assert!(all[0].differences.is_empty());
+    assert_eq!(all[1].differences.len(), 1);
+    assert_eq!(all[1].differences[0].field, Field::People);
+    assert_eq!(samples.comparisons.since(2).count(), 1);
+    // The window is bounded; the count keeps numbering.
+    for _ in 0..100 {
+        samples.compare(sample(200));
+    }
+    assert_eq!(samples.comparisons.count, 103);
+    assert_eq!(samples.comparisons.since(0).count(), 64);
+    assert_eq!(samples.comparisons.since(100).count(), 3);
+}
