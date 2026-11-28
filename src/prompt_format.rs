@@ -244,10 +244,12 @@ mod tests {
             let lengths = std::fs::read(path.join("tycoon.off")).unwrap();
             let bytes = std::fs::read(path.join("tycoon.bin")).unwrap();
             let mut at = 0;
+            let (lengths, remainder) = lengths.as_chunks::<2>();
+            assert!(remainder.is_empty());
             lengths
-                .chunks_exact(2)
-                .map(|n| {
-                    let end = at + usize::from(u16::from_le_bytes(n.try_into().unwrap()));
+                .iter()
+                .map(|&n| {
+                    let end = at + usize::from(u16::from_le_bytes(n));
                     let text = bytes[at..end].to_vec();
                     at = end;
                     text
