@@ -91,7 +91,7 @@ pub(crate) use context::{
     Globals, Intent, NavigationUi, OriginalGraphicsPolicy, SoundBoundary, State, UiContext,
     UiJoins, ui_cursor_pass,
 };
-pub(crate) use cursor::Cursor;
+pub(crate) use cursor::{Cursor, WorldPick, pick_status_host_index};
 pub(crate) use input::PhysicalInput;
 pub(crate) use producer::selected_business;
 

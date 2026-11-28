@@ -1,5 +1,6 @@
-//! Original default, right-drag, pan and enabled-menu-hover images. The native host owns
-//! cursor presentation; no OS cursor API enters shared assets or simulation.
+//! Original default, right-drag, pan, enabled-menu-hover and city-hover (states 4-7)
+//! images. The native host owns cursor presentation; no OS cursor API enters shared
+//! assets or simulation.
 use openmt2001::{
     archive::ArchiveIndex,
     texture::{TextureSet, loader_pixels},
@@ -11,7 +12,9 @@ struct Image {
     rgba: Vec<u8>,
     hotspot: [u16; 2],
 }
-pub struct Images([Image; 4]);
+/// Host cursor count: original states 0-7 (records 0-7 of the cursor collection).
+pub const COUNT: usize = 8;
+pub struct Images([Image; COUNT]);
 impl Images {
     pub fn load(index: &ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
         // Original004bd677 registers this collection in file order at6874f0.
@@ -22,32 +25,43 @@ impl Images {
             .get(entry.offset as usize..(entry.offset + entry.length) as usize)
             .ok_or("cursor collection outside archive")?;
         let set = TextureSet::parse(data).map_err(|e| e.to_string())?;
-        let images = [(0, [5, 1]), (2, [8, 8]), (3, [5, 0]), (1, [8, 1])]
-            .into_iter()
-            .map(|(i, hotspot)| {
-                // Original004391e0 sets dimensions from the registered image and
-                // these hotspots;004390a0 subtracts them from pointer coordinates.
-                let image = set.textures.get(i).ok_or("missing inspection cursor")?;
-                let mut rgba = loader_pixels(image);
-                // Original cursor3 hotspotY=-1: image starts one pixel below pointer.
-                // Native custom cursors require a nonnegative hotspot, so prepend one clear row.
-                if i == 3 {
-                    let mut padded = vec![0; image.width as usize * 4];
-                    padded.extend(rgba);
-                    rgba = padded;
-                }
-                Ok(Image {
-                    width: u16::try_from(image.width).map_err(|_| "cursor width")?,
-                    height: u16::try_from(image.height + u32::from(i == 3))
-                        .map_err(|_| "cursor height")?,
-                    rgba,
-                    hotspot,
-                })
+        // Host order keeps the first four city indices; states 4-7 follow in order.
+        let images = [
+            (0, 5, 1),
+            (2, 8, 8),
+            (3, 5, -1),
+            (1, 8, 1),
+            (4, 5, -1),
+            (5, 5, -1),
+            (6, 5, -1),
+            (7, 5, -1),
+        ]
+        .into_iter()
+        .map(|(i, hotspot_x, hotspot_y): (usize, u16, i8)| {
+            // Original004391e0 sets dimensions from the registered image and
+            // these hotspots;004390a0 subtracts them from pointer coordinates.
+            let image = set.textures.get(i).ok_or("missing inspection cursor")?;
+            let mut rgba = loader_pixels(image);
+            // Hotspot Y -1 (states 3-7): the image starts one pixel below the pointer.
+            // Native custom cursors require a nonnegative hotspot, so prepend one clear row.
+            let padded = hotspot_y < 0;
+            if padded {
+                let mut rows = vec![0; image.width as usize * 4];
+                rows.extend(rgba);
+                rgba = rows;
+            }
+            Ok(Image {
+                width: u16::try_from(image.width).map_err(|_| "cursor width")?,
+                height: u16::try_from(image.height + u32::from(padded))
+                    .map_err(|_| "cursor height")?,
+                rgba,
+                hotspot: [hotspot_x, hotspot_y.max(0).unsigned_abs().into()],
             })
-            .collect::<Result<Vec<_>, String>>()?;
+        })
+        .collect::<Result<Vec<_>, String>>()?;
         Ok(Self(images.try_into().map_err(|_| "cursor count")?))
     }
-    pub fn create(self, event_loop: &ActiveEventLoop) -> Result<[CustomCursor; 4], String> {
+    pub fn create(self, event_loop: &ActiveEventLoop) -> Result<[CustomCursor; COUNT], String> {
         let cursors = self
             .0
             .into_iter()
@@ -92,6 +106,37 @@ mod tests {
         assert_eq!(w(68), u32::MAX);
         assert_eq!(i.hotspot[1], 0);
         assert!(i.rgba[..usize::from(i.width) * 4].iter().all(|&v| v == 0));
+    }
+    #[test]
+    #[ignore = "requires original archive"]
+    fn city_hover_cursors_use_records_four_to_seven_one_row_below_the_pointer() {
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
+        let archive = read("OPENMT2001_ARCHIVE_BIN");
+        let directory = openmt2001::archive::ArchiveIndex::parse(
+            &read("OPENMT2001_ARCHIVE_DIR"),
+            archive.len() as u64,
+        )
+        .unwrap();
+        let entry = directory.find("gamedata2/Cursors/textures.gtd").unwrap();
+        let set = openmt2001::texture::TextureSet::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
+        let images = super::Images::load(&directory, &archive).unwrap();
+        for record in 4..8 {
+            let texture = &set.textures[record];
+            let image = &images.0[record];
+            assert_eq!(u32::from(image.width), texture.width);
+            // Hotspot (5,-1): one clear row above the record's own pixels.
+            assert_eq!(u32::from(image.height), texture.height + 1);
+            assert_eq!(image.hotspot, [5, 0]);
+            let row = usize::from(image.width) * 4;
+            assert!(image.rgba[..row].iter().all(|&v| v == 0));
+            assert_eq!(
+                image.rgba[row..],
+                openmt2001::texture::loader_pixels(texture)[..]
+            );
+        }
     }
     #[test]
     #[ignore = "requires original archive and native cursor setter observations"]
