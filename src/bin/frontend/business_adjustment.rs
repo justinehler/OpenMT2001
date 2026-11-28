@@ -253,6 +253,54 @@ fn retail_totals(rows: &[Row], capacity: i32) -> [String; 4] {
         totals[3].to_string(),
     ]
 }
+// 416bf9/416d61/41702e/4172c3/4173b6/417495 configure every
+// numeric column as style 1. 440720..440747 rounds the centered X origin;
+// 416b60 uses style 0 with a twenty-unit inset for commodity names.
+fn retail_row_text(
+    fonts: &mut [Surface],
+    tab: &[u8],
+    text: &[u8],
+    bounds: [f32; 4],
+    column: usize,
+    row: usize,
+) -> Result<(), String> {
+    let [left, top, right, bottom] = bounds;
+    let x = if column == 0 {
+        left.trunc() + 22.
+    } else {
+        let width = f64::from(ui::text_width(tab, text, 1.)?);
+        left.trunc() + ((f64::from(right) - f64::from(left) - width) * 0.5 + 0.5).trunc() as f32
+    };
+    ui::text(
+        fonts,
+        tab,
+        text,
+        [x, top.trunc() + 2. + row as f32 * 17., right, bottom],
+        false,
+        0xffffffff,
+    )
+}
+
+// 41937a..4193f2 divides the commodity list into six horizontal hit regions,
+// using the full BAP_BACKING width. 4193ff..419423 paints only the hovered row.
+fn retail_row_bounds(regions: &[[f32; 4]], row: usize) -> [f32; 4] {
+    let backing = regions[1];
+    let list = regions[15];
+    let height = (f64::from(list[3]) - f64::from(list[1])) * f64::from(1.0f32 / 6.);
+    [
+        backing[0],
+        (f64::from(list[1]) + row as f64 * height) as f32,
+        backing[2],
+        (f64::from(list[1]) + (row + 1) as f64 * height) as f32,
+    ]
+}
+fn retail_row_band(regions: &[[f32; 4]], row: Option<usize>) -> Surface {
+    let mut band = Surface::solid();
+    if let Some(row) = row {
+        band.rect(retail_row_bounds(regions, row), [0xcc37478a; 4]);
+    }
+    band
+}
 const RETAIL_ARROW_TEXTURES: [usize; 8] = [118, 119, 120, 121, 122, 123, 124, 125];
 fn retail_numeric_controls(
     regions: &[(String, [f32; 4])],
@@ -353,6 +401,7 @@ impl PreparedRefresh {
         state.building = fresh.building;
         state.edit_target = fresh.edit_target;
         state.rows = fresh.rows;
+        state.row_hover = state.row_hover.filter(|&row| row < state.rows.len());
         state.stock_capacity = fresh.stock_capacity;
         state.apartment = fresh.apartment;
         state.name = fresh.name;
@@ -381,6 +430,7 @@ pub struct State {
     pub building: usize,
     pub rows: Vec<Row>,
     stock_capacity: i32,
+    row_hover: Option<usize>,
     pub apartment: Option<Apartment>,
     pub name: u32,
     block_name: u32,
@@ -437,6 +487,18 @@ impl State {
         }
     }
     pub fn pointer(&mut self, assets: &Assets, point: Option<[i32; 2]>) {
+        let row = point.and_then(|p| {
+            (0..self.rows.len()).find(|&row| {
+                let b = retail_row_bounds(&assets.regions, row);
+                let [x, y] = p.map(|v| v as f32 * 0.5);
+                // Original 4342c0 excludes the left and right edges.
+                x > b[0] && x < b[2] && y >= b[1] && y <= b[3]
+            })
+        });
+        if self.row_hover != row {
+            self.row_hover = row;
+            self.dirty = true;
+        }
         let edit = if self.edit_target.is_some() && self.edit_pending.is_none() {
             point.and_then(|p| {
                 assets
@@ -1041,6 +1103,7 @@ impl Assets {
                 building,
                 rows: vec![],
                 stock_capacity: 0,
+                row_hover: None,
                 apartment: Some(Apartment::from_record(record, false, false)?),
                 name: b
                     .business()
@@ -1094,6 +1157,7 @@ impl Assets {
                 info.row(business.business_type as usize)
                     .ok_or("adjustment business kind")?,
             ),
+            row_hover: None,
             apartment: None,
             name: business.name_text_id,
             block_name: self.block_names[b.category],
@@ -1233,9 +1297,9 @@ impl Assets {
         }
         let currency = label(2243)?;
         let currency_suffix = label(2244)?.first() != Some(&0x4c);
+        surfaces.push(retail_row_band(&self.regions, state.row_hover));
         self.prepare_commodity_icons(&state.rows, &mut surfaces)?;
         for (row, item) in state.rows.iter().enumerate() {
-            let y = self.regions[15][1] + 2. + row as f32 * 17.;
             let numbers = [
                 Vec::new(),
                 ui::formatted_float_money(item.cost, currency, currency_suffix)?,
@@ -1246,32 +1310,18 @@ impl Assets {
                 item.today.to_string().bytes().map(|b| b - 32).collect(),
             ];
             for (column, text) in numbers.iter().enumerate() {
-                let b = self.regions[15 + column];
-                let inset = if column == 0 {
-                    // Original row labels reserve twenty screen units for the icon.
-                    20.
-                } else if state.edit_target.is_some() && matches!(column, 2 | 4) {
-                    14.
-                } else {
-                    4.
-                };
                 let encoded = if column == 0 {
                     label(item.name)?
                 } else {
                     text.as_slice()
                 };
-                ui::text_fit(
+                retail_row_text(
                     &mut fonts,
                     &self.tab,
                     encoded,
-                    [
-                        b[0] + inset,
-                        y,
-                        b[2] - if column == 0 { 4. } else { inset },
-                        y + 14.,
-                    ],
-                    column != 0,
-                    0xffffffff,
+                    self.regions[15 + column],
+                    column,
+                    row,
                 )?;
             }
         }
@@ -1288,8 +1338,10 @@ impl Assets {
             .into_iter()
             .enumerate()
         {
-            centered(
+            // 417545/4175b9/4176a9/41775d use centered style 4 totals.
+            ui::text_widget_style4(
                 &mut fonts,
+                &self.tab,
                 &total.bytes().map(|b| b - 32).collect::<Vec<_>>(),
                 self.regions[23 + i],
                 0xffffffff,
@@ -1816,6 +1868,115 @@ mod tests {
         (rows, record)
     }
 
+    fn retail_state_fixture() -> State {
+        State {
+            edit_target: Some(crate::business_edit::Target {
+                building: 0,
+                business: 0,
+            }),
+            edit_request: None,
+            edit_pending: None,
+            edit_inflight: None,
+            close: false,
+            close_after_apply: false,
+            dirty_terms: false,
+            last_refresh: Instant::now(),
+            edit_hover: None,
+            edit_pressed: None,
+            diagnostic: None,
+            initialized: true,
+            building: 0,
+            rows: retail_fixture().0,
+            stock_capacity: 30,
+            row_hover: None,
+            apartment: None,
+            name: 0,
+            block_name: 0,
+            owner_color: 0,
+            prepared: None,
+            navigation: vec![],
+            requested_building: None,
+            dirty: false,
+            hover: false,
+            pressed: false,
+            arrow_hover: None,
+            arrow_pressed: None,
+            tutorial_control: None,
+            tutorial_producer: None,
+        }
+    }
+
+    #[test]
+    fn retail_columns_center_values_without_moving_commodity_labels() {
+        let mut tab = vec![0; 4 + 96 * 44];
+        tab[..4].copy_from_slice(&96u32.to_le_bytes());
+        for glyph in tab[4..].chunks_exact_mut(44) {
+            glyph[32..36].copy_from_slice(&8i32.to_le_bytes());
+            glyph[36..40].copy_from_slice(&10i32.to_le_bytes());
+        }
+        // The seven-unit advance makes the centering exercise native rounding.
+        for column in 0..7 {
+            let mut fonts = [Surface::solid(), Surface::solid()];
+            let bounds = [40.25, 140.25, 141.25, 242.25];
+            retail_row_text(&mut fonts, &tab, &[0, 0], bounds, column, 2).unwrap();
+            let expected_x = if column == 0 { 61.5 } else { 83.5 };
+            assert_eq!(fonts[0].vertices[0][0], expected_x, "column {column}");
+            assert_eq!(fonts[0].vertices[0][1], 185.5);
+            // All four totals use native style 4: centered both horizontally
+            // and vertically, with the same unscaled font advances.
+            if column < 4 {
+                let mut totals = [Surface::solid(), Surface::solid()];
+                ui::text_widget_style4(&mut totals, &tab, &[0, 0], bounds, 0xffffffff).unwrap();
+                assert_eq!(totals[0].vertices[0][0], 83.5);
+                assert_eq!(totals[0].vertices[0][1], 195.5);
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_moves_full_width_translucent_band_between_occupied_rows() {
+        let mut state = retail_state_fixture();
+        let mut assets = refresh_assets_fixture();
+        assets.regions = vec![[0.; 4]; 30];
+        assets.regions[1] = [35., 100., 635., 300.];
+        assets.regions[15] = [35., 145., 150., 247.];
+        for (point, expected) in [
+            (Some([80, 300]), Some(0)),
+            (Some([1000, 335]), Some(1)),
+            (Some([1000, 370]), None), // Empty third row.
+            (Some([1300, 300]), None),
+            (None, None),
+        ] {
+            let previous = state.row_hover;
+            state.pointer(&assets, point);
+            assert_eq!(state.row_hover, expected);
+            assert_eq!(state.dirty, previous != expected);
+            state.dirty = false;
+            let band = retail_row_band(&assets.regions, state.row_hover);
+            if let Some(row) = expected {
+                let b = retail_row_bounds(&assets.regions, row);
+                assert_eq!(band.vertices.len(), 6);
+                assert_eq!(band.vertices[0][..2], [35., 145. + row as f32 * 17.]);
+                assert_eq!(band.vertices[2][..2], [635., b[3]]);
+                assert_eq!(band.alpha, [0xcc; 6]);
+                assert_eq!(
+                    band.vertices[0][3..6],
+                    [55. / 255., 71. / 255., 138. / 255.]
+                );
+            } else {
+                assert!(band.vertices.is_empty());
+            }
+        }
+        // Hover works while a worker edit is pending and on read-only businesses.
+        state.edit_target = None;
+        state.pointer(&assets, Some([80, 335]));
+        assert_eq!(state.row_hover, Some(1));
+        let (_sender, pending) = std::sync::mpsc::channel();
+        state.edit_pending = Some(pending);
+        state.pointer(&assets, Some([80, 300]));
+        assert_eq!(state.row_hover, Some(0));
+    }
+
     #[test]
     fn stock_totals_share_building_capacity_and_refresh_after_apply() {
         let (mut rows, mut record) = retail_fixture();
@@ -1866,41 +2027,8 @@ mod tests {
     #[test]
     fn authoritative_edit_replies_refresh_totals_and_apply_admission() {
         use crate::business_edit::Action;
-        let (rows, mut record) = retail_fixture();
-        let mut state = State {
-            edit_target: Some(crate::business_edit::Target {
-                building: 0,
-                business: 0,
-            }),
-            edit_request: None,
-            edit_pending: None,
-            edit_inflight: None,
-            close: false,
-            close_after_apply: false,
-            dirty_terms: false,
-            last_refresh: Instant::now(),
-            edit_hover: None,
-            edit_pressed: None,
-            diagnostic: None,
-            initialized: true,
-            building: 0,
-            rows,
-            stock_capacity: 30,
-            apartment: None,
-            name: 0,
-            block_name: 0,
-            owner_color: 0,
-            prepared: None,
-            navigation: vec![],
-            requested_building: None,
-            dirty: false,
-            hover: false,
-            pressed: false,
-            arrow_hover: None,
-            arrow_pressed: None,
-            tutorial_control: None,
-            tutorial_producer: None,
-        };
+        let (_, mut record) = retail_fixture();
+        let mut state = retail_state_fixture();
         let mut assets = refresh_assets_fixture();
         assets.regions = vec![[0.; 4]; 30];
         assets.regions[29] = [100., 100., 160., 124.];
