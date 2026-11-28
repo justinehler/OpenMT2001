@@ -274,8 +274,6 @@ impl Intro {
                         environment_pending: None,
                         environment_tick: loaded.logic_tick.unwrap_or(0),
                         environment_time: loaded.environment_time,
-                        last_environment_query: Instant::now()
-                            - std::time::Duration::from_millis(40),
                         last_status_query: Instant::now() - std::time::Duration::from_secs(1),
                         last_snapshot: Instant::now(),
                         construction_active: loaded.construction_active,

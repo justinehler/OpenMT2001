@@ -806,7 +806,7 @@ impl Intro {
                             .draw_overlay(&self.color_view, &self.depth_view, panel);
                     }
                 }
-                if view.prompts.request().is_some()
+                if view.prompts.visible()
                     && let Some(menu) = &self.menu
                 {
                     view.prompts.cursor(

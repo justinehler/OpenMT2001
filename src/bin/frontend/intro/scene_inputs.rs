@@ -919,6 +919,7 @@ impl SceneInputs {
                                 let _ = reply.send(crate::time_panel::ClockSample {
                                     ticks: clock.timing[0],
                                     interface_ticks: host.interface_ticks(),
+                                    prompt_updates: host.prompt_updates(),
                                     year: 1930 + clock.calendar[2] * 10 + clock.calendar[1],
                                     hour: clock.hour(),
                                     fraction: clock.timing[2],

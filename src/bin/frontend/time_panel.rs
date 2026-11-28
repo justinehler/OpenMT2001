@@ -900,6 +900,8 @@ type ViewKey = (u32, u32, u32, u32, String, Option<u32>, Option<usize>, i32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockSample {
     pub interface_ticks: u64,
+    /// Delivered normal modal-group updates, after pause and suppression gates.
+    pub prompt_updates: u64,
     pub ticks: u32,
     pub year: u32,
     pub hour: u32,
@@ -910,6 +912,7 @@ impl ClockSample {
     fn from_status(status: &crate::live_host::Status) -> Self {
         Self {
             interface_ticks: status.interface_ticks,
+            prompt_updates: status.prompt_updates,
             ticks: status.ticks,
             year: status.year,
             hour: status.hour,
@@ -1287,6 +1290,7 @@ mod tests {
         let mut legacy = crate::tooltip::IconDwell::default();
         let mut sample = super::ClockSample {
             interface_ticks: 0,
+            prompt_updates: 0,
             ticks: 0,
             year: 1930,
             hour: 9,
@@ -1439,6 +1443,7 @@ mod tests {
         let mut state = ClockState::default();
         let mut clock = ClockSample {
             interface_ticks: 0,
+            prompt_updates: 0,
             ticks: 0,
             year: 1930,
             hour: 9,
@@ -1585,6 +1590,7 @@ mod tests {
             &renderer,
             ClockSample {
                 interface_ticks: 800,
+                prompt_updates: 800,
                 ticks: 125,
                 year: 1930,
                 hour: 9,

@@ -120,9 +120,12 @@ impl Intro {
                     Ok(mut status) => {
                         // Advance existing slots before admitting requests from
                         // this snapshot: they did not exist in earlier updates.
-                        for id in view.prompts.advance_to(status.prompt_updates) {
-                            view.dismiss_prompt(id)?;
-                        }
+                        apply_prompt_updates(
+                            &mut view.prompts,
+                            view._fresh_session.as_ref(),
+                            &mut view.prompt_reply,
+                            status.prompt_updates,
+                        )?;
                         if let Some(image) = &status.window_texture {
                             self.renderer.publish_window_texture(image.pixels.clone())?;
                             for index in view.scene.set_window_pixels(image.pixels.clone())? {
@@ -263,6 +266,12 @@ impl Intro {
                 match reply.try_recv() {
                     Ok(clock) => {
                         view.environment_pending = None;
+                        apply_prompt_updates(
+                            &mut view.prompts,
+                            view._fresh_session.as_ref(),
+                            &mut view.prompt_reply,
+                            clock.prompt_updates,
+                        )?;
                         view.time_panel.update_clock(
                             &self.assets.time_panel,
                             &self.renderer,
@@ -341,7 +350,6 @@ impl Intro {
             if view.environment_pending.is_none()
                 && view.auction.scene.is_none()
                 && view.result.is_none()
-                && view.last_environment_query.elapsed().as_millis() >= 40
                 && let Some(sender) = &view._fresh_session
             {
                 let (reply, result) = mpsc::channel();
@@ -349,7 +357,6 @@ impl Intro {
                     .send(FreshRequest::LogicTick(reply))
                     .map_err(|e| e.to_string())?;
                 view.environment_pending = Some(result);
-                view.last_environment_query = Instant::now();
             }
             refresh = self.loading.is_none()
                 && self.refresh_retry.error.is_none()
@@ -372,5 +379,143 @@ impl Intro {
             self.last_sample = None;
         }
         Ok(refresh)
+    }
+}
+
+/// Dispatch expiry in the same draw pass that consumes the delivered updates.
+/// Keep the queue slot until the worker replies, preserving callback admission.
+fn apply_prompt_updates(
+    prompts: &mut crate::prompt::State,
+    sender: Option<&mpsc::Sender<FreshRequest>>,
+    pending: &mut Option<mpsc::Receiver<Vec<crate::prompt::Request>>>,
+    delivered: u64,
+) -> Result<(), String> {
+    for id in prompts.advance_to(delivered) {
+        let sender = sender.ok_or("Prompt has no live session")?;
+        let (reply, answer) = mpsc::channel();
+        sender
+            .send(FreshRequest::DismissPrompt(id, Some(reply)))
+            .map_err(|error| error.to_string())?;
+        *pending = Some(answer);
+    }
+    for response in prompts.take_dialog_replies() {
+        let sender = sender.ok_or("Human dialog has no live session")?;
+        let (reply, answer) = mpsc::channel();
+        sender
+            .send(FreshRequest::HumanDialog(response, reply))
+            .map_err(|error| error.to_string())?;
+        *pending = Some(answer);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod modal_frame_tests {
+    use super::*;
+    use crate::{human_dialog::Dialog, prompt, time_panel::ClockSample};
+
+    #[test]
+    fn modal_expires_on_frame_sample_without_status_poll() {
+        // Ordinary script messages and prompts use the same queue as native
+        // dialogs. Tutorial records retain their disabled timeout policy.
+        for (script, tutorial, buttons) in [
+            (false, false, 0),
+            (true, false, 0),
+            (true, false, 1),
+            (true, true, 0),
+            (true, true, 1),
+        ] {
+            let (sender, requests) = mpsc::channel();
+            let mut pending = None;
+            let mut prompts = prompt::State::default();
+            let mut sample = ClockSample {
+                interface_ticks: 70,
+                prompt_updates: 70,
+                ticks: 0,
+                year: 1930,
+                hour: 9,
+                fraction: 0,
+                speed: 1,
+            };
+            apply_prompt_updates(
+                &mut prompts,
+                Some(&sender),
+                &mut pending,
+                sample.prompt_updates,
+            )
+            .unwrap();
+            let mut request = if script {
+                crate::live_host::script_request(
+                    &[
+                        openmt2001::lua4::Value::Number(1.),
+                        openmt2001::lua4::Value::Number(2.),
+                        openmt2001::lua4::Value::Number(17.),
+                    ],
+                    tutorial,
+                    buttons != 0,
+                )
+                .unwrap()
+            } else {
+                prompt::Request {
+                    script: None,
+                    dialog: Some(Dialog {
+                        context: 17,
+                        context_written: true,
+                        ..Default::default()
+                    }),
+                    title: 0,
+                    body: 0,
+                    dismissal_id: 0,
+                    card: None,
+                }
+            };
+            request.dialog.as_mut().unwrap().timeout_ticks = Some(2);
+            prompts.submit(request);
+            // Interface samples continue while normal modal updates are
+            // paused/suppressed; only the delivered count ages the modal.
+            for delivered in [70, 70, 71, 72, 72, 72] {
+                sample.interface_ticks += 1;
+                sample.prompt_updates = delivered;
+                apply_prompt_updates(
+                    &mut prompts,
+                    Some(&sender),
+                    &mut pending,
+                    sample.prompt_updates,
+                )
+                .unwrap();
+                assert!(prompts.visible());
+                assert!(requests.try_recv().is_err());
+                assert!(pending.is_none());
+            }
+            sample.interface_ticks += 1;
+            sample.prompt_updates = 73; // N+1, with no Status ever requested.
+            apply_prompt_updates(
+                &mut prompts,
+                Some(&sender),
+                &mut pending,
+                sample.prompt_updates,
+            )
+            .unwrap();
+            if tutorial {
+                assert!(prompts.visible());
+                assert!(requests.try_recv().is_err());
+                continue;
+            }
+            assert!(!prompts.visible(), "expiry frame no longer draws the modal");
+            assert!(prompts.request().is_some(), "keep callback admission order");
+            let FreshRequest::HumanDialog(response, reply) = requests.try_recv().unwrap() else {
+                panic!("expiry did not dispatch a human dialog reply");
+            };
+            assert_eq!((response.context, response.button), (17, 0));
+            assert!(requests.try_recv().is_err());
+            // The worker's continuation can create a successor before the
+            // old head is unlinked, without making the old modal visible.
+            let mut next = prompts.request().unwrap();
+            next.dialog.as_mut().unwrap().context = 29;
+            reply.send(vec![next]).unwrap();
+            prompts.finish_dismiss(pending.take().unwrap().try_recv().unwrap());
+            assert!(prompts.visible());
+            assert_eq!(prompts.request().unwrap().dialog.unwrap().context, 29);
+        }
     }
 }

@@ -268,6 +268,7 @@ pub struct State {
     pressed: bool,
     last_tick: Option<u64>,
     deferred: bool,
+    timeout_pending: bool,
     pending_backspace: bool,
 }
 impl State {
@@ -278,6 +279,11 @@ impl State {
     }
     pub fn request(&self) -> Option<Request> {
         self.head.and_then(|i| self.slots[i].request.clone())
+    }
+    /// An expired modal stops drawing immediately, while its slot stays owned
+    /// until the worker has run the continuation and admitted its requests.
+    pub fn visible(&self) -> bool {
+        self.head.is_some() && !self.timeout_pending
     }
     /// Tutorial messages leave controls and picking to the independent script gates.
     pub fn blocks_controls(&self) -> bool {
@@ -365,6 +371,7 @@ impl State {
             if dialog.timeout {
                 if self.slots[at].remaining <= 0 {
                     self.dialog_reply(0);
+                    self.timeout_pending = true;
                 } else {
                     self.slots[at].remaining -= 1;
                 }
@@ -381,7 +388,9 @@ impl State {
             return None;
         }
         if self.slots[at].remaining <= 0 {
-            self.begin_dismiss()
+            let callback = self.begin_dismiss();
+            self.timeout_pending = self.deferred;
+            callback
         } else {
             self.slots[at].remaining -= 1;
             None
@@ -532,6 +541,7 @@ impl State {
                 .filter(|&next| self.slots[next].active);
         }
         self.pressed = false;
+        self.timeout_pending = false;
         (id != 0).then_some(id)
     }
     /// Host shortcut when dismissal dispatch cannot reenter the presenter.
