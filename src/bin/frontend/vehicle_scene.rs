@@ -37,7 +37,7 @@ pub struct Resources {
 
 impl Resources {
     pub fn new(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         image: &openmt2001::pe::PeImage<'_>,
         index: &openmt2001::archive::ArchiveIndex,
         archive: &[u8],
@@ -117,7 +117,7 @@ impl Layer {
     }
 
     pub fn from_resources(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         suncols: &[u8],
         resources: &Resources,
     ) -> Result<Self, String> {

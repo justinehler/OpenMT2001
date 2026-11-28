@@ -231,7 +231,7 @@ pub struct View {
     rights_request: Option<RightsRequest>,
     rights_open_category: Option<usize>,
     property_offer_open: bool,
-    property_inspection: Option<crate::fresh_city::property::Inspection>,
+    property_inspection: Option<openmt2001::session::property::Inspection>,
     property_panel: openmt2001::property_offer::Panel,
     property_request: Option<PropertyRequest>,
     property_error: Option<String>,
@@ -494,7 +494,7 @@ impl View {
     pub fn property_offer_open(&self) -> bool {
         self.property_offer_open
     }
-    pub fn property_panel_state(&self) -> Option<&crate::fresh_city::property::Inspection> {
+    pub fn property_panel_state(&self) -> Option<&openmt2001::session::property::Inspection> {
         self.property_inspection.as_ref()
     }
     pub fn take_property_request(&mut self) -> Option<PropertyRequest> {
@@ -505,7 +505,7 @@ impl View {
     pub fn apply_property_inspection(
         &mut self,
         category: u32,
-        result: Result<crate::fresh_city::property::Inspection, String>,
+        result: Result<openmt2001::session::property::Inspection, String>,
     ) {
         if self.category != Some(category as usize) || !self.property_offer_open {
             return;

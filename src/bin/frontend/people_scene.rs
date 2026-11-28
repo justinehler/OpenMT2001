@@ -213,7 +213,7 @@ pub struct DrawRequest {
 /// Resolve the live auxiliary pool against its retained model registry. This
 /// prepares requests only; textured GPU submission remains a separate stage.
 pub fn initial_requests(
-    session: &crate::fresh_city::Session<'_>,
+    session: &openmt2001::session::Session<'_>,
     camera: openmt2001::flyby::CameraSample,
     detail: u32,
     size: [u32; 2],
@@ -316,7 +316,7 @@ pub struct Resources {
 }
 impl Resources {
     pub fn new(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         image: &openmt2001::pe::PeImage<'_>,
         index: &openmt2001::archive::ArchiveIndex,
         archive: &[u8],
@@ -458,7 +458,7 @@ impl Layer {
     }
 
     pub fn new(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         image: &openmt2001::pe::PeImage<'_>,
         index: &openmt2001::archive::ArchiveIndex,
         archive: &[u8],
@@ -469,7 +469,7 @@ impl Layer {
     }
 
     pub fn from_resources(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         suncols: &[u8],
         resources: &Resources,
     ) -> Result<Self, String> {
@@ -749,7 +749,7 @@ impl Layer {
 
 /// Textured initial pose using retained original pages, geometry and lighting.
 pub fn initial_draws(
-    session: &crate::fresh_city::Session<'_>,
+    session: &openmt2001::session::Session<'_>,
     image: &openmt2001::pe::PeImage<'_>,
     index: &openmt2001::archive::ArchiveIndex,
     archive: &[u8],

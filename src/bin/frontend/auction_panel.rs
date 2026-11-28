@@ -25,7 +25,7 @@ pub struct Info {
     pub price: u32,
 }
 impl Info {
-    pub fn from_session(session: &crate::fresh_city::Session<'_>) -> Result<Self, String> {
+    pub fn from_session(session: &openmt2001::session::Session<'_>) -> Result<Self, String> {
         let record = &session.world.city.auction.controller.record;
         let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
         let category = word(4);

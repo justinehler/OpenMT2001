@@ -12,10 +12,10 @@ pub use openmt2001::card_panel::{Entry, EntryVisual, Panel};
 #[cfg(test)]
 pub fn verify_host(
     host: &mut crate::live_host::Host,
-    session: &mut crate::fresh_city::Session<'_>,
-    assets: &crate::fresh_city::CommandAssets<'_, '_>,
+    session: &mut openmt2001::session::Session<'_>,
+    assets: &openmt2001::session::CommandAssets<'_, '_>,
 ) {
-    use crate::fresh_city::cards::Action;
+    use openmt2001::session::cards::Action;
     let current = session
         .roster
         .manager
@@ -145,7 +145,7 @@ impl Input {
         entry: Entry,
         pointer: Option<[f32; 2]>,
         down: bool,
-    ) -> Option<crate::fresh_city::cards::Action> {
+    ) -> Option<openmt2001::session::cards::Action> {
         if let Some(panel) = panel {
             let hovered = (0..4)
                 .find(|&i| panel.buttons[i] && pointer.is_some_and(|p| hit(assets.buttons[i], p)))
@@ -156,7 +156,7 @@ impl Input {
             } else {
                 let prior = self.pressed.take();
                 (prior.is_some() && prior == hovered).then_some(
-                    crate::fresh_city::cards::Action::Button {
+                    openmt2001::session::cards::Action::Button {
                         event: 12,
                         button: prior.unwrap_or(0),
                     },
@@ -170,7 +170,7 @@ impl Input {
             } else {
                 let activate =
                     std::mem::take(&mut self.entry_pressed) && inside && entry.can_open();
-                activate.then_some(crate::fresh_city::cards::Action::Open)
+                activate.then_some(openmt2001::session::cards::Action::Open)
             }
         }
     }
@@ -533,7 +533,7 @@ mod tests {
                 let action = input.mouse(&assets, Some(panel), entry, pointer, false);
                 if panel.buttons[button] {
                     assert!(
-                        matches!(action,Some(crate::fresh_city::cards::Action::Button{event:12,button:i}) if i==button as u32)
+                        matches!(action,Some(openmt2001::session::cards::Action::Button{event:12,button:i}) if i==button as u32)
                     );
                 }
             }

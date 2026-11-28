@@ -1878,7 +1878,7 @@ mod script_message_tests {
         .unwrap()
     }
     fn record(
-        hooks: &mut crate::fresh_city::Hooks,
+        hooks: &mut openmt2001::session::Hooks,
         id: u32,
         arguments: &[Value],
     ) -> Result<Option<f64>, String> {
@@ -1896,7 +1896,7 @@ mod script_message_tests {
         let mut vm = Runtime::new().unwrap();
         vm.register_coerced("Message", 724, "ppnn").unwrap();
         vm.register_coerced("Prompt", 5, "ppnn").unwrap();
-        let mut hooks = crate::fresh_city::Hooks::new();
+        let mut hooks = openmt2001::session::Hooks::new();
         vm.execute("queue", b"Message(1,2,11,-23); Prompt(1,2,12); Message(1,2,13); Prompt(1,2,14); Message(1,2,15)",
             &mut |id, args| record(&mut hooks, id, args)).unwrap();
         let mut state = State::default();
@@ -2041,7 +2041,7 @@ mod script_message_tests {
             .parent()
             .unwrap()
             .join("TUTORIAL2/hub.lua");
-        let mut hooks = crate::fresh_city::Hooks::new();
+        let mut hooks = openmt2001::session::Hooks::new();
         vm.execute(
             "shipped tutorial",
             &fs::read(script).unwrap(),

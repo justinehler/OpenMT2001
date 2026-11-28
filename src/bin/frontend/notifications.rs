@@ -30,7 +30,7 @@ impl Queue {
     pub fn entries(&self) -> &[Entry] {
         &self.entries[..self.count]
     }
-    pub fn view(&self, session: &crate::fresh_city::Session<'_>) -> Result<Vec<Notice>, String> {
+    pub fn view(&self, session: &openmt2001::session::Session<'_>) -> Result<Vec<Notice>, String> {
         self.entries()
             .iter()
             .map(|entry| {

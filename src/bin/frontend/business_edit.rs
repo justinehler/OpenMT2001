@@ -1,5 +1,5 @@
 //! Original adjustment-arrow writes and submission over the retained city.
-use crate::fresh_city::{CommandAssets, Session};
+use openmt2001::session::{CommandAssets, Session};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
