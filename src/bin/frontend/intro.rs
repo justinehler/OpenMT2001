@@ -131,6 +131,7 @@ pub struct Paths {
     pub save_root: PathBuf,
 }
 pub struct Assets {
+    board_name: crate::board_selection::Name,
     //Process lifetime: moved into Intro, retained across city retirement.
     pub(crate) primary_products: camera_live::main_construction::CompletedMainLayout,
     pub(crate) ui_images: camera_live::process_images::Images,
@@ -440,6 +441,7 @@ impl Assets {
             maps,
         });
         Ok(Self {
+            board_name: Default::default(),
             process_runtime,
             activity,
             primary_products,
@@ -481,6 +483,7 @@ impl Assets {
     }
 }
 
+#[derive(Clone)]
 struct SceneInputs {
     process_runtime: Option<crate::live_host::process_runtime::Handle>,
     compatibility: crate::compatibility::Mode,
@@ -1577,7 +1580,8 @@ impl Intro {
             graphics: &mut self.graphics_levels,
             gameplay: &mut self.gameplay_levels,
         }
-        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())
+        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())?;
+        self.sync_board_names()
     }
     /// App invokes this once after EVERY synchronous window-event dispatch,
     /// including inner early returns, before any following OS focus prefix.
@@ -1598,6 +1602,7 @@ impl Intro {
             self.sync_profile_settings()?;
             self.persist_settings();
         }
+        self.sync_board_names()?;
         Ok(())
     }
 
@@ -2424,3 +2429,6 @@ mod process_worker_tests;
 #[cfg(test)]
 #[path = "intro/process_review_tests.rs"]
 pub(crate) mod process_review_tests;
+
+#[path = "intro/board_names.rs"]
+mod board_names;

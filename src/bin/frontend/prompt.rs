@@ -162,6 +162,13 @@ pub struct Assets {
     pub button: [f32; 4],
 }
 impl Assets {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)
+    }
+
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],

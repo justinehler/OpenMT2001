@@ -1165,6 +1165,15 @@ impl CharacterBiography {
     }
 }
 impl SinglePlayer {
+    pub(crate) fn apply_board_language(&mut self, strings: &[Vec<u8>]) -> Result<(), String> {
+        let rows = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        self.strings = rows
+            .iter()
+            .map(|row| crate::scenarios::currency_text(row, &rows))
+            .collect::<Result<_, _>>()?;
+        Ok(())
+    }
+
     pub fn new(
         index: &ArchiveIndex,
         archive: &[u8],

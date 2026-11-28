@@ -268,6 +268,15 @@ fn moved(value: usize, delta: i32, max: usize) -> usize {
     (value as i64 + i64::from(delta)).clamp(0, max as i64) as usize
 }
 impl SetupPanel {
+    pub(crate) fn apply_board_language(&mut self, strings: &[Vec<u8>]) -> Result<(), String> {
+        let rows = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        self.strings = rows
+            .iter()
+            .map(|row| crate::scenarios::currency_text(row, &rows))
+            .collect::<Result<_, _>>()?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn inert(options: Options) -> Self {
         Self {
