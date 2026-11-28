@@ -7,6 +7,8 @@
 use crate::ui::Surface;
 #[path = "desktop_quit.rs"]
 pub(crate) mod desktop_quit;
+#[path = "multiplayer_route.rs"]
+pub mod multiplayer_route;
 #[path = "preferred_token.rs"]
 pub mod preferred_token;
 #[path = "skirmish_route.rs"]
@@ -24,6 +26,7 @@ use std::{fs, path::Path};
 
 pub struct Assets {
     skirmish: Option<skirmish_route::Route>,
+    multiplayer: Option<multiplayer_route::Route>,
     settings: crate::settings_menu::Assets,
     planning: crate::build_view::Assets,
     prompts: crate::prompt::Assets,
@@ -239,6 +242,9 @@ impl Assets {
             skirmish: Some(skirmish_route::Route::new(
                 index, archive, installer, scripts, &strings, executable,
             )?),
+            multiplayer: Some(multiplayer_route::Route::new(
+                index, archive, installer, scripts, &strings, executable,
+            )?),
             settings: crate::settings_menu::Assets::load(index, archive, installer, language)?,
             planning: crate::build_view::Assets::load(
                 index, archive, installer, &strings, executable,
@@ -291,6 +297,7 @@ impl Assets {
 }
 pub struct Menu {
     pub skirmish: skirmish_route::Route,
+    multiplayer: multiplayer_route::Route,
 
     pub settings: crate::settings_menu::View,
     pub settings_audio: crate::settings_menu::Levels,
@@ -423,6 +430,7 @@ impl Menu {
         self.desktop_quit.cancel_pointer();
         self.settings.cancel_input();
         self.skirmish.cancel_input();
+        self.multiplayer.cancel_input();
         self.pressed = false;
         self.pressed_origin = None;
         self.light_click_target = None;
@@ -541,6 +549,7 @@ impl Menu {
     pub fn new(mut assets: Assets) -> Self {
         Self {
             skirmish: assets.skirmish.take().unwrap(),
+            multiplayer: assets.multiplayer.take().unwrap(),
 
             settings: Default::default(),
             settings_audio: Default::default(),
@@ -587,6 +596,11 @@ impl Menu {
             self.desktop_quit.cursor(p);
             return; // never mutate the menu selection behind the modal
         }
+        if self.multiplayer.visible {
+            self.multiplayer.pointer(p);
+            self.select(self.multiplayer.hit(p), self.pressed);
+            return;
+        }
         if self.skirmish.error.is_none() && self.skirmish.visible() {
             self.skirmish.pointer(p);
         }
@@ -622,6 +636,9 @@ impl Menu {
                 true,
             );
             return held_entry_click(&mut self.light_click_target, target);
+        }
+        if self.multiplayer.visible {
+            return false;
         }
         if self.settings.page.is_some() {
             return self
@@ -678,6 +695,9 @@ impl Menu {
         if self.pending.is_some() {
             return false;
         }
+        if self.multiplayer.visible {
+            return self.multiplayer.hit(p).is_some();
+        }
         if self.skirmish.error.is_some() {
             return self.hit(p).is_some();
         }
@@ -715,6 +735,9 @@ impl Menu {
                 .assets
                 .prompts
                 .desktop_quit_hit_at(p, self.desktop_quit.blocked_by_right());
+        }
+        if self.multiplayer.visible {
+            return self.multiplayer.hit(p);
         }
         if self.skirmish.error.is_some() {
             let [l, t, r, b] = self.assets.prompts.button_at([0.; 2]);
@@ -771,6 +794,12 @@ impl Menu {
             if let Some(button) = self.desktop_quit.left(pressed, hit) {
                 self.desktop_reply(button);
             }
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.mouse(self.pointer_position, pressed);
+            self.pressed = pressed;
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_none() && self.skirmish.visible() {
@@ -834,6 +863,12 @@ impl Menu {
     }
     pub fn activate(&mut self) {
         if self.desktop_input_blocked() {
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.activate_keyboard();
+            self.selected = None;
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -998,6 +1033,26 @@ impl Menu {
             self.dirty = true;
             return;
         }
+        if self.selected == Some(3) {
+            if let Some(current) = self.profile.store.current {
+                let name = self.profile.store.names[current].as_bytes();
+                match preferred_token::Token::load(&preferred_token::path(
+                    &self.assets.profile_root,
+                    name,
+                )) {
+                    Ok(token) => {
+                        self.multiplayer
+                            .open(self.assets.catalog.clone(), name, token.index())
+                    }
+                    Err(error) => self.skirmish.error = Some(error),
+                }
+            } else {
+                self.profile.visible = true;
+            }
+            self.selected = None;
+            self.dirty = true;
+            return;
+        }
         if self.selected == Some(5) {
             self.settings.open();
             self.selected = None;
@@ -1020,10 +1075,17 @@ impl Menu {
         }
     }
     pub fn is_editing(&self) -> bool {
-        self.skirmish.is_editing() || (self.profile.visible && self.profile.name.is_some())
+        (self.multiplayer.visible && self.multiplayer.is_editing())
+            || self.skirmish.is_editing()
+            || (self.profile.visible && self.profile.name.is_some())
     }
     pub fn navigate(&mut self, delta: i32) {
         if self.desktop_input_blocked() {
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.navigate(delta);
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -1070,6 +1132,11 @@ impl Menu {
         if self.desktop_input_blocked() {
             return;
         }
+        if self.multiplayer.visible {
+            self.multiplayer.text(text);
+            self.dirty = true;
+            return;
+        }
         if self.skirmish.error.is_some() {
             return;
         }
@@ -1087,6 +1154,11 @@ impl Menu {
         if self.desktop_input_blocked() {
             return;
         }
+        if self.multiplayer.visible {
+            self.multiplayer.select_all();
+            self.dirty = true;
+            return;
+        }
         if self.profile.visible {
             self.profile.select_all();
             self.dirty = true;
@@ -1094,6 +1166,11 @@ impl Menu {
     }
     pub fn erase(&mut self) {
         if self.desktop_input_blocked() {
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.erase();
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -1111,6 +1188,11 @@ impl Menu {
     }
     pub fn scroll(&mut self, delta: i32) {
         if self.desktop_input_blocked() {
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.scroll(self.pointer_position, delta);
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -1143,6 +1225,12 @@ impl Menu {
     }
     pub fn back(&mut self) {
         if self.desktop_input_blocked() {
+            return;
+        }
+        if self.multiplayer.visible {
+            self.multiplayer.back();
+            self.selected = None;
+            self.dirty = true;
             return;
         }
         if self.skirmish.error.is_some() {
@@ -1193,6 +1281,21 @@ impl Menu {
         depth: &wgpu::TextureView,
     ) -> Result<(), String> {
         if self.desktop_exit_requested {
+            return Ok(());
+        }
+        self.multiplayer.poll();
+        if self.multiplayer.visible {
+            let panel = self
+                .multiplayer
+                .draw(renderer, self.pointer_position, self.pressed)?;
+            renderer.draw_overlay(color, depth, &panel);
+            if let Some(message) = &self.multiplayer.notice {
+                let modal = self
+                    .assets
+                    .prompts
+                    .prepare_notice(renderer, 1600, message)?;
+                renderer.draw_overlay(color, depth, &modal);
+            }
             return Ok(());
         }
         if let Some(error) = &self.skirmish.error {

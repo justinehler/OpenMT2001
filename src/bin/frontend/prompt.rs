@@ -951,11 +951,19 @@ impl Assets {
         renderer: &Renderer,
         message: &str,
     ) -> Result<PreparedScene, String> {
+        self.prepare_notice(renderer, 1488, message)
+    }
+    pub fn prepare_notice(
+        &self,
+        renderer: &Renderer,
+        title: u32,
+        message: &str,
+    ) -> Result<PreparedScene, String> {
         let mut state = State::default();
         state.submit(Request {
             script: None,
             dialog: None,
-            title: 1488,
+            title,
             body: 0,
             dismissal_id: 0,
             card: None,
