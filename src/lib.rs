@@ -65,6 +65,7 @@ pub mod texture;
 pub mod time_panel;
 pub mod timers;
 pub mod traffic;
+pub mod traffic_lights;
 pub mod trees;
 pub mod tutorial_two_interaction;
 pub mod x87;

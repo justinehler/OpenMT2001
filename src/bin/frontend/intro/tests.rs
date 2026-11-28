@@ -4151,6 +4151,25 @@ fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
     };
     let mut road_scene = final_snapshot.scene.clone();
     road_scene.reframe(near_road).unwrap();
+    // The worker's road tick carries the shared crossing masks that pick
+    // the junction traffic-light glows (0x44dbe0). Every crossing row gets
+    // the same green/amber words; amber suppresses the green and red points.
+    let lanes = traffic.signal_lanes();
+    assert!(!lanes.is_empty());
+    assert!(lanes.iter().all(|row| row[..8] == lanes[0][..8]));
+    let green = u32::from_le_bytes(lanes[0][..4].try_into().unwrap());
+    let amber = u32::from_le_bytes(lanes[0][4..8].try_into().unwrap());
+    assert!(matches!((green, amber), (5 | 10, 0) | (0, 0 | 5 | 10)));
+    let mut changed_lanes = lanes.to_vec();
+    for row in &mut changed_lanes {
+        row[..4].copy_from_slice(&(15 - green.min(15)).to_le_bytes());
+    }
+    assert_eq!(
+        road_scene.set_signal_lanes(&changed_lanes).unwrap().len(),
+        1
+    );
+    assert_eq!(road_scene.set_signal_lanes(lanes).unwrap().len(), 1);
+    assert!(road_scene.set_signal_lanes(lanes).unwrap().is_empty());
     let road_draws = traffic.reframe(&mut road_scene, near_road, 35).unwrap();
     assert!(
         road_scene.draws[road_draws]

@@ -67,6 +67,15 @@ impl Intro {
                             }
                             view.vehicles = Some(vehicles);
                         }
+                        if let Some(vehicles) = &view.vehicles {
+                            for i in view.scene.set_signal_lanes(vehicles.signal_lanes())? {
+                                self.renderer.update_dynamic_vertices(
+                                    &mut view.prepared,
+                                    i,
+                                    &view.scene.draws[i].borrowed(),
+                                )?;
+                            }
+                        }
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
                     Err(mpsc::TryRecvError::Disconnected) => {

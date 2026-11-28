@@ -140,3 +140,148 @@ fn original_street_furniture_reaches_city_draws_and_options() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires original v1.4 city assets"]
+fn original_junction_traffic_lights_reach_city_draws_era_models_and_glows() {
+    use crate::traffic_lights::{self, Glow};
+    let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
+    let executable = read("EXE");
+    let directory = read("ARCHIVE_DIR");
+    let archive = read("ARCHIVE_BIN");
+    let build_file = read("BUILD_FILE");
+    let suncols = read("SUNCOLS");
+    let map = read("MAP");
+    let image = PeImage::parse(&executable).unwrap();
+    let board = Board::from_v14(&image).unwrap();
+    let posts = traffic_lights::posts(&board).unwrap();
+    // Every post belongs to a junction with more than two links, and the
+    // original board has full 4-way crossings.
+    let mut per_crossing = BTreeMap::<usize, usize>::new();
+    for post in &posts {
+        *per_crossing.entry(post.crossing).or_default() += 1;
+    }
+    assert!(per_crossing.values().all(|&n| n == 3 || n == 4));
+    assert!(per_crossing.values().any(|&n| n == 4));
+    let lanes = board.fresh_crossing_lanes();
+    assert!(posts.iter().all(|p| p.crossing < lanes.len()));
+
+    let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+    let triangle_vertices = |path| {
+        let entry = index.find(path).unwrap();
+        crate::mesh::CachedMesh::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap()
+        .parts
+        .iter()
+        .map(|p| p.indices.len() / 2)
+        .sum::<usize>()
+    };
+    let junction = posts
+        .iter()
+        .find(|p| per_crossing[&p.crossing] == 4)
+        .unwrap();
+    let camera = crate::flyby::CameraSample {
+        eye: [junction.position[0], 90., junction.position[2] - 80.],
+        target: [junction.position[0], 0., junction.position[2]],
+        up: [0., 1., 0.],
+        vertical_fov: 45.,
+    };
+    let mut scene = assemble(Request {
+        build_file: &build_file,
+        source: Source::Map(std::str::from_utf8(&map).unwrap()),
+        original: Some(OriginalAssets {
+            executable: &executable,
+            directory: &directory,
+            archive: &archive,
+        }),
+        suncols: Some(&suncols),
+        phase: Some(13),
+        camera: Some(camera),
+        width: 1024,
+        height: 768,
+        animated: true,
+    })
+    .unwrap();
+    let count = |scene: &Scene, kind| {
+        scene
+            .street_furniture
+            .iter()
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, i)| scene.draws[*i].vertices.len())
+            .sum::<usize>()
+    };
+    assert_eq!(
+        count(&scene, Kind::EarlySignal),
+        posts.len() * triangle_vertices(traffic_lights::EARLY_POST)
+    );
+    assert_eq!(
+        count(&scene, Kind::LateSignal),
+        posts.len() * triangle_vertices(traffic_lights::LATE_POST)
+    );
+    let active = |scene: &Scene, kind| {
+        scene
+            .street_furniture
+            .iter()
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, i)| scene.draws[*i].active_vertices.unwrap())
+            .sum::<usize>()
+    };
+    scene.set_street_furniture_era(1).unwrap();
+    assert!(active(&scene, Kind::EarlySignal) > 0);
+    assert_eq!(active(&scene, Kind::LateSignal), 0);
+    scene.set_street_furniture_era(2).unwrap();
+    assert_eq!(active(&scene, Kind::EarlySignal), 0);
+    assert!(active(&scene, Kind::LateSignal) > 0);
+
+    // Glows follow the crossing masks the scene is given, and the camera.
+    let glow_draw = scene.halos.as_ref().unwrap().signal_draw().unwrap();
+    let view = crate::camera::scene_view_with_up(camera.eye, camera.target, camera.up);
+    let expected = |lanes: &[[u8; 32]]| {
+        posts
+            .iter()
+            .filter_map(|p| p.glow(lanes).unwrap().map(|g| (p, g)))
+            .filter(|(p, _)| p.glow_alpha(&view) > 0)
+            .collect::<Vec<_>>()
+    };
+    let colors = |scene: &Scene| {
+        let mut colors = scene.draws[glow_draw]
+            .vertices
+            .iter()
+            .map(|v| [v[3], v[4], v[5]].map(|c| c as u8))
+            .collect::<Vec<_>>();
+        colors.dedup();
+        colors
+    };
+    // Fresh crossings are green for directions 1|4. Looking along +Z, only
+    // the yaw-0 posts (direction 1) face the camera, so every point is green.
+    let fresh = expected(&lanes);
+    assert!(!fresh.is_empty());
+    assert!(fresh.iter().all(|(p, g)| *g == Glow::Green && p.yaw == 0.));
+    assert_eq!(colors(&scene), [[0, 1, 0]]);
+    let all = |green: u32, amber: u32| {
+        let mut row = [0; 32];
+        row[..4].copy_from_slice(&green.to_le_bytes());
+        row[4..8].copy_from_slice(&amber.to_le_bytes());
+        vec![row; lanes.len()]
+    };
+    let changed = scene.set_signal_lanes(&all(15, 0)).unwrap();
+    assert_eq!(changed, [glow_draw]);
+    assert!(!scene.draws[glow_draw].vertices.is_empty());
+    assert_eq!(colors(&scene), [[0, 1, 0]]);
+    assert!(scene.set_signal_lanes(&all(15, 0)).unwrap().is_empty());
+    scene.set_signal_lanes(&all(0, 0)).unwrap();
+    assert_eq!(colors(&scene), [[1, 0, 0]]);
+    // Amber removes every glow point but keeps the post meshes.
+    scene.set_signal_lanes(&all(0, 15)).unwrap();
+    assert!(scene.draws[glow_draw].vertices.is_empty());
+    assert!(active(&scene, Kind::LateSignal) > 0);
+    // Points appear only for posts whose axis faces along the view depth.
+    scene.set_signal_lanes(&all(15, 0)).unwrap();
+    let facing = expected(&all(15, 0)).len();
+    assert!(facing > 0 && facing < posts.len());
+    assert!(scene.draws[glow_draw].vertices.len() <= facing * 2 * 6);
+    let alpha = scene.draws[glow_draw].diffuse_alpha.as_ref().unwrap();
+    assert!(alpha.iter().all(|&a| a > 0));
+}

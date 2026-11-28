@@ -347,6 +347,7 @@ fn assemble_with_style_internal(
     let mut street_furniture_era = 0;
     let mut furniture_families = BTreeMap::new();
     let mut halo_instances = Vec::new();
+    let mut signal_posts = (Vec::new(), Vec::new());
     let mut station_detail_families = std::collections::BTreeSet::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
@@ -898,6 +899,12 @@ fn assemble_with_style_internal(
             style.apply_board(&mut board)?;
         }
         halo_instances = crate::light_halos::lamps(&board.blocks);
+        // Fresh crossings start with mask 5 (0x44ab20); live sessions
+        // replace it every road tick through `Scene::set_signal_lanes`.
+        signal_posts = (
+            crate::traffic_lights::posts(&board)?,
+            board.fresh_crossing_lanes(),
+        );
         // 0044a0a0 creates this quad; 0044faf0 places the owning scene
         // object at the block center. 004b8760/004b8870 exclude flag 1
         // objects and flag 2 ground. 00689624 is BuildingTextures index 1.
@@ -1032,6 +1039,8 @@ fn assemble_with_style_internal(
             crate::street_furniture::BENCH,
             crate::street_furniture::SUBWAY,
             crate::street_furniture::PARKING,
+            crate::traffic_lights::EARLY_POST,
+            crate::traffic_lights::LATE_POST,
             // The park fences and Reading bridge girders (00686198).
             park_railings::PATH,
         ]
@@ -1094,6 +1103,8 @@ fn assemble_with_style_internal(
                 street_furniture::LATE_LAMP => Some(Kind::LateLamp),
                 street_furniture::BENCH => Some(Kind::Bench),
                 street_furniture::SUBWAY | street_furniture::PARKING => Some(Kind::Entrance),
+                crate::traffic_lights::EARLY_POST => Some(Kind::EarlySignal),
+                crate::traffic_lights::LATE_POST => Some(Kind::LateSignal),
                 _ => None,
             };
             if let Some(kind) = kind {
@@ -1110,6 +1121,11 @@ fn assemble_with_style_internal(
                 street_furniture::subways(&board.blocks)
                     .into_iter()
                     .map(|pose| (pose, 0xffffffff))
+                    .collect()
+            } else if matches!(kind, Some(Kind::EarlySignal | Kind::LateSignal)) {
+                crate::traffic_lights::posts(&board)?
+                    .into_iter()
+                    .map(|post| (post.mesh_pose(), 0xffffffff))
                     .collect()
             } else if mesh_path == street_furniture::PARKING {
                 street_furniture::parking(&board)?
@@ -1977,6 +1993,7 @@ fn assemble_with_style_internal(
         let layer = crate::light_halos::Layer::load(
             original,
             halo_instances,
+            signal_posts,
             &mut scene.draws,
             light.as_ref().map_or(255, |l| l.night_threshold),
             crate::flyby::CameraSample {
@@ -2188,6 +2205,15 @@ impl Scene {
         layer.enabled = enabled;
         layer.detail = detail;
         layer.fill(&mut self.draws)
+    }
+
+    /// The shared crossing green/amber masks (`RoadNetwork::lanes`) that
+    /// choose each junction post's red or green glow (0x44dbe0).
+    pub fn set_signal_lanes(&mut self, lanes: &[[u8; 32]]) -> Result<Vec<usize>, String> {
+        let Some(layer) = &mut self.halos else {
+            return Ok(Vec::new());
+        };
+        layer.set_signal_lanes(lanes, &mut self.draws)
     }
 
     /// 452570 submits the fixed station-detail list at Medium and High detail.
