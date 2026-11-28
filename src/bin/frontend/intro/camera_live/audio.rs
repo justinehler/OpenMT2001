@@ -1,5 +1,6 @@
 //! Existing available audio consumers extracted from exact public Intro.
-//! Nonblocking drains only. No new source generation, 3D listener or RNG.
+//! Simulation inputs arrive through nonblocking drains; city presentation and
+//! the outgoing music level advance only at the once-per-draw entry.
 use super::super::Inspection;
 use std::time::Instant;
 
@@ -7,6 +8,7 @@ use std::time::Instant;
 /// once-per-draw entry advances the outgoing music level.
 pub(crate) fn service_frame(view: &mut Inspection, allow_music_poll: bool) -> Result<(), String> {
     service_with_music_poll(view, allow_music_poll)?;
+    view.transport_audio_player.service_frame(view.camera.eye);
     if music_admitted(view, allow_music_poll)
         && let Err(error) = view.era_audio_player.service()
     {
@@ -40,13 +42,8 @@ pub(crate) fn service_with_music_poll(
     }
     view.transport_audio_player
         .set_interface_mode(if view.strategic { 3 } else { 0 });
-    while let Some(request) = view
-        .transport_audio_requests
-        .as_ref()
-        .and_then(|receiver| receiver.try_recv().ok())
-    {
-        view.transport_audio_player.apply(request.operation);
-    }
+    view.transport_audio_player
+        .drain_requests(view.transport_audio_requests.as_ref());
     while let Some(request) = view
         .era_audio_requests
         .as_ref()

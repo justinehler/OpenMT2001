@@ -17,6 +17,8 @@ pub enum Operation {
     /// Original 4af140 clears the retained city sound handles when leaving
     /// gameplay for a result or an auction transition.
     Reset,
+    /// Replace simulation-owned inputs without advancing frame presentation.
+    City(Box<CityInputs>),
     Route(RouteSound),
     /// Original 4af860 consumes 650330 and three ranked 63f9c0 rows,
     /// produced together by road::audio::Proximity.
@@ -42,6 +44,20 @@ pub enum Operation {
     Coast {
         camera_z: f32,
     },
+}
+
+/// Produced only when simulation advances; camera-dependent presentation is
+/// evaluated by the audio owner on every draw, including ordinary pause.
+#[derive(Clone, Debug)]
+pub struct CityInputs {
+    pub reciprocal_sum: f32,
+    pub nearest: [[u32; 3]; 3],
+    pub categories: [[u8; 0x17c]; 52],
+    pub construction: [[Option<ConstructionSource>; 2]; 4],
+    pub hour: u32,
+    pub tick: u32,
+    pub previous_tick: u32,
+    pub initial_random_state: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -348,6 +364,7 @@ pub struct Player {
     block_controller: Option<block_audio::Controller>,
     pending_ship_random: u32,
     interface_mode: u32,
+    city: Option<Box<CityInputs>>,
 }
 
 impl Player {
@@ -374,6 +391,7 @@ impl Player {
             block_controller: None,
             pending_ship_random: 0,
             interface_mode: 0,
+            city: None,
         }
     }
 
@@ -413,6 +431,12 @@ impl Player {
     pub fn apply(&mut self, operation: Operation) {
         match operation {
             Operation::Reset => self.reset(),
+            Operation::City(mut inputs) => {
+                if let Some(previous) = &self.city {
+                    inputs.previous_tick = previous.previous_tick;
+                }
+                self.city = Some(inputs);
+            }
             Operation::Route(call) => self.route(call),
             Operation::RoadProximity {
                 reciprocal_sum,
@@ -420,13 +444,68 @@ impl Player {
             } => self.road(reciprocal_sum, nearest),
             Operation::ResidentCrowd(weight) => self.crowd(weight),
             Operation::Environment { call, distance } => self.environment(call, distance),
-            Operation::Construction(groups) => self.construction(groups),
+            Operation::Construction(groups) => {
+                if let Some(inputs) = &mut self.city {
+                    inputs.construction = groups;
+                }
+                self.construction(groups);
+            }
             Operation::Blocks(snapshot) => self.blocks(*snapshot),
             Operation::Coast { camera_z } => self.coast(camera_z),
         }
     }
 
+    /// Request polling can happen several times per draw while the worker is
+    /// waiting on other UI services. It must never advance city presentation.
+    pub fn drain_requests(&mut self, receiver: Option<&mpsc::Receiver<Request>>) {
+        while let Some(request) = receiver.and_then(|receiver| receiver.try_recv().ok()) {
+            self.apply(request.operation);
+        }
+    }
+
+    /// Original 4afbf0, called once per rendered iteration before camera
+    /// interpolation (4b9c7e/4b9c94), independently of simulation scheduling.
+    pub fn service_frame(&mut self, camera: [f32; 3]) {
+        let Some(mut inputs) = self.city.take() else {
+            return;
+        };
+        self.road(inputs.reciprocal_sum, inputs.nearest);
+        self.crowd(resident_crowd_weight(&inputs.categories, camera));
+        let groups = if matches!(self.interface_mode, 1 | 3) {
+            [[None; 2]; 4]
+        } else {
+            inputs.construction.map(|group| {
+                group.map(|source| {
+                    source.map(|mut source| {
+                        let delta: [f64; 3] = std::array::from_fn(|axis| {
+                            f64::from(source.position[axis]) - f64::from(camera[axis])
+                        });
+                        source.distance = ((delta[2] * delta[2] + delta[1] * delta[1])
+                            + delta[0] * delta[0])
+                            .sqrt() as f32;
+                        source
+                    })
+                })
+            })
+        };
+        self.construction(groups);
+        self.blocks(block_audio::Snapshot::from_categories(
+            &inputs.categories,
+            camera,
+            inputs.hour,
+            inputs.tick,
+            inputs.previous_tick,
+            inputs.initial_random_state,
+        ));
+        self.coast(camera[2]);
+        // All parks consume the same elapsed simulation ticks, and repeated
+        // renders at the same tick consume zero. Store only after consumers.
+        inputs.previous_tick = inputs.tick;
+        self.city = Some(inputs);
+    }
+
     fn reset(&mut self) {
+        self.city = None;
         for handle in [
             &mut self.train_motion,
             &mut self.train_toot,

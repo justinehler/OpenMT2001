@@ -1051,12 +1051,6 @@ impl Host {
                 }
             );
         }
-        if !self.running {
-            let _ = crate::transport_audio::submit(
-                &self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
-            );
-        }
     }
     /// V2 saves retain the reason bytes. A cold Host must recover the player
     /// latch before its initial focus snapshot, or the first press adds a second hold.
@@ -2171,12 +2165,6 @@ impl Host {
             return;
         }
         if !self.running || self.failure.is_some() || session.world.pause.has_reason() {
-            if let Err(error) = crate::transport_audio::submit(
-                &self.transport_audio,
-                crate::transport_audio::Operation::Construction([[None; 2]; 4]),
-            ) {
-                self.fail(error);
-            }
             return;
         }
         if let Err(error) = self.request_camera(camera_bridge::Operation::CurrentPose) {
@@ -2821,52 +2809,18 @@ impl Host {
             Ok(()) => {
                 if let Err(error) = crate::transport_audio::submit(
                     &transport_audio,
-                    crate::transport_audio::Operation::RoadProximity {
-                        reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
-                        nearest: session.road_traffic.proximity.nearest,
-                    },
-                ) {
-                    self.fail(error);
-                }
-                // Native 4afcde updates the resident crowd bed immediately
-                // after 4af860's road ambience from the 52 live categories.
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::ResidentCrowd(
-                        crate::transport_audio::resident_crowd_weight(
-                            &session.world.city.categories,
-                            camera,
-                        ),
-                    ),
-                ) {
-                    self.fail(error);
-                }
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::Construction(construction_sounds),
-                ) {
-                    self.fail(error);
-                }
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::Blocks(Box::new(
-                        crate::transport_audio::block_audio::Snapshot::from_categories(
-                            &session.world.city.categories,
-                            camera,
-                            session.world.clock.hour(),
-                            session.world.clock.timing[0],
-                            block_previous_tick,
-                            block_random_state,
-                        ),
+                    crate::transport_audio::Operation::City(Box::new(
+                        crate::transport_audio::CityInputs {
+                            reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
+                            nearest: session.road_traffic.proximity.nearest,
+                            categories: session.world.city.categories,
+                            construction: construction_sounds,
+                            hour: session.world.clock.hour(),
+                            tick: session.world.clock.timing[0],
+                            previous_tick: block_previous_tick,
+                            initial_random_state: block_random_state,
+                        },
                     )),
-                ) {
-                    self.fail(error);
-                }
-                if let Err(error) = crate::transport_audio::submit(
-                    &transport_audio,
-                    crate::transport_audio::Operation::Coast {
-                        camera_z: camera[2],
-                    },
                 ) {
                     self.fail(error);
                 }
