@@ -732,7 +732,11 @@ impl Assets {
                         let rect = list.text_bounds(i - first);
                         if state.selected == Some(i) {
                             let mut tint = Surface::solid();
-                            tint.rect(list.highlight(i - first), [0xff008ed0; 4]);
+                            // The shared list painter 0x430b50 (called at 0x406b42) and its selection colour.
+                            tint.rect(
+                                list.highlight(i - first),
+                                [openmt2001::frontend_list::SELECTED_COLOR; 4],
+                            );
                             surfaces.push(tint);
                         }
                         let price = self.money(row.price)?;
