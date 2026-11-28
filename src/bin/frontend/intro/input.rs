@@ -556,11 +556,15 @@ impl Intro {
             && let Some(category) = view.utility_category(&self.assets.selection.blocks)
             && let Some(report) = &view.block_information
             && report.categories[category].is_some()
+            && let Some(menu) = &self.menu
         {
             view.utility_report.scroll = (view.utility_report.scroll as i64 - i64::from(delta))
                 .clamp(
                     0,
-                    report.land_rent[category].len().saturating_sub(22) as i64,
+                    report.land_rent[category]
+                        .len()
+                        .saturating_sub(menu.locator_assets().land_rent_visible_rows())
+                        as i64,
                 ) as usize;
             view.utility_report.dirty = true;
             return;
