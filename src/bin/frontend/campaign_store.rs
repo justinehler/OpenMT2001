@@ -273,6 +273,52 @@ pub fn save_progress(catalog: &Catalog, path: &Path) -> Result<(), String> {
     fs::write(&temporary, script::profile_text(catalog)).map_err(|e| e.to_string())?;
     fs::rename(temporary, path).map_err(|e| e.to_string())
 }
+/// Test support for campaign continuations: a new V2 profile in which every
+/// level before `level_id` in the original catalog's campaign order has been
+/// won once on Easy, through the same `Catalog::finish` path a real Win takes.
+/// Each call writes its own file, so tests never depend on another test's
+/// output or share progress.
+#[cfg(test)]
+pub fn checkpoint_profile(image: &PeImage<'_>, scripts: &Path, level_id: u32) -> PathBuf {
+    let mut catalog = load_catalog(image, scripts).unwrap();
+    catalog.reset_progress();
+    catalog.unlock_first();
+    catalog.difficulty = 0;
+    let target = catalog
+        .find(level_id)
+        .unwrap_or_else(|| panic!("checkpoint level {level_id} is not registered"));
+    for _ in 0..catalog.levels.len() {
+        if catalog.levels[target].unlocked() {
+            break;
+        }
+        let frontier: Vec<u32> = catalog
+            .levels
+            .iter()
+            .filter(|l| !l.tutorial() && l.single_player() && l.unlocked() && l.attempts() == 0)
+            .map(|l| l.id())
+            .collect();
+        let [next] = frontier[..] else {
+            panic!("campaign frontier is not a single level: {frontier:?}");
+        };
+        assert!(catalog.select(next, false));
+        catalog.finish(true, 1).unwrap();
+    }
+    assert!(
+        catalog.levels[target].unlocked(),
+        "the campaign never unlocks {level_id}"
+    );
+    catalog.select(u32::MAX, false);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = openmt2001::fixtures::scratch("CAMPAIGN_CHECKPOINTS").join(format!(
+        "before-{level_id}-{}-{nonce}.lua",
+        std::process::id()
+    ));
+    save_progress(&catalog, &path).unwrap();
+    path
+}
 /// Apply original 4ba2a4 only once, even if writing the V2 profile fails and
 /// the caller retries after fixing host storage. `applied` belongs to one
 /// outcome presentation, never to the profile across launches. The authored

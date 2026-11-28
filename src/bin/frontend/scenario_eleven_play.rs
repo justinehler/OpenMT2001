@@ -1,8 +1,8 @@
 //! Natural Scenario11 sales objective through legal Host construction and trade.
 use super::scenario_twelve_play::wealth;
 use super::{
-    CommandAssets, Inputs, Path, PathBuf, Policy, Session, character_names, finish_original_win,
-    fs, load_era_styles, submit_business_shape, word,
+    CommandAssets, Inputs, Path, Policy, Session, character_names, finish_original_win, fs,
+    load_era_styles, submit_business_shape, word,
 };
 
 fn build_capacity_shop(
@@ -263,15 +263,10 @@ fn run_scenario_eleven(probe_shops: usize) {
                 &exe.parent().unwrap().parent().unwrap().join("US/language/usa"),
             )
             .unwrap();
-            let source_profile = PathBuf::from(
-                fs::read_to_string("work/economy/scenario3-natural-win-profile-path.txt")
-                    .unwrap(),
-            );
+            let source_profile =
+                crate::campaign_store::checkpoint_profile(&image, &scripts, 200011);
             let source_bytes = fs::read(&source_profile).unwrap();
-            let profile = PathBuf::from(format!(
-                "work/economy/scenario11-legal-{}-profile.lua",
-                std::process::id()
-            ));
+            let profile = source_profile.with_extension("run.lua");
             fs::write(&profile, &source_bytes).unwrap();
             let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
             crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
