@@ -195,6 +195,7 @@ pub mod live_commands;
 pub mod local_commands;
 
 pub mod ai_hourly;
+pub mod market_share_panel;
 pub mod player_share;
 
 pub mod player_elimination;

@@ -33,19 +33,19 @@ pub struct Status {
     pub stats: Option<openmt2001::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
     pub chat: Option<openmt2001::network::chat::View>,
-    pub market_share: Option<crate::market_share_panel::Snapshot>,
+    pub market_share: Option<openmt2001::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
     pub result_review: Option<ResultReview>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
     /// Current original runtime+4 ledgers for the 412810 player report.
-    pub financial: Option<crate::player_info::Snapshot>,
+    pub financial: Option<openmt2001::player_info::Snapshot>,
     /// Native current player's one-based ownership byte, not character ID.
     pub business_owner: Option<u8>,
     /// Original current-player +10 activity byte used by construction input.
     pub current_player_active: bool,
     /// Current original 4112a0 resident counts and ratios for the City tab.
-    pub city_people_rows: Option<Vec<crate::city_people::Row>>,
+    pub city_people_rows: Option<Vec<openmt2001::city_people::Row>>,
     pub tutorial_controls: TutorialControls,
     pub source_picking: Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
@@ -74,7 +74,7 @@ pub struct Status {
     pub card_visual: openmt2001::card_panel::EntryVisual,
     /// Original822b0c/822b0e/822af4, retained independently of clock arithmetic.
     pub day_night_flags: [u8; 3],
-    pub notices: Vec<crate::notifications::Notice>,
+    pub notices: Vec<openmt2001::notifications::Notice>,
     pub auction: Option<Auction>,
     pub running: bool,
     pub speed: u32,
@@ -246,12 +246,12 @@ pub struct Auction {
     /// Authoritative details858 voice/AI gate published with the live panel.
     pub bid_voice_gate: bool,
     pub info: Option<crate::auction_panel::Info>,
-    pub participants: Vec<crate::auction_labels::Participant>,
+    pub participants: Vec<openmt2001::auction_labels::Participant>,
 }
 
 impl Auction {
     fn refresh_participants(&mut self, session: &Session<'_>) -> Result<(), String> {
-        self.participants = crate::auction_labels::participants(session)?;
+        self.participants = openmt2001::auction_labels::participants(session)?;
         Ok(())
     }
 }
@@ -349,13 +349,13 @@ pub struct Host {
     game_active: bool,
     stats: Option<openmt2001::stats_panel::State>,
     comparison: Option<crate::comparison::Runtime>,
-    market_share: crate::market_share_panel::State,
+    market_share: openmt2001::market_share_panel::State,
     cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<openmt2001::card_panel::Panel>,
     card_visible: bool,
     day_night_flags: [u8; 3],
-    notices: crate::notifications::Queue,
+    notices: openmt2001::notifications::Queue,
     pub auction_renderer: Option<std::sync::mpsc::Sender<auction_requests::Request>>,
     auction_actor_events: Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
@@ -1402,7 +1402,7 @@ impl Host {
         session: &Session<'_>,
         assets: &CommandAssets<'_, '_>,
     ) -> Result<crate::comparison::Data, String> {
-        let players = crate::player_info::Snapshot::from_runtime(
+        let players = openmt2001::player_info::Snapshot::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
             session.roster.status.current_player,
@@ -1491,7 +1491,7 @@ impl Host {
                 Default::default()
             }
         };
-        let financial = match crate::player_info::Snapshot::from_runtime(
+        let financial = match openmt2001::player_info::Snapshot::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
             session.roster.status.current_player,
@@ -1502,7 +1502,7 @@ impl Host {
                 None
             }
         };
-        let city_people_rows = match crate::city_people::Report::live_rows(&session.world) {
+        let city_people_rows = match openmt2001::city_people::Report::live_rows(&session.world) {
             Ok(rows) => Some(rows),
             Err(error) => {
                 self.fail(error);
@@ -1869,7 +1869,7 @@ impl Host {
         category: u32,
         panel: openmt2001::property_offer::Panel,
         initialize_amount: bool,
-    ) -> Result<crate::fresh_city::property::Inspection, String> {
+    ) -> Result<openmt2001::session::property::Inspection, String> {
         session.inspect_property_offer_display(
             category,
             panel,
@@ -1884,7 +1884,7 @@ impl Host {
         assets: &CommandAssets<'_, '_>,
         category: u32,
         panel: openmt2001::property_offer::Panel,
-    ) -> Result<crate::fresh_city::property::Inspection, String> {
+    ) -> Result<openmt2001::session::property::Inspection, String> {
         if self.failure.is_some() {
             return Err("Stopped session cannot accept property offers".into());
         }
@@ -3997,7 +3997,7 @@ mod tests {
                 }
             }
         }
-        let desktop = crate::menu::desktop_quit::dialog();
+        let desktop = crate::desktop_quit::dialog();
         assert_eq!(
             (desktop.title, desktop.body, desktop.callback),
             (1765, 1766, 0x495670)
