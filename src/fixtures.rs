@@ -29,6 +29,14 @@ const PREFIX: &str = "OPENMT2001_";
 const ROOT_VARIABLE: &str = "OPENMT2001_FIXTURES";
 const MANIFEST: &str = "manifest.toml";
 
+/// The ffmpeg the audio tests decode the original's music with: the `FFMPEG`
+/// fixture (`OPENMT2001_FFMPEG` or the manifest) when it is set, else
+/// `ffmpeg` on the `PATH`. Never a path relative to the working directory,
+/// which differs per package under cargo.
+pub fn ffmpeg() -> PathBuf {
+    optional("FFMPEG").unwrap_or_else(|| PathBuf::from("ffmpeg"))
+}
+
 /// Returns the location of a required fixture.
 ///
 /// # Panics
