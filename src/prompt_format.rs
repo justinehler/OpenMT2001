@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(map_text(b"A\tB", &rows[0]).unwrap(), vec![33]);
     }
     #[test]
-    #[ignore = "requires original LANGUAGE, VOTING_OLD_LANGUAGE and INSTALLER fixtures"]
+    #[ignore = "requires original language banks, EURO1/EURO2 language groups and board fonts"]
     fn every_shipped_language_row_formats_with_typed_arguments() {
         fn load(path: &std::path::Path) -> Vec<Vec<u8>> {
             let lengths = std::fs::read(path.join("tycoon.off")).unwrap();
@@ -256,32 +256,65 @@ mod tests {
                 })
                 .collect()
         }
-        let board = load(&crate::fixtures::path("INSTALLER").join("Standard/fonts/board/usa"));
-        for name in ["LANGUAGE", "VOTING_OLD_LANGUAGE"] {
-            let mut rows = load(&crate::fixtures::path(name));
-            rows.truncate(2242);
-            rows.extend_from_slice(&board[1..]);
-            // This checks the entire language bank, a superset of all titles,
-            // bodies and indirect references selected by shipped Lua scripts.
-            for (index, text) in rows.iter().enumerate().skip(1) {
-                let mut args = Vec::new();
-                let mut at = 0;
-                while at + 1 < text.len() {
-                    if text[at] == rows[0][5] {
-                        match text[at + 1] {
-                            t if t == rows[0][0x53] => args.push(Argument::Text(b"Synthetic")),
-                            t if t == rows[0][0x44] => args.push(Argument::Word(7)),
-                            t if t == rows[0][0x49] => args.push(Argument::Word(1)),
-                            _ => {
-                                at += 1;
-                                continue;
+        fn language_directories(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+            let mut directories = std::fs::read_dir(root)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.join("tycoon.off").is_file())
+                .collect::<Vec<_>>();
+            directories.sort();
+            directories
+        }
+        let boards =
+            language_directories(&crate::fixtures::path("INSTALLER").join("Standard/fonts/board"))
+                .into_iter()
+                .map(|path| {
+                    let rows = load(&path);
+                    (path, rows)
+                })
+                .collect::<Vec<_>>();
+        let mut languages = vec![
+            crate::fixtures::path("LANGUAGE"),
+            crate::fixtures::path("VOTING_OLD_LANGUAGE"),
+        ];
+        // Each group fixture contains its shipped locale subdirectories.
+        for name in ["PROMPT_LANGUAGE_EURO1", "PROMPT_LANGUAGE_EURO2"] {
+            languages.extend(language_directories(&crate::fixtures::path(name)));
+        }
+        assert!(languages.len() >= 13);
+        assert!(boards.len() >= 21);
+        for language in languages {
+            let base = load(&language);
+            for (board_path, board) in &boards {
+                let mut rows = base[..2242].to_vec();
+                rows.extend_from_slice(&board[1..]);
+                // This checks the entire language bank, a superset of all titles,
+                // bodies and indirect references selected by shipped Lua scripts.
+                for (index, text) in rows.iter().enumerate().skip(1) {
+                    let mut args = Vec::new();
+                    let mut at = 0;
+                    while at + 1 < text.len() {
+                        if text[at] == rows[0][5] {
+                            match text[at + 1] {
+                                t if t == rows[0][0x53] => args.push(Argument::Text(b"Synthetic")),
+                                t if t == rows[0][0x44] => args.push(Argument::Word(7)),
+                                t if t == rows[0][0x49] => args.push(Argument::Word(1)),
+                                _ => {
+                                    at += 1;
+                                    continue;
+                                }
                             }
+                            at += 1;
                         }
                         at += 1;
                     }
-                    at += 1;
+                    assert!(
+                        resource(text, &rows, &args).complete,
+                        "{} / {} row {index}",
+                        language.display(),
+                        board_path.display()
+                    );
                 }
-                assert!(resource(text, &rows, &args).complete, "{name} row {index}");
             }
         }
     }
