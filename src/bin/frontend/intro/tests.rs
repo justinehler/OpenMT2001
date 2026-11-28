@@ -2055,14 +2055,23 @@ fn right_drag_mode12_reframes_retained_gpu_city() {
                 .unwrap();
         }
     }
-    assert_eq!(
-        scene
-            .draws
-            .iter()
-            .map(|draw| draw.vertices.len())
-            .collect::<Vec<_>>(),
-        layout
-    );
+    // Since #518 the junction traffic-light glows share the light-halo draws
+    // and are rebuilt for the new camera (0x44dbe0 emits a point only where
+    // its post faces the eye), so their vertex counts follow the reframe.
+    // Every other draw keeps its assembled topology, and every rebuilt halo
+    // draw is reported as changed so the renderer re-uploads it.
+    for (index, draw) in scene.draws.iter().enumerate() {
+        if draw.mode == openmt2001::render::SurfaceMode::LightHalos {
+            if draw.vertices.len() != layout[index] {
+                assert!(
+                    changed.contains(&index),
+                    "halo draw {index} not re-uploaded"
+                );
+            }
+        } else {
+            assert_eq!(draw.vertices.len(), layout[index], "draw {index}");
+        }
+    }
     for phase in 0..2 {
         let changed = if phase == 0 {
             changed.clone()
