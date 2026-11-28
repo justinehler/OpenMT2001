@@ -351,6 +351,45 @@ impl Manager {
         }
     }
 
+    /// Copy the live accounts into the player records (cash, ledgers, owned
+    /// categories, retail and housing counters). The original keeps a single
+    /// record per player and writes sales straight to it (0x4625c0 adds each
+    /// unit to +0x1b4), so the records must match the accounts wherever
+    /// original code would read them. The roster lengths must agree; player
+    /// removal reconciles both representations.
+    pub fn publish_accounts(
+        &mut self,
+        accounts: &[crate::economy::PlayerAccount],
+    ) -> Result<(), String> {
+        if self.players.len() != accounts.len() {
+            return Err("runtime manager/account roster length mismatch".into());
+        }
+        for (player, account) in self.players.iter_mut().zip(accounts) {
+            account.write_runtime(&mut player.bytes)?;
+        }
+        Ok(())
+    }
+
+    /// The 440-byte player prefixes a V2 save stores, taken after the live
+    /// accounts are published.
+    pub fn account_prefixes(
+        &mut self,
+        accounts: &[crate::economy::PlayerAccount],
+    ) -> Result<Vec<[u8; 440]>, String> {
+        self.publish_accounts(accounts)?;
+        self.players
+            .iter()
+            .map(|player| {
+                player
+                    .bytes
+                    .get(4..444)
+                    .ok_or_else(|| "truncated runtime player prefix".to_string())?
+                    .try_into()
+                    .map_err(|_| "invalid runtime player prefix".into())
+            })
+            .collect()
+    }
+
     /// Resolve a registered RNG node into its sole owning player allocation.
     /// Returns false for a node owned by another world subsystem.
     pub fn link_rng_tail(&mut self, reference: u32, next: u32) -> bool {
@@ -1052,5 +1091,77 @@ mod tests {
             }
         }
         assert_eq!(at, bytes.len());
+    }
+
+    /// A pause raised in the 0x480ec0 drain ends the batch before that
+    /// iteration's 0x48cea0 player tick, so the record trails the sales of the
+    /// ticks since the last copy. The save prefixes and the batch-end copy
+    /// both publish the live accounts first, as the original's single record
+    /// would read.
+    #[test]
+    fn pause_ended_batch_record_matches_live_sales_after_publish() {
+        let mut manager = Manager::initialize([0; 0x28]);
+        manager.players.push(Player {
+            reference: 0x1000,
+            bytes: vec![0; 0x13f8],
+            auxiliaries: vec![],
+        });
+        let mut accounts =
+            vec![crate::economy::PlayerAccount::from_runtime(&manager.players[0].bytes).unwrap()];
+        let mut clock = crate::clock::Clock {
+            calendar: [0; 5],
+            timing: [5970, 5969, 0, 0, 0, 1],
+        };
+        let mut controls = crate::scheduler::Controls {
+            iterations: 10,
+            abort: false,
+            alternate_script_active: false,
+            network_enabled: false,
+            network_override: false,
+            deadline: u32::MAX,
+            gate_32: false,
+            gate_32_offset: false,
+            before_six_sound: 0,
+        };
+        let mut player_ticks = 0;
+        crate::scheduler::advance(&mut clock, &mut controls, |event, clock, controls| {
+            match event {
+                // A timed tip paused the game during tick 5974's work.
+                crate::scheduler::Event::Helper(0x480ec0) => {
+                    controls.abort = clock.timing[0] == 5975;
+                }
+                // One unit sold each normal tick (0x4625c0 adds it to +0x1b4).
+                crate::scheduler::Event::Residents => accounts[0].retail_counters[1] += 1,
+                crate::scheduler::Event::Helper(0x48cea0) => {
+                    player_ticks += 1;
+                    manager.publish_accounts(&accounts)?;
+                }
+                _ => {}
+            }
+            Ok(0)
+        })
+        .unwrap();
+        assert_eq!(clock.timing[..2], [5975, 5973]);
+        assert_eq!(player_ticks, 0, "the aborted iteration skipped 0x48cea0");
+        assert_eq!(accounts[0].retail_counters[1], 4);
+        assert_eq!(
+            word(&manager.players[0].bytes, 0x1b4),
+            0,
+            "record trails before publish"
+        );
+
+        let prefixes = manager.account_prefixes(&accounts).unwrap();
+        assert_eq!(
+            word(&prefixes[0], 0x1b0),
+            4,
+            "save prefix +0x1b4 holds the live count"
+        );
+
+        manager.players[0].bytes[0x1b4..0x1b8].fill(0);
+        manager.publish_accounts(&accounts).unwrap();
+        assert_eq!(word(&manager.players[0].bytes, 0x1b4), 4);
+
+        accounts.push(accounts[0].clone());
+        assert!(manager.publish_accounts(&accounts).is_err());
     }
 }

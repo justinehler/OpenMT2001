@@ -102,24 +102,15 @@ fn apply_terms(
 }
 fn check_sales(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>) -> i32 {
     // The original keeps one player record, and 004625c0 adds every unit sold
-    // to its +0x1b4 at the sale. The engine keeps that live count in the
-    // ledger account and copies it into the manager record before the code
-    // that reads the record: the 0x48cea0 player tick (every fifth global
-    // tick), the objective test and market share. A pause raised during a
-    // batch ends it after the global tick and before that player tick
-    // (0x481680), as the Win result does here, so between copies the record
-    // may trail the live count but never lead it.
+    // to its +0x1b4 at the sale. The engine copies the live account into the
+    // manager record at the end of every batch, including one a pause ended
+    // before its 0x48cea0 player tick (the Win result here), so between
+    // frames the record always holds the live count.
     let sales = session.world.ledgers.players[0].retail_counters[1];
-    let copied = word(&session.roster.manager.players[0].bytes, 0x1b4) as i32;
-    assert!(
-        copied <= sales,
-        "manager +0x1b4 ({copied}) is ahead of the live sales count ({sales})"
+    assert_eq!(
+        word(&session.roster.manager.players[0].bytes, 0x1b4) as i32,
+        sales
     );
-    let mut published = session.roster.manager.players[0].bytes.clone();
-    session.world.ledgers.players[0]
-        .write_runtime(&mut published)
-        .unwrap();
-    assert_eq!(word(&published, 0x1b4) as i32, sales);
     let history = session
         .world
         .ledgers

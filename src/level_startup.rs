@@ -642,32 +642,14 @@ impl Roster {
     }
 
     pub fn account_prefixes(&mut self, city: &City) -> Result<Vec<[u8; 440]>, String> {
-        self.publish_accounts(city)?;
-        self.manager
-            .players
-            .iter()
-            .map(|player| {
-                player
-                    .bytes
-                    .get(4..444)
-                    .ok_or_else(|| "truncated runtime player prefix".to_string())?
-                    .try_into()
-                    .map_err(|_| "invalid runtime player prefix".into())
-            })
-            .collect()
+        self.manager.account_prefixes(&city.ledgers.players)
     }
 
     /// Typed accounts are authoritative between manager callbacks. Publish
     /// them before reading raw players; do not silently truncate mismatched
     /// rosters with zip (player removal must reconcile both representations).
     pub fn publish_accounts(&mut self, city: &City) -> Result<(), String> {
-        if self.manager.players.len() != city.ledgers.players.len() {
-            return Err("runtime manager/account roster length mismatch".into());
-        }
-        for (player, account) in self.manager.players.iter_mut().zip(&city.ledgers.players) {
-            account.write_runtime(&mut player.bytes)?;
-        }
-        Ok(())
+        self.manager.publish_accounts(&city.ledgers.players)
     }
 
     /// Read back after a raw-manager callback, including its partial effects
