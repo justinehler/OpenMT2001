@@ -1531,6 +1531,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openmt-headless"
+version = "0.1.0"
+dependencies = [
+ "openmt2001",
+ "sha2",
+]
+
+[[package]]
 name = "openmt2001"
 version = "0.1.0"
 dependencies = [

@@ -43,6 +43,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy within the warning budget
         run: .github/clippy-budget.sh +$RUST_VERSION
+      # The headless runner must keep building without wgpu, winit or rodio (#99).
+      - name: Check the headless runner without the native stack
+        run: cargo +$RUST_VERSION check --locked -p openmt-headless
 
   test:
     strategy:
