@@ -54,7 +54,7 @@ mod block_init_tests;
 mod portable_tests;
 
 impl Primary {
-    /// Supported finite mode4/6/12/13 subset. Opaque bytes are never decoded as floats.
+    /// Supported finite mode4/6/12/13/17 subset. Opaque bytes are never decoded as floats.
     /// Positive divisors are required whenever a dirty flag can cause sampling.
     pub fn decode(raw: [u8; 196]) -> Result<Self> {
         let state = Self { raw };
@@ -63,6 +63,39 @@ impl Primary {
     }
     pub fn raw(&self) -> &[u8; 196] {
         &self.raw
+    }
+    /// Kind 17's loader enables pose smoothing and leaves the current pose intact.
+    pub fn flyby(current: [[f32; 3]; 2]) -> Result<Self> {
+        let mut state = Self { raw: [0; 196] };
+        state.raw[..4].copy_from_slice(&17i32.to_le_bytes());
+        state.raw[0x70..0x72].fill(1);
+        state.raw[0x74..0x78].copy_from_slice(&1i32.to_le_bytes());
+        state.store(0x78, Sum::from_f32(30.)?)?;
+        state.store(0x68, Sum::from_f32(1.)?)?;
+        for (at, vector) in [(4, current[0]), (0x10, current[1])] {
+            for (axis, value) in vector.into_iter().enumerate() {
+                state.store(at + axis * 4, Sum::from_f32(value)?)?;
+            }
+        }
+        state.validate()?;
+        Ok(state)
+    }
+    /// Publish the converted track pose before the shared camera update.
+    pub fn request_flyby(&mut self, eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Result<()> {
+        if self.word(0) != 17 {
+            return Err("flyby request requires kind17");
+        }
+        let mut next = self.clone();
+        for (at, vector) in [(0x34, eye), (0x40, target), (0x64, up)] {
+            for (axis, value) in vector.into_iter().enumerate() {
+                next.store(at + axis * 4, Sum::from_f32(value)?)?;
+            }
+        }
+        next.raw[0x74..0x78].copy_from_slice(&2i32.to_le_bytes());
+        next.store(0x78, Sum::from_f32(30.)?)?;
+        next.validate()?;
+        *self = next;
+        Ok(())
     }
     fn word(&self, at: usize) -> u32 {
         u32::from_le_bytes(self.raw[at..at + 4].try_into().unwrap())
@@ -93,8 +126,8 @@ impl Primary {
         }
     }
     fn validate(&self) -> Result<()> {
-        if !matches!(self.word(0) as i32, 4 | 6 | 12 | 13) {
-            return Err("primary core supports only mode4/6/12/13");
+        if !matches!(self.word(0) as i32, 4 | 6 | 12 | 13 | 17) {
+            return Err("primary core supports only mode4/6/12/13/17");
         }
         for at in (4..0x1c)
             .step_by(4)

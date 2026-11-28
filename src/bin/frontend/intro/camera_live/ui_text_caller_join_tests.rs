@@ -35,7 +35,7 @@ fn assets() -> Assets {
     .unwrap()
 }
 fn inspection(assets: &Assets) -> Inspection {
-    let camera = *assets.samples.first().expect("actual loaded flyby sample");
+    let camera = assets.flyby.current();
     let mut graph = ui_graph::refresh_fixture([0; 600]);
     graph.main.case_zero.literals = assets.ui_text.literals.clone();
     //Tests do not activate G/B/H/C show, input, central transport or full48.
