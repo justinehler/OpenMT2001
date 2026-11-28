@@ -756,16 +756,26 @@ impl SceneInputs {
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Vehicles { reply } => {
-                                let result = session
-                                    .road_traffic
-                                    .project(&mut session.world.road_network, 0.)
-                                    .and_then(|()| {
-                                        crate::vehicle_scene::Layer::from_resources(
-                                            &session,
-                                            &self.suncols,
-                                            cache.vehicles.as_ref().unwrap(),
-                                        )
-                                    });
+                                // The frontend asks once per rendered frame. As in
+                                // the original main loop 4b9480, dispatch the timers
+                                // first, then draw road poses at the logic timer's
+                                // progress, so cars glide between 25 Hz ticks.
+                                let elapsed = timing.elapsed_now();
+                                host.frame(&mut session, &assets, elapsed);
+                                if std::mem::take(&mut host.synchronize_time) {
+                                    timing.synchronize_now();
+                                }
+                                if host.camera_retired() {
+                                    break;
+                                }
+                                last_tick = Instant::now();
+                                let result = session.project_road_traffic().and_then(|()| {
+                                    crate::vehicle_scene::Layer::from_resources(
+                                        &session,
+                                        &self.suncols,
+                                        cache.vehicles.as_ref().unwrap(),
+                                    )
+                                });
                                 let _ = reply.send(result);
                             }
                             FreshRequest::Transport { reply } => {
@@ -2063,9 +2073,7 @@ impl SceneInputs {
                 &self.archive,
             )?);
         }
-        session
-            .road_traffic
-            .project(&mut session.world.road_network, 0.)?;
+        session.project_road_traffic()?;
         let mut vehicles = crate::vehicle_scene::Layer::from_resources(
             session,
             &self.suncols,

@@ -259,10 +259,29 @@ pub fn dispatch(
             index += 1;
         }
     }
-    Ok(tasks
+    Ok(tasks.iter().map(progress).collect())
+}
+
+/// Original4eb7f0 for one task: accumulated milliseconds over the interval.
+/// The dispatch catch-up leaves an enabled task below one interval, so this is
+/// normally in [0, 1); there is no separate clamp. A disabled task keeps its
+/// accumulator, so its progress holds still until it is enabled again.
+pub fn progress(task: &Task) -> f32 {
+    (f64::from(number(task, 12)) / f64::from(number(task, 8))) as f32
+}
+
+/// Callback of the 25 Hz logic task registered by4b98d1 (original481680).
+pub const LOGIC_CALLBACK: u32 = 0x481680;
+
+/// The render interpolation factor for road vehicle poses. The city render
+/// 4b3870 passes the 4eb7f0 ratio of the logic task (index at 8b2378) to the
+/// road pose pass 44d340, sampled after the main loop 4b9480 dispatched timers
+/// for the frame. `None` when no logic task is registered.
+pub fn logic_progress(tasks: &[Task]) -> Option<f32> {
+    tasks
         .iter()
-        .map(|task| (f64::from(number(task, 12)) / f64::from(number(task, 8))) as f32)
-        .collect())
+        .find(|task| task[16..20] == LOGIC_CALLBACK.to_le_bytes())
+        .map(progress)
 }
 
 #[cfg(test)]

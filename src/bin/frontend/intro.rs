@@ -1261,7 +1261,6 @@ struct Inspection {
     last_people_query: Instant,
     vehicles: Option<crate::vehicle_scene::Layer>,
     vehicles_pending: Option<mpsc::Receiver<Result<crate::vehicle_scene::Layer, String>>>,
-    last_vehicles_query: Instant,
     transport: Option<crate::transport_scene::Layer>,
     transport_pending: Option<mpsc::Receiver<Result<crate::transport_scene::Layer, String>>>,
     last_transport_query: Instant,
