@@ -102,7 +102,7 @@ fn assert_slider_draw(
 ) {
     let [l, t, r, b] = expected;
     let surfaces = assets.surfaces(state(page)).unwrap();
-    // Sound has only slider icons; Graphics has five radios and a checkbox; Gameplay has
+    // Sound has only slider icons; Graphics has five radios; Gameplay has
     // three checkboxes before its slider. Surface zero contains solid art.
     assert_eq!(rect(&surfaces[icon_index].vertices), [l, t, l + 16., b]);
     assert_eq!(rect(&surfaces[icon_index + 1].vertices), [r - 16., t, r, b]);
@@ -169,7 +169,7 @@ fn settings_draw_sliders_use_factory_regions_and_integer_origin_span() {
                 Button::DistanceRight,
             ],
             [220., 300., 419., 316.],
-            7,
+            6,
         ),
         (
             Page::Gameplay,
