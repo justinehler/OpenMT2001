@@ -584,6 +584,32 @@ impl Player {
     }
 
     fn construction(&mut self, groups: [[Option<ConstructionSource>; 2]; 4]) {
+        // The current backend is nonspatial. Keep its traversal separate:
+        // 4ad8b0's spatial branch visits both ranked sources instead.
+        let needs_mixer = groups.iter().enumerate().any(|(group, candidates)| {
+            candidates
+                .iter()
+                .enumerate()
+                .find(|(_, source)| {
+                    source.is_some_and(|source| {
+                        source.distance.is_finite() && source.distance <= 250.
+                    })
+                })
+                .is_some_and(|(slot, _)| self.construction[group * 2 + slot].is_none())
+        });
+        let mixer = if needs_mixer {
+            self.mixer().cloned()
+        } else {
+            None
+        };
+        self.construction_fallback(groups, mixer.as_ref());
+    }
+
+    fn construction_fallback(
+        &mut self,
+        groups: [[Option<ConstructionSource>; 2]; 4],
+        mixer: Option<&rodio::mixer::Mixer>,
+    ) {
         for (group, candidates) in groups.into_iter().enumerate() {
             for (slot, candidate) in candidates.into_iter().enumerate() {
                 let index = group * 2 + slot;
@@ -593,7 +619,7 @@ impl Player {
                     }
                     continue;
                 };
-                if !candidate.distance.is_finite() || candidate.distance >= 250. {
+                if !candidate.distance.is_finite() || candidate.distance > 250. {
                     // 4ad8b0 retains an existing handle and silences it while
                     // its ranked source is beyond the audible radius.
                     if let Some(sink) = &self.construction[index] {
@@ -607,7 +633,7 @@ impl Player {
                         2 => self.assets.construction_saw.clone(),
                         _ => self.assets.construction_hammer.clone(),
                     };
-                    if let Some(mixer) = self.mixer() {
+                    if let Some(mixer) = mixer {
                         self.construction[index] = Some(Self::loop_sink(mixer, &samples, 0.));
                     }
                 }
@@ -617,6 +643,9 @@ impl Player {
                             .source_gain(construction_fallback_level(candidate.distance)),
                     );
                 }
+                // Admission ends this phase even when no voice was allocated.
+                // Only far candidates advance to the next ranked source.
+                break;
             }
         }
     }
@@ -867,6 +896,14 @@ impl Player {
                 }
             }
             EnvironmentCall::Cue(id) => {
+                if matches!(self.interface_mode, 1 | 3) {
+                    // 4ae2c9..4ae319/4ae731 precedes cue dispatch. The end
+                    // slot is separate and survives this cleanup.
+                    stop(&mut self.crane_start);
+                    stop(&mut self.crane_lift);
+                    stop(&mut self.crane_loop);
+                    return;
+                }
                 if id == 30 {
                     stop(&mut self.crane_lift);
                     return;
