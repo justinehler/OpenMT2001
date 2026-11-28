@@ -181,6 +181,8 @@ pub mod session;
 pub mod session_save;
 #[cfg(feature = "lua4")]
 pub mod stats_panel;
+#[cfg(feature = "lua4")]
+pub mod strategic_inputs;
 
 pub mod category_ownership;
 #[cfg(feature = "lua4")]

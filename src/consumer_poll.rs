@@ -160,3 +160,115 @@ fn matches_native_live_poll() {
     }
     assert!(data.is_empty());
 }
+
+/// Read-only 48b030 apartment consumer poll counts per category, read from
+/// the live pools or a save's linked lists.
+#[derive(Clone, Debug, Default)]
+pub struct Poll {
+    pub counts: [u16; 32],
+    pub residents: u16,
+}
+impl Poll {
+    /// Read the same apartment/resident links as 48b030 from the retained
+    /// world. Saved +20c/+ec indices remain indices in the live pools.
+    #[cfg(feature = "lua4")]
+    pub fn from_runtime(world: &crate::level_startup::World) -> Result<[Self; 52], String> {
+        let mut polls = std::array::from_fn(|_| Self::default());
+        let commodities = world.commodities.resident_inputs();
+        let active = std::array::from_fn(|id| commodities[id].active);
+        // The UI is a fresh, read-only view of the same native-backed query
+        // used by AI/valuation. Keep its linked-list and filtering semantics
+        // authoritative in consumer_poll::start rather than walking it again.
+        let mut player = crate::player_manager::Player {
+            reference: 0,
+            bytes: vec![0; 0x1e50],
+            auxiliaries: vec![],
+        };
+        for (category, poll) in polls.iter_mut().enumerate() {
+            crate::consumer_poll::clear(&mut player);
+            crate::consumer_poll::start(
+                &mut player,
+                category as i32,
+                &world.categories,
+                &world.buildings,
+                &world.ledgers.businesses,
+                &world.ledgers.residents,
+                &active,
+            )?;
+            poll.residents = u16::from_le_bytes(player.bytes[0x208..0x20a].try_into().unwrap());
+            poll.counts = std::array::from_fn(|id| {
+                let at = 0x1c8 + id * 2;
+                u16::from_le_bytes(player.bytes[at..at + 2].try_into().unwrap())
+            });
+        }
+        Ok(polls)
+    }
+    pub fn from_save(save: &crate::save::SaveFile<'_>) -> Result<[Self; 52], String> {
+        let mut polls = std::array::from_fn(|_| Self::default());
+        let residents = save.residents()?;
+        let economy = save.economy()?;
+        let businesses: Vec<_> = economy.businesses().collect();
+        let commodities = economy.resident_commodities();
+        for building in save.buildings()? {
+            let business = i32::from_le_bytes(building.bytes[0x1c..0x20].try_into().unwrap());
+            if business == -1 {
+                continue;
+            }
+            let business = businesses
+                .get(usize::try_from(business).map_err(|_| "negative business index")?)
+                .ok_or("poll business exceeds saved pool")?;
+            if business.business_type() != 42 {
+                continue;
+            }
+            let poll = &mut polls[building.category];
+            let mut next = i32::from_le_bytes(business.bytes[0x20c..0x210].try_into().unwrap());
+            let mut visited = vec![false; residents.nodes.len()];
+            while next != -1 {
+                let index = usize::try_from(next).map_err(|_| "negative poll resident index")?;
+                let node = residents
+                    .nodes
+                    .get(index)
+                    .ok_or("poll resident exceeds saved pool")?;
+                if visited[index] {
+                    return Err("cyclic saved apartment resident list".into());
+                }
+                visited[index] = true;
+                let account = i16::from_le_bytes(node[0x68..0x6a].try_into().unwrap());
+                let account = usize::try_from(account)
+                    .map_err(|_| "poll resident has no spending account")?;
+                let at = account
+                    .checked_mul(0x90)
+                    .ok_or("poll account offset overflow")?
+                    + 0x84;
+                let bytes = residents
+                    .accounts
+                    .get(at..at + 4)
+                    .ok_or("poll account exceeds saved pool")?;
+                let mask = u32::from_le_bytes(bytes.try_into().unwrap());
+                poll.residents = poll.residents.wrapping_add(1);
+                for (id, commodity) in commodities.iter().enumerate() {
+                    if commodity.active && mask & (1 << id) != 0 {
+                        poll.counts[id] = poll.counts[id].wrapping_add(1);
+                    }
+                }
+                next = i32::from_le_bytes(node[0xec..0xf0].try_into().unwrap());
+            }
+        }
+        Ok(polls)
+    }
+    /// Original4123df nested swaps preserve its tie order; at most17 rows.
+    pub fn ranked(&self) -> Vec<(usize, u16)> {
+        let mut rows: Vec<_> = self.counts.iter().copied().enumerate().collect();
+        for i in 0..31 {
+            for j in (i + 1..32).rev() {
+                if rows[i].1 < rows[j].1 {
+                    rows.swap(i, j);
+                }
+            }
+        }
+        rows.into_iter()
+            .take(17)
+            .take_while(|row| row.1 != 0)
+            .collect()
+    }
+}
