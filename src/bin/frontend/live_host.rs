@@ -99,7 +99,7 @@ pub struct Status {
     pub pending_presentation: Vec<u32>,
     pub prompts: Vec<prompt::Request>,
     pub auction_seconds: Option<i32>,
-    pub auction_notice: Option<crate::auction_notice::Notice>,
+    pub auction_notice: Option<openmt2001::auction_notice::Notice>,
     pub auction_locked_categories: Vec<usize>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -247,7 +247,7 @@ pub struct Auction {
     pub hidden_bid_toggle_enabled: bool,
     /// Authoritative details858 voice/AI gate published with the live panel.
     pub bid_voice_gate: bool,
-    pub info: Option<crate::auction_panel::Info>,
+    pub info: Option<openmt2001::auction_panel::Info>,
     pub participants: Vec<openmt2001::auction_labels::Participant>,
 }
 
@@ -1049,7 +1049,7 @@ impl Host {
                 auction.controls = state.controls.clone();
                 auction.controls.timer.sound = rebuilt_sound;
                 auction.visible = state.visible;
-                auction.info = Some(crate::auction_panel::Info::from_session(session)?);
+                auction.info = Some(openmt2001::auction_panel::Info::from_session(session)?);
                 auction.refresh_participants(session)?;
                 // V2 restores the retained phase-two widget group. Native
                 //464ee0 shows565b9c and565ba8 together (464f0f..464f41).
@@ -1445,7 +1445,7 @@ impl Host {
         self.collect_script_prompts(session);
         let prompts = std::mem::take(&mut self.pending_prompts);
         let auction_notice =
-            match crate::auction_notice::Notice::from_session(session, self.auction_seconds) {
+            match openmt2001::auction_notice::Notice::from_session(session, self.auction_seconds) {
                 Ok(notice) => notice,
                 Err(error) => {
                     self.fail(error);
@@ -1461,7 +1461,7 @@ impl Host {
             if let Err(error) = auction.refresh_participants(session) {
                 self.fail(error);
             }
-            match crate::auction_panel::Info::from_session(session) {
+            match openmt2001::auction_panel::Info::from_session(session) {
                 Ok(info) => auction.info = Some(info),
                 Err(error) => self.fail(error),
             }

@@ -159,6 +159,10 @@ pub mod startup_settings;
 #[cfg(feature = "lua4")]
 pub mod auction_labels;
 #[cfg(feature = "lua4")]
+pub mod auction_notice;
+#[cfg(feature = "lua4")]
+pub mod auction_panel;
+#[cfg(feature = "lua4")]
 pub mod city_people;
 #[cfg(feature = "lua4")]
 pub mod level_startup;
