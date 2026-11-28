@@ -3071,11 +3071,7 @@ impl SceneInputs {
         if let Some(report) = &mut block_information {
             report.attach_railroads(
                 &session.population.properties,
-                session
-                    .world
-                    .settings
-                    .daily_freight(session.difficulty)
-                    .ok_or("railroad freight difficulty")?,
+                session.world.settings.selected_income().daily_freight,
             )?;
         }
         let board = self.styled_board(&image)?;

@@ -415,12 +415,18 @@ impl Scripts {
         hooks: &mut impl level_script::Hooks,
         active: bool,
     ) -> Result<(), String> {
+        self.runtime
+            .execute("DEFAULT/hub.lua", sources.default_hub, &mut |id, args| {
+                self.bindings
+                    .handle(id, args, state, &mut self.events, context, geometry, hooks)
+            })?;
+        // Difficulty is applied before level Lua runs. Native loads also
+        // reapply the saved selector; the selected income globals are not saved.
+        state.settings.apply_difficulty(context.difficulty as usize);
         let mut handler = |id, args: &[crate::lua4::Value]| {
             self.bindings
                 .handle(id, args, state, &mut self.events, context, geometry, hooks)
         };
-        self.runtime
-            .execute("DEFAULT/hub.lua", sources.default_hub, &mut handler)?;
         self.runtime
             .execute(sources.scenario_name, sources.scenario_hub, &mut handler)?;
         if active {

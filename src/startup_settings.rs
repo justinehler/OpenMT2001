@@ -8,6 +8,7 @@ pub struct State {
     pub subway_threshold: i32,
     /// Original93af08 structure, including untouched padding.
     pub tweaks: [u8; 36],
+    selected_income: crate::economy::OwnerIncomeSettings,
 }
 impl State {
     /// Fresh-process zero-filled globals; original4dd1d0 also clears Tweaks.
@@ -18,8 +19,29 @@ impl State {
             itchy_counter: 0,
             subway_threshold: 0,
             tweaks: [0; 36],
+            selected_income: crate::economy::OwnerIncomeSettings {
+                multiplier: 0.,
+                daily_freight: 0.,
+            },
         }
     }
+    /// 0048d130 publishes both selected globals. Later Tweaks writes only
+    /// change the configuration; unsupported selectors leave the globals alone.
+    pub fn apply_difficulty(&mut self, difficulty: usize) {
+        if let (Some(multiplier), Some(daily_freight)) =
+            (self.rail_income(difficulty), self.daily_freight(difficulty))
+        {
+            self.selected_income = crate::economy::OwnerIncomeSettings {
+                multiplier,
+                daily_freight,
+            };
+        }
+    }
+
+    pub fn selected_income(&self) -> crate::economy::OwnerIncomeSettings {
+        self.selected_income
+    }
+
     pub fn years_per_day(&self) -> u32 {
         u32::from_le_bytes(self.tweaks[4..8].try_into().unwrap())
     }
@@ -171,6 +193,61 @@ impl Bindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn configure(state: &mut State, difficulty: usize, multiplier: f32, freight: f32) {
+        state.tweaks[12 + difficulty * 4..16 + difficulty * 4]
+            .copy_from_slice(&multiplier.to_bits().to_le_bytes());
+        state.tweaks[24 + difficulty * 4..28 + difficulty * 4]
+            .copy_from_slice(&freight.to_bits().to_le_bytes());
+    }
+
+    #[test]
+    fn selected_income_changes_only_when_difficulty_is_applied() {
+        let mut settings = State::fresh();
+        for difficulty in 0..3 {
+            configure(&mut settings, difficulty, 1., 800.);
+            settings.apply_difficulty(difficulty);
+            configure(&mut settings, difficulty, 2., 1600.);
+            let mut utilities = crate::economy::Utilities::new([1, 0, 0, 0]);
+            let mut properties = crate::economy::PropertyIncome {
+                owners: [1, 0, 0, 0],
+                totals: [0.; 4],
+            };
+            let mut players = [crate::economy::PlayerAccount::from_runtime(&[0; 440]).unwrap()];
+            for (reapply, multiplier, freight) in [(false, 1., 800.), (true, 2., 1600.)] {
+                if reapply {
+                    settings.apply_difficulty(difficulty);
+                }
+                settings
+                    .selected_income()
+                    .reset_income(&mut utilities, &mut properties);
+                assert_eq!(properties.totals, [freight; 4]);
+                utilities.totals = [400., 0., 0., 0.];
+                let before = players[0].cash;
+                settings
+                    .selected_income()
+                    .pay_owners(&mut utilities, &mut properties, &mut players)
+                    .unwrap();
+                assert_eq!(
+                    players[0].cash - before,
+                    (400. + freight) * 0.25 * multiplier
+                );
+                assert_eq!(properties.totals, [freight; 4]);
+            }
+        }
+    }
+
+    #[test]
+    fn difficulty_selection_preserves_raw_float_bits_and_ignores_invalid_selector() {
+        let mut settings = State::fresh();
+        configure(&mut settings, 1, f32::from_bits(0x7f80_0001), -0.);
+        settings.apply_difficulty(1);
+        configure(&mut settings, 1, 2., 1600.);
+        settings.apply_difficulty(3);
+        let income = settings.selected_income();
+        assert_eq!(income.multiplier.to_bits(), 0x7f80_0001);
+        assert_eq!(income.daily_freight.to_bits(), (-0.0_f32).to_bits());
+    }
+
     #[test]
     #[ignore = "requires original scalar property observations"]
     fn matches_original_scalar_setters() {

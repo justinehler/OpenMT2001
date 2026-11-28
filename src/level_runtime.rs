@@ -13,7 +13,6 @@ pub struct HourlyContext<'a> {
     pub calendar: crate::clock::Controls,
     pub hourly: crate::hourly::Controls,
     pub utilities: &'a mut crate::economy::Utilities,
-    pub income: crate::economy::OwnerIncomeSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,7 +178,6 @@ impl Population {
                                 clock,
                                 context.board,
                                 context.utilities,
-                                context.income,
                                 &mut postings,
                             )
                             .and_then(|handled| {
@@ -230,7 +228,6 @@ impl Population {
         clock: &crate::clock::Clock,
         board: &crate::board::Board,
         utilities: &mut crate::economy::Utilities,
-        income: crate::economy::OwnerIncomeSettings,
         postings: &mut Vec<crate::economy::AccountPosting>,
     ) -> Result<bool, String> {
         use crate::hourly::Event;
@@ -282,7 +279,11 @@ impl Population {
                 let owners = self.shopping.categories.map(|category| category.owner);
                 utilities.owners = [2, 35, 39, 42].map(|i| owners[i]);
                 self.properties.owners = [4, 17, 43, 44].map(|i| owners[i]);
-                income.pay_owners(utilities, &mut self.properties, &mut city.ledgers.players)?;
+                city.settings.selected_income().pay_owners(
+                    utilities,
+                    &mut self.properties,
+                    &mut city.ledgers.players,
+                )?;
             }
             Event::MorningResidents => {
                 self.refresh_city(city, board)?;

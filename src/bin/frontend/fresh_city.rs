@@ -694,12 +694,7 @@ impl<'data> Session<'data> {
                 tutorial_state: self.tutorial_state,
                 network_enabled: false,
                 network_override: false,
-                utility_factor: self
-                    .world
-                    .city
-                    .settings
-                    .rail_income(self.difficulty)
-                    .ok_or("command income difficulty leaves settings")?,
+                utility_factor: self.world.city.settings.selected_income().multiplier,
             };
             let mut runtime = live_commands::Runtime {
                 event_cards: &mut self.event_cards,
@@ -1905,19 +1900,11 @@ impl<'data> Session<'data> {
             &resident_models,
             &input.people,
         )?;
-        // Original48de60 seeds the four property totals and resets services.
-        // Use actual script-final difficulty settings, not baseline constants.
-        economy::OwnerIncomeSettings {
-            multiplier: world
-                .settings
-                .rail_income(input.difficulty as usize)
-                .ok_or("income difficulty leaves settings")?,
-            daily_freight: world
-                .settings
-                .daily_freight(input.difficulty as usize)
-                .ok_or("freight difficulty leaves settings")?,
-        }
-        .reset_income(&mut hooks.utilities, &mut population.properties);
+        // Original48de60 consumes the values retained by difficulty application.
+        world
+            .settings
+            .selected_income()
+            .reset_income(&mut hooks.utilities, &mut population.properties);
         // Original4ba148 resets shared metrics before the demand/space refresh.
         {
             let city = &mut world.city;
@@ -2236,7 +2223,7 @@ impl level_script::Hooks for Hooks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn simulation_test_policy() -> tick::Policy {
+    pub(super) fn simulation_test_policy() -> tick::Policy {
         use openmt2001::{hourly, scheduler};
         tick::Policy {
             scheduler: scheduler::Controls {
@@ -7048,11 +7035,7 @@ mod tests {
                 property
                     .attach_railroads(
                         &session.population.properties,
-                        session
-                            .world
-                            .settings
-                            .daily_freight(difficulty as usize)
-                            .unwrap(),
+                        session.world.settings.selected_income().daily_freight,
                     )
                     .unwrap();
                 for (record, account) in
@@ -8278,3 +8261,7 @@ mod skirmish_session_acceptance {
             .unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "selected_income_tests.rs"]
+mod selected_income_tests;

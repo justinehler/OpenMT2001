@@ -242,18 +242,6 @@ impl Session<'_> {
                 calendar: policy.calendar,
                 hourly: policy.hourly,
                 utilities: &mut utilities,
-                income: economy::OwnerIncomeSettings {
-                    multiplier: self
-                        .world
-                        .settings
-                        .rail_income(self.difficulty)
-                        .ok_or("session income difficulty")?,
-                    daily_freight: self
-                        .world
-                        .settings
-                        .daily_freight(self.difficulty)
-                        .ok_or("session freight difficulty")?,
-                },
             };
             let routes = openmt2001::traffic::road::routes::RoadRoutes::from_bytes(
                 &self.road_routes,
@@ -752,7 +740,7 @@ impl Session<'_> {
                                 tutorial_state: self.tutorial_state,
                                 network_enabled: scheduler.network_enabled,
                                 network_override: scheduler.network_override,
-                                utility_factor: context.income.multiplier,
+                                utility_factor: runtime.city.settings.selected_income().multiplier,
                             };
                                 let hooks=std::cell::RefCell::new(&mut self.hooks);
                                 let mut announcement=super::tutorial_announcement::Bridge{

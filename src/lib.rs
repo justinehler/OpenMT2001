@@ -10,6 +10,9 @@ pub mod category_reset;
 pub mod clock;
 pub mod economy;
 pub mod era;
+/// Test support: locates private original files for original-backed tests.
+#[doc(hidden)]
+pub mod fixtures;
 pub mod geometry;
 pub mod hourly;
 pub mod housing;

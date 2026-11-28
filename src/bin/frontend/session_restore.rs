@@ -350,11 +350,7 @@ impl<'data> Session<'data> {
             tutorial_state: 0,
             network_enabled: false,
             network_override: false,
-            utility_factor: self
-                .world
-                .settings
-                .rail_income(self.difficulty)
-                .ok_or("saved open utility factor difficulty leaves settings")?,
+            utility_factor: self.world.settings.selected_income().multiplier,
         };
         let mut messages = openmt2001::player_messages::Context {
             arena: openmt2001::player_messages::Arena {
