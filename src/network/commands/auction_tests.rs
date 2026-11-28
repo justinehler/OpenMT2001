@@ -220,7 +220,10 @@ fn loopback_auction_prepared_barrier_bid_closure_and_city_resume() {
         100,
     )
     .unwrap();
-    let until = Instant::now() + Duration::from_secs(30);
+    // Progress is bounded by frames, not wall time: each loop is one frame for
+    // each peer. The wall-clock limit only stops a genuine stall, and is
+    // generous because slow CI runners (macOS) manage ~70 frames a second.
+    let until = Instant::now() + Duration::from_secs(180);
     let mut held = 0;
     let mut held_tick = None;
     let mut bid = false;
