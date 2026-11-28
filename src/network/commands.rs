@@ -753,6 +753,10 @@ impl Adapter {
         }
         Ok(())
     }
+    /// Route one local command. On the authority a construction must already
+    /// have been admitted by `construction::admit` (0x4517f2), which reserved
+    /// its rectangle or rejected it; it is neither checked nor reserved again
+    /// here. A client sends it unchecked and the authority decides.
     #[cfg(feature = "lua4")]
     #[allow(clippy::too_many_arguments)]
     pub fn submit(
@@ -926,7 +930,6 @@ impl Adapter {
             self.pending_local.push_back((request, completion));
             return Ok(());
         }
-        check_placement(&request, categories).map_err(|e| e.to_string())?;
         let message = if self.host {
             self.commit_authorized(self.local_peer, request, tick)
                 .map_err(|e| e.to_string())?
@@ -969,7 +972,8 @@ impl Adapter {
             self.authorize_local(&request, completion)
                 .map_err(|e| e.to_string())?;
             targets.check(&request).map_err(|e| e.to_string())?;
-            check_placement(&request, categories).map_err(|e| e.to_string())?;
+            // A deferred construction was admitted (and reserved) when it was
+            // submitted; only its commit waited for this tick.
             let message = self
                 .commit_authorized(self.local_peer, request, tick)
                 .map_err(|e| e.to_string())?;
@@ -981,15 +985,20 @@ impl Adapter {
         }
         while let Some(ingress) = worker.poll_gameplay() {
             let rejection = self.rejection(&ingress);
-            let placement = match &ingress.message {
-                Message::CommandRequest(request) if self.host => {
-                    check_placement(request, categories)
-                }
-                _ => Ok(()),
-            };
-            let message = match placement
-                .and_then(|()| self.receive(worker.gameplay_owner(), ingress, tick, targets))
+            // 0x451720 routes a client's construction through the same
+            // 4517f2 admission as a local one: a taken rectangle drops it
+            // without applying or broadcasting it, and its sender is not told.
+            // Remote peers may act only for their own human rows, which the
+            // 451894 rejection leaves without a message.
+            if let Message::CommandRequest(request) = &ingress.message
+                && self.host
+                && request.kind == 0x0f
+                && self.authorize(ingress.connection.slot(), request).is_ok()
+                && check_placement(request, categories).is_err()
             {
+                continue;
+            }
+            let message = match self.receive(worker.gameplay_owner(), ingress, tick, targets) {
                 Ok(message) => message,
                 Err(error) if self.is_host() => {
                     if let Some((target, serial)) = rejection {
@@ -1008,8 +1017,7 @@ impl Adapter {
             };
             match message {
                 Message::CommandCommit(commit) => {
-                    self.enqueue(&commit, queue, categories, tick)
-                        .map_err(|e| e.to_string())?;
+                    self.enqueue_received(&commit, queue, categories, tick)?;
                     if self.is_host() {
                         worker.send_gameplay(self.binding, None, Message::CommandCommit(commit))?;
                     }
@@ -1114,6 +1122,29 @@ impl Adapter {
         }
         Ok(true)
     }
+    /// Enqueue a commit that `receive` produced. On the authority a routed
+    /// construction is admitted here (4517f2 reserves its rectangle); `pump`
+    /// has already dropped one whose rectangle was taken.
+    #[cfg(feature = "lua4")]
+    pub fn enqueue_received(
+        &mut self,
+        commit: &Commit,
+        queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        if self.host && commit.request.kind == 0x0f {
+            let command = commit
+                .request
+                .construction_payload()
+                .map_err(|e| e.to_string())?;
+            if !crate::construction::reserve(&command, categories)? {
+                return Err("admitted construction rectangle is taken".into());
+            }
+        }
+        self.enqueue(commit, queue, categories, tick)
+            .map_err(|e| e.to_string())
+    }
     #[cfg(feature = "lua4")]
     pub fn enqueue(
         &mut self,
@@ -1156,20 +1187,23 @@ impl Adapter {
         } else {
             match request.kind {
                 0x0f => {
-                    check_placement(request, categories)?;
                     let command = request.construction_payload()?;
                     // Original Build0f reserves occupancy before the delayed consumer.
-                    // Reserve on every peer only after authority admission, never on
-                    // a speculative client request. The quote is never recomputed.
-                    let occupancy = (&mut categories[command.category as usize][0x9c..0xcd])
-                        .try_into()
+                    // The authority reserved it at admission; a client reserves it
+                    // here, only after that admission and never on its own
+                    // speculative request. The quote is never recomputed.
+                    if !self.host {
+                        check_placement(request, categories)?;
+                        let occupancy = (&mut categories[command.category as usize][0x9c..0xcd])
+                            .try_into()
+                            .map_err(|_| Error::Row)?;
+                        crate::building_pool::fill_occupancy(
+                            occupancy,
+                            command.rectangle.map(i32::from),
+                            command.height as u8,
+                        )
                         .map_err(|_| Error::Row)?;
-                    crate::building_pool::fill_occupancy(
-                        occupancy,
-                        command.rectangle.map(i32::from),
-                        command.height as u8,
-                    )
-                    .map_err(|_| Error::Row)?;
+                    }
                     crate::live_commands::Command::Build(command)
                 }
                 0x10 => crate::live_commands::Command::Demolish(request.demolition_payload()?),

@@ -540,6 +540,12 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
                     }
                 ) {
                     decisions += 1;
+                    // The AI producer admits on the authority (4517f2) before
+                    // routing; the roster is borrowed here, so reserve directly.
+                    assert!(crate::construction::reserve(
+                        &ai,
+                        &mut session.world.city.categories
+                    )?);
                     adapter.submit(
                         worker,
                         live_commands::Command::Build(ai.clone()),
@@ -596,7 +602,7 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
         panic!()
     };
     authority
-        .enqueue(
+        .enqueue_received(
             commit,
             &mut left.queue,
             &mut left.world.city.categories,
@@ -1929,6 +1935,233 @@ fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {
     assert_eq!(replica.next_commit, 8);
     assert_eq!(authority.requests[peer as usize], Some(3));
     assert_eq!(authority.next_request, 4);
+    host.cancellation().cancel();
+    client.cancellation().cancel();
+}
+
+/// 0x451720 kind 15 on the authority: two computer rows build on the same
+/// rectangle in one tick. The first is reserved, committed and applied on both
+/// peers; the second is dropped with sender success and its owner receives
+/// inbox message 0x30. A client's request for a taken rectangle is dropped
+/// without failing either peer, and a construction admitted after the tick's
+/// deadline is published commits on the next tick without a second check.
+#[test]
+fn authority_drops_constructions_on_a_reserved_rectangle_like_the_original() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let bytes = image_bytes();
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(true);
+    let hb = host
+        .bind_world(left.world.topology.epoch().serial())
+        .unwrap();
+    let cb = client
+        .bind_world(right.world.topology.epoch().serial())
+        .unwrap();
+    // Owner 1 is the host human, owner 2 the client, owners 3 and 4 computers.
+    let owners = vec![Some(0), Some(peer), None, None];
+    let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
+    let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    // Tick 100 stays open until the client's requests have crossed.
+    authority.admit_deadline(0, 125).unwrap();
+    for session in [&mut left, &mut right] {
+        for slot in [2, 3] {
+            let mut player = player_manager::Player {
+                reference: 0x1000 + u32::from(slot) * 0x1000,
+                bytes: session.roster.manager.players[0].bytes.clone(),
+                auxiliaries: vec![],
+            };
+            player.bytes[0x1bc] = slot;
+            put(&mut player.bytes, 0x154, 1);
+            session.roster.manager.players.push(player);
+        }
+        session
+            .roster
+            .collect_accounts(&mut session.world.city)
+            .unwrap();
+    }
+    let mut arena = crate::player_messages::Arena { next: 0x20000000 };
+    // The authority's AI producer: admit (4517f2), then route if admitted.
+    let mut build = |authority: &mut Adapter,
+                     session: &mut TestSession,
+                     command: &crate::construction::Command,
+                     tick: u32| {
+        let admitted = crate::construction::admit(
+            command,
+            &mut session.world.city.categories,
+            &mut session.roster.manager.players,
+            &mut arena,
+            0,
+            crate::player_messages::Routing {
+                current_player: session.roster.status.current_player,
+                network: [true, true],
+                prior: [0; 0x30],
+            },
+            |route, _| Err(format!("computer notice left the authority: {route:?}")),
+        )
+        .unwrap();
+        if admitted {
+            let targets = Targets::new(
+                &session.world.city.buildings,
+                &session.world.city.ledgers.businesses,
+                &session.world.city.categories,
+            );
+            authority
+                .submit(
+                    &host,
+                    live_commands::Command::Build(command.clone()),
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    targets,
+                    tick,
+                )
+                .unwrap();
+        }
+        admitted
+    };
+    let first = construction(3);
+    let mut second = construction(4);
+    second.rectangle = [1, 0, 2, 1];
+    second.business = 6;
+    assert!(build(&mut authority, &mut left, &first, 100));
+    assert!(!build(&mut authority, &mut left, &second, 100));
+    let notice = &left.roster.manager.players[3].auxiliaries;
+    assert_eq!(notice.len(), 1);
+    let word = |at: usize| u32::from_le_bytes(notice[0].bytes[at..at + 4].try_into().unwrap());
+    assert_eq!((word(4), word(0x18), word(0x1c)), (0x30, 7, 6));
+    assert_eq!(notice[0].bytes[0x15], 3);
+    assert!(left.roster.manager.players[2].auxiliaries.is_empty());
+    assert_eq!(left.queue.snapshot().unwrap().len(), 1);
+
+    // The client asks for the taken rectangle, then for a free one.
+    let mut taken = construction(2);
+    taken.rectangle = [0, 1, 0, 1];
+    let mut free = construction(2);
+    free.category = 8;
+    for command in [&taken, &free] {
+        let targets = Targets::new(
+            &right.world.city.buildings,
+            &right.world.city.ledgers.businesses,
+            &right.world.city.categories,
+        );
+        replica
+            .submit(
+                &client,
+                live_commands::Command::Build(command.clone()),
+                &mut right.queue,
+                &mut right.world.city.categories,
+                targets,
+                100,
+            )
+            .unwrap();
+    }
+    let limit = Instant::now() + Duration::from_secs(60);
+    let pump = |authority: &mut Adapter,
+                replica: &mut Adapter,
+                left: &mut TestSession,
+                right: &mut TestSession,
+                tick: u32,
+                expected: usize| {
+        loop {
+            for (adapter, worker, session) in [
+                (&mut *authority, &host, &mut *left),
+                (&mut *replica, &client, &mut *right),
+            ] {
+                let targets = Targets::new(
+                    &session.world.city.buildings,
+                    &session.world.city.ledgers.businesses,
+                    &session.world.city.categories,
+                );
+                adapter
+                    .pump(
+                        worker,
+                        tick,
+                        &mut session.queue,
+                        &mut session.world.city.categories,
+                        targets,
+                        &mut session.world.city.pause,
+                        &mut session.tasks,
+                    )
+                    .unwrap();
+            }
+            if left.queue.snapshot().unwrap().len() == expected
+                && right.queue.snapshot().unwrap().len() == expected
+            {
+                break;
+            }
+            assert!(Instant::now() < limit, "construction commits did not cross");
+            thread::sleep(Duration::from_millis(5));
+        }
+    };
+    // The free request is processed after the taken one, so both arrived.
+    pump(&mut authority, &mut replica, &mut left, &mut right, 100, 2);
+
+    // Tick 100's deadline is published: a computer construction admitted now
+    // keeps its reservation and commits at tick 101 without being rechecked.
+    authority.closed_tick = Some(100);
+    let mut late = construction(4);
+    late.category = 9;
+    assert!(build(&mut authority, &mut left, &late, 100));
+    assert_eq!(left.queue.snapshot().unwrap().len(), 2);
+    assert_eq!(left.world.categories[9][0x9c], 2);
+    pump(&mut authority, &mut replica, &mut left, &mut right, 101, 3);
+
+    for session in [&left, &right] {
+        let queued: Vec<_> = session
+            .queue
+            .snapshot()
+            .unwrap()
+            .into_iter()
+            .map(|(_, due, _, _, command)| {
+                let live_commands::Command::Build(build) = command else {
+                    panic!("only constructions were committed")
+                };
+                (due, build.owner, build.category)
+            })
+            .collect();
+        assert_eq!(queued, [(125, 3, 7), (125, 2, 8), (126, 4, 9)]);
+        // Only the first construction reserved category 7: cells (0,0),(0,1),
+        // (1,0),(1,1) with its height; the rejected (2,0),(2,1) stay free.
+        let occupancy = &session.world.categories[7][0x9c..0xcd];
+        assert_eq!(
+            [occupancy[0], occupancy[1], occupancy[7], occupancy[8]],
+            [2; 4]
+        );
+        assert_eq!([occupancy[14], occupancy[15]], [0; 2]);
+    }
+    assert_eq!(left.world.city.categories, right.world.city.categories);
+    for session in [&mut left, &mut right] {
+        while session.world.clock.timing[0] < 125 {
+            session.tick(&image, &board);
+        }
+        session.controls.deadline = 150;
+        session.world.city.pause.bytes[1] = 0;
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 126);
+        assert_eq!(
+            session
+                .world
+                .buildings
+                .iter()
+                .filter(|row| row[0x3f] != 0)
+                .count(),
+            3
+        );
+        assert!(session.queue.snapshot().unwrap().is_empty());
+    }
+    assert_eq!(left.world.buildings, right.world.buildings);
+    assert_eq!(left.world.city.categories, right.world.city.categories);
+    for slot in 0..4 {
+        assert_eq!(
+            left.world.ledgers.players[slot].cash,
+            right.world.ledgers.players[slot].cash
+        );
+    }
     host.cancellation().cancel();
     client.cancellation().cancel();
 }

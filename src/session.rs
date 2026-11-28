@@ -461,6 +461,39 @@ impl<'data> Session<'data> {
         event: impl FnMut(crate::live_commands::Event) -> Result<(), String>,
     ) -> Result<(), String> {
         if let Some(connection) = &mut self.connected {
+            // The authority's 0x451720 admits a construction (4517f2) before
+            // scheduling it, exactly as a local game does; a rejected one is
+            // dropped with sender success. A client leaves this to the authority.
+            if let crate::live_commands::Command::Build(build) = &command
+                && connection.commands.is_host()
+            {
+                let mut arena = crate::player_messages::Arena {
+                    next: self.allocation_next,
+                };
+                let mut event = event;
+                let admitted = crate::construction::admit(
+                    build,
+                    &mut self.world.city.categories,
+                    &mut self.roster.manager.players,
+                    &mut arena,
+                    u32::from_le_bytes(self.roster.manager.bytes[12..16].try_into().unwrap()),
+                    crate::player_messages::Routing {
+                        current_player: self.roster.status.current_player,
+                        network: [true, true],
+                        prior: [0; 0x30],
+                    },
+                    |route, packet| {
+                        event(crate::live_commands::Event::PlayerMessageRoute {
+                            route,
+                            packet: *packet,
+                        })
+                    },
+                );
+                self.allocation_next = arena.next;
+                if !admitted? {
+                    return Ok(());
+                }
+            }
             let targets = crate::network::commands::Targets::new(
                 &self.world.city.buildings,
                 &self.world.city.ledgers.businesses,
