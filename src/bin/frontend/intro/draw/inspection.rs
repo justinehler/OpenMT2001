@@ -955,6 +955,10 @@ impl Intro {
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, banner);
             }
+            // 0x458af0 captures the fully painted frame, interface included.
+            if self.screenshot.take_pending() {
+                screenshot::capture(&self.renderer.device, &self.renderer.queue, &self.color);
+            }
             presenter
                 .present_binding(&self.binding)
                 .map_err(|e| e.to_string())?;
