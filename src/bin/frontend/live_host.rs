@@ -764,11 +764,12 @@ impl Host {
             .as_ref()
             .ok_or("UI camera source is not installed")?;
         let snapshot = source.read(session.world.topology.epoch())?;
+        let view = self.save_view(session)?;
         let bytes = session.save_v2_with_options_view(
             image,
             snapshot.capture().into_records(),
             game_mode,
-            self,
+            view,
             snapshot.interface_mode(),
         )?;
         crate::save_menu::write_target_from_snapshot(root, target, &bytes, source, &snapshot)
@@ -1250,6 +1251,16 @@ impl Host {
             Ok(())
         })?;
         Ok(Some((continuation, tasks)))
+    }
+    /// Everything a manual save of `session` reads from this Host.
+    pub(crate) fn save_view(
+        &self,
+        session: &Session<'_>,
+    ) -> Result<crate::session_save::HostSaveView, String> {
+        Ok(crate::session_save::HostSaveView {
+            options: self.options_save_projection(&session.world.pause, &session.hooks.timers)?,
+            auction: self.auction_save_state(),
+        })
     }
     /// Native 481910 chooses one or four logic/interface passes per timer
     /// callback in an offline game; 481940 toggles between those settings.
