@@ -516,3 +516,223 @@ fn loopback_client_and_host_ai_construction_apply_once_at_125_with_original_quot
     assert_eq!(left.world.city.categories, right.world.categories);
     assert_eq!(left.world.pending_world, right.world.pending_world);
 }
+
+#[test]
+fn connected_hour_boundary_keeps_shared_accounts_and_rng_with_ai_on_both_peers() {
+    use crate::{clock, hourly, player_manager::word};
+    let mut bytes = image_bytes();
+    put(&mut bytes, 0x308, 0x466ca0);
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (_, binding, _) = owner();
+    let owners = vec![Some(0), Some(4), None];
+    let host = Adapter::new(binding, true, 0, owners.clone()).unwrap();
+    let client = Adapter::new(binding, false, 4, owners).unwrap();
+    let resident_rngs = |session: &TestSession| {
+        let rng = &session.world.creation;
+        [
+            rng.initialization_rng.constructor,
+            rng.initialization_rng.movement,
+            rng.initialization_rng.objective,
+            rng.identity_rng,
+            rng.preference_rng,
+        ]
+    };
+    for (session, current) in [(&mut left, 0), (&mut right, 1)] {
+        session.roster.manager.players.push(player_manager::Player {
+            reference: 0x3000,
+            bytes: vec![0; 0x1e50],
+            auxiliaries: vec![],
+        });
+        for (slot, player) in session.roster.manager.players.iter_mut().enumerate() {
+            put(&mut player.bytes, 0, 0x400100);
+            put(&mut player.bytes, 4, 10000f32.to_bits());
+            player.bytes[0x10] = 1;
+            player.bytes[0x1bc] = slot as u8;
+            put(&mut player.bytes, 0x154, u32::from(slot == 2));
+            let reference = player.reference + 0x800;
+            put(&mut player.bytes, 0x21c, reference);
+            let mut auxiliary = player_manager::Auxiliary {
+                reference,
+                bytes: [0; 0x30],
+            };
+            put(&mut auxiliary.bytes, 0, 10);
+            put(&mut auxiliary.bytes, 0x14, player.reference);
+            put(&mut auxiliary.bytes, 0x1c, 123);
+            put(&mut auxiliary.bytes, 0x20, 0x343fd);
+            put(&mut auxiliary.bytes, 0x24, 0x269ec3);
+            player.auxiliaries.push(auxiliary);
+        }
+        let ai = &mut session.roster.manager.players[2];
+        put(&mut ai.bytes, 0x224, 456);
+        put(&mut ai.bytes, 0x228, 0x343fd);
+        put(&mut ai.bytes, 0x22c, 0x269ec3);
+        put(&mut ai.bytes, 0x13e0, 1);
+        put(&mut ai.bytes, 0x143c, 2);
+        put(&mut ai.bytes, 0x1e14, 1);
+        session
+            .roster
+            .collect_accounts(&mut session.world.city)
+            .unwrap();
+        session.roster.status.current_player = session.roster.manager.players[current].reference;
+        // Typed account changes precede the hour; raw records are deliberately
+        // stale until the real 470b80 supplier publishes them on each peer.
+        for account in &mut session.world.city.ledgers.players {
+            account.post(-17.25, 0xc).unwrap();
+            account.owned_categories[7] = 1;
+            account.retail_counters = [123, 6];
+            account.housing_counter = 50;
+            account.replenishment_modifier = 2;
+        }
+        session.world.city.creation.initialization_rng.constructor = 11;
+        session.world.city.creation.initialization_rng.movement = 22;
+        session.world.city.creation.initialization_rng.objective = 33;
+        session.world.city.creation.identity_rng = 44;
+        session.world.city.creation.preference_rng = 55;
+    }
+    let before_rng = resident_rngs(&left);
+    let profiles = [[0; 0x650]; 10];
+    for (session, adapter, expected_decisions) in [(&mut left, &host, 1), (&mut right, &client, 0)]
+    {
+        let mut controls = crate::player_tick::Controls {
+            network_enabled: false,
+            network_override: false,
+            current_player: session.roster.status.current_player,
+        };
+        adapter.configure_players(&mut controls);
+        let mut decisions = 0;
+        crate::player_tick::advance(
+            &mut session.roster.manager,
+            &mut controls,
+            &image,
+            |event, manager, _| {
+                if matches!(
+                    event,
+                    crate::player_tick::Event::Controller { player: 0x3000, .. }
+                ) {
+                    // Original47d5f0 consumes only this AI player's embedded RNG.
+                    manager.players[2].initial_count(&profiles, 100)?;
+                    decisions += 1;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(decisions, expected_decisions);
+        let mut hourly = hourly::Controls {
+            suppressed: false,
+            world_mode: 1,
+            before_six_sound: 0,
+            network_enabled: false,
+            network_override: false,
+        };
+        adapter.configure_hourly(&mut hourly);
+        let mut calendar = clock::Controls {
+            years_per_day: 1,
+            suppress_rollover_query: false,
+            rollover_events_enabled: true,
+            autosave_disabled: true,
+        };
+        let mut passes = 0;
+        let mut ai_receiver_ticks = 0;
+        session
+            .world
+            .clock
+            .try_advance_hour(&mut calendar, |event, clock, _| {
+                if event == clock::Event::Hourly {
+                    hourly::advance_world(
+                        clock,
+                        &mut hourly,
+                        &mut session.world.city,
+                        |event, clock, _, city| {
+                            match event {
+                                hourly::Event::CurrentPlayerUpdate => {
+                                    assert!(
+                                        session
+                                            .roster
+                                            .advance_hourly_account(city, None)?
+                                            .is_none()
+                                    );
+                                    // A synchronous account callback can change the typed
+                                    // ledger after its publication. The later AI helper
+                                    // must publish again, including on the client.
+                                    city.ledgers.players[0].post(-2.5, 7)?;
+                                }
+                                hourly::Event::PlayerUpdate(slot) => {
+                                    ai_receiver_ticks += 1;
+                                    assert!(
+                                        session
+                                            .roster
+                                            .advance_hourly_account(city, Some(slot))?
+                                            .is_none()
+                                    );
+                                }
+                                hourly::Event::Helper(0x470b80) => {
+                                    session.roster.advance_hourly_ai(
+                                        city,
+                                        &image,
+                                        clock.hour(),
+                                        |_, _, _, _| {
+                                            panic!("inactive event auxiliary produced a decision")
+                                        },
+                                    )?;
+                                    passes += 1;
+                                }
+                                _ => (),
+                            }
+                            Ok(false)
+                        },
+                    )?;
+                }
+                Ok::<_, String>(false)
+            })
+            .unwrap();
+        assert_eq!(session.world.clock.hour(), 10);
+        assert_eq!(passes, 1); // Clients must run the complete470b80 pass too.
+        assert_eq!(ai_receiver_ticks, expected_decisions);
+        assert_eq!(resident_rngs(session), before_rng);
+        let ai = &session.roster.manager.players[2];
+        assert_eq!(word(&ai.bytes, 0x13e0), 2);
+        assert_eq!(word(&ai.bytes, 0x143c), 1);
+        assert_eq!(word(&ai.bytes, 0x1e14), 0);
+        for (slot, (player, account)) in session
+            .roster
+            .manager
+            .players
+            .iter()
+            .zip(&session.world.ledgers.players)
+            .enumerate()
+        {
+            let mut expected = player.bytes.clone();
+            account.write_runtime(&mut expected).unwrap();
+            assert_eq!(&player.bytes[4..0x1b8], &expected[4..0x1b8]);
+            assert_eq!(account.cash, if slot == 0 { 9980.25 } else { 9982.75 });
+            assert_eq!(account.owned_categories[7], 1);
+            assert_eq!(account.retail_counters, [123, 6]);
+            assert_eq!(account.housing_counter, 50);
+        }
+    }
+    for (host, client) in left
+        .roster
+        .manager
+        .players
+        .iter()
+        .zip(&right.roster.manager.players)
+    {
+        // Exclude each human's local auxiliary/UI and the AI's private runtime.
+        assert_eq!(&host.bytes[4..0x1b8], &client.bytes[4..0x1b8]);
+    }
+    assert_ne!(
+        word(&left.roster.manager.players[2].bytes, 0x224),
+        word(&right.roster.manager.players[2].bytes, 0x224)
+    );
+    assert_eq!(resident_rngs(&left), resident_rngs(&right));
+    assert_eq!(left.world.categories, right.world.categories);
+    assert_eq!(left.world.buildings, right.world.buildings);
+    assert_eq!(
+        left.world.objective.cash_statuses,
+        right.world.objective.cash_statuses
+    );
+}

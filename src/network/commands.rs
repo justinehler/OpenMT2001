@@ -192,6 +192,12 @@ impl Adapter {
         controls.network_enabled = true;
         controls.network_override = self.host;
     }
+    /// 47f5cf..47f616 gates only the AI event-receiver ticks on authority.
+    /// The subsequent 470b80 bookkeeping/evaluation pass runs on every peer.
+    pub fn configure_hourly(&self, controls: &mut crate::hourly::Controls) {
+        controls.network_enabled = true;
+        controls.network_override = self.host;
+    }
     fn authorize(&self, peer: u8, request: &Request) -> Result<()> {
         let player = usize::from(request.owner)
             .checked_sub(1)

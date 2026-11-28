@@ -726,6 +726,8 @@ impl Roster {
     }
 
     ///470b80/466bf0/46f020 over the retained AI allocations and event auxiliaries.
+    /// This pass runs on every peer, unlike periodic AI controllers and hourly
+    /// event-receiver ticks. Account publication/readback is shared work.
     pub fn advance_hourly_ai(
         &mut self,
         city: &mut City,
@@ -735,6 +737,7 @@ impl Roster {
             usize,
             crate::ai_hourly::UpdateCall,
             &mut crate::player_manager::Player,
+            &City,
         ) -> Result<(), String>,
     ) -> Result<(), String> {
         self.publish_accounts(city)?;
@@ -747,7 +750,7 @@ impl Roster {
                         player,
                         &city.objective.cash_statuses,
                         image,
-                        |call2, player| callback(call.player, call2, player),
+                        |call2, player| callback(call.player, call2, player, city),
                     )
                 },
                 delay: &mut |_| {
