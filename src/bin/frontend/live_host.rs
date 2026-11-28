@@ -3836,53 +3836,7 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
     })
 }
 
-pub(crate) fn script_request(
-    arguments: &[Value],
-    tutorial: bool,
-    continue_button: bool,
-) -> Result<prompt::Request, String> {
-    let number = |at: usize| match arguments.get(at) {
-        Some(Value::Number(value)) => openmt2001::x87::Sum::from_f64(*value)
-            .map(|v| v.ftol_low_word() as u32)
-            .map_err(str::to_owned),
-        None | Some(Value::Nil) if at >= 2 => Ok(0),
-        _ => Err("Prompt requires C-coerced numeric context/value".to_owned()),
-    };
-    let field = |at| match arguments.get(at) {
-        Some(Value::Number(_)) => Ok((number(at)?, None)),
-        Some(Value::Bytes(bytes)) => {
-            // Validate safe formatting now; row0 mapping is deferred to rendering.
-            prompt::literal_glyphs(bytes, &(0..224).map(|i| i as u8).collect::<Vec<_>>())?;
-            Ok((0, Some(std::sync::Arc::<[u8]>::from(bytes.clone()))))
-        }
-        _ => Err("Prompt title/body must be numeric or convertible to string".to_owned()),
-    };
-    let (title, literal_title) = field(0)?;
-    let (body, literal_body) = field(1)?;
-    Ok(prompt::Request {
-        script: Some(prompt::ScriptText {
-            title: literal_title,
-            body: literal_body,
-            format_value: number(3)?,
-            timeout: !tutorial,
-        }),
-        dialog: Some(crate::human_dialog::Dialog {
-            title,
-            body,
-            buttons: [1707, 0],
-            button_count: usize::from(continue_button),
-            context: number(2)?,
-            context_written: true,
-            timeout: !tutorial,
-            timeout_written: tutorial,
-            ..Default::default()
-        }),
-        card: None,
-        title,
-        body,
-        dismissal_id: number(2)?,
-    })
-}
+pub(crate) use openmt2001::prompt_queue::script_request;
 
 fn human_dialog_ui(
     prompts: &mut Vec<prompt::Request>,

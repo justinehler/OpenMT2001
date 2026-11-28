@@ -21,6 +21,7 @@ pub mod fixtures;
 pub mod geometry;
 pub mod hourly;
 pub mod housing;
+pub mod human_dialog;
 pub mod lighting;
 pub mod market;
 pub mod material;
@@ -35,6 +36,7 @@ pub mod picking;
 pub mod player_startup;
 pub mod polygon;
 pub mod prompt_format;
+pub mod prompt_queue;
 pub mod pulse_lights;
 #[cfg(feature = "graphics")]
 pub mod render;
