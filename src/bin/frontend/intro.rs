@@ -696,6 +696,22 @@ impl CameraCallbackInput {
     }
 }
 
+/// Whether the player's input is removed from this frame's camera callbacks.
+///
+/// The 50 Hz camera callback (0x4e03c9) is scheduled independently of the
+/// prompt queue, so a modal prompt (0x429b50) does not stop the camera: in the
+/// original, Tutorial 1 is already in Pacific Avenue's block view while its
+/// first prompt is still open. The prompt, like tutorial
+/// `Interface.DisableCameraControl` and `DisableAllControls`, only takes the
+/// player's keys and mouse away from the camera.
+fn camera_input_disabled(
+    prompt_blocks_controls: bool,
+    tutorial: Option<crate::live_host::TutorialControls>,
+) -> bool {
+    prompt_blocks_controls
+        || tutorial.is_some_and(|controls| controls.camera_disabled || controls.all_disabled)
+}
+
 /// The legacy camera state one callback advances.
 struct LegacyCamera<'a> {
     controls: &'a mut openmt2001::camera::BlockCamera,
@@ -2243,10 +2259,14 @@ impl Intro {
             // Interface.DisableCameraControl clears the camera-input byte at
             // 0x920889, but the camera callback keeps running: it still eases
             // toward a scripted pose such as Tutorial 1's BlockCam on Pacific
-            // Avenue. Disabled tutorial controls only remove the player's input.
-            let input_disabled = view.live_status.as_ref().is_some_and(|status| {
-                status.tutorial_controls.camera_disabled || status.tutorial_controls.all_disabled
-            });
+            // Avenue. Disabled tutorial controls and an open modal prompt only
+            // remove the player's input.
+            let input_disabled = camera_input_disabled(
+                view.prompts.blocks_controls(),
+                view.live_status
+                    .as_ref()
+                    .map(|status| status.tutorial_controls),
+            );
             while view.tick <= tick {
                 if input_disabled {
                     view.keys = [false; 4];

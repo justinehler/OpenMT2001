@@ -611,9 +611,10 @@ impl Intro {
         self.receive_loading(presenter, inspection_camera, inspection_controls)?;
         self.service_camera_requests()?;
         self.refresh_inspection_projection()?;
+        // A modal prompt does not stop the camera callback; inspection_update
+        // removes the player's camera input while one is open instead.
         if !self.inspection.as_ref().is_some_and(|v| {
             v.auction.scene.is_some()
-                || v.prompts.blocks_controls()
                 || v.result.is_some()
                 || v.result_pending.is_some()
                 || v.live_status
