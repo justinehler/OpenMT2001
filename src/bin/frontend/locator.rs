@@ -1424,18 +1424,11 @@ impl Assets {
                     Action::Lease => state.property_offer_open(),
                     Action::Build => false,
                 };
-            let enabled = policy.enabled(action);
-            let mut backing = if !enabled {
-                self.toolbar_disabled.clone()
-            } else {
-                self.icon_backgrounds[if selected || input.pressed(policy.category, action) {
-                    1
-                } else if input.hover == Some(action) {
-                    2
-                } else {
-                    0
-                }]
-                .clone()
+            let mut backing = match input.backing(policy, action, selected) {
+                toolbar_collapse::Backing::Disabled => self.toolbar_disabled.clone(),
+                toolbar_collapse::Backing::Normal => self.icon_backgrounds[0].clone(),
+                toolbar_collapse::Backing::Selected => self.icon_backgrounds[1].clone(),
+                toolbar_collapse::Backing::Hover => self.icon_backgrounds[2].clone(),
             };
             let [l, t, r, b] = self.property_side_bounds[i];
             backing.quad(
@@ -6014,6 +6007,18 @@ mod ordinary_toolbar_assets_tests {
         );
         assert_eq!(opened[0].vertices[0][0], 5.599999904632568_f32);
         assert_eq!(assets.property_side_bounds[1][1], 77.5999984741211_f32);
+        // A tutorial lock (DisableAllControls) keeps the normal look: the open
+        // body's Information button keeps its selected backing and the others
+        // their normal one, none disabled.
+        let mut locked = q;
+        locked.lease_available = true;
+        locked.tutorial_allowed = [false; 3];
+        let opened = assets.toolbar_surfaces(locked, &input, &state, true);
+        assert_eq!(opened.len(), 6);
+        for (backing, expected) in opened.iter().step_by(2).zip([1, 0, 0]) {
+            assert_eq!(backing.pixels, assets.icon_backgrounds[expected].pixels);
+            assert_ne!(backing.pixels, assets.toolbar_disabled.pixels);
+        }
         q.nonzero_kind = false;
         assert_eq!(
             assets.toolbar_surfaces(q, &input, &state, false).len(),
