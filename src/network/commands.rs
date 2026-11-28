@@ -18,7 +18,7 @@
 //! | 27..2a auction notifications | addressed 48-byte inbox descriptor | supported; authority only |
 //! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
 //! | 1a event card | +0 card u32, +4 zero-based player u32, +8 target i32 (12 bytes) | supported; local human or authority-owned AI |
-//! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | unsupported |
+//! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | supported; client sends to the authority, which routes it and forwards only to the recipient's peer |
 //! | category-ready/elimination/outcome | internal runtime events | unsupported |
 //! | other native IDs / shapes | no qualified decoder | unsupported |
 //!
@@ -497,6 +497,7 @@ pub struct Adapter {
     deadline: u32,
     closed_tick: Option<u32>,
     pending_local: std::collections::VecDeque<(Request, bool)>,
+    received_messages: std::collections::VecDeque<crate::player_messages::Packet>,
 }
 impl Adapter {
     pub fn new(
@@ -536,6 +537,7 @@ impl Adapter {
             deadline: 25,
             closed_tick: Some(0),
             pending_local: Default::default(),
+            received_messages: Default::default(),
         })
     }
     pub fn deadline(&self) -> u32 {
@@ -657,7 +659,54 @@ impl Adapter {
             {
                 Ok(message)
             }
+            Message::PlayerMessage(packet) => {
+                // The original router does not check the sender byte against
+                // the DirectPlay sender. Here a client may only speak for its
+                // own admitted rows, the same rule as its command requests.
+                if self.host {
+                    let sender = usize::from(packet[0x14]);
+                    let peer = ingress.connection.slot();
+                    if !matches!(self.owners.get(sender), Some(Some(p)) if *p == peer) {
+                        return Err(Error::Peer);
+                    }
+                }
+                Ok(Message::PlayerMessage(packet))
+            }
             _ => Err(Error::Tag),
+        }
+    }
+    /// The next player message received from a peer, in arrival order. The
+    /// Session routes it (0x451720) or applies it (0x450a30).
+    pub fn next_player_message(&mut self) -> Option<crate::player_messages::Packet> {
+        self.received_messages.pop_front()
+    }
+    /// Carry one network-routed player message. A client sends every message
+    /// to the authority (0x450490 client arm); the authority forwards a message
+    /// for a remote human only to that human's peer (0x4e2590).
+    #[cfg(feature = "lua4")]
+    pub fn send_player_message(
+        &self,
+        worker: &super::lobby::worker::Handle,
+        route: crate::player_messages::Route,
+        packet: &crate::player_messages::Packet,
+    ) -> std::result::Result<(), String> {
+        use crate::player_messages::Route;
+        match route {
+            Route::NetworkSend if !self.host => {
+                worker.send_gameplay(self.binding, None, Message::PlayerMessage(*packet))
+            }
+            Route::NetworkRecipient { slot } if self.host => match self.owners.get(slot) {
+                Some(Some(peer)) if *peer != self.local_peer => {
+                    worker.send_player_message_to_peer(self.binding, *peer, *packet)
+                }
+                _ => Err(format!(
+                    "Player message recipient {slot} has no remote peer"
+                )),
+            },
+            other => Err(format!(
+                "{} cannot send a player message by {other:?}",
+                if self.host { "Authority" } else { "Client" }
+            )),
         }
     }
     /// Kind8 shares commit ordering: it may only be published after the host
@@ -968,6 +1017,12 @@ impl Adapter {
                     tick: deadline,
                 } => {
                     self.apply_deadline(after, deadline, tick, pause, tasks)?;
+                }
+                Message::PlayerMessage(packet) => {
+                    if self.received_messages.len() >= 64 {
+                        return Err("Received player message queue is full".into());
+                    }
+                    self.received_messages.push_back(packet);
                 }
                 Message::CommandRejected {
                     serial,

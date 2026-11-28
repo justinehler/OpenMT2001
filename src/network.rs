@@ -197,6 +197,7 @@ impl State {
             | Message::CommandCommit(_)
             | Message::CommandDeadline { .. }
             | Message::CommandRejected { .. }
+            | Message::PlayerMessage(_)
             | Message::Barrier { .. }
             | Message::StateSample(_) => self.binding(binding.ok_or(Error::World)?)?,
             Message::Chat(_) => {
@@ -209,9 +210,10 @@ impl State {
         let peer = self.peers[usize::from(connection.slot)]
             .as_mut()
             .ok_or(Error::Peer)?;
+        // Player messages, like synchronization, travel in both directions.
         let synchronization = matches!(
             frame.message,
-            Message::Barrier { .. } | Message::StateSample(_)
+            Message::Barrier { .. } | Message::StateSample(_) | Message::PlayerMessage(_)
         );
         let request = matches!(
             frame.message,
@@ -478,6 +480,10 @@ pub enum Message {
         serial: u64,
         unsupported: bool,
     },
+    /// One 48-byte player inbox descriptor (size leaf 0x48a350). A client sends
+    /// it to the authority (0x450490); the authority forwards it only to the
+    /// recipient's peer (0x4e2590). It is not a timed world command.
+    PlayerMessage(crate::player_messages::Packet),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {

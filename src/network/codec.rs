@@ -5,7 +5,8 @@
 //! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome,
 //! 6=lobby snapshot, 7=client lobby request, 8=denied, 9=read-only probe,
 //! 10=validated startup content, 11=start commit, 12=start content failure,
-//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected, 17=barrier, 18=state sample, 19=chat (payload sender, recipient mask, text).
+//! 13=command request, 14=ordered command commit, 15=kind8 deadline, 16=command rejected, 17=barrier, 18=state sample, 19=chat (payload sender, recipient mask, text),
+//! 20=player inbox message (the 48 descriptor bytes).
 //! Hello and Probe have a zero session and no payload; Welcome has the host's session and
 //! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
 //! sequence. Payloads are field encodings,
@@ -94,6 +95,20 @@ fn validate(message: &Message) -> Result<()> {
             }
         }
         Message::CommandRejected { .. } | Message::CommandDeadline { .. } => {}
+        Message::PlayerMessage(packet) => {
+            // 0x451720 and 0x450a30 treat only signed kinds >= 33 as inbox
+            // messages; sender and recipient are slots or -1 (broadcast).
+            let kind = u32::from_le_bytes(packet[4..8].try_into().map_err(|_| Error::Truncated)?);
+            if (kind as i32) < 0x21 {
+                return Err(Error::Tag);
+            }
+            if [packet[0x14], packet[0x15]]
+                .iter()
+                .any(|&slot| slot != 0xff && usize::from(slot) >= SLOTS)
+            {
+                return Err(Error::Row);
+            }
+        }
         Message::CommandCommit(commit) => commit.request.validate()?,
         Message::Transfer(transfer) => {
             if transfer.category >= 52 || !(1..=6).contains(&transfer.owner) {
@@ -233,6 +248,10 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
         Message::Barrier { sender, complete } => {
             payload.extend_from_slice(&[*sender, *complete]);
             17
+        }
+        Message::PlayerMessage(packet) => {
+            payload.extend_from_slice(packet);
+            20
         }
         Message::StateSample(sample) => {
             payload.extend_from_slice(&[sample.sender, sample.available]);
@@ -403,6 +422,7 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
             sender: reader.byte()?,
             complete: reader.byte()?,
         },
+        20 => Message::PlayerMessage(reader.take()?),
         18 => {
             let sender = reader.byte()?;
             let available = reader.byte()?;
