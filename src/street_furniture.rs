@@ -17,9 +17,14 @@ impl Pose {
     pub fn identity(position: [f32; 3]) -> Self {
         Self { position, yaw: 0. }
     }
-    // 4e0b50 stores negative yaw radians before 4e3380 builds the matrix.
+    /// Object rows from 0x4e3380. 0x4e0b50 passes it the negated descriptor
+    /// yaw (+0x14) and 0x4e3380 negates it again, so the rows are
+    /// (cos, 0, sin) and (-sin, 0, cos) of the stored yaw, the same matrix as
+    /// resident and vehicle descriptors. Every furniture creator (0x4b6940
+    /// lamps, 0x44fd50 subways, 0x44a4a0 parking, 0x4b55d0 benches and the
+    /// 0x44dbe0 signal posts) stores its placement yaw there unchanged.
     fn basis(self) -> [[f32; 3]; 3] {
-        let radians = (-f64::from(self.yaw) * f64::from(0.017453292_f32)) as f32;
+        let radians = (f64::from(self.yaw) * f64::from(0.017453292_f32)) as f32;
         let (sine, cosine) = f64::from(radians).sin_cos();
         let (sine, cosine) = (sine as f32, cosine as f32);
         [[cosine, 0., sine], [0., 1., 0.], [-sine, 0., cosine]]
@@ -191,14 +196,48 @@ mod tests {
             poses.iter().map(|p| p.yaw).collect::<Vec<_>>(),
             [270., 270., 90., 90.]
         );
+    }
+    #[test]
+    fn ninety_degree_pose_follows_the_original_object_matrix() {
+        // 0x4e3380 rows at yaw 90 are (0, 0, 1) and (-1, 0, 0); .tm vertices
+        // reach them with Z negated. Local +X turns to world +Z, and local +Z
+        // (model -Z) turns to world +X.
         let p = Pose {
             position: [10., 2., 20.],
             yaw: 90.,
         }
         .transform()
         .position([3., 4., 5.]);
-        for (actual, expected) in p.into_iter().zip([5., 6., 17.]) {
-            assert!((actual - expected).abs() < 0.00001);
+        for (actual, expected) in p.into_iter().zip([15., 6., 23.]) {
+            assert!((actual - expected).abs() < 0.00001, "{p:?}");
+        }
+    }
+    #[test]
+    fn lamp_heads_reach_the_original_glow_centres_on_every_side() {
+        // 0x449360 stores each lamp's post base at +/-41 and its glow centre
+        // at +/-38 from the block centre. The side-8 lamp (yaw 0) puts the head
+        // 3 units along local +X; the rotation has to carry that offset onto
+        // the glow centre on the other sides too.
+        let block = Block {
+            id: 0,
+            name: String::new(),
+            text_id: 0,
+            kind: 0,
+            center: [100., -200.],
+            size: [80.; 2],
+            pavement_color: 0,
+            flags: 0,
+            street_sides: 1 | 2 | 4 | 8,
+        };
+        let blocks = std::slice::from_ref(&block);
+        let poses = lamps(blocks);
+        let halos = crate::light_halos::lamps(blocks);
+        assert_eq!(poses.len(), 8);
+        for (pose, halo) in poses.iter().zip(&halos) {
+            let head = pose.transform().position([3., halo.position[1], 0.]);
+            for (actual, expected) in head.into_iter().zip(halo.position) {
+                assert!((actual - expected).abs() < 1e-4, "yaw {}", pose.yaw);
+            }
         }
     }
     #[test]
