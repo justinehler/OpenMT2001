@@ -6,9 +6,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A new push to a PR cancels that PR's running build. On main a new merge
+# waits for the running build instead (one running, one pending), so every
+# main build finishes and saves the dependency caches the PR builds restore.
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
@@ -61,7 +64,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test core library (default features)
         run: cargo +${{ env.RUST_VERSION }} test --locked --lib
-      - name: Build native game
-        run: cargo +${{ env.RUST_VERSION }} build --locked --features native --bin game
+      # The next step links the game with native,capture; this one only checks
+      # that it compiles without capture. The nightly alpha links it release.
+      - name: Check native game
+        run: cargo +${{ env.RUST_VERSION }} check --locked --features native --bin game
       - name: Test library, binaries and integration tests (native, capture)
         run: cargo +${{ env.RUST_VERSION }} test --locked --features native,capture --lib --bins --tests
