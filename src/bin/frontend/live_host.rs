@@ -11,6 +11,7 @@ use crate::{
     fresh_city::{self, CommandAssets, Session},
     prompt,
 };
+use openmt2001::auction_panel::Auction;
 use openmt2001::{
     audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests,
     audio_requests::transport as transport_requests, hourly, level_script, lua4::Value,
@@ -239,33 +240,6 @@ pub struct ResultRequest {
     pub characters: (u32, u32),
     pub music_address: u32,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Auction {
-    pub controls: openmt2001::auction_controls::State,
-    pub visible: bool,
-    /// 414160 disables the textureless title-right child in network mode.
-    pub hidden_bid_toggle_enabled: bool,
-    /// Authoritative details858 voice/AI gate published with the live panel.
-    pub bid_voice_gate: bool,
-    pub info: Option<openmt2001::auction_panel::Info>,
-    pub participants: Vec<openmt2001::auction_labels::Participant>,
-}
-
-impl Auction {
-    fn refresh_participants(&mut self, session: &Session<'_>) -> Result<(), String> {
-        self.participants = openmt2001::auction_labels::participants(session)?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StatsAction {
-    Open,
-    Close,
-    Cycle(bool),
-    Toggle(usize),
-}
-
 /// The stopped graph owns the session until its Close action reaches a menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultReview {
@@ -1332,10 +1306,10 @@ impl Host {
     pub fn stats_action(
         &mut self,
         session: &mut Session<'_>,
-        action: StatsAction,
+        action: openmt2001::stats_panel::Action,
     ) -> Result<(), String> {
         match action {
-            StatsAction::Open => {
+            openmt2001::stats_panel::Action::Open => {
                 if self.stats.is_some() || self.result_completed {
                     return Ok(());
                 }
@@ -1353,15 +1327,15 @@ impl Host {
                 }
                 self.stats = Some(state);
             }
-            StatsAction::Close => {
+            openmt2001::stats_panel::Action::Close => {
                 self.close_statistics(&mut session.world.pause, &mut session.hooks.timers)?;
             }
-            StatsAction::Cycle(right) => {
+            openmt2001::stats_panel::Action::Cycle(right) => {
                 if let Some(state) = &mut self.stats {
                     state.cycle(right, session.world.objective.kind, self.game_active);
                 }
             }
-            StatsAction::Toggle(slot) => {
+            openmt2001::stats_panel::Action::Toggle(slot) => {
                 if let Some(state) = &mut self.stats {
                     state.toggle(slot)?;
                 }

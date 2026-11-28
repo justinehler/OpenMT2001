@@ -1118,7 +1118,7 @@ enum FreshRequest {
     },
     Card(crate::fresh_city::cards::Action),
     AuctionButton(u32),
-    Stats(crate::live_host::StatsAction),
+    Stats(openmt2001::stats_panel::Action),
     ScenarioReminder,
     DismissMarketShare,
     HumanDialog(

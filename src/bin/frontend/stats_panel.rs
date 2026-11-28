@@ -15,7 +15,7 @@ use openmt2001::{
 use std::{fs, path::Path};
 
 // The dialog's state and plot geometry are library code (#99).
-pub use openmt2001::stats_panel::{Graph, Grid, Player, Snapshot, State, line_quads};
+pub use openmt2001::stats_panel::{Action, Graph, Grid, Player, Snapshot, State, line_quads};
 
 pub struct Assets {
     model: Vec<Surface>,
@@ -79,7 +79,7 @@ impl View {
         point: Option<[f32; 2]>,
         down: bool,
         snapshot: &Snapshot,
-    ) -> Option<crate::live_host::StatsAction> {
+    ) -> Option<Action> {
         let hit = point.and_then(|point| assets.button_at(point, snapshot));
         self.dirty |= self.hover != hit;
         self.hover = hit;
@@ -102,13 +102,12 @@ impl View {
         }
     }
 }
-fn action(index: usize) -> crate::live_host::StatsAction {
-    use crate::live_host::StatsAction;
+fn action(index: usize) -> Action {
     match index {
-        0 => StatsAction::Close,
-        1 => StatsAction::Cycle(false),
-        2 => StatsAction::Cycle(true),
-        _ => StatsAction::Toggle(index - 3),
+        0 => Action::Close,
+        1 => Action::Cycle(false),
+        2 => Action::Cycle(true),
+        _ => Action::Toggle(index - 3),
     }
 }
 
@@ -282,12 +281,7 @@ impl Assets {
         (0..3 + snapshot.players.len())
             .find(|&i| openmt2001::ui_mesh::parent_hit(self.button_bounds(i), point, [0., 0.]))
     }
-    pub fn pointer(
-        &self,
-        point: [f32; 2],
-        pressed: bool,
-        snapshot: &Snapshot,
-    ) -> Option<crate::live_host::StatsAction> {
+    pub fn pointer(&self, point: [f32; 2], pressed: bool, snapshot: &Snapshot) -> Option<Action> {
         pressed
             .then(|| self.button_at(point, snapshot).map(action))
             .flatten()
@@ -873,9 +867,9 @@ mod tests {
                 }
                 if let Some(actual) = view.pointer(&assets, Some(point), down, &snapshot) {
                     let actual_index = match actual {
-                        crate::live_host::StatsAction::Close => 0,
-                        crate::live_host::StatsAction::Cycle(right) => 1 + usize::from(right),
-                        crate::live_host::StatsAction::Toggle(slot) => 3 + slot,
+                        Action::Close => 0,
+                        Action::Cycle(right) => 1 + usize::from(right),
+                        Action::Toggle(slot) => 3 + slot,
                         _ => panic!("Widget cannot open itself"),
                     };
                     notifications.push([12, actual_index as u32, 0]);

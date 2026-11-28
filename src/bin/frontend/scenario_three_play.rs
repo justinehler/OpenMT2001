@@ -1192,14 +1192,14 @@ fn finish_original_result(
         session.roster.manager.players.len(),
     )
     .unwrap();
-    host.stats_action(session, crate::live_host::StatsAction::Open)
+    host.stats_action(session, openmt2001::stats_panel::Action::Open)
         .unwrap();
     assert_eq!(session.world.pause.bytes, pause);
     let opened = host.status(session);
     assert!(!opened.running);
     assert!(opened.failure.is_none());
     assert_eq!(opened.stats.unwrap().state, expected_stats);
-    host.stats_action(session, crate::live_host::StatsAction::Close)
+    host.stats_action(session, openmt2001::stats_panel::Action::Close)
         .unwrap();
     assert_eq!(session.world.pause.bytes, pause);
     let closed = host.status(session);

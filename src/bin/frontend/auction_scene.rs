@@ -567,7 +567,7 @@ mod tests {
         let mut state = [0u8; 128];
         state[0x60..0x64].copy_from_slice(&0u32.to_le_bytes());
         let (sender, receiver) = std::sync::mpsc::channel();
-        let mut host_auction = Some(crate::live_host::Auction::default());
+        let mut host_auction = Some(openmt2001::auction_panel::Auction::default());
         let mut omitted = std::collections::BTreeSet::new();
         auction::apply(
             Command {
@@ -698,7 +698,7 @@ mod tests {
         state[0x50..0x54].copy_from_slice(&u32::MAX.to_le_bytes());
         state[0x60..0x64].copy_from_slice(&u32::MAX.to_le_bytes());
         let (sender, receiver) = std::sync::mpsc::channel();
-        let mut host_auction = Some(crate::live_host::Auction::default());
+        let mut host_auction = Some(openmt2001::auction_panel::Auction::default());
         let mut omitted = std::collections::BTreeSet::new();
         auction::apply(
             Command {

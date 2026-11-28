@@ -334,7 +334,7 @@ fn host_result_persists_only_after_presentation_completes() {
                     Some(crate::live_host::ResultReview::Statistics)
                 );
                 assert!(status.stats.is_some());
-                host.stats_action(&mut session, crate::live_host::StatsAction::Close)
+                host.stats_action(&mut session, openmt2001::stats_panel::Action::Close)
                     .unwrap();
                 assert_eq!(
                     host.status(&session).result_review,

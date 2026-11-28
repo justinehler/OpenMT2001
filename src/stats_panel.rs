@@ -561,3 +561,12 @@ impl Graph {
         })
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A statistics-panel button action (original 49e630).
+pub enum Action {
+    Open,
+    Close,
+    Cycle(bool),
+    Toggle(usize),
+}
