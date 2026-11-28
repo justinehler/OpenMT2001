@@ -3,6 +3,7 @@
 //! objectives. This is the map/population stage, not the complete boot sequence.
 pub mod camera;
 pub mod objective_selection;
+pub mod prompt_dismiss;
 pub mod random;
 
 use crate::{
@@ -72,6 +73,15 @@ pub trait Hooks: crate::map_script::Hooks {
         &mut [crate::timers::Task],
     );
     fn command(&mut self, command: Command, arguments: &[Value]) -> Result<(), String>;
+    /// Return the active modal context, retaining its head through the nested
+    /// Lua catch. None skips both the catch and finish; zero skips only catch.
+    fn begin_prompt_dismiss(&mut self) -> Result<Option<i32>, String> {
+        self.command(Command::TutorialDismissPrompt, &[])?;
+        Ok(None)
+    }
+    fn finish_prompt_dismiss(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 fn tutorial_build_integer(arguments: &[Value]) -> Option<i32> {
@@ -261,7 +271,7 @@ impl Bindings {
         self.selected_objective.bind(level);
     }
 
-    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..748. Host buffers
+    /// Reserves callback IDs1..14,100..164,200..290,300..406,500..502,600..609,700..749. Host buffers
     /// registered with Runtime::script_buffer satisfy nested C_RunScript calls.
     pub fn register(vm: &mut Runtime, image: &crate::pe::PeImage<'_>) -> Result<Self, String> {
         register_calendar(vm)?;
@@ -334,10 +344,10 @@ impl Bindings {
             ("TutorialDisableAllControls", 720),
             ("TutorialDisableAllPicking", 721),
             ("TutorialDisableCameraControl", 722),
-            ("TutorialDismissPrompt", 725),
         ] {
             vm.register(name, id)?;
         }
+        prompt_dismiss::register(vm)?;
         for (name, value) in [
             ("TUT_NAVIGATOR_PANEL", 103.),
             ("TUT_PCP_OPEN_CLOSE", 76.),
@@ -802,14 +812,14 @@ impl Bindings {
                 hooks.command(Command::TutorialEnableAllPicking, arguments)?;
                 Ok(None)
             }
-            720..=733 => {
+            725 | 749 => prompt_dismiss::handle(id, hooks),
+            720..=724 | 726..=733 => {
                 let command = match id {
                     720 => Command::TutorialDisableAllControls,
                     721 => Command::TutorialDisableAllPicking,
                     722 => Command::TutorialDisableCameraControl,
                     723 => Command::TutorialArrow,
                     724 => Command::TutorialMessage,
-                    725 => Command::TutorialDismissPrompt,
                     726 => Command::TutorialEnableControl,
                     727 => Command::TutorialDisableControl,
                     728 => Command::TutorialCameraMode,
