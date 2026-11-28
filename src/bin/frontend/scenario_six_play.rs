@@ -2,8 +2,9 @@
 use super::scenario_one_play::build_ranked;
 use super::scenario_twelve_play::{export, wealth};
 use super::{
-    CommandAssets, Inputs, Path, PathBuf, Policy, Session, character_names, finish_original_win,
-    fs, load_era_styles, validate_natural_owned_shoppers, word,
+    CommandAssets, Inputs, Path, PathBuf, Policy, Session, character_names, check_measured_result,
+    finish_original_result, fs, load_era_styles, result_sequence, validate_natural_owned_shoppers,
+    word,
 };
 use std::cell::RefCell;
 
@@ -172,7 +173,7 @@ fn observe_after(
 }
 
 #[test]
-#[ignore = "requires original assets and the real Scenario1 Win profile"]
+#[ignore = "requires original assets and the real Scenario1 Win profile; measured Scenario6 result"]
 fn legal_scenario_six_mayor_win_and_profile_reload() {
     assert!(std::env::var_os("OPENMT2001_SCENARIO6_SHARE_ORACLE").is_some());
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
@@ -452,11 +453,14 @@ fn legal_scenario_six_mayor_win_and_profile_reload() {
             if result_dialog.is_some() { break; }
             if session.world.clock.calendar[4]*24+session.world.clock.hour() >= start_hour+144 { break; }
         }
+        let result_tick=session.world.clock.timing[0];
         export(&session,&image,"SCENARIO6");
         let dialog = result_dialog.expect("bounded legal mayor strategy did not reach an original result");
-        assert_eq!(dialog.context,0,"original mayor election won by an opponent");
-        assert_eq!(word(&session.roster.manager.players[0].bytes,0x14c),3,"survival alone does not prove three elections");
-        assert_eq!(session.world.objective.reached[0],1);
+        let winner=dialog.context;let won=winner==0;
+        println!("Scenario6 original result winner slot{winner} tick{result_tick} mayor-score{:?}",
+            session.roster.manager.players.iter().map(|p|i32::from_le_bytes(p.bytes[0x1b4..0x1b8].try_into().unwrap())).collect::<Vec<_>>());
+        assert_eq!(word(&session.roster.manager.players[winner as usize].bytes,0x14c),3,"survival alone does not prove three elections");
+        assert_eq!(session.world.objective.reached[winner as usize],1);
         assert_eq!((session.world.objective.kind,session.world.objective.target),(1,3.));
         assert_eq!(built.len(),plan.len()); assert!(owned_shopper);
         assert!(apartment_controlled && rent_terms.iter().all(|check|check.checked));
@@ -464,16 +468,19 @@ fn legal_scenario_six_mayor_win_and_profile_reload() {
         assert_eq!(fs::read(&profile).unwrap(),before_profile);
         host.human_dialog_reply(&mut session,&assets,
             crate::human_dialog::Reply{callback:dialog.callback,context:dialog.context,button:0}).unwrap();
-        finish_original_win(&mut session,&assets,&mut host,&profile,&before_profile);
+        finish_original_result(&mut session,&assets,&mut host,&profile,&before_profile,result_sequence(winner));
         let mut catalog=crate::campaign_store::load_catalog(&image,&scripts).unwrap();
         crate::campaign_store::load_progress(&mut catalog,&profile).unwrap();
-        for id in [200003,200004,200005,200002,200012,200001,200006] {
+        for id in [200003,200004,200005,200002,200012,200001] {
             let level=&catalog.levels[catalog.find(id).unwrap()];
             assert_eq!(level.attempts(),1); assert!(level.completed()[0]);
         }
-        assert!(catalog.levels[catalog.find(200011).unwrap()].unlocked());
+        let mayor=&catalog.levels[catalog.find(200006).unwrap()];
+        assert_eq!(mayor.attempts(),1); assert_eq!(mayor.completed()[0],won);
+        assert_eq!(catalog.levels[catalog.find(200011).unwrap()].unlocked(),won);
         drop(host); let(counts,active)=presenter.join().unwrap();
         assert!(!active); assert_eq!(counts[0],counts[1]); assert_eq!(counts[1],counts[2]);
-        println!("Natural Scenario6 three-election mayor Win once;11 unlocked, auctions{counts:?}");
+        println!("Natural Scenario6 three-election mayor {:?} once; 11 unlocked{won}, auctions{counts:?}",result_sequence(winner));
+        check_measured_result("SCENARIO6",0,winner,result_tick);
     }).unwrap().join().unwrap();
 }

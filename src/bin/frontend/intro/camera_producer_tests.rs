@@ -740,3 +740,36 @@ fn tutorial_blockcam_flies_into_block_view_while_camera_control_is_disabled() {
     }
     assert!(eye[1] < 200.);
 }
+
+#[test]
+fn open_prompt_removes_camera_input_without_stopping_the_callback() {
+    use super::super::camera_input_disabled;
+    use crate::live_host::TutorialControls;
+    let enabled = TutorialControls::default();
+    // A modal prompt takes the player's input away on its own, in a tutorial
+    // or not; the frame loop still runs the camera callback under it.
+    assert!(camera_input_disabled(true, None));
+    assert!(camera_input_disabled(true, Some(enabled)));
+    assert!(!camera_input_disabled(false, None));
+    assert!(!camera_input_disabled(false, Some(enabled)));
+    for controls in [
+        TutorialControls {
+            camera_disabled: true,
+            ..enabled
+        },
+        TutorialControls {
+            all_disabled: true,
+            ..enabled
+        },
+    ] {
+        assert!(camera_input_disabled(false, Some(controls)));
+    }
+    // Disabled building picking leaves the camera to the player.
+    assert!(!camera_input_disabled(
+        false,
+        Some(TutorialControls {
+            picking_disabled: true,
+            ..enabled
+        })
+    ));
+}

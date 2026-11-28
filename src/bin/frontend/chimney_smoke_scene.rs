@@ -16,10 +16,11 @@ pub fn fill(
     draw: &mut OwnedDraw,
     state: &Smoke,
     detail: u8,
+    lit_white: u32,
     camera: CameraSample,
 ) -> Result<(), String> {
     let points = state
-        .points(detail)
+        .points(detail, lit_white)
         .into_iter()
         .map(|point| Point {
             position: point.position,
@@ -45,8 +46,10 @@ mod tests {
             up: [0., 1., 0.],
             vertical_fov: 45.,
         };
-        fill(&mut draw, &state, 2, camera).unwrap();
-        let points = state.points(2);
+        // A daytime lit white from the foliage palette, as 004b6370 leaves it.
+        let lit_white = 0xffd8d0c8;
+        fill(&mut draw, &state, 2, lit_white, camera).unwrap();
+        let points = state.points(2, lit_white);
         assert_eq!(draw.vertices.len(), 18);
         assert_eq!(draw.diffuse_alpha.as_ref().unwrap(), &[10; 18]);
         for (vertices, point) in draw.vertices.as_chunks::<6>().0.iter().zip(points) {
@@ -58,9 +61,10 @@ mod tests {
                     -point.position[2]
                 ]
             );
-            assert!(vertices.iter().all(|v| v[3..6] == [0.; 3]));
+            let rgb = [0xd8, 0xd0, 0xc8].map(|channel| f32::from(channel as u8) / 255.);
+            assert!(vertices.iter().all(|v| v[3..6] == rgb));
         }
-        fill(&mut draw, &state, 0, camera).unwrap();
+        fill(&mut draw, &state, 0, lit_white, camera).unwrap();
         assert_eq!(
             draw.vertices.len(),
             6,

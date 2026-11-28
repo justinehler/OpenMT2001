@@ -1,9 +1,9 @@
 //! Original Scenario12 wealth objective on the naturally unlocked campaign.
 //! Reuse the accepted parent's legal builders, controls and result sequence.
 use super::{
-    CommandAssets, Inputs, Path, Policy, Session, Terms, apply_terms, character_names, current,
-    export_live_price_scores, finish_original_win, fs, load_era_styles, submit_business_shape,
-    validate_natural_owned_shoppers, word,
+    CommandAssets, Inputs, Path, Policy, Session, Terms, apply_terms, character_names,
+    check_measured_result, current, export_live_price_scores, finish_original_result, fs,
+    load_era_styles, result_sequence, submit_business_shape, validate_natural_owned_shoppers, word,
 };
 
 pub(super) fn wealth(
@@ -55,7 +55,9 @@ pub(super) fn export(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>,
 }
 
 /// Hotel is original planning's special residential choice, despite its
-/// script catalog class. Use the actual landlord/color-group gate and Form.
+/// script catalog class. Use the actual landlord/color-group gate and Form:
+/// 4229f0 offers it only on a block whose player landlord owns every block of
+/// its color group, so a city-owned group never admits one.
 fn submit_hotel(session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) -> Option<i32> {
     for category in 0..52 {
         let context = crate::build_panel::Context::from_session(session, category).unwrap();
@@ -67,7 +69,7 @@ fn submit_hotel(session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) -> Op
             word(&context.category_record, 0x8c),
         )
         .unwrap();
-        if !crate::build_panel::special_residential_group_owned(
+        if !crate::build_panel::hotel_allowed(
             &members,
             context.category_record[5],
             &context.category_owners,
@@ -142,7 +144,7 @@ fn hotel_sales(session: &Session<'_>) -> i32 {
 }
 
 #[test]
-#[ignore = "requires original assets and the real Scenario2 Win profile"]
+#[ignore = "requires original assets and the real Scenario2 Win profile; measured Scenario12 result"]
 fn legal_scenario_twelve_wealth_win_and_profile_reload() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
         let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
@@ -217,8 +219,10 @@ fn legal_scenario_twelve_wealth_win_and_profile_reload() {
             }
             (counts, view.scene.is_some())
         });
-        let plan = [(43, Some((6, 5))), (11, Some((9, 4))), (13, None), (20, None), (21, None)];
-        let mut submitted = 0; let mut checks: Vec<Terms> = Vec::new();
+        // The Hotel needs a player-owned complete color group, which the
+        // human starts without, so it is built only once planning offers it.
+        let plan = [(11, Some((9, 4))), (13, None), (20, None), (21, None)];
+        let mut submitted = 0; let mut hotel_built = None; let mut checks: Vec<Terms> = Vec::new();
         let mut controlled = std::collections::BTreeSet::new();
         let mut owned_shopper = false; let mut previous_hour = u32::MAX;
         let mut lease_submitted = false; let mut lease_seen = false; let mut lease_due = None;
@@ -229,11 +233,11 @@ fn legal_scenario_twelve_wealth_win_and_profile_reload() {
         for frame in 0..110000 {
             if frame % 625 == 0 && submitted < plan.len() {
                 let (business, shape) = plan[submitted];
-                let built = if business == 43 { submit_hotel(&mut session, &assets) }
-                    else { submit_business_shape(&mut session, &assets, business, &[], shape) };
-                if built.is_some() {
+                if submit_business_shape(&mut session, &assets, business, &[], shape).is_some() {
                     submitted += 1;
                 }
+            } else if frame % 625 == 0 && hotel_built.is_none() {
+                hotel_built = submit_hotel(&mut session, &assets);
             }
             host.frame(&mut session, &assets, 40);
             assert!(host.failure.is_none(), "legal Scenario12 stopped: {:?}", host.failure);
@@ -350,28 +354,37 @@ fn legal_scenario_twelve_wealth_win_and_profile_reload() {
             }
             if result_dialog.is_some() { break; }
         }
+        let result_tick = session.world.clock.timing[0];
         export(&session, &image, "SCENARIO12");
         let dialog = result_dialog.expect("bounded legal wealth strategy did not reach an original result");
-        assert_eq!(dialog.context, 0, "original Scenario12 won by an opponent");
-        assert_eq!(session.world.objective.reached[0], 1,
-            "Scenario12 survival result did not prove the wealth objective");
-        assert!(wealth(&session, &image).compare(openmt2001::x87::Sum::from_f32(20000.).unwrap()).is_ge());
+        let winner = dialog.context; let won = winner == 0;
+        println!("Scenario12 original result winner slot{winner} tick{result_tick} hotel{hotel_built:?}");
+        assert_eq!(session.world.objective.reached[winner as usize], 1,
+            "Scenario12 survival result did not prove its winner's wealth objective");
+        if won {
+            assert!(wealth(&session, &image).compare(openmt2001::x87::Sum::from_f32(20000.).unwrap()).is_ge());
+        }
         assert!(owned_shopper); assert!(checks.iter().all(|c| c.checked));
-        assert!(hotel_sales(&session) > 0, "legal Hotel must have natural room purchases");
+        if hotel_built.is_some() {
+            assert!(hotel_sales(&session) > 0, "legal Hotel must have natural room purchases");
+        }
         assert_eq!((session.world.objective.kind, session.world.objective.target), (5, 20000.));
         assert_eq!(fs::read(&profile).unwrap(), before_profile);
         host.human_dialog_reply(&mut session, &assets,
             crate::human_dialog::Reply { callback: dialog.callback, context: dialog.context, button: 0 }).unwrap();
-        finish_original_win(&mut session, &assets, &mut host, &profile, &before_profile);
+        finish_original_result(&mut session, &assets, &mut host, &profile, &before_profile, result_sequence(winner));
         let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
-        for id in [200003, 200004, 200005, 200002, 200012] {
+        for id in [200003, 200004, 200005, 200002] {
             let level = &catalog.levels[catalog.find(id).unwrap()];
             assert_eq!(level.attempts(), 1); assert!(level.completed()[0]);
         }
-        assert!(catalog.levels[catalog.find(200001).unwrap()].unlocked());
+        let level = &catalog.levels[catalog.find(200012).unwrap()];
+        assert_eq!(level.attempts(), 1); assert_eq!(level.completed()[0], won);
+        assert_eq!(catalog.levels[catalog.find(200001).unwrap()].unlocked(), won);
         drop(host); let (counts, active) = presenter.join().unwrap();
         assert!(!active); assert_eq!(counts[0], counts[1]); assert_eq!(counts[1], counts[2]);
-        println!("Natural Scenario12 wealth Win once; Scenario1 unlocked, real auction scenes{counts:?}");
+        println!("Natural Scenario12 wealth {:?} once; Scenario1 unlocked{won}, real auction scenes{counts:?}", result_sequence(winner));
+        check_measured_result("SCENARIO12", 0, winner, result_tick);
     }).unwrap().join().unwrap();
 }

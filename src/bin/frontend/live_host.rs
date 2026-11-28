@@ -24,7 +24,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
     pub autosave: Option<openmt2001::save_menu::AutosaveStatus>,
-    pub time_display: crate::time_panel::DisplayState,
+    pub time_display: openmt2001::time_panel::DisplayState,
     pub cash_arrow: openmt2001::cash_arrow::State,
     pub window_texture: Option<openmt2001::window_texture::Publication>,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
@@ -33,19 +33,19 @@ pub struct Status {
     pub stats: Option<openmt2001::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
     pub chat: Option<openmt2001::network::chat::View>,
-    pub market_share: Option<crate::market_share_panel::Snapshot>,
+    pub market_share: Option<openmt2001::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
     pub result_review: Option<ResultReview>,
     /// Original normal main57e760 and player-statistics57e778 panel visibility.
     pub player_panels: [bool; 2],
     /// Current original runtime+4 ledgers for the 412810 player report.
-    pub financial: Option<crate::player_info::Snapshot>,
+    pub financial: Option<openmt2001::player_info::Snapshot>,
     /// Native current player's one-based ownership byte, not character ID.
     pub business_owner: Option<u8>,
     /// Original current-player +10 activity byte used by construction input.
     pub current_player_active: bool,
     /// Current original 4112a0 resident counts and ratios for the City tab.
-    pub city_people_rows: Option<Vec<crate::city_people::Row>>,
+    pub city_people_rows: Option<Vec<openmt2001::city_people::Row>>,
     pub tutorial_controls: TutorialControls,
     pub source_picking: Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
@@ -74,13 +74,15 @@ pub struct Status {
     pub card_visual: openmt2001::card_panel::EntryVisual,
     /// Original822b0c/822b0e/822af4, retained independently of clock arithmetic.
     pub day_night_flags: [u8; 3],
-    pub notices: Vec<crate::notifications::Notice>,
+    pub notices: Vec<openmt2001::notifications::Notice>,
     pub auction: Option<Auction>,
     pub running: bool,
     pub speed: u32,
     pub network_enabled: bool,
     pub synchronization: Option<openmt2001::network::synchronization::Status>,
     pub script_paused: bool,
+    /// Text identifier of the 4bad40 pause banner, while the session is active.
+    pub pause_banner: Option<u32>,
     pub ticks: u32,
     pub interface_ticks: u64,
     /// Delivered updates of the normal modal UI group, after the central gate.
@@ -246,12 +248,12 @@ pub struct Auction {
     /// Authoritative details858 voice/AI gate published with the live panel.
     pub bid_voice_gate: bool,
     pub info: Option<crate::auction_panel::Info>,
-    pub participants: Vec<crate::auction_labels::Participant>,
+    pub participants: Vec<openmt2001::auction_labels::Participant>,
 }
 
 impl Auction {
     fn refresh_participants(&mut self, session: &Session<'_>) -> Result<(), String> {
-        self.participants = crate::auction_labels::participants(session)?;
+        self.participants = openmt2001::auction_labels::participants(session)?;
         Ok(())
     }
 }
@@ -343,19 +345,19 @@ pub struct Host {
     /// writes when neither camera owner is installed.
     pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
     camera_suppliers: Option<CameraSuppliers>,
-    pub time_runtime: std::sync::Arc<std::sync::Mutex<crate::time_panel::Runtime>>,
+    pub time_runtime: std::sync::Arc<std::sync::Mutex<openmt2001::time_panel::Runtime>>,
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
     stats: Option<openmt2001::stats_panel::State>,
     comparison: Option<crate::comparison::Runtime>,
-    market_share: crate::market_share_panel::State,
+    market_share: openmt2001::market_share_panel::State,
     cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<openmt2001::card_panel::Panel>,
     card_visible: bool,
     day_night_flags: [u8; 3],
-    notices: crate::notifications::Queue,
+    notices: openmt2001::notifications::Queue,
     pub auction_renderer: Option<std::sync::mpsc::Sender<auction_requests::Request>>,
     auction_actor_events: Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
@@ -1084,7 +1086,7 @@ impl Host {
         self.running = running
             && !self.camera_retired()
             && self.failure.is_none()
-            && self.options_resume.is_none()
+            && (self.options_resume.is_none() || self.policy.scheduler.network_enabled)
             && !self.result_completed;
         if self.running != was_running {
             eprintln!(
@@ -1198,6 +1200,9 @@ impl Host {
     ///49e860/49e994 local Options owns one reason0 transition. The UI's
     ///oneshot acknowledgement is sent only after this actual owner operation.
     ///Keep the existing player-run latch distinct from native pause bytes.
+    ///In a network game (93bbb9) 49e860 pauses nothing: the menu opens over
+    ///the running simulation, and the deadline and barrier reasons stay
+    ///owned by their network producers.
     pub fn options(
         &mut self,
         pause: &mut openmt2001::pause::State,
@@ -1207,32 +1212,36 @@ impl Host {
         if self.stop_retired_camera() {
             return Err("Options session retired".into());
         }
+        let network = self.policy.scheduler.network_enabled;
         if open {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
             if self.options_resume.is_none() {
-                if !self.policy.scheduler.network_enabled {
+                if !network {
                     pause.pause(0, |change, _| {
                         change.apply(timers);
                         Ok(())
                     })?;
                 }
                 self.options_resume = Some(self.running);
-                self.set_running(false);
+                if !network {
+                    self.set_running(false);
+                }
             }
         } else if let Some(running) = self.options_resume {
-            if !self.policy.scheduler.network_enabled {
+            self.options_resume = None;
+            if !network {
                 pause.unpause(0, |change, _| {
                     change.apply(timers);
                     Ok(())
                 })?;
+                self.set_running(running);
             }
-            self.options_resume = None;
-            self.set_running(running);
         }
         Ok(())
     }
+
     ///Recheck the SAME worker/Session at ordinary captured-save consumption.
     ///This is a current modal hold check, not a native construction token.
     pub fn options_save_allowed(
@@ -1240,17 +1249,19 @@ impl Host {
         pause: &openmt2001::pause::State,
         timers: &[openmt2001::timers::Task],
     ) -> bool {
-        self.options_resume.is_some()
+        // A network game never holds the simulation for Options, and 49e860
+        // disables its Save action, so no manual save is ever consumed there.
+        !self.policy.scheduler.network_enabled
+            && self.options_resume.is_some()
             && !self.running
             && self.failure.is_none()
             && !self.camera_retired()
-            && (self.policy.scheduler.network_enabled
-                || (pause.bytes[0] != 0
-                    && pause.bytes[8] != 0
-                    && timers
-                        .iter()
-                        .filter(|t| u32::from_le_bytes(t[4..8].try_into().unwrap()) & 2 != 0)
-                        .all(|t| t[0] == 0)))
+            && pause.bytes[0] != 0
+            && pause.bytes[8] != 0
+            && timers
+                .iter()
+                .filter(|t| u32::from_le_bytes([t[4], t[5], t[6], t[7]]) & 2 != 0)
+                .all(|t| t[0] == 0)
     }
     /// Project only this live Options owner's transient pause into a cold-load
     /// continuation. The actual Session stays held until the UI closes Options.
@@ -1266,9 +1277,6 @@ impl Host {
         if !self.options_save_allowed(pause, timers) {
             return Err("Options save owner is not held".into());
         }
-        if self.policy.scheduler.network_enabled {
-            return Ok(None);
-        }
         // Native unpause is signed. A wrapped/nonpositive count cannot account
         // for the one owned release: refuse rather than clear or repair it.
         if pause.bytes[0] as i8 <= 0 {
@@ -1282,11 +1290,16 @@ impl Host {
         })?;
         Ok(Some((continuation, tasks)))
     }
-    /// Everything a manual save of `session` reads from this Host.
+    /// Everything a manual save of `session` reads from this Host. Every
+    /// manual write reads this view, so it is where a network game's disabled
+    /// Save (49e860) is enforced against a stale menu that still offers it.
     pub(crate) fn save_view(
         &self,
         session: &Session<'_>,
     ) -> Result<crate::session_save::HostSaveView, String> {
+        if self.policy.scheduler.network_enabled || session.connected.is_some() {
+            return Err("Save is disabled in a network game".into());
+        }
         Ok(crate::session_save::HostSaveView {
             options: self.options_save_projection(&session.world.pause, &session.hooks.timers)?,
             auction: self.auction_save_state(),
@@ -1391,7 +1404,7 @@ impl Host {
         session: &Session<'_>,
         assets: &CommandAssets<'_, '_>,
     ) -> Result<crate::comparison::Data, String> {
-        let players = crate::player_info::Snapshot::from_runtime(
+        let players = openmt2001::player_info::Snapshot::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
             session.roster.status.current_player,
@@ -1480,7 +1493,7 @@ impl Host {
                 Default::default()
             }
         };
-        let financial = match crate::player_info::Snapshot::from_runtime(
+        let financial = match openmt2001::player_info::Snapshot::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
             session.roster.status.current_player,
@@ -1491,7 +1504,7 @@ impl Host {
                 None
             }
         };
-        let city_people_rows = match crate::city_people::Report::live_rows(&session.world) {
+        let city_people_rows = match openmt2001::city_people::Report::live_rows(&session.world) {
             Ok(rows) => Some(rows),
             Err(error) => {
                 self.fail(error);
@@ -1594,6 +1607,13 @@ impl Host {
                 .map(|c| c.synchronization.samples.status.clone()),
             network_enabled: self.policy.scheduler.network_enabled,
             script_paused: session.world.pause.has_reason(),
+            pause_banner: self
+                .game_active
+                .then(|| {
+                    let [a, b, c, d, ..] = session.world.pause.bytes;
+                    crate::pause_banner::caption([a, b, c, d])
+                })
+                .flatten(),
             ticks: session.world.clock.timing[0],
             interface_ticks: self.interface_ticks,
             prompt_updates: self.prompt_updates,
@@ -1858,7 +1878,7 @@ impl Host {
         category: u32,
         panel: openmt2001::property_offer::Panel,
         initialize_amount: bool,
-    ) -> Result<crate::fresh_city::property::Inspection, String> {
+    ) -> Result<openmt2001::session::property::Inspection, String> {
         session.inspect_property_offer_display(
             category,
             panel,
@@ -1873,7 +1893,7 @@ impl Host {
         assets: &CommandAssets<'_, '_>,
         category: u32,
         panel: openmt2001::property_offer::Panel,
-    ) -> Result<crate::fresh_city::property::Inspection, String> {
+    ) -> Result<openmt2001::session::property::Inspection, String> {
         if self.failure.is_some() {
             return Err("Stopped session cannot accept property offers".into());
         }
@@ -3129,7 +3149,7 @@ impl Host {
             u32::from(self.auction.is_some())
         };
         self.prompt_updates = self.prompt_updates.wrapping_add(u64::from(
-            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
+            openmt2001::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
         ));
         //465490 switches GUI8b1050 to1 before any auction widget is shown.
         //Normal GUI0/2/3 share the other manager. Hidden Time widgets do not
@@ -3163,7 +3183,7 @@ impl Host {
             .lock()
             .map_err(|_| "Time runtime poisoned")?;
         for (instance, passes) in
-            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)
+            openmt2001::time_panel::instance_passes(mode, self.policy.scheduler.iterations)
                 .into_iter()
                 .enumerate()
         {
@@ -3986,7 +4006,7 @@ mod tests {
                 }
             }
         }
-        let desktop = crate::menu::desktop_quit::dialog();
+        let desktop = crate::desktop_quit::dialog();
         assert_eq!(
             (desktop.title, desktop.body, desktop.callback),
             (1765, 1766, 0x495670)
@@ -4357,6 +4377,84 @@ mod tests {
         host.options(&mut pause, &mut timers, false).unwrap();
         assert_eq!(pause.bytes, [0; 9]);
         assert_eq!(timers, before);
+    }
+    #[test]
+    fn network_options_keeps_the_connected_simulation_running() {
+        // No reason, the tick-ceiling reason 1, the barrier reason 2, or both.
+        for held in [&[][..], &[1], &[2], &[1, 2]] {
+            let mut host = Host::new([0.; 3]);
+            host.policy.scheduler.network_enabled = true;
+            host.set_running(true);
+            let mut pause = openmt2001::pause::State::default();
+            let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+            let mut apply = |change: openmt2001::pause::Timers, _: &mut _| {
+                change.apply(&mut timers);
+                Ok(())
+            };
+            for &reason in held {
+                pause.pause(reason, &mut apply).unwrap();
+            }
+            let network = (pause.clone(), timers.clone());
+            host.options(&mut pause, &mut timers, true).unwrap();
+            // Logic dispatch keys off `running`: it stays on under Options,
+            // and repeated opens neither stop it nor add a reason.
+            assert!(host.running, "{held:?}");
+            host.options(&mut pause, &mut timers, true).unwrap();
+            assert!(host.running);
+            assert_eq!((pause.clone(), timers.clone()), network);
+            // The network producers still own their reasons while Options is up.
+            let mut apply = |change: openmt2001::pause::Timers, _: &mut _| {
+                change.apply(&mut timers);
+                Ok(())
+            };
+            for &reason in held {
+                pause.unpause(reason, &mut apply).unwrap();
+            }
+            assert!(!pause.has_reason());
+            for &reason in held {
+                pause.pause(reason, &mut apply).unwrap();
+            }
+            assert!(host.running);
+            // Stats and focus are also not local pause owners here.
+            host.toggle_player_pause(&mut pause, &mut timers, |_, _| Ok(()))
+                .unwrap();
+            host.focus(&mut pause, &mut timers, false, |_| {
+                Ok(crate::intro::focus::Prefix::Complete(None))
+            })
+            .unwrap();
+            assert_eq!((pause.clone(), timers.clone()), network);
+            host.options(&mut pause, &mut timers, false).unwrap();
+            assert!(host.running);
+            assert_eq!((pause, timers), network);
+        }
+    }
+    #[test]
+    fn network_options_never_admits_a_manual_save() {
+        let mut host = Host::new([0.; 3]);
+        host.policy.scheduler.network_enabled = true;
+        host.set_running(true);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+        assert!(!host.options_save_allowed(&pause, &timers));
+        host.options(&mut pause, &mut timers, true).unwrap();
+        // A menu that still shows Save cannot get a write admitted, even with
+        // the player's run latch off as an offline Options hold would leave it.
+        assert!(!host.options_save_allowed(&pause, &timers));
+        assert!(host.options_save_projection(&pause, &timers).is_err());
+        host.set_running(false);
+        assert!(!host.options_save_allowed(&pause, &timers));
+        assert!(host.options_save_projection(&pause, &timers).is_err());
+        // The same Host offline admits the held save.
+        host.options(&mut pause, &mut timers, false).unwrap();
+        host.policy.scheduler.network_enabled = false;
+        host.set_running(true);
+        host.options(&mut pause, &mut timers, true).unwrap();
+        assert!(host.options_save_allowed(&pause, &timers));
+        assert!(
+            host.options_save_projection(&pause, &timers)
+                .unwrap()
+                .is_some()
+        );
     }
     #[test]
     fn scenario_prompt_preserves_callback_identity() {

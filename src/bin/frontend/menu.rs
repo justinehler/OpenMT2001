@@ -223,7 +223,7 @@ impl Assets {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let single = Some(crate::singleplayer::SinglePlayer::new(
-            index, archive, installer, &strings, executable,
+            index, archive, installer, scripts, &strings, executable,
         )?);
         let mode_labels = [2239, 2226, 2227, 2240, 1439]
             .iter()

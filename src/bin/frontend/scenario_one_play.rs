@@ -1,8 +1,9 @@
 //! Original Scenario1 date/rank objective after the real Scenario12 Win.
 use super::scenario_twelve_play::{export, wealth};
 use super::{
-    CommandAssets, Inputs, Path, Policy, Session, character_names, finish_original_win, fs,
-    load_era_styles, submit_business_shape, validate_natural_owned_shoppers, word,
+    CommandAssets, Inputs, Path, Policy, Session, character_names, check_measured_result,
+    finish_original_result, fs, load_era_styles, result_sequence, submit_business_shape,
+    validate_natural_owned_shoppers, word,
 };
 
 fn date(session: &Session<'_>) -> u32 {
@@ -33,7 +34,7 @@ pub(super) fn build_ranked(
 }
 
 #[test]
-#[ignore = "requires original assets and the real Scenario12 Win profile"]
+#[ignore = "requires original assets and the real Scenario12 Win profile; measured Scenario1 result"]
 fn legal_scenario_one_date_rank_win_and_profile_reload() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
         let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
@@ -142,26 +143,31 @@ fn legal_scenario_one_date_rank_win_and_profile_reload() {
             }
             if result_dialog.is_some() { break; }
         }
+        let result_tick = session.world.clock.timing[0];
         export(&session, &image, "SCENARIO1");
         let dialog = result_dialog.expect("bounded legal Scenario1 did not reach an original result");
-        assert_eq!(dialog.context, 0, "original dated wealth rank was won by an opponent");
+        let winner = dialog.context; let won = winner == 0;
+        println!("Scenario1 original result winner slot{winner} tick{result_tick} date{}", date(&session));
         assert!(date(&session) >= 1945, "survival result does not establish the original date objective");
-        assert_eq!(session.world.objective.reached[0], 1, "original dated rank must select the human");
+        assert_eq!(session.world.objective.reached[winner as usize], 1, "original dated rank must select its winner");
         assert_eq!((session.world.objective.kind, session.world.objective.target), (4, 1945.));
         assert_eq!(built.len(), 5); assert!(owned_shopper);
         assert_eq!(fs::read(&profile).unwrap(), before_profile);
         host.human_dialog_reply(&mut session, &assets,
             crate::human_dialog::Reply { callback: dialog.callback, context: dialog.context, button: 0 }).unwrap();
-        finish_original_win(&mut session, &assets, &mut host, &profile, &before_profile);
+        finish_original_result(&mut session, &assets, &mut host, &profile, &before_profile, result_sequence(winner));
         let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
-        for id in [200003, 200004, 200005, 200002, 200012, 200001] {
+        for id in [200003, 200004, 200005, 200002, 200012] {
             let level = &catalog.levels[catalog.find(id).unwrap()];
             assert_eq!(level.attempts(), 1); assert!(level.completed()[0]);
         }
-        assert!(catalog.levels[catalog.find(200006).unwrap()].unlocked());
+        let level = &catalog.levels[catalog.find(200001).unwrap()];
+        assert_eq!(level.attempts(), 1); assert_eq!(level.completed()[0], won);
+        assert_eq!(catalog.levels[catalog.find(200006).unwrap()].unlocked(), won);
         drop(host); let (counts, active) = presenter.join().unwrap();
         assert!(!active); assert_eq!(counts[0], counts[1]); assert_eq!(counts[1], counts[2]);
-        println!("Natural Scenario1 dated wealth Win once, Scenario6 unlocked; auctions{counts:?}");
+        println!("Natural Scenario1 dated wealth {:?} once, Scenario6 unlocked{won}; auctions{counts:?}", result_sequence(winner));
+        check_measured_result("SCENARIO1", 0, winner, result_tick);
     }).unwrap().join().unwrap();
 }

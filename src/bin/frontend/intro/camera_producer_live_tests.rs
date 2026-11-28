@@ -1222,10 +1222,13 @@ fn actual_cold_adoption_absence_explicit_city_view_raw4_and_mismatch_first_retur
                 .save_v2_with_auction_view(&image, pair.into_records(), 1, None, 0)
                 .unwrap();
             let root = crate::save_menu::selected_profile_root(&scratch.0, b"Cold provenance");
+            // Saved raw records carry no renderer FOV: gameplay reset 4b9d40
+            // loads 53 degrees (545acc) and strategic entry 4b5509 keeps it,
+            // so every attachment starts at 53.
             for (index, bytes, metadata, attachment, fov) in [
-                (0, legacy, None, Attachment::LegacyRawKind4, 45.),
+                (0, legacy, None, Attachment::LegacyRawKind4, 53.),
                 (1, city, Some(0), Attachment::Explicit(0), 53.),
-                (2, modern, Some(3), Attachment::Explicit(3), 45.),
+                (2, modern, Some(3), Attachment::Explicit(3), 53.),
             ] {
                 let path = scratch.0.join(format!("cold{index}.sav"));
                 fs::write(&path, bytes).unwrap();
@@ -2447,6 +2450,8 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
             assert!(status.failure.is_none(), "{:?}", status.failure);
             assert_eq!(status.prompts.len(), 1);
             assert!(status.tutorial_controls.camera_disabled);
+            // Status hands each new prompt out once; keep the latest one.
+            let mut latest_prompt = status.prompts.last().map(|p| p.dismissal_id);
             let pacific = session
                 .scripts
                 .runtime
@@ -2496,14 +2501,13 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                         .dispatch_session_event("InterfacePromptDismiss", 2, &command_assets, true)
                         .unwrap();
                 }
-                let status = host.status(&session);
-                assert!(status.failure.is_none(), "{:?}", status.failure);
-                assert_eq!(status.prompts.len(), 1);
-                assert_eq!(status.prompts[0].dismissal_id, prompt);
                 for _ in 0..300 {
                     host.frame(&mut session, &command_assets, 20);
                     let status = host.status(&session);
                     assert!(status.failure.is_none(), "{:?}", status.failure);
+                    if let Some(opened) = status.prompts.last() {
+                        latest_prompt = Some(opened.dismissal_id);
+                    }
                     assert_eq!(status.tutorial_camera_events.len(), 1);
                     assert!(producer.legacy_callback_enabled(state.strategic));
                     let disabled = status.tutorial_controls.camera_disabled
@@ -2530,6 +2534,7 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                     )
                     .unwrap();
                 }
+                assert_eq!(latest_prompt, Some(prompt));
                 assert_block_view(state.active.inertia.sample(0.).unwrap());
             }
             assert_eq!(producer.kind(), 12);

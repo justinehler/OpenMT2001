@@ -30,7 +30,7 @@ impl Queue {
     pub fn entries(&self) -> &[Entry] {
         &self.entries[..self.count]
     }
-    pub fn view(&self, session: &openmt2001::session::Session<'_>) -> Result<Vec<Notice>, String> {
+    pub fn view(&self, session: &crate::session::Session<'_>) -> Result<Vec<Notice>, String> {
         self.entries()
             .iter()
             .map(|entry| {
@@ -94,7 +94,7 @@ impl Queue {
 #[test]
 #[ignore = "requires original420500/4207d0 observations"]
 fn original_notification_queue() {
-    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_NOTIFICATIONS")).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_NOTIFICATIONS")).unwrap();
     assert_eq!(&bytes[..8], b"MTNOTI01");
     let mut words = bytes[8..]
         .chunks_exact(4)

@@ -23,9 +23,7 @@ pub struct Participant {
     pub winner: bool,
 }
 
-pub fn participants(
-    session: &openmt2001::session::Session<'_>,
-) -> Result<Vec<Participant>, String> {
+pub fn participants(session: &crate::session::Session<'_>) -> Result<Vec<Participant>, String> {
     let record = &session.world.city.auction.controller.record;
     let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
     session
@@ -63,7 +61,7 @@ impl Label {
             return Err("Auction participant outside six slots".into());
         }
         let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
-        let cash = openmt2001::x87::Sum::from_f32(cash)?.ftol_low_word();
+        let cash = crate::x87::Sum::from_f32(cash)?.ftol_low_word();
         let bid = word(0xc + slot * 12) as i32;
         let status = if word(0x60) == slot as u32 {
             Text::Language(1552)
@@ -164,7 +162,7 @@ fn projected_bounds_keep_original_coordinate_space() {
 #[test]
 #[ignore = "requires original414f90 label observations"]
 fn original_auction_labels() {
-    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_LABELS")).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_LABELS")).unwrap();
     assert_eq!(&data[..8], b"MTAULB01");
     let mut words = data[8..]
         .chunks_exact(4)
@@ -211,7 +209,7 @@ fn original_auction_labels() {
 #[test]
 #[ignore = "requires original414c40 layout observations"]
 fn original_auction_label_layout() {
-    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_LABEL_LAYOUT")).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_LABEL_LAYOUT")).unwrap();
     assert_eq!(&data[..8], b"MTAULY01");
     let mut words = data[8..]
         .chunks_exact(4)

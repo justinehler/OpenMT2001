@@ -42,7 +42,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
         let path = crate::campaign_store::profile_path(&inputs.profile_root, b"Justin");
         crate::campaign_store::load_progress(&mut catalog, &path).unwrap();
         let mut single = crate::singleplayer::SinglePlayer::new(&index, &inputs.archive,
-            &inputs.installer, &strings, &inputs.executable).unwrap();
+            &inputs.installer, inputs.maps.parent().unwrap(), &strings, &inputs.executable).unwrap();
         single.open(false, "Justin", catalog.clone(), path.clone());
         single.activate(0); // selected unlocked campaign scenario -> character panel
         single.activate(0); // actual character-screen Start producer
@@ -158,6 +158,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 &index,
                 &inputs.archive,
                 &inputs.installer,
+                inputs.maps.parent().unwrap(),
                 &strings,
                 &inputs.executable,
             )
@@ -265,7 +266,13 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                         let selected = (0..52).find(|&category_id| state.tutorial_interaction.callback(
                             crate::tutorial_two_interaction::Pick::BlockEntry { category_id }) == Some(1))
                             .expect("subsequent original utility/railroad block-entry gate");
-                        if (id == 100010 && step == 0) || (id == 100011 && step == 1) {
+                        // After the first stage each lesson's nested dismiss catch
+                        // (0x4db6b0 -> 0x43bed0 -> 0x429d50, #370) disables world
+                        // picks, so those stages continue through Navigator 103.
+                        if (id == 100010 && step != 1) || (id == 100011 && step >= 1) {
+                            if step > 0 {
+                                assert!(state.tutorial_controls.picking_disabled);
+                            }
                             assert!(state.tutorial_enabled_controls.contains(&103));
                             sender.send(FreshRequest::TutorialControl(103)).unwrap();
                         } else {

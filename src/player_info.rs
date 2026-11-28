@@ -21,7 +21,7 @@ pub fn report(saved: &[u8; 440], today: bool) -> Result<Vec<Row>, String> {
     };
     let add = |a: f32, b: f32| (f64::from(a) + f64::from(b)) as f32;
     let sum = |offsets: &[usize]| -> Result<f32, String> {
-        let mut value = openmt2001::x87::Sum::from_f32(get(offsets[0])?)?;
+        let mut value = crate::x87::Sum::from_f32(get(offsets[0])?)?;
         if !today {
             value.add_f32(0.)?;
         }
@@ -130,7 +130,7 @@ pub fn player_order(active: &[bool], current: Option<usize>) -> Vec<usize> {
 }
 /// Original40ff70 uses13% of the button extent, not absolute coordinates.
 pub fn portrait_inset(bounds: [f32; 4]) -> Result<[f32; 4], String> {
-    use openmt2001::x87::Sum;
+    use crate::x87::Sum;
     let mut out = bounds;
     for axis in 0..2 {
         let mut extent = Sum::from_f32(bounds[axis + 2])?;
@@ -167,8 +167,8 @@ pub struct Snapshot {
 }
 impl Snapshot {
     pub fn from_runtime(
-        manager: &openmt2001::player_manager::Manager,
-        accounts: &[openmt2001::economy::PlayerAccount],
+        manager: &crate::player_manager::Manager,
+        accounts: &[crate::economy::PlayerAccount],
         current: u32,
     ) -> Result<Self, String> {
         if manager.players.len() != accounts.len() || accounts.len() > 6 {
@@ -231,8 +231,8 @@ impl State {
         Ok(state)
     }
     pub fn from_runtime(
-        manager: &openmt2001::player_manager::Manager,
-        accounts: &[openmt2001::economy::PlayerAccount],
+        manager: &crate::player_manager::Manager,
+        accounts: &[crate::economy::PlayerAccount],
         current: u32,
     ) -> Result<Self, String> {
         let snapshot = Snapshot::from_runtime(manager, accounts, current)?;
@@ -374,14 +374,14 @@ mod tests {
         bytes[0x10] = 1;
         bytes[0x150..0x154].copy_from_slice(&4u32.to_le_bytes());
         bytes[0x158..0x15d].copy_from_slice(b"Human");
-        let mut account = openmt2001::economy::PlayerAccount::from_runtime(&bytes).unwrap();
+        let mut account = crate::economy::PlayerAccount::from_runtime(&bytes).unwrap();
         account.post(125., 35).unwrap();
         account.rotate_ledger();
         account.post(40., 35).unwrap();
         let original = bytes.clone();
-        let manager = openmt2001::player_manager::Manager {
+        let manager = crate::player_manager::Manager {
             bytes: [0; 0x28],
-            players: vec![openmt2001::player_manager::Player {
+            players: vec![crate::player_manager::Player {
                 reference: 123,
                 bytes,
                 auxiliaries: vec![],
@@ -413,9 +413,9 @@ mod tests {
     #[test]
     #[ignore = "private original player button/order fixture"]
     fn matches_native_player_style() {
-        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PLAYER_STYLE")).unwrap();
-        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
-        let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_STYLE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let image = crate::pe::PeImage::parse(&exe).unwrap();
         let word_at = |a| u32::from_le_bytes(image.at(a, 4).unwrap().try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTPLRSTY");
         let mut at = 8;
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     #[ignore = "requires original saved/synthetic financial report oracle"]
     fn matches_native_player_report() {
-        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PLAYER_REPORT")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_REPORT")).unwrap();
         assert_eq!(&bytes[..8], b"MTPRPT01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let count = word(8);

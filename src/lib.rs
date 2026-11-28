@@ -61,6 +61,7 @@ pub mod skirmish_maps;
 pub mod sky;
 pub mod street_furniture;
 pub mod texture;
+pub mod time_panel;
 pub mod timers;
 pub mod traffic;
 pub mod trees;
@@ -156,7 +157,17 @@ pub mod resident_settings;
 pub mod startup_settings;
 
 #[cfg(feature = "lua4")]
+pub mod auction_labels;
+#[cfg(feature = "lua4")]
+pub mod city_people;
+#[cfg(feature = "lua4")]
 pub mod level_startup;
+#[cfg(feature = "lua4")]
+pub mod notifications;
+#[cfg(feature = "lua4")]
+pub mod people_markers;
+#[cfg(feature = "lua4")]
+pub mod player_info;
 #[cfg(feature = "lua4")]
 pub mod session;
 #[cfg(feature = "lua4")]
@@ -184,6 +195,7 @@ pub mod live_commands;
 pub mod local_commands;
 
 pub mod ai_hourly;
+pub mod market_share_panel;
 pub mod player_share;
 
 pub mod player_elimination;

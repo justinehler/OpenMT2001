@@ -29,6 +29,30 @@ fn image_bytes() -> Vec<u8> {
     }
     bytes
 }
+/// A fresh road traffic pool with no vehicles, for the sample's traffic sum.
+fn empty_roads(image: &crate::pe::PeImage<'_>) -> crate::traffic::road::runtime::RoadTraffic {
+    struct Models;
+    impl crate::traffic::road::runtime::VehicleModels for Models {
+        fn bind(&mut self, _: u32, _: &mut [u8; 284]) -> std::result::Result<(), String> {
+            Ok(())
+        }
+        fn extent(
+            &self,
+            _: &[u8; 284],
+        ) -> std::result::Result<crate::traffic::road::ModelExtent, String> {
+            unreachable!()
+        }
+    }
+    crate::traffic::road::runtime::RoadTraffic::fresh(
+        image,
+        0,
+        [0; 3],
+        &mut [0; 284],
+        0x10000000,
+        &mut Models,
+    )
+    .unwrap()
+}
 struct TestGeometry;
 impl crate::building_pool::GeometryBinding for TestGeometry {
     fn prepare(&mut self, _: usize, record: &mut [u8; 916]) -> std::result::Result<(), String> {
@@ -169,6 +193,36 @@ impl TestSession {
     }
     fn tick(&mut self, image: &crate::pe::PeImage<'_>, board: &crate::board::Board) {
         self.tick_observing(image, board, |_, _, _, _| Ok(()));
+    }
+    /// Live residents at the given auxiliary positions (+4, +0xc), bound as
+    /// creation binds them: through the resident reset with reference slot + 1.
+    /// Auxiliaries are allocated in reverse resident order, as a load can leave
+    /// them, so a slot is not the resident's index. Returns the expected
+    /// people sum.
+    fn add_residents(&mut self, positions: &[[f32; 2]]) -> u32 {
+        let city = &mut self.world.city;
+        let first = city.creation.auxiliary.used();
+        for &[x, y] in positions.iter().rev() {
+            let mut auxiliary = [0; 0x11c];
+            put(&mut auxiliary, 4, x.to_bits());
+            put(&mut auxiliary, 0xc, y.to_bits());
+            city.creation.auxiliary.allocate(&auxiliary).unwrap();
+        }
+        for count in (1..=positions.len()).rev() {
+            let residents = &mut city.ledgers.residents;
+            let index = residents.allocate_resident_slot().unwrap().unwrap();
+            residents.active_count += 1;
+            let slot = first + count - 1;
+            let auxiliary = city.creation.auxiliary.get_mut(slot).unwrap();
+            residents.nodes[index]
+                .reset_runtime_state(slot as u32 + 1, auxiliary, &mut 0, 1)
+                .unwrap();
+            assert_eq!(residents.nodes[index].auxiliary_slot(), Some(slot));
+        }
+        positions.iter().fold(0u32, |sum, [x, y]| {
+            sum.wrapping_add(*x as i32 as u32)
+                .wrapping_add(*y as i32 as u32)
+        })
     }
     fn tick_observing(
         &mut self,

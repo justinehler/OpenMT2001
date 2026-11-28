@@ -322,6 +322,28 @@ pub enum End {
     Failure(String),
 }
 
+/// Category bytes +0c..+8c: the 32 building-ID cells the saver fills from
+/// the live membership list (0x447cc0). The simulation follows the list
+/// through building +44 and never reads them, so a save written mid-run must
+/// not change the digest.
+const CATEGORY_SAVED_IDS: std::ops::Range<usize> = 0x0c..0x8c;
+/// Building +170: the registered model object. Its value is a host handle
+/// that a load hands out again in slot order; only its presence is state.
+const BUILDING_MODEL: std::ops::Range<usize> = 0x170..0x174;
+
+fn hash_category(hash: &mut sha2::Sha256, row: &[u8; 0x17c]) {
+    use sha2::Digest;
+    hash.update(&row[..CATEGORY_SAVED_IDS.start]);
+    hash.update(&row[CATEGORY_SAVED_IDS.end..]);
+}
+
+fn hash_building(hash: &mut sha2::Sha256, record: &[u8; 0x394]) {
+    use sha2::Digest;
+    hash.update(&record[..BUILDING_MODEL.start]);
+    hash.update([u8::from(record[BUILDING_MODEL] != [0; 4])]);
+    hash.update(&record[BUILDING_MODEL.end..]);
+}
+
 /// Checkpoint digest. Reading it never mutates the session.
 pub fn digest(session: &crate::fresh_city::Session<'_>) -> String {
     use sha2::Digest;
@@ -332,10 +354,10 @@ pub fn digest(session: &crate::fresh_city::Session<'_>) -> String {
         hash.update(word.to_le_bytes());
     }
     for row in &world.categories {
-        hash.update(row);
+        hash_category(&mut hash, row);
     }
     for record in &world.buildings {
-        hash.update(record);
+        hash_building(&mut hash, record);
     }
     for record in &world.ledgers.businesses {
         hash.update(record);
@@ -948,6 +970,57 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Options, String> {
         Options::parse(args.iter().map(|s| s.to_string()))
+    }
+
+    fn category_hash(row: &[u8; 0x17c]) -> Vec<u8> {
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
+        hash_category(&mut hash, row);
+        hash.finalize().to_vec()
+    }
+
+    fn building_hash(record: &[u8; 0x394]) -> Vec<u8> {
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
+        hash_building(&mut hash, record);
+        hash.finalize().to_vec()
+    }
+
+    #[test]
+    fn digest_ignores_the_category_ids_a_save_writes() {
+        let mut row = [0u8; 0x17c];
+        row[8] = 2; // building count
+        row[0x15c..0x160].copy_from_slice(&0x591318u32.to_le_bytes());
+        let live = category_hash(&row);
+        // What the saver leaves behind: the members' IDs in list order.
+        row[0x0c..0x10].copy_from_slice(&0x3eu32.to_le_bytes());
+        row[0x10..0x14].copy_from_slice(&0x3fu32.to_le_bytes());
+        row[0x88..0x8c].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(category_hash(&row), live);
+        // Bytes on either side are state.
+        row[0x0b] = 1;
+        assert_ne!(category_hash(&row), live);
+        row[0x0b] = 0;
+        row[0x8c] = 1;
+        assert_ne!(category_hash(&row), live);
+    }
+
+    #[test]
+    fn digest_keeps_only_the_presence_of_a_building_model() {
+        let mut record = [0u8; 0x394];
+        record[0x170..0x174].copy_from_slice(&0x1bu32.to_le_bytes());
+        let first = building_hash(&record);
+        // A load registers the same model under another handle.
+        record[0x170..0x174].copy_from_slice(&0x1cu32.to_le_bytes());
+        assert_eq!(building_hash(&record), first);
+        record[0x170..0x174].fill(0);
+        assert_ne!(building_hash(&record), first);
+        record[0x170..0x174].copy_from_slice(&0x1cu32.to_le_bytes());
+        record[0x16f] = 1;
+        assert_ne!(building_hash(&record), first);
+        record[0x16f] = 0;
+        record[0x174] = 1;
+        assert_ne!(building_hash(&record), first);
     }
 
     #[test]

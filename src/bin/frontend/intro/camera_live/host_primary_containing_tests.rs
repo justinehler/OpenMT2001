@@ -122,6 +122,7 @@ pub(crate) fn inspection_products(
         tutorial_go_to_block_pressed: false,
         tooltip: None,
         tooltip_state: None,
+        pause_banner: Default::default(),
         icon_tooltip_dwell: Default::default(),
         navigation: Default::default(),
         navigation_bounds: navigation_bounds,

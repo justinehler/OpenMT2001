@@ -229,16 +229,20 @@ pub fn capture(
         .nodes
         .get(..count)
         .ok_or("sample resident count outside pool")?;
+    // 0x481340 reads each counted resident's auxiliary through its pointer
+    // with no null test. Creation binds an auxiliary before the resident is
+    // live (0x45bb80 faults at 0x45c300 otherwise) and residents are never
+    // removed, so every counted resident has one. The engine's handle is
+    // slot + 1, and the slot need not equal the resident's index after a load.
     let mut people = 0u32;
     for resident in residents {
-        let offset = resident
-            .auxiliary_reference()
-            .checked_sub(0x6899a0)
-            .ok_or("sample resident auxiliary before pool")? as usize;
-        if !offset.is_multiple_of(0x11c) || offset / 0x11c >= city.creation.auxiliary.used() {
+        let slot = resident
+            .auxiliary_slot()
+            .ok_or("sample resident has no auxiliary")?;
+        if slot >= city.creation.auxiliary.used() {
             return Err("sample resident auxiliary unallocated".into());
         }
-        let row = &city.creation.auxiliary.slots()[offset / 0x11c];
+        let row = &city.creation.auxiliary.slots()[slot];
         people = people
             .wrapping_add(truncate(float(row, 4)))
             .wrapping_add(truncate(float(row, 0xc)));

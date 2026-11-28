@@ -242,9 +242,9 @@ mod tests {
             let initial_cash = session.world.ledgers.players[0].cash;
             assert!(Poll::from_runtime(&session.world).unwrap().iter().all(|p| p.residents == 0));
             let assets = CommandAssets { image: &image, board: &board, file: &file };
-            // Original map apartments charge60, above120*0.48. Build a
-            // human apartment through the actual form and lower its rent using
-            // the original arrows/Apply; subsequent housing is untouched.
+            // Build a human apartment through the actual form and lower its
+            // rent using the original arrows/Apply; subsequent housing is
+            // untouched.
             let apartment_category = submit_legal_business(&mut session, &assets, 42, None);
             // A real shop ties the same retained accounts to sales and the
             // overnight restock/history/report path, without injected stock.
@@ -297,7 +297,21 @@ mod tests {
             assert_eq!(report_rows.iter().find(|r|r.label == 0x5bb).unwrap().amount, rental_income.to_bits(), "UI financial rent row diverged from retained ledger");
             let target = rent_target.unwrap();
             let apartment = &session.world.ledgers.businesses[target.business];
-            assert_eq!(u16::from_le_bytes(apartment[0x10..0x12].try_into().unwrap()), polls.iter().map(|p|p.residents).sum::<u16>(), "UI respondents differ from naturally occupied human apartment");
+            assert!(u16::from_le_bytes(apartment[0x10..0x12].try_into().unwrap()) > 0, "legal human apartment housed nobody");
+            // Each district poll walks every city apartment in it. House
+            // hunting reads the retained city rent (#222), so the map's own
+            // apartments are affordable and occupied alongside the human one.
+            let expected_polls: [u16; 52] = std::array::from_fn(|category| {
+                session.population.housing.categories[category]
+                    .buildings
+                    .iter()
+                    .filter_map(|&building| session.population.housing.buildings[building].business)
+                    .map(|business| &session.world.ledgers.businesses[business])
+                    .filter(|&row| word(row, 4) == 42)
+                    .map(|row| u16::from_le_bytes(row[0x10..0x12].try_into().unwrap()))
+                    .sum()
+            });
+            assert_eq!(polls.each_ref().map(|p| p.residents), expected_polls, "UI respondents differ from naturally occupied city apartments");
             assert_eq!(f32::from_le_bytes(apartment[0x50..0x54].try_into().unwrap()).to_bits(), rental_income.to_bits(), "business and player rental postings diverged");
             let bakery = session.world.ledgers.businesses.iter().find(|b|b[0x21c] != 0 && b[10] == 1 && b[4..8] == 0u32.to_le_bytes()).expect("legal bakery never opened");
             let sales = session.world.ledgers.players[0].retail_counters[1];

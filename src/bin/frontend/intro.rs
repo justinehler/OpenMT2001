@@ -90,7 +90,7 @@ fn normal_city_scene_updates(
     if let Some(detail) = detail {
         changed.extend(scene.apply_normal_star_detail(detail, camera)?);
         changed.extend(scene.set_street_furniture_detail(detail)?);
-        changed.extend(scene.set_station_factory_detail(detail)?);
+        changed.extend(scene.set_station_detail_level(detail)?);
     }
     changed.sort_unstable();
     changed.dedup();
@@ -155,6 +155,7 @@ pub struct Assets {
     navigation: crate::navigation::Navigation,
     navigator: crate::navigator::Navigator,
     tooltip: crate::tooltip::Tooltip,
+    pause_banner: crate::pause_banner::Assets,
     result_actors: crate::auction_scene::Assets,
     result_text: crate::result_presentation::text::Assets,
     result_firework_texture: crate::result_presentation::particles_gpu::FireworkTexture,
@@ -279,6 +280,7 @@ impl Assets {
             &paths.language,
             &ui_text,
         )?;
+        let pause_banner = crate::pause_banner::Assets::load_shared(&ui_text)?;
         let result_actors = crate::auction_scene::Assets::load_result(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &index,
@@ -466,6 +468,7 @@ impl Assets {
             navigation,
             navigator,
             tooltip,
+            pause_banner,
             result_actors,
             result_text,
             result_firework_texture,
@@ -513,6 +516,10 @@ struct StaticAppearanceContext<'a, 'b> {
     board: &'a openmt2001::board::Board,
     image: &'a openmt2001::pe::PeImage<'b>,
     hour: u32,
+    /// Submit the fixed utility/marina details (004b7bbf). They belong to the
+    /// scene, not to any prepared building, so exactly one static pass per
+    /// scene assembly may include them.
+    fixed_structures: bool,
 }
 
 /// Native 4b7fd0 submits pass-3 descriptors only after the building's
@@ -694,6 +701,22 @@ impl CameraCallbackInput {
     fn gated(self, disabled: bool) -> Self {
         if disabled { Self::default() } else { self }
     }
+}
+
+/// Whether the player's input is removed from this frame's camera callbacks.
+///
+/// The 50 Hz camera callback (0x4e03c9) is scheduled independently of the
+/// prompt queue, so a modal prompt (0x429b50) does not stop the camera: in the
+/// original, Tutorial 1 is already in Pacific Avenue's block view while its
+/// first prompt is still open. The prompt, like tutorial
+/// `Interface.DisableCameraControl` and `DisableAllControls`, only takes the
+/// player's keys and mouse away from the camera.
+fn camera_input_disabled(
+    prompt_blocks_controls: bool,
+    tutorial: Option<crate::live_host::TutorialControls>,
+) -> bool {
+    prompt_blocks_controls
+        || tutorial.is_some_and(|controls| controls.camera_disabled || controls.all_disabled)
 }
 
 /// The legacy camera state one callback advances.
@@ -919,6 +942,10 @@ struct SnapshotCache {
     static_details: Option<crate::static_detail::Resources>,
     #[cfg(test)]
     static_detail_ranges: Vec<std::ops::Range<usize>>,
+    /// Fixed-structure vertex spans (draw, vertices), drawn without the
+    /// category visibility gate.
+    #[cfg(test)]
+    fixed_detail_spans: Vec<(usize, std::ops::Range<usize>)>,
     trees: Option<std::sync::Arc<crate::tree_scene::Resources>>,
     tree_instances: Option<(u64, std::sync::Arc<crate::tree_scene::Instances>)>,
     people: Option<crate::people_scene::Resources>,
@@ -1255,6 +1282,7 @@ struct Inspection {
     tutorial_go_to_block_pressed: bool,
     tooltip: Option<PreparedScene>,
     tooltip_state: Option<(u32, [i32; 2])>,
+    pause_banner: crate::pause_banner::View,
     icon_tooltip_dwell: crate::tooltip::IconDwell,
     navigation: [PreparedScene; 3],
     navigation_bounds: [f32; 4],
@@ -1311,13 +1339,19 @@ fn update_city_pulse(
 fn update_city_smoke(
     renderer: &Renderer,
     submission: (Option<usize>, Option<&openmt2001::chimney_smoke::Smoke>, u8),
+    trees: Option<&crate::tree_scene::Layer>,
     camera: CameraSample,
     scene: &mut Scene,
     prepared: &mut PreparedScene,
 ) -> Result<(), String> {
     if let (Some(index), Some(state), detail) = submission {
         let draw = scene.draws.get_mut(index).ok_or("smoke draw missing")?;
-        crate::chimney_smoke_scene::fill(draw, state, detail, camera)?;
+        // 004b60d0 reads the lit white that 004b6370 left in the foliage
+        // palette, which is still zero before the first foliage pass.
+        let lit_white = trees
+            .and_then(crate::tree_scene::Layer::palette)
+            .map_or(0, |palette| palette[8]);
+        crate::chimney_smoke_scene::fill(draw, state, detail, lit_white, camera)?;
         renderer.update_surface(prepared, index, &draw.borrowed(), scene.camera, None)?;
     }
     Ok(())
@@ -2086,19 +2120,7 @@ impl Intro {
                 gates.text_entry = graph.chat_guard57e794_plus345()? != 0;
             }
             gates.text_entry |= view.chat_panel.open;
-            use crate::live_host::process_runtime::Byte;
-            gates.suppressed = self
-                .assets
-                .process_runtime
-                .byte(Byte::Media8fca98)
-                .map_err(|e| e.to_string())?
-                != 0
-                || self
-                    .assets
-                    .process_runtime
-                    .byte(Byte::Suppressed8b0700)
-                    .map_err(|e| e.to_string())?
-                    != 0;
+            gates.suppressed = pause_keys::suppressed(&self.assets.process_runtime)?;
         }
         self.dispatch_camera_shortcut(sample);
         self.pause_keys.dispatch(sample, gates, &mut self.focus)?;
@@ -2243,10 +2265,14 @@ impl Intro {
             // Interface.DisableCameraControl clears the camera-input byte at
             // 0x920889, but the camera callback keeps running: it still eases
             // toward a scripted pose such as Tutorial 1's BlockCam on Pacific
-            // Avenue. Disabled tutorial controls only remove the player's input.
-            let input_disabled = view.live_status.as_ref().is_some_and(|status| {
-                status.tutorial_controls.camera_disabled || status.tutorial_controls.all_disabled
-            });
+            // Avenue. Disabled tutorial controls and an open modal prompt only
+            // remove the player's input.
+            let input_disabled = camera_input_disabled(
+                view.prompts.blocks_controls(),
+                view.live_status
+                    .as_ref()
+                    .map(|status| status.tutorial_controls),
+            );
             while view.tick <= tick {
                 if input_disabled {
                     view.keys = [false; 4];

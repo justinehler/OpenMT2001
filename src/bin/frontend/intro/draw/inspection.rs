@@ -474,6 +474,7 @@ impl Intro {
                         view.smoke_state.as_ref(),
                         view.settings_menu.graphics.detail,
                     ),
+                    view.trees.as_ref(),
                     view.camera,
                     &mut view.scene,
                     &mut view.prepared,
@@ -944,6 +945,15 @@ impl Intro {
                     .prepare_frontend_prompt(&self.renderer, &view.game_options.quit_prompt)?;
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &panel);
+            }
+            // 4b4dae draws the pause banner after every interface group.
+            if let Some(banner) = view.pause_banner.update(
+                &self.assets.pause_banner,
+                &self.renderer,
+                view.live_status.as_ref().and_then(|s| s.pause_banner),
+            )? {
+                self.renderer
+                    .draw_overlay(&self.color_view, &self.depth_view, banner);
             }
             presenter
                 .present_binding(&self.binding)

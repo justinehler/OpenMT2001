@@ -636,14 +636,27 @@ mod tests {
                 [80, 120, 160, 255],
             )
         };
+        // A white texel modulated by the lit white 004b6370 leaves in
+        // 008b2248 (here 200 grey) and a half-faded puff alpha.
         let mut smoke = material_quad(SurfaceMode::ChimneySmoke, [-1., -1., 1., 1.], 0.5, [255; 4]);
-        smoke.vertices.iter_mut().for_each(|v| v[3..6].fill(0.));
+        smoke
+            .vertices
+            .iter_mut()
+            .for_each(|v| v[3..6].fill(200. / 255.));
         smoke.diffuse_alpha = Some(vec![128; 6]);
         let pixel = |draws: &[OwnedDraw], x: usize| {
             let bytes = material_readback(&renderer, draws);
             <[u8; 3]>::try_from(&bytes[(32 * 64 + x) * 4..(32 * 64 + x) * 4 + 3]).unwrap()
         };
-        assert_eq!(pixel(&[background(), smoke.clone()], 32), [40, 60, 80]);
+        let close = |actual: [u8; 3], expected: [u8; 3]| {
+            for (a, e) in actual.into_iter().zip(expected) {
+                assert!(a.abs_diff(e) <= 2, "{actual:?} != {expected:?}");
+            }
+        };
+        // SRCALPHA/INVSRCALPHA: a light translucent grey over the background,
+        // brighter than the background in every channel.
+        let blended = [140, 160, 180];
+        close(pixel(&[background(), smoke.clone()], 32), blended);
         let front = material_quad(
             SurfaceMode::UiDepth,
             [-1., -1., 0., 1.],
@@ -663,9 +676,9 @@ mod tests {
             ),
             [80, 120, 160]
         );
-        assert_eq!(
+        close(
             pixel(&[background(), front, equal, smoke.clone()], 40),
-            [40, 60, 80]
+            blended,
         );
         let behind = material_quad(
             SurfaceMode::UiDepth,

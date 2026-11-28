@@ -412,7 +412,7 @@ fn legal_scenario_five_sales_win_and_profile_reload() {
     campaign_continuation("SCENARIO5", 200005, 6, 200., 200002, 15000., 423, 2);
 }
 #[test]
-#[ignore = "requires original assets and naturally completed Scenario5 profile"]
+#[ignore = "requires original assets and naturally completed Scenario5 profile; measured Scenario2 result"]
 fn legal_scenario_two_profit_win_and_profile_reload() {
     campaign_continuation("SCENARIO2", 200002, 3, 3000., 200012, 8000., 483, 3);
 }
@@ -504,7 +504,7 @@ fn campaign_continuation(
         let mut sales_to_city = Vec::new();
         let mut sale_ledger: Option<(u32, f32)> = None;
         let mut sale_ledger_checked = false;
-        for _ in 0..45_000 {
+        for _ in 0..if kind == 3 { 140_000 } else { 45_000 } {
             if submitted < plan.len() && session.world.clock.timing[0].is_multiple_of(625) {
                 let built = if kind == 3 {
                     let business = plan[submitted];
@@ -734,7 +734,9 @@ fn campaign_continuation(
                     }
                     // A first-evening offer enters its original delayed auction
                     // overnight. Include the next rent cycle after acquisitions.
-                    if session.world.clock.calendar[4] >= 2 { break; }
+                    // The daily profit objective has no deadline, so give it
+                    // more days to reach a natural result.
+                    if session.world.clock.calendar[4] >= if kind == 3 { 8 } else { 2 } { break; }
                 }
             }
             if winning_dialog.is_some() { break; }
@@ -742,28 +744,31 @@ fn campaign_continuation(
         let financial = crate::player_info::State::from_runtime(&session.roster.manager, &session.world.ledgers.players, session.roster.status.current_player).unwrap();
         let snapshot = crate::comparison::Data::verify_runtime(&session.world, &financial.records, &image, scenario, 0);
         println!("{scenario} bounded final metrics{:?}", snapshot.rows);
+        let result_tick = session.world.clock.timing[0];
         let dialog = winning_dialog.expect("bounded legal campaign strategy did not reach an original result");
         assert!(validated_owned_shopper, "campaign did not exercise visible shoppers at owned businesses");
-        println!("{scenario} original outcome context{} metrics{:?}", dialog.context, snapshot.rows);
-        assert_eq!(dialog.context, 0, "natural campaign result was won by an opponent");
-        assert_eq!(session.world.objective.reached[0], 1,
-            "natural campaign survival result did not prove its objective");
-        assert!(campaign_metric(&session, &image, kind) >= target);
+        println!("{scenario} original outcome context{} tick{result_tick} metrics{:?}", dialog.context, snapshot.rows);
+        let winner = dialog.context;
+        let won = winner == 0;
+        assert_eq!(session.world.objective.reached[winner as usize], 1,
+            "natural campaign result did not prove its winner's objective");
+        if won { assert!(campaign_metric(&session, &image, kind) >= target); }
         assert!(checks.iter().all(|c| c.checked));
         assert_eq!((session.world.objective.kind, session.world.objective.target), (kind, target));
         assert_eq!(fs::read(&profile).unwrap(), profile_before);
         host.human_dialog_reply(&mut session, &assets, crate::human_dialog::Reply { callback: dialog.callback, context: dialog.context, button: 0 }).unwrap();
-        finish_original_win(&mut session, &assets, &mut host, &profile, &profile_before);
+        finish_original_result(&mut session, &assets, &mut host, &profile, &profile_before, result_sequence(winner));
         let mut reloaded = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         crate::campaign_store::load_progress(&mut reloaded, &profile).unwrap();
         let level = &reloaded.levels[reloaded.find(level_id).unwrap()];
-        assert_eq!(level.attempts(), 1); assert!(level.completed()[0]);
-        for completed in [200003, 200004, 200005, 200002].into_iter().take(match level_id { 200004 => 2, 200005 => 3, _ => 4 }) {
+        assert_eq!(level.attempts(), 1); assert_eq!(level.completed()[0], won);
+        for completed in [200003, 200004, 200005, 200002].into_iter().take(match level_id { 200004 => 1, 200005 => 2, _ => 3 }) {
             let previous = &reloaded.levels[reloaded.find(completed).unwrap()];
             assert_eq!(previous.attempts(), 1); assert!(previous.completed()[0]);
         }
-        assert!(reloaded.levels[reloaded.find(next_id).unwrap()].unlocked());
-        println!("Natural {scenario} Win exactly once; next{next_id} unlocked on same profile{}", profile.display());
+        assert_eq!(reloaded.levels[reloaded.find(next_id).unwrap()].unlocked(), won);
+        println!("Natural {scenario} {:?} exactly once; next{next_id} unlocked{won} on same profile{}", result_sequence(winner), profile.display());
+        check_measured_result(scenario, 0, winner, result_tick);
         drop(host);
         if let Some(presenter) = presenter {
             let (counts, active_scene) = presenter.join().unwrap();
@@ -1044,17 +1049,77 @@ fn campaign_metric(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>, k
         .unwrap()
         .1
 }
-fn finish_original_win(
+/// Results the scripted human strategies below reach on the current engine,
+/// as (winning slot, logic tick of the result callback), keyed by scenario and
+/// strategy. These are measured engine outcomes, not observations of the
+/// original. They are pinned because the sim-diff harness matches the engine
+/// to the original field by field over whole game days on campaign and AI
+/// Skirmish saves (#181, #195), so a change here means the simulation moved
+/// and the measurement needs renewing. A strategy without an entry must still
+/// produce a human Win.
+fn measured_result(scenario: &str, strategy: u32) -> Option<(u32, u32)> {
+    match (scenario, strategy) {
+        // Six legal builds with leases: opponent slot 2 first reaches 3000
+        // daily profit, on day 4.
+        ("SCENARIO2", 0) => Some((2, 66775)),
+        // Five ranked shops: opponent slot 3 leads the 1945 wealth rank.
+        ("SCENARIO1", 0) => Some((3, 41325)),
+        // Opponent slot 2 wins its third mayor election first.
+        ("SCENARIO6", 0) => Some((2, 68345)),
+        // Five shops on distinct blocks plus the category0 lease: opponent
+        // slot 2 reaches 3000 sales.
+        ("SCENARIO11", 0) => Some((2, 104375)),
+        // The staged shop (7) and kind6 (9) never pass their cash reserve
+        // gate, so both runs are the five-shop plan on category0, and
+        // opponent slot 4 reaches 3000 sales.
+        ("SCENARIO11", 7 | 9) => Some((4, 120775)),
+        // Without a player-owned complete color group no Hotel is offered;
+        // opponent slot 1 reaches 20000 wealth.
+        ("SCENARIO12", 0) => Some((1, 41175)),
+        _ => None,
+    }
+}
+
+/// Check the natural result against `measured_result`, after its result hub
+/// and profile commit have run on the actual outcome.
+fn check_measured_result(scenario: &str, strategy: u32, winner: u32, tick: u32) {
+    match measured_result(scenario, strategy) {
+        Some(measured) => assert_eq!(
+            (winner, tick),
+            measured,
+            "measured {scenario} strategy {strategy} (winner, result tick) changed"
+        ),
+        None => assert_eq!(
+            winner, 0,
+            "legal {scenario} strategy {strategy} did not produce a human Win (result tick {tick})"
+        ),
+    }
+}
+
+/// The original result sequence the Host presents for a winning slot.
+fn result_sequence(winner: u32) -> openmt2001::outcome_notice::Sequence {
+    if winner == 0 {
+        openmt2001::outcome_notice::Sequence::Win
+    } else {
+        openmt2001::outcome_notice::Sequence::Lose
+    }
+}
+
+/// Drive the original WIN_SEQUENCE or LOSE_SEQUENCE hub to its profile commit.
+/// Both hubs fly their camera, set cut scene identifier 1 (Win) or 2 (Lose)
+/// on FlybyEnded and request Game.End(1) or Game.End(2) on CutSceneEnded. The
+/// profile records the attempt only when the Host commits that request.
+fn finish_original_result(
     session: &mut Session<'_>,
     assets: &CommandAssets<'_, '_>,
     host: &mut crate::live_host::Host,
     profile: &Path,
     before: &[u8],
+    sequence: openmt2001::outcome_notice::Sequence,
 ) {
-    assert_eq!(
-        host.result_sequence(),
-        Some(openmt2001::outcome_notice::Sequence::Win)
-    );
+    let won = sequence == openmt2001::outcome_notice::Sequence::Win;
+    let identifier = if won { 1 } else { 2 };
+    assert_eq!(host.result_sequence(), Some(sequence));
     assert!(host.complete_result_sequence(session).is_err());
     assert_eq!(fs::read(profile).unwrap(), before);
     let state = session.result_presentation().unwrap().clone();
@@ -1080,7 +1145,7 @@ fn finish_original_win(
     }
     session.dispatch_result_event("FlybyEnded", assets).unwrap();
     let state = session.result_presentation().unwrap();
-    assert_eq!(state.cut_scene_identifier, Some(1));
+    assert_eq!(state.cut_scene_identifier, Some(identifier));
     controller.set_identifier(state.cut_scene_identifier);
     controller.set_bypass(state.bypass_enabled);
     assert!(host.complete_result_sequence(session).is_err());
@@ -1100,7 +1165,7 @@ fn finish_original_win(
         .unwrap();
     assert_eq!(
         session.result_presentation().unwrap().end_requested,
-        Some(1)
+        Some(identifier)
     );
     assert_eq!(fs::read(profile).unwrap(), before);
     let stopped = host.status(session);
@@ -1127,10 +1192,7 @@ fn finish_original_win(
     assert!(!closed.running);
     assert!(closed.failure.is_none());
     assert!(closed.stats.is_none());
-    assert_eq!(
-        host.complete_result_sequence(session).unwrap(),
-        openmt2001::outcome_notice::Sequence::Win
-    );
+    assert_eq!(host.complete_result_sequence(session).unwrap(), sequence);
     let bytes = fs::read(profile).unwrap();
     assert_ne!(bytes, before);
     assert!(host.complete_result_sequence(session).is_err());

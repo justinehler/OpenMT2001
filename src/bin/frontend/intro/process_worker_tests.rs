@@ -295,7 +295,7 @@ fn all_three_start_routes_full_join_and_warm_settings_keep_process_ownership() {
 }
 #[test]
 #[ignore = "private supplied inputs and owned disk scratch; actual cold record12 and joined CPU worker"]
-fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio() {
+fn cold_record12_keeps_process_dispatch_input_wrapper_and_audio() {
     let scratch = Scratch::new();
     let (inputs, owner) = inputs(scratch.0.join("profiles"));
     let (camera, _) = fresh_city_camera();
@@ -307,8 +307,9 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
             &mut cache,
         )
         .unwrap();
-    let expected = [2, 1, 0, 0, 0, 0xa5, 0x5a, 0xee, 1];
-    session.world.pause.bytes = expected;
+    // A saved process image with player/script owners, focus padding and the
+    // transition latch, and marked timer records and frequency below.
+    session.world.pause.bytes = [2, 1, 0, 0, 0, 0xa5, 0x5a, 0xee, 1];
     for task in &mut session.hooks.timers {
         task[0] = 0;
         task[1..4].copy_from_slice(&[0x71, 0x82, 0x93]);
@@ -370,20 +371,33 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
     assert!(!audio.music_paused());
     let (reply, probe) = mpsc::channel();
     run.send(FreshRequest::DispatchProbe(reply));
-    assert_eq!(
-        probe.recv_timeout(Duration::from_secs(15)).unwrap().pause,
-        expected
+    // Record 12's process-dispatch fields are consumed, never applied (#255):
+    // native completion (4bcd6d..4bcd7b) releases reason0 once, and the saved
+    // owners, padding, latch, frequency and timer records do not return.
+    let probe = probe.recv_timeout(Duration::from_secs(15)).unwrap();
+    assert_eq!(probe.pause, [0; 9]);
+    assert_eq!(probe.frequency, (0., None, None));
+    assert!(!probe.tasks.is_empty());
+    assert!(
+        probe.tasks.iter().all(|task| task[..4] == [1, 0, 0, 0]),
+        "load-time registrations, not the saved disabled/marked records"
     );
+    assert!(rows.iter().all(|task| !probe.tasks.contains(task)));
     let custody = run.finish().unwrap();
-    assert_eq!(custody.pause.bytes, [1, 0, 0, 0, 0, 0xa5, 0x5a, 0xee, 1]);
-    assert_eq!(custody.tasks, rows);
+    // City retirement holds reason0 and sets the transition latch over the
+    // current process image; it keeps the load-time registrations.
+    assert_eq!(custody.pause.bytes, [1, 0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(custody.tasks.len(), probe.tasks.len());
+    for (retired, live) in custody.tasks.iter().zip(&probe.tasks) {
+        assert_eq!(retired[1..], live[1..]);
+    }
     assert_eq!(
         (
             custody.frequency.frequency,
             custody.frequency.calendar_timer,
             custody.frequency.logic_timer
         ),
-        (17., Some(1), Some(2))
+        probe.frequency
     );
     owner.borrow_mut().return_custody(custody).unwrap();
 }
@@ -646,4 +660,70 @@ fn original_save_releases_one_startup_hold_and_advances_after_ready_focus() {
         assert_eq!(&task[1..4], &[0x12, 0x34, 0x56]);
         assert_eq!(&task[12..16], &0f32.to_le_bytes());
     }
+}
+
+#[test]
+#[ignore = "private supplied original save; F1/P player pause in the joined worker"]
+fn original_save_pauses_and_resumes_with_p_and_f1() {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    let scratch = Scratch::new();
+    let (inputs, owner) = inputs(scratch.0.join("profiles"));
+    let process = inputs.process_runtime.clone().unwrap();
+    let save = openmt2001::fixtures::path("SAVE_ONE");
+    let mut run = Running::start(inputs, owner.clone(), WorkerStart::Saved(save, None));
+    let mut keys = pause_keys::Input::default();
+    let banner = |run: &Running| {
+        let (reply, status) = mpsc::channel();
+        run.send(FreshRequest::Status {
+            camera: fresh_city_camera().0.eye,
+            reply,
+        });
+        let status = status.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(status.failure.is_none(), "{status:?}");
+        status.pause_banner
+    };
+    let reason3 = |run: &Running| {
+        let (reply, probe) = mpsc::channel();
+        run.send(FreshRequest::DispatchProbe(reply));
+        probe.recv_timeout(Duration::from_secs(15)).unwrap().pause[3]
+    };
+    let advances = |run: &Running| {
+        let before = run.clock().ticks;
+        std::thread::sleep(Duration::from_millis(200));
+        run.clock().ticks > before
+    };
+    assert_eq!(banner(&run), None);
+    assert!(advances(&run));
+    for (code, paused) in [
+        (KeyCode::KeyP, true),
+        (KeyCode::F1, false),
+        (KeyCode::F1, true),
+        (KeyCode::KeyP, false),
+    ] {
+        // The production gate reads the process runtime the city runs in.
+        let gates = pause_keys::Gates {
+            active: true,
+            suppressed: pause_keys::suppressed(&process).unwrap(),
+            ..Default::default()
+        };
+        for down in [true, false] {
+            let sample = process_frontend::PhysicalSample::Key {
+                key: PhysicalKey::Code(code),
+                down,
+                repeat: false,
+            };
+            keys.dispatch(sample, gates, &mut run.route).unwrap();
+        }
+        run.owner.borrow_mut().note_sent(run.route.sent());
+        run.route.wait_prefix();
+        run.route.service_one().unwrap();
+        assert_eq!(reason3(&run), u8::from(paused), "{code:?}");
+        run.route.poll().unwrap();
+        assert_eq!(run.route.sent(), run.route.completed());
+        // 4bad40 shows text 0x46d while reason3 is held.
+        assert_eq!(banner(&run), paused.then_some(0x46d), "{code:?}");
+        assert_eq!(advances(&run), !paused, "{code:?} clock");
+    }
+    let custody = run.finish().unwrap();
+    owner.borrow_mut().return_custody(custody).unwrap();
 }

@@ -4481,6 +4481,13 @@ impl Resident {
     pub fn auxiliary_reference(&self) -> u32 {
         self.auxiliary_reference
     }
+    /// The resident auxiliary pool slot behind the reference. The engine's
+    /// reference is the nonzero slot + 1; zero means no auxiliary was bound.
+    pub fn auxiliary_slot(&self) -> Option<usize> {
+        self.auxiliary_reference
+            .checked_sub(1)
+            .and_then(|slot| usize::try_from(slot).ok())
+    }
     pub(crate) fn overwrite_saved_payload(&mut self, bytes: [u8; 0x14a]) {
         self.bytes = bytes;
         self.bytes[0xf0..0xf4].copy_from_slice(&self.auxiliary_reference.to_le_bytes());

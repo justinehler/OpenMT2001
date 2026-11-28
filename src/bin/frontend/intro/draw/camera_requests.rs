@@ -30,10 +30,9 @@ impl Intro {
                             .camera_producer
                             .as_ref()
                             .is_some_and(|p| p.error().is_some())
-                        || view
-                            .live_status
-                            .as_ref()
-                            .is_none_or(|s| s.tutorial_session || s.failure.is_some()),
+                        || view.live_status.as_ref().is_none_or(|s| {
+                            s.tutorial_session || s.network_enabled || s.failure.is_some()
+                        }),
                 ),
                 Ok(None) => {}
                 Err(error) => {
