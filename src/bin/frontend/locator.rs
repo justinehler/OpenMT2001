@@ -1,5 +1,7 @@
 //! Original40f260 Locator business list and live report navigation.
 use crate::ui::{self, Surface};
+#[path = "locator/navigator_report.rs"]
+mod navigator_report;
 #[path = "locator/report_text.rs"]
 mod report_text;
 #[path = "locator/strategic.rs"]
@@ -53,6 +55,7 @@ pub struct Assets {
     welcome_body_bounds: [f32; 4],
     property_title_bounds: [f32; 4],
     property_title_text_bounds: [f32; 4],
+    navigator_title_bounds: [f32; 4],
     property_title_icon: Surface,
     property_title_fonts: Vec<Surface>,
     property_title_tab: Vec<u8>,
@@ -311,6 +314,10 @@ impl Assets {
                 .map(|r| r.bounds)
                 .ok_or_else(|| format!("property {name} missing"))
         };
+        let navigator_title_bounds = navigator_report::title_bounds(
+            title_area("P_MAIN_TITLE_AREA1")?,
+            title_area("P_MAIN_TITLE_AREA2")?,
+        );
         let mut property_title_text_bounds = title_area("P_MAIN_TITLE_AREA1")?;
         property_title_text_bounds[0] += 10.;
         property_title_text_bounds[2] += 10.;
@@ -573,6 +580,7 @@ impl Assets {
             welcome_body_bounds,
             property_title_bounds,
             property_title_text_bounds,
+            navigator_title_bounds,
             property_title_icon,
             property_title_fonts,
             property_title_tab,
@@ -2119,7 +2127,7 @@ impl Assets {
                 }
                 let mut state = self.people_state()?;
                 state.saved_panels = true;
-                state.player = crate::player_info::State::new(&scene.saved_players)?;
+                state.attach_players(crate::player_info::State::new(&scene.saved_players)?);
                 state.other_rows = commodity_rows(
                     scene
                         .saved_commodity_rows
@@ -2150,6 +2158,8 @@ impl Assets {
         Ok(state)
     }
     pub fn people_state(&self) -> Result<Locator, String> {
+        let mut player = crate::player_info::State::new(&[])?;
+        player.set_visible_rows(self.finance_layout().list.visible_rows());
         Ok(Locator {
             strategic_state: None,
             city_info: false,
@@ -2167,7 +2177,7 @@ impl Assets {
             ownership_scroll: 0,
             pending_category: None,
             player_info: false,
-            player: crate::player_info::State::new(&[])?,
+            player,
             saved_panels: false,
             catalog: None,
             owned_rows: Vec::new(),
@@ -2564,6 +2574,15 @@ impl Assets {
             }
             let mut fonts = self.fonts.clone();
             let mut solid = Surface::solid();
+            if state.body_open() && (state.city_info || state.player_info) {
+                surfaces.extend(navigator_report::paint_title(
+                    &self.property_title_fonts,
+                    &self.property_title_tab,
+                    &self.strings[if state.city_info { 1450 } else { 1452 }],
+                    self.navigator_title_bounds,
+                    self.text_palette[0],
+                )?);
+            }
             if state.body_open() && state.poll_info {
                 self.poll_report(state, scene, &mut fonts)?;
             } else if state.body_open() && state.city_info {
@@ -2929,14 +2948,6 @@ impl Assets {
         ui::text(
             fonts,
             &self.tab,
-            &self.strings[1450],
-            [32., 7., 187., 21.],
-            false,
-            0xffffffff,
-        )?;
-        ui::text(
-            fonts,
-            &self.tab,
             &self.strings[1443],
             self.city_layout.header,
             true,
@@ -2980,14 +2991,6 @@ impl Assets {
         Ok(())
     }
     fn ownership_report(&self, state: &Locator, fonts: &mut [Surface]) -> Result<(), String> {
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1450],
-            [32., 7., 187., 21.],
-            false,
-            0xffffffff,
-        )?;
         ui::text(
             fonts,
             &self.tab,
@@ -3069,14 +3072,6 @@ impl Assets {
         ui::text(
             fonts,
             &self.tab,
-            &self.strings[1450],
-            [32., 7., 187., 21.],
-            false,
-            0xffffffff,
-        )?;
-        ui::text(
-            fonts,
-            &self.tab,
             &self.strings[1444],
             self.city_layout.header,
             true,
@@ -3153,14 +3148,6 @@ impl Assets {
         fonts: &mut [Surface],
         solid: &mut Surface,
     ) -> Result<(), String> {
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1450],
-            [32., 7., 187., 21.],
-            false,
-            0xffffffff,
-        )?;
         // Original 410f89 names the page; 4105ef sets its People caption.
         ui::text(
             fonts,
@@ -3240,14 +3227,6 @@ impl Assets {
         state: &Locator,
         fonts: &mut [Surface],
     ) -> Result<Vec<Surface>, String> {
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1452],
-            [32., 7., 187., 21.],
-            false,
-            self.text_palette[0],
-        )?;
         let mut surfaces = Vec::new();
         let ordered = state.player_display_order();
         for (position, player) in ordered.iter().enumerate() {
@@ -3342,60 +3321,28 @@ impl Assets {
             true,
             self.text_palette[0],
         )?;
-        let mut body = self.fonts.clone();
-        let mut sections = Surface::solid();
-        sections.rect(self.city_layout.header, [self.text_palette[17]; 4]);
-        for (i, row) in state
-            .player
-            .rows
-            .iter()
-            .skip(state.player.scroll)
-            .take(19)
-            .enumerate()
-        {
-            let y = self.bounds[1] + 60. + i as f32 * 10.;
-            if row.style >= 2 {
-                continue;
+        let mut section = Surface::solid();
+        section.rect(self.city_layout.header, [self.text_palette[17]; 4]);
+        surfaces.push(section);
+        surfaces.extend(
+            navigator_report::Finance {
+                pages: &self.fonts,
+                tab: &self.tab,
+                strings: &self.strings,
+                palette: &self.text_palette,
+                arrows: &self.scrollbar_textures,
             }
-            if row.style == 1 {
-                sections.rect(
-                    [self.bounds[0], y, self.bounds[2] - 4., y + 10.],
-                    [self.text_palette[17]; 4],
-                );
-            }
-            let label = self
-                .strings
-                .get(row.label as usize)
-                .ok_or("report label leaves language")?;
-            ui::text_fit(
-                &mut body,
-                &self.tab,
-                label,
-                [32., y, if row.style == 0 { 116. } else { 186. }, y + 10.],
-                false,
-                self.text_palette[if row.style == 1 { 16 } else { 0 }],
-            )?;
-            if row.style == 0 {
-                let value = f32::from_bits(row.amount);
-                let mut text = vec![];
-                if value < 0. {
-                    text.push(b'-' - 32);
-                }
-                text.extend_from_slice(self.strings.get(2243).ok_or("currency symbol missing")?);
-                text.extend(ui::decimal2(value.abs())?.bytes().map(|b| b - 32));
-                ui::text_fit(
-                    &mut body,
-                    &self.tab,
-                    &text,
-                    [117., y, 186., y + 10.],
-                    true,
-                    self.text_palette[3],
-                )?;
-            }
-        }
-        surfaces.push(sections);
-        surfaces.extend(body);
+            .paint(
+                &state.player,
+                &self.finance_layout(),
+                state.hover,
+                state.pressed,
+            )?,
+        );
         Ok(surfaces)
+    }
+    fn finance_layout(&self) -> navigator_report::Layout {
+        navigator_report::Layout::new(self.bounds, self.scrollbar[2] - self.scrollbar[0])
     }
     // Original40dd0a..40df24: texture97 dimensions and main-window bounds.
     fn player_period_rects(&self) -> [[f32; 4]; 2] {
@@ -3577,7 +3524,10 @@ impl Assets {
             {
                 return Action::PeriodStep(i != 0);
             }
-            return Action::None;
+            return self
+                .finance_layout()
+                .hit(p, state.player.rows.len())
+                .unwrap_or(Action::None);
         }
         for index in 0..3 {
             if inside(p, self.city_layout.buttons[index]) {
@@ -3618,7 +3568,7 @@ impl Assets {
         Action::None
     }
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Action {
     None,
     Toggle,
@@ -3817,7 +3767,10 @@ impl Locator {
             .unwrap_or_default();
         self.player.selected = selected;
         self.player.today = old.player.today;
-        self.player.scroll = old.player.scroll.min(rows.len().saturating_sub(19));
+        self.player.scroll = old
+            .player
+            .scroll
+            .min(rows.len().saturating_sub(self.player.visible_rows));
         self.player.rows = rows;
 
         self.open = old.open;
@@ -4022,7 +3975,8 @@ impl Locator {
         self.rights = rights;
         self.dirty = true;
     }
-    pub fn attach_players(&mut self, players: crate::player_info::State) {
+    pub fn attach_players(&mut self, mut players: crate::player_info::State) {
+        players.set_visible_rows(self.player.visible_rows);
         self.player = players;
         self.dirty = true;
     }
@@ -4155,7 +4109,7 @@ impl Locator {
                 .player
                 .scroll
                 .saturating_add_signed(delta as isize)
-                .min(self.player.rows.len().saturating_sub(19));
+                .min(assets.finance_layout().maximum(self.player.rows.len()));
             self.dirty = true;
             return;
         }
@@ -4273,12 +4227,18 @@ impl Locator {
             Action::Scroll(delta) => self.scroll(assets, delta),
             Action::ScrollTrack => {
                 if let Some(point) = p {
-                    self.scroll = ui::slider_selection(
-                        ui::slider_track(assets.scrollbar, true),
-                        point[1] as f32 * 0.5,
-                        self.rows.len().saturating_sub(assets.visible()) as i32,
-                        true,
-                    ) as usize;
+                    if self.player_info {
+                        self.player.scroll = assets
+                            .finance_layout()
+                            .selection(point[1] as f32 * 0.5, self.player.rows.len());
+                    } else {
+                        self.scroll = ui::slider_selection(
+                            ui::slider_track(assets.scrollbar, true),
+                            point[1] as f32 * 0.5,
+                            self.rows.len().saturating_sub(assets.visible()) as i32,
+                            true,
+                        ) as usize;
+                    }
                 }
             }
             Action::None => (),
@@ -5673,7 +5633,11 @@ mod tests {
             state.scroll(&assets, 1000);
             assert_eq!(
                 state.player.scroll,
-                state.player.rows.len().saturating_sub(19)
+                state
+                    .player
+                    .rows
+                    .len()
+                    .saturating_sub(state.player.visible_rows)
             );
             assets.prepare(&renderer, &state, &scene).unwrap();
             state.mouse(&assets, &scene, Some([32, 224]), true);
@@ -6124,7 +6088,13 @@ pub(crate) mod refresh_ui_tests {
             crate::player_info::report(&changed, false).unwrap()
         );
         assert!(new.player.rows.iter().any(|r| r.amount == 42f32.to_bits()));
-        assert_eq!(new.player.scroll, new.player.rows.len().saturating_sub(19));
+        assert_eq!(
+            new.player.scroll,
+            new.player
+                .rows
+                .len()
+                .saturating_sub(new.player.visible_rows)
+        );
         let mut missing = fresh();
         missing.player = crate::player_info::State::new(&[record, record]).unwrap();
         missing.player.current = Some(1);
