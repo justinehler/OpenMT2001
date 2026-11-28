@@ -7,6 +7,8 @@
 use crate::ui::Surface;
 #[path = "desktop_quit.rs"]
 pub(crate) mod desktop_quit;
+#[path = "modal_frame.rs"]
+pub(crate) mod modal_frame;
 #[path = "multiplayer_route.rs"]
 pub mod multiplayer_route;
 #[path = "preferred_token.rs"]
@@ -313,6 +315,7 @@ pub struct Menu {
     pointer_position: Option<[f32; 2]>,
     pub pending: Option<usize>,
     desktop_quit: desktop_quit::Modal,
+    modal_fade: modal_frame::Fade,
     desktop_exit_requested: bool,
     dirty: bool,
     single_mode: bool,
@@ -408,6 +411,16 @@ impl Menu {
                 self.desktop_reply(button);
             }
         }
+        if self.modal_fade.advance(self.frontend_modal_open()) {
+            self.dirty = true;
+        }
+    }
+    fn frontend_modal_open(&self) -> bool {
+        self.desktop_quit.active()
+            || self.profile.visible && self.profile.modal_open()
+            || self.load.visible && self.load.delete_pending()
+            || self.multiplayer.visible && self.multiplayer.notice.is_some()
+            || self.skirmish.error.is_some()
     }
     fn desktop_reply(&mut self, button: usize) {
         let exit = &mut self.desktop_exit_requested;
@@ -565,6 +578,7 @@ impl Menu {
             pointer_position: None,
             pending: None,
             desktop_quit: Default::default(),
+            modal_fade: Default::default(),
             desktop_exit_requested: false,
             dirty: true,
             single_mode: false,
@@ -1285,9 +1299,12 @@ impl Menu {
         }
         self.multiplayer.poll();
         if self.multiplayer.visible {
-            let panel = self
-                .multiplayer
-                .draw(renderer, self.pointer_position, self.pressed)?;
+            let panel = self.multiplayer.draw(
+                renderer,
+                self.pointer_position,
+                self.pressed,
+                self.modal_fade.alpha(),
+            )?;
             renderer.draw_overlay(color, depth, &panel);
             if let Some(message) = &self.multiplayer.notice {
                 let modal = self
@@ -1299,6 +1316,15 @@ impl Menu {
             return Ok(());
         }
         if let Some(error) = &self.skirmish.error {
+            if self.skirmish.visible() {
+                let panel = self.skirmish.draw(
+                    renderer,
+                    self.pointer_position,
+                    false,
+                    self.modal_fade.alpha(),
+                )?;
+                renderer.draw_overlay(color, depth, &panel);
+            }
             let panel = self.assets.prompts.prepare_error(renderer, error)?;
             renderer.draw_overlay(color, depth, &panel);
             return Ok(());
@@ -1316,9 +1342,12 @@ impl Menu {
             return Ok(());
         }
         if self.skirmish.visible() {
-            let panel = self
-                .skirmish
-                .draw(renderer, self.pointer_position, self.pressed)?;
+            let panel = self.skirmish.draw(
+                renderer,
+                self.pointer_position,
+                self.pressed,
+                self.modal_fade.alpha(),
+            )?;
             renderer.draw_overlay(color, depth, &panel);
             return Ok(());
         }
@@ -1332,7 +1361,12 @@ impl Menu {
         }
         if self.load.visible {
             if self.dirty {
-                self.prepared = Some(self.load.draw(renderer, self.selected, self.pressed)?);
+                self.prepared = Some(self.load.draw(
+                    renderer,
+                    self.selected,
+                    self.pressed,
+                    self.modal_fade.alpha(),
+                )?);
                 self.dirty = false;
             }
             renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
@@ -1352,7 +1386,12 @@ impl Menu {
         }
         if self.profile.visible {
             if self.dirty {
-                self.prepared = Some(self.profile.draw(renderer, self.selected, self.pressed)?);
+                self.prepared = Some(self.profile.draw(
+                    renderer,
+                    self.selected,
+                    self.pressed,
+                    self.modal_fade.alpha(),
+                )?);
                 self.dirty = false;
             }
             renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
@@ -1503,14 +1542,19 @@ impl Menu {
                     );
                 }
             }
-            let mut draws: Vec<_> = self
-                .assets
-                .base
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !self.single_mode || *i < 4 || *i == 6)
-                .map(|(_, s)| s.draw())
-                .collect();
+            let backdrop =
+                modal_frame::Backdrop::new(&self.assets.base[..4], self.modal_fade.alpha());
+            let mut draws = backdrop.draws();
+            // 495730 paints these images after the bound model; they do not
+            // inherit its descriptor alpha.
+            draws.extend(
+                self.assets
+                    .base
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i >= 4 && (!self.single_mode || *i == 6))
+                    .map(|(_, s)| s.draw()),
+            );
             draws.push(buttons.draw());
             draws.extend(self.assets.fonts.iter().map(Surface::draw));
             if self.pending.is_some() {

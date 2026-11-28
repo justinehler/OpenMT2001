@@ -430,6 +430,7 @@ impl Route {
         renderer: &Renderer,
         p: Option<[f32; 2]>,
         pressed: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         if let Some(r) = self.roster.as_ref().filter(|r| r.visible) {
             return self.roster_panel.draw(
@@ -446,6 +447,7 @@ impl Route {
                 pressed,
                 [&self.metadata[0], &self.metadata[1]],
                 |b| encode(&self.map, b),
+                panel_alpha,
             );
         }
         self.setup_panel.draw(
@@ -457,6 +459,7 @@ impl Route {
                 Some(PointerTarget::Setup(a)) => Some(a),
                 _ => None,
             },
+            panel_alpha,
         )
     }
 }

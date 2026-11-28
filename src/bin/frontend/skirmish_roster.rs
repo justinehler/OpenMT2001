@@ -371,6 +371,7 @@ impl RosterPanel {
         out.push(s);
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)] // Shared roster presentation plus parent descriptor alpha.
     pub fn draw(
         &self,
         state: &State,
@@ -379,6 +380,7 @@ impl RosterPanel {
         pressed: bool,
         metadata: [&[u8]; 2],
         encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         self.draw_rows(
             renderer,
@@ -396,6 +398,7 @@ impl RosterPanel {
                 closed: [false; 6],
                 details: &[],
             },
+            panel_alpha,
         )
     }
     #[allow(clippy::too_many_arguments)] // Shared font assets and independent browser presentation.
@@ -492,10 +495,12 @@ impl RosterPanel {
         metadata: [&[u8]; 2],
         mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
         view: Presentation<'_>,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         let mut out = vec![];
         if view.visible {
             out = self.base.clone();
+            crate::menu::modal_frame::set_alpha(&mut out, panel_alpha);
             let mut shapes = Surface::solid();
             let mut images = vec![];
             let mut pages = self
@@ -795,7 +800,7 @@ mod tests {
         #[cfg(feature = "capture")]
         {
             let draw = panel
-                .draw(&state, &renderer, None, false, metadata, encode)
+                .draw(&state, &renderer, None, false, metadata, encode, 255)
                 .unwrap();
             crate::capture_test::capture_standalone(
                 &renderer,
@@ -833,7 +838,7 @@ mod tests {
         #[cfg(feature = "capture")]
         {
             let draw = panel
-                .draw(&state, &renderer, Some(25), false, metadata, encode)
+                .draw(&state, &renderer, Some(25), false, metadata, encode, 255)
                 .unwrap();
             crate::capture_test::capture_standalone(
                 &renderer,

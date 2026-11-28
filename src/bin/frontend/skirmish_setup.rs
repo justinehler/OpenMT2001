@@ -985,8 +985,11 @@ impl SetupPanel {
         pointer: Option<[f32; 2]>,
         pressed: bool,
         keyboard: Option<Action>,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
-        let out = self.surfaces(state, pointer, pressed, keyboard)?;
+        let mut out = self.surfaces(state, pointer, pressed, keyboard)?;
+        let model_count = if state.visible { self.base.len() } else { 0 };
+        crate::menu::modal_frame::set_alpha(&mut out[..model_count], panel_alpha);
         renderer.prepare(
             &out.iter().map(Surface::draw).collect::<Vec<_>>(),
             [
@@ -1348,7 +1351,9 @@ mod tests {
                 descriptor.backends = wgpu::Backends::DX12;
             }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            let scene = panel.draw(&state, &renderer, None, false, None).unwrap();
+            let scene = panel
+                .draw(&state, &renderer, None, false, None, 255)
+                .unwrap();
             crate::capture_test::capture_standalone(
                 &renderer,
                 &scene,
@@ -1360,7 +1365,14 @@ mod tests {
                 .keyboard_activate(&mut state, Action::MapRow(24), &mut |_| Ok(3))
                 .unwrap();
             let selected_scene = panel
-                .draw(&state, &renderer, None, false, Some(Action::MapRow(24)))
+                .draw(
+                    &state,
+                    &renderer,
+                    None,
+                    false,
+                    Some(Action::MapRow(24)),
+                    255,
+                )
                 .unwrap();
             crate::capture_test::capture_standalone(
                 &renderer,
@@ -1368,7 +1380,9 @@ mod tests {
                 "work/frontend/skirmish-map-selected.png",
             );
             state.set_maps(vec![], None).unwrap();
-            let empty_scene = panel.draw(&state, &renderer, None, false, None).unwrap();
+            let empty_scene = panel
+                .draw(&state, &renderer, None, false, None, 255)
+                .unwrap();
             crate::capture_test::capture_standalone(
                 &renderer,
                 &empty_scene,
