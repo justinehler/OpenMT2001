@@ -997,7 +997,7 @@ pub struct State {
     preview_draws: usize,
     preview_failure: Option<String>,
     preview_phase: Option<u32>,
-    pub pending: Option<mpsc::Receiver<crate::fresh_city::BuildReply>>,
+    pub pending: Option<mpsc::Receiver<openmt2001::session::BuildReply>>,
     placement_choices_pending: bool,
     pub placement_pending: Option<mpsc::Receiver<crate::build_panel::PlacementReply>>,
     pub quote_request: Option<Request>,

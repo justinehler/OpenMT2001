@@ -128,7 +128,7 @@ pub struct Inputs {
 }
 impl Inputs {
     pub fn capture(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         tables: Arc<Tables>,
     ) -> Result<Self, String> {
         let world = &session.world;
@@ -275,7 +275,7 @@ pub struct Writeback {
     pub active: [u8; 600],
 }
 impl Writeback {
-    pub fn commit(self, session: &mut crate::fresh_city::Session<'_>) -> Result<(), String> {
+    pub fn commit(self, session: &mut openmt2001::session::Session<'_>) -> Result<(), String> {
         let current = session
             .roster
             .manager

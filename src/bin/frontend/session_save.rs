@@ -34,7 +34,7 @@ mod tests;
 // The moved module's imports, for its tests' `use super::*`.
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::fresh_city::Session;
+use openmt2001::session::Session;
 #[cfg(test)]
 #[allow(unused_imports)]
 use openmt2001::{

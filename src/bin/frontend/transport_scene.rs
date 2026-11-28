@@ -149,7 +149,7 @@ pub struct Layer {
 
 impl Layer {
     pub fn from_resources(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         suncols: &[u8],
         resources: &Resources,
         auxiliaries: Vec<[u8; 284]>,

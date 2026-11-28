@@ -20,7 +20,7 @@ pub struct Notice {
 }
 impl Notice {
     pub fn from_session(
-        session: &crate::fresh_city::Session<'_>,
+        session: &openmt2001::session::Session<'_>,
         seconds: Option<i32>,
     ) -> Result<Option<Self>, String> {
         let presentation = &session.world.city.auction.presentation;

@@ -2221,7 +2221,7 @@ mod tests {
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
                 use crate::business_edit::{Action, Target, edit};
-                use crate::fresh_city::{
+                use openmt2001::session::{
                     CommandAssets, Inputs, Policy, Session, character_names, load_era_styles,
                 };
                 let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();

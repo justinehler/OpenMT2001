@@ -23,7 +23,9 @@ pub struct Participant {
     pub winner: bool,
 }
 
-pub fn participants(session: &crate::fresh_city::Session<'_>) -> Result<Vec<Participant>, String> {
+pub fn participants(
+    session: &openmt2001::session::Session<'_>,
+) -> Result<Vec<Participant>, String> {
     let record = &session.world.city.auction.controller.record;
     let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
     session

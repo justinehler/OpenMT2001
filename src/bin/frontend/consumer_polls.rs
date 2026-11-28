@@ -112,8 +112,8 @@ impl Poll {
 mod tests {
     use super::*;
     fn submit_legal_business(
-        session: &mut crate::fresh_city::Session<'_>,
-        assets: &crate::fresh_city::CommandAssets<'_, '_>,
+        session: &mut openmt2001::session::Session<'_>,
+        assets: &openmt2001::session::CommandAssets<'_, '_>,
         business: u32,
         excluded: Option<i32>,
     ) -> i32 {
@@ -211,7 +211,7 @@ mod tests {
     #[ignore = "requires original assets; naturally housed live respondents and retained daily continuation"]
     fn naturally_housed_live_polls() {
         std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-            use crate::fresh_city::{Session, Inputs, Policy, CommandAssets, character_names, load_era_styles};
+            use openmt2001::session::{Session, Inputs, Policy, CommandAssets, character_names, load_era_styles};
             use std::{fs, path::Path};
             let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
