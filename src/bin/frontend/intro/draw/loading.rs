@@ -76,6 +76,11 @@ impl Intro {
                         scene.draws.push(self.assets.city_pulse.empty_draw());
                         index
                     });
+                    let smoke_draw = retained_session.as_ref().map(|_| {
+                        let index = scene.draws.len();
+                        scene.draws.push(crate::chimney_smoke_scene::empty(&self.assets.dust));
+                        index
+                    });
                     let draws = scene.draws.iter().map(|d| d.borrowed()).collect::<Vec<_>>();
                     let profile_prepare = std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS")
                         .map(|_| Instant::now());
@@ -214,6 +219,7 @@ impl Intro {
                         self.assets.transport_audio.clone());
                     if let Some(process)=&self.process_frontend {transport_audio_player.bind_audio(process.borrow().audio.clone());}
                     else {transport_audio_player.set_level(self.audio_levels.effects);}
+                    transport_audio_player.set_listener(inspection_camera.eye, inspection_camera.target);
                     let mut gameplay_sound_player = crate::gameplay_sound::Player::new(
                         self.assets.gameplay_sound.clone());
                     if let Some(process)=&self.process_frontend {gameplay_sound_player.bind_audio(process.borrow().audio.clone());}
@@ -273,6 +279,8 @@ impl Intro {
                         detail_visibility,
                         pulse_draw,
                         pulse_state: None,
+                        smoke_draw,
+                        smoke_state: None,
                         status_pending: None,
                         environment_pending: None,
                         environment_tick: loaded.logic_tick.unwrap_or(0),
@@ -504,6 +512,7 @@ impl Intro {
                                 view.save_delete_pending = previous.save_delete_pending.take();
                                 view.settings_menu = std::mem::take(&mut previous.settings_menu);
                                 view.pulse_state = previous.pulse_state.take();
+                                view.smoke_state = previous.smoke_state.take();
                                 view.status_pending = previous.status_pending.take();
                                 view.last_status_query = previous.last_status_query;
                                 view.snapshot_tick =

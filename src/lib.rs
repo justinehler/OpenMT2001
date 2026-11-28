@@ -12,6 +12,7 @@ pub mod business_report;
 #[cfg(feature = "lua4")]
 pub mod campaign_store;
 pub mod category_reset;
+pub mod chimney_smoke;
 pub mod city_structures;
 pub mod clock;
 pub mod compatibility;
@@ -149,6 +150,10 @@ pub mod startup_settings;
 
 #[cfg(feature = "lua4")]
 pub mod level_startup;
+#[cfg(feature = "lua4")]
+pub mod session;
+#[cfg(feature = "lua4")]
+pub mod session_save;
 
 pub mod category_ownership;
 #[cfg(feature = "lua4")]

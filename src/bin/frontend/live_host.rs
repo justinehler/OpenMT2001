@@ -24,6 +24,7 @@ pub struct Status {
     pub cash_arrow: crate::cash_arrow::State,
     pub window_texture: Option<openmt2001::window_texture::Publication>,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
+    pub chimney_smoke: openmt2001::chimney_smoke::Smoke,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
@@ -1494,6 +1495,7 @@ impl Host {
             cash_arrow: self.cash_arrow,
             window_texture: session.window_texture.pending(),
             pulse_lights: session.pulse_lights.clone(),
+            chimney_smoke: session.chimney_smoke.clone(),
             demolition_points: session.demolition_points.clone(),
             stats,
             comparison: self.comparison.as_ref().map(|state| state.snapshot.clone()),
@@ -2681,7 +2683,7 @@ impl Host {
                     let distance = camera.into_iter().zip(position)
                         .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
                     crate::transport_audio::submit(&transport_audio,
-                        crate::transport_audio::Operation::Environment { call, distance })?;
+                        crate::transport_audio::Operation::Environment { call, distance, position })?;
                     Ok(0)
                 }
                 Event::Command(openmt2001::live_commands::Event::Construction(

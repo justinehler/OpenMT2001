@@ -201,6 +201,7 @@ impl Intro {
                             comparison.apply_live(snapshot);
                         }
                         view.pulse_state = Some(status.pulse_lights.clone());
+                        view.smoke_state = Some(status.chimney_smoke.clone());
                         view.time_panel
                             .update(&self.assets.time_panel, &self.renderer, &status)?;
                         view.cash_arrow.update(

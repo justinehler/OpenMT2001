@@ -78,6 +78,16 @@ fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]
 }
 impl Route {
+    pub(crate) fn apply_board(
+        &mut self,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        strings: &[Vec<u8>],
+    ) -> Result<(), String> {
+        crate::board_selection::overlay(&mut self.strings, board)?;
+        self.setup_panel.apply_board_language(strings)?;
+        self.roster_panel.apply_board(board)
+    }
+
     pub fn new(
         index: &openmt2001::archive::ArchiveIndex,
         archive: &[u8],

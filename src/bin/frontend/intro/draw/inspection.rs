@@ -467,6 +467,17 @@ impl Intro {
                     &mut view.scene,
                     &mut view.prepared,
                 )?;
+                update_city_smoke(
+                    &self.renderer,
+                    (
+                        view.smoke_draw,
+                        view.smoke_state.as_ref(),
+                        view.settings_menu.graphics.detail,
+                    ),
+                    view.camera,
+                    &mut view.scene,
+                    &mut view.prepared,
+                )?;
                 self.renderer
                     .draw_prepared(&self.color_view, &self.depth_view, &view.prepared);
                 if view.dust.active && view.dust.prepared.is_some() {

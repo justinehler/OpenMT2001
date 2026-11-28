@@ -1,6 +1,6 @@
 //! Human event-card controls against the same retained roster, deck and command queue.
 use super::{CommandAssets, Session};
-use openmt2001::{
+use crate::{
     event_cards::{self, human, lifecycle},
     live_commands, player_messages,
 };
@@ -22,10 +22,7 @@ impl Session<'_> {
         action: Action,
         assets: &CommandAssets<'_, '_>,
         network: [bool; 2],
-        mut presentation: impl FnMut(
-            human::Call,
-            &openmt2001::player_manager::Player,
-        ) -> Result<(), String>,
+        mut presentation: impl FnMut(human::Call, &crate::player_manager::Player) -> Result<(), String>,
     ) -> Result<(), String> {
         let current = self.roster.status.current_player;
         let slot = self
@@ -71,8 +68,13 @@ impl Session<'_> {
             network,
             prior: [0; 48],
         };
-        let mut call = |call, player: &mut openmt2001::player_manager::Player| match call {
+        let mut outgoing_cards = Vec::new();
+        let mut call = |call, player: &mut crate::player_manager::Player| match call {
             human::Call::Submit(command) => {
+                if self.connected.is_some() {
+                    outgoing_cards.push(command);
+                    return Ok(());
+                }
                 if network[0] && !network[1] {
                     return Err("human card command requires network transport".into());
                 }
@@ -137,7 +139,7 @@ impl Session<'_> {
             _ => presentation(call, player),
         };
         let validate =
-            |p: &mut openmt2001::player_manager::Player, a| targets.validate(p, a, assets.image);
+            |p: &mut crate::player_manager::Player, a| targets.validate(p, a, assets.image);
         let result = match action {
             Action::Open => human::open(player, reference, assets.image, validate, &mut call),
             Action::Button { event, button } => human::button(
@@ -167,12 +169,31 @@ impl Session<'_> {
             .map(|_| ()),
         };
         self.allocation_next = arena.next;
-        result
+        result?;
+        if let Some(connection) = &mut self.connected {
+            for command in outgoing_cards {
+                let targets = crate::network::commands::Targets::new(
+                    &self.world.city.buildings,
+                    &self.world.city.ledgers.businesses,
+                    &self.world.city.categories,
+                );
+                connection.commands.submit(
+                    &connection.worker,
+                    live_commands::Command::EventCard(command),
+                    &mut self.live_commands,
+                    &mut self.world.city.categories,
+                    targets,
+                    self.world.clock.timing[0],
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
-#[cfg(test)]
-pub(super) fn exercise(
+/// Test driver (the binary's Session tests); not used by the game.
+#[doc(hidden)]
+pub fn exercise(
     session: &mut Session<'_>,
     assets: &CommandAssets<'_, '_>,
     policy: &mut super::tick::Policy,

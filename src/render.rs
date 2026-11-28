@@ -62,6 +62,8 @@ pub enum SurfaceMode {
     ResultFireworks,
     /// City state4: SRCALPHA/ONE, LESSEQUAL, no depth writes (004b69f0).
     LightHalos,
+    /// Original mode19 smoke: SRCALPHA/INVSRCALPHA, LESSEQUAL, no depth writes.
+    ChimneySmoke,
     /// Original tree state10: two-sided GREATER64 cutout, ONE/ZERO, depth writes and LESSEQUAL.
     TreeFoliage,
     /// Original sun/moon textured quads, state1 with depth disabled.
@@ -152,6 +154,7 @@ pub struct Renderer {
     result_particle_pipeline: wgpu::RenderPipeline,
     result_firework_pipeline: wgpu::RenderPipeline,
     halo_pipeline: wgpu::RenderPipeline,
+    chimney_smoke_pipeline: wgpu::RenderPipeline,
     tree_foliage_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
@@ -317,6 +320,7 @@ impl Renderer {
                             | SurfaceMode::ResultParticles
                             | SurfaceMode::ResultFireworks
                             | SurfaceMode::LightHalos
+                            | SurfaceMode::ChimneySmoke
                             | SurfaceMode::Celestial
                             | SurfaceMode::Overlay
                     )),
@@ -338,6 +342,7 @@ impl Renderer {
                                     | SurfaceMode::TreeFoliage
                                     | SurfaceMode::ResultFireworks
                                     | SurfaceMode::LightHalos
+                                    | SurfaceMode::ChimneySmoke
                             )
                         {
                             wgpu::CompareFunction::LessEqual
@@ -363,6 +368,7 @@ impl Renderer {
                         | SurfaceMode::StaticLit
                         | SurfaceMode::StaticOpaque => "static_fragment",
                         SurfaceMode::TreeFoliage => "tree_fragment",
+                        SurfaceMode::ChimneySmoke => "smoke_fragment",
                         SurfaceMode::FacadeBlend => "facade_fragment",
                         SurfaceMode::Clouds => "cloud_fragment",
                         SurfaceMode::Stars
@@ -396,6 +402,7 @@ impl Renderer {
         let result_particle_pipeline = make_pipeline(SurfaceMode::ResultParticles);
         let result_firework_pipeline = make_pipeline(SurfaceMode::ResultFireworks);
         let halo_pipeline = make_pipeline(SurfaceMode::LightHalos);
+        let chimney_smoke_pipeline = make_pipeline(SurfaceMode::ChimneySmoke);
         let tree_foliage_pipeline = make_pipeline(SurfaceMode::TreeFoliage);
         let celestial_pipeline = make_pipeline(SurfaceMode::Celestial);
         let cloud_pipeline = make_pipeline(SurfaceMode::Clouds);
@@ -424,6 +431,7 @@ impl Renderer {
             result_particle_pipeline,
             result_firework_pipeline,
             halo_pipeline,
+            chimney_smoke_pipeline,
             tree_foliage_pipeline,
             celestial_pipeline,
             cloud_pipeline,
@@ -1222,6 +1230,7 @@ impl Renderer {
             SurfaceMode::ResultParticles => &self.result_particle_pipeline,
             SurfaceMode::ResultFireworks => &self.result_firework_pipeline,
             SurfaceMode::LightHalos => &self.halo_pipeline,
+            SurfaceMode::ChimneySmoke => &self.chimney_smoke_pipeline,
             SurfaceMode::TreeFoliage => &self.tree_foliage_pipeline,
             SurfaceMode::Celestial => &self.celestial_pipeline,
             SurfaceMode::Clouds => &self.cloud_pipeline,

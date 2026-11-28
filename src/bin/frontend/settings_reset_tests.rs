@@ -48,6 +48,8 @@ fn original_defaults() -> Snapshot {
 
 fn synthetic_assets() -> Assets {
     Assets {
+        boards: Vec::new(),
+        board_pitch: 11.,
         panels: std::array::from_fn(|_| Panel {
             base: Vec::new(),
             regions: (0..35)

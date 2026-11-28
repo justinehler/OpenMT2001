@@ -3,6 +3,7 @@
 //! shared simulation. Source WAVs are read in place from the user's installer.
 pub mod block_audio;
 use crate::audio_bus::effects::{Handle, Request as VoiceRequest};
+use crate::audio_bus::spatial::{Emitter, Listener};
 use openmt2001::{
     pe::PeImage,
     traffic::{RouteSound, scene::EnvironmentCall},
@@ -36,6 +37,7 @@ pub enum Operation {
     Environment {
         call: EnvironmentCall,
         distance: f32,
+        position: [f32; 3],
     },
     /// Original 4b0750 keeps the two nearest construction positions per
     /// stage; 4adb10/4afcde present their four sound beds.
@@ -149,6 +151,8 @@ pub fn submit(sender: &Option<mpsc::Sender<Request>>, operation: Operation) -> R
 
 #[derive(Clone)]
 pub struct Assets {
+    /// Startup NO3D inverse (4355de/4aae90); --no-3d selects fallback.
+    pub spatial_enabled: bool,
     train_motion: Vec<f32>,
     train_toot: Vec<f32>,
     road_ambient: Vec<f32>,
@@ -286,6 +290,7 @@ impl Assets {
         }
         let blocks = directory.join("Block_Sounds");
         Ok(Self {
+            spatial_enabled: true,
             train_motion: pcm16(&directory.join(checked_name(
                 image,
                 0x54513c,
@@ -367,6 +372,7 @@ pub struct Player {
     pending_ship_random: u32,
     interface_mode: u32,
     city: Option<Box<CityInputs>>,
+    listener: Listener,
 }
 
 impl Player {
@@ -394,7 +400,17 @@ impl Player {
             pending_ship_random: 0,
             interface_mode: 0,
             city: None,
+            listener: Listener::default(),
         }
+    }
+
+    pub fn set_listener(&mut self, eye: [f32; 3], target: [f32; 3]) {
+        self.listener = Listener::camera(eye, target);
+        self.audio.set_listener(self.listener);
+    }
+
+    pub fn listener_position(&self) -> [f32; 3] {
+        self.listener.position
     }
 
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
@@ -430,7 +446,7 @@ impl Player {
         gain: f32,
     ) -> Option<Handle> {
         let mixer = self.mixer()?.clone();
-        self.audio.effect(
+        self.audio.effect_with_channels(
             &mixer,
             VoiceRequest {
                 name,
@@ -440,6 +456,7 @@ impl Player {
             },
             samples,
             gain,
+            self.bus.output_channels(),
         )
     }
 
@@ -458,7 +475,11 @@ impl Player {
                 nearest,
             } => self.road(reciprocal_sum, nearest),
             Operation::ResidentCrowd(weight) => self.crowd(weight),
-            Operation::Environment { call, distance } => self.environment(call, distance),
+            Operation::Environment {
+                call,
+                distance,
+                position,
+            } => self.environment(call, distance, position),
             Operation::Construction(groups) => {
                 if let Some(inputs) = &mut self.city {
                     inputs.construction = groups;
@@ -478,8 +499,9 @@ impl Player {
         }
     }
 
-    /// Original 4afbf0, called once per rendered iteration before camera
-    /// interpolation (4b9c7e/4b9c94), independently of simulation scheduling.
+    /// Original 4afbf0 consumes the camera before interpolation
+    /// (4b9c7e/4b9c94). Service once per draw with that captured pose,
+    /// independently of simulation scheduling.
     pub fn service_frame(&mut self, camera: [f32; 3]) {
         self.audio.service_effects();
         let Some(mut inputs) = self.city.take() else {
@@ -601,7 +623,16 @@ impl Player {
                         );
                     }
                     if let Some(sink) = &self.block_sinks[category] {
-                        sink.set_volume(self.audio.source_gain(source.level(snapshot.camera)));
+                        if self.assets.spatial_enabled {
+                            sink.set_spatial(Emitter {
+                                position: source.position,
+                                min_distance: 80.,
+                                max_distance: 800.,
+                            });
+                            sink.set_volume(self.audio.source_gain(100));
+                        } else {
+                            sink.set_volume(self.audio.source_gain(source.level(snapshot.camera)));
+                        }
                     }
                 }
             }
@@ -609,8 +640,11 @@ impl Player {
     }
 
     fn construction(&mut self, groups: [[Option<ConstructionSource>; 2]; 4]) {
-        // The current backend is nonspatial. Keep its traversal separate:
-        // 4ad8b0's spatial branch visits both ranked sources instead.
+        if self.assets.spatial_enabled {
+            self.construction_spatial(groups);
+            return;
+        }
+        // 4ad8b0's fallback returns after its first admitted source.
         let needs_mixer = groups.iter().enumerate().any(|(group, candidates)| {
             candidates
                 .iter()
@@ -628,6 +662,50 @@ impl Player {
             None
         };
         self.construction_fallback(groups, mixer.as_ref());
+    }
+
+    // 4ad8b0: both ranked sources, 80/250 range and source level 70.
+    fn construction_spatial(&mut self, groups: [[Option<ConstructionSource>; 2]; 4]) {
+        for (group, candidates) in groups.into_iter().enumerate() {
+            for (slot, source) in candidates.into_iter().enumerate() {
+                let index = group * 2 + slot;
+                let Some(source) = source else {
+                    stop(&mut self.construction[index]);
+                    continue;
+                };
+                if source.distance > 250. || !source.distance.is_finite() {
+                    if let Some(sink) = &self.construction[index] {
+                        sink.set_volume(0.);
+                    }
+                    continue;
+                }
+                if self.construction[index].is_none() {
+                    let (name, samples) = match group {
+                        0 | 1 => (
+                            "ambi_any_altbuild_scaffold.wav",
+                            self.assets.construction_scaffold.clone(),
+                        ),
+                        2 => (
+                            "rand_any_altbuild_saw.wav",
+                            self.assets.construction_saw.clone(),
+                        ),
+                        _ => (
+                            "rand_any_altbuild_hammer002.wav",
+                            self.assets.construction_hammer.clone(),
+                        ),
+                    };
+                    self.construction[index] = self.voice(name, &samples, false, true, false, 0.);
+                }
+                if let Some(sink) = &self.construction[index] {
+                    sink.set_spatial(Emitter {
+                        position: source.position,
+                        min_distance: 80.,
+                        max_distance: 250.,
+                    });
+                    sink.set_volume(self.audio.source_gain(70));
+                }
+            }
+        }
     }
 
     fn construction_fallback(
@@ -918,7 +996,7 @@ impl Player {
         }
     }
 
-    fn environment(&mut self, call: EnvironmentCall, distance: f32) {
+    fn environment(&mut self, call: EnvironmentCall, distance: f32, position: [f32; 3]) {
         if !distance.is_finite() {
             return;
         }
@@ -931,10 +1009,24 @@ impl Player {
                 }
                 // Fallback 4ade96 always issues the unique cached request
                 // and stores its result, even when uniqueness returns none.
-                let samples = self.assets.ship_engine.clone();
-                self.ship_engine = self.voice("shipengine.wav", &samples, false, true, true, 0.);
-                let gain = self.audio.source_gain(positional_level(distance, 800.));
+                if !self.assets.spatial_enabled || self.ship_engine.is_none() {
+                    let samples = self.assets.ship_engine.clone();
+                    self.ship_engine =
+                        self.voice("shipengine.wav", &samples, false, true, true, 0.);
+                }
+                let gain = self.audio.source_gain(if self.assets.spatial_enabled {
+                    100
+                } else {
+                    positional_level(distance, 800.)
+                });
                 if let Some(sink) = &self.ship_engine {
+                    if self.assets.spatial_enabled {
+                        sink.set_spatial(Emitter {
+                            position,
+                            min_distance: 80.,
+                            max_distance: 300.,
+                        });
+                    }
                     sink.set_volume(gain);
                 }
                 // 4adee2/4ae072 share the park sound manager RNG, including
@@ -961,6 +1053,13 @@ impl Player {
                     self.ship_horn = self.voice(name, &samples, true, false, true, 0.);
                 }
                 if let Some(sink) = &self.ship_horn {
+                    if self.assets.spatial_enabled {
+                        sink.set_spatial(Emitter {
+                            position,
+                            min_distance: 170.,
+                            max_distance: 900.,
+                        });
+                    }
                     sink.set_volume(gain);
                 }
             }
@@ -968,6 +1067,12 @@ impl Player {
                 if matches!(self.interface_mode, 1 | 3) {
                     // 4ae2c9..4ae319/4ae731 precedes cue dispatch. The end
                     // slot is separate and survives this cleanup.
+                    stop(&mut self.crane_start);
+                    stop(&mut self.crane_lift);
+                    stop(&mut self.crane_loop);
+                    return;
+                }
+                if self.assets.spatial_enabled && distance > 300. {
                     stop(&mut self.crane_start);
                     stop(&mut self.crane_lift);
                     stop(&mut self.crane_loop);
@@ -981,7 +1086,7 @@ impl Player {
                     stop(&mut self.crane_loop);
                     return;
                 }
-                if distance >= 300. {
+                if !self.assets.spatial_enabled && distance >= 300. {
                     return;
                 }
                 let (has_handle, samples, looping) = match id {
@@ -1008,6 +1113,21 @@ impl Player {
                     _ => return,
                 };
                 if has_handle {
+                    if self.assets.spatial_enabled && matches!(id, 27 | 28) {
+                        let handle = if id == 27 {
+                            &self.crane_start
+                        } else {
+                            &self.crane_end
+                        };
+                        if let Some(sink) = handle {
+                            sink.set_spatial(Emitter {
+                                position,
+                                min_distance: 80.,
+                                max_distance: 200.,
+                            });
+                            sink.set_volume(self.audio.source_gain(70));
+                        }
+                    }
                     return;
                 }
                 let name = match id {
@@ -1017,6 +1137,16 @@ impl Player {
                     _ => "craneloop.wav",
                 };
                 let sink = self.voice(name, &samples, false, looping, true, 0.);
+                if self.assets.spatial_enabled
+                    && let Some(sink) = &sink
+                {
+                    sink.set_spatial(Emitter {
+                        position,
+                        min_distance: 80.,
+                        max_distance: 200.,
+                    });
+                    sink.set_volume(self.audio.source_gain(70));
+                }
                 // Nonspatial 4ae2b0 creates at source0 and returns. Only the
                 // separate 4ae1f0 Refresh path applies positional level/factor.
                 match id {
@@ -1028,6 +1158,9 @@ impl Player {
                 }
             }
             EnvironmentCall::Refresh => {
+                if self.assets.spatial_enabled {
+                    return;
+                }
                 if distance >= 300. {
                     // Native 4ae73d releases +140/+144/+148; +14c is not
                     // visited on this branch.
@@ -1208,6 +1341,7 @@ mod tests {
     fn original_audio_reset_silences_retained_city_beds() {
         let samples = vec![0.5; 64];
         let assets = Assets {
+            spatial_enabled: false,
             train_motion: samples.clone(),
             train_toot: samples.clone(),
             road_ambient: samples.clone(),
@@ -1326,6 +1460,7 @@ mod tests {
         let (mixer, _output) = rodio::mixer::mixer(1, 22_050);
         let samples = vec![0.5; 64];
         let mut player = Player::new(Assets {
+            spatial_enabled: false,
             train_motion: samples.clone(),
             train_toot: samples.clone(),
             road_ambient: samples.clone(),

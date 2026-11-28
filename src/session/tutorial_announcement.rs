@@ -1,16 +1,16 @@
 //! Synchronous native48dc40 delivery within auction and business completion.
-use openmt2001::{building_pool::GeometryBinding, level_script, level_startup, live_commands};
+use crate::{building_pool::GeometryBinding, level_script, level_startup, live_commands};
 use std::cell::RefCell;
 
-pub(super) struct Bridge<'a, 'hooks, 'context, 'image> {
+pub struct Bridge<'a, 'hooks, 'context, 'image> {
     pub scripts: &'a mut level_startup::Scripts,
     pub hooks: &'a RefCell<&'hooks mut super::Hooks>,
     pub context: &'a mut level_script::Context<'context, 'image>,
 }
-pub(super) struct PartsBridge<'a, 'hooks, 'context, 'image> {
-    pub runtime: &'a mut openmt2001::lua4::Runtime,
+pub struct PartsBridge<'a, 'hooks, 'context, 'image> {
+    pub runtime: &'a mut crate::lua4::Runtime,
     pub bindings: &'a mut level_script::Bindings,
-    pub events: &'a mut openmt2001::script_events::Events,
+    pub events: &'a mut crate::script_events::Events,
     pub hooks: &'a RefCell<&'hooks mut super::Hooks>,
     pub context: &'a mut level_script::Context<'context, 'image>,
 }
@@ -36,7 +36,7 @@ impl Bridge<'_, '_, '_, '_> {
         control: u32,
         state: &mut level_script::State<'_>,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         PartsBridge {
             runtime: &mut self.scripts.runtime,
@@ -54,7 +54,7 @@ impl PartsBridge<'_, '_, '_, '_> {
         control: u32,
         state: &mut level_script::State<'_>,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         let mut hooks = self.hooks.borrow_mut();
         let active = active_dismissal(&hooks);
@@ -109,9 +109,9 @@ impl live_commands::TutorialAnnouncement for PartsBridge<'_, '_, '_, '_> {
     fn start(
         &mut self,
         state: &mut level_script::State<'_>,
-        _presentation: &openmt2001::ai_messages::offers::auction::admission::Presentation,
+        _presentation: &crate::ai_messages::offers::auction::admission::Presentation,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         self.dispatch_control(61, state, geometry, utilities)
     }
@@ -120,7 +120,7 @@ impl live_commands::TutorialAnnouncement for PartsBridge<'_, '_, '_, '_> {
         control: u32,
         state: &mut level_script::State<'_>,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         self.dispatch_control(control, state, geometry, utilities)
     }
@@ -130,9 +130,9 @@ impl live_commands::TutorialAnnouncement for Bridge<'_, '_, '_, '_> {
     fn start(
         &mut self,
         state: &mut level_script::State<'_>,
-        _presentation: &openmt2001::ai_messages::offers::auction::admission::Presentation,
+        _presentation: &crate::ai_messages::offers::auction::admission::Presentation,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         self.dispatch_control(61, state, geometry, utilities)
     }
@@ -141,7 +141,7 @@ impl live_commands::TutorialAnnouncement for Bridge<'_, '_, '_, '_> {
         control: u32,
         state: &mut level_script::State<'_>,
         geometry: &mut dyn GeometryBinding,
-        utilities: &mut openmt2001::economy::Utilities,
+        utilities: &mut crate::economy::Utilities,
     ) -> Result<(), String> {
         self.dispatch_control(control, state, geometry, utilities)
     }

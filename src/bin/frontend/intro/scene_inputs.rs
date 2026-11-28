@@ -1112,6 +1112,7 @@ impl SceneInputs {
             self.process_runtime.clone(),
             dispatch,
         )?;
+        session.chimney_smoke.bind_archive(&index, &self.archive)?;
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         Ok((loaded, session))
     }
@@ -1232,6 +1233,7 @@ impl SceneInputs {
             self.process_runtime.clone(),
             dispatch,
         )?;
+        session.chimney_smoke.bind_archive(&index, &self.archive)?;
         eprintln!(
             "Fresh city preview: {}, difficulty {difficulty}, {} residents, {} buildings; host seed{seed} / auxiliary prior bytes zero; player roster initialized; live worker enabled",
             scenario_token,
@@ -1354,6 +1356,7 @@ impl SceneInputs {
             self.process_runtime.clone(),
             dispatch,
         )?;
+        session.chimney_smoke.bind_archive(&index, &self.archive)?;
         // Native restore success4bcd74/7b precedes the explicit modern extension.
         // Input/wrapper transition is published only by the later real focus
         // prefix; no reset or synthesized acquisition occurs on this worker.

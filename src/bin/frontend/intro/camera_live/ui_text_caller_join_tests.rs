@@ -46,6 +46,8 @@ fn inspection(assets: &Assets) -> Inspection {
     }
     Inspection {
         tutorial_start: Default::default(),
+        smoke_draw: None,
+        smoke_state: None,
         music_admission: None, // explicit isolated fixture, no composed focus Route
         camera_producer: None,
         camera_ready: None,

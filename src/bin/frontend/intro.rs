@@ -132,6 +132,7 @@ pub struct Paths {
     pub save_root: PathBuf,
 }
 pub struct Assets {
+    board_name: crate::board_selection::Name,
     //Process lifetime: moved into Intro, retained across city retirement.
     pub(crate) primary_products: camera_live::main_construction::CompletedMainLayout,
     pub(crate) ui_images: camera_live::process_images::Images,
@@ -172,6 +173,9 @@ pub struct Assets {
     strategic_scene: crate::strategic_scene::Assets,
 }
 impl Assets {
+    pub(crate) fn set_spatial_audio(&mut self, enabled: bool) {
+        self.transport_audio.spatial_enabled = enabled;
+    }
     pub fn load(paths: Paths) -> Result<Self, String> {
         Self::load_with_source_options(paths, "")
     }
@@ -441,6 +445,7 @@ impl Assets {
             maps,
         });
         Ok(Self {
+            board_name: Default::default(),
             process_runtime,
             activity,
             primary_products,
@@ -482,6 +487,7 @@ impl Assets {
     }
 }
 
+#[derive(Clone)]
 struct SceneInputs {
     process_runtime: Option<crate::live_host::process_runtime::Handle>,
     compatibility: crate::compatibility::Mode,
@@ -1126,6 +1132,8 @@ struct Inspection {
     settings_menu: crate::settings_menu::View,
     pulse_draw: Option<usize>,
     pulse_state: Option<openmt2001::pulse_lights::PulseLights>,
+    smoke_draw: Option<usize>,
+    smoke_state: Option<openmt2001::chimney_smoke::Smoke>,
     status_pending: Option<mpsc::Receiver<crate::live_host::Status>>,
     environment_pending: Option<mpsc::Receiver<crate::time_panel::ClockSample>>,
     environment_tick: u32,
@@ -1229,6 +1237,21 @@ fn update_city_pulse(
     }
     Ok(())
 }
+fn update_city_smoke(
+    renderer: &Renderer,
+    submission: (Option<usize>, Option<&openmt2001::chimney_smoke::Smoke>, u8),
+    camera: CameraSample,
+    scene: &mut Scene,
+    prepared: &mut PreparedScene,
+) -> Result<(), String> {
+    if let (Some(index), Some(state), detail) = submission {
+        let draw = scene.draws.get_mut(index).ok_or("smoke draw missing")?;
+        crate::chimney_smoke_scene::fill(draw, state, detail, camera)?;
+        renderer.update_surface(prepared, index, &draw.borrowed(), scene.camera, None)?;
+    }
+    Ok(())
+}
+
 enum ResultPhase {
     Flyby,
     CutScene,
@@ -1580,7 +1603,8 @@ impl Intro {
             graphics: &mut self.graphics_levels,
             gameplay: &mut self.gameplay_levels,
         }
-        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())
+        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())?;
+        self.sync_board_names()
     }
     /// App invokes this once after EVERY synchronous window-event dispatch,
     /// including inner early returns, before any following OS focus prefix.
@@ -1601,6 +1625,7 @@ impl Intro {
             self.sync_profile_settings()?;
             self.persist_settings();
         }
+        self.sync_board_names()?;
         Ok(())
     }
 
@@ -2427,3 +2452,6 @@ mod process_worker_tests;
 #[cfg(test)]
 #[path = "intro/process_review_tests.rs"]
 pub(crate) mod process_review_tests;
+
+#[path = "intro/board_names.rs"]
+mod board_names;

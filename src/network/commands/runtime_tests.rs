@@ -49,6 +49,7 @@ struct TestSession {
     controls: scheduler::Controls,
     postings: Vec<economy::AccountPosting>,
     applied: Vec<u8>,
+    deck: crate::event_cards::Deck,
 }
 impl TestSession {
     fn new(image: &crate::pe::PeImage<'_>, board: &crate::board::Board) -> Self {
@@ -163,6 +164,7 @@ impl TestSession {
             },
             postings: vec![],
             applied: vec![],
+            deck: crate::event_cards::Deck::new([17, 214013, 2531011]),
         }
     }
     fn tick(&mut self, image: &crate::pe::PeImage<'_>, board: &crate::board::Board) {
@@ -188,7 +190,6 @@ impl TestSession {
             network: [true, false],
             prior: [0; 48],
         };
-        let mut deck = crate::event_cards::Deck::new([0, 0, 0]);
         let mut utilities = economy::Utilities::new([0; 4]);
         let city = &mut self.world.city;
         scheduler::advance(
@@ -203,7 +204,7 @@ impl TestSession {
                         population: &mut self.population,
                         utilities: &mut utilities,
                         board,
-                        event_cards: &mut deck,
+                        event_cards: &mut self.deck,
                         message_context: &mut messages,
                     };
                     let mut clocks = [clock.timing[0], clock.timing[1]];
@@ -215,6 +216,7 @@ impl TestSession {
                             live_commands::Command::SellBusiness(_) => 0x13,
                             live_commands::Command::Takeover(_) => 0x15,
                             live_commands::Command::Terms(_) => 0x18,
+                            live_commands::Command::EventCard(_) => 0x1a,
                             live_commands::Command::PropertyTransfer { .. } => 0x16,
                             _ => 0x0f,
                         });
@@ -249,6 +251,55 @@ impl TestSession {
         .unwrap();
     }
 }
+#[test]
+fn authority_grants_only_when_the_published_ceiling_is_reached() {
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(false);
+    let binding = host.bind_world(1).unwrap();
+    client.bind_world(1).unwrap();
+    let mut authority = Adapter::new(binding, true, 0, vec![Some(0), Some(peer)]).unwrap();
+    let mut queue = live_commands::Queue::default();
+    let mut categories = [[0; 380]; 52];
+    let mut pause = crate::pause::State::default();
+    let mut tasks = crate::timers::startup_tasks([0; 20]);
+    assert_eq!(authority.deadline(), 25);
+    let mut grants = Vec::new();
+    for tick in 0..=101 {
+        let before = authority.deadline();
+        authority
+            .pump(
+                &host,
+                tick,
+                &mut queue,
+                &mut categories,
+                Targets::default(),
+                &mut pause,
+                &mut tasks,
+            )
+            .unwrap();
+        if authority.deadline() != before {
+            grants.push((tick, authority.deadline()));
+        }
+        assert_eq!(authority.deadline(), (tick / 25 + 1) * 25);
+    }
+    assert_eq!(grants, [(25, 50), (50, 75), (75, 100), (100, 125)]);
+    // Unsigned >= also covers a host that has advanced past the old ceiling;
+    // the grant is based on Total, without rounding to a five-tick boundary.
+    authority
+        .pump(
+            &host,
+            127,
+            &mut queue,
+            &mut categories,
+            Targets::default(),
+            &mut pause,
+            &mut tasks,
+        )
+        .unwrap();
+    assert_eq!(authority.deadline(), 152);
+    host.cancellation().cancel();
+    client.cancellation().cancel();
+}
+
 #[test]
 fn two_live_runtimes_apply_exact_property_and_cash_once_at_125_and_pause_same_tasks() {
     let bytes = image_bytes();
@@ -804,6 +855,317 @@ fn ready_building(session: &mut TestSession, id: usize, owner: u8) {
     row[0x2d] = owner;
     row[0x3f] = 1;
     put(row, 0x40, 0x617628 + 7 * 380);
+}
+
+#[test]
+fn event_cards_loopback_apply_once_at_125_with_identical_ledgers_targets_and_rng() {
+    use crate::event_cards::{ai, lifecycle, selection};
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut bytes = image_bytes();
+    put(&mut bytes, 0x134200 + 0x200, 2f32.to_bits());
+    // Invented cards: collect from rivals, promotion, a debit, and an AI credit.
+    for (card, class, amount, effect) in [(0, 0, 7, 1), (1, 2, 2, 6), (2, 0, 3, 7), (3, 0, 5, 0)] {
+        let at = 0x134208 + 0x200 + card * 20;
+        put(&mut bytes, at, class);
+        put(&mut bytes, at + 8, amount);
+        put(&mut bytes, at + 12, effect);
+    }
+    let image = crate::pe::PeImage::parse(&bytes).unwrap();
+    let board = crate::board::Board::from_v14(&image).unwrap();
+    let mut left = TestSession::new(&image, &board);
+    let mut right = TestSession::new(&image, &board);
+    let (host, client, peer) = crate::network::lobby::worker::tests::playing_pair(true);
+    let hb = host
+        .bind_world(left.world.topology.epoch().serial())
+        .unwrap();
+    let cb = client
+        .bind_world(right.world.topology.epoch().serial())
+        .unwrap();
+    let owners = vec![Some(0), Some(peer), None];
+    let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
+    let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    // These sessions start at Total100, within an existing window ending125.
+    authority.admit_deadline(0, 125).unwrap();
+    replica.admit_deadline(0, 125).unwrap();
+    left.controls.network_override = true;
+    for session in [&mut left, &mut right] {
+        let mut player = player_manager::Player {
+            reference: 0x3000,
+            bytes: session.roster.manager.players[0].bytes.clone(),
+            auxiliaries: vec![player_manager::Auxiliary {
+                reference: 0x4000,
+                bytes: [0; 0x30],
+            }],
+        };
+        player.bytes[0x1bc] = 2;
+        put(&mut player.bytes, 0x154, 1);
+        put(&mut player.bytes, 0x21c, 0x4000);
+        put(&mut player.bytes, 0x1b8, 3);
+        let aux = &mut player.auxiliaries[0].bytes;
+        for (at, value) in [
+            (4, 3),
+            (0x14, 0x3000),
+            (0x18, 1),
+            (0x1c, 17),
+            (0x20, 214013),
+            (0x24, 2531011),
+        ] {
+            put(aux, at, value);
+        }
+        session.roster.manager.players.push(player);
+        session
+            .roster
+            .collect_accounts(&mut session.world.city)
+            .unwrap();
+        ready_building(session, 0, 1);
+        put(&mut session.world.city.buildings[0], 0x1c, 0);
+        let business = &mut session.world.city.ledgers.businesses[0];
+        business[0xa] = 1;
+        business[0x21c] = 1;
+        for card in 0..4 {
+            session.deck.draw_specific(card, |_, _| Ok(())).unwrap();
+        }
+    }
+    // Host human and remote human use the same ordinary submission path.
+    for (adapter, worker, session, cards, player) in [
+        (&mut authority, &host, &mut left, vec![0, 1], 0),
+        (&mut replica, &client, &mut right, vec![2], 1),
+    ] {
+        for card in cards {
+            adapter
+                .submit(
+                    worker,
+                    live_commands::Command::EventCard(lifecycle::Command {
+                        card,
+                        player,
+                        target: 0,
+                    }),
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    Targets::default(),
+                    100,
+                )
+                .unwrap();
+        }
+    }
+    // The real AI lifecycle resolves on both peers and resets its registered
+    // auxiliary RNG. Only the authority's resulting command enters the stream.
+    for (adapter, worker, session) in [
+        (&mut authority, &host, &mut left),
+        (&mut replica, &client, &mut right),
+    ] {
+        let city = &mut session.world.city;
+        let references: Vec<_> = session
+            .roster
+            .manager
+            .players
+            .iter()
+            .map(|p| p.reference)
+            .collect();
+        let binding = ai::Bindings {
+            world: selection::World {
+                buildings: &city.buildings,
+                businesses: &city.ledgers.businesses,
+                categories: &city.categories,
+                catalog: &city.catalog.info,
+                products: &city.catalog.products,
+                commodities: &city.commodities.rows,
+                utilities: [1; 4],
+                hour: 6,
+                tick: 0,
+                unselected_building: 0,
+            },
+            targets: lifecycle::Targets {
+                buildings: &city.buildings,
+                businesses: &city.ledgers.businesses,
+                categories: &city.categories,
+                players: &references,
+                nodes: &[],
+            },
+            period: 0,
+            image: &image,
+        };
+        let mut commands = Vec::new();
+        ai::run_update(
+            &mut session.roster.manager.players[2],
+            crate::ai_hourly::UpdateCall::Retire { account: 0x4000 },
+            &binding,
+            |call, _| {
+                if let ai::RuntimeCall::Submit(command) = call {
+                    commands.push(command);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(commands.len(), 1);
+        for command in commands {
+            adapter
+                .submit_ai_card(
+                    worker,
+                    command,
+                    &mut session.queue,
+                    &mut city.categories,
+                    Targets::default(),
+                    100,
+                )
+                .unwrap();
+        }
+        let ai = &session.roster.manager.players[2];
+        let next = 17u32.wrapping_mul(214013).wrapping_add(2531011);
+        assert_eq!(player_manager::word(&ai.auxiliaries[0].bytes, 0x1c), next);
+        assert_eq!(
+            player_manager::word(&ai.auxiliaries[0].bytes, 0),
+            20 + ((next >> 16) & 0x7fff) % 9
+        );
+        assert_eq!(player_manager::word(&ai.bytes, 0x1b8), 0);
+    }
+    assert!(right.queue.snapshot().unwrap().is_empty());
+    assert_eq!(replica.next_request, 1);
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        for (adapter, worker, session) in [
+            (&mut authority, &host, &mut left),
+            (&mut replica, &client, &mut right),
+        ] {
+            adapter
+                .pump(
+                    worker,
+                    100,
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    Targets::default(),
+                    &mut session.world.city.pause,
+                    &mut session.tasks,
+                )
+                .unwrap();
+        }
+        if left.queue.snapshot().unwrap().len() == 4 && right.queue.snapshot().unwrap().len() == 4 {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "card commits did not cross loopback"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!((authority.next_commit, replica.next_enqueued), (4, 4));
+    assert_eq!(replica.next_request, 1); // No commit rebroadcast or AI request.
+    let initial_rng = left.deck.rng;
+    for session in [&mut left, &mut right] {
+        let queued = session.queue.snapshot().unwrap();
+        let cards: Vec<_> = queued
+            .iter()
+            .map(|(_, due, inner, _, command)| {
+                assert_eq!((*due, *inner), (125, 125));
+                let live_commands::Command::EventCard(command) = command else {
+                    panic!()
+                };
+                command.card
+            })
+            .collect();
+        assert_eq!(cards, [0, 1, 3, 2]);
+        while session.world.clock.timing[0] < 124 {
+            session.tick(&image, &board);
+        }
+        assert!(session.applied.is_empty());
+        assert!(
+            session
+                .world
+                .ledgers
+                .players
+                .iter()
+                .all(|p| p.cash == 10000.)
+        );
+        assert_eq!(session.world.ledgers.businesses[0][0x74], 0);
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 125);
+        assert_eq!(session.applied, [0x1a; 4]);
+        assert_eq!(
+            session
+                .world
+                .ledgers
+                .players
+                .iter()
+                .map(|p| p.cash)
+                .collect::<Vec<_>>(),
+            [10028., 9980., 9996.]
+        );
+        assert_eq!(session.world.ledgers.businesses[0][0x74], 24);
+        assert_eq!(
+            player_manager::word(&session.world.ledgers.businesses[0], 0x78),
+            2
+        );
+        assert_eq!(&session.deck.used[..4], &[0; 4]);
+        assert_eq!(session.deck.rng, initial_rng); // Application releases cards; it never draws again.
+        assert!(session.queue.snapshot().unwrap().is_empty());
+    }
+    // At the ceiling the client pauses on the same tasks, then admitted kind8
+    // releases it after every card commit. No command can execute a second time.
+    assert_eq!(right.world.city.pause.bytes[1], 1);
+    loop {
+        for (adapter, worker, session) in [
+            (&mut authority, &host, &mut left),
+            (&mut replica, &client, &mut right),
+        ] {
+            adapter
+                .pump(
+                    worker,
+                    125,
+                    &mut session.queue,
+                    &mut session.world.city.categories,
+                    Targets::default(),
+                    &mut session.world.city.pause,
+                    &mut session.tasks,
+                )
+                .unwrap();
+            session.controls.deadline = adapter.deadline();
+        }
+        if replica.deadline() == 150 {
+            break;
+        }
+        assert!(Instant::now() < until);
+        thread::sleep(Duration::from_millis(2));
+    }
+    for session in [&mut left, &mut right] {
+        session.tick(&image, &board);
+        assert_eq!(session.world.clock.timing[0], 126);
+        assert_eq!(session.applied.len(), 4);
+    }
+    assert_eq!(left.postings, right.postings);
+    for (a, b) in left
+        .world
+        .ledgers
+        .players
+        .iter()
+        .zip(&right.world.ledgers.players)
+    {
+        assert_eq!(a.cash, b.cash);
+        for event in 0..38 {
+            assert_eq!(a.ledger(event), b.ledger(event));
+        }
+    }
+    assert_eq!(left.world.city.categories, right.world.city.categories);
+    assert_eq!(left.world.buildings, right.world.buildings);
+    assert_eq!(
+        left.world.ledgers.businesses,
+        right.world.ledgers.businesses
+    );
+    assert_eq!(
+        left.roster.manager.players[2].bytes,
+        right.roster.manager.players[2].bytes
+    );
+    assert_eq!(
+        left.roster.manager.players[2].auxiliaries[0].bytes,
+        right.roster.manager.players[2].auxiliaries[0].bytes
+    );
+    assert_eq!(left.deck.rng, right.deck.rng);
+    assert_eq!(left.deck.cards, right.deck.cards);
+    host.cancellation().cancel();
+    client.cancellation().cancel();
 }
 
 fn business_family_applies_once_at_125(kind: u8) {
@@ -1363,6 +1725,7 @@ fn lifecycle_loopback_submits_remote_human_and_host_ai_without_rebroadcast() {
     let owners = vec![Some(0), Some(peer), None];
     let mut authority = Adapter::new(hb, true, 0, owners.clone()).unwrap();
     let mut replica = Adapter::new(cb, false, peer, owners).unwrap();
+    authority.admit_deadline(0, 125).unwrap();
     for session in [&mut left, &mut right] {
         session.world.city.categories[7][5] = 2;
         session.world.city.categories[8][5] = 3;

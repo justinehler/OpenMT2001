@@ -1,7 +1,7 @@
 //! Bounded remote command qualification (0x450490 -> 0x451720 -> 0x450a30).
 //!
 //! Native payload schemas below exclude the common 20-byte header (kind at +4,
-//! size +8, Total due +12, delayed byte +16). Construction, business lifecycle/settings and the short
+//! size +8, Total due +12, delayed byte +16). Construction, business lifecycle/settings, event cards and the short
 //! command16 transfer are qualified. Native auction descriptors use a separate
 //! envelope retaining their delayed flag and additional announcement delay.
 //!
@@ -17,7 +17,7 @@
 //! | 16/19/1d/1e/1f/20 auction | native descriptor plus announcement delay | supported; host control, participant-owned actions |
 //! | 27..2a auction notifications | addressed 48-byte inbox descriptor | supported; authority only |
 //! | 18 terms | +0 business u32, +4 stock i16[6], +16 prices f32[6], +40 rent f32 (44 bytes) | supported; business owner authorizes |
-//! | 1a event card | card u32, player u32, target i32 | unsupported |
+//! | 1a event card | +0 card u32, +4 zero-based player u32, +8 target i32 (12 bytes) | supported; local human or authority-owned AI |
 //! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | unsupported |
 //! | category-ready/elimination/outcome | internal runtime events | unsupported |
 //! | other native IDs / shapes | no qualified decoder | unsupported |
@@ -209,6 +209,38 @@ impl Request {
             payload: command.packet()[20..].to_vec(),
         }
     }
+    pub fn event_card(serial: u64, command: &crate::event_cards::lifecycle::Command) -> Self {
+        let payload = [command.card, command.player, command.target as u32]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        Self {
+            serial,
+            owner: command.player.wrapping_add(1) as u8,
+            kind: 0x1a,
+            payload,
+        }
+    }
+    pub fn event_card_payload(&self) -> Result<crate::event_cards::lifecycle::Command> {
+        if self.kind != 0x1a || self.payload.len() != 12 {
+            return Err(Error::Unsupported);
+        }
+        let command = crate::event_cards::lifecycle::Command {
+            card: crate::player_manager::word(&self.payload, 0),
+            player: crate::player_manager::word(&self.payload, 4),
+            target: crate::player_manager::word(&self.payload, 8) as i32,
+        };
+        // 41bc90 submits only a validated target, never the -1 sentinel.
+        // Category/building/business targets all fit the native 600-row pools.
+        if command.card >= crate::event_cards::COUNT as u32
+            || !(1..=6).contains(&self.owner)
+            || command.player != u32::from(self.owner - 1)
+            || !(0..crate::building_pool::COUNT as i32).contains(&command.target)
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
     pub fn construction_payload(&self) -> Result<crate::construction::Command> {
         if self.kind != 0x0f || self.payload.len() != 40 {
             return Err(Error::Unsupported);
@@ -243,6 +275,7 @@ impl Request {
             0x13 => self.business_sale_payload().map(|_| ()),
             0x15 => self.takeover_payload().map(|_| ()),
             0x18 => self.terms_payload().map(|_| ()),
+            0x1a => self.event_card_payload().map(|_| ()),
             0x16 => self.transfer_payload().map(|_| ()),
             _ => Err(Error::Unsupported),
         }
@@ -633,6 +666,11 @@ impl Adapter {
         if !self.host {
             return Err(Error::Peer);
         }
+        // 481680 tests unsigned Total >= the published ceiling, independently
+        // of the periodic-player and network-maintenance frequencies.
+        if tick < self.deadline {
+            return Err(Error::Phase);
+        }
         Ok(Message::CommandDeadline {
             after: self.next_commit,
             tick: tick.checked_add(25).ok_or(Error::Exhausted)?,
@@ -710,6 +748,9 @@ impl Adapter {
                 self.next_serial()
                     .map(|serial| Request::terms(serial, owner, &command))
             }
+            crate::live_commands::Command::EventCard(command) => self
+                .next_serial()
+                .map(|serial| Request::event_card(serial, &command)),
             crate::live_commands::Command::PropertyTransfer {
                 category,
                 owner,
@@ -748,6 +789,38 @@ impl Adapter {
             worker,
             Request::business_open(serial, command),
             true,
+            queue,
+            categories,
+            targets,
+            tick,
+        )
+    }
+    /// 470b80 evaluates AI cards on every peer, including selection and reset
+    /// RNG draws. Only the authority emits the resulting command (450490).
+    #[cfg(feature = "lua4")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_ai_card(
+        &mut self,
+        worker: &super::lobby::worker::Handle,
+        command: crate::event_cards::lifecycle::Command,
+        queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
+        targets: Targets<'_>,
+        tick: u32,
+    ) -> std::result::Result<(), String> {
+        worker.validate_binding(self.binding)?;
+        Request::event_card(0, &command)
+            .validate()
+            .map_err(|e| e.to_string())?;
+        if self.owners.get(command.player as usize) != Some(&None) {
+            return Err(Error::Peer.to_string());
+        }
+        if !self.host {
+            return Ok(());
+        }
+        self.submit(
+            worker,
+            crate::live_commands::Command::EventCard(command),
             queue,
             categories,
             targets,
@@ -815,7 +888,7 @@ impl Adapter {
         }
         worker.send_gameplay(self.binding, None, message)
     }
-    /// Ordered ingress, kind8 resume and five-Hz authority deadlines. Borrow the
+    /// Ordered ingress and kind8 grants at the authority's tick ceiling. Borrow the
     /// actual Session queue/pause/tasks; no replacement timer records are made.
     #[cfg(feature = "lua4")]
     #[allow(clippy::too_many_arguments)]
@@ -912,12 +985,7 @@ impl Adapter {
                 _ => return Err(Error::Unsupported.to_string()),
             }
         }
-        if self.is_host()
-            && tick.is_multiple_of(5)
-            && tick
-                .checked_add(25)
-                .is_some_and(|next| next > self.deadline())
-        {
+        if self.is_host() && tick >= self.deadline() {
             let message = self.advance_deadline(tick).map_err(|e| e.to_string())?;
             if let Message::CommandDeadline {
                 after,
@@ -1007,6 +1075,7 @@ impl Adapter {
                 }
                 0x15 => crate::live_commands::Command::Takeover(request.takeover_payload()?),
                 0x18 => crate::live_commands::Command::Terms(request.terms_payload()?),
+                0x1a => crate::live_commands::Command::EventCard(request.event_card_payload()?),
                 0x16 => {
                     let t = request.transfer_payload()?;
                     crate::live_commands::Command::PropertyTransfer {

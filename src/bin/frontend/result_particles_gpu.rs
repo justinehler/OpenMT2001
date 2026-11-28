@@ -116,7 +116,7 @@ pub fn fill_with_scale(
     scale: f32,
 ) -> Result<(), String> {
     let capacity = match draw.mode {
-        SurfaceMode::ResultParticles => CAPACITY,
+        SurfaceMode::ResultParticles | SurfaceMode::ChimneySmoke => CAPACITY,
         SurfaceMode::ResultFireworks => RESULT_POINT_CAPACITY,
         _ => return Err("result particle material changed".into()),
     };
@@ -156,7 +156,7 @@ pub fn fill_with_scale(
     }
     draw.specular
         .as_mut()
-        .unwrap()
+        .ok_or("result particle specular missing")?
         .resize(draw.vertices.len(), [0.; 3]);
     Ok(())
 }
@@ -609,6 +609,63 @@ mod tests {
             center(material_readback(&renderer, &[background(), front, halo()])),
             [7, 11, 17]
         );
+    }
+
+    #[test]
+    #[cfg(feature = "capture")]
+    #[ignore = "requires GPU; controlled original mode19 smoke material"]
+    fn chimney_smoke_alpha_depth_and_no_depth_write() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let background = || {
+            material_quad(
+                SurfaceMode::UiDepth,
+                [-1., -1., 1., 1.],
+                0.9,
+                [80, 120, 160, 255],
+            )
+        };
+        let mut smoke = material_quad(SurfaceMode::ChimneySmoke, [-1., -1., 1., 1.], 0.5, [255; 4]);
+        smoke.vertices.iter_mut().for_each(|v| v[3..6].fill(0.));
+        smoke.diffuse_alpha = Some(vec![128; 6]);
+        let pixel = |draws: &[OwnedDraw], x: usize| {
+            let bytes = material_readback(&renderer, draws);
+            <[u8; 3]>::try_from(&bytes[(32 * 64 + x) * 4..(32 * 64 + x) * 4 + 3]).unwrap()
+        };
+        assert_eq!(pixel(&[background(), smoke.clone()], 32), [40, 60, 80]);
+        let front = material_quad(
+            SurfaceMode::UiDepth,
+            [-1., -1., 0., 1.],
+            0.25,
+            [80, 120, 160, 255],
+        );
+        let equal = material_quad(
+            SurfaceMode::UiDepth,
+            [0., -1., 1., 1.],
+            0.5,
+            [80, 120, 160, 255],
+        );
+        assert_eq!(
+            pixel(
+                &[background(), front.clone(), equal.clone(), smoke.clone()],
+                24
+            ),
+            [80, 120, 160]
+        );
+        assert_eq!(
+            pixel(&[background(), front, equal, smoke.clone()], 40),
+            [40, 60, 80]
+        );
+        let behind = material_quad(
+            SurfaceMode::UiDepth,
+            [-1., -1., 1., 1.],
+            0.6,
+            [7, 11, 17, 255],
+        );
+        assert_eq!(pixel(&[background(), smoke, behind], 32), [7, 11, 17]);
     }
 
     #[test]

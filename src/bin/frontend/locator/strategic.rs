@@ -1283,6 +1283,9 @@ impl Locator {
     }
     fn project_strategic_state(&mut self, s: &State) -> Result<(), String> {
         self.check_strategic_projection(s)?;
+        let finance_changed = !self.player_info
+            || self.player.selected != s.player_page as usize
+            || self.player.today != (s.finance_page == 1);
         self.city_info = s.tab == 0;
         self.player_info = s.tab == 1;
         self.poll_info = s.tab == 3;
@@ -1349,7 +1352,16 @@ impl Locator {
         self.player.today = s.finance_page == 1;
         if s.tab == 1 {
             self.player.rows = s.finance_rows.clone();
-            self.player.scroll = 0;
+            self.player.scroll = if finance_changed {
+                0
+            } else {
+                self.player.scroll.min(
+                    self.player
+                        .rows
+                        .len()
+                        .saturating_sub(self.player.visible_rows),
+                )
+            };
         }
         if s.tab == 0 && s.city_page == 0 {
             self.city_people

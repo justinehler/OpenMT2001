@@ -116,8 +116,15 @@ pub fn load_style(
     image: &openmt2001::pe::PeImage<'_>,
     installer: &Path,
 ) -> Result<openmt2001::board_style::Style, String> {
+    load_board_style(image, installer, crate::board_selection::Name::default())
+}
+pub fn load_board_style(
+    image: &openmt2001::pe::PeImage<'_>,
+    installer: &Path,
+    board: crate::board_selection::Name,
+) -> Result<openmt2001::board_style::Style, String> {
     let mut style = openmt2001::board_style::Style::from_v14(image)?;
-    let source = fs::read_to_string(installer.join("Standard/fonts/board/usa/board.prm"))
+    let source = fs::read_to_string(board.directory(installer).join("board.prm"))
         .map_err(|e| e.to_string())?;
     style.apply_source(&source)?;
     Ok(style)
@@ -130,6 +137,23 @@ impl Assets {
         installer: &Path,
         blocks: &[Block],
         style: &openmt2001::board_style::Style,
+    ) -> Result<Self, String> {
+        Self::load_board(
+            index,
+            archive,
+            installer,
+            blocks,
+            style,
+            &crate::board_selection::Name::default().language(installer)?,
+        )
+    }
+    pub(crate) fn load_board(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        blocks: &[Block],
+        style: &openmt2001::board_style::Style,
+        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
     ) -> Result<Self, String> {
         let entry = index
             .find("gamedata2/font640/textures.gtd")
@@ -150,7 +174,7 @@ impl Assets {
             .collect::<Vec<_>>();
         let tab = fs::read(installer.join("Standard/fonts/copperplate18boldp.tab"))
             .map_err(|e| e.to_string())?;
-        let names = crate::tooltip::board_strings(installer)?;
+        let names = board.rows();
         let district_colors = &style.text;
         let mut object_colors = vec![Vec::new(); pages.len()];
         let mut centers = Vec::new();
