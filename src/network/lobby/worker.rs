@@ -82,6 +82,13 @@ impl Handle {
         Self::spawn(network::process(), open)
     }
     fn spawn(owner: &'static Owner, open: Open) -> Result<Self, String> {
+        Self::spawn_with_timeout(owner, open, Duration::from_secs(3))
+    }
+    fn spawn_with_timeout(
+        owner: &'static Owner,
+        open: Open,
+        network_timeout: Duration,
+    ) -> Result<Self, String> {
         let attempt = owner.begin().map_err(|e| e.to_string())?;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let stopped = cancel.clone();
@@ -91,7 +98,15 @@ impl Handle {
             .name("multiplayer lobby".into())
             .spawn(move || {
                 let _retire = Retirement { owner, attempt };
-                if let Err(error) = run(owner, attempt, open, actions, &publish, &stopped) {
+                if let Err(error) = run(
+                    owner,
+                    attempt,
+                    open,
+                    actions,
+                    &publish,
+                    &stopped,
+                    network_timeout,
+                ) {
                     // Bounded error delivery also remains off the UI thread.
                     while !stopped.load(Ordering::Relaxed) {
                         match publish.try_send(Update::Failed(error.clone())) {
@@ -195,10 +210,11 @@ fn run(
     actions: Receiver<Command>,
     publish: &SyncSender<Update>,
     cancel: &AtomicBool,
+    network_timeout: Duration,
 ) -> Result<(), String> {
     if let Open::Probe(address) = &open {
-        let (session, snapshot) = network::transport::probe(*address, Duration::from_secs(3))
-            .map_err(|e| e.to_string())?;
+        let (session, snapshot) =
+            network::transport::probe(*address, network_timeout).map_err(|e| e.to_string())?;
         if !cancel.load(Ordering::Relaxed) {
             publish
                 .try_send(Update::Probed(Selection {
@@ -231,7 +247,7 @@ fn run(
     } else {
         // STRUCTURAL GUARANTEE: run is invoked only inside thread::spawn above.
         owner
-            .connect(attempt, address, Duration::from_secs(3))
+            .connect(attempt, address, network_timeout)
             .map_err(|e| e.to_string())?;
         address
     };

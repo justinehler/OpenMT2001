@@ -3,22 +3,28 @@ use crate::network::lobby::{
     Settings,
     tests::{names, settings},
 };
+// This bound catches hangs without imposing production response times on CI.
+const WAIT: Duration = Duration::from_secs(60);
+
+fn spawn_worker(owner: &'static Owner, open: Open) -> Result<Handle, String> {
+    Handle::spawn_with_timeout(owner, open, WAIT)
+}
 fn owner() -> &'static Owner {
     Box::leak(Box::new(Owner::new().unwrap()))
 }
 fn wait(handle: &Handle, mut accept: impl FnMut(&Update) -> bool) -> Update {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     loop {
-        if let Some(update) = handle.poll() {
-            if accept(&update) {
-                return update;
-            }
-            if let Update::Failed(error) = update {
-                panic!("{error}");
-            }
+        let update = handle
+            .updates
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("worker result timed out or channel closed");
+        if accept(&update) {
+            return update;
         }
-        assert!(Instant::now() < deadline, "worker result timed out");
-        thread::sleep(Duration::from_millis(5));
+        if let Update::Failed(error) = update {
+            panic!("{error}");
+        }
     }
 }
 fn host_open(settings: Settings) -> Open {
@@ -30,18 +36,18 @@ fn host_open(settings: Settings) -> Open {
 }
 #[test]
 fn loopback_probe_join_edit_revision_start_and_leave_over_real_transport() {
-    let host = Handle::spawn(owner(), host_open(settings())).unwrap();
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
-    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
     let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
         panic!()
     };
     assert_eq!(selection.snapshot.settings, settings());
     assert_eq!(selection.snapshot.capacity(), (1, 6));
     drop(probe);
-    let join = Handle::spawn(
+    let join = spawn_worker(
         owner(),
         Open::Join {
             selection,
@@ -107,11 +113,11 @@ fn loopback_probe_join_edit_revision_start_and_leave_over_real_transport() {
 #[test]
 fn stale_worker_retirement_cannot_close_replacement() {
     let owner = owner();
-    let old = Handle::spawn(owner, host_open(settings())).unwrap();
+    let old = spawn_worker(owner, host_open(settings())).unwrap();
     wait(&old, |u| matches!(u, Update::Lobby(_)));
     let attempt = old.attempt;
     drop(old);
-    let next = Handle::spawn(owner, host_open(settings())).unwrap();
+    let next = spawn_worker(owner, host_open(settings())).unwrap();
     wait(&next, |u| matches!(u, Update::Lobby(_)));
     assert_eq!(owner.retire(attempt), Err(network::Error::StaleAttempt));
     assert_eq!(owner.phase(), Ok(network::Phase::Lobby));
@@ -129,7 +135,7 @@ fn blocking_connect_is_structurally_inside_worker_and_poll_is_nonblocking() {
     assert!(spawn < run_call && run_call < run_fn && run_fn < connect);
     assert_eq!(source.matches("owner.connect(").count(), 1);
     let owner = owner();
-    let handle = Handle::spawn(owner, Open::Probe("127.0.0.1:1".parse().unwrap())).unwrap();
+    let handle = spawn_worker(owner, Open::Probe("127.0.0.1:1".parse().unwrap())).unwrap();
     let start = Instant::now();
     for _ in 0..100 {
         let _ = handle.poll();
@@ -139,18 +145,18 @@ fn blocking_connect_is_structurally_inside_worker_and_poll_is_nonblocking() {
 
 #[test]
 fn full_six_human_session_still_answers_read_only_probes() {
-    let host = Handle::spawn(owner(), host_open(settings())).unwrap();
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
     let mut clients = Vec::new();
     for i in 1..6 {
-        let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+        let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
         let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
             panic!()
         };
         drop(probe);
-        let join = Handle::spawn(
+        let join = spawn_worker(
             owner(),
             Open::Join {
                 selection,
@@ -162,7 +168,7 @@ fn full_six_human_session_still_answers_read_only_probes() {
         wait(&join, |u| matches!(u, Update::Lobby(_)));
         clients.push(join);
     }
-    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
     let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
         panic!()
     };
@@ -173,17 +179,17 @@ fn full_six_human_session_still_answers_read_only_probes() {
 #[test]
 fn join_refuses_a_rehosted_session_selected_by_an_earlier_probe() {
     let host_owner = owner();
-    let host = Handle::spawn(host_owner, host_open(settings())).unwrap();
+    let host = spawn_worker(host_owner, host_open(settings())).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
-    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
     let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
         panic!()
     };
     drop(probe);
     drop(host);
-    let replacement = Handle::spawn(
+    let replacement = spawn_worker(
         host_owner,
         Open::Host {
             address: initial.address,
@@ -193,7 +199,7 @@ fn join_refuses_a_rehosted_session_selected_by_an_earlier_probe() {
     )
     .unwrap();
     wait(&replacement, |u| matches!(u, Update::Lobby(_)));
-    let join = Handle::spawn(
+    let join = spawn_worker(
         owner(),
         Open::Join {
             selection,
@@ -211,16 +217,16 @@ fn join_refuses_a_rehosted_session_selected_by_an_earlier_probe() {
 
 #[test]
 fn cancelling_an_unjoined_connection_keeps_existing_lobby_peers() {
-    let host = Handle::spawn(owner(), host_open(settings())).unwrap();
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
-    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
     let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
         panic!()
     };
     drop(probe);
-    let client = Handle::spawn(
+    let client = spawn_worker(
         owner(),
         Open::Join {
             selection,
@@ -234,10 +240,8 @@ fn cancelling_an_unjoined_connection_keeps_existing_lobby_peers() {
     };
     let extra = Owner::new().unwrap();
     let attempt = extra.begin().unwrap();
-    extra
-        .connect(attempt, initial.address, Duration::from_secs(1))
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    extra.connect(attempt, initial.address, WAIT).unwrap();
+    let deadline = Instant::now() + WAIT;
     while extra.phase().unwrap() != network::Phase::Lobby {
         extra.pump(attempt, None).unwrap();
         assert!(Instant::now() < deadline);
@@ -257,16 +261,16 @@ fn cancelling_an_unjoined_connection_keeps_existing_lobby_peers() {
 
 #[test]
 fn mismatched_content_never_releases_construction() {
-    let host = Handle::spawn(owner(), host_open(settings())).unwrap();
+    let host = spawn_worker(owner(), host_open(settings())).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
-    let probe = Handle::spawn(owner(), Open::Probe(initial.address)).unwrap();
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
     let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
         panic!()
     };
     drop(probe);
-    let join = Handle::spawn(
+    let join = spawn_worker(
         owner(),
         Open::Join {
             selection,
@@ -310,7 +314,7 @@ fn mismatched_content_never_releases_construction() {
 #[test]
 fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
     let owner = owner();
-    let old = Handle::spawn(owner, host_open(settings())).unwrap();
+    let old = spawn_worker(owner, host_open(settings())).unwrap();
     wait(&old, |u| matches!(u, Update::Lobby(_)));
     old.action(Action::Kind(1)).unwrap();
     wait(
@@ -327,7 +331,7 @@ fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
     old.stage(move || {
         assert_ne!(thread::current().id(), ui_thread);
         entered.send(()).unwrap();
-        resume.recv_timeout(Duration::from_secs(5)).unwrap();
+        resume.recv_timeout(WAIT).unwrap();
         Ok(network::Content {
             level: ticket.view.snapshot.settings.level,
             parameter_bits: ticket.view.snapshot.settings.parameter_bits,
@@ -336,10 +340,10 @@ fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
         })
     })
     .unwrap();
-    staged.recv_timeout(Duration::from_secs(5)).unwrap();
+    staged.recv_timeout(WAIT).unwrap();
     old.cancellation().cancel();
     assert!(old.validate().is_err());
-    let next = Handle::spawn(owner, host_open(settings())).unwrap();
+    let next = spawn_worker(owner, host_open(settings())).unwrap();
     wait(&next, |u| matches!(u, Update::Lobby(_)));
     release.send(()).unwrap();
     drop(old);
