@@ -9,7 +9,6 @@ pub struct Category {
 pub struct Rights {
     pub categories: [Category; 52],
     pub owner_number: u8,
-    pub player_name: Vec<u8>,
 }
 impl Rights {
     pub fn from_runtime(
@@ -19,10 +18,9 @@ impl Rights {
         let Some(current) = players.current else {
             return Ok(None);
         };
-        let player = players
-            .records
-            .get(current)
-            .ok_or("rights current player leaves roster")?;
+        if current >= players.records.len() {
+            return Err("rights current player leaves roster".into());
+        }
         let categories = std::array::from_fn(|i| {
             let row = &world.categories[i];
             Category {
@@ -37,25 +35,9 @@ impl Rights {
         {
             return Err("rights category owner outside live roster".into());
         }
-        let bytes = &player[0x154..];
-        let end = bytes
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or("rights player name not terminated")?;
-        let player_name = bytes[..end]
-            .iter()
-            .map(|b| {
-                if (32..=126).contains(b) {
-                    b - 32
-                } else {
-                    b'?' - 32
-                }
-            })
-            .collect();
         Ok(Some(Self {
             categories,
             owner_number: (current + 1) as u8,
-            player_name,
         }))
     }
     pub fn from_save(save: &SaveFile<'_>) -> Result<Option<Self>, String> {
@@ -86,25 +68,9 @@ impl Rights {
                 return Err("rights category owner outside roster".into());
             }
         }
-        let bytes = &player.bytes[0x154..];
-        let end = bytes
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or("rights player name not terminated")?;
-        let player_name = bytes[..end]
-            .iter()
-            .map(|b| {
-                if (32..=126).contains(b) {
-                    b - 32
-                } else {
-                    b'?' - 32
-                }
-            })
-            .collect();
         Ok(Some(Self {
             categories,
             owner_number: (player.slot + 1) as u8,
-            player_name,
         }))
     }
 }

@@ -312,7 +312,6 @@ fn original_bonus_initializes_at_all_difficulties() {
                 .unwrap()
                 .expect("Bonus has a current human player");
             assert_eq!(rights.owner_number, 1);
-            assert!(!rights.player_name.is_empty());
             let prestige =
                 crate::city_prestige::Prestige::from_runtime(&session.world, &board).unwrap();
             assert!(

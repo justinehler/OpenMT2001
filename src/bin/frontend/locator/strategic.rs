@@ -1443,22 +1443,6 @@ impl Locator {
                 .collect(),
         });
         if let Some(current) = s.input.financial.current {
-            let p = &s.input.financial.records[current];
-            let name = &p[0x154..];
-            let end = name
-                .iter()
-                .position(|&b| b == 0)
-                .ok_or("C player name not terminated")?;
-            let player_name = name[..end]
-                .iter()
-                .map(|&b| {
-                    if (32..=126).contains(&b) {
-                        Ok(b - 32)
-                    } else {
-                        Err("C player name needs actual glyph mapping")
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
             self.rights = Some(crate::city_rights::Rights {
                 categories: std::array::from_fn(|i| {
                     let r = &s.input.categories[i];
@@ -1469,7 +1453,6 @@ impl Locator {
                     }
                 }),
                 owner_number: s.input.roster_slots[current] + 1,
-                player_name,
             });
         }
         self.dirty = true;

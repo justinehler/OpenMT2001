@@ -98,6 +98,7 @@ pub struct Assets {
     ownership_tab: Vec<u8>,
     ownership_label_widths: [f32; 52],
     short_labels: [Vec<u8>; 52],
+    ownership_report_labels: [Vec<u8>; 52],
     civic_icons: [Option<(Surface, u32)>; 52],
     ownership_styles: [(u32, Option<usize>); 11],
     star_size: [u32; 2],
@@ -130,6 +131,7 @@ impl Assets {
             let row = block.text_id - 2242 + 1;
             self.block_labels[block.id] = board.row(row)?.to_vec();
             self.short_labels[block.id] = board.row(row + 1)?.to_vec();
+            self.ownership_report_labels[block.id] = board.row(row + 2)?.to_vec();
             self.title_labels[block.id] = board.row(row + 3)?.to_vec();
             self.ownership_label_widths[block.id] =
                 ui::text_width(&self.ownership_tab, board.row(row + 1)?, 1.)? as f32;
@@ -528,6 +530,7 @@ impl Assets {
         let names = crate::tooltip::board_strings(installer)?;
         let mut ownership_label_widths = [0.; 52];
         let mut short_labels: [Vec<u8>; 52] = std::array::from_fn(|_| Vec::new());
+        let mut ownership_report_labels: [Vec<u8>; 52] = std::array::from_fn(|_| Vec::new());
         let mut title_labels: [Vec<u8>; 52] = std::array::from_fn(|_| Vec::new());
         let mut civic_icons = std::array::from_fn(|_| None);
         for block in openmt2001::board::Board::from_v14(&image)?.blocks {
@@ -538,7 +541,14 @@ impl Assets {
                 .get((block.text_id - 2242 + 1) as usize)
                 .ok_or("block full name missing")?
                 .clone();
+            // 40f6c0 uses base+1 for prestige; 40eb70 uses base+2 for
+            // ownership. 4922e0 overlays these board rows at2242; table5385a0
+            // supplies each base ID. Source row0 is the character map.
             short_labels[block.id] = name.clone();
+            ownership_report_labels[block.id] = names
+                .get((block.text_id - 2242 + 3) as usize)
+                .ok_or("ownership mixed-case block name missing")?
+                .clone();
             // 40225c reads the category's base text ID; 402263 adds three
             // for the selected pavement title (MARVIN, not MARVIN GARDENS).
             title_labels[block.id] = names
@@ -572,6 +582,7 @@ impl Assets {
             ownership_tab,
             ownership_label_widths,
             short_labels,
+            ownership_report_labels,
             civic_icons,
             ownership_styles: ownership_styles.try_into().unwrap(),
             ownership_icons,
@@ -2175,6 +2186,7 @@ impl Assets {
             prestige: None,
             prestige_mode: false,
             ownership_scroll: 0,
+            city_visible_rows: self.city_report_layout().list.visible_rows(),
             pending_category: None,
             player_info: false,
             player,
@@ -2588,11 +2600,9 @@ impl Assets {
             } else if state.body_open() && state.city_info {
                 solid.rect(self.city_layout.header, [self.text_palette[17]; 4]);
                 if state.rights_mode {
-                    surfaces.extend(self.rights_report(state, &mut fonts)?);
-                } else if state.prestige_mode {
-                    self.prestige_report(state, &mut fonts)?;
-                } else if state.ownership_mode {
-                    self.ownership_report(state, &mut fonts)?;
+                    surfaces.extend(self.rights_report(&mut fonts)?);
+                } else if state.prestige_mode || state.ownership_mode {
+                    surfaces.extend(self.city_report(state, &mut fonts)?);
                 } else {
                     self.people_report(state, &mut fonts, &mut solid)?;
                 }
@@ -2943,132 +2953,29 @@ impl Assets {
         }
         Ok(())
     }
-    fn prestige_report(&self, state: &Locator, fonts: &mut [Surface]) -> Result<(), String> {
-        use crate::city_prestige::Row;
+    fn city_report(&self, state: &Locator, fonts: &mut [Surface]) -> Result<Vec<Surface>, String> {
         ui::text(
             fonts,
             &self.tab,
-            &self.strings[1443],
+            &self.strings[if state.prestige_mode { 1443 } else { 1445 }],
             self.city_layout.header,
             true,
             self.text_palette[16],
         )?;
-        if let Some(report) = &state.prestige {
-            for (i, row) in report
-                .rows
-                .iter()
-                .skip(state.ownership_scroll)
-                .take(17)
-                .enumerate()
-            {
-                let (text, color) = match row {
-                    Row::Space => continue,
-                    Row::Block(id) => (self.block_labels[*id].clone(), 0xffffffff),
-                    Row::Grade(grade) => {
-                        let template = &self.strings[43];
-                        let marker = [b'%' - 32, b'd' - 32];
-                        let at = template
-                            .windows(2)
-                            .position(|w| w == marker)
-                            .ok_or("prestige grade template lacks original integer field")?;
-                        let mut text = template[..at].to_vec();
-                        text.extend(grade.to_string().bytes().map(|b| b - 32));
-                        text.extend_from_slice(&template[at + 2..]);
-                        (text, 0xffffd080)
-                    }
-                };
-                let y = 74. + i as f32 * 10.;
-                ui::text_fit(
-                    fonts,
-                    &self.tab,
-                    &text,
-                    [32., y, 187., y + 10.],
-                    false,
-                    color,
-                )?;
-            }
+        navigator_report::City {
+            list: self.navigator_list(),
+            short_labels: &self.short_labels,
+            ownership_labels: &self.ownership_report_labels,
         }
-        Ok(())
-    }
-    fn ownership_report(&self, state: &Locator, fonts: &mut [Surface]) -> Result<(), String> {
-        ui::text(
-            fonts,
-            &self.tab,
-            &self.strings[1445],
-            self.city_layout.header,
-            true,
-            self.text_palette[16],
-        )?;
-        let mut rows: Vec<(Vec<u8>, u32)> = Vec::new();
-        if let Some(report) = &state.ownership {
-            for (i, group) in report.groups.iter().enumerate() {
-                // Both saved initialization and retained live snapshots feed
-                // this copied native player+4 report representation.
-                let player = state
-                    .player
-                    .records
-                    .get(i)
-                    .ok_or("ownership player unavailable")?;
-                let name = &player[0x154..];
-                let end = name
-                    .iter()
-                    .position(|&b| b == 0)
-                    .ok_or("unterminated ownership player name")?;
-                let name: Result<Vec<_>, String> = name[..end]
-                    .iter()
-                    .map(|b| {
-                        if (32..=126).contains(b) {
-                            Ok(b - 32)
-                        } else {
-                            Err("unsupported ownership name glyph".into())
-                        }
-                    })
-                    .collect();
-                rows.push((name?, 0xffffd080));
-                if group.is_empty() {
-                    rows.push((self.strings[19].clone(), 0xffffffff));
-                }
-                for &category in group {
-                    rows.push((self.block_labels[category].clone(), 0xffffffff));
-                }
-            }
-        }
-        for (i, (text, color)) in rows
-            .iter()
-            .skip(state.ownership_scroll)
-            .take(17)
-            .enumerate()
-        {
-            let y = 74. + i as f32 * 10.;
-            ui::text_fit(
-                fonts,
-                &self.tab,
-                text,
-                [32., y, 187., y + 10.],
-                false,
-                *color,
-            )?;
-        }
-        Ok(())
+        .paint(state, &self.city_report_layout())
     }
     fn draw_rights_badge(&self, out: &mut Vec<Surface>, badge: crate::city_rights::Badge) {
-        let mut background = Surface::solid();
-        background.rect(badge.background, [badge.color; 4]);
-        out.push(background);
-        let mut icon = self.rights_icon.clone();
-        let [l, t, r, b] = badge.icon_rect;
-        icon.quad(
-            [[l, t], [l, b], [r, b], [r, t]],
-            [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-            [badge.icon_color; 4],
-        );
-        out.push(icon);
+        out.extend(navigator_report::paint_rights_badge(
+            &self.rights_icon,
+            badge,
+        ));
     }
-    fn rights_report(
-        &self,
-        state: &Locator,
-        fonts: &mut [Surface],
-    ) -> Result<Vec<Surface>, String> {
+    fn rights_report(&self, fonts: &mut [Surface]) -> Result<Vec<Surface>, String> {
         ui::text(
             fonts,
             &self.tab,
@@ -3077,70 +2984,16 @@ impl Assets {
             true,
             self.text_palette[16],
         )?;
-        let mut out = Vec::new();
-        if let Some(rights) = &state.rights {
-            ui::text_fit(
-                fonts,
-                &self.tab,
-                &rights.player_name,
-                [32., 72., 187., 84.],
-                false,
-                0xffffd080,
-            )?;
+        navigator_report::Rights {
+            pages: &self.fonts,
+            tab: &self.tab,
+            descriptions: &self.ownership_fonts,
+            description_tab: &self.ownership_tab,
+            strings: &self.strings,
+            icon: &self.rights_icon,
+            color: self.text_palette[0],
         }
-        let mut body = self.ownership_fonts.clone();
-        let mut y = 84.;
-        for (title, description, mode, owned) in [
-            (13, 14, 0, false),
-            (15, 16, 1, false),
-            (17, 18, 1, true),
-            (1801, 1441, 0, true),
-        ] {
-            self.draw_rights_badge(
-                &mut out,
-                crate::city_rights::badge(
-                    mode,
-                    owned,
-                    [47., y + 16.],
-                    [self.rights_icon.width, self.rights_icon.height],
-                    0,
-                )
-                .unwrap(),
-            );
-            ui::text_fit(
-                fonts,
-                &self.tab,
-                &self.strings[title],
-                [67., y, 187., y + 12.],
-                false,
-                0xffffd080,
-            )?;
-            let (offsets, text) = crate::prompt::wrap_with_gap(
-                &self.ownership_tab,
-                &self.strings[description],
-                120,
-                -1,
-            )?;
-            for (line, pair) in offsets.windows(2).enumerate() {
-                let encoded =
-                    &text[pair[0].min(text.len())..pair[1].saturating_sub(1).min(text.len())];
-                for q in openmt2001::font::Font::parse(&self.ownership_tab)?.layout(
-                    encoded,
-                    openmt2001::font::Layout {
-                        origin: [67., y + 14. + line as f32 * 10.],
-                        depth: 0.5,
-                        scale: 1.,
-                        gap: -1,
-                        baseline: -1,
-                    },
-                )? {
-                    body[q.page].quad(q.positions.map(|p| [p[0], p[1]]), q.uv, [0xffffffff; 4]);
-                }
-            }
-            y += 16. + offsets.windows(2).count() as f32 * 10.;
-        }
-        out.extend(body);
-        Ok(out)
+        .paint(self.bounds)
     }
     fn people_report(
         &self,
@@ -3324,22 +3177,25 @@ impl Assets {
         let mut section = Surface::solid();
         section.rect(self.city_layout.header, [self.text_palette[17]; 4]);
         surfaces.push(section);
-        surfaces.extend(
-            navigator_report::Finance {
-                pages: &self.fonts,
-                tab: &self.tab,
-                strings: &self.strings,
-                palette: &self.text_palette,
-                arrows: &self.scrollbar_textures,
-            }
-            .paint(
-                &state.player,
-                &self.finance_layout(),
-                state.hover,
-                state.pressed,
-            )?,
-        );
+        surfaces.extend(self.navigator_list().paint(
+            &state.player,
+            &self.finance_layout(),
+            state.hover,
+            state.pressed,
+        )?);
         Ok(surfaces)
+    }
+    fn navigator_list(&self) -> navigator_report::List<'_> {
+        navigator_report::List {
+            pages: &self.fonts,
+            tab: &self.tab,
+            strings: &self.strings,
+            palette: &self.text_palette,
+            arrows: &self.scrollbar_textures,
+        }
+    }
+    fn city_report_layout(&self) -> navigator_report::Layout {
+        navigator_report::Layout::city(self.bounds, self.scrollbar[2] - self.scrollbar[0])
     }
     fn finance_layout(&self) -> navigator_report::Layout {
         navigator_report::Layout::new(self.bounds, self.scrollbar[2] - self.scrollbar[0])
@@ -3466,30 +3322,11 @@ impl Assets {
             return Action::Toggle;
         }
         if state.body_open() && state.city_info {
-            if state.prestige_mode && inside(p, [32., 74., 187., 244.]) {
-                let row = state.ownership_scroll + ((p[1] - 74.) / 10.) as usize;
-                if let Some(crate::city_prestige::Row::Block(category)) =
-                    state.prestige.as_ref().and_then(|p| p.rows.get(row))
-                {
-                    return Action::OwnershipBlock(*category);
-                }
-            }
-            if state.ownership_mode && inside(p, [32., 74., 187., 244.]) {
-                let row = state.ownership_scroll + ((p[1] - 74.) / 10.) as usize;
-                if let Some(report) = &state.ownership {
-                    let mut rows = Vec::new();
-                    for group in &report.groups {
-                        rows.push(None);
-                        if group.is_empty() {
-                            rows.push(None);
-                        } else {
-                            rows.extend(group.iter().copied().map(Some));
-                        }
-                    }
-                    if let Some(Some(category)) = rows.get(row) {
-                        return Action::OwnershipBlock(*category);
-                    }
-                }
+            if (state.prestige_mode || state.ownership_mode)
+                && let Some(action) =
+                    navigator_report::city_hit(state, &self.city_report_layout(), p)
+            {
+                return action;
             }
             if !state.prestige_mode && !state.ownership_mode && !state.rights_mode {
                 if inside(p, self.people_arrow_bounds(false)) {
@@ -3627,6 +3464,7 @@ pub struct Locator {
     prestige: Option<crate::city_prestige::Prestige>,
     prestige_mode: bool,
     ownership_scroll: usize,
+    city_visible_rows: usize,
     pending_category: Option<usize>,
     player_info: bool,
     player: crate::player_info::State,
@@ -3816,9 +3654,13 @@ impl Locator {
             .min(self.owned_rows.len().saturating_sub(owned_visible));
         self.ownership_scroll = if self.prestige_mode {
             match (&old.prestige, &self.prestige) {
-                (Some(a), Some(b)) => {
-                    remap_scroll(&a.rows, old.ownership_scroll, &b.rows, 17, Clone::clone)
-                }
+                (Some(a), Some(b)) => remap_scroll(
+                    &a.rows,
+                    old.ownership_scroll,
+                    &b.rows,
+                    self.city_visible_rows,
+                    Clone::clone,
+                ),
                 _ => 0,
             }
         } else if self.ownership_mode {
@@ -3841,9 +3683,13 @@ impl Locator {
                     .collect::<Vec<_>>()
             };
             match (&old.ownership, &self.ownership) {
-                (Some(a), Some(b)) => {
-                    remap_scroll(&keys(a), old.ownership_scroll, &keys(b), 17, |r| *r)
-                }
+                (Some(a), Some(b)) => remap_scroll(
+                    &keys(a),
+                    old.ownership_scroll,
+                    &keys(b),
+                    self.city_visible_rows,
+                    |r| *r,
+                ),
                 _ => 0,
             }
         } else {
@@ -4081,23 +3927,12 @@ impl Locator {
             .collect()
     }
     pub fn scroll(&mut self, assets: &Assets, delta: i32) {
-        if self.city_info && self.prestige_mode {
-            let count = self.prestige.as_ref().map_or(0, |p| p.rows.len());
+        if self.city_info && (self.prestige_mode || self.ownership_mode) {
+            let count = navigator_report::city_rows(self).len();
             self.ownership_scroll = self
                 .ownership_scroll
                 .saturating_add_signed(delta as isize)
-                .min(count.saturating_sub(17));
-            self.dirty = true;
-            return;
-        }
-        if self.city_info && self.ownership_mode {
-            let count = self.ownership.as_ref().map_or(0, |o| {
-                o.groups.iter().map(|g| 1 + g.len().max(1)).sum::<usize>()
-            });
-            self.ownership_scroll = self
-                .ownership_scroll
-                .saturating_add_signed(delta as isize)
-                .min(count.saturating_sub(17));
+                .min(assets.city_report_layout().maximum(count));
             self.dirty = true;
             return;
         }
@@ -4227,7 +4062,12 @@ impl Locator {
             Action::Scroll(delta) => self.scroll(assets, delta),
             Action::ScrollTrack => {
                 if let Some(point) = p {
-                    if self.player_info {
+                    if self.city_info && (self.prestige_mode || self.ownership_mode) {
+                        self.ownership_scroll = assets.city_report_layout().selection(
+                            point[1] as f32 * 0.5,
+                            navigator_report::city_rows(self).len(),
+                        );
+                    } else if self.player_info {
                         self.player.scroll = assets
                             .finance_layout()
                             .selection(point[1] as f32 * 0.5, self.player.rows.len());
@@ -5053,11 +4893,21 @@ mod tests {
                 groups: vec![(0..30).collect(), vec![]],
             });
             state.ownership_mode = true;
-            state.mouse(&assets, &scene, Some([150, 170]), true);
-            state.mouse(&assets, &scene, Some([150, 170]), false);
+            // Row 1 (below the first player's heading) is the first block.
+            let layout = assets.city_report_layout();
+            let row = layout.list.line(1, false);
+            let point = [
+                (row[0] + 20.) as i32 * 2,
+                ((row[1] + row[3]) * 0.5) as i32 * 2,
+            ];
+            state.mouse(&assets, &scene, Some(point), true);
+            state.mouse(&assets, &scene, Some(point), false);
             assert_eq!(state.take_category_selection(), Some(0));
-            state.scroll(&assets, 20);
-            assert_eq!(state.ownership_scroll, 16);
+            state.scroll(&assets, 100);
+            let rows = super::navigator_report::city_rows(&state).len();
+            assert_eq!(rows, 1 + 30 + 1 + 1);
+            assert_eq!(state.ownership_scroll, layout.maximum(rows));
+            assert!(state.ownership_scroll > 0);
             if let Some(path) = openmt2001::fixtures::optional("OWNERSHIP_SYNTHETIC") {
                 let bytes = std::fs::read(path).unwrap();
                 let diagnostic = openmt2001::save::SaveFile::parse(&bytes).unwrap();
@@ -5873,6 +5723,7 @@ pub(crate) mod refresh_ui_tests {
             prestige: None,
             prestige_mode: false,
             ownership_scroll: 0,
+            city_visible_rows: 17,
             pending_category: None,
             player_info: false,
             player: crate::player_info::State::new(&[]).unwrap(),
@@ -5915,7 +5766,6 @@ pub(crate) mod refresh_ui_tests {
                 remaining: 0,
             }; 52],
             owner_number: 1,
-            player_name: vec![],
         });
         state.ownership = Some(crate::city_ownership::Ownership {
             badges: [crate::ownership_badges::Badge {
