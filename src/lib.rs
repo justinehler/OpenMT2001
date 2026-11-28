@@ -12,6 +12,7 @@ pub mod business_report;
 #[cfg(feature = "lua4")]
 pub mod campaign_store;
 pub mod category_reset;
+pub mod chimney_smoke;
 pub mod city_structures;
 pub mod clock;
 pub mod compatibility;

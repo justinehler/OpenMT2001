@@ -682,6 +682,7 @@ impl Session<'_> {
                         }
                         scheduler::Event::Helper(0x4805b0) => self.window_texture.tick(clock.hour()),
                         scheduler::Event::Helper(0x4b5d50) => self.pulse_lights.tick(),
+                        scheduler::Event::Helper(0x4b5db0) => self.chimney_smoke.tick(clock.timing[0]),
                         scheduler::Event::Helper(0x44ec50) => {
                             self.transport.advance_logic(
                                 image,

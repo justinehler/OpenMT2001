@@ -186,6 +186,7 @@ pub struct Session<'data> {
     pub build_random_state: u32,
     pub window_texture: openmt2001::window_texture::WindowTexture,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
+    pub chimney_smoke: openmt2001::chimney_smoke::Smoke,
     pub allocation_next: u32,
     pub static_rng_tail_next: u32,
     pub event_cards: openmt2001::event_cards::Deck,
@@ -2183,6 +2184,10 @@ impl<'data> Session<'data> {
                 startup.state(openmt2001::window_texture::RNG_REFERENCE),
             ),
             pulse_lights: openmt2001::pulse_lights::PulseLights::from_original(input.image)?,
+            chimney_smoke: openmt2001::chimney_smoke::Smoke::new(
+                startup.state(openmt2001::chimney_smoke::RNG_REFERENCE),
+                &[],
+            ),
             allocation_next,
             static_rng_tail_next,
             event_cards: openmt2001::event_cards::Deck::new([
