@@ -72,6 +72,36 @@ fn request(button_count: usize, context: u32) -> prompt::Request {
 }
 
 #[test]
+fn options_quit_menu_backspace_and_return_use_original_replies() {
+    for (code, button) in [(KeyCode::Backspace, 1), (KeyCode::Enter, 0)] {
+        let mut h = Harness::new();
+        let assets = crate::game_options::Assets::test_menu();
+        let mut menu = crate::game_options::View::default();
+        menu.open(true);
+        assert_eq!(menu.mouse(&assets, Some([65., 5.]), true), None);
+        assert_eq!(
+            menu.mouse(&assets, Some([65., 5.]), false),
+            Some(crate::game_options::Button::Quit)
+        );
+        h.prompts = std::mem::take(&mut menu.quit_prompt);
+        h.event1(true);
+        h.key(code, true, false);
+        h.event1(true);
+        assert_eq!(
+            h.prompts.take_dialog_replies(),
+            vec![crate::human_dialog::Reply {
+                callback: crate::game_options::QUIT_CALLBACK,
+                context: 0,
+                button,
+            }]
+        );
+        h.prompts.finish_dismiss(vec![]);
+        assert!(h.prompts.request().is_none());
+        assert!(menu.open && menu.resume_running);
+    }
+}
+
+#[test]
 fn production_dialog_keys_return_and_backspace_match_mouse_replies() {
     for (code, button) in [(KeyCode::Enter, 0), (KeyCode::Backspace, 1)] {
         let mut h = Harness::new();

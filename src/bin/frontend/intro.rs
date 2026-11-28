@@ -4541,7 +4541,13 @@ impl Intro {
                         .as_ref()
                         .is_none_or(|s| s.stats.is_none() && s.result_request.is_none())
             })
-            .map(|view| &mut view.prompts);
+            .map(|view| {
+                if view.game_options.quit_prompt.request().is_some() {
+                    &mut view.game_options.quit_prompt
+                } else {
+                    &mut view.prompts
+                }
+            });
         self.dialog_keys.event1(prompts);
     }
     /// Drain before modal/loading early returns and every dependent worker poll.
@@ -5208,6 +5214,10 @@ impl Intro {
             return Ok(());
         }
         if pressed && let Some(view) = &mut self.inspection {
+            if view.game_options.quit_prompt.request().is_some() {
+                // Physical Return/Backspace edges are sampled by dialog_keys.
+                return Ok(());
+            }
             if view.save_visible() {
                 match key {
                     NamedKey::Escape => {
@@ -5816,6 +5826,21 @@ impl Intro {
             if stats_modal {
                 return;
             }
+            if view.game_options.quit_prompt.request().is_some() {
+                if button == winit::event::MouseButton::Left
+                    && let Some(menu) = &self.menu
+                {
+                    view.game_options.quit_prompt.cursor(
+                        view.pointer
+                            .map(|p| p.map(|v| v as f32 * 0.5))
+                            .unwrap_or([-1.; 2]),
+                    );
+                    view.game_options
+                        .quit_prompt
+                        .dialog_mouse(pressed, &menu.prompt_assets().dialog_buttons(2));
+                }
+                return;
+            }
             if view.save_visible() {
                 if button == winit::event::MouseButton::Left {
                     let pointer = view.pointer.map(|p| p.map(|v| v as f32 * 0.5));
@@ -5910,11 +5935,9 @@ impl Intro {
                                     eprintln!("[Options] {error}");
                                 }
                             }
-                            Some(crate::game_options::Button::Quit) => {
-                                self.retire_inspection();
-                                self.last_sample = None;
-                                return;
-                            }
+                            // The menu action retained the city and opened
+                            // its abandonment prompt. Its reply owns teardown.
+                            Some(crate::game_options::Button::Quit) => {}
                             Some(crate::game_options::Button::Settings) => {
                                 view.settings_menu.open();
                             }
@@ -7187,6 +7210,7 @@ impl Intro {
             view.toolbar_input.cancel();
             view.toolbar_right_held = false;
             view.settings_menu.cancel_input();
+            view.game_options.quit_prompt.cancel_press();
             if let Some(comparison) = &mut view.comparison {
                 comparison.cancel_press();
             }
@@ -9402,6 +9426,33 @@ impl Intro {
                     view.card_selection = Some(selected);
                 }
             }
+            if let Some(reply) = &view.game_options.quit_reply {
+                match reply.try_recv() {
+                    Ok(requests) => {
+                        view.game_options.quit_reply = None;
+                        view.game_options.quit_prompt.finish_dismiss(vec![]);
+                        for request in requests {
+                            view.prompts.submit(request);
+                        }
+                        view.last_status_query = Instant::now() - std::time::Duration::from_secs(1);
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err("Abandonment session disconnected".into());
+                    }
+                }
+            }
+            for response in view.game_options.quit_prompt.take_dialog_replies() {
+                let sender = view
+                    ._fresh_session
+                    .as_ref()
+                    .ok_or("Abandonment has no live session")?;
+                let (reply, answer) = mpsc::channel();
+                sender
+                    .send(FreshRequest::HumanDialog(response, reply))
+                    .map_err(|e| e.to_string())?;
+                view.game_options.quit_reply = Some(answer);
+            }
             if let Some(reply) = &view.prompt_reply {
                 match reply.try_recv() {
                     Ok(requests) => {
@@ -10667,6 +10718,20 @@ impl Intro {
                     }
                 }
             }
+            if view.game_options.quit_prompt.request().is_some()
+                && let Some(menu) = &self.menu
+            {
+                view.game_options.quit_prompt.cursor(
+                    view.pointer
+                        .map(|p| p.map(|v| v as f32 * 0.5))
+                        .unwrap_or([-1.; 2]),
+                );
+                let panel = menu
+                    .prompt_assets()
+                    .prepare(&self.renderer, &view.game_options.quit_prompt)?;
+                self.renderer
+                    .draw_overlay(&self.color_view, &self.depth_view, &panel);
+            }
             return presenter
                 .present_binding(&self.binding)
                 .map_err(|e| e.to_string());
@@ -11347,6 +11412,9 @@ mod tests {
             assert_eq!(state.mouse(&assets, Some(point), true), None);
             assert_eq!(state.mouse(&assets, Some(point), false), Some(actions[i]));
         }
+        state.quit_prompt.dialog_button(1);
+        assert_eq!(state.quit_prompt.take_dialog_replies()[0].button, 1);
+        state.quit_prompt.finish_dismiss(vec![]);
         state.set_save_disabled(true);
         let [l, t, r, b] = bounds[1];
         let save = [(l + r) * 0.5, (t + b) * 0.5];
