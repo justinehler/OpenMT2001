@@ -4287,6 +4287,9 @@ impl Intro {
                         self.renderer
                             .draw_overlay(&self.color_view, &self.depth_view, panel);
                     }
+                    presenter
+                        .present_binding(&self.binding)
+                        .map_err(|error| error.to_string())?;
                     return Ok(true);
                 }
                 crate::live_host::ResultReview::Menu(target) => {
