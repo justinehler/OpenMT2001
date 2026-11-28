@@ -72,9 +72,20 @@ impl Cache {
                 count += 1;
             }
             let baseline = inputs.commodities[commodity];
-            *cached = ((f64::from(baseline.value) * f64::from(baseline.markup)
-                + f64::from(*cached))
-                / f64::from(count + 1)) as f32;
+            if [baseline.markup, baseline.value, *cached]
+                .iter()
+                .all(|v| v.is_finite())
+            {
+                let mut price = crate::x87::Sum::from_f32(baseline.markup)?;
+                price.mul_f32(baseline.value)?;
+                price.add_f32(*cached)?;
+                price.div(crate::x87::Sum::from_i32(count + 1))?;
+                *cached = price.to_f32();
+            } else {
+                *cached = ((f64::from(baseline.value) * f64::from(baseline.markup)
+                    + f64::from(*cached))
+                    / f64::from(count + 1)) as f32;
+            }
         }
         self.rent = 0.;
         let mut capacity = 0_i32;
@@ -95,11 +106,24 @@ impl Cache {
             }
             let units = u16::from_le_bytes(business[0xe..0x10].try_into().unwrap());
             let rent = f32::from_le_bytes(business[0x1dc..0x1e0].try_into().unwrap());
-            self.rent = (f64::from(rent) * f64::from(units) + f64::from(self.rent)) as f32;
+            if rent.is_finite() && self.rent.is_finite() {
+                let mut weighted = crate::x87::Sum::from_f32(rent)?;
+                weighted.mul(crate::x87::Sum::from_i32(i32::from(units)));
+                weighted.add_f32(self.rent)?;
+                self.rent = weighted.to_f32();
+            } else {
+                self.rent = (f64::from(rent) * f64::from(units) + f64::from(self.rent)) as f32;
+            }
             capacity = capacity.wrapping_add(i32::from(units));
         }
         // Zero capacity is unguarded in the original x87 calculation.
-        self.rent = (f64::from(self.rent) / f64::from(capacity)) as f32;
+        if capacity == 0 || !self.rent.is_finite() {
+            self.rent = (f64::from(self.rent) / f64::from(capacity)) as f32;
+        } else {
+            let mut rent = crate::x87::Sum::from_f32(self.rent)?;
+            rent.div(crate::x87::Sum::from_i32(capacity))?;
+            self.rent = rent.to_f32();
+        }
         Ok(())
     }
 }
