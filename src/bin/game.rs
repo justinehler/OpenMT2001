@@ -25,6 +25,9 @@ use openmt_frontend::{
 };
 #[cfg(test)]
 use openmt_frontend::{music_gain, saved_current_player};
+// The Host and session modules live in crates/headless and build without
+// intro or the interface layer (#99); kept nameable as crate::<module>.
+use openmt_headless::{fresh_city, live_host, process_dispatch, session_save};
 #[path = "frontend/app.rs"]
 mod app;
 #[cfg(test)]
@@ -36,18 +39,12 @@ pub mod card_panel;
 mod headless;
 #[path = "frontend/intro.rs"]
 mod intro;
-#[path = "frontend/live_host.rs"]
-mod live_host;
 #[path = "frontend/load.rs"]
 mod load;
 #[path = "frontend/menu.rs"]
 mod menu;
 #[path = "frontend/navigator.rs"]
 mod navigator;
-#[path = "frontend/process_dispatch.rs"]
-mod process_dispatch;
-#[path = "frontend/session_save.rs"]
-pub mod session_save;
 #[path = "frontend/singleplayer.rs"]
 mod singleplayer;
 #[path = "frontend/skirmish_roster.rs"]
@@ -71,12 +68,9 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(all(test, feature = "capture"))]
 use openmt_frontend::capture_test;
-#[path = "frontend/fresh_city.rs"]
-pub mod fresh_city;
 
 #[cfg(test)]
-#[path = "frontend/session_validation.rs"]
-mod session_validation;
+use openmt_headless::session_validation;
 
 #[path = "frontend/consumer_polls.rs"]
 pub mod consumer_polls;
@@ -106,3 +100,85 @@ mod locator_property_panel_tests;
 #[cfg(test)]
 #[path = "frontend/transport_audio_host_tests.rs"]
 mod transport_audio_host_tests;
+
+// Host and session tests that need intro, the game's menus or panels, so they
+// build with the game binary (#99). Each wrapper stands in for the module the
+// test file was a child of, so its `use super::*` still resolves; its
+// `#[path]` directory is where the test files are.
+#[cfg(test)]
+#[path = "frontend"]
+mod fresh_city_result_host_tests {
+    #[allow(unused_imports)]
+    pub use crate::fresh_city::result::*;
+    #[allow(unused_imports)]
+    use crate::fresh_city::{CommandAssets, Session};
+    #[allow(unused_imports)]
+    use openmt2001::level_script::random::zero_to as random_zero_to;
+    #[allow(unused_imports)]
+    use openmt2001::{
+        business_binding, level_script, level_startup, lua4::Value, outcome_notice::Sequence,
+    };
+    #[path = "fresh_city/performance_tests.rs"]
+    mod performance_tests;
+}
+#[cfg(test)]
+#[path = "frontend/live_host/camera_bridge/autosave_producer_failure_tests.rs"]
+mod live_host_autosave_producer_failure_host_tests;
+#[cfg(test)]
+#[path = "frontend"]
+mod live_host_process_host_tests {
+    #[allow(unused_imports)]
+    pub use crate::live_host::*;
+    #[path = "live_host"]
+    mod camera_session_service {
+        #[allow(unused_imports)]
+        use crate::live_host::camera_bridge::{RequestError, SessionCall, SessionReply};
+        #[allow(unused_imports)]
+        pub use crate::live_host::camera_session_service::*;
+        #[allow(unused_imports)]
+        use openmt2001::session::Session;
+        #[path = "camera_session_service/process_tests.rs"]
+        mod process_tests;
+        #[path = "camera_session_service/resident_tests.rs"]
+        mod resident_tests;
+        #[path = "camera_session_service/tests.rs"]
+        mod tests;
+    }
+}
+#[cfg(test)]
+#[path = "frontend"]
+mod session_save_host_tests {
+    #[allow(unused_imports)]
+    pub use crate::session_save::*;
+    #[allow(unused_imports)]
+    use openmt2001::session::Session;
+    #[allow(unused_imports)]
+    use openmt2001::{
+        live_commands::Command,
+        save::{SaveFile, extension, writer},
+    };
+    #[cfg(feature = "capture")]
+    #[path = "session_save_auction_test.rs"]
+    pub mod auction_test;
+    #[path = "session_save_terms_test.rs"]
+    mod terms_test;
+    #[path = "session_save_tests.rs"]
+    mod tests;
+}
+#[cfg(test)]
+#[path = "frontend"]
+mod fresh_city_scenarios_host_tests {
+    #[allow(unused_imports)]
+    pub use crate::fresh_city::*;
+    #[path = ""]
+    mod scenarios {
+        #[allow(unused_imports)]
+        pub use crate::fresh_city::scenarios::*;
+        #[allow(unused_imports)]
+        use openmt2001::lua4::Runtime;
+        #[allow(unused_imports)]
+        use std::path::Path;
+        #[path = "session_scenarios_tests.rs"]
+        mod tests;
+    }
+}

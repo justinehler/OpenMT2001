@@ -3,7 +3,7 @@
 #[path = "live_host/camera_bridge.rs"]
 pub mod camera_bridge;
 #[path = "live_host/camera_session_service.rs"]
-mod camera_session_service;
+pub mod camera_session_service;
 #[path = "live_host/process_runtime.rs"]
 pub mod process_runtime;
 use openmt2001::auction_panel::Auction;
@@ -110,7 +110,7 @@ pub struct TutorialControls {
 }
 /// Terminal diagnostics replace the intrusive city overlay. Emit only a state,
 /// speed or hour transition; clock polling must not flood the console.
-pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
+pub fn report_status(status: &Status, previous: Option<&Status>) {
     if previous.is_none() {
         eprintln!(
             "[controls] F1/P pauses/resumes; Options opens the game menu. Diagnostics stay in this terminal."
@@ -291,7 +291,7 @@ pub enum CameraSupplierPolicy {
         upper: openmt2001::navigator_inputs::Producer,
     },
 }
-enum CameraSuppliers {
+pub enum CameraSuppliers {
     CameraOnly,
     Graph {
         tables: std::sync::Arc<openmt2001::strategic_inputs::Tables>,
@@ -301,23 +301,23 @@ enum CameraSuppliers {
 
 pub struct Host {
     /// Barrier completion requests 0x4ebaa0 on the retained process clock.
-    pub(crate) synchronize_time: bool,
+    pub synchronize_time: bool,
     ai_warnings: AiWarnings,
     //Missing process source is explicit for legacy CPU Hosts. Production binds
     //the SAME Assets-born handle before commands/startup are consumed.
     pub process_runtime: Option<process_runtime::Handle>,
     /// None retains existing callers. Installation is an explicit ack barrier.
-    camera_bridge: Option<camera_bridge::Worker>,
+    pub camera_bridge: Option<camera_bridge::Worker>,
     /// Explicit legacy UI snapshot source, mutually exclusive with the native
     /// camera bridge. Absence retains the pre-connection supported routes.
     ui_camera_source: Option<openmt2001::save_menu::camera_source::Reader>,
     /// Authority supplied only by Inputs::session_worker selected profile.
-    pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
+    pub autosave_profile_root: Option<std::path::PathBuf>,
     pub autosave_status: Option<openmt2001::save_menu::AutosaveStatus>,
     /// Headless only: the camera records and interface view an autosave
     /// writes when neither camera owner is installed.
-    pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
-    camera_suppliers: Option<CameraSuppliers>,
+    pub fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
+    pub camera_suppliers: Option<CameraSuppliers>,
     pub time_runtime: std::sync::Arc<std::sync::Mutex<openmt2001::time_panel::Runtime>>,
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
@@ -325,33 +325,33 @@ pub struct Host {
     stats: Option<openmt2001::stats_panel::State>,
     comparison: Option<openmt2001::comparison::Runtime>,
     market_share: openmt2001::market_share_panel::State,
-    cash_arrow: openmt2001::cash_arrow::State,
+    pub cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
     card: Option<openmt2001::card_panel::Panel>,
     card_visible: bool,
     day_night_flags: [u8; 3],
     notices: openmt2001::notifications::Queue,
     pub auction_renderer: Option<std::sync::mpsc::Sender<auction_requests::Request>>,
-    auction_actor_events: Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
+    pub auction_actor_events: Option<std::sync::mpsc::Sender<auction_requests::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
     pub transport_audio: Option<std::sync::mpsc::Sender<transport_requests::Request>>,
     pub era_audio: Option<std::sync::mpsc::Sender<era_requests::Request>>,
     pub gameplay_sound: Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
-    auction: Option<Auction>,
+    pub auction: Option<Auction>,
     pub running: bool,
     player_paused: bool,
     pub failure: Option<String>,
     /// Saved on the worker, rather than inferred from an asynchronous UI poll.
     options_resume: Option<bool>,
     pub policy: openmt2001::session::tick::Policy,
-    commands_seen: usize,
+    pub commands_seen: usize,
     tutorial_started: bool,
-    tutorial_controls: TutorialControls,
+    pub tutorial_controls: TutorialControls,
     tutorial_arrows: Vec<[i32; 2]>,
     pending_prompt_closes: Vec<usize>,
     script_closes_seen: usize,
     tutorial_enabled_controls: std::collections::BTreeSet<u32>,
-    tutorial_interaction: openmt2001::tutorial_two_interaction::State,
+    pub tutorial_interaction: openmt2001::tutorial_two_interaction::State,
     tutorial_camera_events: Vec<TutorialCameraAction>,
     tutorial_build_type: i32,
     tutorial_build_use: i32,
@@ -378,7 +378,7 @@ impl Host {
     /// Declare the exact number of deliberately injected warnings in a test.
     /// All other session tests reject warnings when their host is dropped.
     #[cfg(test)]
-    pub(crate) fn expect_ai_warnings(&mut self, count: u64) {
+    pub fn expect_ai_warnings(&mut self, count: u64) {
         self.ai_warnings.expected_count = count;
     }
     ///4ba17e (fresh) /4bbd6b (loaded) shows the persistent normal Time
@@ -400,8 +400,8 @@ impl Host {
         self.restore_player_pause(&session.world.pause);
         Ok(())
     }
-    #[cfg(test)]
-    pub(crate) fn cash_arrow_state(&self) -> openmt2001::cash_arrow::State {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn cash_arrow_state(&self) -> openmt2001::cash_arrow::State {
         self.cash_arrow
     }
     /// Consume original load-stage effects once, after the actual UI channels
@@ -734,7 +734,7 @@ impl Host {
     }
     /// Bind only the actual Session topology epoch. Missing initial publication
     /// is retained as an explicit unavailable source, never legacy fallback.
-    pub(crate) fn install_ui_camera_source(
+    pub fn install_ui_camera_source(
         &mut self,
         session: &Session<'_>,
         source: openmt2001::save_menu::camera_source::Reader,
@@ -747,13 +747,13 @@ impl Host {
         self.ui_camera_source = Some(source);
         Ok(())
     }
-    pub(crate) fn has_ui_camera_source(&self) -> bool {
+    pub fn has_ui_camera_source(&self) -> bool {
         self.ui_camera_source.is_some()
     }
     /// Producer-dependent ordinary SaveSelected consumer. The same atomic
     /// pair/mode source is used by autosave below; no cached request pose is
     /// overlaid and Options stays held throughout encoding/publication.
-    pub(crate) fn save_selected_from_ui_snapshot(
+    pub fn save_selected_from_ui_snapshot(
         &self,
         session: &mut Session<'_>,
         image: &openmt2001::pe::PeImage<'_>,
@@ -816,7 +816,7 @@ impl Host {
     }
     // Exchange without fallible world projection. Callers must commit the
     // completed boundary's scheduler effects before projection can fail.
-    fn exchange_camera(
+    pub fn exchange_camera(
         &mut self,
         operation: camera_bridge::Operation,
     ) -> Result<Option<camera_bridge::Observation>, camera_bridge::RequestError> {
@@ -831,7 +831,7 @@ impl Host {
     /// Actual Session remains on this Host stack throughout the UI operation.
     /// Both Worker and Session are exclusively borrowed, so a callback cannot
     /// re-enter this request or send dependent work to the blocked Host.
-    pub(crate) fn exchange_camera_with_session(
+    pub fn exchange_camera_with_session(
         &mut self,
         session: &mut Session<'_>,
         operation: camera_bridge::Operation,
@@ -903,7 +903,7 @@ impl Host {
         upper.mode8b2318 = mode8b2318;
         Ok(())
     }
-    fn camera_central_tail(
+    pub fn camera_central_tail(
         &mut self,
         session: &mut Session<'_>,
     ) -> Result<(), camera_bridge::RequestError> {
@@ -958,6 +958,7 @@ impl Host {
         }
         Ok(())
     }
+    #[cfg(test)]
     fn complete_camera_central(
         &mut self,
         tasks: &mut [openmt2001::timers::Task],
@@ -1075,15 +1076,15 @@ impl Host {
     }
     /// V2 saves retain the reason bytes. A cold Host must recover the player
     /// latch before its initial focus snapshot, or the first press adds a second hold.
-    pub(crate) fn restore_player_pause(&mut self, pause: &openmt2001::pause::State) {
+    pub fn restore_player_pause(&mut self, pause: &openmt2001::pause::State) {
         self.player_paused = pause.bytes[3] != 0;
     }
-    pub(crate) fn player_paused(&self) -> bool {
+    pub fn player_paused(&self) -> bool {
         self.player_paused
     }
     /// 43e5f0 toggles only its own reason3, then calls the process audio
     /// wrapper. Options and script pauses retain their independent counts.
-    pub(crate) fn toggle_player_pause(
+    pub fn toggle_player_pause(
         &mut self,
         pause: &mut openmt2001::pause::State,
         timers: &mut [openmt2001::timers::Task],
@@ -1125,7 +1126,7 @@ impl Host {
     /// Apply one received offline host focus operation, before the next frame.
     /// The required provider finishes device/input and guarded frontend-audio
     /// effects first. Player running and all ordinary pause owners stay intact.
-    pub(crate) fn focus(
+    pub fn focus(
         &mut self,
         pause: &mut openmt2001::pause::State,
         timers: &mut [openmt2001::timers::Task],
@@ -1239,7 +1240,7 @@ impl Host {
     /// Project only this live Options owner's transient pause into a cold-load
     /// continuation. The actual Session stays held until the UI closes Options.
     /// Other reason0 holders, other reasons, timer padding and accumulators stay.
-    pub(crate) fn options_save_projection(
+    pub fn options_save_projection(
         &self,
         pause: &openmt2001::pause::State,
         timers: &[openmt2001::timers::Task],
@@ -1266,7 +1267,7 @@ impl Host {
     /// Everything a manual save of `session` reads from this Host. Every
     /// manual write reads this view, so it is where a network game's disabled
     /// Save (49e860) is enforced against a stale menu that still offers it.
-    pub(crate) fn save_view(
+    pub fn save_view(
         &self,
         session: &Session<'_>,
     ) -> Result<openmt2001::session_save::HostSaveView, String> {
@@ -1675,7 +1676,7 @@ impl Host {
     /// 4c3929/4c3979 dispatch 0 for block selection, 4c3beb/4c3cf6 dispatch
     /// 1 for block entry, and 4c3958 dispatches 2 for building selection.
     /// The script owns dismissal and the following prompt.
-    fn tutorial_pick_callback(
+    pub fn tutorial_pick_callback(
         &self,
         pick: openmt2001::tutorial_two_interaction::Pick,
     ) -> Option<i32> {
@@ -1927,7 +1928,7 @@ impl Host {
             self.script_closes_seen += 1;
         }
     }
-    fn collect_script_prompts(&mut self, session: &Session<'_>) {
+    pub fn collect_script_prompts(&mut self, session: &Session<'_>) {
         if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) {
             return;
         }
@@ -2967,7 +2968,7 @@ impl Host {
     }
     /// Original 49e940 releases the modal for either answer. Only Yes calls
     /// 4ba1d0 with completed=0, won=0; it skips results and final statistics.
-    pub(crate) fn reply_options_quit(
+    pub fn reply_options_quit(
         &mut self,
         catalog: &mut openmt2001::level_catalog::Catalog,
         profile: Option<&std::path::Path>,
@@ -2996,7 +2997,7 @@ impl Host {
         self.running = false;
         Ok(())
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn result_sequence(&self) -> Option<openmt2001::outcome_notice::Sequence> {
         self.result_request.map(|request| request.sequence)
     }
@@ -3278,7 +3279,7 @@ impl Host {
         self.auction.as_mut().unwrap().controls = controls;
         result
     }
-    pub(crate) fn apply_auction_action(
+    pub fn apply_auction_action(
         &mut self,
         session: &mut Session<'_>,
         assets: &CommandAssets<'_, '_>,
@@ -3686,7 +3687,7 @@ fn ledger_ui_post_with(
     }
 }
 
-fn ledger_ui_call(
+pub fn ledger_ui_call(
     cash_arrow: &mut openmt2001::cash_arrow::State,
     sound: &Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     call: openmt2001::category_ownership::Seam,
@@ -3762,7 +3763,7 @@ fn current_cash(session: &Session<'_>) -> Result<f32, String> {
         .ok_or_else(|| "Time current account missing".into())
 }
 
-pub(crate) use openmt2001::auction_panel::action as auction_action;
+pub use openmt2001::auction_panel::action as auction_action;
 
 ///Same source FISTP-low-word conversion using the public portable arithmetic.
 ///Nonfinite/indefinite conversions produce low word0; no private economy API.
@@ -3799,7 +3800,7 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
     })
 }
 
-pub(crate) use openmt2001::prompt_queue::script_request;
+pub use openmt2001::prompt_queue::script_request;
 
 fn human_dialog_ui(
     prompts: &mut Vec<prompt_queue::Request>,

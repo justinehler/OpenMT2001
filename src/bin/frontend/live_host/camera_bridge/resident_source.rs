@@ -33,8 +33,8 @@ impl ResidentSource {
     pub fn validate_binding(&self, binding: &AuxiliaryBinding) -> Result<(), String> {
         binding.validate_source(&self.pool)
     }
-    #[cfg(test)]
-    pub(crate) fn synthetic(epoch: u64, pool: &AuxiliaryPool) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn synthetic(epoch: u64, pool: &AuxiliaryPool) -> Self {
         Self {
             epoch: PropertyEpoch::synthetic(epoch),
             pool: pool.source(),

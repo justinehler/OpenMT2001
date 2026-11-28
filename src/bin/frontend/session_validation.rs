@@ -4,7 +4,7 @@
 /// The original 0x48c binding writes the reciprocal business/building indexes.
 /// Run this during natural Host hours so later construction and sale can expose
 /// a stale link even when money and the clock continue to change.
-pub(crate) fn assert_live_links(session: &crate::fresh_city::Session<'_>) {
+pub fn assert_live_links(session: &crate::fresh_city::Session<'_>) {
     for (slot, business) in session.world.ledgers.businesses.iter().enumerate() {
         if business[0x21c] == 0 {
             continue;

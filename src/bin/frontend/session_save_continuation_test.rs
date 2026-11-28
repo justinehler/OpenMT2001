@@ -2,7 +2,7 @@
 //! The subsequent comparisons still check complete continued state.
 use super::*;
 
-pub(crate) fn load_boundary(
+pub fn load_boundary(
     session: &mut Session<'_>,
     loaded: &Session<'_>,
     assets: &crate::fresh_city::CommandAssets<'_, '_>,
@@ -227,7 +227,7 @@ fn loaded_opponents(control: &mut Session<'_>, loaded: &Session<'_>) {
 /// Native load effects for a city with opponents: the resident movement step
 /// (#247), the metrics and demand rebuild, and the rebuilt opponents and
 /// ownership lists (#254, #351). Apply them all to the uninterrupted control.
-pub(crate) fn opponent_load_boundary(
+pub fn opponent_load_boundary(
     control: &mut Session<'_>,
     loaded: &Session<'_>,
     assets: &crate::fresh_city::CommandAssets<'_, '_>,
@@ -276,7 +276,7 @@ pub(crate) fn opponent_load_boundary(
     market.rent = loaded.population.market.rent;
 }
 
-pub(super) fn allocation_cursor(
+pub fn allocation_cursor(
     control: &mut Session<'_>,
     loaded: &Session<'_>,
     native_allocation_next: u32,

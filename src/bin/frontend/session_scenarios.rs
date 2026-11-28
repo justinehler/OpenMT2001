@@ -1,8 +1,8 @@
 pub use openmt2001::session::scenarios::*;
 
-#[cfg(test)]
-#[path = "session_scenarios_tests.rs"]
-mod tests;
+// session_scenarios_tests.rs needs the single-player menu, the build view and
+// the consumer polls, so it builds with the game binary (game.rs
+// `fresh_city_scenarios_host_tests`, #99).
 
 // The moved module's imports, for its tests' `use super::*`.
 #[cfg(test)]

@@ -68,8 +68,10 @@ jobs:
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The library alone: the other packages' lib tests need the native stack
+      # (crates/headless's Host tests use the interface layer) and run below.
       - name: Test core library (default features)
-        run: cargo +${{ env.RUST_VERSION }} test --locked --lib
+        run: cargo +${{ env.RUST_VERSION }} test --locked -p openmt2001 --lib
       - name: Build native game
         run: cargo +${{ env.RUST_VERSION }} build --locked --features native --bin game
       - name: Test library, binaries and integration tests (native, capture)

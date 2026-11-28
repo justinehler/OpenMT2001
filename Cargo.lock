@@ -1520,6 +1520,7 @@ dependencies = [
  "glam",
  "image",
  "openmt-frontend",
+ "openmt-headless",
  "openmt2001",
  "png",
  "pollster",
@@ -1534,8 +1535,12 @@ dependencies = [
 name = "openmt-headless"
 version = "0.1.0"
 dependencies = [
+ "glam",
+ "openmt-frontend",
  "openmt2001",
+ "pollster",
  "sha2",
+ "wgpu",
 ]
 
 [[package]]

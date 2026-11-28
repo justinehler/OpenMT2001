@@ -53,7 +53,7 @@ fn saved_auction_worker_rebuilds_and_saves() {
         vertical_fov: 0.7,
     };
     for prior in [0, 3] {
-        let paths = crate::session_save::auction_test::auction_continuation_saves(prior);
+        let paths = crate::session_save_host_tests::auction_test::auction_continuation_saves(prior);
         let source_root = paths[0].parent().unwrap().parent().unwrap().to_path_buf();
         for (phase, path) in paths.into_iter().enumerate() {
             let expected_inputs = inputs.clone();

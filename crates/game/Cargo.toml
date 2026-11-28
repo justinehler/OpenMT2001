@@ -16,6 +16,7 @@ required-features = ["native"]
 [dependencies]
 openmt2001 = { path = "../.." }
 openmt-frontend = { path = "../frontend" }
+openmt-headless = { path = "../headless" }
 sha2 = "0.10"
 bytemuck = { version = "1.25.2", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
@@ -32,9 +33,10 @@ windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation
 
 [dev-dependencies]
 openmt-frontend = { path = "../frontend", features = ["test-support"] }
+openmt-headless = { path = "../headless", features = ["test-support"] }
 
 [features]
 lua4 = ["openmt2001/lua4", "openmt-frontend/lua4"]
 graphics = ["openmt2001/graphics", "openmt-frontend/graphics", "dep:wgpu", "dep:bytemuck", "dep:glam"]
-capture = ["openmt2001/capture", "openmt-frontend/capture", "graphics", "dep:pollster", "dep:png"]
+capture = ["openmt2001/capture", "openmt-frontend/capture", "openmt-headless/capture", "graphics", "dep:pollster", "dep:png"]
 native = ["openmt2001/native", "openmt-frontend/native", "graphics", "lua4", "dep:pollster", "dep:winit", "dep:image", "dep:rodio", "dep:chrono", "dep:windows-sys"]
