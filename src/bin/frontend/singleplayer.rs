@@ -93,6 +93,7 @@ mod campaign_picker_tests {
             scenario: panel(),
             tutorial_panel: panel(),
             character_panel: panel(),
+            highlight: ui::LobbyHighlight::default(),
             generic: vec![],
             characters: vec![],
             fonts: vec![],
@@ -126,6 +127,39 @@ mod campaign_picker_tests {
         }
     }
 
+    #[test]
+    fn lobby_campaign_frame_uses_select_region_under_backing_and_slot_interiors() {
+        let mut panel = panel();
+        panel.visible = true;
+        panel.character_screen = true;
+        let b = &mut panel.character_panel.bounds;
+        b[8] = [10., 80., 610., 260.];
+        b[23] = [20., 90., 108., 254.];
+        for slot in 0..6 {
+            let x = 20. + slot as f32 * 96.;
+            b[34 - slot] = [x + 3., 93., x + 85., 109.];
+            b[15 + slot] = [x + 3., 194., x + 85., 251.];
+        }
+        for phase in 0..33 {
+            let mut shapes = Surface::solid();
+            panel.character_slot_backgrounds(&mut shapes);
+            assert_eq!(shapes.vertices.len(), 14 * 6);
+            let quads = shapes.vertices.as_chunks::<6>().0;
+            assert_eq!(quads[0][0][..2], [20., 90.]);
+            assert_eq!(quads[0][2][..2], [108., 254.]);
+            assert_eq!(quads[0][0][3..6], [0., 1., 0.]);
+            assert_eq!(shapes.alpha[0], 255 - ((phase * 8) & 255) as u8);
+            assert_eq!(&shapes.alpha[6..12], &[0xbb; 6]);
+            // All six name bars and lower rows cover the marker completely.
+            for quad in &quads[2..] {
+                assert!(quad.iter().all(|v| v[3..6] == [0., 10. / 255., 75. / 255.]));
+            }
+            assert!(shapes.alpha[12..].iter().all(|&alpha| alpha == 255));
+            assert!(panel.advance_highlight());
+        }
+        panel.character_screen = false;
+        assert!(!panel.advance_highlight());
+    }
     #[test]
     fn singleplayer_text_style_campaign_slots_use_small_font_and_lobby_alignment() {
         let mut panel = panel();
@@ -776,6 +810,7 @@ pub struct SinglePlayer {
     scenario: Panel,
     tutorial_panel: Panel,
     character_panel: Panel,
+    highlight: ui::LobbyHighlight,
     generic: Vec<Surface>,
     characters: Vec<Character>,
     fonts: Vec<Surface>,
@@ -1038,6 +1073,7 @@ impl SinglePlayer {
                 "gamedata2\\brand_new_panels\\sp_token_V2.tm",
                 &[0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
             )?,
+            highlight: ui::LobbyHighlight::default(),
             generic,
             characters,
             fonts: texture.textures[2..4].iter().map(Surface::new).collect(),
@@ -1808,6 +1844,22 @@ impl SinglePlayer {
             None,
         )
     }
+    pub fn advance_highlight(&mut self) -> bool {
+        if !self.visible || !self.character_screen {
+            return false;
+        }
+        self.highlight.advance();
+        true
+    }
+    fn character_slot_backgrounds(&self, shapes: &mut Surface) {
+        let b = &self.character_panel.bounds;
+        self.highlight.paint(shapes, b[23]); // SELECTP1: local campaign slot
+        shapes.rect(b[8], [0xbb000a28; 4]);
+        for slot in 0..6 {
+            shapes.rect(b[34 - slot], [0xff000a4b; 4]);
+            shapes.rect(b[15 + slot], [0xff000a4b; 4]);
+        }
+    }
     fn slot_labels(&self) -> Result<Vec<Surface>, String> {
         let mut pages = self.slot_fonts.clone();
         let profile_glyphs = ascii(&String::from_utf8_lossy(&self.name));
@@ -1882,7 +1934,8 @@ impl SinglePlayer {
             0xffffffff,
         )?;
         if self.character_screen {
-            for part in [8, 62, 68] {
+            self.character_slot_backgrounds(&mut shapes);
+            for part in [62, 68] {
                 shapes.rect(b[part], [0xee000530; 4]);
             }
             for (part, id) in [(22, 0x694), (61, 0x6a7)] {
@@ -1900,8 +1953,6 @@ impl SinglePlayer {
             }
             slot_labels = self.slot_labels()?;
             for slot in 0..6 {
-                let namepart = 34 - slot;
-                shapes.rect(b[namepart], [0xff000530; 4]);
                 let mut tint = b[41 + slot];
                 let authored = self
                     .custom

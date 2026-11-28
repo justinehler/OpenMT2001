@@ -149,6 +149,11 @@ impl Route {
             self.visible = false;
         }
     }
+    pub fn advance_highlight(&mut self) {
+        if self.visible && self.page == Page::Lobby {
+            self.roster_panel.advance_highlight();
+        }
+    }
     pub fn poll(&mut self) {
         while let Some(update) = self.worker.as_ref().and_then(Handle::poll) {
             match update {
