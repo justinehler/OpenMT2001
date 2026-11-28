@@ -868,7 +868,7 @@ fn tutorial_tick_rect(row: usize) -> [f32; 4] {
 // child from Info8 minus the always-reserved scrollbar. 440650 sets inset3;
 // 441279..44129d subtracts both insets before 4e7a90 wraps with glyph gap -1.
 // Custom, Tutorial and Character keep their independent layout contracts.
-struct CampaignDescription {
+pub(crate) struct CampaignDescription {
     offsets: Vec<usize>,
     text: Vec<u8>,
     child: [f32; 4],
@@ -876,7 +876,11 @@ struct CampaignDescription {
     visible: usize,
 }
 impl CampaignDescription {
-    fn new(tab: &[u8], text: &[u8], bounds: [f32; 4]) -> Result<Self, String> {
+    // Rich-text children use Font2's 10-unit W height plus the native gap2.
+    // Keep this independent of LIST BOX row spacing.
+    const LINE_PITCH: f32 = 12.;
+
+    pub(crate) fn new(tab: &[u8], text: &[u8], bounds: [f32; 4]) -> Result<Self, String> {
         let [left, top, right, bottom] = bounds;
         let strip = SCENARIO_INFO_SCROLL[2] - SCENARIO_INFO_SCROLL[0];
         let child = [left, top, right - strip, bottom];
@@ -898,16 +902,19 @@ impl CampaignDescription {
             origin: [left.trunc() + 5., (top + 3.).trunc()],
             // Preserve the existing whole-row capacity, independent of inset.
             // W height10 + native vertical gap2 remains a 12-unit pitch.
-            visible: ((bottom - top) / SCENARIO_ROW_HEIGHT) as usize,
+            visible: ((bottom - top) / Self::LINE_PITCH) as usize,
         })
     }
-    fn rows(&self) -> impl Iterator<Item = &[u8]> {
+    pub(crate) fn rows(&self) -> impl Iterator<Item = &[u8]> {
         self.offsets.windows(2).map(|range| {
             let end = range[1].saturating_sub(1).min(self.text.len());
             &self.text[range[0].min(end)..end]
         })
     }
-    fn limit(&self) -> usize {
+    pub(crate) fn capacity(&self) -> usize {
+        self.visible
+    }
+    pub(crate) fn limit(&self) -> usize {
         self.offsets
             .len()
             .saturating_sub(1)
@@ -916,7 +923,12 @@ impl CampaignDescription {
     fn wheel(&self, first: usize, delta: i32) -> usize {
         (first as i64 + i64::from(delta)).clamp(0, self.limit() as i64) as usize
     }
-    fn paint(&self, pages: &mut [Surface], tab: &[u8], first: usize) -> Result<(), String> {
+    pub(crate) fn paint(
+        &self,
+        pages: &mut [Surface],
+        tab: &[u8],
+        first: usize,
+    ) -> Result<(), String> {
         // Use exactly the same visible-row capacity as limit/wheel/track.
         // ui::text retains its existing glyph renderer and child-edge clipping.
         for (line, text) in self.rows().skip(first).take(self.visible).enumerate() {
@@ -926,7 +938,7 @@ impl CampaignDescription {
                 text,
                 [
                     self.origin[0],
-                    self.origin[1] + line as f32 * SCENARIO_ROW_HEIGHT,
+                    self.origin[1] + line as f32 * Self::LINE_PITCH,
                     self.child[2],
                     self.child[3],
                 ],
