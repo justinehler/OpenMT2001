@@ -172,6 +172,15 @@ pub fn saved_command(packet: &[u8]) -> Result<crate::live_commands::Command, Str
     };
     let kind = word(4)?;
     match kind {
+        // 450a30 consumes the 28-byte result command built by 4896e0 and
+        // 489df0, and the 24-byte removal command built by 48cc50.
+        9 if packet.len() == 28 => Ok(Command::OutcomeNotice {
+            player: word(20)? as i32,
+            reason: word(24)?,
+        }),
+        10 if packet.len() == 24 => Ok(Command::Eliminate {
+            slot: word(20)? as usize,
+        }),
         0x0f => Ok(Command::Build(crate::construction::Command::from_packet(
             packet,
         )?)),
@@ -222,6 +231,15 @@ pub fn saved_command(packet: &[u8]) -> Result<crate::live_commands::Command, Str
             category: i16::from_le_bytes(packet[24..26].try_into().unwrap()),
             owner: packet[26],
         }),
+        // 465330 queues the 20-byte auction room-start (size from 465480);
+        // the announcement it opens is the tag-8000 auction record. Pad it
+        // to the live adapter's 52 bytes, keeping +0xc so the saved
+        // deadline is used as is rather than adding the routing lead again.
+        0x1e if packet.len() == 20 => {
+            let mut descriptor = [0; 52];
+            descriptor[..20].copy_from_slice(packet);
+            Ok(Command::Auction { descriptor })
+        }
         0x19 | 0x1d | 0x1e | 0x1f | 0x20 | 0x27..=0x2a if packet.len() == 52 => {
             Ok(Command::Auction {
                 descriptor: packet.try_into().unwrap(),
