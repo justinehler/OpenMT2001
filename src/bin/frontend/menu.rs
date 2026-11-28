@@ -409,6 +409,11 @@ impl Menu {
     /// Current/previous physical samples arrive once per App menu redraw.
     /// This is the host's eligible modal event1 cadence, not proven50Hz parity.
     pub fn desktop_ui_event1(&mut self, sample: desktop_quit::Sample) {
+        self.skirmish.advance_highlight();
+        self.multiplayer.advance_highlight();
+        if self.single.advance_highlight() {
+            self.dirty = true;
+        }
         let edges = self.desktop_quit.event1(sample);
         for (button, edge) in edges.into_iter().enumerate() {
             if edge && self.desktop_quit.active() {

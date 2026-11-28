@@ -293,13 +293,13 @@ impl Assets {
         let font = Font::parse(&self.tab)?;
         for (i, label) in self.labels.iter().enumerate() {
             // Native 49e750 sets font4 and 440650 style9 on each row.
-            // Generic 442b10 changes disabled Save text to style8.
-            let color = if save_disabled && i == 1 {
-                0xff646464
-            } else {
-                0xffffffff
-            };
-            crate::ui::text_widget_style9(&mut fonts, &self.tab, label, self.bounds[i], color)?;
+            crate::ui::button_label(
+                &mut fonts,
+                &self.tab,
+                label,
+                self.bounds[i],
+                save_disabled && i == 1,
+            )?;
         }
         if let Some(message) = message {
             // Save feedback is host presentation text beneath the original menu.
