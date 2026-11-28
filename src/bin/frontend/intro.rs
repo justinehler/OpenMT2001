@@ -34,6 +34,8 @@ pub(crate) mod process_frontend;
 mod refresh;
 #[path = "intro/result_cut_scene.rs"]
 mod result_cut_scene;
+#[path = "intro/screenshot.rs"]
+mod screenshot;
 use openmt2001::{
     flyby::{CameraSample, Flyby, Playback},
     render::{COLOR_FORMAT, DEPTH_FORMAT, PreparedScene, Renderer},
@@ -1458,6 +1460,7 @@ pub struct Intro {
     pub(crate) process_frontend: Option<process_frontend::Owner>,
     camera_physical: camera_live::PhysicalInput,
     pause_keys: pause_keys::Input,
+    screenshot: screenshot::Input,
     camera_keys: camera_keys::Input,
     camera_parked: Option<camera_live::owner::Owner>,
     assets: Assets,
@@ -1469,7 +1472,8 @@ pub struct Intro {
     sidewalk_shading: crate::block_sidewalk_labels::FadeState,
     sidewalk_camera: CameraSample,
     strategic_scene: crate::strategic_scene::View,
-    _color: wgpu::Texture,
+    /// The presented frame; Alt+F5 reads it back (0x458af0).
+    color: wgpu::Texture,
     _depth: wgpu::Texture,
     color_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -1875,7 +1879,9 @@ impl Intro {
         };
         let color = make_texture(
             COLOR_FORMAT,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             &[wgpu::TextureFormat::Rgba8UnormSrgb],
         );
         let depth = make_texture(DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT, &[]);
@@ -1900,7 +1906,7 @@ impl Intro {
             sidewalk_shading: crate::block_sidewalk_labels::FadeState::default(),
             sidewalk_camera,
             strategic_scene: crate::strategic_scene::View::default(),
-            _color: color,
+            color,
             _depth: depth,
             color_view,
             depth_view,
@@ -1928,6 +1934,7 @@ impl Intro {
             inspection: None,
             camera_physical: camera_live::PhysicalInput::default(),
             pause_keys: pause_keys::Input::default(),
+            screenshot: screenshot::Input::default(),
             camera_keys: camera_keys::Input::default(),
             camera_parked: Some(camera_producer::new_process_owner()?),
             audio_levels: crate::settings_menu::Levels::default(),
@@ -2145,6 +2152,14 @@ impl Intro {
         }
         self.dispatch_camera_shortcut(sample);
         self.pause_keys.dispatch(sample, gates, &mut self.focus)?;
+        // 0x4ba88d: Alt+F5 has only the city and media/sequence gates.
+        let capture_active = screenshot::Input::is_f5_press(sample)
+            && self
+                .inspection
+                .as_ref()
+                .is_some_and(|view| view._fresh_session.is_some())
+            && !pause_keys::suppressed(&self.assets.process_runtime)?;
+        self.screenshot.sample(sample, capture_active);
         process_frontend::project_camera_sample(
             &mut self.camera_physical,
             self.inspection.as_mut(),
