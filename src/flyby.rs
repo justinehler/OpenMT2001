@@ -259,8 +259,12 @@ mod tests {
         let bytes = authored_track(&poses);
         let mut playback = Playback::new(&Flyby::parse(&bytes).unwrap()).unwrap();
         let mut reference = playback.camera.clone();
+        // Compare against the decoded callback requests (the track stores Z
+        // negated, so raw poses can differ in the sign of zero).
+        let requests = playback.requests.clone();
+        assert_eq!(requests.len(), poses.len());
         for tick in 1..20 {
-            let request = poses[tick % poses.len()];
+            let request = requests[tick % requests.len()];
             reference
                 .request_flyby(request.eye, request.target, request.up)
                 .unwrap();
