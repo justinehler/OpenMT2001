@@ -957,7 +957,7 @@ impl Menu {
                         }
                     } else {
                         self.single_mode = false;
-                        self.profile.visible = true;
+                        self.profile.open_selection();
                     }
                     self.selected = None;
                 }
@@ -987,7 +987,7 @@ impl Menu {
                         self.selected = None;
                     } else {
                         self.single_mode = false;
-                        self.profile.visible = true;
+                        self.profile.open_selection();
                         self.selected = None;
                     }
                 }
@@ -1008,7 +1008,7 @@ impl Menu {
                     Err(error) => self.single.message = Some(error),
                 }
             } else {
-                self.profile.visible = true;
+                self.profile.open_selection();
             }
             self.selected = None;
             self.dirty = true;
@@ -1056,7 +1056,7 @@ impl Menu {
             return;
         }
         if self.selected == Some(0) {
-            self.profile.visible = true;
+            self.profile.open_selection();
             self.selected = None;
             self.dirty = true;
             return;
@@ -1075,7 +1075,7 @@ impl Menu {
                     Err(error) => self.skirmish.error = Some(error),
                 }
             } else {
-                self.profile.visible = true;
+                self.profile.open_selection();
             }
             self.selected = None;
             self.dirty = true;
