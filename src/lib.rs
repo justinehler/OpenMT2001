@@ -97,6 +97,7 @@ pub mod player_script;
 pub mod player_tick;
 #[cfg(feature = "lua4")]
 pub mod population_script;
+pub mod process_dispatch;
 pub mod property_offer;
 pub mod property_rights;
 pub mod scenario_objective;

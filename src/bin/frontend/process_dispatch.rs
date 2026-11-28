@@ -1,123 +1,26 @@
-//! Move-only process controllers and dispatch. World callback context never travels.
-use openmt2001::{pause, scenario_objective, timers};
-use std::time::Instant;
+//! Session side of the process dispatch controllers; the controllers themselves
+//! live in the library (`openmt2001::process_dispatch`, #99).
+pub(crate) use openmt2001::process_dispatch::{DispatchCustody, Seed, Timing};
 
-pub(crate) struct DispatchCustody {
-    pub objective: scenario_objective::State,
-    pub pause: pause::State,
-    pub tasks: Vec<timers::Task>,
-    pub frequency: timers::CalendarFrequency,
-    pub frame: timers::Frame,
-    pub epoch: Instant,
-}
-pub(crate) struct Seed {
-    pub objective: scenario_objective::State,
-    pub pause: pause::State,
-    pub tasks: Vec<timers::Task>,
-    pub frequency: timers::CalendarFrequency,
-}
-pub(crate) struct Timing {
-    pub frame: timers::Frame,
-    pub epoch: Instant,
-}
-impl DispatchCustody {
-    pub(crate) fn startup(pause: pause::State) -> Result<Self, String> {
-        // Explicit modern prior padding policy, not recovered native heap data.
-        let mut value = Self {
-            objective: scenario_objective::State::default(),
-            pause,
-            tasks: timers::startup_tasks([0; 20]),
-            frequency: timers::CalendarFrequency {
+/// Take the controllers back from a departing city (`DispatchCustody::from_parts`).
+pub(crate) fn custody_from_session(
+    session: &mut crate::fresh_city::Session<'_>,
+    timing: Timing,
+) -> Result<DispatchCustody, String> {
+    DispatchCustody::from_parts(
+        std::mem::take(&mut session.world.objective),
+        std::mem::take(&mut session.world.pause),
+        std::mem::take(&mut session.hooks.timers),
+        std::mem::replace(
+            &mut session.hooks.frequency,
+            openmt2001::timers::CalendarFrequency {
                 frequency: 0.,
                 calendar_timer: None,
                 logic_timer: None,
             },
-            frame: timers::Frame::default(),
-            epoch: Instant::now(),
-        };
-        value.frame.initialize(0); // once-only4eb660
-        value.pause.pause(0, |change, _| {
-            change.apply(&mut value.tasks);
-            Ok(())
-        })?;
-        Ok(value)
-    }
-    pub(crate) fn prepare_start(self, fresh: bool) -> Result<(Seed, Timing), String> {
-        if fresh && (self.pause.bytes[0] as i8) < 0 {
-            return Err("Unsupported native nonterminating fresh start: negative reason0".into());
-        }
-        Ok((
-            Seed {
-                objective: self.objective,
-                pause: self.pause,
-                tasks: self.tasks,
-                frequency: self.frequency,
-            },
-            Timing {
-                frame: self.frame,
-                epoch: self.epoch,
-            },
-        ))
-    }
-    pub(crate) fn from_session(
-        session: &mut crate::fresh_city::Session<'_>,
-        timing: Timing,
-    ) -> Result<Self, String> {
-        let mut value = Self {
-            objective: std::mem::take(&mut session.world.objective),
-            pause: std::mem::take(&mut session.world.pause),
-            tasks: std::mem::take(&mut session.hooks.timers),
-            frequency: std::mem::replace(
-                &mut session.hooks.frequency,
-                timers::CalendarFrequency {
-                    frequency: 0.,
-                    calendar_timer: None,
-                    logic_timer: None,
-                },
-            ),
-            frame: timing.frame,
-            epoch: timing.epoch,
-        };
-        value.retire_session()?;
-        Ok(value)
-    }
-
-    fn retire_session(&mut self) -> Result<(), String> {
-        // The worker's Options, player and script owners die with its World.
-        // Returning their counts would orphan them in the next city. Native
-        // UI teardown releases its owners separately (e.g. Options49e719),
-        // while4ba1d0 keeps group2 suspended for the menu. Our joined-worker
-        // boundary replaces all departing ordinary owners with ONE menu hold.
-        // Focus, padding, timer records and process timing retain their owners.
-        self.pause.bytes[..4].fill(0);
-        self.pause.pause(0, |change, _| {
-            change.apply(&mut self.tasks);
-            Ok(())
-        })
-    }
-}
-impl Seed {
-    ///4b9d40 ->4eb6f0 is shared by fresh and native saved load.
-    pub(crate) fn world_reset_accumulators(&mut self) {
-        for task in &mut self.tasks {
-            task[12..16].copy_from_slice(&0f32.to_le_bytes());
-        }
-    }
-
-    pub(crate) fn fresh_reset(&mut self) -> Result<(), String> {
-        if (self.pause.bytes[0] as i8) < 0 {
-            return Err("Unsupported negative reason0 before World reset".into());
-        }
-        self.world_reset_accumulators();
-        //4b9fa0 drains only positive ordinary reason0.
-        while self.pause.bytes[0] as i8 > 0 {
-            self.pause.unpause(0, |change, _| {
-                change.apply(&mut self.tasks);
-                Ok(())
-            })?;
-        }
-        Ok(())
-    }
+        ),
+        timing,
+    )
 }
 
 ///4bcd6d..4bcd7b: native load completes with ONE unpause0, not fresh's
@@ -135,6 +38,7 @@ pub(crate) fn native_load_completed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openmt2001::pause;
 
     #[test]
     fn city_switch_retires_options_player_and_script_owners() {

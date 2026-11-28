@@ -307,7 +307,7 @@ impl SceneInputs {
                                 camera_producer::record_exit(&exit_failures, error.clone());
                             }
                             if joined {
-                                match crate::process_dispatch::DispatchCustody::from_session(
+                                match crate::process_dispatch::custody_from_session(
                                     &mut session,
                                     timing,
                                 ) {
@@ -981,10 +981,7 @@ impl SceneInputs {
                     }
                 }
                 if joined {
-                    match crate::process_dispatch::DispatchCustody::from_session(
-                        &mut session,
-                        timing,
-                    ) {
+                    match crate::process_dispatch::custody_from_session(&mut session, timing) {
                         Ok(custody) => {
                             drop(session);
                             return Some(custody);
