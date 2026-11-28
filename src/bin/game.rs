@@ -1,4 +1,7 @@
 //! Native boot host. Shared simulation and asset modules do not depend on it.
+// Session dependencies that moved into the library (#99); kept nameable as
+// crate::compatibility and crate::skirmish_maps.
+use openmt2001::{compatibility, skirmish_maps};
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_bridge.rs"]
@@ -33,8 +36,6 @@ pub mod card_panel;
 pub mod category_distance;
 #[path = "frontend/city_pulse_scene.rs"]
 pub mod city_pulse_scene;
-#[path = "frontend/compatibility.rs"]
-mod compatibility;
 #[path = "frontend/cursor.rs"]
 mod cursor;
 #[path = "frontend/dust_scene.rs"]
@@ -95,8 +96,6 @@ pub mod session_save;
 mod settings_menu;
 #[path = "frontend/singleplayer.rs"]
 mod singleplayer;
-#[path = "frontend/skirmish_maps.rs"]
-mod skirmish_maps;
 #[path = "frontend/skirmish_roster.rs"]
 mod skirmish_roster;
 #[path = "frontend/skirmish_setup.rs"]

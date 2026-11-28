@@ -8,6 +8,7 @@ pub mod business_pool;
 pub mod business_report;
 pub mod category_reset;
 pub mod clock;
+pub mod compatibility;
 pub mod economy;
 pub mod era;
 /// Test support: locates private original files for original-backed tests.
@@ -38,6 +39,7 @@ pub mod save;
 pub mod scene;
 pub mod scheduler;
 pub mod script_events;
+pub mod skirmish_maps;
 pub mod sky;
 pub mod texture;
 pub mod timers;
