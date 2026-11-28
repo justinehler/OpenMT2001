@@ -505,6 +505,22 @@ mod tests {
     }
 
     #[test]
+    fn foliage_palette_white_entry_is_lit_light_grey_for_chimney_smoke() {
+        // Entry 8 of the original 005455f0 table is opaque white; chimney
+        // smoke (004b60d0) takes its lit RGB from 008b2248.
+        let mut tables = tables();
+        tables.colors[8] = 0xffffffff;
+        let lit = |sun| {
+            tables
+                .palette([0.; 3], [0., 0., 1.], sun, 0xff808080, 0xff808080)
+                .unwrap()[8]
+        };
+        assert_eq!(lit([0., 0., -1.]), 0xffffffff);
+        assert_eq!(lit([1., 0., 0.]), 0xffbfbfbf);
+        assert_eq!(lit([0., 0., 1.]), 0xff7f7f7f);
+    }
+
+    #[test]
     #[ignore = "requires supplied original archive and v1.4 executable"]
     fn original_tree_pool_and_foliage_records() {
         let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();

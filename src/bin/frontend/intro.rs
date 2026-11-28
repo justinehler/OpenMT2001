@@ -1339,13 +1339,19 @@ fn update_city_pulse(
 fn update_city_smoke(
     renderer: &Renderer,
     submission: (Option<usize>, Option<&openmt2001::chimney_smoke::Smoke>, u8),
+    trees: Option<&crate::tree_scene::Layer>,
     camera: CameraSample,
     scene: &mut Scene,
     prepared: &mut PreparedScene,
 ) -> Result<(), String> {
     if let (Some(index), Some(state), detail) = submission {
         let draw = scene.draws.get_mut(index).ok_or("smoke draw missing")?;
-        crate::chimney_smoke_scene::fill(draw, state, detail, camera)?;
+        // 004b60d0 reads the lit white that 004b6370 left in the foliage
+        // palette, which is still zero before the first foliage pass.
+        let lit_white = trees
+            .and_then(crate::tree_scene::Layer::palette)
+            .map_or(0, |palette| palette[8]);
+        crate::chimney_smoke_scene::fill(draw, state, detail, lit_white, camera)?;
         renderer.update_surface(prepared, index, &draw.borrowed(), scene.camera, None)?;
     }
     Ok(())
