@@ -937,6 +937,8 @@ struct LoadedInspection {
 #[derive(Default)]
 struct SnapshotCache {
     converted_textures: openmt2001::texture::LoaderCache,
+    /// Converted era road textures for the retained city's road pages.
+    road_textures: openmt2001::road_textures::Loader,
     /// Exact renderer inputs, compared directly; simulation remains authoritative.
     buildings: Vec<[u8; 0x394]>,
     hour: u32,

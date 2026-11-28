@@ -15,6 +15,9 @@ use crate::{
 use glam::{Mat4, Vec3};
 use std::{collections::BTreeMap, sync::Arc};
 
+/// 004c0200 loads this ground mesh; 004b8d20 swaps its pages by era.
+const ROADS_MESH: &str = "gamedata2/roads/roads.tm";
+
 mod park_railings;
 mod station_details;
 
@@ -144,6 +147,11 @@ pub struct Scene {
     street_furniture_detail: u8,
     halos: Option<crate::light_halos::Layer>,
     station_details: Vec<usize>,
+    /// roads.tm draws in mesh part order, for the era road textures.
+    road_draws: Vec<usize>,
+    /// Era whose road textures the road draws hold (00545658); none while
+    /// they still hold roads.tm's built-in pages.
+    road_era: Option<u32>,
 }
 
 /// Original model-space inputs for the portions of shared material batches
@@ -349,6 +357,7 @@ fn assemble_with_style_internal(
     let mut halo_instances = Vec::new();
     let mut signal_posts = (Vec::new(), Vec::new());
     let mut station_detail_families = std::collections::BTreeSet::new();
+    let mut road_families = Vec::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
     let mut saved_commodity_rows = None;
@@ -966,7 +975,7 @@ fn assemble_with_style_internal(
         // wraps them with zero translation/rotation and unit scale, and
         // both normal city render paths draw the resulting 0068ade8 list.
         for mesh_path in [
-            "gamedata2/roads/roads.tm",
+            ROADS_MESH,
             // 004bdc10 loads 00688b48; 0044faf0 instances it in 00688740.
             "gamedata2/NEW_building stuff/pavement.tm",
             "gamedata2/New_building stuff/airport_ground.tm",
@@ -1095,6 +1104,21 @@ fn assemble_with_style_internal(
                 if let Some(i) = registrations[material] {
                     scenery_families.insert(sets.len(), scenery_regions[i].page);
                 }
+            }
+            if mesh_path == ROADS_MESH {
+                // Each road texture owns a whole page, which 004b8d20 rewrites.
+                road_families = mesh
+                    .parts
+                    .iter()
+                    .filter(|part| {
+                        registrations
+                            .get(usize::from(part.texture))
+                            .copied()
+                            .flatten()
+                            .is_none_or(|i| scenery_regions[i].uv == [1., 1., 0., 0.])
+                    })
+                    .map(|part| first_family + usize::from(part.texture))
+                    .collect();
             }
             use crate::street_furniture::{self, Kind, Pose};
             let detail_pose = station_details::pose(mesh_path);
@@ -1943,6 +1967,16 @@ fn assemble_with_style_internal(
                 .ok_or_else(|| "station detail draw missing".to_owned())
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let road_draws = road_families
+        .into_iter()
+        .filter_map(|family| batches.get(&(family, 0)))
+        .map(|vertices| {
+            draws
+                .iter()
+                .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
+                .ok_or_else(|| "road draw missing".to_owned())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let draws = draws
         .into_iter()
         .map(|draw| OwnedDraw {
@@ -1988,6 +2022,8 @@ fn assemble_with_style_internal(
         street_furniture_detail: 2,
         halos: None,
         station_details,
+        road_draws,
+        road_era: None,
     };
     if scene_mode && let Some(original) = request.original {
         let layer = crate::light_halos::Layer::load(
@@ -2246,6 +2282,46 @@ impl Scene {
         self.street_furniture_era = era;
         self.street_furniture_detail = detail;
         Ok(changed)
+    }
+    /// 004b8d20, called by the city draw 004b2b60: when the clamped era
+    /// differs from the era the road pages hold, replace roads.tm's two pages
+    /// with that era's road textures. `pages` receives the clamped era and the
+    /// two page widths and returns the converted pages in mesh part order.
+    /// Returns the draws whose texture changed.
+    pub fn set_road_era(
+        &mut self,
+        era: u32,
+        pages: impl FnOnce(u32, [u32; 2]) -> Result<[Arc<[u8]>; 2], String>,
+    ) -> Result<Vec<usize>, String> {
+        let selected = crate::road_textures::selected_era(era);
+        let [first, second] = match self.road_draws[..] {
+            [first, second] => [first, second],
+            _ => return Ok(Vec::new()),
+        };
+        if self.road_era == Some(selected) {
+            return Ok(Vec::new());
+        }
+        let width = |index: usize| -> Result<u32, String> {
+            let draw = self.draws.get(index).ok_or("road draw missing")?;
+            if draw.width != draw.height {
+                return Err("road texture page is not square".into());
+            }
+            Ok(draw.width)
+        };
+        let widths = [width(first)?, width(second)?];
+        let pages = pages(selected, widths)?;
+        for ((index, width), rgba) in [first, second].into_iter().zip(widths).zip(pages) {
+            if rgba.len() != width as usize * width as usize * 4 {
+                return Err("road texture page size changed".into());
+            }
+            self.draws[index].rgba = rgba;
+        }
+        self.road_era = Some(selected);
+        Ok(vec![first, second])
+    }
+    /// Era whose road textures the road draws hold, if they were replaced.
+    pub fn road_era(&self) -> Option<u32> {
+        self.road_era
     }
     pub fn set_street_furniture_era(&mut self, era: u32) -> Result<Vec<usize>, String> {
         self.apply_street_furniture_options(era, self.street_furniture_detail)
@@ -4243,3 +4319,7 @@ mod city_structures_tests;
 #[cfg(test)]
 #[path = "render_scene/light_halos_tests.rs"]
 mod light_halos_tests;
+
+#[cfg(test)]
+#[path = "render_scene/road_era_tests.rs"]
+mod road_era_tests;
