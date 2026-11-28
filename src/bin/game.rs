@@ -3,7 +3,7 @@
 // crate::<module> in the binary.
 use openmt2001::{
     auction_controls, build_panel, campaign_store, compatibility, human_dialog, result_controller,
-    save_menu, session::business_operations, skirmish_maps,
+    save_menu, session::business_operations, skirmish_maps, tutorial_two_interaction,
 };
 #[path = "frontend/app.rs"]
 mod app;
@@ -110,8 +110,6 @@ mod strategic_scene;
 pub mod time_panel;
 #[path = "frontend/tooltip.rs"]
 mod tooltip;
-#[path = "frontend/tutorial_two_interaction.rs"]
-pub mod tutorial_two_interaction;
 #[path = "frontend/ui.rs"]
 mod ui;
 fn main() -> std::process::ExitCode {
