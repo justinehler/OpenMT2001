@@ -168,6 +168,12 @@ struct Assets {
     labels: Vec<Vec<u8>>,
     slider_textures: Vec<Surface>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Notice {
+    Delete,
+    Duplicate,
+}
+
 pub struct Profile {
     assets: Assets,
     pub store: Profiles,
@@ -177,7 +183,8 @@ pub struct Profile {
     chosen: Option<usize>,
     first: usize,
     error: Option<String>,
-    deleting: bool,
+    notice: Option<Notice>,
+    notice_keys: crate::menu::desktop_quit::Modal,
     selected_all: bool,
     pointer_position: Option<[f32; 2]>,
 }
@@ -318,7 +325,8 @@ impl Profile {
             chosen,
             first: 0,
             error: None,
-            deleting: false,
+            notice: None,
+            notice_keys: Default::default(),
             selected_all: false,
             pointer_position: None,
         }
@@ -328,13 +336,66 @@ impl Profile {
         self.name = None;
         self.first_registration = false;
     }
+    fn open_notice(&mut self, notice: Notice) {
+        self.notice = Some(notice);
+        self.notice_keys.open(self.pointer_position);
+    }
+    pub(crate) fn prompt_pending(&self) -> bool {
+        self.notice.is_some()
+    }
+    pub(crate) fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
+        use crate::human_dialog::{Argument, Dialog};
+        let mut dialog = Dialog {
+            portrait: u32::MAX,
+            timeout: false,
+            ..Default::default()
+        };
+        match self.notice? {
+            Notice::Duplicate => {
+                // 495f8f..496007; reply 495ea0 restores registration unchanged.
+                dialog.title = 0x6cd;
+                dialog.body = 0x6ce;
+                dialog.buttons = [0x467, 0];
+                dialog.button_count = 1;
+                dialog.callback = 0x495ea0;
+            }
+            Notice::Delete => {
+                // 498eab..498f47; zero reply deletes, one preserves selection.
+                dialog.title = 0x663;
+                dialog.body = 0x666;
+                dialog.buttons = [0x664, 0x665];
+                dialog.button_count = 2;
+                dialog.callback = 0x498c70;
+                let name = self.store.names.get(self.chosen?)?;
+                let mut argument = [0; 96];
+                argument[..name.len()].copy_from_slice(name.as_bytes());
+                dialog.arguments[0] = Argument::Name(argument);
+                dialog.argument_count = 1;
+            }
+        }
+        Some(dialog)
+    }
+    pub(crate) fn ui_event1(&mut self, sample: crate::menu::desktop_quit::Sample) -> bool {
+        let edges = self.notice_keys.event1(sample);
+        let mut replied = false;
+        for (button, edge) in edges.into_iter().enumerate() {
+            if edge && self.prompt_pending() {
+                self.activate(button);
+                replied = true;
+            }
+        }
+        replied
+    }
     pub(crate) fn modal_open(&self) -> bool {
-        self.name.is_some() || self.deleting
+        self.name.is_some() || self.notice.is_some()
     }
     pub fn count(&self) -> usize {
+        if let Some(dialog) = self.generic_prompt() {
+            return dialog.button_count;
+        }
         if self.first_registration {
             1
-        } else if self.name.is_some() || self.deleting {
+        } else if self.name.is_some() || self.notice.is_some() {
             2
         } else {
             4 + self.store.names.len()
@@ -350,7 +411,7 @@ impl Profile {
     pub fn generic_button_enabled(&self, i: usize) -> bool {
         action_button_enabled(
             self.chosen.is_some(),
-            self.name.is_some() || self.deleting,
+            self.name.is_some() || self.notice.is_some(),
             i,
         )
     }
@@ -363,7 +424,10 @@ impl Profile {
     }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         let hit = |[l, t, r, b]: [f32; 4]| p[0] >= l && p[0] <= r && p[1] >= t && p[1] <= b;
-        if self.name.is_some() || self.deleting {
+        if self.notice.is_some() {
+            return None; // Menu owns shared prompt geometry.
+        }
+        if self.name.is_some() {
             return [4, 6].iter().enumerate().find_map(|(i, &part)| {
                 (self.modal_button_enabled(i) && hit(self.assets.confirm[part])).then_some(i)
             });
@@ -393,19 +457,24 @@ impl Profile {
     }
     pub fn back(&mut self) {
         // 495d1a..495d45 disables Back only for startup registration.
-        if self.first_registration {
-            return;
+        if self.first_registration || self.notice.is_some() {
+            return; // Warning replies use Return/Backspace, not Escape.
         }
         self.error = None;
-        if self.name.take().is_none() && !self.deleting {
+        if self.name.take().is_none() {
             self.visible = false;
         }
-        self.deleting = false;
     }
     pub fn select_all(&mut self) {
+        if self.notice.is_some() {
+            return;
+        }
         self.selected_all = self.name.is_some();
     }
     pub fn input(&mut self, text: &str) {
+        if self.notice.is_some() {
+            return;
+        }
         if let Some(name) = &mut self.name {
             if self.selected_all {
                 name.clear();
@@ -420,6 +489,9 @@ impl Profile {
         }
     }
     pub fn erase(&mut self) {
+        if self.notice.is_some() {
+            return;
+        }
         if let Some(name) = &mut self.name {
             if self.selected_all {
                 name.clear();
@@ -431,7 +503,10 @@ impl Profile {
         }
     }
     pub fn reveal(&mut self, index: usize) {
-        if self.name.is_none() && !self.deleting && index >= 4 && index - 4 < self.store.names.len()
+        if self.name.is_none()
+            && self.notice.is_none()
+            && index >= 4
+            && index - 4 < self.store.names.len()
         {
             let row = index - 4;
             if row < self.first {
@@ -442,7 +517,7 @@ impl Profile {
         }
     }
     pub fn scroll(&mut self, delta: i32) {
-        if self.name.is_some() || self.deleting {
+        if self.name.is_some() || self.notice.is_some() {
             return;
         }
         self.first = (self.first as i32 + delta).clamp(
@@ -453,12 +528,30 @@ impl Profile {
                 .saturating_sub(self.assets.list_layout.visible_rows()) as i32,
         ) as usize;
     }
+    pub(crate) fn prompt_mouse(&mut self, down: bool, hit: Option<usize>) -> bool {
+        if let Some(button) = self.notice_keys.left(down, hit) {
+            self.activate(button);
+            return true;
+        }
+        false
+    }
+    pub(crate) fn prompt_right(&mut self, down: bool) {
+        self.notice_keys.right(down);
+    }
+    pub(crate) fn cancel_input(&mut self) {
+        self.pointer_position = None;
+        self.notice_keys.cancel_pointer();
+    }
+    pub(crate) fn prompt_controls(&self) -> &crate::menu::desktop_quit::Modal {
+        &self.notice_keys
+    }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
+        self.notice_keys.cursor(p);
     }
     pub fn drag_track(&mut self, origin: Option<usize>, p: [f32; 2]) -> bool {
         if self.name.is_some()
-            || self.deleting
+            || self.notice.is_some()
             || self.store.names.len() <= self.assets.list_layout.visible_rows()
             || origin != Some(4 + self.store.names.len() + 2)
         {
@@ -483,14 +576,32 @@ impl Profile {
         self.error = None;
         let before = (self.store.names.clone(), self.store.current, self.chosen);
         let result = (|| -> Result<(), String> {
-            if self.deleting {
-                if index == 0
+            if let Some(notice) = self.notice {
+                if index > 1 {
+                    return Ok(());
+                }
+                self.notice = None;
+                self.notice_keys = Default::default();
+                // 42a2dc delivers Backspace even to one-button records;
+                // 495ea0 reopens registration only for reply zero. Original
+                // +498 marks New from selection (the inverse of startup);
+                // neither warning reply changes it or opens Player Selection.
+                if notice == Notice::Duplicate && index == 1 && !self.first_registration {
+                    self.name = None;
+                }
+                if notice == Notice::Delete
+                    && index == 0
                     && let Some(i) = self.chosen
                 {
                     self.store.delete_chosen(i)?;
                     self.chosen = None;
+                    self.first = self.first.min(
+                        self.store
+                            .names
+                            .len()
+                            .saturating_sub(self.assets.list_layout.visible_rows()),
+                    );
                 }
-                self.deleting = false;
                 return Ok(());
             }
             if let Some(name) = &self.name {
@@ -506,7 +617,8 @@ impl Profile {
                     return Err("Enter a name (1-31 ASCII characters)".into());
                 }
                 if self.store.names.contains(name) {
-                    return Err("This player name already exists".into());
+                    self.open_notice(Notice::Duplicate);
+                    return Ok(());
                 }
                 self.store.clear_orphan_progress(name)?;
                 self.store.clear_orphan_options(name)?;
@@ -553,7 +665,11 @@ impl Profile {
             }
             match index {
                 0 => self.name = Some(String::new()),
-                1 => self.deleting = self.chosen.is_some(),
+                1 => {
+                    if self.chosen.is_some() {
+                        self.open_notice(Notice::Delete);
+                    }
+                }
                 2 => {
                     if self.chosen.is_some() {
                         self.store.current = self.chosen;
@@ -654,7 +770,7 @@ impl Profile {
         for (i, part) in [11, 10, 13, 12].iter().enumerate() {
             let bounds = self.assets.bounds[*part];
             let disabled = ((1..=3).contains(&i) && self.chosen.is_none())
-                || ((self.name.is_some() || self.deleting) && i != 0);
+                || ((self.name.is_some() || self.notice.is_some()) && i != 0);
             ui::button(
                 &mut shapes,
                 bounds,
@@ -676,7 +792,7 @@ impl Profile {
         }
         let mut modal = Surface::solid();
         let mut modal_fonts = self.assets.fonts.clone();
-        let modal_open = self.name.is_some() || self.deleting;
+        let modal_open = self.name.is_some() && self.notice.is_none();
         if modal_open {
             modal.rect(self.assets.confirm[1], [0xaa000000; 4]);
             modal.rect(
@@ -685,15 +801,10 @@ impl Profile {
             );
             let mut title = self.assets.confirm[2];
             title[1] += 4.;
-            let delete_title: Vec<_> = "Delete player?".bytes().map(|c| c - 32).collect();
             ui::text(
                 &mut modal_fonts,
                 &self.assets.tab,
-                if self.deleting {
-                    &delete_title
-                } else {
-                    &self.assets.labels[5]
-                },
+                &self.assets.labels[5],
                 title,
                 true,
                 0xffffffff,
@@ -705,41 +816,22 @@ impl Profile {
                 input,
                 [if self.selected_all {
                     0xff0070c0
-                } else if self.name.is_some() {
-                    0xff002896 // Registration painter 495e5e; deletion has a separate dialog.
                 } else {
-                    0xff001a90
+                    0xff002896 // Registration painter 495e5e.
                 }; 4],
             );
-            let name = self.name.as_deref().unwrap_or_else(|| {
-                self.chosen
-                    .map(|i| self.store.names[i].as_str())
-                    .unwrap_or("")
-            });
+            let name = self.name.as_deref().unwrap_or("");
             let encoded: Vec<_> = name.bytes().map(|c| c - 32).collect();
-            if self.name.is_some() {
-                // Registration configures style 4 on the full CONFIRM_TEXT
-                // region (495c89..495cb2), not the inset blue backing.
-                ui::text_entry(
-                    &mut modal_fonts,
-                    &mut modal,
-                    &self.assets.tab,
-                    &encoded,
-                    self.assets.confirm[3],
-                    true,
-                    true,
-                )?;
-            } else {
-                input[1] += 5.;
-                ui::text(
-                    &mut modal_fonts,
-                    &self.assets.tab,
-                    &encoded,
-                    input,
-                    true,
-                    0xffffffff,
-                )?;
-            }
+            // Registration configures style 4 on the full CONFIRM_TEXT region.
+            ui::text_entry(
+                &mut modal_fonts,
+                &mut modal,
+                &self.assets.tab,
+                &encoded,
+                self.assets.confirm[3],
+                true,
+                true,
+            )?;
             for (i, part) in [4, 6].iter().enumerate() {
                 let bounds = self.assets.confirm[*part];
                 ui::button(
@@ -925,11 +1017,10 @@ mod tests {
         assert_eq!(profile.hit([390., 275.]), Some(1));
         profile.input("Alice");
         profile.activate(0);
-        assert!(
-            profile.error.is_some(),
-            "duplicate cannot overwrite a player"
-        );
+        assert!(profile.prompt_pending(), "duplicate opens the Warning");
+        assert!(profile.error.is_none());
         assert_eq!(profile.store.names, ["Alice"]);
+        profile.activate(0); // Warning OK returns to registration.
         profile.select_all();
         profile.input("Bob");
         profile.activate(0);
@@ -951,6 +1042,40 @@ mod tests {
     }
 
     #[test]
+    fn first_registration_duplicate_replies_preserve_text_and_startup_gate() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        for key in [KeyCode::Enter, KeyCode::Backspace] {
+            let scratch = Scratch::new();
+            let mut profile = scratch.load();
+            // Exercise discovery of a colliding name while startup entry is open.
+            profile.store.names.push("Alice".into());
+            profile.input("Alice");
+            profile.activate(0);
+            assert!(profile.prompt_pending() && profile.first_registration);
+            assert_eq!(profile.generic_prompt().unwrap().title, 0x6cd);
+            let mut keys = crate::menu::desktop_quit::Keys::default();
+            profile.ui_event1(keys.sample());
+            keys.physical(PhysicalKey::Code(key), true, false);
+            assert!(profile.ui_event1(keys.sample()));
+            assert!(!profile.prompt_pending());
+            assert!(profile.visible && profile.first_registration);
+            assert_eq!(profile.name.as_deref(), Some("Alice"));
+            assert_eq!(profile.count(), 1);
+            assert_eq!(profile.hit([390., 275.]), None);
+            profile.back();
+            profile.activate(1);
+            assert_eq!(profile.name.as_deref(), Some("Alice"));
+            assert!(profile.first_registration);
+            profile.select_all();
+            profile.input("Bob");
+            profile.activate(0);
+            assert!(!profile.visible && !profile.first_registration);
+            assert_eq!(profile.store.current, Some(1));
+            assert_eq!(scratch.load().store.names, ["Alice", "Bob"]);
+        }
+    }
+
+    #[test]
     fn first_registration_stays_open_when_profile_storage_fails() {
         let scratch = Scratch::new();
         let mut profile = scratch.load();
@@ -964,6 +1089,198 @@ mod tests {
         assert_eq!(profile.store.current, None);
         profile.back();
         assert!(profile.name.is_some());
+    }
+
+    fn profile(root: PathBuf) -> Profile {
+        Profile {
+            assets: Assets {
+                base: vec![],
+                modal: vec![],
+                bounds: vec![[0.; 4]; 14],
+                confirm: vec![[0.; 4]; 7],
+                fonts: vec![],
+                tab: vec![],
+                list_fonts: vec![],
+                list_tab: vec![],
+                list_layout: openmt2001::frontend_list::Layout::new(
+                    [198., 200., 440., 285.],
+                    11.,
+                    0.,
+                )
+                .unwrap(),
+                labels: vec![],
+                slider_textures: vec![],
+            },
+            store: Profiles {
+                names: vec!["Alice".into(), "Bob".into()],
+                current: Some(0),
+                path: root.join("profiles.txt"),
+            },
+            visible: true,
+            name: None,
+            first_registration: false,
+            chosen: Some(1),
+            first: 0,
+            error: None,
+            notice: None,
+            notice_keys: Default::default(),
+            selected_all: false,
+            pointer_position: None,
+        }
+    }
+    fn strings() -> Vec<Vec<u8>> {
+        let mut strings = vec![vec![]; 0x6cf];
+        for (id, text) in [
+            (0x663, "Delete Profile"),
+            (0x664, "Yes"),
+            (0x665, "No"),
+            (0x666, "Do you want to delete profile %s?"),
+            (0x467, "OK"),
+            (0x6cd, "Warning"),
+            (
+                0x6ce,
+                "A profile with this name already exists. Please use a different name or delete the other profile.",
+            ),
+        ] {
+            strings[id] = text.bytes().map(|b| b - 32).collect();
+        }
+        strings
+    }
+    fn text(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| char::from(b + 32)).collect()
+    }
+    #[test]
+    fn duplicate_warning_restores_editable_name_and_keeps_modal_frame_faded() {
+        let mut profile = profile(PathBuf::from("unused"));
+        let strings = strings();
+        profile.activate(0);
+        profile.input("Alice");
+        profile.activate(0);
+        assert!(profile.error.is_none());
+        let dialog = profile.generic_prompt().unwrap();
+        assert_eq!(text(&dialog.title_text(&strings).unwrap()), "Warning");
+        assert_eq!(
+            text(&dialog.paragraphs(&strings).unwrap()[0]),
+            "A profile with this name already exists. Please use a different name or delete the other profile."
+        );
+        assert_eq!(
+            (dialog.buttons, dialog.button_count, dialog.timeout),
+            ([0x467, 0], 1, false)
+        );
+        profile.input("ignored");
+        profile.erase();
+        profile.select_all();
+        profile.back();
+        assert_eq!(profile.name.as_deref(), Some("Alice"));
+        let mut fade = crate::menu::modal_frame::Fade::default();
+        for _ in 0..26 {
+            fade.advance(profile.modal_open());
+        }
+        assert_eq!(fade.alpha(), 125);
+        // Out-of-range replies cannot dismiss the warning.
+        profile.activate(2);
+        assert!(profile.prompt_pending());
+        profile.activate(0);
+        assert!(!profile.prompt_pending());
+        assert!(profile.visible && profile.modal_open());
+        assert!(!fade.advance(profile.modal_open()));
+        profile.erase();
+        profile.input("ia");
+        assert_eq!(profile.name.as_deref(), Some("Alicia"));
+        assert_eq!(profile.store.names, ["Alice", "Bob"]);
+    }
+    #[test]
+    fn warning_backspace_matches_original_nonzero_reply() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        let mut profile = profile(PathBuf::from("unused"));
+        let mut keys = crate::menu::desktop_quit::Keys::default();
+        profile.activate(0);
+        profile.input("Alice");
+        profile.activate(0);
+        profile.ui_event1(keys.sample());
+        keys.physical(PhysicalKey::Code(KeyCode::Backspace), true, false);
+        assert!(profile.ui_event1(keys.sample()));
+        assert!(!profile.prompt_pending() && profile.name.is_none() && profile.visible);
+        assert_eq!(profile.store.names, ["Alice", "Bob"]);
+    }
+    #[test]
+    fn delete_prompt_mouse_and_original_key_replies_share_completion() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        let root = std::env::temp_dir().join(format!(
+            "openmt-profile-dialog-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut profile = profile(root.clone());
+        let mut keys = crate::menu::desktop_quit::Keys::default();
+        profile.activate(1);
+        let dialog = profile.generic_prompt().unwrap();
+        assert_eq!(
+            text(&dialog.title_text(&strings()).unwrap()),
+            "Delete Profile"
+        );
+        assert_eq!(
+            text(&dialog.paragraphs(&strings()).unwrap()[0]),
+            "Do you want to delete profile Bob?"
+        );
+        assert_eq!(
+            (dialog.buttons, dialog.button_count, dialog.timeout),
+            ([0x664, 0x665], 2, false)
+        );
+        let mut fade = crate::menu::modal_frame::Fade::default();
+        fade.advance(profile.modal_open());
+        assert_eq!(fade.alpha(), 250);
+        profile.activate(4);
+        assert!(profile.prompt_pending());
+        profile.ui_event1(keys.sample());
+        keys.physical(PhysicalKey::Code(KeyCode::Backspace), true, false);
+        assert!(profile.ui_event1(keys.sample()));
+        assert!(!profile.prompt_pending());
+        assert_eq!(profile.chosen, Some(1));
+        assert_eq!(profile.store.names, ["Alice", "Bob"]);
+        profile.activate(1);
+        assert!(!profile.prompt_mouse(true, Some(1)));
+        assert!(profile.prompt_mouse(false, Some(1)));
+        assert_eq!(profile.store.names, ["Alice", "Bob"]);
+        profile.activate(1);
+        profile.ui_event1(keys.sample());
+        keys.physical(PhysicalKey::Code(KeyCode::Enter), true, false);
+        assert!(profile.ui_event1(keys.sample()));
+        assert_eq!(profile.store.names, ["Alice"]);
+        assert_eq!(profile.store.current, Some(0));
+        assert_eq!(profile.chosen, None);
+        assert_eq!(Profiles::load(root.clone()).unwrap().names, ["Alice"]);
+        profile.chosen = Some(0);
+        profile.activate(1);
+        profile.prompt_mouse(true, Some(0));
+        profile.prompt_mouse(false, Some(0));
+        assert!(profile.store.names.is_empty());
+        assert!(!profile.modal_open());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    #[ignore = "requires original v1.4 language resources"]
+    fn original_profile_dialog_strings_match_verified_call_sites() {
+        let offsets = fs::read(openmt2001::fixtures::path("LANGUAGE_OFF")).unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("LANGUAGE_BIN")).unwrap();
+        let mut at = 0;
+        let rows = offsets
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|n| {
+                let end = at + usize::from(u16::from_le_bytes(*n));
+                let row = bytes[at..end].to_vec();
+                at = end;
+                row
+            })
+            .collect::<Vec<_>>();
+        for id in [0x663, 0x664, 0x665, 0x666, 0x467, 0x6cd, 0x6ce] {
+            assert_eq!(rows[id], strings()[id], "language ID {id:x}");
+        }
     }
 
     #[test]
@@ -1048,7 +1365,8 @@ mod tests {
             chosen: None,
             first: 0,
             error: None,
-            deleting: false,
+            notice: None,
+            notice_keys: Default::default(),
             selected_all: false,
             pointer_position: None,
         };
