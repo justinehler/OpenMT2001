@@ -695,11 +695,10 @@ fn advance(
             break End::Failure(error.clone());
         }
         let tick = session.world.clock.timing[0];
-        if let Some(status) = host.autosave_status.take() {
-            match collect_autosave(status, options, &mut autosaves, session, out)? {
-                Some(end) => break end,
-                None => {}
-            }
+        if let Some(status) = host.autosave_status.take()
+            && let Some(end) = collect_autosave(status, options, &mut autosaves, session, out)?
+        {
+            break end;
         }
         if let Some(end) = respond(host, session, assets, options, out)? {
             break end;
