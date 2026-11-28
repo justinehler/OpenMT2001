@@ -540,18 +540,18 @@ impl Menu {
     /// V2-owned Options record for the active player, keyed by the same
     /// reversible profile identity as campaign progress.
     pub fn current_settings_path(&self) -> Option<std::path::PathBuf> {
-        let name = self.profile.store.names.get(self.profile.store.current?)?;
+        let name = self.profile.store.current_code_page()?;
         Some(crate::profile_settings::profile_path(
             &self.assets.profile_root,
-            name.as_bytes(),
+            &name,
         ))
     }
 
     pub fn current_save_root(&self) -> Option<std::path::PathBuf> {
-        let name = self.profile.store.names.get(self.profile.store.current?)?;
+        let name = self.profile.store.current_code_page()?;
         Some(crate::save_menu::selected_profile_root(
             &self.assets.profile_root,
-            name.as_bytes(),
+            &name,
         ))
     }
 
@@ -578,8 +578,10 @@ impl Menu {
         if matches!(target, ResultMenu::Scenarios | ResultMenu::Tutorials) {
             let current = self.profile.store.current.ok_or("Result profile missing")?;
             let name = &self.profile.store.names[current];
-            let path =
-                crate::campaign_store::profile_path(&self.assets.profile_root, name.as_bytes());
+            let path = crate::campaign_store::profile_path(
+                &self.assets.profile_root,
+                &crate::ui::text_field::code_page(name),
+            );
             let mut catalog = self.assets.catalog.clone();
             crate::campaign_store::load_progress(&mut catalog, &path)?;
             if target == ResultMenu::Tutorials {
@@ -948,13 +950,8 @@ impl Menu {
                 &mut self.settings_audio,
             );
             if self.settings.take_reset()
-                && let Some(name) = self
-                    .profile
-                    .store
-                    .current
-                    .and_then(|index| self.profile.store.names.get(index))
-                && let Err(error) =
-                    preferred_token::reset(&self.assets.profile_root, name.as_bytes())
+                && let Some(name) = self.profile.store.current_code_page()
+                && let Err(error) = preferred_token::reset(&self.assets.profile_root, &name)
             {
                 self.skirmish.error = Some(error);
             }
@@ -1050,8 +1047,8 @@ impl Menu {
                     self.selected = None;
                 }
                 Some(1) => {
-                    if let Some(current) = self.profile.store.current {
-                        let name = self.profile.store.names[current].as_bytes();
+                    if let Some(name) = self.profile.store.current_code_page() {
+                        let name = name.as_slice();
                         let path =
                             crate::campaign_store::profile_path(&self.assets.profile_root, name);
                         let mut catalog = self.assets.catalog.clone();
@@ -1085,7 +1082,7 @@ impl Menu {
                         let name = &self.profile.store.names[current];
                         let path = crate::campaign_store::profile_path(
                             &self.assets.profile_root,
-                            name.as_bytes(),
+                            &crate::ui::text_field::code_page(name),
                         );
                         let mut catalog = self.assets.catalog.clone();
                         match crate::campaign_store::load_progress(&mut catalog, &path) {
@@ -1119,8 +1116,10 @@ impl Menu {
         if self.selected == Some(1) && !self.profile.visible && !self.load.visible {
             if let Some(current) = self.profile.store.current {
                 let name = &self.profile.store.names[current];
-                let path =
-                    crate::campaign_store::profile_path(&self.assets.profile_root, name.as_bytes());
+                let path = crate::campaign_store::profile_path(
+                    &self.assets.profile_root,
+                    &crate::ui::text_field::code_page(name),
+                );
                 let mut catalog = self.assets.catalog.clone();
                 match crate::campaign_store::load_progress(&mut catalog, &path) {
                     Ok(()) => self.single.open_tutorial(name, catalog, path),
@@ -1152,13 +1151,8 @@ impl Menu {
             return;
         }
         if self.selected == Some(4) && !self.profile.visible {
-            let name = self
-                .profile
-                .store
-                .current
-                .and_then(|current| self.profile.store.names.get(current))
-                .map(String::as_bytes);
-            self.load.select_profile(name);
+            let name = self.profile.store.current_code_page();
+            self.load.select_profile(name.as_deref());
             self.load.open();
             self.selected = None;
             self.dirty = true;
@@ -1185,8 +1179,8 @@ impl Menu {
             return;
         }
         if self.selected == Some(3) {
-            if let Some(current) = self.profile.store.current {
-                let name = self.profile.store.names[current].as_bytes();
+            if let Some(name) = self.profile.store.current_code_page() {
+                let name = name.as_slice();
                 match preferred_token::Token::load(&preferred_token::path(
                     &self.assets.profile_root,
                     name,
@@ -1620,7 +1614,7 @@ impl Menu {
                     && let Some(current) = self.profile.store.current
                 {
                     label.push(0);
-                    label.extend(self.profile.store.names[current].bytes().map(|c| c - 32));
+                    label.extend(self.profile.name_glyphs(&self.profile.store.names[current]));
                 }
                 let label = &label;
                 let [l, t, r, _] = bounds[i];

@@ -1,6 +1,8 @@
 //! Native UI surfaces; original asset parsing stays in shared core modules.
 #[path = "ui/text_entry.rs"]
 mod text_entry;
+#[path = "ui/text_field.rs"]
+pub mod text_field;
 use openmt2001::{
     render::{SurfaceMode, TexturedDraw},
     texture::{TextureRecord, loader_pixels},

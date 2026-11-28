@@ -1543,7 +1543,7 @@ impl SinglePlayer {
         self.roster = None;
         self.scenario_id = None;
         self.scenario_rows.clear();
-        self.name = name.as_bytes().to_vec();
+        self.name = crate::ui::text_field::code_page(name);
         self.profile_path = Some(profile_path.clone());
         let root = profile_path.parent().and_then(|p| p.parent());
         let token = root
@@ -1551,7 +1551,7 @@ impl SinglePlayer {
             .and_then(|root| {
                 crate::menu::preferred_token::Token::load(&crate::menu::preferred_token::path(
                     root,
-                    name.as_bytes(),
+                    &crate::ui::text_field::code_page(name),
                 ))
             });
         self.character = match token {
@@ -1563,7 +1563,7 @@ impl SinglePlayer {
                 return;
             }
         };
-        self.name = name.as_bytes().to_vec();
+        self.name = crate::ui::text_field::code_page(name);
         // Original 49b1b0 walks registration order and appends only
         // non-tutorial, unlocked, non-custom scenario records.
         self.scenario_rows = scenario_rows_for(&catalog);
@@ -1635,7 +1635,7 @@ impl SinglePlayer {
         self.sandbox = false;
         self.difficulty = 0;
         self.character = 0;
-        self.name = name.as_bytes().to_vec();
+        self.name = crate::ui::text_field::code_page(name);
         self.tutorial_index = tutorial_preselection(&catalog);
         self.catalog = Some(catalog);
         self.profile_path = Some(profile_path);

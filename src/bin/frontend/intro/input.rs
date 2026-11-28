@@ -219,7 +219,7 @@ impl Intro {
             && view.options_visible()
             && view.save_visible()
         {
-            view.save_dialog.input(text);
+            view.save_dialog.input(&self.assets.save_dialog, text);
         }
     }
     pub(super) fn submit_save_dialog_action(

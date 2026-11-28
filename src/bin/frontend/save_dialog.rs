@@ -81,6 +81,17 @@ pub struct Assets {
     slider_textures: Vec<Surface>,
 }
 impl Assets {
+    /// The Save As field's font (496250 configures font 1); language row 0
+    /// maps the name's code-page bytes to glyphs.
+    fn name_font(&self) -> ui::text_field::FieldFont<'_> {
+        self.field_font(&self.tab1)
+    }
+    fn field_font<'a>(&'a self, tab: &'a [u8]) -> ui::text_field::FieldFont<'a> {
+        ui::text_field::FieldFont {
+            tab,
+            map: self.strings.first().map_or(&[], Vec::as_slice),
+        }
+    }
     pub(crate) fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
@@ -286,7 +297,7 @@ impl Assets {
             ui::text_fit(
                 &mut font2,
                 &self.tab2,
-                &openmt2001::level_text::ascii(&slot.name),
+                &self.field_font(&self.tab2).glyphs(&slot.name),
                 [row[0] + 3., row[1], row[0] + 151., row[3]],
                 false,
                 0xffffffff,
@@ -306,7 +317,7 @@ impl Assets {
             ui::text_widget_style4(
                 &mut font1,
                 &self.tab1,
-                &openmt2001::level_text::ascii(&slot.name),
+                &self.name_font().glyphs(&slot.name),
                 b[13],
                 0xffffffff,
             )?;
@@ -510,7 +521,7 @@ impl Assets {
             NAME_HEADER,
             0xffffffff,
         )?;
-        let body = openmt2001::level_text::ascii(&view.name);
+        let body = self.name_font().glyphs(&view.name);
         shapes.rect(NAME_INPUT, [0xff0724a2; 4]);
         ui::text_entry(font, shapes, &self.tab1, &body, NAME_INPUT, true, true)?;
         for (part, id, color) in [(true, 0x598, [80, 148, 34]), (false, 0x59c, [175, 6, 6])] {
@@ -712,19 +723,12 @@ impl View {
                 .saturating_sub(assets.list_layout.visible_rows()) as i32,
         ) as usize;
     }
-    pub fn input(&mut self, text: &str) {
+    /// Typed text for the Save As name (496250): filename-safe, 155 px.
+    pub fn input(&mut self, assets: &Assets, text: &str) {
         if self.modal != Some(Modal::Name) {
             return;
         }
-        for c in text.chars() {
-            if c.is_ascii()
-                && !c.is_ascii_control()
-                && !"/\\:*?\"<>|".contains(c)
-                && self.name.len() < 120
-            {
-                self.name.push(c);
-            }
-        }
+        ui::text_field::Rule::SAVE_NAME.type_text(&mut self.name, text, assets.name_font());
     }
     pub fn erase(&mut self) {
         if self.modal == Some(Modal::Name) {
@@ -988,6 +992,7 @@ mod tests {
         bounds[23] = [110., 360., 200., 390.];
         bounds[25] = [210., 360., 300., 390.];
         bounds[22] = [310., 360., 400., 390.];
+        let (tab1, glyph_map) = ui::text_field::synthetic_font();
         let assets = Assets {
             base: Vec::new(),
             info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
@@ -998,10 +1003,10 @@ mod tests {
             font1: Vec::new(),
             font2: Vec::new(),
             font4: Vec::new(),
-            tab1: Vec::new(),
+            tab1,
             tab2: Vec::new(),
             tab4: Vec::new(),
-            strings: Vec::new(),
+            strings: vec![glyph_map],
             level_text: openmt2001::level_text::LevelTextCatalog::default(),
             slider_textures: Vec::new(),
         };
@@ -1059,7 +1064,7 @@ mod tests {
         view.mouse(&assets, Some([50., 375.]), true);
         view.mouse(&assets, Some([50., 375.]), false);
         assert_eq!(view.modal, Some(Modal::Name));
-        view.input("test1-inprogressgame");
+        view.input(&assets, "test1-inprogressgame");
         assert_eq!(view.name, "test1-inprogressgame");
         assert!(view.mouse(&assets, Some([350., 250.]), true).is_none());
         assert!(view.mouse(&assets, Some([350., 250.]), false).is_none());
@@ -1073,8 +1078,12 @@ mod tests {
         assert!(view.visible && view.modal.is_none());
         view.mouse(&assets, Some([50., 375.]), true);
         view.mouse(&assets, Some([50., 375.]), false);
-        view.input("new-save");
-        assert_eq!(view.enter(), Some(Action::NewName("new-save".into())));
+        // 496250's field is filename-safe and stops at 155 px of font 1.
+        view.input(&assets, &"W".repeat(20));
+        assert_eq!(view.name, "W".repeat(12));
+        view.name.clear();
+        view.input(&assets, "new?-s\u{e9}ve");
+        assert_eq!(view.enter(), Some(Action::NewName("new-s\u{e9}ve".into())));
         view.mouse(&assets, Some([10., 10.]), true);
         view.mouse(&assets, Some([30., 45.]), false);
         assert_eq!(
