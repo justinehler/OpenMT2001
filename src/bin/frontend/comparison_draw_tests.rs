@@ -179,7 +179,7 @@ fn comparison_draw_retains_opaque_title_and_six_authored_bar_outlines() {
             }
             let rows: Vec<_> = (0..count).map(|i| (i, 100. - i as f32 * 75.)).collect();
             let surfaces = assets
-                .surfaces(&state, &players, &rows, &[true; 6], None, None)
+                .surfaces(&state, &players, &rows, &[true; 6], None, None, true)
                 .unwrap();
             // Backings, ten panel borders, six rings, title, side, widgets,
             // then dynamic rows: every empty slot keeps its own mesh ring.
@@ -223,7 +223,7 @@ fn comparison_draw_retains_opaque_title_and_six_authored_bar_outlines() {
     let mut closed = State::new(0);
     closed.open = false;
     let surfaces = assets
-        .surfaces(&closed, &[], &[], &[true; 6], None, None)
+        .surfaces(&closed, &[], &[], &[true; 6], None, None, true)
         .unwrap();
     assert!(surfaces.last().unwrap().vertices.is_empty());
     assert_eq!(surfaces[0].alpha, [255; 6]); // No translucent body when closed.
@@ -289,4 +289,59 @@ fn chat_lines_use_sender_colour_and_stack_up_from_city_bottom() {
             .iter()
             .all(|v| v[0] >= 193.5 && v[1] >= 449.5 && v[1] < 463.5)
     );
+}
+
+#[test]
+fn city_view_holds_the_panel_open_without_its_toggle() {
+    let mut assets = synthetic_assets();
+    // Tag row 8's button (88..=90) and contour (71/72) textures.
+    for texture in [71, 72, 88, 89, 90] {
+        assets.generic[texture].pixels = vec![texture as u8, 0, 0, 255];
+    }
+    let toggles = |surfaces: &[Surface]| {
+        surfaces
+            .iter()
+            .filter(|s| [71, 72, 88, 89, 90].contains(&s.pixels[0]) && !s.vertices.is_empty())
+            .count()
+    };
+    let mut view = View::new(Data {
+        objective: 0,
+        rows: vec![],
+    });
+    view.state.open = false;
+    let shown = |view: &View| {
+        assets
+            .surfaces(
+                &view.state,
+                &[],
+                &[],
+                &[true; 6],
+                None,
+                None,
+                view.toggle_visible(),
+            )
+            .unwrap()
+    };
+    assert_eq!(toggles(&shown(&view)), 2, "3D views draw the toggle");
+    // 427210: interface mode 3 opens the closed panel and hides row 8.
+    view.set_city_view(true);
+    assert!(view.state.open && !view.toggle_visible());
+    assert_eq!(toggles(&shown(&view)), 0, "City View has no toggle");
+    // The toggle cannot be hovered or pressed while hidden.
+    let [l, t, r, b] = assets.regions[1][57];
+    let point = [(l + r) as i32, (t + b) as i32];
+    assert_eq!(assets.button_at(&view.state, point), Some(0));
+    view.pointer(&assets, Some(point));
+    view.mouse(true);
+    view.mouse(false);
+    assert!(view.state.open);
+    // Leaving City View closes the panel it opened and shows the toggle.
+    view.set_city_view(false);
+    assert!(!view.state.open && view.toggle_visible());
+    assert_eq!(toggles(&shown(&view)), 2);
+    // A panel the player left open stays open on both sides of City View.
+    view.state.open = true;
+    view.set_city_view(true);
+    view.set_city_view(false);
+    assert!(view.state.open);
 }

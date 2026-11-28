@@ -61,6 +61,11 @@ pub struct View {
     up: [[bool; 6]; 9],
     live: bool,
     chat_pressed: Option<usize>,
+    /// Original 427210 under interface mode 3 (City View): the panel is held
+    /// open and its open/close toggle (row 8) is hidden.
+    city_view: bool,
+    /// City View opened a closed panel; leaving City View closes it again.
+    opened_for_city_view: bool,
 }
 impl View {
     pub fn new(data: Data) -> Self {
@@ -74,11 +79,43 @@ impl View {
             up: [[true; 6]; 9],
             live: false,
             chat_pressed: None,
+            city_view: false,
+            opened_for_city_view: false,
         }
+    }
+    /// Original 427210 polls 4b52f0 every frame. In mode 3 it opens a closed
+    /// panel and hides the toggle; in any other mode the toggle is shown and
+    /// a panel that City View opened is closed again.
+    pub fn set_city_view(&mut self, city_view: bool) {
+        let open = self.state.open;
+        if city_view {
+            if !self.state.open {
+                self.state.open = true;
+                self.opened_for_city_view = true;
+            }
+        } else if std::mem::take(&mut self.opened_for_city_view) {
+            self.state.open = false;
+        }
+        self.dirty |= open != self.state.open;
+        if self.city_view != city_view {
+            self.city_view = city_view;
+            if city_view && matches!(self.hover, Some(0)) {
+                self.hover = None;
+            }
+            if city_view && matches!(self.pressed, Some(0)) {
+                self.pressed = None;
+            }
+            self.dirty = true;
+        }
+    }
+    pub fn toggle_visible(&self) -> bool {
+        !self.city_view
     }
     /// Keep fresh data and enabled metrics; retain only valid user choices.
     pub fn retain_ui_from(&mut self, old: &Self) {
         self.state.open = old.state.open;
+        self.city_view = old.city_view;
+        self.opened_for_city_view = old.opened_for_city_view;
         if self.state.enabled.get(old.state.mode) == Some(&true) {
             self.state.mode = old.state.mode;
         }
@@ -109,7 +146,9 @@ impl View {
         self.pressed.is_some()
     }
     pub fn pointer(&mut self, assets: &Assets, point: Option<[i32; 2]>) {
-        let hover = point.and_then(|p| assets.button_at(&self.state, p));
+        let hover = point
+            .and_then(|p| assets.button_at(&self.state, p))
+            .filter(|&button| button != 0 || self.toggle_visible());
         if hover != self.hover {
             self.hover = hover;
             self.dirty = true;
@@ -168,6 +207,7 @@ impl View {
                 &self.up[self.state.mode],
                 self.hover,
                 self.pressed,
+                self.toggle_visible(),
             )?);
             self.dirty = false;
         }
@@ -522,8 +562,9 @@ impl Assets {
         up: &[bool; 6],
         hover: Option<usize>,
         pressed: Option<usize>,
+        toggle: bool,
     ) -> Result<openmt2001::render::PreparedScene, String> {
-        let surfaces = self.surfaces(state, players, rows, up, hover, pressed)?;
+        let surfaces = self.surfaces(state, players, rows, up, hover, pressed, toggle)?;
         let draws: Vec<_> = surfaces.iter().map(crate::ui::Surface::draw).collect();
         renderer.prepare(
             &draws,
@@ -548,6 +589,7 @@ impl Assets {
             None,
         )
     }
+    #[allow(clippy::too_many_arguments)]
     fn surfaces(
         &self,
         state: &State,
@@ -556,6 +598,7 @@ impl Assets {
         up: &[bool; 6],
         hover: Option<usize>,
         pressed: Option<usize>,
+        toggle: bool,
     ) -> Result<Vec<crate::ui::Surface>, String> {
         use crate::ui::{self, Surface};
         let bounds = &self.regions[usize::from(state.open)];
@@ -578,17 +621,20 @@ impl Assets {
             surfaces.push(s);
             Ok(())
         };
-        icon(
-            88 + if pressed == Some(0) {
-                2
-            } else if hover == Some(0) {
-                1
-            } else {
-                0
-            },
-            57,
-        )?;
-        icon(if state.open { 71 } else { 72 }, 58)?;
+        if toggle {
+            icon(
+                88 + if pressed == Some(0) {
+                    2
+                } else if hover == Some(0) {
+                    1
+                } else {
+                    0
+                },
+                57,
+            )?;
+            // Row 8's contour: the open/close glyph (425e10) hides with it.
+            icon(if state.open { 71 } else { 72 }, 58)?;
+        }
         if state.open {
             icon(
                 97 + if pressed == Some(1) {

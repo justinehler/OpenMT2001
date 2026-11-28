@@ -171,9 +171,11 @@ impl Intro {
                 });
                 locator.dirty = false;
             }
+            let city_view = view.city_view();
             if view.statistics_visible()
                 && let (Some(comparison), Some(menu)) = (&mut view.comparison, &self.menu)
             {
+                comparison.set_city_view(city_view);
                 comparison.pointer(
                     menu.comparison_assets(),
                     if view.adjustment.is_none() {

@@ -5,6 +5,31 @@ pub struct Row {
     pub label: u32,
     pub amount: u32,
 }
+/// One displayed line of the finance list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub row: Row,
+    /// Original 430240 marks the next entry with state 3; the list update
+    /// (UiCaseZeroList::update) then draws a 1 px rule two units below that
+    /// entry's top. The marker itself is not an entry.
+    pub rule: bool,
+}
+/// Lay out `report` rows as list lines. Style 2 (430240) only places a rule
+/// above the following line; style 3 (430210) writes a space line into both
+/// text columns, so it remains an empty line.
+pub fn lines(rows: &[Row]) -> Vec<Line> {
+    let mut rule = false;
+    let mut out = Vec::with_capacity(rows.len());
+    for &row in rows {
+        if row.style == 2 {
+            rule = true;
+        } else {
+            out.push(Line { row, rule });
+            rule = false;
+        }
+    }
+    out
+}
 pub fn report(saved: &[u8; 440], today: bool) -> Result<Vec<Row>, String> {
     let current = usize::from(saved[0x140]);
     if current > 1 {
@@ -158,6 +183,21 @@ pub fn period_layout(bounds: [f32; 4], dimensions: [u32; 2]) -> [[f32; 4]; 3] {
         [left, y, bounds[2] - width - width, y + height],
     ]
 }
+/// 410130's backing colour (80% opaque navy).
+pub const PERIOD_BACKING_COLOR: u32 = 0xcc183088;
+/// Original 410130: the translucent navy band behind the period caption. It
+/// starts two units into the left arrow and ends five units into the right one.
+pub fn period_backing(bounds: [f32; 4], dimensions: [u32; 2]) -> [f32; 4] {
+    let width = dimensions[0] as f32;
+    let height = dimensions[1] as f32;
+    let top = bounds[1] + 47.;
+    [
+        width + bounds[0] + 2.,
+        top,
+        bounds[2] - width - width - width + 5.,
+        height + top - 4.,
+    ]
+}
 /// A live copy of the original runtime+4 financial prefixes. The simulation
 /// remains the owner of the player and account records.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -300,12 +340,16 @@ impl State {
         self.rows = rows;
         self.scroll = self
             .scroll
-            .min(self.rows.len().saturating_sub(self.visible_rows));
+            .min(self.line_count().saturating_sub(self.visible_rows));
         Ok(true)
     }
     pub fn set_visible_rows(&mut self, count: usize) {
         self.visible_rows = count;
-        self.scroll = self.scroll.min(self.rows.len().saturating_sub(count));
+        self.scroll = self.scroll.min(self.line_count().saturating_sub(count));
+    }
+    /// Number of list lines the report occupies (the scroll range's basis).
+    pub fn line_count(&self) -> usize {
+        self.rows.iter().filter(|row| row.style != 2).count()
     }
     pub fn refresh(&mut self) -> Result<(), String> {
         self.rows = if let Some(&index) = self.players.get(self.selected) {
@@ -432,6 +476,53 @@ mod tests {
                 .any(|r| r.label == 0x26 && r.amount == 125f32.to_bits())
         );
         assert_eq!(manager.players[0].bytes, original);
+    }
+    #[test]
+    fn finish_pair_rules_the_next_line_without_taking_one() {
+        let row = |style, label| Row {
+            style,
+            label,
+            amount: 0,
+        };
+        let rows = [
+            row(1, 0x25),
+            row(0, 0x26),
+            row(2, 0),
+            row(0, 0x3f),
+            row(3, 0),
+            row(1, 0x43),
+            row(2, 0),
+            row(0, 0x40),
+        ];
+        let lines = lines(&rows);
+        assert_eq!(
+            lines
+                .iter()
+                .map(|l| (l.row.label, l.rule))
+                .collect::<Vec<_>>(),
+            [
+                (0x25, false),
+                (0x26, false),
+                (0x3f, true),
+                (0, false),
+                (0x43, false),
+                (0x40, true)
+            ]
+        );
+        let mut state = State::new(&[]).unwrap();
+        state.rows = rows.to_vec();
+        assert_eq!(state.line_count(), 6);
+        state.scroll = 9;
+        state.set_visible_rows(4);
+        assert_eq!(state.scroll, 2);
+    }
+    #[test]
+    fn period_backing_spans_the_caption_between_the_arrows() {
+        // 410130 with a 16x16 arrow texture in a [30,40]-[190,320] window.
+        let bounds = [30., 40., 190., 320.];
+        assert_eq!(period_backing(bounds, [16, 16]), [48., 87., 147., 99.]);
+        let [left, right, _] = period_layout(bounds, [16, 16]);
+        assert_eq!([left[0], left[1], right[0]], [46., 85., 142.]);
     }
     #[test]
     #[ignore = "private original player button/order fixture"]
