@@ -382,7 +382,11 @@ pub fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
         // header-only object: its size method 465480 returns 0x14. The live
         // auction adapter pads it to 52 bytes with zeros; only the native
         // 20 bytes are saved.
-        Command::Auction { descriptor } if word(descriptor, 4) == 0x1e => descriptor[..20].to_vec(),
+        Command::Auction { descriptor }
+            if word(descriptor, 4) == 0x1e && descriptor[20..].iter().all(|&b| b == 0) =>
+        {
+            descriptor[..20].to_vec()
+        }
         Command::Auction { descriptor } => descriptor.to_vec(),
         Command::PropertyTransfer {
             category,
