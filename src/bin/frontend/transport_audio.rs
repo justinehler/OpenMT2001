@@ -409,6 +409,10 @@ impl Player {
         self.audio.set_listener(self.listener);
     }
 
+    pub fn listener_position(&self) -> [f32; 3] {
+        self.listener.position
+    }
+
     fn mixer(&mut self) -> Option<&rodio::mixer::Mixer> {
         self.bus.combined_mixer()
     }
@@ -495,8 +499,9 @@ impl Player {
         }
     }
 
-    /// Original 4afbf0, called once per rendered iteration before camera
-    /// interpolation (4b9c7e/4b9c94), independently of simulation scheduling.
+    /// Original 4afbf0 consumes the camera before interpolation
+    /// (4b9c7e/4b9c94). Service once per draw with that captured pose,
+    /// independently of simulation scheduling.
     pub fn service_frame(&mut self, camera: [f32; 3]) {
         self.audio.service_effects();
         let Some(mut inputs) = self.city.take() else {

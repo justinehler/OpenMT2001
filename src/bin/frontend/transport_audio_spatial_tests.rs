@@ -49,7 +49,7 @@ fn spatial_current_camera_listener_rotates_and_moves_a_retained_source() {
     assert_eq!(sink.spatial_gains(), [0.25, 0.]);
     stereo_window(&mut output, [nominal * 0.25, 0.]);
     current_listener(&mut player, [80., 0., 0.], [80., 0., 1.]);
-    assert_eq!(player.listener.position, [80., 0., 0.]);
+    assert_eq!(player.listener_position(), [80., 0., 0.]);
     assert_eq!(sink.spatial_gains(), [0., 1.]);
     stereo_window(&mut output, [0., nominal]);
     // Listener updates affect even loops that receive no new simulation cue.

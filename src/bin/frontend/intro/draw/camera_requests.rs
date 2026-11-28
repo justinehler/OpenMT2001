@@ -42,7 +42,6 @@ impl Intro {
                 }
             }
             camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;
-            camera_live::audio::service_frame(view, self.focus.sent() == self.focus.completed())?;
             if let Some(mut endpoint) = view.camera_endpoint.take() {
                 let result = (|| {
                     let joins = camera_live::UiJoins {
@@ -99,6 +98,10 @@ impl Intro {
                 view.camera_endpoint = Some(endpoint);
                 result?;
             }
+            // Keep frame-owned audio running even when logic is paused or
+            // the worker is waiting. A completed Sample has published the
+            // authoritative pre-interpolation listener during the drain above.
+            camera_live::audio::service_frame(view, self.focus.sent() == self.focus.completed())?;
             Self::poll_camera_save(view);
             while let Some(request) = view
                 .auction_requests

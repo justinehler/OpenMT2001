@@ -542,11 +542,7 @@ impl super::endpoint::Context for UiContext<'_> {
 
     fn pending_sound(&mut self, current: Pose) -> Result<(), String> {
         publish_listener(&mut self.view.transport_audio_player, current);
-        pending_sound_service(self.view, self.sound)?;
-        self.view
-            .transport_audio_player
-            .service_frame(current.eye.map(f32::from_bits));
-        Ok(())
+        pending_sound_service(self.view, self.sound)
     }
 
     fn present(&mut self, sampled: Pose) -> Result<(), String> {

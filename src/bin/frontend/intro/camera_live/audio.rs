@@ -1,6 +1,6 @@
 //! Existing available audio consumers extracted from exact public Intro.
-//! Simulation inputs arrive through nonblocking drains. City audio follows the
-//! current-pose Sample boundary; music advances at the once-per-draw entry.
+//! Simulation inputs arrive through nonblocking drains. City audio uses the
+//! current pose published before Sample; city and music service once per draw.
 use super::super::Inspection;
 use std::time::Instant;
 
@@ -8,13 +8,14 @@ use std::time::Instant;
 /// once-per-draw entry advances the outgoing music level.
 pub(crate) fn service_frame(view: &mut Inspection, allow_music_poll: bool) -> Result<(), String> {
     service_with_music_poll(view, allow_music_poll)?;
-    // Live camera frames service the city at pending_sound(current), before
-    // sampling. Intro/inspection without an endpoint still has a draw boundary.
+    // The live endpoint publishes its raw current pose before interpolation.
+    // Rendering's interpolated CameraSample must not replace that listener.
     if view.camera_endpoint.is_none() {
         view.transport_audio_player
             .set_listener(view.camera.eye, view.camera.target);
-        view.transport_audio_player.service_frame(view.camera.eye);
     }
+    let camera = view.transport_audio_player.listener_position();
+    view.transport_audio_player.service_frame(camera);
     if music_admitted(view, allow_music_poll)
         && let Err(error) = view.era_audio_player.service()
     {
