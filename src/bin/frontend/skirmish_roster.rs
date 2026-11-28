@@ -164,7 +164,6 @@ pub struct Presentation<'a> {
     /// None for offline Skirmish; network authority determines the ready caption.
     pub network_host: Option<bool>,
     pub visible: bool,
-    pub busy: bool,
     pub rows: &'a [Participant; 6],
     pub enabled: [bool; 26],
     pub start_enabled: bool,
@@ -409,7 +408,6 @@ impl RosterPanel {
                 chat: None,
                 network_host: None,
                 visible: state.visible,
-                busy: state.busy,
                 rows: state.roster.slots(),
                 enabled: std::array::from_fn(|id| state.enabled(id)),
                 start_enabled: state.roster.start_enabled(),
@@ -625,22 +623,19 @@ impl RosterPanel {
             }
             let status = self.bounds("SESS_INFO3")?;
             shapes.rect(status, [0xff1b254b; 4]);
-            let status_text = if view.busy {
-                encode(b"Loading...")?
+            // The original has no loading caption here: while a started
+            // game loads, the status keeps its ready label.
+            let status_text = self.label(if !view.start_enabled {
+                1759
+            } else if view.network_host == Some(false) {
+                1758 // 49ead0: ready clients wait for the host.
             } else {
-                self.label(if !view.start_enabled {
-                    1759
-                } else if view.network_host == Some(false) {
-                    1758 // 49ead0: ready clients wait for the host.
-                } else {
-                    1757
-                })?
-                .to_vec()
-            };
+                1757
+            })?;
             ui::text_widget_style9(
                 &mut pages[0],
                 &self.fonts[0].tab,
-                &status_text,
+                status_text,
                 status,
                 0xffffffff,
             )?;
@@ -688,7 +683,8 @@ impl RosterPanel {
                 let name = self.bounds(&format!("NAMESLOT_P{row}"))?;
                 shapes.rect(name, [0xff000530; 4]);
                 let text = if view.closed[i] {
-                    encode(b"Closed")?
+                    // 0x563, pushed at 40722f.
+                    self.label(1379)?.to_vec()
                 } else if p.kind == Kind::Empty {
                     self.label(1754)?.to_vec()
                 } else if p.kind == Kind::Ai {
@@ -893,7 +889,6 @@ mod tests {
                     chat: None,
                     network_host: None,
                     visible: true,
-                    busy: false,
                     rows,
                     enabled: std::array::from_fn(|id| id != 25 || enabled),
                     start_enabled: enabled,
@@ -1029,7 +1024,6 @@ mod tests {
                             chat: None,
                             network_host: Some(host),
                             visible: true,
-                            busy: false,
                             rows: &rows,
                             enabled,
                             start_enabled: snapshot.start_enabled(),

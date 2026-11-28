@@ -455,7 +455,7 @@ impl Inspection {
         if let Some(producer) = &mut self.camera_producer {
             if let Err(error) = producer.commit(self.camera, if self.strategic { 3 } else { 0 }) {
                 self.game_options.set_save_disabled(true);
-                self.save_dialog.message = Some(format!("Save failed: {error}"));
+                self.save_dialog.fail(format!("Save failed: {error}"));
             }
         }
     }

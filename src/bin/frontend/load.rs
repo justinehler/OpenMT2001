@@ -76,6 +76,8 @@ pub struct Load {
     pub visible: bool,
     pub busy: bool,
     pub request: Option<PathBuf>,
+    /// The last engine-side failure. The original has no status line on this
+    /// panel, so it is logged rather than drawn.
     pub message: Option<String>,
     delete_confirmation: Option<String>,
     refusal_messages: refusal::Messages,
@@ -292,7 +294,7 @@ impl Load {
         // enumeration, including when a saved game already occupies row 0.
         self.chosen = None;
         if let Err(e) = result {
-            self.message = Some(e);
+            self.fail(e);
         }
     }
     pub fn count(&self) -> usize {
@@ -336,10 +338,14 @@ impl Load {
         self.busy = false;
         self.request = None;
         self.refusal_prompt = self.refusal_messages.prompt(&failure);
-        self.message = match failure {
-            refusal::Failure::Storage(error) => Some(error),
-            _ => None,
-        };
+        self.message = None;
+        if let refusal::Failure::Storage(error) = failure {
+            self.fail(error);
+        }
+    }
+    fn fail(&mut self, error: String) {
+        eprintln!("Load Game: {error}");
+        self.message = Some(error);
     }
     /// The Delete Saved Game confirmation while it is the visible prompt (a
     /// refusal notice is drawn over it first).
@@ -475,7 +481,7 @@ impl Load {
             if i == 0 {
                 match crate::save_menu::delete_slot(&self.profile_root, &id) {
                     Ok(()) => self.open(),
-                    Err(error) => self.message = Some(error),
+                    Err(error) => self.fail(error),
                 }
             }
             return;
@@ -533,9 +539,8 @@ impl Load {
                         Ok(_) => {
                             self.request = Some(e.path.clone());
                             self.busy = true;
-                            self.message = Some("Loading saved game...".into());
                         }
-                        Err(e) => self.message = Some(e.clone()),
+                        Err(e) => self.fail(e.clone()),
                     }
                 }
             }
@@ -545,9 +550,9 @@ impl Load {
                     if let Some(id) = &entry.writable_id {
                         self.delete_confirmation = Some(id.clone());
                         self.message = None;
-                    } else {
-                        self.message = Some("Original saved games are read-only".into());
                     }
+                    // Imported original saves stay read-only; like a press
+                    // on an inactive control, Delete then does nothing.
                 }
             }
             i => {
@@ -663,11 +668,12 @@ impl Load {
                 false,
                 0xffffffff,
             )?;
-            if let Some(modified) = crate::save_menu::format_modified_local(e.modified) {
+            let suffixes = crate::save_menu::DaySuffixes::from_strings(&self.strings);
+            if let Some(modified) = crate::save_menu::format_modified_local(e.modified, suffixes) {
                 ui::text_fit(
                     &mut list_fonts,
                     &self.list_tab,
-                    &ascii(&modified),
+                    &modified,
                     timestamp,
                     false,
                     0xff6ed1e1,
@@ -831,15 +837,6 @@ impl Load {
                 if disabled { 0xff777777 } else { 0xffffffff },
             )?;
         }
-        if let Some(message) = &self.message {
-            wrapped(
-                &mut fonts,
-                &self.tab,
-                &ascii(message),
-                [32., 438., 608., 458.],
-                0,
-            )?;
-        }
         let mut surfaces = self.base.clone();
         crate::menu::modal_frame::set_alpha(&mut surfaces, panel_alpha);
         surfaces.push(shapes);
@@ -864,26 +861,6 @@ fn row_columns([left, top, right, bottom]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
         [left + 3., top, left + 151., bottom],
         [left + 155., top, right, bottom],
     )
-}
-pub(crate) fn wrapped(
-    pages: &mut [Surface],
-    tab: &[u8],
-    text: &[u8],
-    b: [f32; 4],
-    first: usize,
-) -> Result<(), String> {
-    for (i, line) in wrap_lines(tab, text, b[2] - b[0])?
-        .iter()
-        .skip(first)
-        .enumerate()
-    {
-        let y = b[1] + i as f32 * 14.;
-        if y + 14. > b[3] {
-            break;
-        }
-        ui::text(pages, tab, line, [b[0], y, b[2], b[3]], false, 0xffffffff)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1165,8 +1142,11 @@ mod tests {
         );
         for row in [original_row, writable_row] {
             assert!(
-                crate::save_menu::format_modified_local(load.entries[row].modified)
-                    .is_some_and(|text| text.contains(':') && text.contains(' '))
+                crate::save_menu::format_modified_local(
+                    load.entries[row].modified,
+                    crate::save_menu::DaySuffixes::from_strings(&load.strings)
+                )
+                .is_some_and(|text| text.contains(&(b':' - 32)) && text.contains(&0))
             );
         }
         let (name, time) = row_columns([20., 40., 300., 54.]);

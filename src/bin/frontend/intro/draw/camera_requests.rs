@@ -37,7 +37,7 @@ impl Intro {
                 Ok(None) => {}
                 Err(error) => {
                     view.game_options.set_save_disabled(true);
-                    view.game_options.set_message(error);
+                    eprintln!("[Options] {error}");
                 }
             }
             camera_live::ui_cursor_pass(view, &self.assets, self.menu.as_ref())?;

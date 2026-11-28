@@ -74,13 +74,12 @@ impl Intro {
                         Ok(Ok(None)) => planning.close = true,
                         Ok(Err(error)) => {
                             planning.placement_pending = None;
-                            planning.diagnostic = Some(error);
+                            planning.fail(error);
                             planning.dirty = true;
                         }
                         Err(mpsc::TryRecvError::Disconnected) => {
                             planning.placement_pending = None;
-                            planning.diagnostic =
-                                Some("Build placement session disconnected".into());
+                            planning.fail("Build placement session disconnected".into());
                             planning.dirty = true;
                         }
                         Err(mpsc::TryRecvError::Empty) => {}
@@ -100,31 +99,31 @@ impl Intro {
                                 }
                                 Ok(Some(quote)) => {
                                     if planning.quote_matches_request() {
-                                        planning.diagnostic = if quote.category_locked {
-                                            Some("This block is locked".into())
-                                        } else if !quote.placement_allowed {
-                                            Some("This lot is occupied".into())
-                                        } else if !quote.affordable {
-                                            Some("Insufficient funds".into())
-                                        } else if quote.preview.is_none() {
-                                            Some("No building model matches".into())
-                                        } else {
-                                            None
-                                        };
+                                        // A locked block is explained on the Build page
+                                        // before the planner opens (1201/1202/1406,
+                                        // 0x404eb0), and the original planner has no
+                                        // caption for an occupied lot or a missing model.
+                                        planning.diagnostic = (!quote.category_locked
+                                            && quote.placement_allowed
+                                            && !quote.affordable)
+                                            .then(|| "Insufficient funds".into());
+                                        if quote.preview.is_none() {
+                                            eprintln!("Build planner: no building model matches");
+                                        }
                                         planning.reset_preview();
                                         planning.quote = Some(quote);
                                     } else {
                                         planning.needs_quote = true;
                                     }
                                 }
-                                Err(error) => planning.diagnostic = Some(error),
+                                Err(error) => planning.fail(error),
                             }
                             planning.dirty = true;
                         }
                         Err(mpsc::TryRecvError::Empty) => {}
                         Err(mpsc::TryRecvError::Disconnected) => {
                             planning.pending = None;
-                            planning.diagnostic = Some("Session disconnected".into());
+                            planning.fail("Session disconnected".into());
                             planning.dirty = true;
                         }
                     }
@@ -139,7 +138,7 @@ impl Intro {
                             build_request = Some((form, planning.submit));
                         }
                         Err(error) => {
-                            planning.diagnostic = Some(error);
+                            planning.fail(error);
                             planning.dirty = true;
                         }
                     }
@@ -160,7 +159,7 @@ impl Intro {
             {
                 match result {
                     Ok(receiver) => planning.pending = Some(receiver),
-                    Err(error) => planning.diagnostic = Some(error),
+                    Err(error) => planning.fail(error),
                 }
                 planning.dirty = true;
             }

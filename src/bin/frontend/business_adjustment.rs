@@ -238,6 +238,8 @@ const RETAIL_CAMERA: [f32; 16] = [
 const RETAIL_HEADERS: [usize; 7] = [1421, 1470, 1471, 1472, 1473, 1474, 1475];
 // 417830's OK control initialization passes language ID 0x59b ("Ok").
 const RETAIL_CONFIRM: usize = 0x59b;
+// The Apply button's caption: language ID 0x59e (pushed at 40c1d5 and 418974).
+const APPLY_LABEL: usize = 0x59e;
 fn retail_panel_frame(
     index: &ArchiveIndex,
     archive: &[u8],
@@ -547,14 +549,11 @@ impl State {
             _ => None,
         }
     }
-    fn provenance(&self) -> &[u8] {
-        if let Some(message) = &self.diagnostic {
-            message.as_bytes()
-        } else if self.edit_pending.is_some() {
-            b"Updating business..."
-        } else {
-            b""
-        }
+    /// Record an engine-side failure. The original panel has no status line,
+    /// so it is logged rather than drawn; it also stops the live refresh.
+    fn fail(&mut self, error: String) {
+        eprintln!("Business adjustment: {error}");
+        self.diagnostic = Some(error);
     }
     pub fn pointer(&mut self, assets: &Assets, point: Option<[i32; 2]>) {
         let row = point.and_then(|p| {
@@ -667,7 +666,7 @@ impl State {
         let action = self.edit_inflight.take();
         match result {
             Err(error) => {
-                self.diagnostic = Some(error);
+                self.fail(error);
             }
             Ok(record) => {
                 // Native419d99..419da7 emits7 after all four retail edits,
@@ -713,7 +712,7 @@ impl State {
                     refresh_retail_rows(&mut self.rows, &record)
                 };
                 if let Err(error) = refreshed {
-                    self.diagnostic = Some(error);
+                    self.fail(error);
                 }
             }
         }
@@ -969,10 +968,14 @@ impl Assets {
             );
             surfaces.push(icon);
             if action == Action::Apply {
+                let label = self
+                    .strings
+                    .get(APPLY_LABEL)
+                    .ok_or("adjustment apply language ID")?;
                 ui::text(
                     fonts,
                     &self.tab,
-                    &b"Apply".map(|b| b - 32),
+                    label,
                     [b[0], b[1] + 7., b[2], b[3]],
                     true,
                     apply.1,
@@ -1399,24 +1402,6 @@ impl Assets {
         );
         surfaces.push(button);
         retail_confirm_text(&mut fonts, &self.tab, &self.strings, b)?;
-        let note = state
-            .provenance()
-            .iter()
-            .map(|b| b - 32)
-            .collect::<Vec<_>>();
-        ui::text_fit(
-            &mut fonts,
-            &self.tab,
-            &note,
-            [
-                self.regions[27][0] + 6.,
-                self.regions[27][1] + 10.,
-                self.regions[29][0] - 4.,
-                self.regions[27][3],
-            ],
-            false,
-            0xffffd080,
-        )?;
         self.prepare_edits(state, &mut surfaces, &mut fonts)?;
         surfaces.extend(fonts);
         renderer.prepare(
@@ -1607,23 +1592,6 @@ impl Assets {
             [b[0], b[1] + 7., b[2], b[3]],
             true,
             0xffffffff,
-        )?;
-        ui::text_fit(
-            &mut fonts,
-            &self.tab,
-            &state
-                .provenance()
-                .iter()
-                .map(|b| b - 32)
-                .collect::<Vec<_>>(),
-            [
-                regions[18][0] + 6.,
-                regions[18][1] + 10.,
-                regions[20][0] - 4.,
-                regions[18][3],
-            ],
-            false,
-            0xffffd080,
         )?;
         self.prepare_edits(state, &mut surfaces, &mut fonts)?;
         surfaces.extend(fonts);
