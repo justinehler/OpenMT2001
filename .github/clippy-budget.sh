@@ -36,13 +36,22 @@ echo "clippy warnings: $count (budget $budget)"
 # does not depend on what else merges meanwhile, so two passing PRs cannot
 # combine into a failure on main.
 if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
-  git fetch -q --depth=1 origin "$GITHUB_BASE_REF" || { echo "::error::cannot fetch $GITHUB_BASE_REF"; exit 1; }
-  # HEAD is the merge of the PR into the base, so this diff is exactly the PR.
+  # HEAD is the merge of the PR into the base; its first parent is the base
+  # commit GitHub merged into. Diffing against that, not the base branch's
+  # current tip, keeps commits that land on the base during the job out of the
+  # diff (reverted, they would otherwise show up as "added" lines). The
+  # checkout is shallow, so read the parent from the raw commit and fetch it.
+  base=$(git cat-file -p HEAD | awk '/^parent /{n++; if (n == 1) p = $2} END {if (n == 2) print p}')
+  if [[ -n "$base" ]]; then
+    git fetch -q --depth=1 origin "$base" || { echo "::error::cannot fetch merge base $base"; exit 1; }
+  else
+    git fetch -q --depth=1 origin "$GITHUB_BASE_REF" || { echo "::error::cannot fetch $GITHUB_BASE_REF"; exit 1; }
+  fi
   # Lines that only moved (an added line matching a removed line anywhere in
   # the diff, ignoring whitespace, visibility and trailing commas) don't count:
   # a pure-move refactor carries its existing warnings with it.
   added=$(mktemp)
-  git diff -U0 --no-color FETCH_HEAD HEAD -- '*.rs' | awk '
+  git diff -U0 --no-color "${base:-FETCH_HEAD}" HEAD -- '*.rs' | awk '
     function norm(t) {
       sub(/^[+-]/, "", t); gsub(/[ \t]+/, " ", t); sub(/^ /, "", t); sub(/ $/, "", t)
       sub(/^pub(\([a-z]+\))? /, "", t); sub(/,$/, "", t); return t
