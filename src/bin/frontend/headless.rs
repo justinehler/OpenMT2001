@@ -616,11 +616,11 @@ pub fn run(options: &Options, out: &mut dyn Write) -> Result<End, String> {
     host.auction_renderer = Some(auction_renderer);
     if let Some(dir) = &options.autosave_dir {
         // No camera owner runs headless: autosaves keep the loaded cameras,
-        // like --write-save.
+        // like --write-save, and the city view (interface mode 0).
         let cameras = session
             .saved_cameras
             .ok_or("--autosave-dir: the loaded save has no camera records")?;
-        host.fixed_save_cameras = Some((cameras, session.saved_game_mode.unwrap_or(0)));
+        host.fixed_save_cameras = Some((cameras, 0));
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         host.autosave_profile_root = Some(dir.join("profile"));
     }

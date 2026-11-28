@@ -297,7 +297,7 @@ pub struct Host {
     /// Authority supplied only by Inputs::session_worker selected profile.
     pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
     pub autosave_status: Option<crate::save_menu::AutosaveStatus>,
-    /// Headless only: the camera records and interface mode an autosave
+    /// Headless only: the camera records and interface view an autosave
     /// writes when neither camera owner is installed.
     pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
     camera_suppliers: Option<CameraSuppliers>,
