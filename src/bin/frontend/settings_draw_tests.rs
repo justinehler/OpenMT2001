@@ -93,7 +93,10 @@ fn rect(vertices: &[[f32; 8]]) -> [f32; 4] {
 }
 
 #[test]
-fn settings_draw_headers_use_green_palette_font1_and_style9() {
+fn settings_draw_headers_use_mint_palette_font1_and_style9() {
+    // Text palette entry 16, mint 0xff3afd87 (#552).
+    let mint = [0x3a, 0xfd, 0x87].map(|c: u8| f32::from(c) / 255.);
+    let is_mint = |v: &[f32]| v[3..6].iter().zip(mint).all(|(a, b)| (a - b).abs() < 1e-6);
     let assets = synthetic_assets();
     for (page, rows) in [
         (Page::Sound, &[9, 17][..]),
@@ -104,7 +107,7 @@ fn settings_draw_headers_use_green_palette_font1_and_style9() {
         let green = surfaces
             .iter()
             .flat_map(|s| &s.vertices)
-            .filter(|v| v[3..6] == [0., 1., 0.])
+            .filter(|v| is_mint(&v[..]))
             .copied()
             .collect::<Vec<_>>();
         assert_eq!(green.len(), rows.len() * 6, "{page:?} header glyphs");
@@ -118,7 +121,7 @@ fn settings_draw_headers_use_green_palette_font1_and_style9() {
         }
         for surface in &surfaces {
             for (v, alpha) in surface.vertices.iter().zip(&surface.alpha) {
-                if v[3..6] == [0., 1., 0.] {
+                if is_mint(&v[..]) {
                     assert_eq!(*alpha, 255);
                 }
             }
