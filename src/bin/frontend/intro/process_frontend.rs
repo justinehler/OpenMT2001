@@ -36,7 +36,11 @@ pub(crate) enum PhysicalSample {
         button: MouseButton,
         down: bool,
     },
-    Pointer([f64; 2]),
+    /// The window pointer moved. Its absolute position stays with the UI
+    /// routing; it is never camera motion.
+    Pointer,
+    /// Relative device motion for the camera (the original's DirectInput dx/dy).
+    Motion([f64; 2]),
     Unfocus,
 }
 impl PhysicalSample {
@@ -59,10 +63,21 @@ impl PhysicalSample {
                 button: *button,
                 down: *state == ElementState::Pressed,
             },
-            WindowEvent::CursorMoved { position, .. } => Self::Pointer([position.x, position.y]),
+            WindowEvent::CursorMoved { .. } => Self::Pointer,
             WindowEvent::Focused(false) => Self::Unfocus,
             _ => return None,
         })
+    }
+    /// Raw relative mouse motion. The caller only forwards it while the city
+    /// window has focus, like the original's foreground DirectInput mouse
+    /// (cooperative level 6, 0x4e4a10).
+    pub(crate) fn from_device_event(event: &winit::event::DeviceEvent) -> Option<Self> {
+        match event {
+            winit::event::DeviceEvent::MouseMotion { delta: (x, y) } => {
+                Some(Self::Motion([*x, *y]))
+            }
+            _ => None,
+        }
     }
 }
 struct Receiver {
@@ -378,6 +393,12 @@ impl ProcessFrontend {
             self.cancelled_samples += 1;
             return Ok(());
         }
+        if fence > completed && matches!(sample, PhysicalSample::Motion(_)) {
+            // The foreground mouse is not acquired until focus completes, so
+            // relative motion from before then never reaches a poll.
+            self.cancelled_samples += 1;
+            return Ok(());
+        }
         if fence > completed {
             if self.physical.len() >= 256 {
                 let error =
@@ -563,9 +584,11 @@ pub(crate) fn project_camera_sample(
             }
         }
         PhysicalSample::Button { button, down } => physical.button(button, down),
-        PhysicalSample::Pointer(point) => {
+        // The camera ignores absolute window positions (0x4e4f50).
+        PhysicalSample::Pointer => (),
+        PhysicalSample::Motion(movement) => {
             let before = physical.snapshot().ok().map(|s| s.2);
-            physical.pointer(point);
+            physical.motion(movement);
             if let (Some(before), Ok((_, buttons, after))) = (before, physical.snapshot())
                 && let Some(view) = view.as_deref_mut()
                 && view.camera_ui.is_none()

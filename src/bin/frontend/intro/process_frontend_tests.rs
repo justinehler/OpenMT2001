@@ -374,3 +374,30 @@ fn gain_down_loss_before_receipt_never_reestablishes_app_camera_or_desktop_holds
     );
     route.detach();
 }
+#[test]
+fn relative_motion_waits_for_foreground_and_never_fills_the_physical_suffix() {
+    let owner = owner();
+    let mut p = owner.borrow_mut();
+    let window = WindowId::from(7);
+    let motion = PhysicalSample::Motion([3., -2.]);
+    p.observe(true).unwrap();
+    // A pending focus receipt drops motion instead of queueing it, so a fast
+    // mouse cannot overflow the suffix while the mouse is being acquired.
+    for _ in 0..1000 {
+        p.sample(window, motion, 1, 0).unwrap();
+    }
+    assert_ne!(p.phase, Phase::Failed);
+    p.complete_physical(1);
+    assert!(p.take_samples().is_empty());
+    p.sample(window, motion, 1, 1).unwrap();
+    assert!(matches!(
+        &p.take_samples()[..],
+        [PhysicalSample::Motion([3., -2.])]
+    ));
+    p.observe(false).unwrap();
+    p.sample(window, motion, 1, 1).unwrap();
+    assert!(
+        p.take_samples().is_empty(),
+        "a background window gets no camera motion"
+    );
+}

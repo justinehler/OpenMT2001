@@ -809,8 +809,7 @@ mod supplier_preflight_tests {
         let mut physical = PhysicalInput::default();
         physical.key(PhysicalKey::Code(KeyCode::ArrowRight), true);
         physical.button(MouseButton::Right, true);
-        physical.pointer([1., 2.]);
-        physical.pointer([4., 8.]);
+        physical.motion([3., 6.]);
         let input_before = physical.snapshot().unwrap();
         let mut ui = State::new(
             Globals::after_normal_initialization(OriginalGraphicsPolicy::NormalD3d, false),

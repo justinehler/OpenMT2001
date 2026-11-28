@@ -8,7 +8,7 @@ use std::{
 };
 use winit::{
     application::ApplicationHandler,
-    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowId},
@@ -459,6 +459,44 @@ impl ApplicationHandler for App {
         }
         if redraw && self.stage == 3 && self.failure.is_none() {
             self.update_intro_music();
+        }
+    }
+    /// Raw relative mouse motion drives the camera, as the original's polled
+    /// DirectInput mouse does (0x4e51c0). The mouse is foreground-only
+    /// (cooperative level 6 at 0x4e4a10), so motion counts only while the city
+    /// window has focus; focus loss clears what is pending.
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _device: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if self.failure.is_some() || self.window_focus != Some(true) {
+            return;
+        }
+        let Some(sample) =
+            crate::intro::process_frontend::PhysicalSample::from_device_event(&event)
+        else {
+            return;
+        };
+        let Some(window) = self.presenter.as_ref().map(|p| p.window.id()) else {
+            return;
+        };
+        if let Err(error) = self.service_process_input() {
+            self.failure = Some(error);
+            event_loop.exit();
+            return;
+        }
+        if let Some(intro) = &mut self.intro
+            && let Err(error) = intro.physical_sample(window, sample)
+        {
+            self.failure = Some(error);
+            event_loop.exit();
+            return;
+        }
+        self.drain_physical();
+        if self.failure.is_some() {
+            event_loop.exit();
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
