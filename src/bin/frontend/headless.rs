@@ -40,8 +40,8 @@ run:
                         original does, and copy it to DIR/autosave-N.sav
   --autosaves N         stop after the Nth autosave (needs --autosave-dir)
   --rng                 print the live RNG stream states, keyed by original
-                        registry address, at the start, at each autosave and
-                        at the end
+                        registry address, at the start, at each checkpoint,
+                        at each autosave and at the end
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -752,6 +752,9 @@ fn advance(
         last_hour = session.world.clock.hour();
         if report {
             line(out, &digest(session))?;
+            if options.rng {
+                line(out, &rng_report(session, tick))?;
+            }
         }
     };
     line(out, &digest(session))?;
