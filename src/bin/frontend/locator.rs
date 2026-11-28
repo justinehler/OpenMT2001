@@ -3532,17 +3532,8 @@ impl Assets {
                     return Action::PeopleStep(true);
                 }
             }
-            if inside(p, self.city_layout.buttons[0]) {
-                return Action::CityMode(0);
-            }
-            if state.prestige.is_some() && inside(p, self.city_layout.buttons[1]) {
-                return Action::CityMode(1);
-            }
-            if state.rights.is_some() && inside(p, self.city_layout.buttons[2]) {
-                return Action::CityMode(2);
-            }
-            if state.ownership.is_some() && inside(p, self.city_layout.buttons[3]) {
-                return Action::CityMode(3);
+            if let Some(action) = state.city_mode_at(&self.city_layout, p) {
+                return action;
             }
         }
         if !state.body_open() || state.city_info || state.poll_info {
@@ -3624,6 +3615,16 @@ enum Action {
     Select(u32),
     Scroll(i32),
     ScrollTrack,
+}
+fn icon_tooltip(action: Action) -> Option<u32> {
+    match action {
+        Action::City => Some(1146),
+        Action::Player => Some(1147),
+        Action::Toggle => Some(1148),
+        Action::Poll => Some(12),
+        Action::CityMode(index) => [1150, 1151, 1152, 1153].get(usize::from(index)).copied(),
+        _ => None,
+    }
 }
 fn tutorial_control(action: Action) -> Option<u32> {
     match action {
@@ -3885,16 +3886,26 @@ impl Locator {
         Ok(())
     }
 
-    ///40d8f2 stores the descriptor tooltip ID at each of the four icon
-    /// children +0x34. Use the same hit test as the visible icon controls.
-    pub fn icon_tooltip_at(&self, assets: &Assets, point: [i32; 2]) -> Option<u32> {
-        match assets.hit(self, point) {
-            Action::City => Some(1146),
-            Action::Player => Some(1147),
-            Action::Toggle => Some(1148),
-            Action::Poll => Some(12),
-            _ => None,
+    fn city_mode_at(&self, layout: &ui::MppModes, point: [f32; 2]) -> Option<Action> {
+        if !self.body_open() || !self.city_info {
+            return None;
         }
+        [
+            true,
+            self.prestige.is_some(),
+            self.rights.is_some(),
+            self.ownership.is_some(),
+        ]
+        .into_iter()
+        .zip(layout.buttons)
+        .position(|(available, bounds)| available && inside(point, bounds))
+        .map(|index| Action::CityMode(index as u8))
+    }
+    ///40d8f2 stores the orange descriptor IDs; 410dbd..410e87 installs
+    ///533788's four City Information identifiers in the green children +34.
+    ///Both use the same hit test as their visible controls.
+    pub fn icon_tooltip_at(&self, assets: &Assets, point: [i32; 2]) -> Option<u32> {
+        icon_tooltip(assets.hit(self, point))
     }
     pub fn tutorial_control_at(&self, assets: &Assets, p: Option<[i32; 2]>) -> Option<u32> {
         p.and_then(|point| tutorial_control(assets.hit(self, point)))
@@ -5027,6 +5038,9 @@ mod tests {
                 crate::city_ownership::Ownership::from_save(&original).unwrap(),
             ));
             state.attach_rights(crate::city_rights::Rights::from_save(&original).unwrap());
+            for (point, id) in city_points.into_iter().zip(1150..=1153) {
+                assert_eq!(state.icon_tooltip_at(&assets, point), Some(id));
+            }
             state.mouse(&assets, &scene, Some(city_points[3]), true);
             state.mouse(&assets, &scene, Some(city_points[3]), false);
             assert!(state.ownership_mode);
@@ -5895,6 +5909,96 @@ pub(crate) mod refresh_ui_tests {
             tutorial_activated: None,
             dirty: true,
             prepared: None,
+        }
+    }
+    #[test]
+    fn city_tab_hover_help_uses_regions_and_shared_dwell() {
+        use crate::intro::camera_live::focus::{ChildKey, Focus};
+        let mut state = fresh();
+        state.city_info = true;
+        state.open = true;
+        state.prestige = Some(crate::city_prestige::Prestige {
+            rows: vec![],
+            values: [0.; 52],
+            overlay_categories: vec![],
+        });
+        state.rights = Some(crate::city_rights::Rights {
+            categories: [crate::city_rights::Category {
+                mode: 0,
+                owner: 0,
+                remaining: 0,
+            }; 52],
+            owner_number: 1,
+            player_name: vec![],
+        });
+        state.ownership = Some(crate::city_ownership::Ownership {
+            badges: [crate::ownership_badges::Badge {
+                character: None,
+                remaining: 0,
+            }; 52],
+            groups: vec![],
+        });
+        let layout = ui::mpp_modes([30., 30., 190., 245.], [25, 25]).unwrap();
+        let target =
+            |state: &Locator, point| state.city_mode_at(&layout, point).and_then(icon_tooltip);
+        let mut focus = Focus::default();
+        let mut fallback = crate::tooltip::IconDwell::default();
+        for (index, id) in [1150, 1151, 1152, 1153].into_iter().enumerate() {
+            let [l, t, r, b] = layout.buttons[index];
+            let point = [(l + r) / 2., (t + b) / 2.];
+            assert_eq!(target(&state, point), Some(id));
+            for tick in 1..=26 {
+                //Repeated presentation of the same widget preserves dwell.
+                focus
+                    .show_child(ChildKey::Locator(id), target(&state, point).unwrap(), false)
+                    .unwrap();
+                focus.advance();
+                let expected = (tick > 25).then_some(id);
+                assert_eq!(focus.caption(), expected);
+                assert_eq!(fallback.advance(target(&state, point)), expected);
+            }
+            for point in [[r + 1., (t + b) / 2.], [(l + r) / 2., b + 1.]] {
+                assert_eq!(target(&state, point), None);
+            }
+            focus.clear_child();
+            assert_eq!(focus.caption(), None);
+            assert_eq!(fallback.advance(None), None);
+            state.open = false;
+            assert_eq!(target(&state, point), None);
+            state.open = true;
+            state.city_info = false;
+            assert_eq!(target(&state, point), None);
+            state.city_info = true;
+        }
+        //A direct move between tabs replaces help and starts a fresh dwell.
+        focus
+            .show_child(ChildKey::Locator(1150), 1150, false)
+            .unwrap();
+        for _ in 0..26 {
+            focus.advance();
+        }
+        assert_eq!(focus.caption(), Some(1150));
+        focus
+            .show_child(ChildKey::Locator(1151), 1151, false)
+            .unwrap();
+        assert_eq!(focus.caption(), None);
+        for _ in 0..26 {
+            focus.advance();
+        }
+        assert_eq!(focus.caption(), Some(1151));
+        //The presentation gate clears the child when a modal takes input.
+        focus.clear_child();
+        assert_eq!(focus.caption(), None);
+        state.prestige = None;
+        let [l, t, r, b] = layout.buttons[1];
+        assert_eq!(target(&state, [(l + r) / 2., (t + b) / 2.]), None);
+        for (action, id) in [
+            (Action::City, 1146),
+            (Action::Player, 1147),
+            (Action::Toggle, 1148),
+            (Action::Poll, 12),
+        ] {
+            assert_eq!(icon_tooltip(action), Some(id));
         }
     }
     fn report(value: i32) -> crate::city_people::Report {
