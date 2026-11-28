@@ -84,6 +84,9 @@ pub(super) struct Owners<'a> {
     pub(super) navigation: &'a mut Option<camera_live::navigation::State>,
     pub(super) focus: &'a mut camera_live::focus::Focus,
     pub(super) endpoint: &'a mut Option<camera_live::endpoint::Endpoint>,
+    pub(super) tooltip: &'a mut Option<openmt2001::render::PreparedScene>,
+    pub(super) tooltip_state: &'a mut Option<(u32, [i32; 2])>,
+    pub(super) icon_tooltip_dwell: &'a mut crate::tooltip::IconDwell,
     pub(super) navigation_click_latched: &'a mut bool,
 }
 impl<'a> Owners<'a> {
@@ -97,6 +100,9 @@ impl<'a> Owners<'a> {
             focus: &mut view.camera_focus,
             endpoint: &mut view.camera_endpoint,
             navigation_click_latched: &mut view.navigation_click_latched,
+            tooltip: &mut view.tooltip,
+            tooltip_state: &mut view.tooltip_state,
+            icon_tooltip_dwell: &mut view.icon_tooltip_dwell,
         }
     }
 }
@@ -202,6 +208,11 @@ pub(super) fn commit(
     }
     *next.navigation = previous.navigation.take();
     *next.focus = std::mem::take(previous.focus);
+    // HUD hover belongs to the retained interface, not the replaced city
+    // snapshot. The next interface draw still resets it if its target changed.
+    *next.icon_tooltip_dwell = std::mem::take(previous.icon_tooltip_dwell);
+    *next.tooltip = previous.tooltip.take();
+    *next.tooltip_state = previous.tooltip_state.take();
     *next.endpoint = previous.endpoint.take();
     if let Some(prepared) = prepared.adjustment {
         let mut adjustment = previous
