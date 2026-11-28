@@ -70,7 +70,7 @@ mod tests {
             assert_eq!(transform.position([-120., 42., 365.]), [-120., 42., -365.]);
         }
         assert!(pose("gamedata2/New_building stuff/train_stations/bando_fact2.tm").is_none());
-        let mut draws = vec![OwnedDraw::texture_page(
+        let mut draws = [OwnedDraw::texture_page(
             SurfaceMode::StaticOpaque,
             1,
             1,
@@ -205,13 +205,14 @@ mod tests {
             up: [0., 1., 0.],
             vertical_fov: 53.,
         };
+        let runtime_records = vec![[0u8; 0x394]; 600];
         for source in [
             Source::Map(&fresh),
             Source::Map(&skirmish),
             Source::Save(&save),
             Source::RuntimeBuildings {
-                records: &[],
-                category_base: 0x6179a0,
+                records: &runtime_records,
+                category_base: crate::building_geometry::V14_CATEGORY_BASE,
             },
         ] {
             let mut city = assemble(Request {
