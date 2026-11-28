@@ -474,6 +474,15 @@ pub(crate) fn shared_state(
                 // Only the authority draws event cards (broadcast 0x31 goes
                 // to its 0x48c1c0 broadcaster); a client's deck copy is unused.
                 8 => record.fill(0),
+                // AI profiles, category counts and proposal state: computer
+                // controllers run on the authority alone (0x481680), so a
+                // client's copy is never advanced (and the authority's grows).
+                6 => record.clear(),
+                // The timed command queue. The authority enqueues a commit
+                // when it schedules it (Total+25, 0x451720) and a client when
+                // the commit arrives, so an hour can catch one in flight. Its
+                // effects are compared once it applies.
+                9 => record.clear(),
                 _ => {}
             }
             if tag == 12 {
@@ -484,6 +493,14 @@ pub(crate) fn shared_state(
                 openmt2001::session_save::skip_saved_dispatch(&mut input)?;
                 let end = dispatch + input.position();
                 record[dispatch..end].fill(0);
+                // The construction quote components (6175fc..617608) are
+                // scratch written by whichever peer produces a construction;
+                // the command carries its own copy. Skip the building
+                // selection pair before them.
+                record
+                    .get_mut(end + 8..end + 24)
+                    .ok_or("V2 economy record too short")?
+                    .fill(0);
             }
             Ok(record)
         })
@@ -498,6 +515,7 @@ pub(crate) fn shared_state(
 /// count, +0x218 head), the held event card (+0x1b8, until it is played as a
 /// replicated command) and the auxiliary descriptors differ between peers in
 /// the original as well, and its state sample (0x481340) reads none of them.
+/// The same holds for a computer row's controller state.
 fn per_peer_players(record: &mut Vec<u8>) -> Result<(), String> {
     const SHORT: &str = "V2 player roster record too short";
     let word = |record: &[u8], at: usize| -> Result<usize, String> {
@@ -513,6 +531,17 @@ fn per_peer_players(record: &mut Vec<u8>) -> Result<(), String> {
         for range in [0x1b8..0x1bc, 0x20c..0x21c] {
             if let Some(bytes) = player.get_mut(8 + range.start..8 + range.end) {
                 bytes.fill(0);
+            }
+        }
+        // A computer row's controller (its offer delay +8 and everything
+        // after the native account, from +0x1bc) runs on the authority alone
+        // (0x481680); every peer applies its commands, so its account stays
+        // compared.
+        if player.get(8 + 0x154..8 + 0x158) == Some(&1u32.to_le_bytes()[..]) {
+            for range in [8..12, 0x1bc..length] {
+                if let Some(bytes) = player.get_mut(8 + range.start..8 + range.end) {
+                    bytes.fill(0);
+                }
             }
         }
         normalized.extend_from_slice(&player);

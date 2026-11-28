@@ -376,11 +376,20 @@ fn report_hour(
     shared_dir: Option<&std::path::Path>,
     out: &mut dyn Write,
 ) -> Result<(), String> {
-    let shared = crate::intro::connected_start::shared_state(session, image)?;
-    let tagged: Vec<_> = crate::intro::connected_start::SHARED_TAGS
-        .into_iter()
-        .zip(shared)
-        .collect();
+    // A V2 save, and so a capture, is refused while an auction's bidding
+    // scene is being built. Both peers are then in the same auction phase;
+    // the hour is printed without tags and the comparison skips it.
+    let tagged: Vec<_> = match crate::intro::connected_start::shared_state(session, image) {
+        Ok(shared) => crate::intro::connected_start::SHARED_TAGS
+            .into_iter()
+            .zip(shared)
+            .collect(),
+        Err(error) if session.world.auction.controller.reference != 0 => {
+            eprintln!("hour capture skipped during an auction: {error}");
+            Vec::new()
+        }
+        Err(error) => return Err(error),
+    };
     let clock = &session.world.clock;
     if let Some(dir) = shared_dir {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -600,6 +609,7 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
         _ => return Err("the host printed no hourly lines".into()),
     };
     let mut ticks = Vec::new();
+    let mut skipped = 0;
     for (index, client) in clients.iter().enumerate() {
         let name = format!("client {}", index + 1);
         let client_hours = hours(client);
@@ -619,6 +629,12 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
             );
             if actual.tick != expected.tick {
                 return Err(format!("first divergent hour: {at}: Total tick differs"));
+            }
+            // An hour captured during an auction carries no tags (see
+            // `report_hour`); only its tick is compared.
+            if expected.shared.is_empty() || actual.shared.is_empty() {
+                skipped += 1;
+                continue;
             }
             if let Some(((tag, _), _)) = expected
                 .shared
@@ -658,8 +674,15 @@ pub fn compare_logs(host: &str, clients: &[&str]) -> Result<String, String> {
     }
     let matched = samples.iter().filter(|l| l.contains("\"match\"")).count();
     let days = (last.tick - first.tick) / super::TICKS_PER_DAY;
+    let skipped = match skipped {
+        0 => String::new(),
+        n => format!(
+            "; {n} hour{} captured during an auction, tick only",
+            if n == 1 { "" } else { "s" }
+        ),
+    };
     Ok(format!(
-        "{days} day{} in sync (host tick {}, {}; {matched} of {} samples compared and matched)",
+        "{days} day{} in sync (host tick {}, {}; {matched} of {} samples compared and matched{skipped})",
         if days == 1 { "" } else { "s" },
         last.tick,
         ticks.join(", "),
