@@ -124,7 +124,7 @@ fn options_quit_menu_backspace_and_return_use_original_replies() {
         assert_eq!(
             h.prompts.take_dialog_replies(),
             vec![crate::human_dialog::Reply {
-                callback: crate::game_options::QUIT_CALLBACK,
+                callback: openmt2001::human_dialog::quit::CITY_CALLBACK,
                 context: 0,
                 button,
             }]

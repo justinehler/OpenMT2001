@@ -4,13 +4,10 @@
 use crate::ui::Surface;
 use openmt2001::{
     font::{Font, Layout},
+    pause::{PLAYER_PAUSE_TEXT, REASON_TWO_TEXT},
     render::{PreparedScene, Renderer},
 };
 
-/// Caption for player pause reason 3 (F1/P, 43e5f0).
-const PLAYER_PAUSE_TEXT: u32 = 0x46d;
-/// Caption for pause reason 2, which replaces the player caption.
-const REASON_TWO_TEXT: u32 = 0x6df;
 /// 4bad40 band: left, top, right, bottom in interface units.
 const BAND: [f32; 4] = [0., 450., 640., 480.];
 /// 4bad40 passes ARGB b4ff0000 to the uniform interface quad.
@@ -19,19 +16,6 @@ const BAND_COLOR: u32 = 0xb4ff0000;
 const CAPTION_TOP: f32 = 455.;
 /// 4bad40 selects font5 (455420) for the caption.
 const FONT: u32 = 5;
-
-/// Text identifier 4bad40 draws for the four pause reason counters, if any.
-/// Reason 2 takes precedence over the player's reason 3; reasons 0 and 1
-/// (Options, scripts) never show the banner.
-pub(crate) fn caption(reasons: [u8; 4]) -> Option<u32> {
-    if reasons[2] != 0 {
-        Some(REASON_TWO_TEXT)
-    } else if reasons[3] != 0 {
-        Some(PLAYER_PAUSE_TEXT)
-    } else {
-        None
-    }
-}
 
 pub struct Assets {
     pages: Vec<Surface>,
@@ -130,21 +114,5 @@ impl View {
             Some(id) => self.shown = Some((id, assets.prepare(renderer, id)?)),
         }
         Ok(self.shown.as_ref().map(|(_, scene)| scene))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn caption_follows_4bad40_reason_priority() {
-        assert_eq!(caption([0; 4]), None);
-        assert_eq!(caption([1, 0, 0, 0]), None, "Options pause has no banner");
-        assert_eq!(caption([0, 1, 0, 0]), None, "script pause has no banner");
-        assert_eq!(caption([0, 0, 0, 1]), Some(PLAYER_PAUSE_TEXT));
-        assert_eq!(caption([1, 1, 0, 1]), Some(PLAYER_PAUSE_TEXT));
-        assert_eq!(caption([0, 0, 1, 0]), Some(REASON_TWO_TEXT));
-        assert_eq!(caption([0, 0, 1, 1]), Some(REASON_TWO_TEXT));
     }
 }

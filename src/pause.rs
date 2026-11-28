@@ -24,9 +24,27 @@ impl Timers {
     }
 }
 
+/// Pause banner caption for player pause reason 3 (F1/P, 43e5f0).
+pub const PLAYER_PAUSE_TEXT: u32 = 0x46d;
+/// Pause banner caption for pause reason 2, which replaces the player caption.
+pub const REASON_TWO_TEXT: u32 = 0x6df;
+
 impl State {
     pub fn has_reason(&self) -> bool {
         self.bytes[..4] != [0; 4]
+    }
+
+    /// Text identifier 4bad40 draws in the pause banner, if any. Reason 2 takes
+    /// precedence over the player's reason 3; reasons 0 and 1 (Options,
+    /// scripts) never show the banner.
+    pub fn banner_caption(&self) -> Option<u32> {
+        if self.bytes[2] != 0 {
+            Some(REASON_TWO_TEXT)
+        } else if self.bytes[3] != 0 {
+            Some(PLAYER_PAUSE_TEXT)
+        } else {
+            None
+        }
     }
 
     /// Pause slice of focus loss004bab90, AFTER device unacquire, input-disable
@@ -110,6 +128,22 @@ mod focus_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_caption_follows_4bad40_reason_priority() {
+        let caption = |reasons: [u8; 4]| {
+            let mut bytes = [0; 9];
+            bytes[..4].copy_from_slice(&reasons);
+            State { bytes }.banner_caption()
+        };
+        assert_eq!(caption([0; 4]), None);
+        assert_eq!(caption([1, 0, 0, 0]), None, "Options pause has no banner");
+        assert_eq!(caption([0, 1, 0, 0]), None, "script pause has no banner");
+        assert_eq!(caption([0, 0, 0, 1]), Some(PLAYER_PAUSE_TEXT));
+        assert_eq!(caption([1, 1, 0, 1]), Some(PLAYER_PAUSE_TEXT));
+        assert_eq!(caption([0, 0, 1, 0]), Some(REASON_TWO_TEXT));
+        assert_eq!(caption([0, 0, 1, 1]), Some(REASON_TWO_TEXT));
+    }
     #[test]
     #[ignore = "requires original pause counter fixture"]
     fn matches_original_pause_counters() {

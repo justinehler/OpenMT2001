@@ -1020,8 +1020,8 @@ impl Host {
     pub fn interface_ticks(&self) -> u64 {
         self.interface_ticks
     }
-    pub fn auction_save_state(&self) -> Option<crate::session_save::AuctionHostState> {
-        Some(crate::session_save::AuctionHostState {
+    pub fn auction_save_state(&self) -> Option<openmt2001::session_save::AuctionHostState> {
+        Some(openmt2001::session_save::AuctionHostState {
             controls: self
                 .auction
                 .as_ref()
@@ -1034,7 +1034,7 @@ impl Host {
     }
     pub fn restore_auction_widgets(
         &mut self,
-        state: Option<&crate::session_save::AuctionHostState>,
+        state: Option<&openmt2001::session_save::AuctionHostState>,
         session: &Session<'_>,
     ) -> Result<(), String> {
         if let Some(state) = state {
@@ -1296,11 +1296,11 @@ impl Host {
     pub(crate) fn save_view(
         &self,
         session: &Session<'_>,
-    ) -> Result<crate::session_save::HostSaveView, String> {
+    ) -> Result<openmt2001::session_save::HostSaveView, String> {
         if self.policy.scheduler.network_enabled || session.connected.is_some() {
             return Err("Save is disabled in a network game".into());
         }
-        Ok(crate::session_save::HostSaveView {
+        Ok(openmt2001::session_save::HostSaveView {
             options: self.options_save_projection(&session.world.pause, &session.hooks.timers)?,
             auction: self.auction_save_state(),
         })
@@ -1609,10 +1609,7 @@ impl Host {
             script_paused: session.world.pause.has_reason(),
             pause_banner: self
                 .game_active
-                .then(|| {
-                    let [a, b, c, d, ..] = session.world.pause.bytes;
-                    crate::pause_banner::caption([a, b, c, d])
-                })
+                .then(|| session.world.pause.banner_caption())
                 .flatten(),
             ticks: session.world.clock.timing[0],
             interface_ticks: self.interface_ticks,
@@ -2310,7 +2307,7 @@ impl Host {
                             ui_snapshot=Some((source,snapshot));
                             pair
                         };
-                        let host=Some(crate::session_save::AuctionHostState {
+                        let host=Some(openmt2001::session_save::AuctionHostState {
                             controls:auction.as_ref().map(|a|a.controls.clone()).unwrap_or_default(),
                             visible:auction.as_ref().is_some_and(|a|a.visible),
                             interface_ticks,announcement_seconds:*auction_seconds,
@@ -2873,7 +2870,7 @@ impl Host {
         assets: &CommandAssets<'_, '_>,
         reply: openmt2001::human_dialog::Reply,
     ) -> Result<(), String> {
-        if reply.callback == crate::game_options::QUIT_CALLBACK {
+        if reply.callback == openmt2001::human_dialog::quit::CITY_CALLBACK {
             return self.reply_options_quit(
                 &mut session.catalog,
                 session.campaign_profile.as_deref(),
@@ -3958,7 +3955,7 @@ mod tests {
                     assert_eq!(
                         replies,
                         vec![human_dialog::Reply {
-                            callback: game_options::QUIT_CALLBACK,
+                            callback: openmt2001::human_dialog::quit::CITY_CALLBACK,
                             context: 0,
                             button: button as u32,
                         }]
@@ -4006,7 +4003,7 @@ mod tests {
                 }
             }
         }
-        let desktop = crate::desktop_quit::dialog();
+        let desktop = openmt2001::human_dialog::quit::desktop();
         assert_eq!(
             (desktop.title, desktop.body, desktop.callback),
             (1765, 1766, 0x495670)

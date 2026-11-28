@@ -39,25 +39,7 @@ pub enum Button {
     Quit,
 }
 
-pub const QUIT_CALLBACK: u32 = 0x49e940;
-
-/// Original 49e970's abandonment prompt, distinct from desktop Quit in its
-/// strings (0x6e3/0x6e4) and callback. It never sets a portrait.
-pub fn quit_dialog() -> crate::human_dialog::Dialog {
-    crate::human_dialog::Dialog {
-        portrait: crate::human_dialog::NO_PORTRAIT,
-        title: 1763,
-        body: 1764,
-        buttons: [1636, 1637],
-        button_count: 2,
-        callback: QUIT_CALLBACK,
-        timeout: false,
-        handler_written: true,
-        context_written: true,
-        timeout_written: true,
-        ..Default::default()
-    }
-}
+pub use openmt2001::human_dialog::quit::city as quit_dialog;
 
 pub struct Assets {
     base: Vec<Surface>,

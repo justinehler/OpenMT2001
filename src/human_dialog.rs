@@ -297,3 +297,49 @@ pub fn integer_money(value: i32, symbol: &[u8], suffix: bool) -> Vec<u8> {
     }
     text
 }
+
+/// The two Quit confirmations. They share their buttons and never set a
+/// portrait, but differ in strings and callback.
+pub mod quit {
+    use super::{Dialog, NO_PORTRAIT};
+
+    /// Callback of the in-city abandonment prompt (original 49e940).
+    pub const CITY_CALLBACK: u32 = 0x49e940;
+    /// Callback of the main-menu Quit-to-desktop prompt (original 495670).
+    pub const DESKTOP_CALLBACK: u32 = 0x495670;
+
+    /// Original 49e970's abandonment prompt (strings 0x6e3/0x6e4).
+    pub fn city() -> Dialog {
+        Dialog {
+            portrait: NO_PORTRAIT,
+            title: 1763,
+            body: 1764,
+            buttons: [1636, 1637],
+            button_count: 2,
+            callback: CITY_CALLBACK,
+            timeout: false,
+            handler_written: true,
+            context_written: true,
+            timeout_written: true,
+            ..Default::default()
+        }
+    }
+
+    /// Original 4958f4's main-menu Quit confirmation.
+    pub fn desktop() -> Dialog {
+        Dialog {
+            portrait: NO_PORTRAIT,
+            title: 1765,
+            body: 1766,
+            buttons: [1636, 1637],
+            button_count: 2,
+            callback: DESKTOP_CALLBACK,
+            context: 0,
+            timeout: false,
+            handler_written: true,
+            context_written: true,
+            timeout_written: true,
+            ..Dialog::default()
+        }
+    }
+}
