@@ -23,11 +23,7 @@ impl MusicAdmission {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Prefix {
-    ReceiverAbsent,
-    Complete(Option<openmt2001::native_input::focus::AudioOutcome>),
-}
+pub(crate) use openmt2001::native_input::focus::Prefix;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AttachmentId(u64);

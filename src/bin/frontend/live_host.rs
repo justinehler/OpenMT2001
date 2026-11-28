@@ -1131,7 +1131,7 @@ impl Host {
         pause: &mut openmt2001::pause::State,
         timers: &mut [openmt2001::timers::Task],
         focused: bool,
-        prefix: impl FnOnce(i8) -> Result<crate::intro::focus::Prefix, String>,
+        prefix: impl FnOnce(i8) -> Result<openmt2001::native_input::focus::Prefix, String>,
     ) -> Result<(), String> {
         if self.stop_retired_camera() {
             return Err("Focus Session retired".into());
@@ -1141,7 +1141,7 @@ impl Host {
         }
         let result = (|| {
             let prefix = prefix(pause.bytes[3] as i8)?;
-            if prefix == crate::intro::focus::Prefix::ReceiverAbsent {
+            if prefix == openmt2001::native_input::focus::Prefix::ReceiverAbsent {
                 return Ok(());
             }
             // Native tests this gate after the frontend callback, not instead
@@ -4390,7 +4390,7 @@ mod tests {
             host.toggle_player_pause(&mut pause, &mut timers, |_, _| Ok(()))
                 .unwrap();
             host.focus(&mut pause, &mut timers, false, |_| {
-                Ok(crate::intro::focus::Prefix::Complete(None))
+                Ok(openmt2001::native_input::focus::Prefix::Complete(None))
             })
             .unwrap();
             assert_eq!((pause.clone(), timers.clone()), network);
