@@ -343,7 +343,10 @@ fn run(boundary_hour: u32) {
                 let bytes = durable(&out.join("countdown.sav"), &bytes);
                 let saved = SaveFile::parse(&bytes).unwrap();
                 let mut loaded = Session::load_original(inputs(), policy(), &bytes).unwrap();
+                let native_allocation_next = loaded.allocation_next;
                 let continuation = loaded.restore_v2_extension_with_image(&saved, &image).unwrap().unwrap().auction.unwrap();
+                continuation_test::load_boundary(&mut source, &loaded, &assets, &saved, native_allocation_next);
+                host.restore_auction_widgets(continuation.host.as_ref(), &source).unwrap();
                 let mut loaded_host = crate::live_host::Host::new(camera.eye);
         loaded_host.begin_presentation(&loaded).unwrap(); loaded_host.running = true;
                 let (tx, worker) = presenter(exe.clone(), directory.clone(), archive.clone());
@@ -417,7 +420,9 @@ fn run(boundary_hour: u32) {
         let bytes = durable(&out.join("pending-card.sav"), &bytes);
         let saved = SaveFile::parse(&bytes).unwrap();
         let mut loaded = Session::load_original(inputs(),policy(),&bytes).unwrap();
+        let native_allocation_next = loaded.allocation_next;
         let metadata = loaded.restore_v2_extension_with_image(&saved,&image).unwrap().unwrap();
+        continuation_test::load_boundary(&mut source, &loaded, &assets, &saved, native_allocation_next);
         let mut loaded_host = crate::live_host::Host::new(camera.eye);
         loaded_host.begin_presentation(&loaded).unwrap(); loaded_host.running = true;
         let (tx, worker) = presenter(exe.clone(),directory.clone(),archive.clone());

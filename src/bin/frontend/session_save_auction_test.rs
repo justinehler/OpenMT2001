@@ -73,7 +73,9 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
             let ext = extension::Extension::parse(&save).unwrap().unwrap();
             assert_eq!(ext.version, 4); assert!(ext.records.contains_key(&15)); assert!(ext.records.contains_key(&16)); assert!(!ext.records.contains_key(&14));
             let mut restored = Session::load_original(inputs(), policy(), &bytes).unwrap();
+            let native_allocation_next = restored.allocation_next;
             let metadata = restored.restore_v2_extension(&save).unwrap().unwrap();
+            continuation_test::allocation_cursor(&mut session, &restored, native_allocation_next);
             assert_eq!(metadata.interface_mode, Some(3)); assert!(metadata.auction.is_none());
             assert_eq!(restored.saved_cameras, Some(cameras));
             let mut restored_host = crate::live_host::Host::new(camera.eye); restored_host.running = true;
@@ -103,8 +105,11 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
         let countdown_bytes = std::fs::read(&countdown_path).unwrap();
         let countdown_save = SaveFile::parse(&countdown_bytes).unwrap();
         let mut resumed = Session::load_original(inputs(), policy(), &countdown_bytes).unwrap();
+        let native_allocation_next = resumed.allocation_next;
         let metadata = resumed.restore_v2_extension(&countdown_save).unwrap().unwrap();
+        continuation_test::load_boundary(&mut session, &resumed, &assets, &countdown_save, native_allocation_next);
         let continuation = metadata.auction.unwrap(); assert_eq!(continuation.game_mode, 1); assert_eq!(continuation.prior_mode, prior_mode);
+        host.restore_auction_widgets(continuation.host.as_ref(), &session).unwrap();
         let mut resumed_host = crate::live_host::Host::new(camera.eye);
         let (reloaded_renderer, reloaded_thread) = bridge(exe.clone(), directory.clone(), archive.clone(), "reloaded", prior_mode);
         resumed_host.auction_renderer = Some(reloaded_renderer); resumed_host.running = true;
@@ -128,7 +133,9 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
                 drop(resumed_host); reloaded_thread.join().unwrap();
                 let bytes = std::fs::read(path).unwrap(); let save = SaveFile::parse(&bytes).unwrap();
                 resumed = Session::load_original(inputs(), policy(), &bytes).unwrap();
+                let native_allocation_next = resumed.allocation_next;
                 let continuation = resumed.restore_v2_extension(&save).unwrap().unwrap().auction.unwrap();
+                continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
                 assert_eq!(continuation.game_mode, 2); assert_eq!(continuation.prior_mode, prior_mode);
                 resumed_host = crate::live_host::Host::new(camera.eye);
                 resumed_host.begin_presentation(&resumed).unwrap();
@@ -163,7 +170,9 @@ pub(crate) fn auction_continuation_saves(prior_mode: u32) -> Vec<std::path::Path
                 let dormant_save = SaveFile::parse(&dormant_bytes).unwrap();
                 assert!(dormant_save.auction().unwrap().is_none());
                 resumed = Session::load_original(inputs(), policy(), &dormant_bytes).unwrap();
+                let native_allocation_next = resumed.allocation_next;
                 let dormant = resumed.restore_v2_extension(&dormant_save).unwrap().unwrap().auction.unwrap();
+                continuation_test::load_boundary(&mut session, &resumed, &assets, &dormant_save, native_allocation_next);
                 resumed_host.activate_saved_auction(&mut resumed).unwrap();
                 dormant.apply(&mut resumed).unwrap();
                 resumed_host.restore_auction_widgets(dormant.host.as_ref(), &resumed).unwrap();
@@ -275,7 +284,17 @@ fn compare(
         .iter()
         .zip(&resumed.roster.manager.players)
     {
-        assert!(a.bytes == b.bytes, "player tick{tick}");
+        assert!(
+            a.bytes == b.bytes,
+            "player {:x} tick{tick}: {:x?}",
+            a.reference,
+            a.bytes
+                .iter()
+                .zip(&b.bytes)
+                .enumerate()
+                .filter_map(|(at, (a, b))| (a != b).then_some((at, *a, *b)))
+                .collect::<Vec<_>>()
+        );
     }
     for (a, b) in source
         .world
