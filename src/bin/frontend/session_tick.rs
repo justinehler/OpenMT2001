@@ -260,6 +260,13 @@ impl Session<'_> {
                 &mut policy.scheduler,
                 animations,
                 |event, clock, city, scheduler, dispatch| {
+                    let event = match event {
+                        openmt2001::level_runtime::Event::AccountPosted(posting) => {
+                            boundary(Event::AccountPosted(posting), clock)?;
+                            return Ok(0);
+                        }
+                        openmt2001::level_runtime::Event::Scheduled(event) => event,
+                    };
                     // Original4ed6f0 is mov al,1;ret.4ed6e0 selects PC64;
                     // our shared numeric routines model that precision explicitly.
                     if matches!(event, scheduler::Event::Helper(0x4ed6f0 | 0x4ed6e0)) {

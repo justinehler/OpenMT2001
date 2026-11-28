@@ -212,6 +212,7 @@ impl Settings {
 /// Mutable ledgers and explicit scheduler inputs; no serialized pointers are
 /// followed, and this binding does not invent animation-manager or traffic ticks.
 pub struct Runtime<'a> {
+    pub postings: &'a mut Vec<crate::economy::AccountPosting>,
     pub businesses: &'a mut [[u8; 544]],
     pub accounts: &'a mut [crate::resident::SpendingAccount],
     pub owners: &'a mut [crate::economy::PlayerAccount],
@@ -240,6 +241,7 @@ pub struct ResidentBinding {
 /// Shared population resources for the scheduler's separate Residents and
 /// Animations events. All transactions use the caller's actual ledger records.
 pub struct Population<'a> {
+    pub postings: &'a mut Vec<crate::economy::AccountPosting>,
     pub topology: &'a mut Topology,
     pub settings: &'a Settings,
     pub routes: &'a mut crate::routing::CategoryRoutes,
@@ -485,6 +487,7 @@ impl Population<'_> {
                         topology: self.topology,
                         settings: self.settings,
                         runtime: Runtime {
+                            postings: self.postings,
                             businesses: ledgers.businesses,
                             accounts: &mut residents.accounts,
                             owners: ledgers.players,
@@ -648,6 +651,7 @@ impl Session<'_, '_> {
         };
         let mut state = crate::resident::ShoppingState {
             local: crate::resident::LocalPurchaseState {
+                postings: self.runtime.postings,
                 retail: &retail,
                 centers: &self.topology.geometry.centers,
                 boundary: self.runtime.boundary,

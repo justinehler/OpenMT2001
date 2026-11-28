@@ -1939,6 +1939,7 @@ mod tests {
                             return Err("unexpected auxiliary timer in population fixture".into());
                         };
                         let mut population = crate::shopping::Population {
+                            postings: &mut Vec::new(),
                             topology: &mut shopping,
                             settings: &shopping_settings,
                             routes: &mut routes,

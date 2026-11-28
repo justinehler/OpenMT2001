@@ -1161,12 +1161,17 @@ pub struct Utilities {
 impl Utilities {
     /// 0048dfc0 pays each service in descending native index order, then
     /// clears its accumulated total. The global +86d518 factor is caller state.
-    pub fn pay_owners(&mut self, players: &mut [PlayerAccount], factor: f32) -> Result<(), String> {
+    pub fn pay_owners(
+        &mut self,
+        players: &mut [PlayerAccount],
+        factor: f32,
+    ) -> Result<Vec<AccountPosting>, String> {
         for &owner in &self.owners {
             if owner > 6 || usize::from(owner) > players.len() {
                 return Err("utility owner does not resolve to a native player".into());
             }
         }
+        let mut postings = Vec::new();
         // Our service order is telecom/gas/water/electrical; original 3,2,1,0.
         for i in [0, 1, 3, 2] {
             let owner = self.owners[i];
@@ -1174,11 +1179,13 @@ impl Utilities {
                 let count = self.owners.iter().filter(|&&id| id == owner).count();
                 let amount =
                     (count as f64 * f64::from(self.totals[i]) * 0.25 * f64::from(factor)) as f32;
-                players[usize::from(owner) - 1].post(amount, [28, 27, 25, 26][i])?;
+                let player = usize::from(owner) - 1;
+                players[player].post(amount, [28, 27, 25, 26][i])?;
+                postings.push(AccountPosting { player, amount });
             }
             self.totals[i] = 0.;
         }
-        Ok(())
+        Ok(postings)
     }
 
     /// Original 0048dda0 process initialization: all four services enabled,
@@ -1244,7 +1251,7 @@ impl OwnerIncomeSettings {
         for player in players.iter_mut() {
             player.finish_daily_update();
         }
-        self.pay_owners(utilities, properties, players)
+        self.pay_owners(utilities, properties, players).map(|_| ())
     }
 
     /// 0048e070: utilities, four-property freight, then re-enable services.
@@ -1255,16 +1262,16 @@ impl OwnerIncomeSettings {
         utilities: &mut Utilities,
         properties: &mut PropertyIncome,
         players: &mut [PlayerAccount],
-    ) -> Result<(), String> {
+    ) -> Result<Vec<AccountPosting>, String> {
         for &owner in utilities.owners.iter().chain(&properties.owners) {
             if owner > 6 || usize::from(owner) > players.len() {
                 return Err("income owner does not resolve to a native player".into());
             }
         }
-        utilities.pay_owners(players, self.multiplier)?;
-        properties.pay_owners(players, self.multiplier, self.daily_freight)?;
+        let mut postings = utilities.pay_owners(players, self.multiplier)?;
+        postings.extend(properties.pay_owners(players, self.multiplier, self.daily_freight)?);
         utilities.enabled = [true; 4];
-        Ok(())
+        Ok(postings)
     }
 
     /// Unmodified supplied v1.4 DEFAULT/hub.lua lines 31..36. All three
@@ -1308,23 +1315,26 @@ impl PropertyIncome {
         players: &mut [PlayerAccount],
         factor: f32,
         baseline: f32,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<AccountPosting>, String> {
         for &owner in &self.owners {
             if owner > 6 || usize::from(owner) > players.len() {
                 return Err("property owner does not resolve to a native player".into());
             }
         }
+        let mut postings = Vec::new();
         for i in (0..4).rev() {
             let owner = self.owners[i];
             if owner != 0 {
                 let count = self.owners.iter().filter(|&&id| id == owner).count();
                 let amount =
                     (count as f64 * f64::from(self.totals[i]) * 0.25 * f64::from(factor)) as f32;
-                players[usize::from(owner) - 1].post(amount, 29 + i)?;
+                let player = usize::from(owner) - 1;
+                players[player].post(amount, 29 + i)?;
+                postings.push(AccountPosting { player, amount });
             }
             self.totals[i] = baseline;
         }
-        Ok(())
+        Ok(postings)
     }
 }
 
@@ -1441,6 +1451,7 @@ impl BusinessAccount {
 /// dword; stock/history word arithmetic wraps without an extra quantity clamp.
 /// Buyer demand selection belongs to the caller. `tick` is global 00822d40.
 /// Catalog identity/order must come from script initialization, not guessed.
+/// Returns the rounded proprietor posting, or None when the shop has no owner.
 pub fn purchase_business_record(
     record: &mut [u8; 0x220],
     slot: usize,
@@ -1449,7 +1460,7 @@ pub fn purchase_business_record(
     quantity: i32,
     tick: u32,
     owner: Option<&mut PlayerAccount>,
-) -> Result<(), String> {
+) -> Result<Option<f32>, String> {
     let history = usize::from(record[0x209]);
     if slot >= 6 || commodity_id >= 32 || history >= 4 {
         return Err("unsupported retail catalog slot, commodity or history".into());
@@ -1495,6 +1506,7 @@ pub fn purchase_business_record(
     let sold = i16::from_le_bytes(record[history_at..history_at + 2].try_into().unwrap());
     record[history_at..history_at + 2]
         .copy_from_slice(&sold.wrapping_add(quantity as i16).to_le_bytes());
+    let posted = owner.is_some();
     if let Some(owner) = owner {
         owner.post(proceeds.to_f32(), 0x23)?;
         owner.retail_counters[0] = owner.retail_counters[0].wrapping_add(quantity.wrapping_mul(20));
@@ -1505,7 +1517,7 @@ pub fn purchase_business_record(
     if elapsed >= 100 || elapsed == 0 {
         record[0x214..0x218].copy_from_slice(&tick.to_le_bytes());
     }
-    Ok(())
+    Ok(posted.then(|| proceeds.to_f32()))
 }
 
 /// Apply 00461c40 to a loaded business record. Prices retain runtime catalog
