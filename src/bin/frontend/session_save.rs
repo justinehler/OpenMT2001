@@ -198,6 +198,62 @@ fn remap_resident_auxiliary(reference: u32, references: &[u32]) -> Result<u32, S
         .ok_or_else(|| "V2 resident reference leaves allocated auxiliary pool".into())
 }
 
+/// Native load owns the saved account prefix and the AI reset/bootstrap.
+/// The extension still supplies common runtime auxiliaries and embedded RNG
+/// state absent from native records. Live auction continuation has its own
+/// validated activation snapshot and retains that existing policy.
+fn restore_player_runtime(
+    player: &mut openmt2001::player_manager::Player,
+    saved: &[u8],
+    auction: bool,
+) -> Result<(), String> {
+    if saved.len() != player.bytes.len() || saved.len() < 0x224 {
+        return Err("V2 player runtime size invalid".into());
+    }
+    if auction {
+        player.bytes.copy_from_slice(saved);
+    } else {
+        player.bytes[0x1bc..0x220].copy_from_slice(&saved[0x1bc..0x220]);
+        if word(&player.bytes, 0x154) == 1 {
+            if saved.len() < 0x238 {
+                return Err("V2 AI runtime size invalid".into());
+            }
+            player.bytes[0x224..0x238].copy_from_slice(&saved[0x224..0x238]);
+        } else {
+            player.bytes[0x220..].copy_from_slice(&saved[0x220..]);
+        }
+    }
+    Ok(())
+}
+
+/// Read the legacy cache payload even when native load has invalidated it.
+fn restore_market_runtime(
+    input: &mut Input<'_>,
+    market: &mut openmt2001::market::Cache,
+    auction: bool,
+) -> Result<(), String> {
+    let dirty = match input.word()? {
+        0 => false,
+        1 => true,
+        _ => return Err("V2 market flag invalid".into()),
+    };
+    let mut prices = [0.; 32];
+    for value in &mut prices {
+        *value = f32::from_bits(input.word()?);
+    }
+    let rent = f32::from_bits(input.word()?);
+    if auction {
+        *market = openmt2001::market::Cache {
+            dirty,
+            prices,
+            rent,
+        };
+    } else {
+        market.invalidate();
+    }
+    Ok(())
+}
+
 fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
     let mut bytes = match command {
         Command::Build(c) => c.packet().to_vec(),
@@ -624,7 +680,7 @@ impl<'data> Session<'data> {
             if bytes.get(4..444) != Some(native.bytes.as_slice()) {
                 return Err("V2/native player account records disagree".into());
             }
-            player.bytes.copy_from_slice(bytes);
+            restore_player_runtime(player, bytes, has_auction)?;
             let n = p.word()? as usize;
             if n > 4096 {
                 return Err("V2 player auxiliary count exceeds retained bound".into());
@@ -656,7 +712,8 @@ impl<'data> Session<'data> {
         self.script_random_state = r.word()?;
         self.credit_random_state = r.word()?;
         self.particle_random_state = r.word()?;
-        self.allocation_next = r.word()?;
+        // Native AI ownership rebuilds can allocate beyond the saved arena.
+        self.allocation_next = self.allocation_next.max(r.word()?);
         self.static_rng_tail_next = r.word()?;
         self.world.creation.initialization_rng.constructor = r.word()?;
         self.world.creation.initialization_rng.movement = r.word()?;
@@ -703,7 +760,9 @@ impl<'data> Session<'data> {
             .iter_mut()
             .zip(profiles.chunks_exact(0x650))
         {
-            dst.copy_from_slice(src);
+            if has_auction {
+                dst.copy_from_slice(src);
+            }
         }
         let counts = a.blob()?;
         if counts.len() != self.roster.category_counts.len() * 4 {
@@ -715,24 +774,23 @@ impl<'data> Session<'data> {
             .iter_mut()
             .zip(counts.chunks_exact(4))
         {
-            *dst = word(src, 0);
+            if has_auction {
+                *dst = word(src, 0);
+            }
         }
         self.roster.proposal_identity = a.word()?;
         let n = a.word()?;
         if n > 12 {
             return Err("V2 ownership list count exceeds roster".into());
         }
-        self.roster.ai_ownership.lists.clear();
+        let mut ownership = std::collections::BTreeMap::new();
         for _ in 0..n {
             let reference = a.word()?;
             let b = a.blob()?;
             if b.len() % 28 != 0 || b.len() > 600 * 28 {
                 return Err("V2 AI ownership list invalid".into());
             }
-            if self
-                .roster
-                .ai_ownership
-                .lists
+            if ownership
                 .insert(
                     reference,
                     b.chunks_exact(28).map(|b| b.try_into().unwrap()).collect(),
@@ -742,6 +800,9 @@ impl<'data> Session<'data> {
                 return Err("duplicate V2 ownership reference".into());
             }
         }
+        if has_auction {
+            self.roster.ai_ownership.lists = ownership;
+        }
         let n = a.word()?;
         if n > 6 {
             return Err("V2 liquidation target count invalid".into());
@@ -750,15 +811,20 @@ impl<'data> Session<'data> {
         for _ in 0..n {
             let reference = a.word()?;
             let bytes = a.take(12)?.try_into().unwrap();
-            self.roster.liquidation_targets.insert(reference, bytes);
+            if has_auction {
+                self.roster.liquidation_targets.insert(reference, bytes);
+            }
         }
-        self.world
-            .ai_demand
-            .rows
-            .as_flattened_mut()
-            .copy_from_slice(a.take(33 * 264)?);
-        self.world.ai_demand.ready =
-            u8::try_from(a.word()?).map_err(|_| "V2 demand ready byte invalid")?;
+        let demand = a.take(33 * 264)?;
+        let ready = u8::try_from(a.word()?).map_err(|_| "V2 demand ready byte invalid")?;
+        if has_auction {
+            self.world
+                .ai_demand
+                .rows
+                .as_flattened_mut()
+                .copy_from_slice(demand);
+            self.world.ai_demand.ready = ready;
+        }
         a.end()?;
         let mut a = Input::new(ext.required(7)?);
         let cursor = a.word()?;
@@ -822,38 +888,40 @@ impl<'data> Session<'data> {
         q.end()?;
         self.live_commands = queue;
         let mut runtime = Input::new(ext.required(10)?);
-        self.world
-            .ai_neighbors
-            .rows
-            .as_flattened_mut()
-            .copy_from_slice(runtime.take(52 * 56)?);
-        for value in &mut self.world.ai_neighbors.owned_properties {
+        // VERSION1+ contains old caches for wire compatibility. Normal loads
+        // retain 4b9f00/4bbd20's rebuilt values and script scores instead.
+        let neighbors = runtime.take(52 * 56)?;
+        let mut owned = [0; 6];
+        let mut groups = [0; 6];
+        for value in &mut owned {
             *value = runtime.word()? as i32;
         }
-        for value in &mut self.world.ai_neighbors.completed_groups {
+        for value in &mut groups {
             *value = runtime.word()? as i32;
         }
-        self.world.ownership_refresh_counter =
+        let ownership_age =
             u8::try_from(runtime.word()?).map_err(|_| "V2 ownership counter invalid")?;
-        self.population.business_counts.age =
+        let business_age =
             u8::try_from(runtime.word()?).map_err(|_| "V2 business counter age invalid")?;
-        for value in &mut self.population.business_counts.values {
+        let mut business_counts = [0; 6];
+        for value in &mut business_counts {
             *value = runtime.word()? as i32;
         }
-        self.population.market.dirty = match runtime.word()? {
-            0 => false,
-            1 => true,
-            _ => return Err("V2 market flag invalid".into()),
-        };
-        for value in &mut self.population.market.prices {
-            *value = f32::from_bits(runtime.word()?);
+        restore_market_runtime(&mut runtime, &mut self.population.market, has_auction)?;
+        let scores = runtime.take(29)?;
+        if has_auction {
+            self.world
+                .ai_neighbors
+                .rows
+                .as_flattened_mut()
+                .copy_from_slice(neighbors);
+            self.world.ai_neighbors.owned_properties = owned;
+            self.world.ai_neighbors.completed_groups = groups;
+            self.world.ownership_refresh_counter = ownership_age;
+            self.population.business_counts.age = business_age;
+            self.population.business_counts.values = business_counts;
+            self.roster.scripts.scores.bytes.copy_from_slice(scores);
         }
-        self.population.market.rent = f32::from_bits(runtime.word()?);
-        self.roster
-            .scripts
-            .scores
-            .bytes
-            .copy_from_slice(runtime.take(29)?);
         let animations = runtime.blob()?;
         if animations.len() % 44 != 0 {
             return Err("V2 animation pool size invalid".into());
