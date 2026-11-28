@@ -4661,3 +4661,7 @@ fn starting_out_early_controls_and_options_remain_live() {
     drop(loaded);
     worker.join().unwrap();
 }
+
+mod announcement_save_test {
+    include!("../intro_announcement_save_test.rs");
+}

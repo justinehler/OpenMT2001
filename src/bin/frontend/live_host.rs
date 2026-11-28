@@ -1017,6 +1017,11 @@ impl Host {
             } else {
                 // Announcement has not prepared a scene; settlement releases it.
                 self.auction = None;
+                if session.world.auction.controller.record[0x7d] != 0 {
+                    // 41d700 opens with empty seconds; 41d900 writes the
+                    // next whole-second boundary from the restored count.
+                    self.auction_seconds = None;
+                }
             }
         }
         Ok(())
