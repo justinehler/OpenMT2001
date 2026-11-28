@@ -1,16 +1,11 @@
-//! Original tutor mesh overlay used by Interface.AddArrow (4bd04e/4c5f50).
-//! The native prompt arrow target is retained separately from the two meshes.
+//! Tutorial pointer overlay for Interface.AddArrow, and the gate on the 3D
+//! Mr. Monopoly tutor figure that the original keeps hidden.
 use openmt2001::{
-    archive::ArchiveIndex,
-    mesh::CachedMesh,
-    pe::PeImage,
-    people,
     render::{PreparedScene, Renderer, SurfaceMode},
     render_scene::OwnedDraw,
-    scene_assets,
 };
 
-const PATHS: [u32; 2] = [0x546448, 0x546424];
+/// 640x480 overlay units to clip space.
 const VIEW: [f32; 16] = [
     2. / 640.,
     0.,
@@ -30,144 +25,91 @@ const VIEW: [f32; 16] = [
     1.,
 ];
 
-struct Model {
-    frames: Vec<Vec<[f32; 3]>>,
-    uvs: Vec<[f32; 2]>,
-    parts: Vec<(people::PreparedPart, usize)>,
+/// The 3D Mr. Monopoly tutor figure (`gamedata2\tutor\mr_tutor_body.tm`
+/// and `mr_tutor_anim.tm`).
+///
+/// City start (init 0x4c5f50, called at 0x4b998e) places it at (250, 450)
+/// in 640x480 units with scale 50 and clears its animation state, but it
+/// never writes the visibility byte 0x934409, which therefore stays 0. The
+/// per-frame draw 0x4c6310 (called from the city render at 0x4b4986) returns
+/// at once while that byte is 0. Its only writer is the animation-finished
+/// callback 0x4c6260, reached from sequences that 0x4c65c0 starts. The only
+/// ways into 0x4c65c0 are 0x4c6700 (appear), 0x4c6720 (leave) and 0x4c6740
+/// (idle tick), and nothing in v1.4 calls any of them, so the figure never
+/// becomes visible in any tutorial or game mode. Because nothing can draw
+/// it, its meshes and texture pages are not loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TutorFigure {
+    /// 0x934409.
+    visible: bool,
 }
 
-/// Textures, meshes and animation frames are read from the supplied v1.4 files.
-pub struct Assets {
-    models: Vec<Model>,
-    pages: Vec<OwnedDraw>,
-}
-
-impl Assets {
-    pub fn load(image: &PeImage<'_>, index: &ArchiveIndex, archive: &[u8]) -> Result<Self, String> {
-        let textures = scene_assets::tutor_textures(image, index, archive, 1280)?;
-        let (pages, regions) = scene_assets::scenery_pages(&textures)?;
-        let pages = pages
-            .into_iter()
-            .map(|page| {
-                let mut draw = OwnedDraw::texture_page(
-                    SurfaceMode::Overlay,
-                    page.side,
-                    page.side,
-                    page.rgba.into(),
-                );
-                draw.specular = None;
-                draw.diffuse_alpha = Some(Vec::new());
-                draw.mipmaps = false;
-                draw
-            })
-            .collect();
-        let mut models = Vec::new();
-        for address in PATHS {
-            let path = image.at(address, 260)?;
-            let end = path
-                .iter()
-                .position(|&byte| byte == 0)
-                .ok_or("unterminated tutor model path")?;
-            let path = std::str::from_utf8(&path[..end]).map_err(|e| e.to_string())?;
-            let entry = index
-                .find(path)
-                .ok_or_else(|| format!("Missing tutor model {path}"))?;
-            let mesh = CachedMesh::parse(
-                archive
-                    .get(entry.offset as usize..(entry.offset + entry.length) as usize)
-                    .ok_or("Tutor mesh outside archive")?,
-            )?;
-            let materials = mesh
-                .texture_names
-                .iter()
-                .map(|name| {
-                    let key = name.rsplit('\\').next().unwrap();
-                    textures
-                        .iter()
-                        .position(|texture| {
-                            texture.name.as_ref().is_some_and(|name| {
-                                name.as_bytes().get(..key.len()).is_some_and(|prefix| {
-                                    prefix.eq_ignore_ascii_case(key.as_bytes())
-                                })
-                            })
-                        })
-                        .map(|i| &regions[i])
-                        .ok_or_else(|| format!("Unresolved tutor texture {key}"))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            let uvs = scene_assets::scenery_mesh_uvs(
-                &mesh,
-                &materials.iter().map(|region| region.uv).collect::<Vec<_>>(),
-            )?;
-            let prepared = people::prepare_mesh(&mesh, &mesh)?;
-            let parts = prepared
-                .parts
-                .into_iter()
-                .map(|part| {
-                    let slot =
-                        u16::from_le_bytes(part.material_header[4..6].try_into().unwrap()) as usize;
-                    Ok((part, materials.get(slot).ok_or("Tutor material slot")?.page))
-                })
-                .collect::<Result<_, String>>()?;
-            let frames = (0..mesh.frames)
-                .map(|frame| mesh.positions(frame))
-                .collect::<Result<_, _>>()?;
-            models.push(Model { frames, uvs, parts });
-        }
-        Ok(Self { models, pages })
+impl TutorFigure {
+    /// The state 0x4c5f50 leaves at city start.
+    pub const fn at_city_start() -> Self {
+        Self { visible: false }
     }
 
-    /// Move only the arrow origin with Interface.PositionPrompt's prompt
-    /// widget. 4c5f50 fixes both tutor meshes at (250,450,100), scale 50,
-    /// independent of prompt placement; AddArrow keeps its absolute target.
-    /// Native head rotation is a separate animated state; this frame is unrotated.
-    pub fn prepare_positioned(
+    /// Whether 0x4c6310 draws the figure this frame.
+    pub const fn visible(self) -> bool {
+        self.visible
+    }
+}
+
+/// The tutorial pointer and the tutor figure drawn over the city view.
+pub struct Overlay {
+    tutor: TutorFigure,
+}
+
+impl Overlay {
+    /// The overlay as a city starts. Nothing in v1.4 changes the tutor's
+    /// visibility afterwards, so one state serves every city.
+    pub const fn at_city_start() -> Self {
+        Self {
+            tutor: TutorFigure::at_city_start(),
+        }
+    }
+
+    /// Draws for one frame with a pointer from the prompt at `origin`,
+    /// moved by Interface.PositionPrompt's `offset`, to the absolute AddArrow
+    /// `target`. The pointer placement (0x429fbd -> 0x4c5f30) only sets the
+    /// pointer origin; the tutor figure stays where 0x4c5f50 put it and is
+    /// drawn only while it is visible.
+    pub fn draws(
+        &self,
+        origin: [f32; 2],
+        target: [f32; 2],
+        offset: [f32; 2],
+    ) -> Result<Vec<OwnedDraw>, String> {
+        if self.tutor.visible() {
+            return Err("the tutor figure is visible, but v1.4 never shows it, \
+                        so its meshes are not loaded"
+                .into());
+        }
+        let origin = [origin[0] + offset[0], origin[1] + offset[1]];
+        Ok(arrow_draw(origin, target).into_iter().collect())
+    }
+
+    /// [`Overlay::draws`] prepared for the renderer, or `None` when there is
+    /// nothing to draw.
+    pub fn prepare(
         &self,
         renderer: &Renderer,
         origin: [f32; 2],
         target: [f32; 2],
-        frame: usize,
         offset: [f32; 2],
-    ) -> Result<PreparedScene, String> {
-        let mut draws = self.pages.clone();
-        for model in &self.models {
-            let positions = model
-                .frames
-                .get(frame % model.frames.len())
-                .ok_or("Tutor frame missing")?;
-            for (part, page) in &model.parts {
-                let draw = &mut draws[*page];
-                for triangle in &part.triangles {
-                    for &local in triangle {
-                        let local = local as usize;
-                        let source = part.source_vertices[local];
-                        let p = positions[source];
-                        let uv = model.uvs[source];
-                        draw.vertices.push([
-                            250. + p[0] * 50.,
-                            450. - p[1] * 50.,
-                            0.5 + p[2] * 0.001,
-                            1.,
-                            1.,
-                            1.,
-                            uv[0],
-                            uv[1],
-                        ]);
-                        draw.diffuse_alpha.as_mut().unwrap().push(255);
-                    }
-                }
-            }
+    ) -> Result<Option<PreparedScene>, String> {
+        let draws = self.draws(origin, target, offset)?;
+        if draws.is_empty() {
+            return Ok(None);
         }
-        draws.retain(|draw| !draw.vertices.is_empty());
-        let origin = [origin[0] + offset[0], origin[1] + offset[1]];
-        if let Some(arrow) = arrow_draw(origin, target) {
-            draws.push(arrow);
-        }
-        renderer.prepare(
-            &draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(),
-            VIEW,
-            None,
-        )
+        renderer
+            .prepare(
+                &draws.iter().map(OwnedDraw::borrowed).collect::<Vec<_>>(),
+                VIEW,
+                None,
+            )
+            .map(Some)
     }
 }
 
@@ -275,29 +217,20 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires original v1.4 tutor meshes and textures"]
-    fn original_tutor_actor() {
-        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
-        let exe = read("OPENMT2001_EXE");
-        let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let directory = read("OPENMT2001_ARCHIVE_DIR");
-        let image = PeImage::parse(&exe).unwrap();
-        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let assets = Assets::load(&image, &index, &archive).unwrap();
-        assert_eq!(assets.models.len(), 2);
-        assert_eq!(assets.models[0].frames.len(), 90);
-        assert_eq!(assets.models[1].frames.len(), 90);
-        #[cfg(feature = "capture")]
-        if let Ok(path) = std::env::var("OPENMT2001_TUTOR_CAPTURE") {
-            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-            if cfg!(windows) {
-                descriptor.backends = wgpu::Backends::DX12;
-            }
-            let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            let prepared = assets
-                .prepare_positioned(&renderer, [320., 240.], [534., 461.], 50, [0., 0.])
-                .unwrap();
-            crate::capture_test::capture_standalone(&renderer, &prepared, &path);
-        }
+    fn pointer_step_draws_the_pointer_line_and_no_tutor_figure() {
+        let overlay = Overlay::at_city_start();
+        assert!(!overlay.tutor.visible());
+        // Tutorial 1's clock pointer (AddArrow 507,18), with the prompt
+        // moved by PositionPrompt.
+        let draws = overlay
+            .draws([320., 240.], [507., 18.], [12., -8.])
+            .unwrap();
+        // Only the red pointer line: one quad, no tutor pages or meshes.
+        assert_eq!(draws.len(), 1);
+        let expected = arrow_draw([332., 232.], [507., 18.]).unwrap();
+        assert_eq!(draws[0].vertices, expected.vertices);
+        assert_eq!(draws[0].vertices.len(), 6);
+        assert_eq!(draws[0].vertices[0][3..6], [1., 0., 0.]);
+        assert_eq!(draws[0].vertices[2][0..2], [506., 18.]);
     }
 }
