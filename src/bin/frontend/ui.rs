@@ -501,6 +501,32 @@ impl LobbyHighlight {
         surface.rect(bounds, [(alpha << 24) | 0x00ff00; 4]);
     }
 }
+/// Shared 430b50 list bars; selection is drawn after hover in the original.
+pub fn list_highlight(
+    shapes: &mut Surface,
+    layout: openmt2001::frontend_list::Layout,
+    row: usize,
+    selected: bool,
+    hovered: bool,
+) {
+    if let Some(color) = openmt2001::frontend_list::row_color(selected, hovered) {
+        shapes.rect(layout.highlight(row), [color; 4]);
+    }
+}
+
+/// 4406a0 style0 inset3 + 2; 4419f0 advances rows without row-edge clipping.
+pub fn list_text(
+    pages: &mut [Surface],
+    tab: &[u8],
+    encoded: &[u8],
+    layout: openmt2001::frontend_list::Layout,
+    row: usize,
+) -> Result<(), String> {
+    let mut bounds = layout.text_bounds(row);
+    bounds[0] = layout.text_origin(row)[0];
+    text(pages, tab, encoded, bounds, false, 0xffffffff)
+}
+
 pub fn text(
     pages: &mut [Surface],
     tab: &[u8],
