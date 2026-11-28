@@ -1252,7 +1252,12 @@ impl Runtime<'_> {
                     &self.city.catalog.info,
                     context.image,
                 )?;
-                crate::business_conversion::debit(command, quote, &mut self.city.ledgers.players)?;
+                let posting = crate::business_conversion::debit(
+                    command,
+                    quote,
+                    &mut self.city.ledgers.players,
+                )?;
+                event(Event::AccountPosted(posting), &*context.clock)?;
                 open_with_tutorial(
                     &command.opening(),
                     self.city,
