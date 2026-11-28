@@ -213,6 +213,7 @@ impl Intro {
                         self.assets.transport_audio.clone());
                     if let Some(process)=&self.process_frontend {transport_audio_player.bind_audio(process.borrow().audio.clone());}
                     else {transport_audio_player.set_level(self.audio_levels.effects);}
+                    transport_audio_player.set_listener(inspection_camera.eye, inspection_camera.target);
                     let mut gameplay_sound_player = crate::gameplay_sound::Player::new(
                         self.assets.gameplay_sound.clone());
                     if let Some(process)=&self.process_frontend {gameplay_sound_player.bind_audio(process.borrow().audio.clone());}

@@ -2681,7 +2681,7 @@ impl Host {
                     let distance = camera.into_iter().zip(position)
                         .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
                     crate::transport_audio::submit(&transport_audio,
-                        crate::transport_audio::Operation::Environment { call, distance })?;
+                        crate::transport_audio::Operation::Environment { call, distance, position })?;
                     Ok(0)
                 }
                 Event::Command(openmt2001::live_commands::Event::Construction(
