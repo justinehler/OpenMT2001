@@ -77,7 +77,7 @@ pub struct Assets {
     tab2: Vec<u8>,
     tab4: Vec<u8>,
     strings: Vec<Vec<u8>>,
-    level_text: crate::load::LevelTextCatalog,
+    level_text: openmt2001::level_text::LevelTextCatalog,
     slider_textures: Vec<Surface>,
 }
 impl Assets {
@@ -177,13 +177,13 @@ impl Assets {
             tab2,
             tab4,
             strings,
-            level_text: crate::load::LevelTextCatalog::default(),
+            level_text: openmt2001::level_text::LevelTextCatalog::default(),
             slider_textures,
         })
     }
     /// Retain registered metadata using this panel's active language glyphs.
     pub fn set_level_catalog(&mut self, catalog: &openmt2001::level_catalog::Catalog) {
-        self.level_text = crate::load::LevelTextCatalog::new(catalog, &self.strings);
+        self.level_text = openmt2001::level_text::LevelTextCatalog::new(catalog, &self.strings);
     }
     pub fn bounds(&self, button: Button) -> [f32; 4] {
         self.bounds[match button {
@@ -286,7 +286,7 @@ impl Assets {
             ui::text_fit(
                 &mut font2,
                 &self.tab2,
-                &crate::load::ascii(&slot.name),
+                &openmt2001::level_text::ascii(&slot.name),
                 [row[0] + 3., row[1], row[0] + 151., row[3]],
                 false,
                 0xffffffff,
@@ -295,7 +295,7 @@ impl Assets {
                 ui::text_fit(
                     &mut font2,
                     &self.tab2,
-                    &crate::load::ascii(&modified),
+                    &openmt2001::level_text::ascii(&modified),
                     [row[0] + 155., row[1], row[2], row[3]],
                     false,
                     0xff6ed1e1,
@@ -306,7 +306,7 @@ impl Assets {
             ui::text_widget_style4(
                 &mut font1,
                 &self.tab1,
-                &crate::load::ascii(&slot.name),
+                &openmt2001::level_text::ascii(&slot.name),
                 b[13],
                 0xffffffff,
             )?;
@@ -316,7 +316,7 @@ impl Assets {
                 ui::text_widget_style4(
                     &mut font1,
                     &self.tab1,
-                    &crate::load::ascii(&words[1].to_string()),
+                    &openmt2001::level_text::ascii(&words[1].to_string()),
                     b[17],
                     0xffffffff,
                 )?;
@@ -446,7 +446,7 @@ impl Assets {
             ui::text_fit(
                 &mut font1,
                 &self.tab1,
-                &crate::load::ascii(message),
+                &openmt2001::level_text::ascii(message),
                 [32., 438., 608., 458.],
                 false,
                 0xffffffff,
@@ -511,7 +511,7 @@ impl Assets {
             NAME_HEADER,
             0xffffffff,
         )?;
-        let body = crate::load::ascii(&view.name);
+        let body = openmt2001::level_text::ascii(&view.name);
         shapes.rect(NAME_INPUT, [0xff0724a2; 4]);
         ui::text_entry(font, shapes, &self.tab1, &body, NAME_INPUT, true, true)?;
         for (part, id, color) in [(true, 0x598, [80, 148, 34]), (false, 0x59c, [175, 6, 6])] {
@@ -992,7 +992,7 @@ mod tests {
             tab2: Vec::new(),
             tab4: Vec::new(),
             strings: Vec::new(),
-            level_text: crate::load::LevelTextCatalog::default(),
+            level_text: openmt2001::level_text::LevelTextCatalog::default(),
             slider_textures: Vec::new(),
         };
         assert_eq!(

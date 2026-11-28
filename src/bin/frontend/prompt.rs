@@ -435,7 +435,7 @@ impl Assets {
         right: bool,
         count: usize,
     ) -> Option<usize> {
-        use crate::menu::desktop_quit;
+        use crate::desktop_quit;
         if right || !desktop_quit::hit(self.input_bounds, cursor) {
             return None;
         }
@@ -443,7 +443,7 @@ impl Assets {
             .iter()
             .position(|bounds| desktop_quit::hit(*bounds, cursor))
     }
-    pub fn desktop_quit_hit(&self, modal: &crate::menu::desktop_quit::Modal) -> Option<usize> {
+    pub fn desktop_quit_hit(&self, modal: &crate::desktop_quit::Modal) -> Option<usize> {
         modal
             .pointer()
             .and_then(|p| self.desktop_quit_hit_at(p, modal.blocked_by_right()))
@@ -451,9 +451,9 @@ impl Assets {
     pub fn prepare_desktop_quit(
         &self,
         renderer: &Renderer,
-        modal: &crate::menu::desktop_quit::Modal,
+        modal: &crate::desktop_quit::Modal,
     ) -> Result<PreparedScene, String> {
-        self.prepare_frontend_dialog(renderer, crate::menu::desktop_quit::dialog(), modal)
+        self.prepare_frontend_dialog(renderer, crate::desktop_quit::dialog(), modal)
     }
     /// The frontend uses the same portrait-free prompt owner (88c0d4) for
     /// Quit, profile deletion and duplicate registration.
@@ -461,7 +461,7 @@ impl Assets {
         &self,
         renderer: &Renderer,
         dialog: crate::human_dialog::Dialog,
-        modal: &crate::menu::desktop_quit::Modal,
+        modal: &crate::desktop_quit::Modal,
     ) -> Result<PreparedScene, String> {
         let mut state = State::default();
         state.submit(Request {
@@ -475,7 +475,7 @@ impl Assets {
         state.cursor(modal.pointer().unwrap_or([-1.; 2]));
         state.pressed_dialog = modal.pressed_button();
         let surfaces =
-            self.message_surfaces(&state, true, crate::menu::desktop_quit::OFFSET, Some(modal))?;
+            self.message_surfaces(&state, true, crate::desktop_quit::OFFSET, Some(modal))?;
         self.prepare_surfaces(renderer, &surfaces)
     }
     /// In-city Options Quit (49e970) raises the same portrait-free 88c0d4
@@ -491,12 +491,12 @@ impl Assets {
         self.prepare_surfaces(renderer, &surfaces)
     }
     pub(crate) fn frontend_prompt_surfaces(&self, state: &State) -> Result<Vec<Surface>, String> {
-        let modal = crate::menu::desktop_quit::Modal::presented(state.cursor, state.pressed_dialog);
-        self.message_surfaces(state, true, crate::menu::desktop_quit::OFFSET, Some(&modal))
+        let modal = crate::desktop_quit::Modal::presented(state.cursor, state.pressed_dialog);
+        self.message_surfaces(state, true, crate::desktop_quit::OFFSET, Some(&modal))
     }
     /// Button bounds of a portrait-free 88c0d4 prompt, translated with it.
     pub fn frontend_dialog_buttons(&self, count: usize) -> Vec<[f32; 4]> {
-        let [x, y] = crate::menu::desktop_quit::OFFSET;
+        let [x, y] = crate::desktop_quit::OFFSET;
         self.dialog_buttons(count)
             .into_iter()
             .map(|[l, t, r, b]| [l + x, t + y, r + x, b + y])
@@ -533,7 +533,7 @@ impl Assets {
         state: &State,
         show_button: bool,
         offset: [f32; 2],
-        desktop: Option<&crate::menu::desktop_quit::Modal>,
+        desktop: Option<&crate::desktop_quit::Modal>,
     ) -> Result<Vec<Surface>, String> {
         let request = state.request().ok_or("no active prompt")?;
         let mut surfaces = self.base.clone();
@@ -579,7 +579,7 @@ impl Assets {
                 ui::button_state(
                     &mut button,
                     bounds,
-                    crate::menu::desktop_quit::COLORS[i],
+                    crate::desktop_quit::COLORS[i],
                     modal.button_state(i, hover),
                 )?;
                 surfaces.push(button);
@@ -1696,12 +1696,12 @@ mod desktop_quit_assets_tests {
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let assets = Assets::load(&index, &archive, installer, &strings, &image).unwrap();
-        let mut modal = crate::menu::desktop_quit::Modal::default();
+        let mut modal = crate::desktop_quit::Modal::default();
         modal.open(None);
         let mut state = State::default();
         state.submit(Request {
             script: None,
-            dialog: Some(crate::menu::desktop_quit::dialog()),
+            dialog: Some(crate::desktop_quit::dialog()),
             title: 1765,
             body: 1766,
             dismissal_id: 0,

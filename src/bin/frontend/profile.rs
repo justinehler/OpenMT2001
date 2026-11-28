@@ -30,7 +30,7 @@ impl Profiles {
     }
     fn clear_orphan_options(&self, name: &str) -> Result<(), String> {
         let root = self.path.parent().ok_or("profile directory")?;
-        crate::menu::preferred_token::clear(root, name.as_bytes())?;
+        crate::preferred_token::clear(root, name.as_bytes())?;
         let path = crate::profile_settings::profile_path(root, name.as_bytes());
         match fs::remove_file(path.with_extension("board")) {
             Ok(()) => {}
@@ -189,7 +189,7 @@ pub struct Profile {
     first: usize,
     error: Option<String>,
     notice: Option<Notice>,
-    notice_keys: crate::menu::desktop_quit::Modal,
+    notice_keys: crate::desktop_quit::Modal,
     selected_all: bool,
     pointer_position: Option<[f32; 2]>,
 }
@@ -380,7 +380,7 @@ impl Profile {
         }
         Some(dialog)
     }
-    pub(crate) fn ui_event1(&mut self, sample: crate::menu::desktop_quit::Sample) -> bool {
+    pub(crate) fn ui_event1(&mut self, sample: crate::desktop_quit::Sample) -> bool {
         let edges = self.notice_keys.event1(sample);
         let mut replied = false;
         for (button, edge) in edges.into_iter().enumerate() {
@@ -547,7 +547,7 @@ impl Profile {
         self.pointer_position = None;
         self.notice_keys.cancel_pointer();
     }
-    pub(crate) fn prompt_controls(&self) -> &crate::menu::desktop_quit::Modal {
+    pub(crate) fn prompt_controls(&self) -> &crate::desktop_quit::Modal {
         &self.notice_keys
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
@@ -879,7 +879,7 @@ impl Profile {
                 0xffff9999,
             )?;
         }
-        let backdrop = crate::menu::modal_frame::Backdrop::new(&self.assets.base[..5], panel_alpha);
+        let backdrop = crate::modal_frame::Backdrop::new(&self.assets.base[..5], panel_alpha);
         let mut draws = Vec::new();
         if !self.first_registration {
             draws.extend(backdrop.draws());
@@ -1058,7 +1058,7 @@ mod tests {
             profile.activate(0);
             assert!(profile.prompt_pending() && profile.first_registration);
             assert_eq!(profile.generic_prompt().unwrap().title, 0x6cd);
-            let mut keys = crate::menu::desktop_quit::Keys::default();
+            let mut keys = crate::desktop_quit::Keys::default();
             profile.ui_event1(keys.sample());
             keys.physical(PhysicalKey::Code(key), true, false);
             assert!(profile.ui_event1(keys.sample()));
@@ -1177,7 +1177,7 @@ mod tests {
         profile.select_all();
         profile.back();
         assert_eq!(profile.name.as_deref(), Some("Alice"));
-        let mut fade = crate::menu::modal_frame::Fade::default();
+        let mut fade = crate::modal_frame::Fade::default();
         for _ in 0..26 {
             fade.advance(profile.modal_open());
         }
@@ -1198,7 +1198,7 @@ mod tests {
     fn warning_backspace_matches_original_nonzero_reply() {
         use winit::keyboard::{KeyCode, PhysicalKey};
         let mut profile = profile(PathBuf::from("unused"));
-        let mut keys = crate::menu::desktop_quit::Keys::default();
+        let mut keys = crate::desktop_quit::Keys::default();
         profile.activate(0);
         profile.input("Alice");
         profile.activate(0);
@@ -1220,7 +1220,7 @@ mod tests {
                 .as_nanos()
         ));
         let mut profile = profile(root.clone());
-        let mut keys = crate::menu::desktop_quit::Keys::default();
+        let mut keys = crate::desktop_quit::Keys::default();
         profile.activate(1);
         let dialog = profile.generic_prompt().unwrap();
         assert_eq!(
@@ -1235,7 +1235,7 @@ mod tests {
             (dialog.buttons, dialog.button_count, dialog.timeout),
             ([0x664, 0x665], 2, false)
         );
-        let mut fade = crate::menu::modal_frame::Fade::default();
+        let mut fade = crate::modal_frame::Fade::default();
         fade.advance(profile.modal_open());
         assert_eq!(fade.alpha(), 250);
         profile.activate(4);
