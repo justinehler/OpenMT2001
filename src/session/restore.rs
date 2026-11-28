@@ -657,7 +657,11 @@ impl<'data> Session<'data> {
             board: input.board,
             file: input.file,
         };
-        let mut session = Self::initialize_joined(
+        // The saved timing is in place before the hub scripts run, so a level's
+        // absolute events (timed tips) are scheduled against the saved global
+        // tick: only those still ahead of it are queued again.
+        let saved_timing = save.clock()?.timing;
+        let mut session = Self::initialize_joined_inner(
             input,
             policy,
             catalog,
@@ -668,6 +672,8 @@ impl<'data> Session<'data> {
             None,
             process,
             dispatch,
+            None,
+            Some(saved_timing),
         )?;
         if session.catalog.selected_level().map(|level| level.id()) != Some(metadata[0]) {
             return Err("saved level differs from selected original level".into());

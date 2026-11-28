@@ -888,7 +888,12 @@ impl Session<'_> {
                                     connection.commands.submit_auction(&connection.worker,descriptor,additional,&mut self.live_commands,&mut runtime.city.categories,clock.timing[0])?;
                                 }
                             }
-
+                            // 0x481680 tests the pause latch 0x8b22d8 right after
+                            // this drain. A pause raised earlier in the batch (a
+                            // timed tip calling Game.Pause, say) still costs this
+                            // iteration its global tick and command drain, then
+                            // ends the batch before any normal-time work.
+                            scheduler.abort = runtime.city.pause.bytes[8] != 0;
                         }
                         scheduler::Event::Helper(0x4b0810) => {
                             let mut removed = false;
