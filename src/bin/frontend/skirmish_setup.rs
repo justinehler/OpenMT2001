@@ -251,6 +251,7 @@ struct Typeface {
     tab: Vec<u8>,
 }
 pub struct SetupPanel {
+    headings: [usize; 2],
     base: Vec<Surface>,
     regions: Vec<Region>,
     generic: Vec<Surface>,
@@ -276,6 +277,7 @@ impl SetupPanel {
             fonts: vec![],
             strings: vec![],
             options,
+            headings: [2226, 2228],
             backing: 0,
         }
     }
@@ -349,6 +351,7 @@ impl SetupPanel {
             .map(Surface::new)
             .collect();
         let panel = Self {
+            headings: [2226, 2228],
             base,
             regions,
             generic,
@@ -435,6 +438,9 @@ impl SetupPanel {
             }
         }
         Ok(outcome)
+    }
+    pub fn network_mode(&mut self) {
+        self.headings = [1683, 1692]; // Network Game / New Network Session.
     }
     pub fn options(&self) -> &Options {
         &self.options
@@ -771,8 +777,8 @@ impl SetupPanel {
                 shapes.rect(self.bounds(name)?, [0xff1b254b; 4]);
             }
             for (font, name, id) in [
-                (3, "TITLE_AREA", 2226),
-                (0, "SESS_TITLE_AREA", 2228),
+                (3, "TITLE_AREA", self.headings[0]),
+                (0, "SESS_TITLE_AREA", self.headings[1]),
                 (0, "LABEL1", 1880),
                 (0, "LABEL2", 1879),
                 (0, "LABEL7", 1883),

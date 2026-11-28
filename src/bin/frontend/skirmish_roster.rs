@@ -156,6 +156,17 @@ pub struct RosterPanel {
     characters: Vec<Character>,
     backing: u32,
 }
+/// Shared original roster art, with route-specific controls and per-row records.
+pub struct Presentation<'a> {
+    pub visible: bool,
+    pub busy: bool,
+    pub rows: &'a [Participant; 6],
+    pub enabled: [bool; 26],
+    pub start_enabled: bool,
+    pub local_row: usize,
+    pub closed: [bool; 6],
+    pub details: &'a [Vec<u8>],
+}
 fn inside(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] > b[0] && p[0] < b[2] && p[1] >= b[1] && p[1] <= b[3]
 }
@@ -367,10 +378,123 @@ impl RosterPanel {
         selected: Option<usize>,
         pressed: bool,
         metadata: [&[u8]; 2],
+        encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+    ) -> Result<PreparedScene, String> {
+        self.draw_rows(
+            renderer,
+            selected,
+            pressed,
+            metadata,
+            encode,
+            Presentation {
+                visible: state.visible,
+                busy: state.busy,
+                rows: state.roster.slots(),
+                enabled: std::array::from_fn(|id| state.enabled(id)),
+                start_enabled: state.roster.start_enabled(),
+                local_row: 0,
+                closed: [false; 6],
+                details: &[],
+            },
+        )
+    }
+    #[allow(clippy::too_many_arguments)] // Shared font assets and independent browser presentation.
+    pub fn browser(
+        &self,
+        renderer: &Renderer,
+        heading: &[u8],
+        lines: &[Vec<u8>],
+        controls: &[(usize, [f32; 4], Vec<u8>, bool)],
+        selected: Option<usize>,
+        pressed: bool,
         mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
     ) -> Result<PreparedScene, String> {
+        let mut shapes = Surface::solid();
+        shapes.rect([35., 35., 605., 445.], [0xf0000a28; 4]);
+        let mut pages = self.fonts[0].pages.clone();
+        ui::text_widget_style9(
+            &mut pages,
+            &self.fonts[0].tab,
+            &encode(heading)?,
+            [45., 45., 595., 75.],
+            0xffffffff,
+        )?;
+        for (i, line) in lines.iter().enumerate() {
+            ui::text_widget_style3(
+                &mut pages,
+                &self.fonts[0].tab,
+                &encode(line)?,
+                [55., 285. + i as f32 * 22., 585., 307. + i as f32 * 22.],
+                0xffffffff,
+            )?;
+        }
+        for (id, bounds, label, enabled) in controls {
+            ui::button(
+                &mut shapes,
+                *bounds,
+                [0, 115, 85],
+                selected == Some(*id),
+                pressed && selected == Some(*id),
+                !*enabled,
+            )?;
+            ui::text_widget_style9(
+                &mut pages,
+                &self.fonts[0].tab,
+                &encode(label)?,
+                *bounds,
+                if *enabled { 0xffffffff } else { 0xff909090 },
+            )?;
+        }
+        let mut out = vec![shapes];
+        out.extend(pages);
+        renderer.prepare(
+            &out.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+    pub fn name_bounds(&self, row: usize) -> Result<[f32; 4], String> {
+        self.bounds(&format!("NAMESLOT_P{}", row + 1))
+    }
+    pub fn token_names(
+        &self,
+        mut decode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+    ) -> Result<[Vec<u8>; 10], String> {
+        (1744..1754)
+            .map(|id| decode(self.label(id)?))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| "ten token names required".into())
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_rows(
+        &self,
+        renderer: &Renderer,
+        selected: Option<usize>,
+        pressed: bool,
+        metadata: [&[u8]; 2],
+        mut encode: impl FnMut(&[u8]) -> Result<Vec<u8>, String>,
+        view: Presentation<'_>,
+    ) -> Result<PreparedScene, String> {
         let mut out = vec![];
-        if state.visible {
+        if view.visible {
             out = self.base.clone();
             let mut shapes = Surface::solid();
             let mut images = vec![];
@@ -420,15 +544,11 @@ impl RosterPanel {
             }
             let status = self.bounds("SESS_INFO3")?;
             shapes.rect(status, [0xff1b254b; 4]);
-            let status_text = if state.busy {
+            let status_text = if view.busy {
                 encode(b"Loading...")?
             } else {
-                self.label(if state.roster.start_enabled() {
-                    1757
-                } else {
-                    1759
-                })?
-                .to_vec()
+                self.label(if view.start_enabled { 1757 } else { 1759 })?
+                    .to_vec()
             };
             ui::text_widget_style9(
                 &mut pages[0],
@@ -440,14 +560,19 @@ impl RosterPanel {
             // Offline component retains the authored chat area as passive art;
             // no invented network/chat action is exposed.
             shapes.rect(self.bounds("CHAT_TYPEAREA")?, [0xff1f2f70; 4]);
-            shapes.rect(self.bounds("SELECTP1")?, [0xff00ff00; 4]);
-            for (i, p) in state.roster.slots().iter().enumerate() {
+            shapes.rect(
+                self.bounds(&format!("SELECTP{}", view.local_row + 1))?,
+                [0xff00ff00; 4],
+            );
+            for (i, p) in view.rows.iter().enumerate() {
                 let row = i + 1;
                 let b = self.bounds(&format!("SLOT_{row}BACKING"))?;
                 shapes.rect(b, [self.backing; 4]);
                 let name = self.bounds(&format!("NAMESLOT_P{row}"))?;
                 shapes.rect(name, [0xff000530; 4]);
-                let text = if p.kind == Kind::Empty {
+                let text = if view.closed[i] {
+                    encode(b"Closed")?
+                } else if p.kind == Kind::Empty {
                     self.label(1754)?.to_vec()
                 } else if p.kind == Kind::Ai {
                     self.label(1744 + p.token.ok_or("AI token missing")?)?
@@ -481,7 +606,9 @@ impl RosterPanel {
                         self.image(
                             &mut images,
                             if id % 2 == 0 { 97 } else { 101 }
-                                + if selected == Some(id) {
+                                + if !view.enabled[id] {
+                                    3
+                                } else if selected == Some(id) {
                                     if pressed { 2 } else { 1 }
                                 } else {
                                     0
@@ -499,7 +626,13 @@ impl RosterPanel {
                     match p.kind {
                         Kind::Human => 259,
                         Kind::Ai => 258,
-                        Kind::Empty => 259,
+                        Kind::Empty => {
+                            if view.closed[i] {
+                                257
+                            } else {
+                                259
+                            }
+                        }
                     },
                     self.action_bounds(12 + i)?,
                 )?;
@@ -517,13 +650,28 @@ impl RosterPanel {
                     color,
                     selected == Some(id),
                     pressed && selected == Some(id),
-                    !state.enabled(id),
+                    !view.enabled[id],
                 )?;
                 ui::text_widget_style9(
                     &mut pages[0],
                     &self.fonts[0].tab,
                     self.label(label)?,
                     b,
+                    0xffffffff,
+                )?;
+            }
+            let chat = self.bounds("CHAT_BACKING")?;
+            for (i, line) in view.details.iter().enumerate() {
+                ui::text_widget_style3(
+                    &mut pages[1],
+                    &self.fonts[1].tab,
+                    &encode(line)?,
+                    [
+                        chat[0] + 5.,
+                        chat[1] + 5. + i as f32 * 12.,
+                        chat[2] - 5.,
+                        chat[1] + 17. + i as f32 * 12.,
+                    ],
                     0xffffffff,
                 )?;
             }

@@ -34,7 +34,7 @@ pub struct Route {
     pub error: Option<String>,
 }
 // Original language row0 maps code-page byte32 onward to glyph indices.
-fn encode(map: &[u8], bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(super) fn encode(map: &[u8], bytes: &[u8]) -> Result<Vec<u8>, String> {
     bytes
         .iter()
         .map(|&b| {
@@ -46,7 +46,7 @@ fn encode(map: &[u8], bytes: &[u8]) -> Result<Vec<u8>, String> {
         })
         .collect()
 }
-fn decode(map: &[u8], glyphs: &[u8]) -> Result<Vec<u8>, String> {
+pub(super) fn decode(map: &[u8], glyphs: &[u8]) -> Result<Vec<u8>, String> {
     glyphs
         .iter()
         .map(|b| {
@@ -57,7 +57,7 @@ fn decode(map: &[u8], glyphs: &[u8]) -> Result<Vec<u8>, String> {
         })
         .collect()
 }
-fn objective(exe: &[u8], scripts: &Path, level: &Level) -> Result<i32, String> {
+pub(super) fn objective(exe: &[u8], scripts: &Path, level: &Level) -> Result<i32, String> {
     let directory = std::str::from_utf8(level.directory()).map_err(|e| e.to_string())?;
     if !directory.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err("invalid catalog directory".into());
