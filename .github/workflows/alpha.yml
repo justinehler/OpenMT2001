@@ -1,0 +1,94 @@
+name: Nightly alpha builds
+# Release builds of the game for macOS (Apple Silicon), Windows and Linux.
+# Each run uploads them as workflow artifacts; on main it also replaces the
+# `nightly` pre-release. No original game files are used or published.
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/alpha.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: alpha-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.99.0
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+          - os: windows-2025
+            target: windows-x86_64
+          - os: ubuntu-24.04
+            target: linux-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: alpha-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build release game
+        run: cargo +${{ env.RUST_VERSION }} build --locked --release --features native --bin game
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="openmt2001-${{ matrix.target }}"
+          mkdir "$name"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cp target/release/game.exe "$name/openmt2001.exe"
+          else
+            cp target/release/game "$name/openmt2001"
+          fi
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md COMPATIBILITY.md "$name/"
+          printf '%s\n' "$GITHUB_SHA" > "$name/COMMIT"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openmt2001-${{ matrix.target }}
+          path: openmt2001-${{ matrix.target }}.*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Replace the nightly pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA::7}"
+          gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+          gh release create nightly dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly alpha $(date -u +%F) ($short)" \
+            --notes "Automated alpha build of main at $short. Unsigned and untested beyond CI. You need your own Monopoly Tycoon v1.4 files; see \"Nightly alpha builds\" in the README."

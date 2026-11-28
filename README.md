@@ -27,6 +27,26 @@ No original executable, assets, scenarios, saves, compiler or decoder is
 distributed here. The engine reads the supplied executable as data; it does
 not launch it.
 
+## Nightly alpha builds
+
+Untested alpha builds of `main` for macOS (Apple Silicon), Windows and Linux
+are published every night as the
+[`nightly` pre-release](https://github.com/justinehler/OpenMT2001/releases/tag/nightly).
+They contain only the engine; you still need your own game files.
+
+1. Download and extract the archive for your platform.
+2. The builds are unsigned. On macOS, clear the download quarantine first:
+   `xattr -dr com.apple.quarantine openmt2001-macos-arm64`. On Windows,
+   choose "More info", then "Run anyway" if SmartScreen warns. On Linux,
+   install the ALSA and xkbcommon runtime libraries (`libasound2`,
+   `libxkbcommon0`) if they are missing.
+3. Run `openmt2001` (or `openmt2001.exe`) from a terminal with the same
+   arguments as `game` below, pointing at your extracted v1.4 files, for
+   example `./openmt2001 --menu --assets … --scene-root … --executable …`.
+   Install FFmpeg for movies and compressed audio.
+
+## Running a source build
+
 Build the native game and run it with explicit paths:
 
 ```sh
