@@ -659,7 +659,7 @@ mod tests {
     fn supplied_eight_custom_registrations_append_to_gamestart() {
         let executable = fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let scripts = crate::fixtures::path("ORIGINAL_SCRIPTS");
+        let scripts = crate::fixtures::path("SCRIPTS");
         let sources = registration_sources(&scripts).unwrap();
         assert_eq!(sources.len(), 9);
         let base = script::load(&image, &sources[0].1, false, |name| {
