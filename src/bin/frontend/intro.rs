@@ -787,6 +787,7 @@ impl DetailVisibility {
 }
 
 struct LoadedInspection {
+    tutorial_session: bool,
     camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
     camera_publisher: Option<crate::save_menu::camera_source::Publisher>,
     camera_inbox: Option<crate::live_host::camera_bridge::Inbox>,
@@ -1076,6 +1077,7 @@ enum FreshRequest {
 #[path = "intro/scene_inputs.rs"]
 mod scene_inputs;
 struct Inspection {
+    tutorial_start: camera_producer::TutorialStart,
     music_admission: Option<focus::MusicAdmission>,
     camera_epoch: Option<openmt2001::level_startup::SourceEpoch>,
     camera_turns: std::collections::VecDeque<camera_producer::Pending>,

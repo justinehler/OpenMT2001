@@ -4,6 +4,19 @@ use super::*;
 impl Intro {
     pub(super) fn draw_inspection(&mut self, presenter: &Presenter) -> Result<bool, String> {
         if let Some(view) = &mut self.inspection {
+            if view.tutorial_start.holds_loading(
+                view.tutorial_camera_seen,
+                !view.camera_turns.is_empty(),
+                view.save_dialog.message.is_some()
+                    || view
+                        .live_status
+                        .as_ref()
+                        .is_some_and(|status| status.failure.is_some()),
+            ) {
+                // Retain the last loading frame while the worker runs BlockCam
+                // and the existing selection transaction commits on the UI.
+                return Ok(true);
+            }
             if view.ui_graph.is_some() {
                 if let Some(prepared) =
                     camera_live::upper_f::body(view, &self.assets, &self.renderer)?

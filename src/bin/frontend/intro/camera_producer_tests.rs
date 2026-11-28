@@ -544,3 +544,111 @@ fn capture_untouched_campaign_and_skirmish_start() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn ordinary_level_blockcam_uses_player_block_entry_and_information_target() {
+    use openmt2001::{
+        board::Block,
+        level_script,
+        lua4::{Runtime, Value},
+    };
+    // IDs deliberately differ from vector indices: scripts pass board IDs.
+    let assets = crate::selection::Assets::descriptor_test_assets(
+        [2, 7]
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| Block {
+                id,
+                name: format!("Authored block {id}"),
+                text_id: 0,
+                kind: 0,
+                center: [100. * index as f32, 30.],
+                size: [82.; 2],
+                pavement_color: 0,
+                flags: 0,
+                street_sides: 0,
+            })
+            .collect(),
+        [0; 116],
+    );
+    let initial = View {
+        active: fresh(),
+        strategic: true,
+        normal_return: Some(fresh()),
+    };
+    let mut startup = TutorialStart::new(true);
+    assert!(startup.holds_loading(0, false, false));
+    // Receiving the event alone is insufficient: the UI turn still has to commit.
+    assert!(startup.holds_loading(1, true, false));
+    let mut scripted = initial;
+    let mut script_core = Core::new(new_process_owner().unwrap());
+    script_core.project(initial.active.camera).unwrap();
+    let mut vm = Runtime::new().unwrap();
+    vm.execute(
+        "Camera table",
+        b"Camera={}; BLOCKCAM=12",
+        &mut |_, _| unreachable!(),
+    )
+    .unwrap();
+    level_script::camera::register(&mut vm).unwrap();
+    vm.execute(
+        "ordinary level event",
+        b"function EVENT_Level() Camera.SetMode(BLOCKCAM, 7) end",
+        &mut |_, _| unreachable!(),
+    )
+    .unwrap();
+    vm.call("EVENT_Level", &[0.], &mut |id, args| {
+        assert_eq!(id, 701);
+        let (command, args) = level_script::camera::command(args)?;
+        assert!(matches!(command, level_script::Command::TutorialCameraMode));
+        let [Value::Number(12.), Value::Number(target)] = args else {
+            panic!("block camera arguments")
+        };
+        script_core.event(
+            &mut scripted,
+            Event::script_block(*target as u32, &assets)?,
+            Resolved::Local,
+            &assets,
+        )?;
+        Ok(None)
+    })
+    .unwrap();
+    let selected = crate::selection::Hit {
+        category: 1,
+        building: None,
+    };
+    let mut clicked = initial;
+    let mut click_core = Core::new(new_process_owner().unwrap());
+    click_core.project(initial.active.camera).unwrap();
+    click_core
+        .event(
+            &mut clicked,
+            Event::Block {
+                category: 7,
+                selected,
+                origin: BlockOrigin::Selection,
+            },
+            Resolved::Local,
+            &assets,
+        )
+        .unwrap();
+    assert!(!startup.holds_loading(1, false, false));
+    // Later camera turns must not re-enter startup loading.
+    assert!(!startup.holds_loading(2, true, false));
+    assert!(!TutorialStart::new(false).holds_loading(0, false, false));
+    assert!(!TutorialStart::new(true).holds_loading(0, false, true));
+    // A tutorial that never sends a camera event still leaves loading.
+    let mut silent = TutorialStart::new(true);
+    for _ in 0..TutorialStart::MAX_HELD_FRAMES {
+        assert!(silent.holds_loading(0, false, false));
+    }
+    assert!(!silent.holds_loading(0, false, false));
+    assert_eq!(script_core.kind(), 12);
+    assert_eq!(script_core.capture(), click_core.capture());
+    assert_eq!(scripted.active.selected, Some(selected));
+    assert!(!scripted.strategic);
+    assert!(scripted.normal_return.is_none());
+    assert!(
+        matches!(super::super::information_target(scripted.active.selected, &[]), super::super::InformationTarget::Block(hit) if hit == selected)
+    );
+}

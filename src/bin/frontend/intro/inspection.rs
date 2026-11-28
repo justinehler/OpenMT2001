@@ -469,20 +469,8 @@ impl Inspection {
         if self.camera_producer.is_some() {
             match action {
                 TutorialCameraAction::Mode { mode: 12, target } => {
-                    let category = selection
-                        .blocks
-                        .iter()
-                        .position(|b| b.id == target as usize)
-                        .ok_or("Tutorial category identity missing")?;
                     self.queue_camera_event(
-                        camera_producer::Event::Block {
-                            category: target,
-                            selected: crate::selection::Hit {
-                                category,
-                                building: None,
-                            },
-                            origin: camera_producer::BlockOrigin::Tutorial,
-                        },
+                        camera_producer::Event::script_block(target, selection)?,
                         None,
                         None,
                         false,

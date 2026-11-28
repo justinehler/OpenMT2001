@@ -20,6 +20,7 @@ pub(crate) fn inspection_products(
     let (camera, controls) = crate::intro::fresh_city_camera();
     let now = Instant::now();
     Inspection {
+        tutorial_start: Default::default(),
         music_admission: None, // explicit isolated fixture, no composed focus Route
         camera_producer: None,
         camera_ready: None,

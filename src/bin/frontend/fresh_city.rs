@@ -2218,13 +2218,7 @@ impl<'data> Session<'data> {
         if self.tutorial_state != 1 {
             return Ok(());
         }
-        if self
-            .catalog
-            .selected_level()
-            .is_some_and(|level| matches!(level.id(), 100001..=100012))
-        {
-            self.scripts.bind_tutorial_camera()?;
-        }
+        self.scripts.bind_tutorial_camera()?;
         let context = self.world.script_context(
             assets.image,
             &self.resident_models,

@@ -227,6 +227,7 @@ impl Intro {
                     let imported_cameras = loaded.imported_cameras;
                     let pending_music_era=loaded.music_era;
                     let mut view = Inspection {
+                        tutorial_start: camera_producer::TutorialStart::new(loaded.tutorial_session),
                         music_admission:self.focus.enabled().then(||self.focus.music_admission()),
                         camera_epoch: loaded.camera_epoch,
                         camera_turns: Default::default(),
