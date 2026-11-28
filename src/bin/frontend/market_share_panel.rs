@@ -225,7 +225,7 @@ impl Assets {
             self.text(
                 &mut surfaces,
                 0,
-                &self.encode(row.percentage_text().as_bytes())?,
+                &self.encode(row.percentage_text()?.as_bytes())?,
                 [rosette[0], top - 20., rosette[2], top],
             )?;
             if snapshot.objective != 2 {
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(row.character, 0);
         assert_eq!(row.percentage, 75.);
         assert_eq!(row.progress, 2);
-        assert_eq!(row.percentage_text(), "75.000000%");
+        assert_eq!(row.percentage_text().unwrap(), "75.00%");
         assert_eq!(row.progress_text(), "2");
         assert_eq!(snapshot.rows[1].as_ref().unwrap().percentage, 25.);
         assert_eq!(snapshot.rows[1].as_ref().unwrap().progress, 2);
@@ -514,7 +514,7 @@ mod tests {
             percentage: 12.345,
             progress: u32::MAX,
         };
-        assert_eq!(row.percentage_text(), "12.345000%");
+        assert_eq!(row.percentage_text().unwrap(), "12.35%");
         assert_eq!(row.progress_text(), "-1");
     }
 }

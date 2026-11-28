@@ -17,6 +17,7 @@ pub mod chimney_smoke;
 pub mod city_structures;
 pub mod clock;
 pub mod compatibility;
+pub mod decimal_text;
 pub mod economy;
 pub mod era;
 /// Test support: locates private original files for original-backed tests.
