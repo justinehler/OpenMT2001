@@ -509,14 +509,36 @@ impl App {
         if let Some(menu) = self.intro.as_mut().and_then(|i| i.menu.as_mut()) {
             menu.desktop_right_button(self.desktop_keys.right());
         }
+        let city_key_admitted = match (&event, &mut self.intro) {
+            (
+                WindowEvent::KeyboardInput {
+                    event,
+                    is_synthetic,
+                    ..
+                },
+                Some(intro),
+            ) => match event.logical_key {
+                Key::Named(key) => intro.admit_city_key(
+                    key,
+                    event.state == ElementState::Pressed,
+                    event.repeat,
+                    *is_synthetic,
+                ),
+                _ => true,
+            },
+            _ => true,
+        };
         if let Some(intro) = &mut self.intro
             && intro.inspecting()
         {
             match &event {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if let Key::Named(key) = event.logical_key
-                        && let Err(e) =
-                            intro.inspection_key(key, event.state == ElementState::Pressed)
+                        && let Err(e) = intro.inspection_keyboard(
+                            key,
+                            event.state == ElementState::Pressed,
+                            city_key_admitted,
+                        )
                     {
                         self.failure = Some(e);
                         event_loop.exit();
@@ -783,8 +805,12 @@ impl App {
                     // One sampled UI event1 per menu redraw; current/previous
                     // survive opening and closing. Camera50Hz is a separate clock.
                     let sample = self.desktop_keys.sample();
-                    if let Some(intro) = &mut self.intro {
-                        intro.dialog_ui_event1();
+                    if let Some(intro) = &mut self.intro
+                        && let Err(error) = intro.dialog_ui_event1()
+                    {
+                        self.failure = Some(error);
+                        event_loop.exit();
+                        return;
                     }
                     if let Some(menu) = self.intro.as_mut().and_then(|intro| intro.menu.as_mut()) {
                         menu.desktop_ui_event1(sample);

@@ -2,6 +2,35 @@
 use super::*;
 
 impl Intro {
+    /// Record a window key event in the city's physical key history and say
+    /// whether a city shortcut may act on it; see `city_keys`. Called for
+    /// every key event, so a key released outside a city does not stay held.
+    pub fn admit_city_key(
+        &mut self,
+        key: winit::keyboard::NamedKey,
+        pressed: bool,
+        repeat: bool,
+        synthetic: bool,
+    ) -> bool {
+        self.city_keys.admit(key, pressed, repeat, synthetic)
+    }
+    /// A window key event while a city is shown. `admitted` comes from
+    /// `admit_city_key`: Escape acts once per physical press.
+    pub fn inspection_keyboard(
+        &mut self,
+        key: winit::keyboard::NamedKey,
+        pressed: bool,
+        admitted: bool,
+    ) -> Result<(), String> {
+        if !admitted {
+            // The result sequence's skip reads held levels, not new presses.
+            if let Some(result) = self.inspection.as_mut().and_then(|v| v.result.as_mut()) {
+                result.bypass.key(key, pressed);
+            }
+            return Ok(());
+        }
+        self.inspection_key(key, pressed)
+    }
     pub fn inspection_key(
         &mut self,
         key: winit::keyboard::NamedKey,
@@ -81,22 +110,14 @@ impl Intro {
                 return Ok(());
             }
             if view.prompts.blocks_controls() {
-                if key == NamedKey::Enter
-                    && let Some(id) = view.prompts.begin_dismiss()
-                {
-                    view.dismiss_prompt(id)?;
-                }
+                // A notice's Return is the physical edge sampled by dialog_keys.
                 return Ok(());
             }
             if view.options_visible() {
-                if view.settings_visible() {
-                    if key == NamedKey::Escape || key == NamedKey::Enter {
-                        view.settings_menu.back();
-                    }
-                    return Ok(());
-                }
-                if key == NamedKey::Escape || key == NamedKey::Enter {
-                    view.close_options()?;
+                match city_keys::options_key(key, view.settings_visible()) {
+                    Some(city_keys::OptionsKey::Back) => view.settings_menu.back(),
+                    Some(city_keys::OptionsKey::Close) => view.close_options()?,
+                    None => (),
                 }
                 return Ok(());
             }

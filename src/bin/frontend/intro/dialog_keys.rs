@@ -49,14 +49,16 @@ impl Input {
             self.previous[index] = down;
         }
     }
-    pub(super) fn event1(&mut self, prompts: Option<&mut crate::prompt::State>) {
+    /// Returns a notice's deferred script dismissal id, if Return started one.
+    pub(super) fn event1(&mut self, prompts: Option<&mut crate::prompt::State>) -> Option<u32> {
         let edges = std::array::from_fn(|i| self.held[i] && !self.previous[i]);
         self.previous = self.held;
         if self.focused
             && let Some(prompts) = prompts
         {
-            prompts.dialog_event1(edges);
+            return prompts.dialog_event1(edges);
         }
+        None
     }
 }
 

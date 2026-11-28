@@ -40,8 +40,8 @@ impl Harness {
             repeat,
         });
     }
-    fn event1(&mut self, active: bool) {
-        self.input.event1(active.then_some(&mut self.prompts));
+    fn event1(&mut self, active: bool) -> Option<u32> {
+        self.input.event1(active.then_some(&mut self.prompts))
     }
     fn open(&mut self, button_count: usize) {
         self.prompts.submit(request(button_count, 17));
@@ -349,19 +349,27 @@ fn production_dialog_keys_simultaneous_edges_resume_after_callback_and_close() {
     h.no_reply(); // Neither held edge is reused against the third request.
 }
 
+fn notice(dismissal_id: u32) -> prompt::Request {
+    prompt::Request {
+        dialog: None,
+        dismissal_id,
+        ..request(0, 0)
+    }
+}
+
 #[test]
 fn production_dialog_keys_script_and_unrelated_keys_keep_independent_routes() {
     let mut h = Harness::new();
-    let mut script = request(1, 0);
-    script.dialog = None;
-    script.dismissal_id = 42;
-    h.prompts.submit(script);
+    h.prompts.submit(notice(42));
     h.key(KeyCode::Backspace, true, false);
-    h.event1(true);
+    assert_eq!(h.event1(true), None); // The first event only arms.
     h.key(KeyCode::Enter, true, false);
-    h.event1(true);
+    assert_eq!(h.event1(true), Some(42)); // Main Return dismisses the notice.
     h.no_reply();
-    assert_eq!(h.prompts.begin_dismiss(), Some(42)); // Existing logical Enter route.
+    assert!(
+        h.prompts.request().is_some(),
+        "script callback precedes unlink"
+    );
     h.prompts.finish_dismiss(vec![request(2, 17)]);
     h.event1(true);
     for code in [
@@ -374,5 +382,71 @@ fn production_dialog_keys_script_and_unrelated_keys_keep_independent_routes() {
         h.key(code, true, false);
         h.event1(true);
     }
+    h.no_reply();
+}
+
+#[test]
+fn held_return_dismisses_one_notice_per_press() {
+    let mut h = Harness::new();
+    for id in [41, 42, 43] {
+        h.prompts.submit(notice(id));
+    }
+    assert_eq!(h.event1(true), None);
+    h.key(KeyCode::Enter, true, false);
+    assert_eq!(h.event1(true), Some(41));
+    // Held: OS auto-repeat and a duplicate down without a release, before
+    // and after the worker finishes the first dismissal.
+    for _ in 0..3 {
+        h.key(KeyCode::Enter, true, true);
+        h.key(KeyCode::Enter, true, false);
+        assert_eq!(h.event1(true), None);
+    }
+    h.prompts.finish_dismiss(vec![]);
+    for _ in 0..5 {
+        h.key(KeyCode::Enter, true, true);
+        h.key(KeyCode::Enter, true, false);
+        assert_eq!(h.event1(true), None);
+    }
+    assert_eq!(h.prompts.request().unwrap().dismissal_id, 42);
+    // The next physical press dismisses the next notice.
+    h.key(KeyCode::Enter, false, false);
+    assert_eq!(h.event1(true), None);
+    h.key(KeyCode::Enter, true, false);
+    assert_eq!(h.event1(true), Some(42));
+}
+
+#[test]
+fn held_return_dismisses_one_card_notice_per_press() {
+    // Card notices have no script callback and dismiss on the spot.
+    let mut h = Harness::new();
+    for _ in 0..3 {
+        h.prompts.submit(notice(0));
+    }
+    h.event1(true);
+    h.key(KeyCode::Enter, true, false);
+    for _ in 0..10 {
+        assert_eq!(h.event1(true), None);
+        h.key(KeyCode::Enter, true, true);
+    }
+    let remaining = h.prompts.slots.iter().filter(|s| s.active).count();
+    assert_eq!(remaining, 2, "one press dismisses exactly one notice");
+}
+
+#[test]
+fn keypad_enter_does_not_dismiss_a_notice_or_answer_a_dialog() {
+    let mut h = Harness::new();
+    h.prompts.submit(notice(42));
+    h.event1(true);
+    for repeat in [false, true, true] {
+        h.key(KeyCode::NumpadEnter, true, repeat);
+        assert_eq!(h.event1(true), None);
+    }
+    h.key(KeyCode::NumpadEnter, false, false);
+    assert_eq!(h.event1(true), None);
+    assert_eq!(h.prompts.request().unwrap().dismissal_id, 42);
+    let mut h = Harness::new();
+    h.open(2);
+    h.key(KeyCode::NumpadEnter, true, false);
+    h.event1(true);
     h.no_reply();
 }
