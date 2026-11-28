@@ -217,6 +217,56 @@ fn mpp_palette(body: u32) -> [(&'static str, [u32; 4]); 6] {
     ]
 }
 
+/// The state of one tab in a panel's tab row, as the original's button draw
+/// (0x443080) resolves it.
+///
+/// The tab rows are toggle-mode buttons (+0x338 = 1). They are built by the
+/// info-tab loop in 0x41dcf0 (block and building panels) and the
+/// mode-tab loops at 0x40da50 and 0x40cfba (city and locator panels). The
+/// draw starts from the normal image. Hover replaces it, or the pressed image
+/// replaces it when the button is held: a press (phase 2, 0x443426) clears the
+/// hover flag. A disabled button (+0x333) then takes the disabled image, and a
+/// selected button (+0x336) finally takes the selected image over every other
+/// state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabState {
+    Normal,
+    Hover,
+    Pressed,
+    Disabled,
+    Selected,
+}
+
+impl TabState {
+    pub fn of(selected: bool, disabled: bool, pressed: bool, hover: bool) -> Self {
+        if selected {
+            Self::Selected
+        } else if disabled {
+            Self::Disabled
+        } else if pressed {
+            Self::Pressed
+        } else if hover {
+            Self::Hover
+        } else {
+            Self::Normal
+        }
+    }
+
+    /// The generic texture for this state's tab backing. 0x41dcf0, 0x40da50
+    /// and 0x40cfba all load images 13 (normal), 15 (hover), 17 (disabled),
+    /// 14 (pressed) and 16 (selected, the backing with the rim) into the
+    /// button's five image slots.
+    pub fn backing_image(self) -> usize {
+        match self {
+            Self::Normal => 13,
+            Self::Hover => 15,
+            Self::Pressed => 14,
+            Self::Disabled => 17,
+            Self::Selected => 16,
+        }
+    }
+}
+
 pub struct MppModes {
     pub buttons: [[f32; 4]; 6],
     pub icons: [[f32; 4]; 4],
@@ -1163,6 +1213,30 @@ impl Slider {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tab_backings_follow_the_original_button_states() {
+        use super::TabState;
+        // 0x41dcf0 image slots: normal 13, hover 15, disabled 17, pressed 14,
+        // selected 16.
+        for (state, image) in [
+            (TabState::Normal, 13),
+            (TabState::Hover, 15),
+            (TabState::Pressed, 14),
+            (TabState::Disabled, 17),
+            (TabState::Selected, 16),
+        ] {
+            assert_eq!(state.backing_image(), image, "{state:?}");
+        }
+        // 0x443080: the selected image wins over every other state, and the
+        // disabled image over hover and press.
+        assert_eq!(TabState::of(false, false, false, false), TabState::Normal);
+        assert_eq!(TabState::of(false, false, false, true), TabState::Hover);
+        assert_eq!(TabState::of(false, false, true, true), TabState::Pressed);
+        assert_eq!(TabState::of(false, true, true, true), TabState::Disabled);
+        assert_eq!(TabState::of(true, true, true, true), TabState::Selected);
+        assert_eq!(TabState::of(true, false, false, false), TabState::Selected);
+    }
+
     #[test]
     fn panel_backings_reject_clockwise_layout_faces() {
         let front = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.]];
