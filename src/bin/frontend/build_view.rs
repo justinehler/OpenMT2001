@@ -75,6 +75,14 @@ const BUSINESS_LIST: [f32; 4] = [30.4, 71.6, 172.8038, 162.6];
 const BUSINESS_SCROLL: [f32; 4] = [172., 71., 188., 166.];
 const BUSINESS_UP: [f32; 4] = [172., 71., 188., 87.];
 const BUSINESS_DOWN: [f32; 4] = [172., 150., 188., 166.];
+// Native 42e4ac/42e4b5 selects font3 and cyan index9 for the Provides list.
+const PROVIDES_TEXT_COLOR_INDEX: usize = 9;
+fn provides_row_bounds(row: usize) -> [f32; 4] {
+    // 42e000 insets the list by (2,1); style0 adds 2 to the retained -1
+    // horizontal offset. 4419f0 truncates the origin and advances by font3's
+    // nine-pixel line height without shrinking the glyphs.
+    [33., 178. + row as f32 * 9., 186.8, 250.6]
+}
 fn business_row(point: [f32; 2]) -> Option<usize> {
     if !hit(BUSINESS_LIST, point) {
         return None;
@@ -132,10 +140,11 @@ fn type_text(kind: u32) -> u32 {
     [860, 859, 861][kind as usize]
 }
 // Native 420f20 assigns index16 via 440ad0 to stage titles and the
-// adjustment/cost captions. Selected values and details retain index0.
+// adjustment/cost captions, including Provides at 421a1f. Selected values
+// retain index0; the Provides list has its own cyan treatment.
 fn planner_text_color_index(text_id: u32) -> usize {
     match text_id {
-        1512 | 1514..=1516 | 1518 | 1520..=1523 => 16,
+        1512..=1516 | 1518 | 1520..=1523 => 16,
         _ => 0,
     }
 }
@@ -540,12 +549,15 @@ impl Assets {
                             .into_iter()
                             .enumerate()
                         {
-                            let y = 179. + i as f32 * 12.;
-                            self.label(
+                            ui::text(
                                 &mut body,
-                                text_id,
-                                [30.4, y, 188.8, y + 12.],
-                                self.text_colors[0],
+                                &self.tabs[1],
+                                self.strings
+                                    .get(text_id as usize)
+                                    .ok_or("Planning Provides language ID")?,
+                                provides_row_bounds(i),
+                                false,
+                                self.text_colors[PROVIDES_TEXT_COLOR_INDEX],
                             )?;
                         }
                     }
@@ -2725,6 +2737,7 @@ mod caption_tests {
     fn planner_caption_and_value_color_indices() {
         for (class, ids) in [
             ("stage headings", &[1512, 1522, 1514, 1515][..]),
+            ("Provides heading", &[1513][..]),
             ("adjustment captions", &[1516, 1520, 1518][..]),
             ("cost captions", &[1521, 1523][..]),
         ] {
@@ -2732,6 +2745,11 @@ mod caption_tests {
                 assert_eq!(super::planner_text_color_index(id), 16, "{class}: {id}");
             }
         }
+        assert_eq!(
+            super::PROVIDES_TEXT_COLOR_INDEX,
+            9,
+            "provided goods/services"
+        );
         for (class, ids) in [
             ("selected types", &[860, 859, 861][..]),
             ("floor and style counts", &[1519][..]),
