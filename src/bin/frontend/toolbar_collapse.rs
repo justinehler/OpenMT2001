@@ -41,14 +41,23 @@ impl Policy {
     pub fn visible(self, a: Action) -> bool {
         self.shown && (a == Action::Info || self.nonzero_kind)
     }
-    pub fn enabled(self, a: Action) -> bool {
+    /// Whether the button draws in its normal (not disabled) look. The
+    /// tutorial lock is not part of this: Interface.DisableControl only sets
+    /// the control's +1d byte (0x48dd80, 0x48dca0), which the hit test reads
+    /// (0x442760) and the button draw ignores (0x443080 picks the disabled
+    /// image from the control's own +333 state).
+    pub fn available(self, a: Action) -> bool {
         self.visible(a)
-            && self.tutorial_allowed[a.index()]
             && match a {
                 Action::Info => true,
                 Action::Lease => self.lease_available,
                 Action::Build => self.build_allowed,
             }
+    }
+    /// Whether the button accepts hover and clicks: available and not locked
+    /// by the tutorial.
+    pub fn enabled(self, a: Action) -> bool {
+        self.available(a) && self.tutorial_allowed[a.index()]
     }
     pub fn occupied(self, bounds: [[f32; 4]; 3], p: [f32; 2]) -> bool {
         Action::ALL
@@ -63,6 +72,14 @@ impl Policy {
 }
 pub fn hit(b: [f32; 4], p: [f32; 2]) -> bool {
     p[0] > b[0] && p[0] < b[2] && p[1] >= b[1] && p[1] <= b[3]
+}
+/// Which backing image a side button draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backing {
+    Disabled,
+    Normal,
+    Selected,
+    Hover,
 }
 #[derive(Default)]
 pub struct Input {
@@ -79,6 +96,20 @@ impl Input {
     }
     pub fn pressed(&self, category: usize, a: Action) -> bool {
         self.pressed == Some((category, a))
+    }
+    /// A tutorial lock blocks input but keeps the normal look: only an
+    /// unavailable button draws disabled. Hover and press can only come from
+    /// enabled buttons, so a locked one never shows them.
+    pub fn backing(&self, policy: Policy, a: Action, selected: bool) -> Backing {
+        if !policy.available(a) {
+            Backing::Disabled
+        } else if selected || self.pressed(policy.category, a) {
+            Backing::Selected
+        } else if self.hover == Some(a) {
+            Backing::Hover
+        } else {
+            Backing::Normal
+        }
     }
     pub fn update(
         &mut self,
@@ -214,6 +245,31 @@ mod tests {
         assert!(!q.occupied(B, [5.6, 60.]));
         assert!(!q.occupied(B, [28.8, 60.]));
         assert!(q.occupied(B, [15., 76.8]));
+    }
+    #[test]
+    fn tutorial_lock_blocks_input_but_keeps_the_normal_look() {
+        let mut q = policy();
+        q.tutorial_allowed = [false; 3];
+        let mut input = Input::default();
+        for a in Action::ALL {
+            assert!(q.available(a) && !q.enabled(a));
+            let b = B[a.index()];
+            let p = Some([(b[0] + b[2]) / 2., (b[1] + b[3]) / 2.]);
+            // The strip still occupies the pointer but nothing hovers or fires.
+            assert_eq!(input.mouse(q, B, p, true), (true, None));
+            assert_eq!(input.hover, None);
+            assert_eq!(input.backing(q, a, false), Backing::Normal);
+            assert_eq!(input.mouse(q, B, p, false), (true, None));
+        }
+        // With the body open, Information keeps its selected rim.
+        assert_eq!(input.backing(q, Action::Info, true), Backing::Selected);
+        // Only real unavailability draws the disabled backing.
+        q.lease_available = false;
+        q.build_allowed = false;
+        assert_eq!(input.backing(q, Action::Lease, false), Backing::Disabled);
+        assert_eq!(input.backing(q, Action::Build, false), Backing::Disabled);
+        q.tutorial_allowed = [true; 3];
+        assert_eq!(input.backing(q, Action::Lease, false), Backing::Disabled);
     }
     #[test]
     #[ignore = "requires original ARCHIVE_DIR/BIN; static mesh decode only"]
