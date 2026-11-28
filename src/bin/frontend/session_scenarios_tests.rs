@@ -4704,10 +4704,11 @@ fn original_tutorial_ten_eleven_utility_railroad_flow() {
                 ),
                 Some(1)
             );
-            if (id == 100010 && i == 0) || (id == 100011 && i >= 1) {
+            if (id == 100010 && i != 1) || (id == 100011 && i >= 1) {
                 // The actual Navigator commits control103 after choosing a
-                // target. The scripts also admit the 3D block-entry path.
-                if id == 100011 {
+                // target. Each lesson's final transition keeps the retained
+                // filter but disables world picks in the outer handler.
+                if i > 0 {
                     assert!(status.tutorial_controls.picking_disabled);
                     assert!(
                         !host
