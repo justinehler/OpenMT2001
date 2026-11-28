@@ -7,9 +7,9 @@
 //!
 //! | Family | Native payload | Remote support |
 //! |---|---|---|
-//! | 0f construction | construction::Command::packet, rectangle/category/owner/quote | unsupported |
+//! | 0f construction | category i8, rectangle i8[4], height i8, variation/business/kind u32, quality/owner i8, components f32[4] (construction::Command::packet) | unsupported |
 //! | 10 demolition | category i8, building u16, amount f32 | unsupported |
-//! | 11 business open | business/category/building/owner (business_open::Command) | unsupported |
+//! | 11 business open | kind u32, building u32, owner u32, stock_argument u8 | unsupported |
 //! | 12 conversion | kind u32, building u32, owner u32 | unsupported |
 //! | 13 business sale | business u32, player u8 | unsupported |
 //! | 15 takeover | building u32 | unsupported |
@@ -19,6 +19,7 @@
 //! | 1a event card | card u32, player u32, target i32 | unsupported |
 //! | player messages | player_messages::Packet (48 bytes), recipient/sender/kind/args | unsupported |
 //! | category-ready/elimination/outcome | internal runtime events | unsupported |
+//! | other native IDs / shapes | no qualified decoder | unsupported |
 //!
 //! Every other kind/schema returns Unsupported. This is not full multiplayer
 //! command coverage or auction/offer admission. The submitting gameplay caller
