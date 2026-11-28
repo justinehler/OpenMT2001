@@ -7,6 +7,8 @@ use crate::{level_script, lua4::Runtime};
 /// Auxiliary prior bytes are explicit because the original stack template
 /// leaves some fields untouched; a zero-filled host policy is not native data.
 pub struct HostContext {
+    /// Incoming control for this invocation; early CRT callers pass PC53.
+    pub precision: crate::x87::Precision,
     pub difficulty: i32,
     pub notifications: bool,
     pub accounting_enabled: bool,
@@ -208,6 +210,7 @@ impl World {
         host: HostContext,
     ) -> Result<level_script::Context<'a, 'image>, String> {
         Ok(level_script::Context {
+            precision: host.precision,
             building_parameters: self.city.building_parameters,
             total_clock: self.clock.timing[0],
             image,
@@ -1008,10 +1011,12 @@ impl Roster {
             city.buildings,
             city.building_base,
         )?;
+        let precision = inputs.precision;
         pending.initialize_created(
             inputs,
             construction,
             &mut crate::ai_script::Initialization {
+                precision,
                 profiles: &mut self.profiles,
                 manager: &mut self.manager,
                 category_counts: &mut self.category_counts,

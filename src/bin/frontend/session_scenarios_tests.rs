@@ -5353,6 +5353,7 @@ fn all_original_campaign_scenarios_initialize() {
                                 &image,
                                 &session.resident_models,
                                 openmt2001::level_startup::HostContext {
+                                    precision: openmt2001::x87::Precision::Pc64,
                                     accounting_enabled: true,
                                     difficulty,
                                     notifications: true,

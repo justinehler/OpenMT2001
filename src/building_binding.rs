@@ -8,6 +8,7 @@ pub struct StockProduct {
 /// Live inputs consumed by445720 and its cost helpers. Owner references are
 /// opaque identities used only for equality, never host addresses.
 pub struct ConstructionInputs<'a> {
+    pub precision: crate::x87::Precision,
     pub volume: i32,
     pub kind: u32,
     pub quality: i8,
@@ -54,8 +55,23 @@ pub fn initial_stock_cost(
     rate: f32,
     products: &[StockProduct],
 ) -> Result<crate::x87::Sum, String> {
+    initial_stock_cost_with_precision(volume, rate, products, crate::x87::Precision::Pc64)
+}
+
+fn initial_stock_cost_with_precision(
+    volume: i32,
+    rate: f32,
+    products: &[StockProduct],
+    precision: crate::x87::Precision,
+) -> Result<crate::x87::Sum, String> {
     use crate::x87::Sum;
-    let count = initial_stock_count(volume, rate)?;
+    let count = if rate.is_finite() {
+        precision
+            .mul(Sum::from_i32(volume), Sum::from_f32(rate)?)
+            .ftol_low_word()
+    } else {
+        0
+    };
     if products.iter().any(|p| !p.fraction.is_finite()) {
         let sum = products.iter().fold(0f64, |a, p| a + f64::from(p.fraction));
         if sum.is_nan() {
@@ -66,20 +82,20 @@ pub fn initial_stock_cost(
     }
     let mut sum = Sum::default();
     for product in products {
-        sum.add_f32(product.fraction)?;
+        sum = precision.add(sum, Sum::from_f32(product.fraction)?);
     }
     if sum.compare(Sum::default()).is_eq() {
         return Ok(Sum::default());
     }
     let mut scale = Sum::from_i32(1);
-    scale.div(sum)?;
-    scale.mul(Sum::from_i32(count));
+    scale = precision.div(scale, sum)?;
+    scale = precision.mul(scale, Sum::from_i32(count));
     let mut total = Sum::default();
     for product in products {
         let mut term = Sum::from_f32(product.value)?;
-        term.mul_f32(product.fraction)?;
-        term.mul(scale);
-        total.add(term);
+        term = precision.mul(term, Sum::from_f32(product.fraction)?);
+        term = precision.mul(term, scale);
+        total = precision.add(total, term);
     }
     Ok(total)
 }
@@ -133,18 +149,37 @@ fn construction_cost_words(
         1 => 0x525b10,
         _ => 0x5251e8,
     })?;
-    let scale = (f64::from(input.volume) * double(0x525b08)? + double(0x525b00)?) as f32;
-    let category = (f64::from(input.category_value) * f64::from(image.f32_at(0x52502c)?)
-        + f64::from(image.f32_at(0x525034)?)) as f32;
-    let mut base =
-        (f64::from(base_price) * f64::from(scale)) * (f64::from(quality) * f64::from(category));
+    use crate::x87::Sum;
+    let precision = input.precision;
+    let f = |value| Sum::from_f32(value);
+    let scale = precision
+        .add(
+            precision.mul(
+                Sum::from_i32(input.volume),
+                Sum::from_f64(double(0x525b08)?)?,
+            ),
+            Sum::from_f64(double(0x525b00)?)?,
+        )
+        .to_f32();
+    let category = precision
+        .add(
+            precision.mul(f(input.category_value)?, f(image.f32_at(0x52502c)?)?),
+            f(image.f32_at(0x525034)?)?,
+        )
+        .to_f32();
+    let mut base = precision.mul(
+        precision.mul(Sum::from_i32(i32::from(base_price)), f(scale)?),
+        precision.mul(f(quality)?, f(category)?),
+    );
     if input.kind != 2 {
-        base += f64::from(word(0x54))
-            * f64::from(installation_quality)
-            * f64::from(category)
-            * f64::from(scale);
+        // The installation DWORD is zero-extended before FILD qword.
+        let mut installation = Sum::from_f64(f64::from(word(0x54)))?;
+        for value in [installation_quality, category, scale] {
+            installation = precision.mul(installation, f(value)?);
+        }
+        base = precision.add(base, installation);
     }
-    let mut components = [base as f32, 0., 0., 0.];
+    let mut components = [base.to_f32(), 0., 0., 0.];
     let mut total = components[0];
     if input.hour >= 6 {
         if input.kind == 0 {
@@ -153,37 +188,53 @@ fn construction_cost_words(
                 .products
                 .get(..count)
                 .ok_or("construction stock catalog is truncated")?;
-            let mut stock = initial_stock_cost(input.volume, float(0x58), products)?;
+            let stock =
+                initial_stock_cost_with_precision(input.volume, float(0x58), products, precision)?;
             components[1] = stock.to_f32();
-            stock.add_f32(total)?;
-            total = stock.to_f32();
+            total = precision.add(stock, f(total)?).to_f32();
         }
-        let volume = f64::from(input.volume as f32);
-        let rent_base = f64::from(unit_price) * f64::from(category) * f64::from(quality);
-        let one = double(0x525c40)?;
-        let rent = (rent_base
-            - (one - one / volume.sqrt()) * (f64::from(input.discount) * rent_base))
-            * volume;
-        components[2] = rent as f32;
-        total = (rent + f64::from(total)) as f32;
+        let volume = input.volume as f32;
+        // 461550 returns ST0 retained; its component FST does not pop it.
+        // Zero/negative volume takes the native masked-invalid FTOL path.
+        if volume <= 0. {
+            let volume = f64::from(volume);
+            let rent_base = f64::from(unit_price) * f64::from(category) * f64::from(quality);
+            let one = double(0x525c40)?;
+            let rent = (rent_base
+                - (one - one / volume.sqrt()) * (f64::from(input.discount) * rent_base))
+                * volume;
+            components[2] = rent as f32;
+            total = (rent + f64::from(total)) as f32;
+        } else {
+            let rent_base = precision.mul(
+                precision.mul(Sum::from_i32(i32::from(unit_price)), f(category)?),
+                f(quality)?,
+            );
+            let one = Sum::from_f64(double(0x525c40)?)?;
+            let reciprocal = precision.div(one, precision.sqrt(f(volume)?)?)?;
+            let reduction = precision.add(one, reciprocal.negated());
+            let discount = precision.mul(f(input.discount)?, rent_base);
+            let rent = precision.mul(
+                precision.add(rent_base, precision.mul(reduction, discount).negated()),
+                f(volume)?,
+            );
+            components[2] = rent.to_f32();
+            total = precision.add(rent, f(total)?).to_f32();
+        }
         for (index, owner) in input.utility_owners.iter().enumerate() {
             if *owner != input.owner {
-                let charge = volume * f64::from(float(0x60 + index * 4));
+                let charge = precision.mul(f(volume)?, f(float(0x60 + index * 4))?);
                 components[3] = if index == 0 {
-                    charge as f32
+                    charge
                 } else {
-                    (charge + f64::from(components[3])) as f32
-                };
+                    precision.add(charge, f(components[3])?)
+                }
+                .to_f32();
             }
         }
-        // The final utility sum is retained until FTOL, with no f32 spill.
         let final_total = if total.is_finite() && components[3].is_finite() {
-            let mut final_total = crate::x87::Sum::from_f32(components[3])?;
-            final_total.add_f32(total)?;
-            final_total.ftol_low_word()
+            precision.add(f(components[3])?, f(total)?).ftol_low_word()
         } else {
-            // Zero-volume native quotes can produce a nonfinite rent. FTOL
-            // still returns integer-indefinite, whose consumed low DWORD is0.
             0
         };
         return Ok(ConstructionCost {
@@ -380,6 +431,7 @@ mod tests {
                 })
                 .collect();
             let input = super::ConstructionInputs {
+                precision: crate::x87::Precision::Pc64,
                 volume: word(at + 4) as i32,
                 kind: word(at + 8),
                 quality: word(at + 16) as i8,

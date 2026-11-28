@@ -64,6 +64,7 @@ function EVENT_LoadScoreData() end
     let initialize =
         |scripts: &mut AiScript, manager: &mut Manager, profiles: &mut [[u8; 0x650]], loaded| {
             let mut state = Initialization::<64> {
+                precision: crate::x87::Precision::Pc64,
                 profiles,
                 manager,
                 category_counts: &mut [0; 52 * 45],

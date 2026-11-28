@@ -709,6 +709,7 @@ impl<'data> Session<'data> {
             assets.image,
             &self.resident_models,
             level_startup::HostContext {
+                precision: openmt2001::x87::Precision::Pc64,
                 accounting_enabled: true,
                 difficulty: self.difficulty as i32,
                 notifications: self.world.city.ai_demand.ready != 0,
@@ -774,6 +775,7 @@ impl<'data> Session<'data> {
                 assets.image,
                 &self.resident_models,
                 level_startup::HostContext {
+                    precision: openmt2001::x87::Precision::Pc64,
                     accounting_enabled: true,
                     difficulty: self.difficulty as i32,
                     notifications: self.world.city.ai_demand.ready != 0,
@@ -1734,10 +1736,14 @@ impl<'data> Session<'data> {
             Hooks::new()
         };
         hooks.process = process; // Before top-level, initialize and Level dispatch.
+        // Session launches (campaign, Sandbox, Skirmish, network, tutorial
+        // and restore) originate after 4b9c3c. The pre-reset boot/flyby
+        // invocation instead supplies PC53 to the shared startup contexts.
         let context = world.script_context(
             input.image,
             &resident_models,
             level_startup::HostContext {
+                precision: openmt2001::x87::Precision::Pc64,
                 accounting_enabled: false,
                 difficulty: input.difficulty,
                 notifications: false,
@@ -1994,6 +2000,7 @@ impl<'data> Session<'data> {
             roster.initialize_world_with_ownership_allocator(
                 &pending,
                 openmt2001::player_script::RosterInputs {
+                    precision: openmt2001::x87::Precision::Pc64,
                     local_slot: connected.map(|stage| stage.local_slot),
                     names,
                     initial_cash: cash,
@@ -2260,6 +2267,7 @@ impl<'data> Session<'data> {
             assets.image,
             &self.resident_models,
             level_startup::HostContext {
+                precision: openmt2001::x87::Precision::Pc64,
                 accounting_enabled: true,
                 difficulty: self.difficulty as i32,
                 notifications: self.world.city.ai_demand.ready != 0,

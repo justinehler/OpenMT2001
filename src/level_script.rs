@@ -130,6 +130,8 @@ pub struct State<'a> {
 /// allocator state is in State; a fresh seed is never invented by this runner.
 #[derive(Clone, Copy)]
 pub struct Context<'a, 'image> {
+    /// Incoming control for this invocation; early CRT callers pass PC53.
+    pub precision: crate::x87::Precision,
     pub building_parameters: crate::building_parameters::BuildingKinds,
     pub total_clock: u32,
     pub image: &'a crate::pe::PeImage<'image>,
@@ -631,6 +633,7 @@ impl Bindings {
                 }
             }
             let mut map = crate::map_script::State {
+                precision: context.precision,
                 building_parameters: context.building_parameters,
                 world: business_binding::World {
                     buildings: state.buildings,
