@@ -352,18 +352,16 @@ fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
 }
 
 #[cfg(feature = "lua4")]
-#[test]
-fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_tasks() {
-    use crate::{
-        live_commands,
-        network::{
-            Message, Transfer,
-            commands::{Adapter, Request},
-        },
-    };
+pub(crate) fn playing_pair(with_ai: bool) -> (Handle, Handle, u8) {
     let host_owner = owner();
     let client_owner = owner();
-    let host = spawn_worker(host_owner, host_open(settings())).unwrap();
+    let mut open = host_open(settings());
+    if let Open::Host { snapshot, .. } = &mut open
+        && with_ai
+    {
+        snapshot.action(Action::Kind(2), &names()).unwrap();
+    }
+    let host = spawn_worker(host_owner, open).unwrap();
     let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
         panic!()
     };
@@ -377,7 +375,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         Open::Join {
             selection,
             name: b"Client".to_vec(),
-            token: 1,
+            token: if with_ai { 2 } else { 1 },
         },
     )
     .unwrap();
@@ -404,16 +402,24 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     client.prepared(Ok(content)).unwrap();
     wait(&host, |u| matches!(u, Update::Validated));
     wait(&client, |u| matches!(u, Update::Validated));
+    (host, client, view.local_peer)
+}
+
+#[cfg(feature = "lua4")]
+#[test]
+fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_tasks() {
+    use crate::{
+        live_commands,
+        network::{
+            Message, Transfer,
+            commands::{Adapter, Request},
+        },
+    };
+    let (host, client, local_peer) = playing_pair(false);
     let hb = host.bind_world(100).unwrap();
     let cb = client.bind_world(200).unwrap();
-    let mut authority = Adapter::new(hb, true, 0, vec![Some(0), Some(view.local_peer)]).unwrap();
-    let mut replica = Adapter::new(
-        cb,
-        false,
-        view.local_peer,
-        vec![Some(0), Some(view.local_peer)],
-    )
-    .unwrap();
+    let mut authority = Adapter::new(hb, true, 0, vec![Some(0), Some(local_peer)]).unwrap();
+    let mut replica = Adapter::new(cb, false, local_peer, vec![Some(0), Some(local_peer)]).unwrap();
     let (mut left, mut right) = (
         live_commands::Queue::default(),
         live_commands::Queue::default(),
@@ -436,6 +442,7 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                     amount: 500,
                 },
                 &mut right,
+                &mut [[0; 0x17c]; 52],
                 100,
             )
             .unwrap();
@@ -445,19 +452,40 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
     // Pump at101: the host stamps126, then closes it at105 with deadline130.
     while left.snapshot().unwrap().len() < 2 {
         authority
-            .pump(&host, 101, &mut left, &mut lp, &mut lt)
+            .pump(
+                &host,
+                101,
+                &mut left,
+                &mut [[0; 0x17c]; 52],
+                &mut lp,
+                &mut lt,
+            )
             .unwrap();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
     }
     authority
-        .pump(&host, 105, &mut left, &mut lp, &mut lt)
+        .pump(
+            &host,
+            105,
+            &mut left,
+            &mut [[0; 0x17c]; 52],
+            &mut lp,
+            &mut lt,
+        )
         .unwrap();
     crate::network::commands::pause_at_limit(&mut rp, &mut rt).unwrap();
     let retained = rt.clone();
     while replica.deadline() < 130 {
         replica
-            .pump(&client, 125, &mut right, &mut rp, &mut rt)
+            .pump(
+                &client,
+                125,
+                &mut right,
+                &mut [[0; 0x17c]; 52],
+                &mut rp,
+                &mut rt,
+            )
             .unwrap();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -485,16 +513,31 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
                 amount: 10,
             },
             &mut right,
+            &mut [[0; 0x17c]; 52],
             125,
         )
         .unwrap();
     authority
-        .pump(&host, 105, &mut left, &mut lp, &mut lt)
+        .pump(
+            &host,
+            105,
+            &mut left,
+            &mut [[0; 0x17c]; 52],
+            &mut lp,
+            &mut lt,
+        )
         .unwrap();
     assert_eq!(left.snapshot().unwrap().len(), 2);
     while left.snapshot().unwrap().len() < 3 {
         authority
-            .pump(&host, 106, &mut left, &mut lp, &mut lt)
+            .pump(
+                &host,
+                106,
+                &mut left,
+                &mut [[0; 0x17c]; 52],
+                &mut lp,
+                &mut lt,
+            )
             .unwrap();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -515,9 +558,23 @@ fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_task
         .unwrap();
     let error = loop {
         authority
-            .pump(&host, 106, &mut left, &mut lp, &mut lt)
+            .pump(
+                &host,
+                106,
+                &mut left,
+                &mut [[0; 0x17c]; 52],
+                &mut lp,
+                &mut lt,
+            )
             .unwrap();
-        if let Err(error) = replica.pump(&client, 125, &mut right, &mut rp, &mut rt) {
+        if let Err(error) = replica.pump(
+            &client,
+            125,
+            &mut right,
+            &mut [[0; 0x17c]; 52],
+            &mut rp,
+            &mut rt,
+        ) {
             break error;
         }
         assert!(Instant::now() < deadline);

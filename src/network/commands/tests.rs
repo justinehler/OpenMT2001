@@ -37,6 +37,111 @@ fn transfer() -> Transfer {
     }
 }
 
+fn construction(owner: i8) -> crate::construction::Command {
+    crate::construction::Command {
+        category: 7,
+        rectangle: [0, 0, 1, 1],
+        height: 2,
+        variation: 3,
+        business: 4,
+        kind: 0,
+        quality: 1,
+        owner,
+        components: [101.25, 23.5, 7.75, 2.5],
+    }
+}
+
+#[test]
+fn construction_checks_compact_owner_replay_schema_and_authority_only_ai() {
+    let (owner, binding, peer) = owner();
+    let mut host = Adapter::new(binding, true, 0, vec![Some(0), None, Some(4)]).unwrap();
+    let mut client = Adapter::new(binding, false, 4, vec![Some(0), None, Some(4)]).unwrap();
+    let request = Request::construction(0, &construction(3));
+    let admitted = ingress(
+        &owner,
+        binding,
+        peer,
+        Message::CommandRequest(request.clone()),
+        0,
+    )
+    .unwrap();
+    let Message::CommandCommit(commit) = host.receive(&owner, admitted, 100).unwrap() else {
+        panic!()
+    };
+    assert_eq!(commit.due, 125);
+    assert_eq!(commit.request, request);
+    assert_eq!(
+        commit.request.construction_payload().unwrap().packet(),
+        construction(3).packet()
+    );
+    let replay = ingress(&owner, binding, peer, Message::CommandRequest(request), 1).unwrap();
+    assert_eq!(host.receive(&owner, replay, 100), Err(Error::Sequence));
+    for (sequence, wrong_owner) in [(2, 1), (3, 2)] {
+        let request = Request::construction(1, &construction(wrong_owner));
+        let wrong = ingress(
+            &owner,
+            binding,
+            peer,
+            Message::CommandRequest(request),
+            sequence,
+        )
+        .unwrap();
+        assert_eq!(host.receive(&owner, wrong, 100), Err(Error::Peer));
+    }
+    // AI has no peer: only the local authority can submit its owner, using
+    // the same serial/order stream as its human player's commands.
+    let ai = host.next_construction(&construction(2)).unwrap();
+    let Message::CommandCommit(ai) = host.request(&owner, ai, 100).unwrap() else {
+        panic!()
+    };
+    assert_eq!(ai.order, 1);
+    assert_eq!(ai.due, 125);
+    let forbidden = client.next_construction(&construction(2)).unwrap();
+    assert_eq!(client.request(&owner, forbidden, 100), Err(Error::Peer));
+    let mut mismatched = Request::construction(1, &construction(3));
+    mismatched.owner = 1;
+    assert!(mismatched.validate().is_err());
+    for length in [0, 7, 39, 41, 60, 128] {
+        let request = Request {
+            serial: 0,
+            owner: 3,
+            kind: 0x0f,
+            payload: vec![0; length],
+        };
+        assert_eq!(request.validate(), Err(Error::Unsupported));
+    }
+    let valid = construction(3);
+    for invalid in [
+        crate::construction::Command {
+            category: -1,
+            ..valid.clone()
+        },
+        crate::construction::Command {
+            category: 52,
+            ..valid.clone()
+        },
+        crate::construction::Command {
+            rectangle: [0, 0, 7, 1],
+            ..valid.clone()
+        },
+        crate::construction::Command {
+            components: [f32::NAN; 4],
+            ..valid.clone()
+        },
+        crate::construction::Command {
+            kind: 3,
+            ..valid.clone()
+        },
+        crate::construction::Command { owner: 0, ..valid },
+    ] {
+        assert_eq!(
+            Request::construction(0, &invalid).validate(),
+            Err(Error::Row)
+        );
+    }
+    assert_eq!(host.next_commit, 2);
+}
+
 #[test]
 fn admitted_connection_and_original_compact_owner_authorize_once() {
     let (owner, binding, peer) = owner();
@@ -58,10 +163,8 @@ fn admitted_connection_and_original_compact_owner_authorize_once() {
         commit,
         Commit {
             order: 0,
-            transfer: Transfer {
-                due: 125,
-                ..transfer()
-            }
+            due: 125,
+            request: Request::transfer(0, transfer())
         }
     );
     // Fresh transport envelope cannot replay an already committed request.
@@ -105,7 +208,6 @@ fn every_unqualified_family_and_auction_transfer_schema_is_explicitly_unsupporte
         1,
         8,
         9,
-        0x0f,
         0x10,
         0x11,
         0x12,
@@ -133,7 +235,7 @@ fn every_unqualified_family_and_auction_transfer_schema_is_explicitly_unsupporte
                 kind,
                 payload: vec![0; 7]
             }
-            .transfer_payload(),
+            .validate(),
             Err(Error::Unsupported)
         );
     }
@@ -178,10 +280,13 @@ fn actual_live_queue_retains_authority_order_and_client_never_adds_delay() {
         let Message::CommandCommit(commit) = host.receive(&owner, admitted, 100).unwrap() else {
             panic!()
         };
-        host.enqueue(commit, &mut left, 100).unwrap();
-        client.enqueue(commit, &mut right, 102).unwrap();
+        host.enqueue(&commit, &mut left, &mut [[0; 0x17c]; 52], 100)
+            .unwrap();
+        client
+            .enqueue(&commit, &mut right, &mut [[0; 0x17c]; 52], 102)
+            .unwrap();
         assert_eq!(
-            client.enqueue(commit, &mut right, 102),
+            client.enqueue(&commit, &mut right, &mut [[0; 0x17c]; 52], 102),
             Err(Error::Sequence)
         );
     }
@@ -215,13 +320,17 @@ mod runtime;
 #[test]
 fn gameplay_wire_schemas_round_trip_and_are_bounded() {
     let messages = [
+        Message::CommandRequest(Request::construction(26, &construction(3))),
+        Message::CommandCommit(Commit {
+            order: 30,
+            due: 125,
+            request: Request::construction(26, &construction(3)),
+        }),
         Message::CommandRequest(Request::transfer(27, transfer())),
         Message::CommandCommit(Commit {
             order: 31,
-            transfer: Transfer {
-                due: 125,
-                ..transfer()
-            },
+            due: 125,
+            request: Request::transfer(27, transfer()),
         }),
         Message::CommandDeadline {
             after: 32,
