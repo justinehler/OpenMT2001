@@ -151,10 +151,10 @@ pub struct Assets {
     navigator: crate::navigator::Navigator,
     tooltip: crate::tooltip::Tooltip,
     result_actors: crate::auction_scene::Assets,
-    result_text: crate::fresh_city::result::text::Assets,
-    result_firework_texture: crate::fresh_city::result::particles_gpu::FireworkTexture,
-    result_medallions: crate::fresh_city::result::medallions::Assets,
-    result_audio: crate::fresh_city::result::audio::Assets,
+    result_text: crate::result_presentation::text::Assets,
+    result_firework_texture: crate::result_presentation::particles_gpu::FireworkTexture,
+    result_medallions: crate::result_presentation::medallions::Assets,
+    result_audio: crate::result_presentation::audio::Assets,
     auction_audio: crate::live_host::auction_audio::Assets,
     transport_audio: crate::transport_audio::Assets,
     era_audio: crate::era_audio::Assets,
@@ -276,19 +276,19 @@ impl Assets {
             &index,
             &archive,
         )?;
-        let result_text = crate::fresh_city::result::text::Assets::load_shared(
+        let result_text = crate::result_presentation::text::Assets::load_shared(
             &index,
             &archive,
             &paths.installer,
             &paths.language,
             &ui_text,
         )?;
-        let result_medallions = crate::fresh_city::result::medallions::Assets::load(
+        let result_medallions = crate::result_presentation::medallions::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &index,
             &archive,
         )?;
-        let result_audio = crate::fresh_city::result::audio::Assets::load(
+        let result_audio = crate::result_presentation::audio::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &paths.installer,
             &paths.ffmpeg,
@@ -353,7 +353,7 @@ impl Assets {
         )?;
         let city_pulse = crate::city_pulse_scene::Assets::load(&index, &archive)?;
         let result_firework_texture =
-            crate::fresh_city::result::particles_gpu::FireworkTexture::load(&index, &archive)?;
+            crate::result_presentation::particles_gpu::FireworkTexture::load(&index, &archive)?;
         let strategic_scene = crate::strategic_scene::Assets::load(
             &openmt2001::pe::PeImage::parse(&executable)?,
             &index,
@@ -1232,7 +1232,7 @@ enum ResultPhase {
 }
 struct ResultView {
     state: crate::fresh_city::result::ResultPresentation,
-    fireworks: Option<crate::fresh_city::result::fireworks::Fireworks>,
+    fireworks: Option<crate::result_presentation::fireworks::Fireworks>,
     fireworks_draw: Option<usize>,
     fireworks_ticks: usize,
     _music: Option<(rodio::OutputStream, crate::audio_bus::focus::Music)>,

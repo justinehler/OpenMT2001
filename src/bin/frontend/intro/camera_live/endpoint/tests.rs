@@ -853,7 +853,7 @@ fn camera_sample_and_ready_result_keep_pcm_behind_unavailable_newer_focus_prefix
     view.era_audio_player
         .apply(crate::era_audio::Operation::Stop)
         .unwrap();
-    let result_music = crate::fresh_city::result::audio::composition_result_pcm(&mixer, &audio);
+    let result_music = crate::result_presentation::audio::composition_result_pcm(&mixer, &audio);
     assert!(result_music.is_paused());
     assert_eq!(result_music.volume(), 0.);
     assert!(output.by_ref().take(1024).all(|sample| sample == 0.));

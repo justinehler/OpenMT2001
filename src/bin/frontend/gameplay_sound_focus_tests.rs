@@ -50,7 +50,7 @@ fn window(output: &mut rodio::mixer::MixerSource, expected: f32, prefix: bool) {
 
 #[test]
 fn every_gameplay_wav_family_consumes_independent_source_gain_without_live_master() {
-    use crate::{auction_scene::ActorCue, fresh_city::result::fireworks::Cue};
+    use crate::{auction_scene::ActorCue, result_presentation::fireworks::Cue};
     // Independent p25 command/PCM literals: q100=-2920, q80=-3173, q60=-3438.
     let mut cases = vec![
         (
@@ -239,7 +239,7 @@ fn voice_admission_unique_requests_return_no_new_auction_handle() {
 #[test]
 fn voice_admission_fireworks_use_four_cached_cells_before_the_emitter_handle_cap() {
     let (mut player, audio, mut output) = owner(100);
-    let cue = Operation::ResultFirework(crate::fresh_city::result::fireworks::Cue::Launch1);
+    let cue = Operation::ResultFirework(crate::result_presentation::fireworks::Cue::Launch1);
     for _ in 0..4 {
         player.apply(cue.clone()).unwrap();
     }

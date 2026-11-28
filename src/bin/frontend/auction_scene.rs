@@ -499,7 +499,7 @@ impl Assets {
                             + f64::from(delta[0]) * f64::from(matrix[i][0])))
                         as f32
                 });
-                crate::fresh_city::result::lighting::camera_half(local_sun, local_eye, [0.; 3])
+                crate::result_presentation::lighting::camera_half(local_sun, local_eye, [0.; 3])
             });
             let mut transform = openmt2001::people::PeopleTransform {
                 matrix,
@@ -515,7 +515,7 @@ impl Assets {
                         let p = transform.position(positions[source]);
                         let uv = model.uvs[source];
                         let shades = if let Some(half) = half {
-                            crate::fresh_city::result::lighting::shade_vertex(
+                            crate::result_presentation::lighting::shade_vertex(
                                 &palette,
                                 part.normals[local],
                                 local_sun,
