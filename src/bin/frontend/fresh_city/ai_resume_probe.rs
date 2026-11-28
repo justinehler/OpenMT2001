@@ -293,6 +293,14 @@ fn run(controlled_retail: bool) {
                     Ok(0)
                 }
                 tick::Event::Command(openmt2001::live_commands::Event::Outcome(_)) => Ok(0),
+                // Ownership/accounting and local timer changes are completed
+                // by Session before these presentation-only callbacks.
+                tick::Event::Command(openmt2001::live_commands::Event::Elimination(
+                    openmt2001::player_elimination::Call::BuildingOwner { .. }
+                    | openmt2001::player_elimination::Call::BuildingRefresh { .. }
+                    | openmt2001::player_elimination::Call::PlayerUi { .. }
+                    | openmt2001::player_elimination::Call::FinishLocal,
+                )) => Ok(0),
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::Appearance(_),
                 )) => Ok(0),
@@ -595,9 +603,11 @@ fn run(controlled_retail: bool) {
                 assert!(retail_restocked);
             }
         } else {
+            // The inserted opponent inherits the human's saved objective
+            // progress. With the native immediate strategy start it wins first.
             assert_eq!(
                 outcome_notice,
-                Some((0, 2)),
+                Some((1, 2)),
                 "saved scenario result boundary changed"
             );
         }
