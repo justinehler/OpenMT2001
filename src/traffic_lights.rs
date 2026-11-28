@@ -82,16 +82,13 @@ impl Post {
         }
     }
 
-    /// Pose for the post mesh in the static scenery path. 0x4e0b50 passes
-    /// the negated yaw to 0x4e3380, which negates it again, so the object
-    /// rows are (cos, 0, sin) and (-sin, 0, cos) of the stored yaw (the same
-    /// matrix as resident and vehicle descriptors). `Pose` rotates by the
-    /// negated yaw, so it is given the negated stored yaw. This keeps the
-    /// arm heads on the 0x44bc30 glow points at yaws 90 and 270.
+    /// Pose for the post mesh in the static scenery path. The post's
+    /// descriptor carries the stored yaw, which keeps the arm heads on the
+    /// 0x44bc30 glow points at yaws 90 and 270.
     pub fn mesh_pose(&self) -> Pose {
         Pose {
             position: self.position,
-            yaw: -self.yaw,
+            yaw: self.yaw,
         }
     }
 

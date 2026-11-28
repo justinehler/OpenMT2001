@@ -285,3 +285,40 @@ fn original_junction_traffic_lights_reach_city_draws_era_models_and_glows() {
     let alpha = scene.draws[glow_draw].diffuse_alpha.as_ref().unwrap();
     assert!(alpha.iter().all(|&a| a > 0));
 }
+
+#[test]
+#[ignore = "requires original v1.4 city assets"]
+fn original_lamp_models_put_their_heads_on_the_glow_centres() {
+    let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
+    let executable = read("EXE");
+    let directory = read("ARCHIVE_DIR");
+    let archive = read("ARCHIVE_BIN");
+    let image = PeImage::parse(&executable).unwrap();
+    let board = Board::from_v14(&image).unwrap();
+    let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+    let lamps = street_furniture::lamps(&board.blocks);
+    let halos = crate::light_halos::lamps(&board.blocks);
+    assert!(lamps.iter().any(|p| p.yaw == 90.) && lamps.iter().any(|p| p.yaw == 270.));
+    for path in [street_furniture::EARLY_LAMP, street_furniture::LATE_LAMP] {
+        let entry = index.find(path).unwrap();
+        let mesh = crate::mesh::CachedMesh::parse(
+            &archive[entry.offset as usize..(entry.offset + entry.length) as usize],
+        )
+        .unwrap();
+        let vertices = mesh.positions(0).unwrap();
+        // The lamp head is the part of the model furthest from the post axis.
+        let head = *vertices
+            .iter()
+            .max_by(|a, b| a[0].hypot(a[2]).total_cmp(&b[0].hypot(b[2])))
+            .unwrap();
+        for (pose, halo) in lamps.iter().zip(&halos) {
+            let world = pose.transform().position(head);
+            let miss = (world[0] - halo.position[0]).hypot(world[2] - halo.position[2]);
+            assert!(
+                miss < 1.5,
+                "{path} yaw {}: head {head:?} lands {miss} from the glow",
+                pose.yaw
+            );
+        }
+    }
+}
