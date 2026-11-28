@@ -918,8 +918,13 @@ impl SceneInputs {
                                     &session, category,
                                 ));
                             }
-                            FreshRequest::BuildDrag { reply } => {
-                                let result = host.complete_build_drag(&mut session, &assets);
+                            FreshRequest::BuildDrag { category, reply } => {
+                                let result = (|| {
+                                    if session.planning_exits(category)? {
+                                        return Ok(None);
+                                    }
+                                    host.complete_build_drag(&mut session, &assets).map(Some)
+                                })();
                                 if let Err(error) = &result {
                                     host.fail(error.clone());
                                 }
@@ -945,12 +950,8 @@ impl SceneInputs {
                                         board: &board,
                                         file: &file,
                                     };
-                                    if submit {
-                                        session.submit_build(&form,&assets,|event|
-                                            Err(format!("paused worker received immediate command effect {event:?}")))
-                                    } else {
-                                        session.inspect_build(&form, &assets)
-                                    }
+                                    session.plan_build(&form, &assets, submit, |event|
+                                        Err(format!("paused worker received immediate command effect {event:?}")))
                                 })();
                                 let _ = reply.send(result);
                             }

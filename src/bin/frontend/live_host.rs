@@ -36,6 +36,8 @@ pub struct Status {
     pub financial: Option<crate::player_info::Snapshot>,
     /// Native current player's one-based ownership byte, not character ID.
     pub business_owner: Option<u8>,
+    /// Original current-player +10 activity byte used by construction input.
+    pub current_player_active: bool,
     /// Current original 4112a0 resident counts and ratios for the City tab.
     pub city_people_rows: Option<Vec<crate::city_people::Row>>,
     pub tutorial_controls: TutorialControls,
@@ -1426,6 +1428,13 @@ impl Host {
                 .iter()
                 .find(|p| p.reference == session.roster.status.current_player)
                 .map(|p| p.bytes[0x1bc].wrapping_add(1)),
+            current_player_active: session
+                .roster
+                .manager
+                .players
+                .iter()
+                .find(|p| p.reference == session.roster.status.current_player)
+                .is_some_and(|p| p.bytes[0x10] != 0),
             city_people_rows,
             tutorial_controls: self.tutorial_controls,
             source_picking: self

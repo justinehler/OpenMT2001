@@ -30,6 +30,18 @@ pub fn special_residential_group_owned(
             .ok_or("planning special residential group member outside city".into())
     })
 }
+/// Hotel admission additionally requires a player landlord (4229f0).
+/// Keep the shared complete-set query's null-owner identity semantics intact.
+pub fn hotel_allowed(members: &[i32; 4], landlord: u8, owners: &[u8; 52]) -> Result<bool, String> {
+    Ok(landlord != 0 && special_residential_group_owned(members, landlord, owners)?)
+}
+
+/// Original424600 leaves the builder before processing any planning input.
+pub fn controller_exits(busy: u8, player_active: bool) -> bool {
+    busy == 1 || !player_active
+}
+/// None closes planning without completing the placement callback.
+pub type PlacementReply = Result<Option<[i32; 3]>, String>;
 /// Read-only worker snapshot. Raw retained records preserve the distinction
 /// between actual scenario settings and executable defaults.
 #[derive(Clone)]
@@ -40,6 +52,7 @@ pub struct Context {
     pub products: [[[u32; 2]; 6]; 45],
     pub commodities: [[u8; 0x1c]; 32],
     pub current_owner: u8,
+    pub player_active: bool,
     pub category_owners: [u8; 52],
     pub players: Vec<Vec<u8>>,
     pub era: u32,
@@ -67,6 +80,7 @@ impl Context {
             products: session.world.catalog.products,
             commodities: session.world.commodities.rows,
             current_owner: player.bytes[0x1bc].wrapping_add(1),
+            player_active: player.bytes[0x10] != 0,
             category_owners: session.world.categories.each_ref().map(|row| row[5]),
             players: session
                 .roster
@@ -79,6 +93,9 @@ impl Context {
         })
     }
     pub fn entry(&self) -> Entry {
+        if controller_exits(self.category_record[0x6c], self.player_active) {
+            return Entry::Exit;
+        }
         entry(
             self.category_record[0x6d],
             self.category_record[5] == self.current_owner,
@@ -203,13 +220,14 @@ pub fn nearest_cell(centers: &[[f32; 2]; 49], mouse: [i32; 2]) -> Result<Option<
     Ok(selected)
 }
 
-/// Original404eb0 planning entry, separate from per-request placement checks.
-/// `rights` is the category +78 dword; `restricted` is the +6d byte.
+/// Planning controller exit or original404eb0 permission result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
+    Exit,
     Open,
     Message { text: u32, show_rights_action: bool },
 }
+/// `rights` is the category +78 dword; `restricted` is the +6d byte.
 pub fn entry(restricted: u8, is_landlord: bool, rights: u32) -> Entry {
     let inspected = openmt2001::property_rights::inspect_values(restricted, is_landlord, rights, 0);
     match inspected.message {
@@ -333,6 +351,21 @@ pub use openmt2001::building_styles::Styles;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hotel_admission_requires_a_player_landlord() {
+        let members = [27, 23, 33, -1];
+        let mut owners = [0; 52];
+        assert!(special_residential_group_owned(&members, 0, &owners).unwrap());
+        assert!(!hotel_allowed(&members, 0, &owners).unwrap());
+        for id in [27, 23, 33] {
+            owners[id] = 2;
+        }
+        assert!(hotel_allowed(&members, 2, &owners).unwrap());
+        for owner in [0, 1] {
+            owners[23] = owner;
+            assert!(!hotel_allowed(&members, 2, &owners).unwrap());
+        }
+    }
     #[test]
     #[ignore = "requires pinned native424010 completion observations"]
     fn matches_native_placement_choices() {

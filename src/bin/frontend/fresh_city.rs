@@ -241,12 +241,53 @@ pub struct BuildInspection {
     pub submitted: bool,
     command: openmt2001::construction::Command,
 }
+/// None tells the frontend to leave planning through its ordinary close path.
+pub type BuildReply = Result<Option<BuildInspection>, String>;
 impl BuildInspection {
     pub fn allowed(&self) -> bool {
         !self.category_locked && self.placement_allowed && self.affordable && self.preview.is_some()
     }
 }
 impl<'data> Session<'data> {
+    pub fn planning_exits(&self, category: usize) -> Result<bool, String> {
+        let row = self
+            .world
+            .categories
+            .get(category)
+            .ok_or("build category outside city")?;
+        let player = self
+            .roster
+            .manager
+            .players
+            .iter()
+            .find(|p| p.reference == self.roster.status.current_player)
+            .ok_or("build current player missing")?;
+        Ok(crate::build_panel::controller_exits(
+            row[0x6c],
+            player.bytes[0x10] != 0,
+        ))
+    }
+
+    /// Worker-side human planning route. None requests the ordinary interface
+    /// transition, before inspecting or submitting a stale frontend form.
+    pub fn plan_build(
+        &mut self,
+        request: &crate::build_panel::Request,
+        assets: &CommandAssets<'_, '_>,
+        submit: bool,
+        event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
+    ) -> BuildReply {
+        let category = usize::try_from(request.category).map_err(|_| "negative build category")?;
+        if self.planning_exits(category)? {
+            return Ok(None);
+        }
+        if submit {
+            self.submit_build(request, assets, event).map(Some)
+        } else {
+            self.inspect_build(request, assets).map(Some)
+        }
+    }
+
     /// Read the authoritative city for the frontend's original construction
     /// form. The UI never supplies financial components or player identity.
     pub fn inspect_build(
@@ -289,6 +330,9 @@ impl<'data> Session<'data> {
             .position(|p| p.reference == self.roster.status.current_player)
             .ok_or("build current player missing")?;
         let owner = self.roster.manager.players[player].bytes[0x1bc].wrapping_add(1);
+        if self.roster.manager.players[player].bytes[0x10] == 0 {
+            return Err("Planning current player is inactive".into());
+        }
         // This entry point is the UI inspection/submit bridge, not the low-level
         // command consumer. Revalidate the original planning gates against the
         // current worker state so a stale frontend snapshot cannot admit a lot.
@@ -312,8 +356,7 @@ impl<'data> Session<'data> {
             let identity = u32::from_le_bytes(row[0x8c..0x90].try_into().unwrap());
             let members = crate::build_panel::special_residential_group(assets.image, identity)?;
             let owners = self.world.categories.each_ref().map(|category| category[5]);
-            request.kind == 1
-                && crate::build_panel::special_residential_group_owned(&members, row[5], &owners)?
+            request.kind == 1 && crate::build_panel::hotel_allowed(&members, row[5], &owners)?
         } else {
             catalog_word(0x0c) == request.kind
         };
@@ -5337,6 +5380,112 @@ mod tests {
                     "special Hotel has original model preview"
                 );
                 assert!(quote.allowed(), "owned group permits Hotel construction");
+                let cash = session.world.ledgers.players[0].cash.to_bits();
+                let pending = session.live_commands.snapshot().unwrap().len();
+                let occupancy = session.world.categories[category];
+                session.roster.manager.players[0].bytes[0x10] = 0;
+                let context =
+                    crate::build_panel::Context::from_session(&session, category).unwrap();
+                assert_eq!(context.entry(), crate::build_panel::Entry::Exit);
+                for submit in [false, true] {
+                    assert!(
+                        session
+                            .plan_build(&request, &assets, submit, |e| panic!(
+                                "inactive planner emitted {e:?}"
+                            ))
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+                assert!(session.submit_build(&request, &assets, |_| Ok(())).is_err());
+                assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash);
+                assert_eq!(session.live_commands.snapshot().unwrap().len(), pending);
+                assert_eq!(session.world.categories[category], occupancy);
+                session.roster.manager.players[0].bytes[0x10] = 1;
+                for busy in [0, 1, 2] {
+                    session.world.categories[category][0x6c] = busy;
+                    let context =
+                        crate::build_panel::Context::from_session(&session, category).unwrap();
+                    assert_eq!(
+                        context.entry() == crate::build_panel::Entry::Exit,
+                        busy == 1
+                    );
+                    assert_eq!(
+                        session
+                            .plan_build(&request, &assets, false, |_| Ok(()))
+                            .unwrap()
+                            .is_none(),
+                        busy == 1
+                    );
+                }
+                session.world.categories[category][0x6c] = occupancy[0x6c];
+                for (pending_rights, rights, message) in
+                    [(0, 0u32, Some(1202)), (1, 2, Some(1406)), (0, 2, None)]
+                {
+                    let row = &mut session.world.categories[category];
+                    row[0x6d] = pending_rights;
+                    row[0x78..0x7c].copy_from_slice(&rights.to_le_bytes());
+                    let context =
+                        crate::build_panel::Context::from_session(&session, category).unwrap();
+                    if let Some(text) = message {
+                        assert!(
+                            matches!(context.entry(), crate::build_panel::Entry::Message { text: actual, .. } if actual == text)
+                        );
+                        let error = session
+                            .plan_build(&request, &assets, true, |_| Ok(()))
+                            .err()
+                            .unwrap();
+                        assert!(error.contains(&text.to_string()));
+                    } else {
+                        assert_eq!(context.entry(), crate::build_panel::Entry::Open);
+                        assert!(
+                            session
+                                .plan_build(&request, &assets, false, |_| Ok(()))
+                                .unwrap()
+                                .unwrap()
+                                .allowed()
+                        );
+                    }
+                }
+                session.world.categories[category] = occupancy;
+                // Keep building rights open so each rejection below exercises
+                // hotel admission, including when the city is the landlord.
+                session.world.categories[category][0x6d] = 0;
+                session.world.categories[category][0x78..0x7c].copy_from_slice(&2u32.to_le_bytes());
+                for (landlord, other, expected) in [
+                    (0, 0, false),
+                    (1, 1, true),
+                    (2, 2, true),
+                    (1, 0, false),
+                    (1, 2, false),
+                ] {
+                    for id in members.into_iter().filter(|&id| id != -1) {
+                        session.world.categories[id as usize][5] = landlord;
+                    }
+                    session.world.categories[23][5] = other;
+                    assert_eq!(
+                        session
+                            .plan_build(&request, &assets, false, |_| Ok(()))
+                            .is_ok(),
+                        expected,
+                        "worker hotel admission for landlord {landlord}, other owner {other}"
+                    );
+                    if !expected {
+                        assert_eq!(
+                            session
+                                .plan_build(&request, &assets, true, |_| Ok(()))
+                                .err()
+                                .unwrap(),
+                            "Planning business is unavailable for this type"
+                        );
+                    }
+                }
+                assert_eq!(session.world.ledgers.players[0].cash.to_bits(), cash);
+                assert_eq!(session.live_commands.snapshot().unwrap().len(), pending);
+                for id in members.into_iter().filter(|&id| id != -1) {
+                    session.world.categories[id as usize][5] = 1;
+                }
+                session.world.categories[category] = occupancy;
                 session.world.categories[23][5] = 2;
                 assert!(
                     session.inspect_build(&request, &assets).is_err(),
@@ -5625,6 +5774,8 @@ mod tests {
             } else {
                 None
             };
+            // Accepted delayed construction is independent of planner activity.
+            session.roster.manager.players[0].bytes[0x10] = 0;
             for tick in start..start + 25 {
                 session.world.clock.timing[0] = tick;
                 session

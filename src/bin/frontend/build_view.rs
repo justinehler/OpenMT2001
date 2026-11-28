@@ -281,6 +281,7 @@ impl Assets {
         )
     }
     pub fn open(&self, context: Context) -> Result<State, String> {
+        let close = context.entry() == build_panel::Entry::Exit;
         let styles = self
             .styles
             .get(context.era as usize)
@@ -294,7 +295,7 @@ impl Assets {
         let businesses = type_businesses[0].clone();
         let display_rows = display_rows_for(&context, 0, &businesses)?;
         let message = match context.entry() {
-            build_panel::Entry::Open => None,
+            build_panel::Entry::Exit | build_panel::Entry::Open => None,
             build_panel::Entry::Message { text, .. } => Some(text),
         };
         Ok(State {
@@ -339,7 +340,7 @@ impl Assets {
             quote_request: None,
             needs_quote: false,
             submit: false,
-            close: false,
+            close,
             message,
             diagnostic: None,
             dirty: true,
@@ -353,7 +354,7 @@ impl Assets {
             .special_residential_groups
             .get(identity)
             .ok_or("planning category identity leaves special residential group table")?;
-        let special = build_panel::special_residential_group_owned(
+        let special = build_panel::hotel_allowed(
             members,
             context.category_record[5],
             &context.category_owners,
@@ -985,9 +986,9 @@ pub struct State {
     preview_draws: usize,
     preview_failure: Option<String>,
     preview_phase: Option<u32>,
-    pub pending: Option<mpsc::Receiver<Result<BuildInspection, String>>>,
+    pub pending: Option<mpsc::Receiver<crate::fresh_city::BuildReply>>,
     placement_choices_pending: bool,
-    pub placement_pending: Option<mpsc::Receiver<Result<[i32; 3], String>>>,
+    pub placement_pending: Option<mpsc::Receiver<crate::build_panel::PlacementReply>>,
     pub quote_request: Option<Request>,
     pub needs_quote: bool,
     pub submit: bool,
@@ -1474,6 +1475,9 @@ impl State {
             .and_then(|row| row.business())
     }
     pub fn request(&self) -> Result<Request, String> {
+        if self.close {
+            return Err("Planning has closed".into());
+        }
         let business = self.business.ok_or("Planning business unselected")?;
         let rectangle = self.rectangle.ok_or("Planning footprint unselected")?;
         let form = build_panel::Form {
@@ -1500,6 +1504,9 @@ impl State {
     /// Reports a completed panel widget activation. The base-plate drag and
     /// slider drags do not emit the generic UI click cue.
     pub fn mouse(&mut self, down: bool) -> bool {
+        if self.close {
+            return false;
+        }
         self.button_down = down;
         if !down {
             self.click_latch = None;
@@ -1943,7 +1950,11 @@ pub fn verify_live_context(
     if let Some(path) = openmt2001::fixtures::optional("NATIVE_PLANNER_ROWS") {
         verify_native_retail_rows(&state, &std::fs::read(path).unwrap());
     }
-    assert_eq!(state.type_businesses[1], [42, 43]);
+    assert_eq!(
+        state.type_businesses[1],
+        [42],
+        "city-owned district excludes Hotel"
+    );
     assert_eq!(state.type_businesses[2], [44]);
     assert!(
         !state.type_businesses[0].contains(&43),
@@ -1970,76 +1981,75 @@ pub fn verify_live_context(
         assert!(!state.mouse(true));
         state.mouse(false)
     };
-    // Fresh 1930 category 33 owns its original whole property group, so the
-    // special Hotel row is present without changing the live worker.
+    // Fresh category 33 and its entire district are city-owned. Exercise
+    // player-owned lists separately from the live worker's unchanged city.
     let identity = word(&state.context.category_record, 0x8c) as usize;
     let members = assets.special_residential_groups[identity];
     assert_eq!(members, [27, 23, 33, -1]);
-    let mut split_context = state.context.clone();
-    split_context.category_owners[23] = 2;
-    let split = assets.open(split_context).unwrap();
-    assert_eq!(
-        split.type_businesses[1],
-        [42],
-        "48a770 excludes Hotel when one group member has another owner"
+    assert_eq!(state.context.category_record[5], 0);
+    assert!(
+        members
+            .into_iter()
+            .filter(|&id| id != -1)
+            .all(|id| state.context.category_owners[id as usize] == 0)
     );
+    for (landlord, other, expected) in [
+        (0, 0, false),
+        (1, 1, true),
+        (2, 2, true),
+        (1, 0, false),
+        (1, 2, false),
+    ] {
+        let mut context = state.context.clone();
+        context.category_record[5] = landlord;
+        for id in members.into_iter().filter(|&id| id != -1) {
+            context.category_owners[id as usize] = landlord;
+        }
+        context.category_owners[23] = other;
+        let mut list = assets.open(context).unwrap();
+        assert_eq!(
+            list.type_businesses[1].contains(&43),
+            expected,
+            "residential hotel list for landlord {landlord}, other owner {other}"
+        );
+        assert!(click(&mut list, [196, 156]));
+        if expected {
+            assert_eq!(list.step, 1, "two residential choices retain list stage");
+            let row = list.businesses.iter().position(|&id| id == 43).unwrap();
+            let y = (BUSINESS_ROW_TOP + (row as f32 + 0.5) * BUSINESS_ROW_HEIGHT) * 2.;
+            assert!(click(&mut list, [196, y as i32]));
+            assert_eq!(list.business, Some(43));
+        } else {
+            assert_eq!(list.business, Some(42));
+        }
+        assert_eq!(list.step, 2);
+    }
+    let mut unavailable = state.context.clone();
+    unavailable.category_record[5] = 1;
+    for id in members.into_iter().filter(|&id| id != -1) {
+        unavailable.category_owners[id as usize] = 1;
+    }
+    unavailable.catalog.row_mut(43).unwrap()[0x30] = 0;
+    assert!(!assets.open(unavailable).unwrap().type_businesses[1].contains(&43));
+    let mut inactive = state.context.clone();
+    inactive.player_active = false;
+    let mut exited = assets.open(inactive).unwrap();
+    assert!(exited.close);
+    assert!(!exited.mouse(true));
+    assert!(exited.request().is_err());
     assert!(!state.can_submit());
-    // Original 424f71 chooses kinds 1/2. Residential retains its list stage
-    // when the whole-group gate adds Hotel row 43; landscape has one
-    // business and automatically advances to the lot-drag stage.
+    // Original 424f71 chooses kinds 1/2. This city's single residential and
+    // landscape entries advance directly to the lot-drag stage.
     for (kind, business, window, screen, point) in [
-        (1, 43, [1280, 720], [307., 117.], [196, 156]),
         (1, 42, [960, 720], [147., 117.], [196, 156]),
         (2, 44, [1280, 720], [307., 159.], [196, 212]),
     ] {
         #[cfg(feature = "capture")]
-        let capture_kind = if business == 43 {
-            "special".to_owned()
-        } else {
-            format!("type{kind}")
-        };
+        let capture_kind = format!("type{kind}");
         let mapped = crate::intro::internal_pointer(screen, window).unwrap();
         assert_eq!(mapped, point, "visible native type row maps to its hitbox");
         assert!(click(&mut state, mapped));
         assert_eq!(state.kind, kind);
-        if kind == 1 {
-            assert_eq!(state.step, 1, "two residential choices retain list stage");
-            #[cfg(feature = "capture")]
-            if business == 43
-                && let Ok(prefix) = std::env::var("OPENMT2001_PLANNER_CAPTURE")
-            {
-                let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-                if cfg!(windows) {
-                    descriptor.backends = wgpu::Backends::DX12;
-                }
-                let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-                assets.prepare(&renderer, &mut state).unwrap();
-                crate::capture_test::capture(
-                    &renderer,
-                    state.prepared.as_ref(),
-                    scene,
-                    &format!("{prefix}-special-1-owned.png"),
-                );
-            }
-            let row = state
-                .businesses
-                .iter()
-                .position(|&id| id == business)
-                .unwrap();
-            let row_y = (f64::from(BUSINESS_ROW_TOP)
-                + (row as f64 + 0.5) * f64::from(BUSINESS_ROW_HEIGHT))
-                * 1.5;
-            let row_screen = if window == [1280, 720] {
-                [310., row_y]
-            } else {
-                [232.5, row_y]
-            };
-            let row_point = crate::intro::internal_pointer(row_screen, window).unwrap();
-            assert!(
-                click(&mut state, row_point),
-                "visible residential row selects {business}"
-            );
-        }
         assert_eq!(state.business, Some(business));
         assert_eq!(state.step, 2);
         state.project_grid(camera, block.center).unwrap();
