@@ -1265,23 +1265,19 @@ impl Intro {
                 }
                 return;
             }
-            if !view.strategic
-                && button == winit::event::MouseButton::Left
-                && let Some(category) = view.live_status.as_ref().and_then(|status| {
-                    crate::notice_panel::View::category(
+            // 0x420a70 hit-tests the active notice rows in City View too: only
+            // their drawing stops in mode 3, so a click on a hidden row still
+            // leaves City View for that notice's block.
+            if button == winit::event::MouseButton::Left
+                && let Some(block) = view.live_status.as_ref().and_then(|status| {
+                    super::notice_click_block(
                         &status.notices,
                         view.pointer.map(|p| p.map(|v| v as f32 * 0.5)),
+                        &self.assets.selection.blocks,
                     )
                 })
             {
-                if pressed
-                    && let Some(index) = self
-                        .assets
-                        .selection
-                        .blocks
-                        .iter()
-                        .position(|b| b.id == category as usize)
-                {
+                if pressed && let Some(index) = block {
                     view.planning = None;
                     view.planning_pending = None;
                     view.focus_category(index, &self.assets.selection);

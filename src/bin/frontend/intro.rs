@@ -985,6 +985,18 @@ pub(crate) fn building_has_management_link(
 ) -> bool {
     building.business().is_some() || building.initialized_apartment.is_some()
 }
+/// The notice list's left-press hit test (0x420a70 event 4). Every active row is
+/// tested in every view mode, City View included. `None` means no row is under
+/// the pointer; `Some(None)` is a hit on a notice whose block is not presented.
+/// The result is an index into `blocks`.
+fn notice_click_block(
+    notices: &[openmt2001::notifications::Notice],
+    pointer: Option<[f32; 2]>,
+    blocks: &[openmt2001::board::Block],
+) -> Option<Option<usize>> {
+    let category = crate::notice_panel::View::category(notices, pointer)?;
+    Some(blocks.iter().position(|b| b.id == category as usize))
+}
 /// Main-panel mode0 is restored on deselection (41eb40/41f290).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InformationTarget {
