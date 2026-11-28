@@ -11,7 +11,7 @@ pub struct BuildingSpec {
     pub block: String,
     pub lot: [u8; 4], // x, y, width, depth
     pub height: u8,
-    pub kind: u8, // native RETAIL=0, RESIDENTIAL=1, LANDSCAPE=2
+    pub kind: u8, // native RETAIL=0, RESIDENTIAL=1, LANDSCAPE=2; fixed scenery=3
     pub variation: u32,
     pub quality: u8, // native low=0, medium=1, high=2
     pub businesses: Vec<String>,

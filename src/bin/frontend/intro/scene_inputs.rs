@@ -1459,6 +1459,14 @@ impl SceneInputs {
         context: StaticAppearanceContext<'_, '_>,
     ) -> Result<(), String> {
         let started = Instant::now();
+        let file = openmt2001::build_file::BuildFile::parse(&self.build_file)?;
+        let fixed_templates = scene
+            .city_structures
+            .iter()
+            .map(|building| {
+                openmt2001::save::appearance::renderer_templates(&file, building.selected, 1)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let instances = prepared
             .values()
             .flat_map(|(building, identity, _)| {
@@ -1468,8 +1476,16 @@ impl SceneInputs {
                     .filter(|row| crate::static_detail::supports(row.descriptor))
                     .map(move |row| (building, row))
             })
+            .chain(scene.city_structures.iter().zip(&fixed_templates).flat_map(
+                |(building, rows)| {
+                    rows.iter()
+                        .filter(|row| crate::static_detail::supports(row.descriptor))
+                        .map(move |row| (building, row))
+                },
+            ))
             .collect::<Vec<_>>();
-        if instances.is_empty() {
+        let instance_count = instances.len();
+        if instance_count == 0 {
             return Ok(());
         }
         if cache.static_details.is_none() {
@@ -1493,7 +1509,7 @@ impl SceneInputs {
         if std::env::var_os("OPENMT2001_PROFILE_SNAPSHOTS").is_some() {
             eprintln!(
                 "Live static details: instances={} load={load_elapsed:?} draws={:?} total={:?}",
-                instances.len(),
+                instance_count,
                 started.elapsed() - load_elapsed,
                 started.elapsed()
             );
@@ -1502,6 +1518,13 @@ impl SceneInputs {
         let first = scene.draws.len();
         scene.draws.extend(draws);
         for span in spans {
+            if scene
+                .city_structures
+                .iter()
+                .any(|building| building.block_id == span.category)
+            {
+                continue;
+            }
             let center = context
                 .board
                 .blocks
@@ -1522,7 +1545,7 @@ impl SceneInputs {
         cache.static_detail_ranges.push(first..scene.draws.len());
         scene.diagnostics.push(format!(
             "Static appearance: {} original TM detail instances",
-            instances.len(),
+            instance_count,
         ));
         Ok(())
     }
