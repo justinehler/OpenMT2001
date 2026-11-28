@@ -200,9 +200,15 @@ fn original_bonus_initializes_at_all_difficulties() {
     assert_eq!(at, text.len());
     let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
     catalog.unlock(400001);
-    let mut menu =
-        crate::singleplayer::SinglePlayer::new(&index, &archive, &installer, &strings, &executable)
-            .unwrap();
+    let mut menu = crate::singleplayer::SinglePlayer::new(
+        &index,
+        &archive,
+        &installer,
+        &scripts,
+        &strings,
+        &executable,
+    )
+    .unwrap();
     menu.open(
         false,
         "Bonus initialization",

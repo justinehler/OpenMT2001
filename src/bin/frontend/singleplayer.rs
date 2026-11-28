@@ -51,7 +51,19 @@ mod campaign_picker_tests {
         fn profile(&self) -> PathBuf {
             crate::campaign_store::profile_path(&self.0, b"Player")
         }
+        /// A scripts directory giving every catalog level `players` as its
+        /// `players.lua`.
+        fn scripts(&self, catalog: &Catalog, players: &str) -> PathBuf {
+            let root = self.0.join("scripts");
+            for level in &catalog.levels {
+                let directory = root.join(std::str::from_utf8(level.directory()).unwrap());
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(directory.join("players.lua"), players).unwrap();
+            }
+            root
+        }
     }
+    const HUMAN_ONLY: &str = "Frontend.RegisterPlayer(0, HUMAN_PLAYER, HAT);";
     impl Drop for Scratch {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
@@ -118,6 +130,8 @@ mod campaign_picker_tests {
             biography_first: std::cell::Cell::new(0),
             name: vec![],
             catalog: None,
+            scripts_root: PathBuf::new(),
+            roster: None,
             profile_path: None,
             request: None,
             busy: false,
@@ -326,6 +340,7 @@ mod campaign_picker_tests {
         crate::campaign_store::load_progress(&mut loaded, &scratch.profile()).unwrap();
         loaded.difficulty = 2;
         let mut picker = panel();
+        picker.scripts_root = scratch.scripts(&loaded, HUMAN_ONLY);
         picker.open(false, "Player", loaded, scratch.profile());
         assert!(!picker.busy && picker.message.is_none());
         assert_eq!(
@@ -357,6 +372,7 @@ mod campaign_picker_tests {
         }
         let mut picker = panel();
         picker.strings[0x66e] = ascii("Scenario information");
+        picker.scripts_root = scratch.scripts(&completed, HUMAN_ONLY);
         for catalog in [completed, Catalog::default()] {
             picker.open(false, "Player", catalog, scratch.profile());
             assert_eq!(picker.scenario_id, None);
@@ -414,6 +430,7 @@ mod campaign_picker_tests {
             let mut picker = panel();
             picker.strings[17] = ascii("New scenario");
             picker.strings[18] = ascii("New description");
+            picker.scripts_root = scratch.scripts(&catalog, HUMAN_ONLY);
             picker.open(false, "Player", catalog, scratch.profile());
             assert_eq!(picker.scenario_id, Some(200003));
             picker.activate(6); // displayed second row, through real activation
@@ -433,6 +450,118 @@ mod campaign_picker_tests {
                 Some(ascii("New description").as_slice())
             );
         }
+    }
+
+    /// A players.lua shaped like the shipped scenarios: slot 0 is the human,
+    /// opponents depend on the difficulty.
+    const SCRIPTED_OPPONENTS: &str = "Frontend.RegisterPlayer(0, HUMAN_PLAYER, HAT);
+if Game.GetDifficulty() == DIFFICULTY_EASY then
+    Frontend.RegisterPlayer(1, AI_PLAYER, IRON, DIFFICULTY_EASY);
+else
+    Frontend.RegisterPlayer(1, AI_PLAYER, IRON, DIFFICULTY_MEDIUM);
+    Frontend.RegisterPlayer(3, AI_PLAYER, DOG, DIFFICULTY_HARD);
+end";
+
+    fn participants(picker: &SinglePlayer) -> Vec<(i32, Option<usize>)> {
+        let roster = picker.roster().unwrap();
+        (0..6)
+            .map(|slot| {
+                (
+                    roster.records[slot].kind,
+                    picker.participant_character(slot),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn character_selection_shows_scripted_opponents_and_refreshes_them() {
+        let scratch = Scratch::new();
+        let catalog = catalog(&[200003]);
+        let mut picker = panel();
+        picker.scripts_root = scratch.scripts(&catalog, SCRIPTED_OPPONENTS);
+        picker.characters = (0..10)
+            .map(|token| Character {
+                name: 0x700 + token,
+                description: 0,
+                color: 0,
+                token: 0,
+                portrait: 0,
+            })
+            .collect();
+        picker.strings[0x6db] = ascii("Locked");
+        picker.strings[0x706] = ascii("Iron");
+        picker.strings[0x707] = ascii("Battleship");
+        picker.open(false, "Player", catalog, scratch.profile());
+        assert!(
+            picker.roster().is_none(),
+            "the scenario list has no roster yet"
+        );
+        picker.activate(0);
+        assert!(picker.character_screen && picker.message.is_none());
+        // Easy, human Racecar: slot 0 human, Iron as the only opponent.
+        let mut expected = vec![(0, Some(0)), (1, Some(6))];
+        expected.extend([(-1, None); 4]);
+        assert_eq!(participants(&picker), expected);
+        assert_eq!(picker.opponent_label(1), ascii("Iron"));
+        for slot in 2..6 {
+            assert_eq!(picker.opponent_label(slot), ascii("Locked"));
+        }
+        // The human takes Iron: the opponent moves to the next free token.
+        for _ in 0..6 {
+            picker.activate(3);
+        }
+        assert_eq!(picker.character, 6);
+        assert_eq!(participants(&picker)[..2], [(0, Some(6)), (1, Some(7))]);
+        assert_eq!(picker.opponent_label(1), ascii("Battleship"));
+        // Leaving Iron restores the scripted token.
+        picker.activate(3);
+        assert_eq!(participants(&picker)[..2], [(0, Some(7)), (1, Some(6))]);
+        // Hard difficulty runs the other branch when Character Selection reopens.
+        picker.activate(1);
+        assert!(!picker.character_screen);
+        picker.activate(4);
+        picker.activate(0);
+        assert!(picker.character_screen && picker.message.is_none());
+        assert_eq!(
+            participants(&picker),
+            [
+                (0, Some(7)),
+                (1, Some(6)),
+                (-1, None),
+                (1, Some(2)),
+                (-1, None),
+                (-1, None)
+            ]
+        );
+        let roster = picker.roster().unwrap();
+        assert_eq!(roster.records[1].difficulty, 1);
+        assert_eq!(roster.records[3].difficulty, 2);
+    }
+
+    #[test]
+    fn character_selection_needs_the_scenario_players_script() {
+        let scratch = Scratch::new();
+        let mut picker = panel();
+        picker.scripts_root = scratch.0.join("scripts");
+        fs::create_dir_all(&picker.scripts_root).unwrap();
+        picker.open(false, "Player", catalog(&[200003]), scratch.profile());
+        picker.activate(0);
+        assert!(!picker.character_screen);
+        assert!(picker.message.as_deref().unwrap().contains("players.lua"));
+    }
+
+    #[test]
+    fn sandbox_opens_with_its_scripted_human_only() {
+        let scratch = Scratch::new();
+        let catalog = catalog(&[200003, 400002]);
+        let mut picker = panel();
+        picker.scripts_root = scratch.scripts(&catalog, HUMAN_ONLY);
+        picker.open(true, "Player", catalog, scratch.profile());
+        assert!(picker.character_screen && picker.message.is_none());
+        let mut expected = vec![(0, Some(0))];
+        expected.extend([(-1, None); 5]);
+        assert_eq!(participants(&picker), expected);
     }
 }
 
@@ -657,12 +786,13 @@ mod tutorial_title_tests {
         let strings = crate::tooltip::localized_strings(&installer, &rows).unwrap();
         let refs = strings.iter().map(Vec::as_slice).collect::<Vec<_>>();
         let exe = read("OPENMT2001_EXE");
-        let mut panel = SinglePlayer::new(&index, &archive, &installer, &refs, &exe).unwrap();
         // Open the original registration catalog with a fresh V2 profile.
         // This exercises the same progression filter as the visible menu.
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let map_path = openmt2001::fixtures::path("MAP");
         let scripts = map_path.parent().unwrap().parent().unwrap();
+        let mut panel =
+            SinglePlayer::new(&index, &archive, &installer, scripts, &refs, &exe).unwrap();
         let mut catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
         let fresh = std::path::PathBuf::from("work/frontend/capture-fresh-profile-missing.lua");
         assert!(!fresh.exists());
@@ -1036,6 +1166,11 @@ pub struct SinglePlayer {
     // Runtime/profile bytes; convert to glyph indices only at the draw boundary.
     name: Vec<u8>,
     catalog: Option<openmt2001::level_catalog::Catalog>,
+    /// Scripts directory holding each level's `players.lua`.
+    scripts_root: PathBuf,
+    /// Campaign and Sandbox participants shown on Character Selection. Custom
+    /// scenarios keep theirs in `custom.roster`.
+    roster: Option<openmt2001::player_script::PendingRoster>,
     profile_path: Option<PathBuf>,
     pub request: Option<Setup>,
     pub busy: bool,
@@ -1288,6 +1423,7 @@ impl SinglePlayer {
         index: &ArchiveIndex,
         archive: &[u8],
         installer: &Path,
+        scripts: &Path,
         strings: &[&[u8]],
         executable: &[u8],
     ) -> Result<Self, String> {
@@ -1374,6 +1510,8 @@ impl SinglePlayer {
             biography_first: std::cell::Cell::new(0),
             name: vec![],
             catalog: None,
+            scripts_root: scripts.to_path_buf(),
+            roster: None,
             profile_path: None,
             request: None,
             busy: false,
@@ -1400,6 +1538,7 @@ impl SinglePlayer {
         self.request = None;
         self.busy = true;
         self.catalog = None;
+        self.roster = None;
         self.scenario_id = None;
         self.scenario_rows.clear();
         self.name = name.as_bytes().to_vec();
@@ -1435,6 +1574,51 @@ impl SinglePlayer {
         self.message = None;
         self.description_first = 0;
         self.pointer_position = None;
+        // Sandbox opens straight onto Character Selection.
+        if sandbox {
+            self.message = self.load_roster().err();
+        }
+    }
+    /// Original 0x4a8420 runs as Character Selection opens: it clears all six
+    /// participant records, evaluates the selected level's required
+    /// `players.lua` at the current difficulty, puts the human in slot 0 with
+    /// the preferred token and resolves duplicate tokens (0x4a8610).
+    fn load_roster(&mut self) -> Result<(), String> {
+        self.roster = None;
+        let id = if self.sandbox {
+            400002
+        } else {
+            self.scenario_id.ok_or("Choose a scenario")?
+        };
+        let catalog = self
+            .catalog
+            .as_ref()
+            .ok_or("Selected profile catalog is unavailable")?;
+        let level = &catalog.levels[catalog
+            .find(id)
+            .ok_or("Selected scenario is not registered")?];
+        let directory = std::str::from_utf8(level.directory())
+            .map_err(|_| "Scenario directory is not UTF-8")?;
+        let relative = format!("{directory}/players.lua");
+        let path = openmt2001::campaign_store::original_path(&self.scripts_root, &relative)?
+            .ok_or_else(|| format!("{relative} is missing"))?;
+        let source = fs::read(&path).map_err(|e| format!("{relative}: {e}"))?;
+        let mut roster = openmt2001::player_script::PendingRoster::default();
+        roster.load_normal(
+            directory,
+            &source,
+            self.difficulty as i32,
+            i32::try_from(self.character).map_err(|_| "character index overflow")?,
+        )?;
+        self.roster = Some(roster);
+        Ok(())
+    }
+    /// The participant records Character Selection displays.
+    fn roster(&self) -> Option<&openmt2001::player_script::PendingRoster> {
+        match &self.custom {
+            Some(custom) => custom.roster.as_ref(),
+            None => self.roster.as_ref(),
+        }
     }
     pub fn open_tutorial(
         &mut self,
@@ -1512,7 +1696,7 @@ impl SinglePlayer {
         if slot >= 6 {
             return None;
         }
-        if let Some(roster) = self.custom.as_ref().and_then(|c| c.roster.as_ref()) {
+        if let Some(roster) = self.roster() {
             let record = roster.records[slot];
             return (record.kind != -1 && (0..10).contains(&record.character))
                 .then_some(record.character as usize);
@@ -1690,6 +1874,13 @@ impl SinglePlayer {
         self.inspected_slot = 0;
         if self.custom.is_some() {
             self.custom_roster()?;
+        } else if let Some(roster) = self.roster.as_mut() {
+            // Original 0x4a8e50 arrows set only slot 0's token, then 0x4a8610
+            // restores each opponent's scripted token, substituting the next
+            // free one when the human now holds it.
+            roster.records[0].character =
+                i32::try_from(value).map_err(|_| "character index overflow")?;
+            roster.resolve_tokens(&mut |_, _| {})?;
         }
         Ok(())
     }
@@ -1817,6 +2008,10 @@ impl SinglePlayer {
                     if !unlocked {
                         self.message =
                             Some("This scenario is locked in the selected profile.".into());
+                        return;
+                    }
+                    if let Err(e) = self.load_roster() {
+                        self.message = Some(e);
                         return;
                     }
                     self.character_screen = true;
@@ -2136,6 +2331,18 @@ impl SinglePlayer {
             shapes.rect(b[15 + slot], [0xff000a4b; 4]);
         }
     }
+    /// An active opponent slot shows its character's name; any other shows
+    /// "Locked" (string 0x6db).
+    fn opponent_label(&self, slot: usize) -> &[u8] {
+        self.roster()
+            .and_then(|r| {
+                let record = r.records[slot];
+                (record.kind != -1).then(|| {
+                    self.strings[self.characters[record.character as usize].name].as_slice()
+                })
+            })
+            .unwrap_or(&self.strings[0x6db])
+    }
     fn slot_labels(&self) -> Result<Vec<Surface>, String> {
         let mut pages = self.slot_fonts.clone();
         let profile_glyphs = ascii(&String::from_utf8_lossy(&self.name));
@@ -2146,17 +2353,7 @@ impl SinglePlayer {
                 if slot == 0 {
                     &profile_glyphs
                 } else {
-                    self.custom
-                        .as_ref()
-                        .and_then(|c| c.roster.as_ref())
-                        .and_then(|r| {
-                            let record = r.records[slot];
-                            (record.kind != -1).then(|| {
-                                self.strings[self.characters[record.character as usize].name]
-                                    .as_slice()
-                            })
-                        })
-                        .unwrap_or(&self.strings[0x6db])
+                    self.opponent_label(slot)
                 },
                 self.character_panel.bounds[34 - slot],
                 0xffffffff,
@@ -2230,14 +2427,10 @@ impl SinglePlayer {
             slot_labels = self.slot_labels()?;
             for slot in 0..6 {
                 let mut tint = b[41 + slot];
-                let authored = self
-                    .custom
-                    .as_ref()
-                    .and_then(|c| c.roster.as_ref())
-                    .and_then(|r| {
-                        let v = r.records[slot];
-                        (v.kind != -1).then_some(v.character as usize)
-                    });
+                let authored = self.roster().and_then(|r| {
+                    let v = r.records[slot];
+                    (v.kind != -1).then_some(v.character as usize)
+                });
                 if slot == 0 || authored.is_some() {
                     let token = authored.unwrap_or(self.character);
                     let c = self.characters[token].color;
@@ -2258,9 +2451,7 @@ impl SinglePlayer {
                     shapes.rect(tint, [0x7f000000; 4]);
                 }
                 let difficulty_icon = self
-                    .custom
-                    .as_ref()
-                    .and_then(|c| c.roster.as_ref())
+                    .roster()
                     .map(|r| {
                         let record = r.records[slot];
                         if record.kind == 0 {
@@ -2569,9 +2760,8 @@ impl SinglePlayer {
 #[cfg(test)]
 mod preferred_flow_tests {
     use super::*;
-    #[test]
-    #[ignore = "requires supplied original assets; source-only candidate"]
-    fn ordinary_arrows_persist_active_name_and_reopen_isolated() {
+    /// The panel and registration catalog built from the supplied originals.
+    fn supplied() -> (SinglePlayer, openmt2001::level_catalog::Catalog) {
         let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -2608,15 +2798,24 @@ mod preferred_flow_tests {
         let map = openmt2001::fixtures::path("MAP");
         let scripts = map.parent().unwrap().parent().unwrap();
         let catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
-        let mut panel = SinglePlayer::new(&index, &archive, &installer, &refs, &exe).unwrap();
-        let root = std::env::temp_dir().join(format!(
-            "ordinary-token-{}-{}",
+        let panel = SinglePlayer::new(&index, &archive, &installer, scripts, &refs, &exe).unwrap();
+        (panel, catalog)
+    }
+    fn scratch_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "{name}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ));
+        ))
+    }
+    #[test]
+    #[ignore = "requires supplied original assets; source-only candidate"]
+    fn ordinary_arrows_persist_active_name_and_reopen_isolated() {
+        let (mut panel, catalog) = supplied();
+        let root = scratch_root("ordinary-token");
         let a = crate::campaign_store::profile_path(&root, b"Alice");
         let b = crate::campaign_store::profile_path(&root, b"Bob");
         panel.open(true, "Alice", catalog.clone(), a.clone());
@@ -2646,6 +2845,102 @@ mod preferred_flow_tests {
             7
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Issue #438: the shipped scenarios' players.lua opponents fill
+    /// Character Selection, with the human on Racecar.
+    #[test]
+    #[ignore = "requires supplied original assets and scripts"]
+    fn shipped_scenarios_show_their_scripted_opponents() {
+        let (mut panel, mut catalog) = supplied();
+        let root = scratch_root("scripted-opponents");
+        let profile = crate::campaign_store::profile_path(&root, b"ref");
+        let id = |catalog: &openmt2001::level_catalog::Catalog, directory: &[u8]| {
+            catalog
+                .levels
+                .iter()
+                .find(|level| level.directory().eq_ignore_ascii_case(directory))
+                .unwrap()
+                .id()
+        };
+        // Compete for Sales and Wealthiest by 2000.
+        let compete = id(&catalog, b"scenario5");
+        let wealthiest = id(&catalog, b"scenario16");
+        for scenario in [compete, wealthiest] {
+            catalog.unlock(scenario);
+        }
+        // Token order: CAR BARROW DOG GUN HAT HORSE IRON SHIP SHOE THIMBLE.
+        let locked = (-1, None);
+        for (scenario, difficulty, human, expected) in [
+            (
+                compete,
+                0,
+                0,
+                [(0, Some(0)), (1, Some(6)), locked, locked, locked, locked],
+            ),
+            (
+                compete,
+                2,
+                0,
+                [(0, Some(0)), (1, Some(6)), locked, locked, locked, locked],
+            ),
+            // The human takes Iron, so the opponent becomes the Battleship.
+            (
+                compete,
+                0,
+                6,
+                [(0, Some(6)), (1, Some(7)), locked, locked, locked, locked],
+            ),
+            (
+                wealthiest,
+                0,
+                0,
+                [
+                    (0, Some(0)),
+                    (1, Some(2)),
+                    (1, Some(1)),
+                    (1, Some(4)),
+                    (1, Some(8)),
+                    (1, Some(7)),
+                ],
+            ),
+        ] {
+            panel.open(false, "ref", catalog.clone(), profile.clone());
+            assert!(panel.message.is_none());
+            panel.scenario_id = Some(scenario);
+            panel.activate(2 + difficulty);
+            panel.activate(0);
+            assert!(
+                panel.character_screen && panel.message.is_none(),
+                "{:?}",
+                panel.message
+            );
+            while panel.character != human {
+                panel.activate(3);
+            }
+            let roster = panel.roster().unwrap();
+            let shown: Vec<_> = (0..6)
+                .map(|slot| (roster.records[slot].kind, panel.participant_character(slot)))
+                .collect();
+            assert_eq!(
+                shown, expected,
+                "scenario {scenario} difficulty {difficulty}"
+            );
+            for (slot, (_, character)) in expected.iter().enumerate().skip(1) {
+                let label = match *character {
+                    Some(token) => panel.strings[panel.characters[token].name].clone(),
+                    None => panel.strings[0x6db].clone(),
+                };
+                assert_eq!(panel.opponent_label(slot), label);
+            }
+        }
+        // Sandbox registers only the human.
+        panel.open(true, "ref", catalog, profile);
+        assert!(panel.message.is_none());
+        let roster = panel.roster().unwrap();
+        assert_eq!(roster.records[0].kind, 0);
+        assert!(roster.records[1..].iter().all(|record| record.kind == -1));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 
@@ -3220,6 +3515,7 @@ mod campaign_description_tests {
                 &index,
                 &self.archive,
                 &self.installer,
+                Path::new(""),
                 &refs,
                 &self.executable,
             )

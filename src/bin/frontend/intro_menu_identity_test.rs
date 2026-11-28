@@ -42,7 +42,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
         let path = crate::campaign_store::profile_path(&inputs.profile_root, b"Justin");
         crate::campaign_store::load_progress(&mut catalog, &path).unwrap();
         let mut single = crate::singleplayer::SinglePlayer::new(&index, &inputs.archive,
-            &inputs.installer, &strings, &inputs.executable).unwrap();
+            &inputs.installer, inputs.maps.parent().unwrap(), &strings, &inputs.executable).unwrap();
         single.open(false, "Justin", catalog.clone(), path.clone());
         single.activate(0); // selected unlocked campaign scenario -> character panel
         single.activate(0); // actual character-screen Start producer
@@ -158,6 +158,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 &index,
                 &inputs.archive,
                 &inputs.installer,
+                inputs.maps.parent().unwrap(),
                 &strings,
                 &inputs.executable,
             )
