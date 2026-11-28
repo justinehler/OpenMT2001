@@ -10,9 +10,6 @@ pub struct Row {
     pub wanted: i16,
     pub stock: u16,
     pub today: u16,
-    pub yesterday_profit: f32,
-    pub today_profit: f32,
-    pub spoilage: u16,
 }
 pub fn rows(
     record: &[u8; 544],
@@ -66,9 +63,6 @@ pub fn rows(
                 wanted: short(0x1e0 + slot * 2) as i16,
                 stock: short(stock),
                 today: short(stock + 2 + bank * 2),
-                yesterday_profit: f32::from_bits(word(stock + 0x18)),
-                today_profit: f32::from_bits(word(stock + 0x14)),
-                spoilage: short(stock + 0xa + ((bank + 3) & 3) * 2),
             })
         })
         .collect()
@@ -239,84 +233,23 @@ fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
         f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap()),
     )
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct RetailColumns {
-    price: usize,
-    yesterday: usize,
-    today: usize,
-}
-impl RetailColumns {
-    // 419820: price toggles in either direction; the other groups wrap at three.
-    fn cycle(&mut self, column: usize, forward: bool) {
-        let (selected, count) = match column {
-            0 => (&mut self.price, 2),
-            1 => (&mut self.yesterday, 3),
-            2 => (&mut self.today, 3),
-            _ => unreachable!(),
-        };
-        *selected = navigation_index(*selected, count, forward);
-    }
-    fn price(self, row: &Row) -> f32 {
-        if self.price == 0 {
-            row.price
-        } else {
-            (f64::from(row.price) - f64::from(row.cost)) as f32
-        }
-    }
-    fn yesterday(self, row: &Row) -> f32 {
-        match self.yesterday {
-            0 => f32::from(row.yesterday),
-            1 => row.yesterday_profit,
-            2 => f32::from(row.spoilage),
-            _ => unreachable!(),
-        }
-    }
-    fn today(self, row: &Row) -> f32 {
-        match self.today {
-            0 => f32::from(row.today),
-            1 => row.today_profit,
-            2 => ((f64::from(row.price) - f64::from(row.cost)) * f64::from(row.stock)) as f32,
-            _ => unreachable!(),
-        }
-    }
-}
-fn retail_totals(rows: &[Row], columns: RetailColumns) -> [f32; 4] {
-    let mut totals = [0.; 4];
-    // 4169f0 traverses products from last to first, spilling each running
-    // metric total to f32. Changing the order loses cents for large profits.
+fn retail_totals(rows: &[Row], capacity: i32) -> [String; 4] {
+    let (mut yesterday, mut today) = (0f32, 0f32);
+    let (mut wanted, mut stock) = (0i32, 0i32);
+    // 4169f0 visits products from last to first, storing each sales sum
+    // as f32 before formatting the default columns as integer counts.
     for row in rows.iter().rev() {
-        for (total, value) in totals.iter_mut().zip([
-            columns.yesterday(row),
-            f32::from(row.wanted),
-            f32::from(row.stock),
-            columns.today(row),
-        ]) {
-            *total += value;
-        }
+        yesterday += f32::from(row.yesterday);
+        today += f32::from(row.today);
+        wanted += i32::from(row.wanted);
+        stock += i32::from(row.stock);
     }
-    totals
-}
-fn metric_text(value: f32, money: bool, currency: &[u8], suffix: bool) -> Result<Vec<u8>, String> {
-    if money {
-        ui::formatted_float_money(value, currency, suffix)
-    } else {
-        Ok((value as i32).to_string().bytes().map(|b| b - 32).collect())
-    }
-}
-// The v1.4 handlers retain selector IDs 2..7, but bap_v2 has no TYPE
-// parts and 417830 never instantiates those buttons. Restore usable controls
-// within the original title regions, using the original small arrow artwork.
-fn retail_header_controls(regions: &[[f32; 4]]) -> [(usize, [f32; 4]); 6] {
-    std::array::from_fn(|index| {
-        let b = regions[[10, 11, 14][index / 2]];
-        let middle = (b[1] + b[3]) * 0.5;
-        let (left, right) = if index % 2 == 0 {
-            (b[0], b[0] + 8.)
-        } else {
-            (b[2] - 8., b[2])
-        };
-        (index + 6, [left, middle - 4., right, middle + 4.])
-    })
+    [
+        (yesterday as i32).to_string(),
+        format!("{wanted}/{capacity}"),
+        format!("{stock}/{capacity}"),
+        (today as i32).to_string(),
+    ]
 }
 // 416bf9/416d61/41702e/4172c3/4173b6/417495 configure every
 // numeric column as style 1. 440720..440747 rounds the centered X origin;
@@ -493,7 +426,6 @@ pub struct State {
     pub rows: Vec<Row>,
     stock_capacity: i32,
     row_hover: Option<usize>,
-    columns: RetailColumns,
     pub apartment: Option<Apartment>,
     pub name: u32,
     block_name: u32,
@@ -595,16 +527,10 @@ impl State {
                     .iter()
                     .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.apartment_regions[i]))
             } else {
-                retail_header_controls(&assets.regions)
-                    .into_iter()
-                    .find(|(_, b)| inside(p.map(|v| v as f32 * 0.5), *b))
-                    .map(|(id, _)| id)
-                    .or_else(|| {
-                        [4, 5]
-                            .iter()
-                            .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.regions[i]))
-                            .map(|i| i + 4)
-                    })
+                [4, 5]
+                    .iter()
+                    .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.regions[i]))
+                    .map(|i| i + 4)
             }
         });
         if arrow != self.arrow_hover {
@@ -635,9 +561,7 @@ impl State {
             && self.arrow_pressed == self.arrow_hover
             && let Some(arrow) = self.arrow_hover
         {
-            if arrow >= 6 {
-                self.columns.cycle((arrow - 6) / 2, arrow % 2 != 0);
-            } else if arrow < 4 {
+            if arrow < 4 {
                 if let Some(apartment) = &mut self.apartment {
                     apartment.toggle(arrow / 2);
                 }
@@ -761,11 +685,6 @@ fn refresh_retail_rows(rows: &mut [Row], record: &[u8; 544]) -> Result<(), Strin
         row.wanted = short(0x1e0 + slot * 2) as i16;
         row.stock = short(stock);
         row.today = short(stock + 2 + bank * 2);
-        row.yesterday_profit =
-            f32::from_le_bytes(record[stock + 0x18..stock + 0x1c].try_into().unwrap());
-        row.today_profit =
-            f32::from_le_bytes(record[stock + 0x14..stock + 0x18].try_into().unwrap());
-        row.spoilage = short(stock + 0xa + ((bank + 3) & 3) * 2);
     }
     rows.clone_from_slice(&updated);
     Ok(())
@@ -1174,7 +1093,6 @@ impl Assets {
                 rows: vec![],
                 stock_capacity: 0,
                 row_hover: None,
-                columns: RetailColumns::default(),
                 apartment: Some(Apartment::from_record(record, false, false)?),
                 name: b
                     .business()
@@ -1227,7 +1145,6 @@ impl Assets {
                     .ok_or("adjustment business kind")?,
             ),
             row_hover: None,
-            columns: RetailColumns::default(),
             apartment: None,
             name: business.name_text_id,
             block_name: self.block_names[b.category],
@@ -1251,7 +1168,6 @@ impl Assets {
         let mut next = self
             .open(scene, building)?
             .ok_or("adjustment navigation target missing")?;
-        next.columns = state.columns;
         if state.edit_target.is_none() {
             next.edit_target = None;
             next.edit_request = None;
@@ -1348,49 +1264,10 @@ impl Assets {
             );
             surfaces.push(arrow);
         }
-        for (id, b) in retail_header_controls(&self.regions) {
-            let phase = if state.arrow_hover == Some(id) {
-                if state.arrow_pressed == Some(id) {
-                    2
-                } else {
-                    1
-                }
-            } else {
-                0
-            };
-            let mut arrow = self.arrows[(id % 2) * 3 + phase].clone();
-            arrow.quad(
-                [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]]],
-                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
-                [0xffffffff; 4],
-            );
-            surfaces.push(arrow);
-        }
         let titles = [1421, 1470, 1471, 1472, 1473, 1474, 1475];
         for (i, id) in titles.into_iter().enumerate() {
-            let mut b = self.regions[8 + i];
-            // Keep the native first-column text IDs. Alternate captions are
-            // literal English strings in 419820, rather than language IDs.
-            let alternate: Option<&[u8]> = match i {
-                2 if state.columns.price != 0 => Some(b"Markup"),
-                3 => [
-                    None,
-                    Some(b"Profit".as_slice()),
-                    Some(b"Spoilage".as_slice()),
-                ][state.columns.yesterday],
-                6 => [
-                    None,
-                    Some(b"Profit".as_slice()),
-                    Some(b"Potential".as_slice()),
-                ][state.columns.today],
-                _ => None,
-            };
-            let encoded = alternate.map(|s| s.iter().map(|b| b - 32).collect::<Vec<_>>());
-            let text = encoded.as_deref().unwrap_or(label(id)?);
-            if matches!(i, 2 | 3 | 6) {
-                b[0] += 8.;
-                b[2] -= 8.;
-            }
+            let b = self.regions[8 + i];
+            let text = label(id)?;
             let (offsets, copy) =
                 crate::prompt::wrap_with_gap(&self.tab, text, (b[2] - b[0] - 4.) as i32, -1)?;
             for (line, pair) in offsets.windows(2).enumerate() {
@@ -1413,21 +1290,11 @@ impl Assets {
             let numbers = [
                 Vec::new(),
                 ui::formatted_float_money(item.cost, currency, currency_suffix)?,
-                ui::formatted_float_money(state.columns.price(item), currency, currency_suffix)?,
-                metric_text(
-                    state.columns.yesterday(item),
-                    state.columns.yesterday == 1,
-                    currency,
-                    currency_suffix,
-                )?,
+                ui::formatted_float_money(item.price, currency, currency_suffix)?,
+                item.yesterday.to_string().bytes().map(|b| b - 32).collect(),
                 item.wanted.to_string().bytes().map(|b| b - 32).collect(),
                 item.stock.to_string().bytes().map(|b| b - 32).collect(),
-                metric_text(
-                    state.columns.today(item),
-                    state.columns.today != 0,
-                    currency,
-                    currency_suffix,
-                )?,
+                item.today.to_string().bytes().map(|b| b - 32).collect(),
             ];
             for (column, text) in numbers.iter().enumerate() {
                 let encoded = if column == 0 {
@@ -1454,37 +1321,15 @@ impl Assets {
             false,
             0xffffffff,
         )?;
-        let totals = retail_totals(&state.rows, state.columns);
-        for (i, total) in [
-            metric_text(
-                totals[0],
-                state.columns.yesterday == 1,
-                currency,
-                currency_suffix,
-            )?,
-            format!("{}/{}", totals[1] as i32, state.stock_capacity)
-                .bytes()
-                .map(|b| b - 32)
-                .collect(),
-            format!("{}/{}", totals[2] as i32, state.stock_capacity)
-                .bytes()
-                .map(|b| b - 32)
-                .collect(),
-            metric_text(
-                totals[3],
-                state.columns.today != 0,
-                currency,
-                currency_suffix,
-            )?,
-        ]
-        .into_iter()
-        .enumerate()
+        for (i, total) in retail_totals(&state.rows, state.stock_capacity)
+            .into_iter()
+            .enumerate()
         {
             // 417545/4175b9/4176a9/41775d use centered style 4 totals.
             ui::text_widget_style4(
                 &mut fonts,
                 &self.tab,
-                &total,
+                &total.bytes().map(|b| b - 32).collect::<Vec<_>>(),
                 self.regions[23 + i],
                 0xffffffff,
             )?;
@@ -2029,7 +1874,6 @@ mod tests {
             rows: retail_fixture().0,
             stock_capacity: 30,
             row_hover: None,
-            columns: RetailColumns::default(),
             apartment: None,
             name: 0,
             block_name: 0,
@@ -2045,120 +1889,6 @@ mod tests {
             tutorial_control: None,
             tutorial_producer: None,
         }
-    }
-
-    #[test]
-    fn metric_header_clicks_cycle_in_both_directions_and_wrap() {
-        let mut state = retail_state_fixture();
-        let mut assets = refresh_assets_fixture();
-        assets.regions = vec![[0.; 4]; 30];
-        for (column, region) in [10, 11, 14].into_iter().enumerate() {
-            assets.regions[region] = [
-                100. + column as f32 * 100.,
-                100.,
-                180. + column as f32 * 100.,
-                120.,
-            ];
-        }
-        assert_eq!(state.columns, RetailColumns::default());
-        for column in 0..3 {
-            let count = if column == 0 { 2 } else { 3 };
-            for forward in [true, false] {
-                for step in 1..=count {
-                    let (id, b) =
-                        retail_header_controls(&assets.regions)[column * 2 + usize::from(forward)];
-                    state.pointer(&assets, Some([(b[0] + b[2]) as i32, (b[1] + b[3]) as i32]));
-                    assert_eq!(state.arrow_hover, Some(id));
-                    state.mouse(true);
-                    state.mouse(false);
-                    let expected = if forward {
-                        step % count
-                    } else {
-                        (count - step) % count
-                    };
-                    assert_eq!(
-                        [
-                            state.columns.price,
-                            state.columns.yesterday,
-                            state.columns.today
-                        ][column],
-                        expected
-                    );
-                    assert!(state.edit_request.is_none());
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn metric_values_follow_history_wrap_and_refresh_profit_and_potential() {
-        let (mut rows, mut record) = retail_fixture();
-        for bank in 0..4 {
-            record[0x209] = bank;
-            for period in 0..4 {
-                let at = 0x82 + period * 2;
-                record[at..at + 2].copy_from_slice(&(10 + period as u16).to_le_bytes());
-                let at = 0x8a + period * 2;
-                record[at..at + 2].copy_from_slice(&(20 + period as u16).to_le_bytes());
-            }
-            record[0x94..0x98].copy_from_slice(&1.25f32.to_le_bytes());
-            record[0x98..0x9c].copy_from_slice(&2.5f32.to_le_bytes());
-            record[0x1ec..0x1f0].copy_from_slice(&2.75f32.to_le_bytes());
-            rows[0].cost = 0.75;
-            refresh_retail_rows(&mut rows, &record).unwrap();
-            let row = &rows[0];
-            let mut catalog = [[0; 116]; 45];
-            catalog[0][0x4c] = 2;
-            catalog[0][0x70..0x74].copy_from_slice(&5u32.to_le_bytes());
-            let opened = super::rows(
-                &record,
-                &BusinessCatalog::from_rows(catalog),
-                &[[0; 28]; 32],
-                &[2, 0],
-            )
-            .unwrap();
-            assert_eq!(opened[0].today, row.today);
-            assert_eq!(opened[0].yesterday, row.yesterday);
-            assert_eq!(opened[0].today_profit, row.today_profit);
-            assert_eq!(opened[0].yesterday_profit, row.yesterday_profit);
-            assert_eq!(opened[0].spoilage, row.spoilage);
-            assert_eq!(row.today, 10 + u16::from(bank));
-            assert_eq!(row.yesterday, 10 + u16::from((bank + 3) & 3));
-            assert_eq!(row.spoilage, 20 + u16::from((bank + 3) & 3));
-            let mut columns = RetailColumns::default();
-            columns.cycle(0, true);
-            assert_eq!(columns.price(row), 2.);
-            columns.cycle(1, true);
-            columns.cycle(2, true);
-            assert_eq!(columns.yesterday(row), 2.5);
-            assert_eq!(columns.today(row), 1.25);
-            columns.cycle(2, true);
-            assert_eq!(columns.today(row), 8.);
-        }
-        // Reverse accumulation with a spill after each row is observable.
-        let mut rows = vec![rows[0].clone(); 3];
-        for (row, profit) in rows.iter_mut().zip([1., -16777216., 16777216.]) {
-            row.today_profit = profit;
-        }
-        let columns = RetailColumns {
-            today: 1,
-            ..RetailColumns::default()
-        };
-        assert_eq!(retail_totals(&rows, columns)[3], 1.);
-        let currency = [b'$' - 32];
-        let decode = |s: Vec<u8>| {
-            s.into_iter()
-                .map(|b| char::from(b + 32))
-                .collect::<String>()
-        };
-        assert_eq!(
-            decode(metric_text(1.25, true, &currency, false).unwrap()),
-            "$1.25"
-        );
-        assert_eq!(
-            decode(metric_text(12., false, &currency, false).unwrap()),
-            "12"
-        );
     }
 
     #[test]
@@ -2545,16 +2275,13 @@ mod tests {
         info[0x58..0x5c].copy_from_slice(&1.25f32.to_le_bytes());
         let capacity = retail_capacity([9, 3, 4, 3], 2, &info);
         assert_eq!(capacity, 30);
-        assert_eq!(
-            retail_totals(&rows, RetailColumns::default()),
-            [10., 20., 9., 8.]
-        );
+        assert_eq!(retail_totals(&rows, capacity), ["10", "20/30", "9/30", "8"]);
         record[0x1e0..0x1e2].copy_from_slice(&15u16.to_le_bytes());
         record[0x80..0x82].copy_from_slice(&11u16.to_le_bytes());
         refresh_retail_rows(&mut rows, &record).unwrap();
         assert_eq!(
-            retail_totals(&rows, RetailColumns::default()),
-            [10., 23., 16., 8.]
+            retail_totals(&rows, capacity),
+            ["10", "23/30", "16/30", "8"]
         );
     }
 
@@ -2610,7 +2337,7 @@ mod tests {
             increase: true,
         });
         state.receive_edit(Ok(record));
-        assert_eq!(retail_totals(&state.rows, state.columns)[1], 21.);
+        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "21/30");
         assert_eq!(apply(&mut state), Some(Action::Apply));
         let (_sender, pending) = std::sync::mpsc::channel();
         state.edit_pending = Some(pending);
@@ -2627,7 +2354,7 @@ mod tests {
         record[0x208] = 0;
         state.edit_inflight = Some(Action::Apply);
         state.receive_edit(Ok(record));
-        assert_eq!(retail_totals(&state.rows, state.columns)[1], 22.);
+        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "22/30");
         assert_eq!(apply(&mut state), None);
     }
 
