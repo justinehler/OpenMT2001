@@ -133,6 +133,10 @@ pub struct PreviewFiles<'a> {
     pub suncols: &'a [u8],
     pub phase: u32,
 }
+/// Dragged base-plate size, formatted with the original "%d x %d" (0x534ec8).
+fn plate_size_label([x0, y0, x1, y1]: [i32; 4]) -> String {
+    format!("{} x {}", x1 - x0 + 1, y1 - y0 + 1)
+}
 fn hit(rect: [f32; 4], p: [f32; 2]) -> bool {
     p[0] >= rect[0] && p[0] <= rect[2] && p[1] >= rect[1] && p[1] <= rect[3]
 }
@@ -615,7 +619,7 @@ impl Assets {
                         ascii(
                             &mut body,
                             &self.tabs[1],
-                            &format!("{} * {}", x1 - x0 + 1, y1 - y0 + 1),
+                            &plate_size_label([x0, y0, x1, y1]),
                             STEP_CHOICES[2],
                         )?;
                     }
@@ -3387,5 +3391,14 @@ mod mesh_facing_tests {
             &panel,
             &std::env::var("OPENMT2001_BUILD_BASE_CAPTURE_PATH").unwrap(),
         );
+    }
+}
+
+#[cfg(test)]
+mod plate_size_label_tests {
+    #[test]
+    fn plate_size_uses_the_original_lower_case_x_format() {
+        assert_eq!(super::plate_size_label([4, 7, 6, 9]), "3 x 3");
+        assert_eq!(super::plate_size_label([0, 0, 0, 1]), "1 x 2");
     }
 }
