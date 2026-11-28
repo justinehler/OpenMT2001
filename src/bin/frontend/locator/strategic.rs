@@ -1442,7 +1442,7 @@ pub(crate) mod selector_boundary_tests {
     pub(crate) fn state_fixture(mode: Mode, provenance: EnabledBufferProvenance) -> State {
         let mut p = [0u8; 440];
         p[0xc] = 1;
-        let tables = Arc::new(Tables {
+        let tables = Arc::new(openmt2001::strategic_inputs::Tables {
             business_order: [0; 45],
             commodity_order: [0; 32],
             business_count: 0,
