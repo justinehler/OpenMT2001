@@ -1,6 +1,6 @@
 //! Original building-panel producers over the authoritative worker session.
-use crate::fresh_city::Session;
-use openmt2001::{
+use crate::session::Session;
+use crate::{
     business_controls::{self, Action, Call},
     business_permissions, live_commands,
 };
@@ -22,8 +22,8 @@ pub struct Inspection {
     pub owned: bool,
     pub owner_name: [u8; 96],
     pub owner_character: Option<u32>,
-    pub report: openmt2001::business_report::Report,
-    pub graph: openmt2001::business_report::Graph,
+    pub report: crate::business_report::Report,
+    pub graph: crate::business_report::Graph,
     pub base_value: f32,
     pub rent_age: i32,
     pub permissions: business_permissions::Permissions,
@@ -122,7 +122,7 @@ impl Session<'_> {
         &self,
         building: usize,
         bounds: [f32; 4],
-        image: &openmt2001::pe::PeImage<'_>,
+        image: &crate::pe::PeImage<'_>,
     ) -> Result<Inspection, String> {
         let target = self.business_operation_target(building)?;
         let permissions = business_permissions::evaluate(&target.inputs);
@@ -139,7 +139,7 @@ impl Session<'_> {
             business_permissions::Trade::Takeover
         }) {
             Some(business_permissions::Trade::Sell) => Some(
-                openmt2001::ai_actions::liquidation_score::business_value(
+                crate::ai_actions::liquidation_score::business_value(
                     business,
                     &city.buildings,
                     image,
@@ -147,9 +147,9 @@ impl Session<'_> {
                 .to_f32(),
             ),
             Some(business_permissions::Trade::Takeover) => Some(
-                openmt2001::business_takeover::price(
+                crate::business_takeover::price(
                     building,
-                    &openmt2001::business_takeover::PriceWorld {
+                    &crate::business_takeover::PriceWorld {
                         categories: &city.categories,
                         buildings: &city.buildings,
                         businesses: &city.ledgers.businesses,
@@ -164,7 +164,7 @@ impl Session<'_> {
         };
         let demolition_price = if permissions.demolish {
             Some(
-                openmt2001::demolition::quote_with_parameters(
+                crate::demolition::quote_with_parameters(
                     row,
                     &city.categories,
                     &city.building_parameters,
@@ -190,11 +190,11 @@ impl Session<'_> {
                 &target.inputs,
                 kind,
                 &city.catalog.info,
-                openmt2001::business_conversion::fits(row, info)?,
+                crate::business_conversion::fits(row, info)?,
             )? {
                 continue;
             }
-            let mut price = openmt2001::business_conversion::quote(
+            let mut price = crate::business_conversion::quote(
                 building as u32,
                 kind,
                 &city.categories,
@@ -224,7 +224,7 @@ impl Session<'_> {
             });
         }
         Ok(Inspection {
-            graph: openmt2001::business_report::graph(
+            graph: crate::business_report::graph(
                 business,
                 [self.world.clock.calendar[1], self.world.clock.calendar[2]],
                 bounds,
@@ -239,13 +239,13 @@ impl Session<'_> {
                     .ok_or("Demolition label missing")?,
                 4,
             ),
-            base_value: openmt2001::ai_actions::liquidation_score::business_base_value(
+            base_value: crate::ai_actions::liquidation_score::business_base_value(
                 business,
                 &city.buildings,
                 image,
             )?
             .to_f32(),
-            rent_age: openmt2001::business_report::rent_age(
+            rent_age: crate::business_report::rent_age(
                 building,
                 &city.buildings,
                 &city.ledgers.businesses,
@@ -253,8 +253,8 @@ impl Session<'_> {
                 self.world.clock.timing[1],
                 image,
             )? as i32,
-            report: openmt2001::business_report::inspect(
-                &openmt2001::business_report::Inputs {
+            report: crate::business_report::inspect(
+                &crate::business_report::Inputs {
                     business,
                     building: row,
                     category: &city.categories[target.category],
@@ -320,7 +320,7 @@ impl Session<'_> {
         &mut self,
         building: usize,
         action: Action,
-        image: &openmt2001::pe::PeImage<'_>,
+        image: &crate::pe::PeImage<'_>,
         network: [bool; 2],
         mut presentation: impl FnMut(Call) -> Result<(), String>,
     ) -> Result<bool, String> {
@@ -344,7 +344,7 @@ impl Session<'_> {
                             &gates,
                             kind as u32,
                             &self.world.catalog.info,
-                            openmt2001::business_conversion::fits(row, info)?,
+                            crate::business_conversion::fits(row, info)?,
                         )?
                     {
                         candidate = true;
@@ -382,27 +382,27 @@ impl Session<'_> {
         business_controls::activate(action, &mut world, |call, _| {
             let command = match call {
                 Call::Sale { business } => Some(live_commands::Command::SellBusiness(
-                    openmt2001::business_sale::Command {
+                    crate::business_sale::Command {
                         business,
                         player: owner.wrapping_sub(1),
                     },
                 )),
                 Call::Takeover { building } => Some(live_commands::Command::Takeover(
-                    openmt2001::business_takeover::Command { building },
+                    crate::business_takeover::Command { building },
                 )),
                 Call::Demolish {
                     category,
                     building,
                     amount,
                 } => Some(live_commands::Command::Demolish(
-                    openmt2001::demolition::Command {
+                    crate::demolition::Command {
                         category: category as i8,
                         building: building as u16,
                         amount,
                     },
                 )),
                 Call::Convert { kind, building } => Some(live_commands::Command::Convert(
-                    openmt2001::business_conversion::Command {
+                    crate::business_conversion::Command {
                         kind,
                         building,
                         owner: u32::from(owner),
@@ -430,7 +430,7 @@ impl Session<'_> {
         })?;
         for command in commands {
             if let Some(connection) = &mut self.connected {
-                let targets = openmt2001::network::commands::Targets::new(
+                let targets = crate::network::commands::Targets::new(
                     &self.world.city.buildings,
                     &self.world.city.ledgers.businesses,
                     &self.world.city.categories,

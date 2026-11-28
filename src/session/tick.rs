@@ -1,7 +1,7 @@
 //! Retained single-player dispatch. Unbound host/system work is returned
 //! synchronously, so callers must handle it or stop with an explicit error.
 use super::{CommandAssets, Session};
-use openmt2001::{
+use crate::{
     business_binding, economy, hourly,
     level_runtime::{CalendarEvent, HourlyContext},
     level_startup, live_commands, scheduler,
@@ -9,7 +9,7 @@ use openmt2001::{
 
 pub struct Policy {
     pub scheduler: scheduler::Controls,
-    pub calendar: openmt2001::clock::Controls,
+    pub calendar: crate::clock::Controls,
     pub hourly: hourly::Controls,
     pub camera: [f32; 3],
     pub distance_disabled: bool,
@@ -25,7 +25,7 @@ pub struct Policy {
 
 /// Both dispatchers refer to the original retained cue at 0x822964. Preserve
 /// stores made before a failed hourly boundary, just like other live controls.
-pub(crate) fn advance_scheduled_hour(
+pub fn advance_scheduled_hour(
     scheduler: &mut scheduler::Controls,
     context: &mut HourlyContext<'_>,
     advance: impl FnOnce(&mut scheduler::Controls, &mut HourlyContext<'_>) -> Result<(), String>,
@@ -37,41 +37,33 @@ pub(crate) fn advance_scheduled_hour(
 }
 #[derive(Debug)]
 pub enum Event<'a> {
-    ScriptCommands(
-        &'a [(
-            openmt2001::level_script::Command,
-            Vec<openmt2001::lua4::Value>,
-        )],
-    ),
+    ScriptCommands(&'a [(crate::level_script::Command, Vec<crate::lua4::Value>)]),
     Tick(scheduler::Event),
     Calendar(CalendarEvent),
     AccountPosted(economy::AccountPosting),
     Autosave(&'a mut dyn crate::session_save::AutosaveRequest),
     Command(live_commands::Event),
     Pending(live_commands::PendingCall, Option<&'a mut [u8; 0x394]>),
-    Player(openmt2001::player_tick::Event),
-    TransportSound(openmt2001::traffic::RouteSound),
+    Player(crate::player_tick::Event),
+    TransportSound(crate::traffic::RouteSound),
     EraMusic {
         era: u32,
         repeat: bool,
     },
     TransportEnvironment {
-        call: openmt2001::traffic::scene::EnvironmentCall,
+        call: crate::traffic::scene::EnvironmentCall,
         position: [f32; 3],
     },
-    MarketShare(openmt2001::player_share::Call),
+    MarketShare(crate::player_share::Call),
     HumanDialog {
-        call: openmt2001::human_messages::Call,
+        call: crate::human_messages::Call,
         name: Option<[u8; 96]>,
     },
-    Ai(openmt2001::ai_runtime::Call),
+    Ai(crate::ai_runtime::Call),
     Script {
         name: String,
         argument: i32,
-        commands: &'a [(
-            openmt2001::level_script::Command,
-            Vec<openmt2001::lua4::Value>,
-        )],
+        commands: &'a [(crate::level_script::Command, Vec<crate::lua4::Value>)],
     },
 }
 
@@ -82,7 +74,7 @@ impl Session<'_> {
             return Ok(());
         };
         let tick = self.world.clock.timing[0];
-        let targets = openmt2001::network::commands::Targets::new(
+        let targets = crate::network::commands::Targets::new(
             &self.world.city.buildings,
             &self.world.city.ledgers.businesses,
             &self.world.city.categories,
@@ -108,8 +100,7 @@ impl Session<'_> {
         let Some(connection) = &mut self.connected else {
             return Ok(false);
         };
-        let active =
-            openmt2001::network::synchronization::active_humans(&self.roster.manager.players);
+        let active = crate::network::synchronization::active_humans(&self.roster.manager.players);
         connection.synchronization.pump(
             &connection.worker,
             active,
@@ -125,7 +116,7 @@ impl Session<'_> {
         iterations: u32,
         suppressed: bool,
         mut call: impl FnMut(
-            openmt2001::ai_messages::offers::auction::announcement::Call,
+            crate::ai_messages::offers::auction::announcement::Call,
         ) -> Result<u32, String>,
     ) -> Result<(), String> {
         let exists = self.world.city.auction.controller.reference != 0;
@@ -135,7 +126,7 @@ impl Session<'_> {
         }
         for _ in 0..iterations {
             if self.world.city.auction.presentation.visible {
-                openmt2001::ai_messages::offers::auction::announcement::advance(
+                crate::ai_messages::offers::auction::announcement::advance(
                     &mut self.world.city.auction.presentation,
                     exists,
                     paused,
@@ -184,7 +175,7 @@ impl Session<'_> {
                 building_base: 0x591318,
             },
         )?;
-        let mut geometry = openmt2001::building_geometry::BuildingGeometry::new(
+        let mut geometry = crate::building_geometry::BuildingGeometry::new(
             assets.board,
             assets.file,
             std::mem::take(&mut self.models),
@@ -192,7 +183,7 @@ impl Session<'_> {
         let result = (|| {
             for index in 0..geometry.registrar().models.len() {
                 geometry.retain_model(
-                    openmt2001::building_geometry::RegisteredModel::from_definition(
+                    crate::building_geometry::RegisteredModel::from_definition(
                         index as u32 + 1,
                         &geometry.registrar().models[index].definition,
                     )?,
@@ -241,7 +232,7 @@ impl Session<'_> {
         &mut self,
         assets: &CommandAssets<'_, '_>,
         policy: &mut Policy,
-        boundary: impl FnMut(Event<'_>, &openmt2001::clock::Clock) -> Result<u32, String>,
+        boundary: impl FnMut(Event<'_>, &crate::clock::Clock) -> Result<u32, String>,
     ) -> Result<(), String> {
         self.advance_session_with_animations(assets, policy, || Ok(()), boundary)
     }
@@ -250,7 +241,7 @@ impl Session<'_> {
         assets: &CommandAssets<'_, '_>,
         policy: &mut Policy,
         animations: impl FnMut() -> Result<(), String>,
-        mut boundary: impl FnMut(Event<'_>, &openmt2001::clock::Clock) -> Result<u32, String>,
+        mut boundary: impl FnMut(Event<'_>, &crate::clock::Clock) -> Result<u32, String>,
     ) -> Result<(), String> {
         self.pump_connected_commands(policy)?;
         //481718..481736 keeps the level script countdown active in auction
@@ -261,8 +252,8 @@ impl Session<'_> {
         }
         let image = assets.image;
         let board = assets.board;
-        let messages = std::cell::RefCell::new(openmt2001::player_messages::Context {
-            arena: openmt2001::player_messages::Arena {
+        let messages = std::cell::RefCell::new(crate::player_messages::Context {
+            arena: crate::player_messages::Arena {
                 next: self.allocation_next,
             },
             current_player: self.roster.status.current_player,
@@ -284,7 +275,7 @@ impl Session<'_> {
                 building_base: 0x591318,
             },
         )?;
-        let mut geometry = openmt2001::building_geometry::BuildingGeometry::new(
+        let mut geometry = crate::building_geometry::BuildingGeometry::new(
             board,
             assets.file,
             std::mem::take(&mut self.models),
@@ -306,7 +297,7 @@ impl Session<'_> {
         let result = (|| {
             for index in 0..geometry.registrar().models.len() {
                 geometry.retain_model(
-                    openmt2001::building_geometry::RegisteredModel::from_definition(
+                    crate::building_geometry::RegisteredModel::from_definition(
                         index as u32 + 1,
                         &geometry.registrar().models[index].definition,
                     )?,
@@ -318,11 +309,11 @@ impl Session<'_> {
                 hourly: policy.hourly,
                 utilities: &mut utilities,
             };
-            let routes = openmt2001::traffic::road::routes::RoadRoutes::from_bytes(
+            let routes = crate::traffic::road::routes::RoadRoutes::from_bytes(
                 &self.road_routes,
                 self.world.road_network.road_segment_count as u32,
             )?;
-            let mut dispatch = openmt2001::level_runtime::Dispatch {
+            let mut dispatch = crate::level_runtime::Dispatch {
                 population: &mut self.population,
                 roads: &mut self.road_traffic,
                 routes: &routes,
@@ -336,11 +327,11 @@ impl Session<'_> {
                 animations,
                 |event, clock, city, scheduler, dispatch| {
                     let event = match event {
-                        openmt2001::level_runtime::Event::AccountPosted(posting) => {
+                        crate::level_runtime::Event::AccountPosted(posting) => {
                             boundary(Event::AccountPosted(posting), clock)?;
                             return Ok(0);
                         }
-                        openmt2001::level_runtime::Event::Scheduled(event) => event,
+                        crate::level_runtime::Event::Scheduled(event) => event,
                     };
                     // Original4ed6f0 is mov al,1;ret.4ed6e0 selects PC64;
                     // our shared numeric routines model that precision explicitly.
@@ -356,7 +347,7 @@ impl Session<'_> {
                         return Ok(0);
                     }
                     if matches!(event, scheduler::Event::Helper(0x4bac90)) && self.connected.is_some() {
-                        openmt2001::network::commands::pause_at_limit(&mut city.pause,&mut self.hooks.timers)?;
+                        crate::network::commands::pause_at_limit(&mut city.pause,&mut self.hooks.timers)?;
                         return Ok(0);
                     }
                     match event {
@@ -376,20 +367,20 @@ impl Session<'_> {
                                             boundary(Event::AccountPosted(posting), clock)?;
                                         }
                                         //48dbf0 returns the retained level object's+85c byte.
-                                        CalendarEvent::Hourly(hourly::Event::Query) | CalendarEvent::Clock(openmt2001::clock::Event::RolloverQuery) => {
+                                        CalendarEvent::Hourly(hourly::Event::Query) | CalendarEvent::Clock(crate::clock::Event::RolloverQuery) => {
                                             return Ok(self.tutorial_state != 0);
                                         }
-                                        CalendarEvent::Clock(openmt2001::clock::Event::Era(requested)) => {
-                                            openmt2001::era::advance(requested as i32,clock,|call,clock|{
+                                        CalendarEvent::Clock(crate::clock::Event::Era(requested)) => {
+                                            crate::era::advance(requested as i32,clock,|call,clock|{
                                                 match call {
-                                                    openmt2001::era::Call::Parameters(year)=>{
+                                                    crate::era::Call::Parameters(year)=>{
                                                         let index=year.wrapping_sub(1930)/10;
                                                         // All eight original era files contain only TexturePrestigeRanking
                                                         // and begin with RESET; these are their native-verified parsed banks.
                                                         self.building_styles=self.era_styles.get(index as usize).ok_or("era parameter year leaves original assets")?.clone();
                                                     },
-                                                    openmt2001::era::Call::Music{era,repeat}=>{boundary(Event::EraMusic{era,repeat},clock)?;},
-                                                    openmt2001::era::Call::Script{name,delay,argument}=>{
+                                                    crate::era::Call::Music{era,repeat}=>{boundary(Event::EraMusic{era,repeat},clock)?;},
+                                                    crate::era::Call::Script{name,delay,argument}=>{
                                                         let raw=image.at(name,32)?;let n=raw.iter().position(|b|*b==0).ok_or("era event name unterminated")?;
                                                         let name=std::str::from_utf8(&raw[..n]).map_err(|e|e.to_string())?;
                                                         script_context.update_clock(clock);
@@ -404,7 +395,7 @@ impl Session<'_> {
                                                 }Ok(())
                                             })?;
                                         }
-                                        CalendarEvent::Clock(openmt2001::clock::Event::Autosave) => {
+                                        CalendarEvent::Clock(crate::clock::Event::Autosave) => {
                                             let projection=crate::session_save::SaveProjection {
                                                 live_commands: &self.live_commands,
                                                 city: city,
@@ -442,8 +433,8 @@ impl Session<'_> {
                                             let mut request=crate::session_save::SaveRequest {projection:Some(projection),image};
                                             boundary(Event::Autosave(&mut request),clock)?;
                                         }
-                                        CalendarEvent::Clock(openmt2001::clock::Event::Rollover) => {
-                                            openmt2001::ai_daily::advance(&mut self.roster.manager.players,&mut self.roster.ai_ownership)?;
+                                        CalendarEvent::Clock(crate::clock::Event::Rollover) => {
+                                            crate::ai_daily::advance(&mut self.roster.manager.players,&mut self.roster.ai_ownership)?;
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Script {
                                             name,
@@ -506,7 +497,7 @@ impl Session<'_> {
                                                 &live_commands::Context{image,clock,accounting_enabled:true,notifications:city.ai_demand.ready!=0,
                                                     tutorial_state:self.tutorial_state,network_enabled:scheduler.network_enabled,network_override:scheduler.network_override,
                                                     utility_factor:1.},|event|{
-                                                        if matches!(event,live_commands::Event::LeaseNotification(openmt2001::category::Call{address:0x43be20,..}))&&!scheduler.network_enabled{scheduler.iterations=1;}
+                                                        if matches!(event,live_commands::Event::LeaseNotification(crate::category::Call{address:0x43be20,..}))&&!scheduler.network_enabled{scheduler.iterations=1;}
                                                         boundary(Event::Command(event),clock).map(|_|())
                                                     });
                                             let refresh=population.refresh_city(city,board);
@@ -517,7 +508,7 @@ impl Session<'_> {
                                             self.roster.update_cash_status(
                                                 city,
                                                 clock.hour(),
-                                                &mut openmt2001::player_manager::CashControls {
+                                                &mut crate::player_manager::CashControls {
                                                     network_enabled: scheduler.network_enabled,
                                                     network_override: scheduler.network_override,
                                                 },
@@ -536,7 +527,7 @@ impl Session<'_> {
                                             {
                                                 let mut card_request=None;
                                                 messages.borrow_mut().produce(command,&mut self.roster.manager,|route,packet| {
-                                                    if route==openmt2001::player_messages::Route::Broadcast && matches!(u32::from_le_bytes(packet[4..8].try_into().unwrap()),0x31|0x32|0x34) {
+                                                    if route==crate::player_messages::Route::Broadcast && matches!(u32::from_le_bytes(packet[4..8].try_into().unwrap()),0x31|0x32|0x34) {
                                                         card_request=Some(*packet);Ok(())
                                                     } else {boundary(Event::Command(live_commands::Event::PlayerMessageRoute{route,packet:*packet}),clock).map(|_|())}
                                                 })?;
@@ -550,7 +541,7 @@ impl Session<'_> {
                                             }
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x4899e0)) => {
-                                            openmt2001::player_share::observer::before(
+                                            crate::player_share::observer::before(
                                                 &self.roster.manager, city, self.roster.status.current_player,
                                                 clock.calendar[4], policy.market_share_prior,
                                                 [scheduler.network_enabled, scheduler.network_override]);
@@ -562,12 +553,12 @@ impl Session<'_> {
                                                 [scheduler.network_enabled, scheduler.network_override],
                                                 policy.market_share_prior,
                                                 |call, manager| {
-                                                    use openmt2001::player_share::Call;
+                                                    use crate::player_share::Call;
                                                     match call {
                                                         Call::CommandProducer {slot} | Call::RemovePlayer {slot} => {
                                                             let event = if matches!(call,Call::CommandProducer{..}) {
-                                                                openmt2001::objective_tick::Event::Outcome{winner:slot as i32,reason:1}
-                                                            } else {openmt2001::objective_tick::Event::RemovePlayer(slot as usize)};
+                                                                crate::objective_tick::Event::Outcome{winner:slot as i32,reason:1}
+                                                            } else {crate::objective_tick::Event::RemovePlayer(slot as usize)};
                                                             live_commands::queue_outcome(event, &mut queue.borrow_mut(), clock.timing[0], manager, &mut messages.borrow_mut(),
                                                                 |call| boundary.borrow_mut()(Event::Command(call), clock).map(|_|()))?;
                                                             Ok(Default::default())
@@ -587,14 +578,14 @@ impl Session<'_> {
                                                 |event, _, manager, _| {
                                                     live_commands::queue_outcome(event, &mut queue.borrow_mut(), clock.timing[0], manager, &mut messages.borrow_mut(),
                                                         |call| boundary.borrow_mut()(Event::Command(call), clock).map(|_|()))?;
-                                                    Ok(openmt2001::x87::Sum::from_i32(0))
+                                                    Ok(crate::x87::Sum::from_i32(0))
                                                 },
                                             )?;
-                                            openmt2001::player_share::observer::after(
+                                            crate::player_share::observer::after(
                                                 &self.roster.manager, city);
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x470b80)) => {
-                                            use openmt2001::event_cards;
+                                            use crate::event_cards;
                                             let word=|b:&[u8],at:usize|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
                                             let players:Vec<_>=self.roster.manager.players.iter().map(|p|p.reference).collect();
                                             let admitted=word(&self.roster.manager.bytes,12)!=0;
@@ -629,10 +620,10 @@ impl Session<'_> {
                                                                 // Original48cab0 admission and sender context;
                                                                 // broadcast34 mutates the deck synchronously.
                                                                 if !admitted {return Ok(());}
-                                                                let packet=openmt2001::player_messages::descriptor(args,word(&player.bytes,12) as i32,policy.player_message_prior);
+                                                                let packet=crate::player_messages::descriptor(args,word(&player.bytes,12) as i32,policy.player_message_prior);
                                                                 if scheduler.network_enabled&&!scheduler.network_override {
                                                                     boundary(Event::Command(live_commands::Event::PlayerMessageRoute {
-                                                                        route:openmt2001::player_messages::Route::NetworkSend,packet,
+                                                                        route:crate::player_messages::Route::NetworkSend,packet,
                                                                     }),clock).map(|_|())
                                                                 }else{self.event_cards.release(args[3] as u32)}
                                                             },
@@ -652,7 +643,7 @@ impl Session<'_> {
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x44f2a0)) => {
                                             self.transport.advance_hour(
-                                                &mut openmt2001::traffic::HourlyInputs {
+                                                &mut crate::traffic::HourlyInputs {
                                                     era: clock.calendar[2],
                                                     hour: clock.hour(),
                                                     population: city.ledgers.residents.active_count
@@ -688,10 +679,10 @@ impl Session<'_> {
                                 |event| {
                                     boundary(
                                         match event {
-                                            openmt2001::traffic::scene::LogicEvent::Environment {
+                                            crate::traffic::scene::LogicEvent::Environment {
                                                 call, position,
                                             } => Event::TransportEnvironment { call, position },
-                                            openmt2001::traffic::scene::LogicEvent::Sound(call) => {
+                                            crate::traffic::scene::LogicEvent::Sound(call) => {
                                                 Event::TransportSound(call)
                                             }
                                         },
@@ -735,18 +726,18 @@ impl Session<'_> {
                                     self.hooks.forced_auction_allowed=false;
                                     let result=result?;
                                     let mut commands=self.hooks.commands[first..].iter().filter_map(|(command,_)|
-                                        if let openmt2001::level_script::Command::ForcedAuction{producer,participant,amount}=command{
+                                        if let crate::level_script::Command::ForcedAuction{producer,participant,amount}=command{
                                             Some((*producer,*participant,*amount))
                                         }else{None});
                                     if let Some((producer,participant,amount))=commands.next(){
                                         if !allowed || commands.next().is_some(){return Err("forced auction is not one audited terminal call".into());}
                                         if city.auction.controller.reference==0{return Err("forced auction has no active controller".into());}
                                         if scheduler.network_enabled && !scheduler.network_override{return Err("forced auction network routing unsupported".into());}
-                                        let action=openmt2001::ai_messages::offers::auction::forced_action_descriptor(
+                                        let action=crate::ai_messages::offers::auction::forced_action_descriptor(
                                             producer,participant,amount,(&city.auction.controller.record[..128]).try_into().unwrap(),[0;32])?;
                                         let mut descriptor=[0;52];descriptor[..32].copy_from_slice(&action);
                                         let mut utilities=std::mem::replace(&mut self.hooks.utilities,
-                                            openmt2001::economy::Utilities::new([0;4]));
+                                            crate::economy::Utilities::new([0;4]));
                                         let applied={
                                         let hooks=std::cell::RefCell::new(&mut self.hooks);
                                         let mut bridge=super::tutorial_announcement::PartsBridge{
@@ -802,7 +793,7 @@ impl Session<'_> {
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
                                 if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)|live_commands::Command::Convert(_)|live_commands::Command::SellBusiness(_)|live_commands::Command::Takeover(_)|live_commands::Command::Terms(_)) {
-                                    return Err(openmt2001::network::Error::Unsupported.to_string());
+                                    return Err(crate::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
                                     && matches!(u32::from_le_bytes(descriptor[4..8].try_into().unwrap()),0x1e..=0x20){
@@ -812,9 +803,9 @@ impl Session<'_> {
                                         return runtime.auction_phase_with_tutorial(descriptor,clock,[scheduler.network_enabled,scheduler.network_override],
                                             Some((self.tutorial_state,&mut geometry,&mut announcement)),|event,clock|{
                                             if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event {
-                                                enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay}).map(|_|0)
+                                                enqueue(live_commands::Command::Auction{descriptor},crate::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay}).map(|_|0)
                                             }else{
-                                                if matches!(event,live_commands::Event::AuctionActivation(openmt2001::ai_messages::offers::auction::activation::Call::NormalSpeed)){scheduler.iterations=1;}
+                                                if matches!(event,live_commands::Event::AuctionActivation(crate::ai_messages::offers::auction::activation::Call::NormalSpeed)){scheduler.iterations=1;}
                                                 boundary(Event::Command(event),clock)
                                             }
                                         });
@@ -834,16 +825,16 @@ impl Session<'_> {
                                     scripts:&mut self.scripts,hooks:&hooks,context:&mut script_context};
                                 let result = runtime.apply_with_announcement(command, &mut command_context, &mut geometry, Some(&mut announcement), |event,clock| {
                                     if let live_commands::Event::AuctionQueue{descriptor,additional_delay}=event {
-                                        enqueue(live_commands::Command::Auction{descriptor},openmt2001::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
+                                        enqueue(live_commands::Command::Auction{descriptor},crate::local_commands::Schedule::Local{delayed:descriptor[16]!=0,additional:additional_delay})
                                     }else if let live_commands::Event::CategoryReadyAt{category,normal_tick}=event{
-                                        enqueue(live_commands::Command::CategoryReady{category},openmt2001::local_commands::Schedule::Normal{due:normal_tick})
-                                    }else if let live_commands::Event::Outcome(openmt2001::outcome_notice::Call::Timers(timers))=event {
+                                        enqueue(live_commands::Command::CategoryReady{category},crate::local_commands::Schedule::Normal{due:normal_tick})
+                                    }else if let live_commands::Event::Outcome(crate::outcome_notice::Call::Timers(timers))=event {
                                         timers.apply(&mut hooks.borrow_mut().timers);Ok(())
-                                    }else if matches!(event,live_commands::Event::Elimination(openmt2001::player_elimination::Call::FinishLocal)) {
-                                        openmt2001::player_elimination::finish_local(self.network_command_timer,&mut hooks.borrow_mut().timers)?;
+                                    }else if matches!(event,live_commands::Event::Elimination(crate::player_elimination::Call::FinishLocal)) {
+                                        crate::player_elimination::finish_local(self.network_command_timer,&mut hooks.borrow_mut().timers)?;
                                         boundary(Event::Command(event),clock).map(|_|())
                                     }else{
-                                        if matches!(event,live_commands::Event::Outcome(openmt2001::outcome_notice::Call::Show)) && !scheduler.network_enabled {scheduler.iterations=1;}
+                                        if matches!(event,live_commands::Event::Outcome(crate::outcome_notice::Call::Show)) && !scheduler.network_enabled {scheduler.iterations=1;}
                                         boundary(Event::Command(event), clock).map(|_| ())
                                     }
                                 });
@@ -863,7 +854,7 @@ impl Session<'_> {
                             }
                             .advance_with_submission(
                                 clock.timing[0],
-                                &mut openmt2001::pending_world::Controls {
+                                &mut crate::pending_world::Controls {
                                     network_enabled: scheduler.network_enabled,
                                     network_override: self.connected.as_ref().map_or(scheduler.network_override, |c| c.commands.is_host()),
                                     effect_model_reference: policy.effect_model,
@@ -871,7 +862,7 @@ impl Session<'_> {
                                 &mut geometry,
                                 |event, mut record| {
                                     match event {
-                                        live_commands::PendingCall::World(openmt2001::pending_world::Event::CreateEffect { arguments }) => {
+                                        live_commands::PendingCall::World(crate::pending_world::Event::CreateEffect { arguments }) => {
                                             return self.demolition_effects.create(arguments);
                                         }
                                         live_commands::PendingCall::ReleaseEffect { index, .. } => {
@@ -909,7 +900,7 @@ impl Session<'_> {
                                     let live_commands::Command::Open(command) = command else {
                                         return Err("pending completion did not produce a business open command".into());
                                     };
-                                    let targets = openmt2001::network::commands::Targets::new(&city.buildings, &city.ledgers.businesses, &city.categories);
+                                    let targets = crate::network::commands::Targets::new(&city.buildings, &city.ledgers.businesses, &city.categories);
                                     connection.commands.submit_completion(&connection.worker, &command, &mut self.live_commands, &mut city.categories,
                                         targets, clock.timing[0])?;
                                 }
@@ -923,37 +914,37 @@ impl Session<'_> {
                             }
                         }
                         scheduler::Event::Helper(0x477f20) => {
-                            openmt2001::ai_events::poll_players(&mut self.roster.manager.players,&mut self.roster.profiles,clock.timing[3] as i32)?;
+                            crate::ai_events::poll_players(&mut self.roster.manager.players,&mut self.roster.profiles,clock.timing[3] as i32)?;
                         }
                         scheduler::Event::Helper(0x48cea0) => {
                             self.roster.publish_accounts(city)?;
-                            let mut controls=openmt2001::player_tick::Controls {
+                            let mut controls=crate::player_tick::Controls {
                                 network_enabled:scheduler.network_enabled,
                                 network_override:scheduler.network_override,
                                 current_player:self.roster.status.current_player,
                             };
                             if let Some(connection) = &self.connected { connection.commands.configure_players(&mut controls); }
-                            let result=openmt2001::player_tick::advance(
+                            let result=crate::player_tick::advance(
                                 &mut self.roster.manager,&mut controls,image,
                                 |event,manager,controls|match event {
-                                    openmt2001::player_tick::Event::Controller{player,target:0x48c140}=>{
-                                        let actors:Vec<_>=manager.players.iter().map(|p|openmt2001::human_messages::Actor{reference:p.reference,character:u32::from_le_bytes(p.bytes[0x150..0x154].try_into().unwrap())}).collect();
+                                    crate::player_tick::Event::Controller{player,target:0x48c140}=>{
+                                        let actors:Vec<_>=manager.players.iter().map(|p|crate::human_messages::Actor{reference:p.reference,character:u32::from_le_bytes(p.bytes[0x150..0x154].try_into().unwrap())}).collect();
                                         let names:Vec<(u32,[u8;96])>=manager.players.iter().map(|p|(p.reference+0x158,p.bytes[0x158..0x1b8].try_into().unwrap())).collect();
                                         let player=manager.players.iter_mut().find(|p|p.reference==player).ok_or("human player unresolved")?;
-                                        openmt2001::player_tick::advance_human(player,|player|{
-                                            let world=openmt2001::human_messages::World{image,actors:&actors,categories:&city.categories,buildings:&city.buildings,businesses:&city.ledgers.businesses,catalog:city.catalog.info.rows()};
-                                            openmt2001::human_messages::consume(player,&world,|call,_|{
+                                        crate::player_tick::advance_human(player,|player|{
+                                            let world=crate::human_messages::World{image,actors:&actors,categories:&city.categories,buildings:&city.buildings,businesses:&city.ledgers.businesses,catalog:city.catalog.info.rows()};
+                                            crate::human_messages::consume(player,&world,|call,_|{
                                                 // Normal prompt open429b50 calls481910(0). The
                                                 // original speed setter changes only offline games.
-                                                if matches!(call,openmt2001::human_messages::Call::Ui{address:0x43be20,..})&&!scheduler.network_enabled{scheduler.iterations=1;}
-                                                let name=if let openmt2001::human_messages::Call::Ui{address:0x440d40,arguments,..}=call{
+                                                if matches!(call,crate::human_messages::Call::Ui{address:0x43be20,..})&&!scheduler.network_enabled{scheduler.iterations=1;}
+                                                let name=if let crate::human_messages::Call::Ui{address:0x440d40,arguments,..}=call{
                                                     Some(names.iter().find(|(reference,_)|*reference==arguments[1]).ok_or("human format name pointer unresolved")?.1)
                                                 }else{None};
                                                 boundary(Event::HumanDialog{call,name},clock).map(|_|())
                                             })
                                         })
                                     }
-                                    openmt2001::player_tick::Event::Controller{player,target:0x466ca0}=>{
+                                    crate::player_tick::Event::Controller{player,target:0x466ca0}=>{
                                         let slot=manager.players.iter().position(|p|p.reference==player).ok_or("normalAI player unresolved")?;
                                         // Auction actions below change controller/UI state only;
                                         // money transactions enter the ordered command queue.
@@ -962,13 +953,13 @@ impl Session<'_> {
                                         let time_cash=city.ledgers.players.get(time_slot)
                                             .ok_or("AI auction Time current account missing")?.cash;
                                         let mut message_context=messages.borrow_mut();
-                                        let mut world=openmt2001::ai_runtime::World{
+                                        let mut world=crate::ai_runtime::World{
                                             building_parameters:city.building_parameters,
                                             neighbor_cache:&mut city.ai_neighbors,
                                             ownership_refresh_counter:&mut city.ownership_refresh_counter,
                                             utility_enabled:context.utilities.enabled,
                                             liquidation_targets:&mut self.roster.liquidation_targets,
-                                            colors:Some(openmt2001::ai_messages::offers::execution::Colors{
+                                            colors:Some(crate::ai_messages::offers::execution::Colors{
                                                 banks:[&self.building_styles.qualities[0],&self.building_styles.qualities[1],&self.building_styles.qualities[2]],
                                                 players:&self.player_style_indices,
                                             }),
@@ -987,11 +978,11 @@ impl Session<'_> {
                                             products:&city.catalog.products,
                                             commodities:&city.commodities.rows,
                                             category_footprints:&mut city.category_footprints,
-                                            strategy_time:Some(openmt2001::ai_selection::Time{hour:clock.hour() as i32,year:clock.calendar[2] as i32}),
+                                            strategy_time:Some(crate::ai_selection::Time{hour:clock.hour() as i32,year:clock.calendar[2] as i32}),
                                             ownership_tick:Some(clock.timing[1]),
                                             strategy_mode:city.objective.kind,
                                             business_counts:Some(&mut dispatch.population.business_counts),
-                                            message_routing:Some(openmt2001::player_messages::Routing {
+                                            message_routing:Some(crate::player_messages::Routing {
                                                 current_player:message_context.current_player,
                                                 network:message_context.network,prior:message_context.prior,
                                             }),
@@ -999,96 +990,96 @@ impl Session<'_> {
                                             ownership:&mut self.roster.ai_ownership,
                                             allocation_next:&mut message_context.arena.next,
                                             global_reset:&mut city.ai_demand.ready,
-                                            income:openmt2001::ai_finance::IncomeTotals::from_economy(&dispatch.population.properties,context.utilities),
+                                            income:crate::ai_finance::IncomeTotals::from_economy(&dispatch.population.properties,context.utilities),
                                             auction:city.auction.message_view(),auction_blocked:Some(city.auction.controller.reference!=0 && city.auction.controller.record[0x7d]!=0),auction_guard:city.auction.guard_view(),offer_auction:city.auction.offer_view(),
                                             auction_state:Some(&mut city.auction.controller),
                                             cash_statuses:&city.objective.cash_statuses,
                                         };
-                                        openmt2001::ai_runtime::advance(slot,manager,&mut self.roster.profiles,
-                                            &mut openmt2001::ai_tick::Controls{normal_tick:clock.timing[0],day_tick:clock.timing[3],event_gate:policy.ai_event_gate},
+                                        crate::ai_runtime::advance(slot,manager,&mut self.roster.profiles,
+                                            &mut crate::ai_tick::Controls{normal_tick:clock.timing[0],day_tick:clock.timing[3],event_gate:policy.ai_event_gate},
                                             &mut self.roster.scripts,image,&mut world,|call,player,profiles,world|{
-                                                if let openmt2001::ai_runtime::Call::ConstructionCommand{descriptor}=call {
-                                                    let command=openmt2001::construction::Command::from_packet(&descriptor)?;
+                                                if let crate::ai_runtime::Call::ConstructionCommand{descriptor}=call {
+                                                    let command=crate::construction::Command::from_packet(&descriptor)?;
                                                     if let Some(connection) = &mut self.connected {
-                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        let targets = crate::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker,live_commands::Command::Build(command),
                                                             &mut self.live_commands,world.categories, targets,clock.timing[0])?;
                                                     } else {
                                                         self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
                                                             |_|Err("AI construction delay wrapped into immediate execution".into()))?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48ae60,arguments,count:1})=call {
+                                                if let crate::ai_runtime::Call::OfferExecution(crate::ai_messages::offers::execution::Call::Producer{address:0x48ae60,arguments,count:1})=call {
                                                     let routing=world.message_routing.ok_or("AI sale command routing unresolved")?;
-                                                    let command=live_commands::Command::SellBusiness(openmt2001::business_sale::Command{business:arguments[0],player:player.bytes[0x1bc]});
+                                                    let command=live_commands::Command::SellBusiness(crate::business_sale::Command{business:arguments[0],player:player.bytes[0x1bc]});
                                                     if let Some(connection) = &mut self.connected {
-                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        let targets = crate::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
                                                     } else {
                                                         if routing.network[0]&&!routing.network[1]{return Err("AI sale command requires network transport".into());}
                                                         self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI sale delay wrapped into immediate execution".into()))?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:address @ (0x48ad20|0x48ad80),arguments,count:3})=call {
+                                                if let crate::ai_runtime::Call::OfferExecution(crate::ai_messages::offers::execution::Call::Producer{address:address @ (0x48ad20|0x48ad80),arguments,count:3})=call {
                                                     let routing=world.message_routing.ok_or("AI business command routing unresolved")?;
                                                     let command=if address==0x48ad20 {
-                                                        live_commands::Command::Demolish(openmt2001::demolition::Command{category:arguments[0] as i8,building:arguments[1] as u16,amount:f32::from_bits(arguments[2])})
+                                                        live_commands::Command::Demolish(crate::demolition::Command{category:arguments[0] as i8,building:arguments[1] as u16,amount:f32::from_bits(arguments[2])})
                                                     }else{
-                                                        live_commands::Command::Open(openmt2001::business_open::Command::from_completion(player,arguments[0],arguments[1],arguments[2] as u8)?)
+                                                        live_commands::Command::Open(crate::business_open::Command::from_completion(player,arguments[0],arguments[1],arguments[2] as u8)?)
                                                     };
                                                     if let Some(connection) = &mut self.connected {
-                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        let targets = crate::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories,
                                                             targets, clock.timing[0])?;
                                                     } else {
                                                         if routing.network[0]&&!routing.network[1]{return Err("AI business command requires network transport".into());}
                                                         self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI business command delay wrapped into immediate execution".into()))?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::AuctionCommand{descriptor,additional_delay}=call {
+                                                if let crate::ai_runtime::Call::AuctionCommand{descriptor,additional_delay}=call {
                                                     self.live_commands.submit_with_delay(live_commands::Command::Auction{descriptor},clock.timing[0],descriptor[16]!=0,additional_delay,
                                                         |_|Err("AI auction command delay wrapped into immediate execution".into()))?;
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::Management(openmt2001::ai_dispatch::Event::Helper(0x4683f0)) = call {
-                                                    openmt2001::ai_maintenance::late_pricing(player,world.businesses,|command,businesses|{
+                                                if let crate::ai_runtime::Call::Management(crate::ai_dispatch::Event::Helper(0x4683f0)) = call {
+                                                    crate::ai_maintenance::late_pricing(player,world.businesses,|command,businesses|{
                                                         if let Some(connection) = &mut self.connected {
-                                                            let targets = openmt2001::network::commands::Targets::new(world.buildings, businesses, world.categories);
+                                                            let targets = crate::network::commands::Targets::new(world.buildings, businesses, world.categories);
                                                             connection.commands.submit(&connection.worker, live_commands::Command::Terms(command), &mut self.live_commands, world.categories, targets, clock.timing[0])
                                                         } else {
                                                             self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|Err("AI late pricing at wrapped clock requires synchronous housing context".into()))
                                                         }
                                                     })?;
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48adf0,arguments,count:2})=call {
+                                                if let crate::ai_runtime::Call::OfferExecution(crate::ai_messages::offers::execution::Call::Producer{address:0x48adf0,arguments,count:2})=call {
                                                     let routing=world.message_routing.ok_or("AI conversion command routing unresolved")?;
-                                                    let command=live_commands::Command::Convert(openmt2001::business_conversion::Command{kind:arguments[0],building:arguments[1],owner:u32::from(player.bytes[0x1bc])+1});
+                                                    let command=live_commands::Command::Convert(crate::business_conversion::Command{kind:arguments[0],building:arguments[1],owner:u32::from(player.bytes[0x1bc])+1});
                                                     if let Some(connection) = &mut self.connected {
-                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        let targets = crate::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
                                                     } else {
                                                         if routing.network[0]&&!routing.network[1]{return Err("AI conversion command requires network transport".into());}
                                                         self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI conversion delay wrapped into immediate execution".into()))?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::TakeoverCommand{building}=call {
+                                                if let crate::ai_runtime::Call::TakeoverCommand{building}=call {
                                                     let routing=world.message_routing.ok_or("AI takeover command routing unresolved")?;
-                                                    let command=live_commands::Command::Takeover(openmt2001::business_takeover::Command{building});
+                                                    let command=live_commands::Command::Takeover(crate::business_takeover::Command{building});
                                                     if let Some(connection) = &mut self.connected {
-                                                        let targets = openmt2001::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
+                                                        let targets = crate::network::commands::Targets::new(world.buildings, world.businesses, world.categories);
                                                         connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories, targets, clock.timing[0])?;
                                                     } else {
                                                         if routing.network[0]&&!routing.network[1]{return Err("AI takeover command requires network transport".into());}
                                                         self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI takeover delay wrapped into immediate execution".into()))?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                if let openmt2001::ai_runtime::Call::Management(event @ (openmt2001::ai_dispatch::Event::BusinessSettings | openmt2001::ai_dispatch::Event::RentSettings)) = call {
+                                                if let crate::ai_runtime::Call::Management(event @ (crate::ai_dispatch::Event::BusinessSettings | crate::ai_dispatch::Event::RentSettings)) = call {
                                                     let ownership = world.ownership.state(player)?;
                                                     let buildings: Vec<[u8;64]> = world.buildings.iter().map(|r| r[..64].try_into().unwrap()).collect();
                                                     let settings = economy::BusinessDaySettings::from_catalog(&city.catalog.info);
@@ -1100,18 +1091,18 @@ impl Session<'_> {
                                                         unit_prices:&dispatch.population.settings.unit_costs,
                                                         settings:&settings,
                                                     };
-                                                    let submit = if event == openmt2001::ai_dispatch::Event::BusinessSettings {
-                                                        openmt2001::ai_business::adjust_owned(&ownership.lists[0],world.businesses,&inputs)?;
+                                                    let submit = if event == crate::ai_dispatch::Event::BusinessSettings {
+                                                        crate::ai_business::adjust_owned(&ownership.lists[0],world.businesses,&inputs)?;
                                                         true
                                                     }else{
                                                         let profile=profiles.get(u32::from_le_bytes(player.bytes[0x150..0x154].try_into().unwrap()) as usize).ok_or("AI rent profile missing")?;
-                                                        let rent=openmt2001::ai_rent::Inputs::from_profile(&inputs,context.utilities,profile,u32::from_le_bytes(player.bytes[0x13f4..0x13f8].try_into().unwrap()) as i32)?;
-                                                        openmt2001::ai_rent::adjust_owned(&ownership.lists[0],world.businesses,&rent)?
+                                                        let rent=crate::ai_rent::Inputs::from_profile(&inputs,context.utilities,profile,u32::from_le_bytes(player.bytes[0x13f4..0x13f8].try_into().unwrap()) as i32)?;
+                                                        crate::ai_rent::adjust_owned(&ownership.lists[0],world.businesses,&rent)?
                                                     };
                                                     if submit {
                                                         economy::submit_business_terms(world.businesses,i32::from(player.bytes[0x1bc]),|command,businesses|{
                                                             if let Some(connection) = &mut self.connected {
-                                                                let targets = openmt2001::network::commands::Targets::new(world.buildings, businesses, world.categories);
+                                                                let targets = crate::network::commands::Targets::new(world.buildings, businesses, world.categories);
                                                                 connection.commands.submit(&connection.worker, live_commands::Command::Terms(command), &mut self.live_commands, world.categories, targets, clock.timing[0])
                                                             } else {
                                                                 self.live_commands.submit(live_commands::Command::Terms(command),clock.timing[0],true,|_|{
@@ -1120,12 +1111,12 @@ impl Session<'_> {
                                                             }
                                                         })?;
                                                     }
-                                                    return Ok(openmt2001::ai_messages::Reply::default());
+                                                    return Ok(crate::ai_messages::Reply::default());
                                                 }
-                                                let event=if let openmt2001::ai_runtime::Call::AuctionAction(action)=call {
+                                                let event=if let crate::ai_runtime::Call::AuctionAction(action)=call {
                                                     Event::Command(live_commands::auction_action_event(action,time_cash))
                                                 } else { Event::Ai(call) };
-                                                boundary(event,clock).map(|value|openmt2001::ai_messages::Reply{value,offer:0})
+                                                boundary(event,clock).map(|value|crate::ai_messages::Reply{value,offer:0})
                                             })
                                     }
                                     other=>boundary(Event::Player(other),clock).map(|_|()),
@@ -1143,7 +1134,7 @@ impl Session<'_> {
                                 city,
                                 image,
                                 0x591318,
-                                &mut openmt2001::objective_tick::Controls {
+                                &mut crate::objective_tick::Controls {
                                     network_enabled: scheduler.network_enabled,
                                     network_override: scheduler.network_override,
                                     mode,
