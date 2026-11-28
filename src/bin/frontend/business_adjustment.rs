@@ -223,9 +223,8 @@ fn apply_presentation(disabled: bool, hover: bool, pressed: bool) -> (usize, u32
     }
 }
 // Submitted terms can await the delayed command with dirty already cleared.
-// A retail edit that restores all applied terms has nothing left to submit.
 fn pending_terms(record: &[u8; 544]) -> bool {
-    record[0x208] != 0 && (record[..4] != [0; 4] || record[0x1b8..0x1dc] != record[0x1e0..0x204])
+    record[0x208] != 0
 }
 fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
     openmt2001::economy::stock_capacity(
@@ -235,22 +234,21 @@ fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
     )
 }
 fn retail_totals(rows: &[Row], capacity: i32) -> [String; 4] {
-    let mut totals = [0i32; 4];
-    for row in rows {
-        for (total, value) in totals.iter_mut().zip([
-            i32::from(row.yesterday),
-            i32::from(row.wanted),
-            i32::from(row.stock),
-            i32::from(row.today),
-        ]) {
-            *total += value;
-        }
+    let (mut yesterday, mut today) = (0f32, 0f32);
+    let (mut wanted, mut stock) = (0i32, 0i32);
+    // 4169f0 visits products from last to first, storing each sales sum
+    // as f32 before formatting the default columns as integer counts.
+    for row in rows.iter().rev() {
+        yesterday += f32::from(row.yesterday);
+        today += f32::from(row.today);
+        wanted += i32::from(row.wanted);
+        stock += i32::from(row.stock);
     }
     [
-        totals[0].to_string(),
-        format!("{}/{capacity}", totals[1]),
-        format!("{}/{capacity}", totals[2]),
-        totals[3].to_string(),
+        (yesterday as i32).to_string(),
+        format!("{wanted}/{capacity}"),
+        format!("{stock}/{capacity}"),
+        (today as i32).to_string(),
     ]
 }
 // 416bf9/416d61/41702e/4172c3/4173b6/417495 configure every
@@ -393,7 +391,6 @@ impl PreparedRefresh {
             state.edit_request = None;
             state.edit_pending = None;
             state.edit_inflight = None;
-            state.close_after_apply = false;
             state.requested_building = None;
             state.tutorial_control = None;
             state.tutorial_producer = None;
@@ -409,7 +406,7 @@ impl PreparedRefresh {
         state.owner_color = fresh.owner_color;
         state.initialized = fresh.initialized;
         state.navigation = fresh.navigation;
-        state.dirty_terms = fresh.dirty_terms;
+        state.dirty_terms = fresh.dirty_terms || (!admission_changed && state.dirty_terms);
         state.prepared = None;
         state.dirty = true;
     }
@@ -419,8 +416,6 @@ pub struct State {
     pub edit_request: Option<crate::business_edit::Action>,
     pub edit_pending: Option<std::sync::mpsc::Receiver<Result<[u8; 544], String>>>,
     pub edit_inflight: Option<crate::business_edit::Action>,
-    pub close: bool,
-    close_after_apply: bool,
     dirty_terms: bool,
     last_refresh: Instant,
     edit_hover: Option<crate::business_edit::Action>,
@@ -472,7 +467,6 @@ impl State {
             crate::business_edit::Action::Stock { slot: 0, increase } => {
                 Some(if increase { 43 } else { 44 })
             }
-            crate::business_edit::Action::Apply => Some(53),
             // Apartment controls have separate native registrations.
             _ => None,
         }
@@ -561,9 +555,6 @@ impl State {
         {
             self.edit_request = Some(action);
             self.diagnostic = None;
-            if action == crate::business_edit::Action::Apply {
-                self.tutorial_control = Some(53);
-            }
         }
         self.edit_pressed = if down { self.edit_hover } else { None };
         if !down
@@ -583,31 +574,24 @@ impl State {
         }
         self.arrow_pressed = if down { self.arrow_hover } else { None };
         let close = !down && self.pressed && self.hover;
-        if close {
-            self.tutorial_control = Some(53);
-        }
         self.pressed = down && self.hover;
         self.dirty = true;
         close && self.request_close()
     }
     pub fn request_close(&mut self) -> bool {
-        if self.edit_target.is_some() {
-            self.close_after_apply = true;
-            self.edit_request = Some(crate::business_edit::Action::Apply);
-            false
-        } else {
-            true
+        // 419938/40c890: OK only dismisses; dirty terms remain in the city.
+        if self.apartment.is_none() {
+            self.tutorial_control = Some(53);
         }
+        true
     }
     pub fn receive_edit(&mut self, result: Result<[u8; 544], String>) {
         self.dirty = true;
         self.last_refresh = Instant::now();
         let action = self.edit_inflight.take();
-        let applied = action == Some(crate::business_edit::Action::Apply);
         match result {
             Err(error) => {
                 self.diagnostic = Some(error);
-                self.close_after_apply = false;
             }
             Ok(record) => {
                 // Native419d99..419da7 emits7 after all four retail edits,
@@ -634,7 +618,18 @@ impl State {
                     };
                     self.tutorial_producer = control.map(|control| (control, 7));
                 }
-                self.dirty_terms = pending_terms(&record);
+                // 419d99 enables Apply independently of the record's dirty
+                // byte: a stock clamp can leave that byte clear. Refresh must
+                // preserve the control until an explicit successful Apply.
+                self.dirty_terms = match action {
+                    Some(crate::business_edit::Action::Apply) => false,
+                    Some(
+                        crate::business_edit::Action::Price { .. }
+                        | crate::business_edit::Action::Stock { .. }
+                        | crate::business_edit::Action::Rent { .. },
+                    ) => true,
+                    _ => self.dirty_terms || pending_terms(&record),
+                };
                 let refreshed = if let Some(apartment) = &self.apartment {
                     Apartment::from_record(&record, apartment.modes[0], apartment.modes[1])
                         .map(|value| self.apartment = Some(value))
@@ -644,9 +639,6 @@ impl State {
                 if let Err(error) = refreshed {
                     self.diagnostic = Some(error);
                 }
-                if self.close_after_apply && applied && !self.dirty_terms {
-                    self.close = true;
-                }
             }
         }
     }
@@ -654,7 +646,6 @@ impl State {
         // The original adjustment refresh reads the live record. Polling is a
         // UI adapter cadence; the original dispatch interval is not recovered.
         if self.edit_target.is_some()
-            && !self.close_after_apply
             && self.diagnostic.is_none()
             && self.edit_request.is_none()
             && self.edit_pending.is_none()
@@ -1092,8 +1083,6 @@ impl Assets {
                 edit_request: edit_target.map(|_| crate::business_edit::Action::Refresh),
                 edit_pending: None,
                 edit_inflight: None,
-                close: false,
-                close_after_apply: false,
                 dirty_terms: pending_terms(record),
                 last_refresh: Instant::now(),
                 edit_hover: None,
@@ -1141,8 +1130,6 @@ impl Assets {
             edit_request: edit_target.map(|_| crate::business_edit::Action::Refresh),
             edit_pending: None,
             edit_inflight: None,
-            close: false,
-            close_after_apply: false,
             dirty_terms: pending_terms(record),
             last_refresh: Instant::now(),
             edit_hover: None,
@@ -1877,8 +1864,6 @@ mod tests {
             edit_request: None,
             edit_pending: None,
             edit_inflight: None,
-            close: false,
-            close_after_apply: false,
             dirty_terms: false,
             last_refresh: Instant::now(),
             edit_hover: None,
@@ -1904,6 +1889,312 @@ mod tests {
             tutorial_control: None,
             tutorial_producer: None,
         }
+    }
+
+    #[test]
+    fn ok_closes_retail_and_apartment_without_requesting_apply() {
+        let (_, mut record) = retail_fixture();
+        record[0x208] = 1;
+        for apartment in [false, true] {
+            let mut state = retail_state_fixture();
+            if apartment {
+                record[..4].copy_from_slice(&1u32.to_le_bytes());
+                state.apartment = Some(Apartment::from_record(&record, false, false).unwrap());
+            }
+            state.dirty_terms = true;
+            assert!(state.request_close());
+            assert!(state.edit_request.is_none());
+            assert!(state.dirty_terms);
+            assert_eq!(
+                state.take_tutorial_control(),
+                if apartment { None } else { Some(53) }
+            );
+        }
+    }
+
+    #[test]
+    fn clamped_edit_enables_apply_even_when_refresh_returns_clean_terms() {
+        use crate::business_edit::Action;
+        let (_, record) = retail_fixture();
+        for action in [
+            Action::Price {
+                slot: 0,
+                increase: false,
+            },
+            Action::Stock {
+                slot: 0,
+                increase: true,
+            },
+            Action::Stock {
+                slot: 0,
+                increase: false,
+            },
+        ] {
+            let mut state = retail_state_fixture();
+            state.edit_inflight = Some(action);
+            state.receive_edit(Ok(record));
+            assert!(state.dirty_terms);
+            assert_eq!(state.take_tutorial_control(), Some(7));
+            state.edit_inflight = Some(Action::Refresh);
+            state.receive_edit(Ok(record));
+            assert!(state.dirty_terms);
+            assert_eq!(state.take_tutorial_control(), None);
+            state.edit_inflight = Some(Action::Apply);
+            state.receive_edit(Ok(record));
+            assert!(!state.dirty_terms);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires original scripts and models for the real business command queue"]
+    fn ok_retains_player_wide_terms_until_explicit_apply_and_delayed_consumption() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                use crate::business_edit::{Action, Target, edit};
+                use crate::fresh_city::{
+                    CommandAssets, Inputs, Policy, Session, character_names, load_era_styles,
+                };
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let executable = read("OPENMT2001_EXE");
+                let archive = read("OPENMT2001_ARCHIVE_BIN");
+                let directory = read("OPENMT2001_ARCHIVE_DIR");
+                let build = read("OPENMT2001_BUILD_FILE");
+                let parameters = read("OPENMT2001_PARAMETERS");
+                let timetable = read("OPENMT2001_TIMETABLE");
+                let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+                let board = openmt2001::board::Board::from_v14(&image).unwrap();
+                let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+                let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+                let exe = openmt2001::fixtures::path("EXE");
+                let scripts = exe.parent().unwrap().join("scripts");
+                let names = character_names(
+                    &image,
+                    &exe.parent()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .join("US/language/usa"),
+                )
+                .unwrap();
+                let mut session = Session::initialize(
+                    Inputs {
+                        tree_locators: None,
+                        image: &image,
+                        board: &board,
+                        file: &file,
+                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                            .unwrap(),
+                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        transport_models: openmt2001::traffic::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+                        scripts: &scripts,
+                        parameters: std::str::from_utf8(&parameters).unwrap(),
+                        era_styles: load_era_styles(
+                            openmt2001::fixtures::path("PARAMETERS").parent().unwrap(),
+                        )
+                        .unwrap(),
+                        timetable: std::str::from_utf8(&timetable).unwrap(),
+                        scenario: "SCENARIO3",
+                        difficulty: 0,
+                        selected_character: 4,
+                        profile_name: b"Business report validation",
+                        character_names: &names,
+                    },
+                    Policy {
+                        seed: 0x12345678,
+                        auxiliary_prior_bytes: [0; 0x11c],
+                    },
+                )
+                .unwrap();
+                let assets = CommandAssets {
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                };
+                // Controlled active records in a real initialized session. Ownership
+                // and a retail catalog are test setup; edits and queue execution use
+                // the same entry points as the running report.
+                let active = session
+                    .world
+                    .ledgers
+                    .businesses
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r[0x21c] != 0)
+                    .take(3)
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>();
+                assert_eq!(active.len(), 3);
+                let target = |business: usize, record: &[u8; 544]| Target {
+                    business,
+                    building: usize::from(u16::from_le_bytes(record[8..10].try_into().unwrap())),
+                };
+                let retail = target(active[0], &session.world.ledgers.businesses[active[0]]);
+                let apartment = target(active[1], &session.world.ledgers.businesses[active[1]]);
+                for &business in &active {
+                    session.world.ledgers.businesses[business][10] = 1;
+                    session.world.ledgers.businesses[business][0x208] = 0;
+                }
+                session.world.ledgers.businesses[active[2]][10] = 2;
+                session.world.ledgers.businesses[active[2]][0x208] = 1;
+                let record = &mut session.world.ledgers.businesses[retail.business];
+                record[..4].fill(0);
+                record[4..8].copy_from_slice(&2u32.to_le_bytes());
+                record[0x1b8..0x204].fill(0);
+                record[0x1c4..0x1c8].copy_from_slice(&0.1f32.to_le_bytes());
+                record[0x1ec..0x1f0].copy_from_slice(&0.1f32.to_le_bytes());
+                let original = *record;
+                let mut state = retail_state_fixture();
+                state.edit_target = Some(retail);
+                for action in [
+                    Action::Stock {
+                        slot: 0,
+                        increase: false,
+                    },
+                    Action::Price {
+                        slot: 0,
+                        increase: false,
+                    },
+                ] {
+                    let record = edit(&mut session, &assets, retail, action).unwrap();
+                    assert_eq!(&record[0x1e0..0x204], &original[0x1e0..0x204]);
+                    state.edit_inflight = Some(action);
+                    state.receive_edit(Ok(record));
+                    assert!(state.dirty_terms);
+                    assert_eq!(state.take_tutorial_control(), Some(7));
+                    state.take_tutorial_producer();
+                }
+                // A quota-limited increment also enables Apply without changing units.
+                let building = &session.world.buildings[retail.building];
+                let info = session.world.catalog.info.row(2).unwrap();
+                let capacity = openmt2001::economy::stock_capacity(
+                    (i32::from(building[7]) - i32::from(building[5]) + 1)
+                        * (i32::from(building[6]) - i32::from(building[4]) + 1),
+                    building[8],
+                    f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap()),
+                );
+                let fraction = f32::from_bits(session.world.catalog.products[2][0][1]);
+                let capacity = (f64::from(capacity) * f64::from(fraction)).trunc() as i16;
+                session.world.ledgers.businesses[retail.business][0x1e0..0x1e2]
+                    .copy_from_slice(&capacity.to_le_bytes());
+                let action = Action::Stock {
+                    slot: 0,
+                    increase: true,
+                };
+                let record = edit(&mut session, &assets, retail, action).unwrap();
+                assert_eq!(
+                    i16::from_le_bytes(record[0x1e0..0x1e2].try_into().unwrap()),
+                    capacity
+                );
+                state.edit_inflight = Some(action);
+                state.receive_edit(Ok(record));
+                assert!(state.dirty_terms);
+                state.take_tutorial_control();
+                state.take_tutorial_producer();
+                let price = edit(
+                    &mut session,
+                    &assets,
+                    retail,
+                    Action::Price {
+                        slot: 0,
+                        increase: true,
+                    },
+                )
+                .unwrap();
+                let old_rent =
+                    session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0].to_vec();
+                let rent = edit(
+                    &mut session,
+                    &assets,
+                    apartment,
+                    Action::Rent { increase: true },
+                )
+                .unwrap();
+                let terms_count = |session: &Session<'_>| {
+                    session
+                        .live_commands
+                        .snapshot()
+                        .unwrap()
+                        .iter()
+                        .filter(|(_, _, _, _, c)| {
+                            matches!(c, openmt2001::live_commands::Command::Terms(_))
+                        })
+                        .count()
+                };
+                for record in [price, rent] {
+                    let mut report = retail_state_fixture();
+                    let apartment = record[..4] == [1, 0, 0, 0];
+                    if apartment {
+                        report.apartment =
+                            Some(Apartment::from_record(&record, false, false).unwrap());
+                    }
+                    report.dirty_terms = pending_terms(&record);
+                    assert!(report.request_close());
+                    assert!(report.edit_request.is_none());
+                    assert_eq!(
+                        report.take_tutorial_control(),
+                        if apartment { None } else { Some(53) }
+                    );
+                }
+                assert_eq!(terms_count(&session), 0);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1b8..0x1dc],
+                    &original[0x1b8..0x1dc]
+                );
+                assert_eq!(
+                    &session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0],
+                    old_rent
+                );
+                let mut controls = refresh_assets_fixture();
+                controls.regions = vec![[0.; 4]; 30];
+                controls.regions[29] = [100., 100., 160., 124.];
+                state.pointer(&controls, Some([240, 220]));
+                state.mouse(true);
+                state.mouse(false);
+                assert_eq!(state.take_tutorial_control(), None);
+                let due = session.world.clock.timing[0] + 25;
+                let result = edit(
+                    &mut session,
+                    &assets,
+                    retail,
+                    state.edit_request.take().unwrap(),
+                )
+                .unwrap();
+                assert_eq!(terms_count(&session), 2);
+                state.edit_inflight = Some(Action::Apply);
+                state.receive_edit(Ok(result));
+                assert!(!state.dirty_terms);
+                assert_eq!(state.take_tutorial_control(), None);
+                assert_eq!(session.world.ledgers.businesses[active[2]][0x208], 1);
+                session.world.clock.timing[0] = due - 1;
+                session.drain_commands(&assets, |_| Ok(())).unwrap();
+                assert_eq!(terms_count(&session), 2);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1c4..0x1c8],
+                    &original[0x1c4..0x1c8]
+                );
+                session.world.clock.timing[0] = due;
+                session.drain_commands(&assets, |_| Ok(())).unwrap();
+                assert_eq!(terms_count(&session), 0);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1c4..0x1c8],
+                    &price[0x1ec..0x1f0]
+                );
+                assert_eq!(
+                    &session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0],
+                    &rent[0x204..0x208]
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -2007,18 +2298,18 @@ mod tests {
     }
 
     #[test]
-    fn apply_disables_after_submission_or_reverting_stock_and_price_edits() {
+    fn apply_stays_enabled_after_reverting_stock_and_price_until_submission() {
         let (_, mut record) = retail_fixture();
         assert!(!pending_terms(&record));
         record[0x208] = 1;
         record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
         assert!(pending_terms(&record));
         record[0x1e0..0x1e2].copy_from_slice(&12u16.to_le_bytes());
-        assert!(!pending_terms(&record));
+        assert!(pending_terms(&record));
         record[0x1ec..0x1f0].copy_from_slice(&1.5f32.to_le_bytes());
         assert!(pending_terms(&record));
         record[0x1ec..0x1f0].copy_from_slice(&0f32.to_le_bytes());
-        assert!(!pending_terms(&record));
+        assert!(pending_terms(&record));
         record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
         record[0x208] = 0;
         assert!(!pending_terms(&record));
@@ -2058,7 +2349,7 @@ mod tests {
             increase: false,
         });
         state.receive_edit(Ok(record));
-        assert_eq!(apply(&mut state), None);
+        assert_eq!(apply(&mut state), Some(Action::Apply));
         record[0x1e0..0x1e2].copy_from_slice(&14u16.to_le_bytes());
         record[0x208] = 0;
         state.edit_inflight = Some(Action::Apply);

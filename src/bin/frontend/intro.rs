@@ -9128,9 +9128,6 @@ impl Intro {
                     Err(error) => state.receive_edit(Err(error.to_string())),
                 }
             }
-            if state.close {
-                view.adjustment = None;
-            }
             let producer = view
                 .adjustment
                 .as_mut()
