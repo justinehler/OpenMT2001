@@ -2212,7 +2212,3 @@ impl AutosaveRequest for SaveRequest<'_, '_> {
 #[cfg(test)]
 #[path = "session_autosave_live_test.rs"]
 mod autosave_live_tests;
-
-#[cfg(test)]
-#[path = "session_autosave_natural_observer.rs"]
-pub(crate) mod natural_observer;

@@ -1334,8 +1334,6 @@ impl SceneInputs {
         // prefix; no reset or synthesized acquisition occurs on this worker.
         crate::process_dispatch::native_load_completed(&mut session)?;
         let metadata = session.restore_v2_extension_with_image(&save, &image)?;
-        #[cfg(test)]
-        crate::session_save::natural_observer::after_restore(&session);
         session.repair_imported_resident_models(self.compatibility, metadata.is_some())?;
         let saved_auction = metadata
             .as_ref()
