@@ -160,6 +160,7 @@ pub struct Player {
     change_queued: bool,
     before_six: Option<(u32, crate::audio_bus::effects::Handle)>,
     next_handle: u32,
+    warned_before_six_release: bool,
 }
 
 impl Player {
@@ -177,6 +178,7 @@ impl Player {
             change_queued: false,
             before_six: None,
             next_handle: 1,
+            warned_before_six_release: false,
         }
     }
 
@@ -357,8 +359,8 @@ impl Player {
                 Ok(0)
             }
             Operation::BeforeSixCreate => {
-                if self.before_six.is_some() {
-                    return Err("pre-six sound already active".into());
+                if let Some((_, stale)) = self.before_six.take() {
+                    stale.stop();
                 }
                 let samples = self.assets.before_six.clone();
                 let gain = self.audio.source_gain(100);
@@ -379,9 +381,9 @@ impl Player {
                     return Ok(0);
                 };
                 let handle = self.next_handle;
-                self.next_handle = handle
-                    .checked_add(1)
-                    .ok_or("pre-six sound handle overflow")?;
+                // Zero means no cue. Presentation tokens can safely wrap once
+                // the previous cue has been released; exhaustion is not fatal.
+                self.next_handle = handle.wrapping_add(1).max(1);
                 self.before_six = Some((handle, sink));
                 Ok(handle)
             }
@@ -389,16 +391,18 @@ impl Player {
                 if handle == 0 {
                     return Ok(0);
                 }
-                let Some((stored, sink)) = self.before_six.take() else {
-                    return Err("pre-six sound handle missing".into());
-                };
-                if stored != handle {
-                    self.before_six = Some((stored, sink));
-                    return Err(format!(
-                        "pre-six sound handle {handle} does not match {stored}"
-                    ));
+                if self.before_six.as_ref().map(|(stored, _)| *stored) != Some(handle) {
+                    if !self.warned_before_six_release {
+                        eprintln!(
+                            "[era audio] ignoring missing or stale pre-six sound handle {handle}"
+                        );
+                        self.warned_before_six_release = true;
+                    }
+                    return Ok(0);
                 }
-                sink.stop();
+                if let Some((_, sink)) = self.before_six.take() {
+                    sink.stop();
+                }
                 Ok(0)
             }
         }
@@ -423,6 +427,11 @@ mod fade_tests;
 #[cfg(test)]
 mod focus_tests {
     include!("era_audio_focus_tests.rs");
+}
+
+#[cfg(test)]
+mod pre_six_tests {
+    include!("era_audio_pre_six_tests.rs");
 }
 
 #[cfg(test)]

@@ -22,6 +22,19 @@ pub struct Policy {
     /// independent of card/modal visibility and remainsfalse until its control is bound.
     pub ai_event_gate: bool,
 }
+
+/// Both dispatchers refer to the original retained cue at 0x822964. Preserve
+/// stores made before a failed hourly boundary, just like other live controls.
+pub(crate) fn advance_scheduled_hour(
+    scheduler: &mut scheduler::Controls,
+    context: &mut HourlyContext<'_>,
+    advance: impl FnOnce(&mut scheduler::Controls, &mut HourlyContext<'_>) -> Result<(), String>,
+) -> Result<(), String> {
+    context.hourly.before_six_sound = scheduler.before_six_sound;
+    let result = advance(scheduler, context);
+    scheduler.before_six_sound = context.hourly.before_six_sound;
+    result
+}
 #[derive(Debug)]
 pub enum Event<'a> {
     ScriptCommands(
@@ -317,7 +330,7 @@ impl Session<'_> {
                 camera: policy.camera,
                 distance_disabled: policy.distance_disabled,
             };
-            dispatch.advance_with_animations(
+            let result = dispatch.advance_with_animations(
                 &mut self.world,
                 &mut policy.scheduler,
                 animations,
@@ -352,10 +365,11 @@ impl Session<'_> {
                             self.demolition_points=self.demolition_effects.points(image)?;
                         }
                         scheduler::Event::AdvanceHour => {
+                            advance_scheduled_hour(scheduler, &mut context, |scheduler, context|
                             dispatch.population.advance_hour(
                                 clock,
                                 city,
-                                &mut context,
+                                context,
                                 |event, clock, city, population, context| {
                                     match event {
                                         CalendarEvent::AccountPosted(posting) => {
@@ -663,7 +677,7 @@ impl Session<'_> {
                                     }
                                     Ok(false)
                                 },
-                            )?;
+                            ))?;
                         }
                         scheduler::Event::Helper(0x4805b0) => self.window_texture.tick(clock.hour()),
                         scheduler::Event::Helper(0x4b5d50) => self.pulse_lights.tick(),
@@ -1149,7 +1163,10 @@ impl Session<'_> {
                     }
                     Ok(0)
                 },
-            )
+            );
+            context.hourly.before_six_sound = policy.scheduler.before_six_sound;
+            policy.hourly = context.hourly;
+            result
         })();
         if policy.scheduler.iterations == admitted_iterations {
             policy.scheduler.iterations = requested_iterations;
