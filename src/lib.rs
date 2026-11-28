@@ -61,6 +61,7 @@ pub mod skirmish_maps;
 pub mod sky;
 pub mod street_furniture;
 pub mod texture;
+pub mod time_panel;
 pub mod timers;
 pub mod traffic;
 pub mod trees;
