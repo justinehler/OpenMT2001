@@ -1,5 +1,5 @@
 //! Saved City View resident markers; original4b7380 and load fixup45bf31.
-use openmt2001::{board::Board, pe::PeImage, save::SaveFile};
+use crate::{board::Board, pe::PeImage, save::SaveFile};
 pub const LABELS: [u32; 4] = [1799, 1454, 1458, 1464];
 pub const MODES: [u32; 4] = [4, 3, 1, 2];
 #[derive(Clone, Debug)]
@@ -69,7 +69,7 @@ pub fn from_save(save: &SaveFile<'_>, image: &PeImage<'_>) -> Result<Vec<Marker>
                 }
             }
             let colors = colors(node, shopping, palette);
-            let mut resident = openmt2001::resident::Resident::from_bytes(*node);
+            let mut resident = crate::resident::Resident::from_bytes(*node);
             let mut auxiliary = [0; 284];
             // Only fields written by this verified fixup are read; scratch is not a model template.
             resident.restore_saved_movement(1, &mut auxiliary, &centers)?;
@@ -119,9 +119,9 @@ fn colors(node: &[u8; 0x14a], shopping: u32, palette: [u32; 3]) -> [u32; 4] {
 }
 /// Snapshot actual initialized auxiliaries; never apply the saved-load fixup to a fresh city.
 pub fn from_world(
-    world: &openmt2001::level_startup::World,
+    world: &crate::level_startup::World,
     image: &PeImage<'_>,
-    players: &openmt2001::player_manager::Manager,
+    players: &crate::player_manager::Manager,
 ) -> Result<Vec<Marker>, String> {
     from_runtime_pools(
         &world.ledgers.residents,
@@ -136,12 +136,12 @@ pub fn from_world(
 /// the same ordinal, independent of active_count, +148 identity or +f0 reference.
 /// Preserve all retained auxiliary rows, including older V2 imported pools.
 fn from_runtime_pools(
-    residents: &openmt2001::economy::ResidentAccounts,
-    auxiliaries: &openmt2001::resident::AuxiliaryPool,
+    residents: &crate::economy::ResidentAccounts,
+    auxiliaries: &crate::resident::AuxiliaryPool,
     buildings: &[[u8; 0x394]],
     businesses: &[[u8; 0x220]],
     image: &PeImage<'_>,
-    players: &openmt2001::player_manager::Manager,
+    players: &crate::player_manager::Manager,
 ) -> Result<Vec<Marker>, String> {
     let count = auxiliaries.used();
     let nodes = residents
@@ -184,7 +184,7 @@ fn runtime_shopping_color(
     building: i16,
     buildings: &[[u8; 0x394]],
     businesses: &[[u8; 0x220]],
-    players: &openmt2001::player_manager::Manager,
+    players: &crate::player_manager::Manager,
     image: &PeImage<'_>,
 ) -> Result<u32, String> {
     shopping_color(building, buildings, businesses, players, |character| {
@@ -197,11 +197,11 @@ fn runtime_shopping_color(
 
 /// Shared original shopping owner lookup for markers and carried bags.
 /// None is the native -1 state, distinct from an owner's actual colour.
-pub(crate) fn shopping_color(
+pub fn shopping_color(
     building: i16,
     buildings: &[[u8; 0x394]],
     businesses: &[[u8; 0x220]],
-    players: &openmt2001::player_manager::Manager,
+    players: &crate::player_manager::Manager,
     palette: impl FnOnce(u32) -> Result<u32, String>,
 ) -> Result<Option<u32>, String> {
     let row = buildings
@@ -259,10 +259,9 @@ mod tests {
     #[test]
     #[ignore = "requires original divergent marker iteration fixture"]
     fn matches_native_positional_marker_iteration() {
-        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let bytes =
-            std::fs::read(openmt2001::fixtures::path("NATIVE_LIVE_PEOPLE_ITERATION")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_LIVE_PEOPLE_ITERATION")).unwrap();
         let mut offset = 0;
         let mut take = |n: usize| {
             let start = offset;
@@ -272,19 +271,19 @@ mod tests {
         assert_eq!(take(8), b"MTLVIT01");
         let count = u32::from_le_bytes(take(4).try_into().unwrap());
         assert_eq!(u32::from_le_bytes(take(4).try_into().unwrap()), 0x037f);
-        let players = openmt2001::player_manager::Manager {
+        let players = crate::player_manager::Manager {
             bytes: [0; 0x28],
             players: vec![],
         };
         for _ in 0..count {
-            let mut residents = openmt2001::economy::ResidentAccounts::new_pool();
+            let mut residents = crate::economy::ResidentAccounts::new_pool();
             residents.active_count = u32::from_le_bytes(take(4).try_into().unwrap());
             let used = u32::from_le_bytes(take(4).try_into().unwrap()) as usize;
-            let mut auxiliaries = openmt2001::resident::AuxiliaryPool::for_residents();
+            let mut auxiliaries = crate::resident::AuxiliaryPool::for_residents();
             for node in residents.nodes.iter_mut().take(used) {
                 let prefix: [u8; 330] = take(330).try_into().unwrap();
                 let reference = u32::from_le_bytes(prefix[0xf0..0xf4].try_into().unwrap());
-                *node = openmt2001::resident::Resident::from_runtime_bytes(prefix, 1, reference);
+                *node = crate::resident::Resident::from_runtime_bytes(prefix, 1, reference);
                 auxiliaries.allocate(take(284).try_into().unwrap()).unwrap();
             }
             let markers =
@@ -336,20 +335,19 @@ mod tests {
     #[test]
     #[ignore = "requires original live resident marker ownership fixture"]
     fn matches_native_live_shopping_markers() {
-        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let fixture =
-            std::fs::read(openmt2001::fixtures::path("NATIVE_LIVE_PEOPLE_MARKERS")).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_LIVE_PEOPLE_MARKERS")).unwrap();
         assert_eq!(&fixture[..8], b"MTLVMK01");
         let word = |at| u32::from_le_bytes(fixture[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
         assert_eq!(fixture.len(), 16 + word(8) as usize * 16);
         let mut buildings = vec![[0; 0x394]; 600];
         let mut businesses = vec![[0; 0x220]; 600];
-        let mut players = openmt2001::player_manager::Manager {
+        let mut players = crate::player_manager::Manager {
             bytes: [0; 0x28],
             players: (0..6)
-                .map(|slot| openmt2001::player_manager::Player {
+                .map(|slot| crate::player_manager::Player {
                     reference: 0x100c0000 + slot * 0x300,
                     bytes: vec![0; 0x1e50],
                     auxiliaries: vec![],
@@ -380,9 +378,9 @@ mod tests {
     #[test]
     #[ignore = "private original strategic resident fixture"]
     fn matches_native_people_markers() {
-        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_PEOPLE_MARKERS")).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_PEOPLE_MARKERS")).unwrap();
         assert_eq!(&b[..8], b"MTPEOMK1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -392,7 +390,7 @@ mod tests {
         };
         assert_eq!(word(&mut at), 2);
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
-            let raw = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
+            let raw = std::fs::read(crate::fixtures::path(key)).unwrap();
             let rows = from_save(&SaveFile::parse(&raw).unwrap(), &image).unwrap();
             at += 32;
             assert_eq!(word(&mut at) as usize, rows.len());
