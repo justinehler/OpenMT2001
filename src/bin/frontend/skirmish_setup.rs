@@ -510,13 +510,11 @@ impl SetupPanel {
         b[2] -= 16.;
         Ok(b)
     }
-    fn row_height(&self) -> f32 {
-        let at = 4 + usize::from(b'W' - 32) * 44 + 36;
-        i32::from_le_bytes(self.fonts[1].tab[at..at + 4].try_into().unwrap()).max(1) as f32
+    fn list_layout(&self, bounds: [f32; 4]) -> Result<openmt2001::frontend_list::Layout, String> {
+        openmt2001::frontend_list::Layout::from_font(bounds, &self.fonts[1].tab)
     }
     fn map_capacity(&self) -> Result<usize, String> {
-        let b = self.map_viewport()?;
-        Ok(((b[3] - b[1]) / self.row_height()).floor() as usize)
+        Ok(self.list_layout(self.map_viewport()?)?.visible_rows())
     }
     fn map_limit(&self, state: &State) -> Result<usize, String> {
         Ok(state.maps.len().saturating_sub(self.map_capacity()?))
@@ -546,8 +544,7 @@ impl SetupPanel {
                     .capacity(),
             );
         }
-        let b = self.viewport(false)?;
-        Ok(((b[3] - b[1]) / self.row_height()).floor() as usize)
+        Ok(self.list_layout(self.viewport(false)?)?.visible_rows())
     }
     fn limit(&self, state: &State, description: bool) -> Result<usize, String> {
         if description {
@@ -640,27 +637,18 @@ impl SetupPanel {
                 }
             }
         }
-        let b = self.map_viewport()?;
-        if inside(b, point) {
-            let row = self.map_first(state)? + ((point[1] - b[1]) / self.row_height()) as usize;
-            if row < state.maps.len()
-                && point[1] < b[1] + self.map_capacity()? as f32 * self.row_height()
-            {
-                return Ok(Some(Action::MapRow(row)));
-            }
+        if let Some(row) = self.list_layout(self.map_viewport()?)?.hit(
+            point,
+            self.map_first(state)?,
+            state.maps.len(),
+        ) {
+            return Ok(Some(Action::MapRow(row)));
         }
-        let b = self.viewport(false)?;
-        if inside(b, point) {
-            let h = (self.fonts[1].tab[4 + usize::from(b'W' - 32) * 44 + 36..][..4])
-                .try_into()
-                .unwrap();
-            let row =
-                state.first + ((point[1] - b[1]) / i32::from_le_bytes(h).max(1) as f32) as usize;
-            if row < state.rows.len()
-                && point[1] < b[1] + self.capacity(false)? as f32 * self.row_height()
-            {
-                return Ok(Some(Action::Row(row)));
-            }
+        if let Some(row) =
+            self.list_layout(self.viewport(false)?)?
+                .hit(point, state.first, state.rows.len())
+        {
+            return Ok(Some(Action::Row(row)));
         }
         Ok(None)
     }
@@ -887,8 +875,6 @@ impl SetupPanel {
                 }
             }
             let tab = &self.fonts[1].tab;
-            let at = 4 + usize::from(b'W' - 32) * 44 + 36;
-            let height = i32::from_le_bytes(tab[at..at + 4].try_into().unwrap()).max(1) as f32;
             for description in [false, true] {
                 let first = if description {
                     state.description_first
@@ -898,22 +884,17 @@ impl SetupPanel {
                 if description {
                     self.description(state)?.paint(&mut pages[1], tab, first)?;
                 } else {
-                    let b = self.viewport(false)?;
+                    let layout = self.list_layout(self.viewport(false)?)?;
                     for (i, &level) in state
                         .rows
                         .iter()
                         .enumerate()
                         .skip(first)
-                        .take(self.capacity(false)?)
+                        .take(layout.visible_rows())
                     {
-                        let row = [
-                            b[0],
-                            b[1] + (i - first) as f32 * height,
-                            b[2],
-                            b[1] + (i - first + 1) as f32 * height,
-                        ];
+                        let row = layout.text_bounds(i - first);
                         if state.selected == Some(i) {
-                            shapes.rect(row, [0xff008ed0; 4]);
+                            shapes.rect(layout.highlight(i - first), [0xff008ed0; 4]);
                         }
                         ui::text_widget_style0(
                             &mut pages[1],
@@ -929,7 +910,7 @@ impl SetupPanel {
                     range:[0.,maximum as f32],pointer,pressed:if pressed && matches!(selected,Some(Action::Scroll {description:d,..}) if d==description) {pointer}else{None}}
                     .paint(&mut shapes,&mut images,&self.generic);
             }
-            let b = self.map_viewport()?;
+            let layout = self.list_layout(self.map_viewport()?)?;
             let first = self.map_first(state)?;
             for (i, identity) in state
                 .maps
@@ -938,14 +919,9 @@ impl SetupPanel {
                 .skip(first)
                 .take(self.map_capacity()?)
             {
-                let row = [
-                    b[0],
-                    b[1] + (i - first) as f32 * height,
-                    b[2],
-                    b[1] + (i - first + 1) as f32 * height,
-                ];
+                let row = layout.text_bounds(i - first);
                 if state.map_selected == Some(i) {
-                    shapes.rect(row, [0xff008ed0; 4]);
+                    shapes.rect(layout.highlight(i - first), [0xff008ed0; 4]);
                 }
                 ui::text_widget_style0(
                     &mut pages[1],
@@ -1380,7 +1356,9 @@ mod tests {
         let actions = panel.keyboard_actions(&state);
         assert!(actions.contains(&Action::MapRow(24)) && actions.contains(&Action::Row(0)));
         let mv = panel.map_viewport().unwrap();
-        let h = panel.row_height();
+        let h = panel.list_layout(mv).unwrap().pitch;
+        assert_eq!(h, 12.);
+        assert_eq!(panel.map_capacity().unwrap(), 8);
         let first_point = [mv[0] + 2., mv[1] + h * 0.5];
         assert_eq!(
             panel.hit(&state, first_point).unwrap(),
@@ -1424,7 +1402,7 @@ mod tests {
         };
         assert_eq!(
             map_highlights(&state),
-            vec![[mv[0], mv[1] + h, mv[2], mv[1] + 2. * h]]
+            vec![[mv[0], mv[1] + h + 4., mv[2] - 1., mv[1] + 2. * h + 3.]]
         );
         panel
             .keyboard_activate(&mut state, Action::MapRow(24), &mut |_| {
@@ -1438,7 +1416,7 @@ mod tests {
         let last_y = mv[1] + (panel.map_capacity().unwrap() - 1) as f32 * h;
         assert_eq!(
             map_highlights(&state),
-            vec![[mv[0], last_y, mv[2], last_y + h]]
+            vec![[mv[0], last_y + 4., mv[2] - 1., last_y + h + 3.]]
         );
         assert!(matches!(state.confirm(),Outcome::Roster(ref h) if h.map==maps[24]));
         let condition_first = state.first;

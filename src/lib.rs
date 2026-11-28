@@ -192,6 +192,7 @@ pub mod business_controls;
 pub mod business_conversion;
 pub mod business_permissions;
 pub mod business_takeover;
+pub mod frontend_list;
 pub mod human_messages;
 pub mod human_reply;
 pub mod level_catalog;
