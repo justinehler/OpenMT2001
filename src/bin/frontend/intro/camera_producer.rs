@@ -212,6 +212,12 @@ pub(super) struct Core {
     owner: camera_live::owner::Owner,
 }
 impl Core {
+    fn legacy_callback_enabled(&self, ui_strategic: bool) -> bool {
+        // 004e02d0 skips callbacks for kind 6, selected by 004b9e57.
+        // Running mode12 here clamps the start center Z=-595 to -500,
+        // moving the otherwise passive overview on its second idle tick.
+        !ui_strategic && !matches!(self.kind(), 4 | 6)
+    }
     pub(super) fn new(owner: camera_live::owner::Owner) -> Self {
         Self { owner }
     }
@@ -332,7 +338,7 @@ impl Producer {
         self.input_metadata
     }
     pub(super) fn legacy_callback_enabled(&self, ui_strategic: bool) -> bool {
-        !ui_strategic && self.kind() != 4
+        self.core.legacy_callback_enabled(ui_strategic)
     }
     pub(super) fn kind(&self) -> u32 {
         self.core.kind()
