@@ -378,7 +378,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable and archive"]
     fn loads_original_group10_transport_materials() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");

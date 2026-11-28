@@ -344,8 +344,8 @@ mod tests {
     #[test]
     fn v14_block_audio_provenance_and_source_assets() {
         let (Some(exe), Some(installer)) = (
-            std::env::var_os("OPENMT2001_EXE"),
-            std::env::var_os("OPENMT2001_INSTALLER"),
+            openmt2001::fixtures::optional("EXE"),
+            openmt2001::fixtures::optional("INSTALLER"),
         ) else {
             return;
         };

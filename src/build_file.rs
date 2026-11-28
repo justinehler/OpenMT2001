@@ -280,10 +280,8 @@ mod tests {
         check_native_profiles("OPENMT2001_NATIVE_ZERO_PROFILES");
     }
     fn check_native_profiles(key: &str) {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").expect("OPENMT2001_BUILD_FILE"))
-                .unwrap();
-        let native = std::fs::read(std::env::var(key).expect(key)).unwrap();
+        let data = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
+        let native = std::fs::read(crate::fixtures::path(key)).unwrap();
         let file = BuildFile::parse(&data).unwrap();
         let (mut at, count) = if &native[..8] == b"MTPROF02" {
             assert_eq!(word(&native, 8), 0x37f);
@@ -348,13 +346,8 @@ mod tests {
     #[test]
     #[ignore = "requires private BuildFile and original-instruction search observations"]
     fn matches_native_search() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").expect("OPENMT2001_BUILD_FILE"))
-                .unwrap();
-        let native = std::fs::read(
-            std::env::var("OPENMT2001_NATIVE_SEARCH").expect("OPENMT2001_NATIVE_SEARCH"),
-        )
-        .unwrap();
+        let data = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_SEARCH")).unwrap();
         let file = BuildFile::parse(&data).unwrap();
         assert_eq!(&native[..8], b"MTSEARCH");
         let mut at = 12;

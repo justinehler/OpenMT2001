@@ -262,8 +262,7 @@ mod tests {
     #[test]
     #[ignore = "requires player-supplied v1.4 PE as inert table data"]
     fn original_skirmish_option_rows_match_recovered_contract() {
-        let bytes =
-            std::fs::read(std::env::var_os("OPENMT2001_EXE").expect("OPENMT2001_EXE")).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&bytes).unwrap();
         let original = Options::from_pe(&image).unwrap();
         assert_eq!(original.rules, options().rules);

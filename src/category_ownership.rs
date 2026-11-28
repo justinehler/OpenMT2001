@@ -50,8 +50,7 @@ pub fn end_wait(category: &mut [u8; CATEGORY_RECORD_BYTES]) {
 #[ignore = "requires pinned original saved category wait captures"]
 fn matches_native_saved_category_wait_admission() {
     use crate::player_manager::word;
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVED_CATEGORY_WAIT").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVED_CATEGORY_WAIT")).unwrap();
     assert_eq!(&bytes[..8], b"MTCSWAIT");
     assert_eq!(word(&bytes, 8), 0x37f);
     assert_eq!(word(&bytes, 12), 312);
@@ -104,7 +103,7 @@ fn matches_native_category_wait() {
         local_commands::{Queue, Schedule},
         player_manager::word,
     };
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_WAIT").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_WAIT")).unwrap();
     assert_eq!(&bytes[..8], b"MTCWAIT1");
     assert_eq!(word(&bytes, 8), 0x37f);
     let mut cursor = 16;
@@ -600,13 +599,12 @@ mod tests {
     #[test]
     #[ignore = "requires original compensated property capture"]
     fn matches_native_compensated_transfers() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_TRANSFER").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_TRANSFER")).unwrap();
         let mut r = Reader::new(&bytes);
         assert_eq!(r.take(8), b"MTPRTX02");
         assert_eq!(r.u32(), 0x037f);
         let count = r.u32();
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         const SIZE: usize = 3 * 548 + 380 * 52 + 3 * 916 + 3 * 544;
         for case in 0..count {
@@ -741,11 +739,8 @@ mod tests {
     }
 
     fn fixture_path() -> std::path::PathBuf {
-        std::env::var_os("OPENMT2001_NATIVE_POST_ROSTER_OWNERSHIP")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::path::PathBuf::from("work/economy/native-post-roster-ownership.bin")
-            })
+        crate::fixtures::optional("NATIVE_POST_ROSTER_OWNERSHIP")
+            .unwrap_or_else(|| crate::fixtures::path("NATIVE_POST_ROSTER_OWNERSHIP"))
     }
 
     fn live_players(raw: &[[u8; PLAYER_RECORD_BYTES]]) -> Vec<crate::player_manager::Player> {
@@ -952,7 +947,7 @@ pub fn property_view(category: &mut [u8; 380], announcement_visible: u8, force: 
 #[test]
 #[ignore = "requires original property view fixture"]
 fn matches_native_property_view() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_VIEW").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_VIEW")).unwrap();
     assert_eq!(&bytes[..8], b"MTPVIEW1");
     assert_eq!(word(&bytes, 8), 0x37f);
     let count = word(&bytes, 12) as usize;

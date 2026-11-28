@@ -750,8 +750,8 @@ mod tests {
     #[test]
     fn original_targeted_and_auction_sound_assets() {
         let (Some(exe), Some(suncols)) = (
-            std::env::var_os("OPENMT2001_EXE"),
-            std::env::var_os("OPENMT2001_SUNCOLS"),
+            openmt2001::fixtures::optional("EXE"),
+            openmt2001::fixtures::optional("SUNCOLS"),
         ) else {
             return;
         };
@@ -880,9 +880,7 @@ mod portable_pcm_tests {
 
     #[test]
     fn original_pcm_loads_despite_filename_case() {
-        let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+        let base = openmt2001::fixtures::scratch("TEST_SCRATCH");
         std::fs::create_dir_all(&base).unwrap();
         let root = base.join(format!(
             "pcm-case-{}-{}",
@@ -917,9 +915,7 @@ mod portable_pcm_tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn sound_lookup_prefers_exact_name_and_rejects_ambiguous_fold() {
-        let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+        let base = openmt2001::fixtures::scratch("TEST_SCRATCH");
         std::fs::create_dir_all(&base).unwrap();
         let root = base.join(format!(
             "pcm-fold-{}-{}",

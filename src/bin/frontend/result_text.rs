@@ -258,13 +258,13 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 font atlas, language and optional GPU"]
     fn original_result_titles_layout_and_capture() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -316,15 +316,15 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 credits, fonts, language and optional GPU"]
     fn original_complete_credit_rows_layout_and_capture() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()

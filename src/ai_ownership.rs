@@ -502,8 +502,8 @@ mod tests {
     #[test]
     #[ignore = "requires original AI initialization observations"]
     fn matches_native_initialization() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_RESET").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_RESET")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIGR01");
@@ -597,8 +597,8 @@ mod tests {
     #[test]
     #[ignore = "requires original saved-player loader observations"]
     fn matches_native_saved_player_initialization() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_LOAD").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_LOAD")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MT48C800");
@@ -659,15 +659,14 @@ mod tests {
     #[test]
     #[ignore = "requires original AI entry arithmetic observations"]
     fn matches_native_entry_value() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_ENTRY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_ENTRY")).unwrap();
         check_entry_value(&bytes, entry_value);
     }
 
     #[test]
     #[ignore = "requires original PC64 AI entry observations"]
     fn matches_native_extended_entry_value() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_ENTRY_PC64").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_ENTRY_PC64")).unwrap();
         check_entry_value(&bytes, entry_value_extended);
     }
 
@@ -706,9 +705,8 @@ mod tests {
     #[test]
     #[ignore = "requires original complete ownership maintenance observations"]
     fn matches_native_lists_and_expiry() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_OWNERSHIP").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_OWNERSHIP")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let mapping = group_mapping(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
         let field = |raw: &[u8], at| u32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
         let word = |at| field(&bytes, at);
@@ -949,9 +947,8 @@ mod tests {
     #[test]
     #[ignore = "requires original ownership group observations"]
     fn matches_native_groups() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_OWNERSHIP_GROUPS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_OWNERSHIP_GROUPS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MT467P01");
         assert_eq!([word(8), word(12), word(16), word(20)], [8, 0xb50, 52, 88]);

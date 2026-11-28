@@ -153,8 +153,7 @@ pub fn evaluate(
 #[test]
 #[ignore = "requires original auction valuation pipeline capture"]
 fn matches_native_pipeline() {
-    let d = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_VALUATION_PIPELINE").unwrap())
-        .unwrap();
+    let d = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_VALUATION_PIPELINE")).unwrap();
     let mut a = 8;
     assert_eq!(&d[..8], b"MTAUVP01");
     fn w(d: &[u8], a: &mut usize) -> u32 {

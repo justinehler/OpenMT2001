@@ -222,12 +222,11 @@ mod tests {
     #[test]
     #[ignore = "requires original whole liquidation scoring observations"]
     fn matches_native_liquidation_score() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_LIQUIDATION_SCORE").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_LIQUIDATION_SCORE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTALSC02");
         assert_eq!(r.word(), 0x37f);
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let catalog = crate::business_pool::BusinessCatalog::from_pe(&image).unwrap();
         for i in 0..r.word() {

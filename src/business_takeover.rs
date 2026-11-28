@@ -298,8 +298,7 @@ fn notify_post(
 #[test]
 #[ignore = "requires original445300 packet observations"]
 fn matches_native_takeover_producer() {
-    let d = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_TAKEOVER_PRODUCER").unwrap())
-        .unwrap();
+    let d = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_TAKEOVER_PRODUCER")).unwrap();
     assert_eq!(&d[..8], b"MTBTPR01");
     assert_eq!(word(&d, 8), 0x37f);
     for r in d[16..].chunks_exact(52) {
@@ -347,9 +346,9 @@ fn compare_native_takeovers(variable: &str, cash: bool, stream: bool) {
     fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
         b.chunks_exact(N).map(|r| r.try_into().unwrap()).collect()
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data = std::fs::read(std::env::var(variable).unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path(variable)).unwrap();
     let mut r = R(&data);
     assert_eq!(
         r.take(8),

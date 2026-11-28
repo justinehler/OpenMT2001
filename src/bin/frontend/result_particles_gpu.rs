@@ -297,8 +297,8 @@ mod tests {
             archive::ArchiveIndex,
             texture::{TextureSet, loader_pixels},
         };
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
             .find("gamedata2/billboardrepeattextures/textures.gtd")
@@ -580,7 +580,7 @@ mod tests {
     #[test]
     #[ignore = "original renderer178 hardware/software vertex oracle /037f"]
     fn original_point_radius_vertices() {
-        let bytes = std::fs::read("work/frontend/native-point-vertices.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_POINT_VERTICES")).unwrap();
         let mut at = 0;
         let take = |at: &mut usize, n: usize| {
             let row = &bytes[*at..*at + n];
@@ -683,7 +683,7 @@ mod tests {
     #[cfg(feature = "capture")]
     #[ignore = "requires original v1.4 executable/archive and GPU result capture path"]
     fn captures_native_launch_particles() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         // Native 4e55d0 with the pinned process seed produces 13289; the
         // 40th 455080 frame is covered by the full differential fixture.
@@ -699,8 +699,8 @@ mod tests {
             up: [0., 1., 0.],
             vertical_fov: 45.,
         };
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let texture = FireworkTexture::load(&index, &archive).unwrap();

@@ -387,7 +387,7 @@ mod tests {
     #[test]
     #[ignore = "requires original packed model observations and archive"]
     fn matches_native_packed_positions() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let data = read("OPENMT2001_NATIVE_PACKED_POSITIONS");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     #[ignore = "requires original model bounds and archive"]
     fn matches_native_model_definition() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let data = read("OPENMT2001_NATIVE_MODEL_DEFINITION");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction mesh registration fixture"]
     fn matches_native_static_registration() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_REGISTRATION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_REGISTRATION")).unwrap();
         assert_eq!(&data[..8], b"MTREG002");
         let n = word(&data, 8) as usize;
         let t = word(&data, 12) as usize;
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction normal fixture"]
     fn matches_native_generated_normals() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_NORMALS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_NORMALS")).unwrap();
         assert_eq!(&data[..8], b"MTNORM01");
         let mut bytes = &data[8..];
         fn next(bytes: &mut &[u8]) -> u32 {
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     #[ignore = "requires original archive and native mesh draw observations"]
     fn matches_native_part_vertex_submission() {
-        let read = |key| std::fs::read(std::env::var(key).expect(key)).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     #[ignore = "requires original archive.DIR and archive.bin"]
     fn parses_original_cached_mesh_corpus() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let bytes = read("OPENMT2001_ARCHIVE_BIN");
         let index = crate::archive::ArchiveIndex::parse(&directory, bytes.len() as u64).unwrap();

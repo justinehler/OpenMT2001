@@ -252,8 +252,8 @@ fn configured_quote_initializer_and_demolition_have_literal_amounts() {
 #[ignore = "requires inert original PE and parameter.prm"]
 fn supplied_original_parameter_rows() {
     use openmt2001::building_parameters::BuildingKinds;
-    let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-    let source = std::fs::read_to_string(std::env::var("OPENMT2001_PARAMETERS").unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+    let source = std::fs::read_to_string(openmt2001::fixtures::path("PARAMETERS")).unwrap();
     let image = PeImage::parse(&bytes).unwrap();
     let raw = BuildingKinds::from_image(&image).unwrap();
     assert_eq!(

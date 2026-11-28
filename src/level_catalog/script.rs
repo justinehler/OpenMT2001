@@ -220,9 +220,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and GAMESTART registration source"]
     fn original_registration_and_profile_data() {
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let root = std::path::PathBuf::from(std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").unwrap());
+        let root = crate::fixtures::path("ORIGINAL_SCRIPTS");
         let source = std::fs::read(root.join("GAMESTART/hub.lua")).unwrap();
         let mut catalog = load(&image, &source, false, |_| Ok(Some(0))).unwrap();
         assert_eq!(catalog.levels.len(), 36);
@@ -263,7 +263,7 @@ mod tests {
         assert_eq!(catalog.levels[catalog.find(200003).unwrap()].attempts(), 7);
         assert!(catalog.levels[catalog.find(400001).unwrap()].unlocked());
         // The supplied v1.4 payload adds Sandbox and the seventh network map.
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = crate::fixtures::path("EXE");
         let patched = std::fs::read(
             executable_path
                 .parent()

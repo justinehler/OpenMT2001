@@ -247,8 +247,7 @@ pub fn buttons(main: [f32; 4], count: usize) -> Vec<[f32; 4]> {
 #[test]
 #[ignore = "requires native429630 button layout"]
 fn original_modal_buttons() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_HUMAN_DIALOG_LAYOUT").unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_HUMAN_DIALOG_LAYOUT")).unwrap();
     assert_eq!(&bytes[..8], b"MTHDLY01");
     let mut words = bytes[8..]
         .chunks_exact(4)

@@ -143,7 +143,7 @@ fn retained_across_signed_abs_and_unspilled_yaw_delta_boundaries() {
 #[test]
 #[ignore = "requires retained original PC53 building setup and mode13 sequences"]
 fn retained_original_building_setups_and_callback_sequences() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_CAMERA").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_CAMERA")).unwrap();
     assert_eq!(&bytes[..8], b"MTBLDC01");
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let cases = word(8) as usize;
@@ -222,8 +222,7 @@ fn retained_original_building_setups_and_callback_sequences() {
 #[test]
 #[ignore = "requires retained original AutoRotate-off setup cases"]
 fn retained_original_auto_rotate_off_setup() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUTO_ROTATE_CAMERA").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUTO_ROTATE_CAMERA")).unwrap();
     assert_eq!(&bytes[..8], b"MTAUTO01");
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     assert_eq!(bytes.len(), 12 + word(8) as usize * 56);

@@ -259,11 +259,10 @@ mod tests {
     #[test]
     #[ignore = "requires original divergent marker iteration fixture"]
     fn matches_native_positional_marker_iteration() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_ITERATION").unwrap())
-                .unwrap();
+            std::fs::read(openmt2001::fixtures::path("NATIVE_LIVE_PEOPLE_ITERATION")).unwrap();
         let mut offset = 0;
         let mut take = |n: usize| {
             let start = offset;
@@ -337,10 +336,10 @@ mod tests {
     #[test]
     #[ignore = "requires original live resident marker ownership fixture"]
     fn matches_native_live_shopping_markers() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_PEOPLE_MARKERS").unwrap()).unwrap();
+            std::fs::read(openmt2001::fixtures::path("NATIVE_LIVE_PEOPLE_MARKERS")).unwrap();
         assert_eq!(&fixture[..8], b"MTLVMK01");
         let word = |at| u32::from_le_bytes(fixture[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x037f);
@@ -381,9 +380,9 @@ mod tests {
     #[test]
     #[ignore = "private original strategic resident fixture"]
     fn matches_native_people_markers() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_PEOPLE_MARKERS").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_PEOPLE_MARKERS")).unwrap();
         assert_eq!(&b[..8], b"MTPEOMK1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -393,7 +392,7 @@ mod tests {
         };
         assert_eq!(word(&mut at), 2);
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
-            let raw = std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let raw = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
             let rows = from_save(&SaveFile::parse(&raw).unwrap(), &image).unwrap();
             at += 32;
             assert_eq!(word(&mut at) as usize, rows.len());

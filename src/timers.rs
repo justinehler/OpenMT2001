@@ -298,8 +298,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Calendar.SetFrequency observations"]
     fn matches_original_calendar_frequency() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CALENDAR_FREQUENCY").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CALENDAR_FREQUENCY")).unwrap();
         assert_eq!(&data[..8], b"MTCALF01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -346,7 +345,7 @@ mod tests {
     #[test]
     #[ignore = "requires original elapsed timer dispatch fixture"]
     fn matches_original_elapsed_dispatch() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_TIMERS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_TIMERS")).unwrap();
         assert_eq!(&data[..8], b"MTTIMER6");
         let mut reader = Reader(&data[8..]);
         assert_eq!(reader.word(), 0x37f);

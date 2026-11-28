@@ -1347,12 +1347,12 @@ mod tests {
     #[test]
     #[ignore = "original Stats443360 full widget input and parent notification oracle /037f"]
     fn original_stats_widget_input() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let executable = read("OPENMT2001_EXE");
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -1371,7 +1371,7 @@ mod tests {
                 row
             })
             .collect::<Vec<_>>();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let localized = crate::tooltip::localized_strings(installer, &strings).unwrap();
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
@@ -1387,7 +1387,7 @@ mod tests {
             history: vec![0; openmt2001::player_history::RECORD_BYTES],
             years_per_day: 1,
         };
-        let bytes = fs::read("work/frontend/native-stats-input.bin").unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_STATS_INPUT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTIN01");
         assert_eq!(r.word(), 0x37f);
@@ -1447,7 +1447,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Stats frontend pose/bind/draw oracle"]
     fn original_stats_mesh_transform() {
-        let bytes = std::fs::read("work/frontend/native-stats-mesh.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_MESH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTMS01");
         assert_eq!(r.word(), 0x37f);
@@ -1477,7 +1477,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Stats wrap/style9/full glyph oracle"]
     fn original_stats_text_layout() {
-        let bytes = std::fs::read("work/frontend/native-stats-text.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_TEXT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTTX01");
         assert_eq!(r.word(), 0x37f);
@@ -1515,7 +1515,7 @@ mod tests {
     #[test]
     #[ignore = "requires whole original42d220 tick/axis producer oracle"]
     fn original_stats_grid_geometry() {
-        let bytes = std::fs::read("work/frontend/native-stats-grid.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_GRID")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTGD01");
         assert_eq!(r.word(), 0x37f);
@@ -1551,7 +1551,7 @@ mod tests {
     #[test]
     #[ignore = "requires original42ce80 linkedCRT/axis fullglyph oracle"]
     fn original_stats_axis_text() {
-        let bytes = std::fs::read("work/frontend/native-stats-axis-text.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_AXIS_TEXT")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTAX01");
         assert_eq!(r.word(), 0x37f);
@@ -1601,7 +1601,7 @@ mod tests {
     #[test]
     #[ignore = "requires complete original42d970 polyline geometry oracle"]
     fn original_stats_line_geometry() {
-        let bytes = std::fs::read("work/frontend/native-stats-graph.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_GRAPH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTGR01");
         assert_eq!(r.word(), 0x37f);
@@ -1629,22 +1629,22 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original Stats constructor/show/action oracle"]
     fn original_stats_controls() {
-        let bytes = std::fs::read("work/frontend/native-stats-panel-graph.bin").unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_STATS_PANEL_GRAPH")).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTSTAT01");
         assert_eq!(r.word(), 0x37f);
         let size = r.word() as usize;
         let count = r.word();
         let original = r.take(size);
-        let index = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let index = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = openmt2001::archive::ArchiveIndex::parse(&index, archive.len() as u64).unwrap();
         let entry = index.find(PANEL).unwrap();
         assert_eq!(
             original,
             &archive[entry.offset as usize..(entry.offset + entry.length) as usize]
         );
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         for _ in 0..count {
             let players = r.word() as usize;
@@ -1806,13 +1806,13 @@ mod mesh_culling_tests {
     }
     impl Supplied {
         fn read() -> Self {
-            let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-            let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+            let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+            let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
             let executable = guarded(
-                &PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap()),
+                &openmt2001::fixtures::path("EXE"),
                 "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
             );
-            let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            let installer = openmt2001::fixtures::path("PARAMETERS")
                 .parent()
                 .unwrap()
                 .parent()
@@ -1834,7 +1834,7 @@ mod mesh_culling_tests {
             ] {
                 guarded(&installer.join("Standard/fonts").join(name), hash);
             }
-            let language = PathBuf::from(std::env::var("OPENMT2001_STATS_LANGUAGE").unwrap());
+            let language = openmt2001::fixtures::path("STATS_LANGUAGE");
             let off = guarded(
                 &language.join("tycoon.off"),
                 "54a2c8adf44e37138bcaf36bf9c9218e0543880e308a0b9cc9a883ee98265b4d",
@@ -2043,7 +2043,7 @@ mod mesh_culling_tests {
         let supplied = Supplied::read();
         let assets = supplied.assets();
         let saved = guarded(
-            &PathBuf::from(std::env::var("OPENMT2001_STATS_SAVE_ONE").unwrap()),
+            &openmt2001::fixtures::path("STATS_SAVE_ONE"),
             "2c3bfdbbdaeb2e12e08752e9f3ed05d6e5c4dc60aa48208113f46a84b329dded",
         );
         let save = openmt2001::save::SaveFile::parse(&saved).unwrap();

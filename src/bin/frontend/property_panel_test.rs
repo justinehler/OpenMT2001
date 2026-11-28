@@ -3,7 +3,7 @@ use super::*;
 #[test]
 #[ignore = "requires original font0 and pinned native441220/4419f0 caption oracle"]
 fn original_rights_caption_layout() {
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let tab = fs::read(
         parameter
             .parent()
@@ -18,7 +18,7 @@ fn original_rights_caption_layout() {
         *bytes = tail;
         u32::from_le_bytes(head.try_into().unwrap())
     }
-    let native = fs::read("work/frontend/native-rights-caption-layout.bin").unwrap();
+    let native = fs::read(openmt2001::fixtures::path("NATIVE_RIGHTS_CAPTION_LAYOUT")).unwrap();
     assert_eq!(&native[..8], b"MTRCPT01");
     let mut bytes = &native[8..];
     assert_eq!(word(&mut bytes), 0x037f);
@@ -62,12 +62,12 @@ fn original_rights_caption_layout() {
 #[ignore = "private original property GPU/input capture"]
 fn property_reports_and_offer_input() {
     use openmt2001::render_scene::{OriginalAssets, Request, Source, assemble};
-    let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+    let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
     let exe = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let build = read("OPENMT2001_BUILD_FILE");
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -86,7 +86,7 @@ fn property_reports_and_offer_input() {
             text
         })
         .collect::<Vec<_>>();
-    let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+    let sun = openmt2001::fixtures::path("SUNCOLS");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
     let assets = Assets::load(
         &index,

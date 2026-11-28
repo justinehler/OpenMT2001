@@ -588,7 +588,7 @@ mod tests {
     #[test]
     #[ignore = "private original railroad report oracle"]
     fn matches_native_railroad_report() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_RAILROAD_REPORT").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_RAILROAD_REPORT")).unwrap();
         assert_eq!(&b[..8], b"MTRAILR1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -625,8 +625,7 @@ mod tests {
     #[test]
     #[ignore = "private original utility controls oracle"]
     fn matches_native_utility_controls() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_UTILITY_CONTROLS").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_UTILITY_CONTROLS")).unwrap();
         assert_eq!(&b[..8], b"MTUPCTRL");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -702,7 +701,7 @@ mod tests {
     #[test]
     #[ignore = "private original utility widget setup/draw oracle"]
     fn matches_native_utility_style() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_UTILITY_STYLE").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_UTILITY_STYLE")).unwrap();
         assert_eq!(&b[..8], b"MTUSTYL1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -737,11 +736,10 @@ mod tests {
     #[test]
     #[ignore = "private original utility report oracle"]
     fn matches_native_utility_report() {
-        let path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_UTILITY_REPORT").unwrap());
+        let path = openmt2001::fixtures::path("NATIVE_UTILITY_REPORT");
         let b = std::fs::read(&path).unwrap();
         assert_eq!(&b[..8], b"MTUTILR1");
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -756,7 +754,7 @@ mod tests {
             at += n + 32;
             let file = ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"]
                 .into_iter()
-                .map(|k| std::path::PathBuf::from(std::env::var(k).unwrap()))
+                .map(|k| openmt2001::fixtures::path(k))
                 .find(|p| p.file_name().unwrap() == name)
                 .unwrap_or_else(|| path.parent().unwrap().join(name));
             let save = std::fs::read(file).unwrap();

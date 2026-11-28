@@ -139,11 +139,11 @@ mod tests {
     #[test]
     #[ignore = "requires whole original expansion observations"]
     fn matches_native_expansion() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_EXPANSION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_EXPANSION")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIEXP1");
         assert_eq!(r.word(), 0x37f);
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         for i in 0..r.word() {
             let expected_identity = r.word();
@@ -499,12 +499,11 @@ mod build_tests {
     #[test]
     #[ignore = "requires original complete expansion/planning/proposal observations"]
     fn matches_native_expansion_build() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_EXPANSION_BUILD").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_EXPANSION_BUILD")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIEXB1");
         assert_eq!(r.word(), 0x37f);
-        let exe = std::fs::read("work/patch14/payload/Essential/mc.exe").unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         for case in 0..r.word() {
             let mode = r.word();

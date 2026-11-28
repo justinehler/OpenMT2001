@@ -486,10 +486,10 @@ mod tests {
                 Ok(10.)
             }
         }
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut reader = Reader {
-            data: std::fs::read(std::env::var("OPENMT2001_NATIVE_MAP_CALLBACKS").unwrap()).unwrap(),
+            data: std::fs::read(crate::fixtures::path("NATIVE_MAP_CALLBACKS")).unwrap(),
             at: 0,
         };
         assert_eq!(reader.bytes::<8>(), *b"MTMAPC01");
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     #[ignore = "requires original map, configuration and building geometry"]
     fn original_starting_out_hub_creates_city_and_population() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
@@ -650,8 +650,7 @@ mod tests {
             crate::people::PeopleModels::load(&image, &directory, &archive).unwrap();
         let handles = std::array::from_fn(|i| [(i * 2 + 1) as u32, (i * 2 + 2) as u32]);
         let model_bindings = people_models.resident_bindings(&handles).unwrap();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default_path = crate::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default_path.parent().unwrap().parent().unwrap();
         let prefs = std::fs::read(scripts.join("SCENARIO3/initialpref.lua")).unwrap();
         for (scenario, difficulty) in ["SCENARIO1", "SCENARIO3", "SCENARIO5"]

@@ -185,7 +185,7 @@ pub(crate) fn construction_stage(
         target: center,
         up: [0., 1., 0.],
     };
-    let sun = fs::read(std::env::var("OPENMT2001_SUNCOLS").unwrap()).unwrap();
+    let sun = fs::read(openmt2001::fixtures::path("SUNCOLS")).unwrap();
     let scene = session
         .scene(build, original, &sun, Some(camera), false)
         .unwrap();

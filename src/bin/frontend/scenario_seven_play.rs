@@ -152,16 +152,13 @@ fn legal_scenario_seven_virginia_three_apartments_frontier() {
 #[test]
 #[ignore = "requires the genuine Scenario6 Win profile and original v1.4 catalog"]
 fn scenario_seven_requires_natural_scenario_eleven_campaign_unlock() {
-    let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-    let scripts = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+    let scripts = openmt2001::fixtures::path("EXE")
         .parent()
         .unwrap()
         .join("scripts");
-    let profile = PathBuf::from(
-        std::env::var("OPENMT2001_SCENARIO6_WIN_PROFILE")
-            .expect("set OPENMT2001_SCENARIO6_WIN_PROFILE to a genuine V2 Scenario6 Win profile"),
-    );
+    let profile = openmt2001::fixtures::path("SCENARIO6_WIN_PROFILE");
     let mut catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
     crate::campaign_store::load_progress(&mut catalog, &profile).unwrap();
     for id in [200003, 200004, 200005, 200002, 200012, 200001, 200006] {
@@ -191,7 +188,7 @@ fn scenario_seven_requires_natural_scenario_eleven_campaign_unlock() {
 
 fn run_scenario_seven_weakest_link(stop_after_first: bool, virginia: bool, third_apartment: bool) {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -202,7 +199,7 @@ fn run_scenario_seven_weakest_link(stop_after_first: bool, virginia: bool, third
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let scripts = exe.parent().unwrap().join("scripts");
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let mut session = Session::initialize(Inputs {
@@ -213,7 +210,7 @@ fn run_scenario_seven_weakest_link(stop_after_first: bool, virginia: bool, third
             transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
             road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
             parameters: std::str::from_utf8(&parameters).unwrap(),
-            era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+            era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
             timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO7", difficulty: 0,
             selected_character: 4, profile_name: b"Scenario7 Weakest Link", character_names: &names,
         }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }).unwrap();

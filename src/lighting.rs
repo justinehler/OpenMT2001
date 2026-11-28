@@ -197,12 +197,10 @@ mod tests {
     #[ignore = "requires original sun-color image and lighting observations"]
     fn matches_native_lighting() {
         let sun =
-            SunColors::parse(&std::fs::read(std::env::var("OPENMT2001_SUNCOLS").unwrap()).unwrap())
-                .unwrap();
-        let path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+            SunColors::parse(&std::fs::read(crate::fixtures::path("SUNCOLS")).unwrap()).unwrap();
+        let path = crate::fixtures::path("NATIVE_LIGHTING");
         let bytes = std::fs::read(&path).unwrap();
-        let vertices =
-            std::fs::read(std::path::Path::new(&path).with_extension("vertices.bin")).unwrap();
+        let vertices = std::fs::read(crate::fixtures::path("NATIVE_LIGHTING_VERTICES")).unwrap();
         let vertex_word = |at| u32::from_le_bytes(vertices[at..at + 4].try_into().unwrap());
         assert_eq!(&vertices[..8], b"MTLITV01");
         let normal_count = vertex_word(12) as usize;

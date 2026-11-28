@@ -823,13 +823,13 @@ mod tests {
     #[test]
     #[ignore = "requires both supplied original saves and v1.4 executable"]
     fn reads_both_supplied_saves() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         for (path, size, sections, records) in [
             ("OPENMT2001_SAVE_ONE", 855336, 357, 340),
             ("OPENMT2001_SAVE_TWO", 909416, 517, 500),
         ] {
-            let bytes = std::fs::read(std::env::var(path).unwrap()).unwrap();
+            let bytes = std::fs::read(crate::fixtures::path(path)).unwrap();
             assert_eq!(bytes.len(), size);
             let save = SaveFile::parse(&bytes).unwrap();
             save.validate_compatibility(&image).unwrap();

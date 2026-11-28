@@ -990,13 +990,13 @@ mod tutorial_two_tests {
     #[test]
     #[ignore = "requires original v1.4 main-panel mesh and fonts"]
     fn original_go_to_block_overlay_is_tutorial_two_target() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let assets = super::Assets::load(&index, &archive, installer, &[], &executable).unwrap();
         let panel = index
@@ -1019,8 +1019,10 @@ mod tutorial_two_tests {
         assert!(assets.go_to_block_contains([20., 288.]));
         assert!(!assets.go_to_block_contains([29., 288.]));
         assert!(!assets.go_to_block_contains([20., 270.]));
-        let script = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("Original Distribution/Monopoly Tycoon ISO 2001 Archive.org/Extracted Installer/scripts/TUTORIAL2/hub.lua")).unwrap();
+        let script = std::fs::read_to_string(
+            openmt2001::fixtures::path("ORIGINAL_SCRIPTS").join("TUTORIAL2/hub.lua"),
+        )
+        .unwrap();
         assert!(script.contains("Interface.AddArrow( 29, 288 )"));
         assert!(script.contains("Interface.EnableControl(TUT_MPP_GREENBUTTON_6)"));
     }
@@ -1066,14 +1068,14 @@ mod tests {
         assert_eq!(information_heading_style(1), (0, 16, 1405));
     }
     pub(super) fn original_assets() -> (Assets, Vec<u8>) {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let exe = read("OPENMT2001_EXE");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -1102,11 +1104,7 @@ mod tests {
     #[test]
     #[ignore = "original Main41e40f/407b07 constructor and icon oracle"]
     fn original_business_information_layout() {
-        let bytes = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/economy/native-main-information-layout.bin"),
-        )
-        .unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_MAIN_INFORMATION_LAYOUT")).unwrap();
         assert_eq!(&bytes[..8], b"MTMAINIF");
         let mut words = bytes[8..]
             .chunks_exact(4)
@@ -1138,8 +1136,7 @@ mod tests {
     #[ignore = "original building constructor and panel assets"]
     fn original_building_resources() {
         let (assets, exe) = original_assets();
-        let bytes =
-            fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_PANEL_LAYOUT").unwrap()).unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_BUILDING_PANEL_LAYOUT")).unwrap();
         assert_eq!(&bytes[..8], b"MTBLAY01");
         let mut words = bytes[8..]
             .chunks_exact(4)
@@ -1323,7 +1320,7 @@ pub(crate) mod facing_fixture {
     }
     impl Inputs {
         pub fn read() -> Self {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let directory = read("OPENMT2001_ARCHIVE_DIR");
             guard(
                 &directory,
@@ -1335,7 +1332,7 @@ pub(crate) mod facing_fixture {
                 &executable,
                 "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b",
             );
-            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let parameter = openmt2001::fixtures::path("PARAMETERS");
             let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
             guard(
                 &fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab")).unwrap(),
@@ -1365,17 +1362,15 @@ pub(crate) mod facing_fixture {
                 &fs::read(installer.join("scripts/DEFAULT/commoditysettings.lua")).unwrap(),
                 "9dc3e30cf2fca8743611e5a0c6f2f88de51b97b584d9ad65ba6c51573500cdde",
             );
-            let executable_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-            let language = std::env::var_os("OPENMT2001_FACING_LANGUAGE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    executable_path
-                        .parent()
-                        .unwrap()
-                        .parent()
-                        .unwrap()
-                        .join("US/language/usa")
-                });
+            let executable_path = openmt2001::fixtures::path("EXE");
+            let language = openmt2001::fixtures::optional("FACING_LANGUAGE").unwrap_or_else(|| {
+                executable_path
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("US/language/usa")
+            });
             let offsets = fs::read(language.join("tycoon.off")).unwrap();
             let bytes = fs::read(language.join("tycoon.bin")).unwrap();
             guard(

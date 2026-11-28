@@ -277,7 +277,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 tutor meshes and textures"]
     fn original_tutor_actor() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");

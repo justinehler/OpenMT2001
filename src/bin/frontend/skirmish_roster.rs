@@ -564,7 +564,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original assets, English language and offscreen graphics"]
     fn original_offline_roster_controls_and_rendered_panels() {
-        let read = |key| fs::read(std::env::var_os(key).expect(key)).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
@@ -580,7 +580,7 @@ mod tests {
                 &glyphs[start..at]
             })
             .collect::<Vec<_>>();
-        let installer = std::path::PathBuf::from(std::env::var_os("OPENMT2001_INSTALLER").unwrap());
+        let installer = openmt2001::fixtures::path("INSTALLER");
         let localized = crate::tooltip::localized_strings(&installer, &strings).unwrap();
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
         let panel = RosterPanel::new(

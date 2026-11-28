@@ -454,7 +454,7 @@ fn random_zero_to(state: &mut u32, args: &[Value]) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn result_random_uses_the_native_static_stream() {
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 US language data"]
     fn result_text_ids_address_supplied_localized_glyphs() {
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -539,8 +539,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 4b1bc0 row-constructor fixture"]
     fn complete_credit_count_matches_original_calls() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CREDITS").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_RESULT_CREDITS")).unwrap();
         assert_eq!(&bytes[..8], b"MTRCRED1");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
         let rows = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
@@ -555,10 +554,9 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 credit-constructor fixture and executable"]
     fn complete_credit_rows_match_native_constructor_arguments() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESULT_CREDITS").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_RESULT_CREDITS")).unwrap();
         assert_eq!(&bytes[..8], b"MTRCRED1");
-        let image_bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let image_bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&image_bytes).unwrap();
         let mut state = 0x1234_5678;
         let descriptors = credit_descriptors(&image, &mut state).unwrap();
@@ -588,7 +586,7 @@ mod tests {
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
-                let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+                let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let executable = read("OPENMT2001_EXE");
                 let archive = read("OPENMT2001_ARCHIVE_BIN");
                 let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -601,7 +599,7 @@ mod tests {
                 let index =
                     openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
                         .unwrap();
-                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe_path = openmt2001::fixtures::path("EXE");
                 let scripts = exe_path.parent().unwrap().join("scripts");
                 let language = exe_path
                     .parent()
@@ -611,7 +609,7 @@ mod tests {
                     .join("US/language/usa");
                 let names = super::super::character_names(&image, &language).unwrap();
                 let era_styles = super::super::load_era_styles(
-                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                    Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                         .parent()
                         .unwrap(),
                 )

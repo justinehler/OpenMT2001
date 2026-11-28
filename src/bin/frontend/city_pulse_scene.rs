@@ -88,7 +88,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 archive and executable"]
     fn native_four_light_submissions() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
@@ -126,7 +126,7 @@ mod tests {
     fn captures_native_pulsing_lights() {
         use glam::Mat4;
         use openmt2001::{camera, render::Renderer};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();

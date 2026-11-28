@@ -89,8 +89,7 @@ pub fn clear(player: &mut Player) {
 #[test]
 #[ignore = "requires original live consumer poll capture"]
 fn matches_native_live_poll() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_LIVE_CONSUMER_POLL").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_LIVE_CONSUMER_POLL")).unwrap();
     let mut data = &bytes[..];
     fn take<'a>(data: &mut &'a [u8], n: usize) -> &'a [u8] {
         let (a, b) = data.split_at(n);

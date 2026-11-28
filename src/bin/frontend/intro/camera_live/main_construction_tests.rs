@@ -8,9 +8,7 @@ use super::super::{
 use super::*;
 use std::{fs, path::PathBuf};
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 struct Inputs {
     exe: Vec<u8>,
@@ -573,8 +571,8 @@ fn actual_assets_entry_retains_prefix_with_same_assets_across_retirement() {
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     })
     .unwrap();
     assert_eq!(

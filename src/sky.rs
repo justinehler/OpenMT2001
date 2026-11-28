@@ -262,7 +262,7 @@ mod tests {
     #[test]
     #[ignore = "requires original celestial quad observations"]
     fn matches_native_celestial_quads() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CELESTIAL").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CELESTIAL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"MTCELES1");
@@ -300,9 +300,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and initialized star observations"]
     fn matches_native_stars() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_STARS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_STARS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTSTARS1");
         assert_eq!(word(12), 0x037f);
@@ -321,8 +321,7 @@ mod tests {
     #[test]
     #[ignore = "requires original incremental cloud animation observations"]
     fn matches_native_cloud_motion() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CLOUD_MOTION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CLOUD_MOTION")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCANIM1");
         assert_eq!((word(8), word(16)), (1088, 0x037f));
@@ -356,7 +355,7 @@ mod tests {
     #[test]
     #[ignore = "requires original cloud coordinate observations"]
     fn matches_native_cloud_coordinates() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CLOUD_UVS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CLOUD_UVS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCLOUD2");
         assert_eq!((word(8), word(12)), (1088, 0x037f));
@@ -384,8 +383,7 @@ mod tests {
     #[test]
     #[ignore = "requires original sky camera observations"]
     fn matches_native_sky_visibility() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SKY_VISIBILITY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SKY_VISIBILITY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTSKYVIS");
         assert_eq!(word(12), 0x027f);
@@ -407,7 +405,7 @@ mod tests {
     #[test]
     #[ignore = "requires original sky observations"]
     fn matches_native_sky_geometry_and_colors() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_SKY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SKY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTSKY001");
         let sky = Sky::original();

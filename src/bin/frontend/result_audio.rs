@@ -184,10 +184,10 @@ mod tests {
     use super::*;
     #[test]
     fn original_result_music_pointers_and_files() {
-        let Some(exe) = std::env::var_os("OPENMT2001_EXE") else {
+        let Some(exe) = openmt2001::fixtures::optional("EXE") else {
             return;
         };
-        let Some(suncols) = std::env::var_os("OPENMT2001_SUNCOLS") else {
+        let Some(suncols) = openmt2001::fixtures::optional("SUNCOLS") else {
             return;
         };
         let exe = std::fs::read(exe).unwrap();

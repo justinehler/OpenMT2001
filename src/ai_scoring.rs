@@ -245,9 +245,8 @@ mod tests {
     #[test]
     #[ignore = "requires original strategy score observations"]
     fn matches_native_contributors() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_STRATEGY_SCORES").unwrap()).unwrap();
-        let original = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_STRATEGY_SCORES")).unwrap();
+        let original = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTSCOR02");
         for _ in 0..r.word() {
@@ -320,7 +319,7 @@ mod tests {
     #[test]
     #[ignore = "requires original weighted strategy observations"]
     fn matches_native_weighted_choice() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CHOICE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CHOICE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(7), b"MTCHO02");
         for _ in 0..r.word() {

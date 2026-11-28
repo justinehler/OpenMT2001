@@ -29,8 +29,8 @@ mod tests {
     #[test]
     #[ignore = "requires original004bb500 history/cache observations"]
     fn matches_native_history() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_HISTORY").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_HISTORY")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTHIST02");

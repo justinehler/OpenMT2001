@@ -2608,9 +2608,7 @@ mod tests {
     #[test]
     #[ignore = "private original auxiliary sunlight transform oracle"]
     fn original_building_pose_sunlight() {
-        let path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_BUILDING_POSE").unwrap());
-        let b = std::fs::read(path.with_file_name("native-building-pose-light.bin")).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_POSE_LIGHT")).unwrap();
         assert_eq!(&b[..8], b"MTBLIGHT");
         let count = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
         assert_eq!(b.len(), 12 + count * 28);
@@ -2631,7 +2629,7 @@ mod tests {
     #[test]
     #[ignore = "private original auxiliary matrix and vertex oracle"]
     fn original_building_pose() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUILDING_POSE").unwrap()).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_BUILDING_POSE")).unwrap();
         assert_eq!(&b[..8], b"MTBLPOSE");
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -2672,7 +2670,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 building geometry and material assets"]
     fn runtime_construction_pose_patch_matches_full_original_scene_assembly() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -2814,7 +2812,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original v1.4 geometry, map, sunlight and archive"]
     fn daylight_facade_submits_cached_row_zero_without_reconversion() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -2942,7 +2940,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 building and material assets"]
     fn quoted_building_uses_world_pose_and_original_materials() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -2995,7 +2993,7 @@ mod tests {
     #[test]
     #[ignore = "requires original scenery page observations and archive"]
     fn matches_native_dedicated_scenery_pages() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             ArchiveIndex::parse(&read("OPENMT2001_ARCHIVE_DIR"), archive.len() as u64).unwrap();
@@ -3055,7 +3053,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro scene assets and flyby track"]
     fn animated_reframe_matches_fresh_scene() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -3131,7 +3129,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro assets and a GPU adapter"]
     fn animated_environment_advances_on_normal_logic_ticks() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -3616,7 +3614,7 @@ mod temporal_city_lighting_regressions {
     use super::*;
 
     fn read(key: &str) -> Vec<u8> {
-        std::fs::read(std::env::var(key).expect(key)).unwrap()
+        std::fs::read(crate::fixtures::path(key)).unwrap()
     }
     fn word(bytes: &[u8], at: usize) -> u32 {
         u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
@@ -3696,11 +3694,9 @@ mod temporal_city_lighting_regressions {
         let build_file = read("OPENMT2001_BUILD_FILE");
         let suncols = read("OPENMT2001_SUNCOLS");
         let map = read("OPENMT2001_INTRO_MAP");
-        let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+        let native_path = crate::fixtures::path("NATIVE_LIGHTING");
         let native = std::fs::read(&native_path).unwrap();
-        let vertices =
-            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
-                .unwrap();
+        let vertices = std::fs::read(crate::fixtures::path("NATIVE_LIGHTING_VERTICES")).unwrap();
         assert_eq!(&native[..8], b"MTLIGHT3");
         assert_eq!(&vertices[..8], b"MTLITV01");
         assert_eq!(word(&native, 8), word(&vertices, 8));
@@ -3838,11 +3834,10 @@ mod temporal_city_lighting_regressions {
         let build_file = read("OPENMT2001_BUILD_FILE");
         let suncols = read("OPENMT2001_SUNCOLS");
         let save_bytes = read("OPENMT2001_SAVE_ONE");
-        let native_path = std::env::var("OPENMT2001_NATIVE_LIGHTING").unwrap();
+        let native_path = crate::fixtures::path("NATIVE_LIGHTING");
         let native = std::fs::read(&native_path).unwrap();
         let observations =
-            std::fs::read(std::path::Path::new(&native_path).with_extension("vertices.bin"))
-                .unwrap();
+            std::fs::read(crate::fixtures::path("NATIVE_LIGHTING_VERTICES")).unwrap();
         let save = crate::save::SaveFile::parse(&save_bytes).unwrap();
         let board = Board::from_v14(&PeImage::parse(&executable).unwrap()).unwrap();
         let file = BuildFile::parse(&build_file).unwrap();

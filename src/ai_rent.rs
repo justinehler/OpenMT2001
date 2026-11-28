@@ -105,7 +105,7 @@ mod tests {
     #[test]
     #[ignore = "requires original rent decision observations"]
     fn matches_native_rent_decisions() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_RENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_RENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTAIRNT2");
         assert_eq!(word(12), 0x037f);

@@ -99,8 +99,7 @@ mod tests {
     #[test]
     #[ignore = "requires work/scene/native-polygon.bin from native_polygon.py"]
     fn matches_native_prepared_polygon_fixture() {
-        let path = std::env::var("OPENMT2001_NATIVE_POLYGON")
-            .unwrap_or_else(|_| "work/scene/native-polygon.bin".to_owned());
+        let path = crate::fixtures::path("NATIVE_POLYGON");
         let data = std::fs::read(path).unwrap();
         assert_eq!(&data[..8], b"MTPOLY01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());

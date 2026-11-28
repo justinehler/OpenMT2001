@@ -235,8 +235,7 @@ mod tests {
     #[test]
     #[ignore = "requires original block settings observations and script"]
     fn matches_native_default_block_settings() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BLOCK_SETTINGS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BLOCK_SETTINGS")).unwrap();
         assert_eq!(&bytes[..8], b"MTBLKSET");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 1);
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 52);
@@ -254,10 +253,9 @@ mod tests {
                 .try_into()
                 .unwrap()
         });
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let defaults =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let defaults = crate::fixtures::path("DEFAULT_SETTINGS");
         let script = std::fs::read(defaults.parent().unwrap().join("blocksettings.lua")).unwrap();
         let mut runtime = Runtime::new().unwrap();
         let bindings = Bindings::register(&mut runtime, 100).unwrap();
@@ -298,12 +296,12 @@ mod tests {
     #[test]
     #[ignore = "requires supplied SCENARIO3 scripts and v1.4 executable"]
     fn original_starting_out_hub_runs_nested_map_and_preferences_in_order() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let ai = std::path::PathBuf::from(std::env::var("OPENMT2001_AI_SCRIPT").unwrap());
+        let ai = crate::fixtures::path("AI_SCRIPT");
         let root = ai.parent().unwrap().parent().unwrap();
         let hub = std::fs::read(root.join("SCENARIO3/hub.lua")).unwrap();
-        let map = std::fs::read(root.join("maps/apartmentrim.lua")).unwrap();
+        let map = std::fs::read(root.join("MAPS/apartmentrim.lua")).unwrap();
         let prefs = std::fs::read(root.join("SCENARIO3/initialpref.lua")).unwrap();
         let expected_map =
             crate::scene::parse_static_map(std::str::from_utf8(&map).unwrap()).unwrap();

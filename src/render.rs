@@ -1748,7 +1748,7 @@ mod depth_tests {
     #[test]
     #[ignore = "requires supplied original city assets and offscreen GPU; release performance measurement"]
     fn original_city_texture_upload_performance() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -1989,8 +1989,8 @@ mod retained_facade_upload_regressions {
     #[test]
     #[ignore = "requires supplied original BuildingTextures and a GPU adapter"]
     fn native_facade_selector_images_reach_each_retained_gpu_update_path() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(crate::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(crate::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
             .find("gamedata2/BuildingTextures/textures.gtd")

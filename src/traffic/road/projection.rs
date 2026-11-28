@@ -87,11 +87,10 @@ mod tests {
     #[test]
     #[ignore = "requires original unseamed vehicle projection observations"]
     fn matches_original_projection() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let settings = ProjectionSettings::from_v14(&image).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_PROJECTION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_PROJECTION")).unwrap();
         assert_eq!(&data[..8], b"MTVPROJ1");
         let mut at = 12;
         fn rows<const N: usize, const M: usize>(data: &[u8], at: &mut usize) -> [[u8; N]; M] {

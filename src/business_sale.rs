@@ -174,8 +174,7 @@ pub fn apply(
 #[test]
 #[ignore = "requires original48ae60 packet observations"]
 fn matches_native_sale_producer() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_SALE_PRODUCER").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_SALE_PRODUCER")).unwrap();
     assert_eq!(&data[..8], b"MTBSPR01");
     assert_eq!(word(&data, 8), 0x37f);
     for row in data[16..].chunks_exact(64) {
@@ -211,9 +210,9 @@ fn matches_native_sales() {
     fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
         b.chunks_exact(N).map(|r| r.try_into().unwrap()).collect()
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_SALE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_SALE")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTBSALE1");
     assert_eq!(r.word(), 0x37f);

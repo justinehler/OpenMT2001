@@ -324,8 +324,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pending construction/demolition observations"]
     fn matches_native_transitions() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PENDING_WORLD").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PENDING_WORLD")).unwrap();
         let mut r = Reader {
             bytes: &bytes,
             at: 0,
@@ -408,8 +407,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pending-world producer observations"]
     fn matches_native_producers() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PENDING_PRODUCERS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PENDING_PRODUCERS")).unwrap();
         let mut r = Reader {
             bytes: &bytes,
             at: 0,

@@ -3,9 +3,7 @@ use super::*;
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let base = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+        let base = openmt2001::fixtures::scratch("TEST_SCRATCH");
         fs::create_dir_all(&base).unwrap();
         // macOS clocks can return the same nanosecond value for back-to-back
         // calls, so a per-process counter keeps parallel tests apart.

@@ -171,7 +171,7 @@ mod tests {
                 use super::super::{
                     CommandAssets, Inputs, Policy, Session, character_names, load_era_styles,
                 };
-                let data = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let data = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let executable = data("OPENMT2001_EXE");
                 let directory = data("OPENMT2001_ARCHIVE_DIR");
                 let archive = data("OPENMT2001_ARCHIVE_BIN");
@@ -184,9 +184,9 @@ mod tests {
                 let index =
                     openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
                         .unwrap();
-                let default = PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
                 let scripts = default.parent().unwrap().parent().unwrap();
-                let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe = openmt2001::fixtures::path("EXE");
                 let language = exe
                     .parent()
                     .unwrap()
@@ -194,7 +194,7 @@ mod tests {
                     .unwrap()
                     .join("US/language/usa");
                 let names = character_names(&image, &language).unwrap();
-                let parameter_path = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let parameter_path = openmt2001::fixtures::path("PARAMETERS");
                 let inputs = || Inputs {
                     tree_locators: None,
                     image: &image,
@@ -361,7 +361,7 @@ mod tests {
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
                 use super::super::{Inputs, Policy, Session, character_names, load_era_styles};
-                let data = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let data = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let executable = data("OPENMT2001_EXE");
                 let directory = data("OPENMT2001_ARCHIVE_DIR");
                 let archive = data("OPENMT2001_ARCHIVE_BIN");
@@ -374,12 +374,12 @@ mod tests {
                 let index =
                     openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
                         .unwrap();
-                let default = PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
                 let scripts = default.parent().unwrap().parent().unwrap();
                 // Require the patched supplied root, never the installer scripts tree.
                 assert!(scripts.join("CUSTOM/deepred/Jon001/hub.lua").is_file());
                 assert!(scripts.join("MAPS/jonmap002.lua").is_file());
-                let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe = openmt2001::fixtures::path("EXE");
                 let language = exe
                     .parent()
                     .unwrap()
@@ -387,7 +387,7 @@ mod tests {
                     .unwrap()
                     .join("US/language/usa");
                 let names = character_names(&image, &language).unwrap();
-                let parameter_path = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let parameter_path = openmt2001::fixtures::path("PARAMETERS");
                 let inputs = |scenario, difficulty, selected_character| Inputs {
                     tree_locators: None,
                     image: &image,

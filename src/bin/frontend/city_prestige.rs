@@ -105,8 +105,7 @@ mod tests {
     #[test]
     #[ignore = "private original prestige fixture"]
     fn matches_native_city_prestige() {
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_PRESTIGE").unwrap()).unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path("NATIVE_CITY_PRESTIGE")).unwrap();
         assert_eq!(&fixture[..8], b"MTCPRES2");
         let mut at = 8;
         let read = |at: &mut usize| {
@@ -115,14 +114,14 @@ mod tests {
             n
         };
         assert_eq!(read(&mut at), 3);
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let board = Board::from_v14(&openmt2001::pe::PeImage::parse(&exe).unwrap()).unwrap();
         for key in [
             "OPENMT2001_SAVE_ONE",
             "OPENMT2001_SAVE_TWO",
             "OPENMT2001_PRESTIGE_SYNTHETIC",
         ] {
-            let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
             let actual = Prestige::from_save(&SaveFile::parse(&bytes).unwrap(), &board).unwrap();
             at += 32;
             let count = read(&mut at);

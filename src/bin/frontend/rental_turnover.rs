@@ -9,10 +9,7 @@ use openmt2001::{
     economy::{BusinessTerms, PlayerAccount, ResidentAccounts},
     housing,
 };
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 fn word(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }
@@ -345,7 +342,7 @@ fn delayed_terms(
 #[ignore = "requires original assets; legal rental turnover and full native terms replay"]
 fn legal_rental_eviction_rehousing_and_next_income() {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(|| {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let archive = read("OPENMT2001_ARCHIVE_BIN");
             let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -356,7 +353,7 @@ fn legal_rental_eviction_rehousing_and_next_income() {
             let board = openmt2001::board::Board::from_v14(&image).unwrap();
             let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
             let scripts = exe.parent().unwrap().join("scripts");
             let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let mut session = Session::initialize(Inputs {
@@ -367,7 +364,7 @@ fn legal_rental_eviction_rehousing_and_next_income() {
                 transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
                 road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
                 parameters: std::str::from_utf8(&parameters).unwrap(),
-                era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
                 timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO3", difficulty: 0,
                 selected_character: 4, profile_name: b"Rental turnover validation", character_names: &names,
             }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }).unwrap();

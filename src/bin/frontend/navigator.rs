@@ -459,7 +459,7 @@ fn arrow_quad(origin: [f32; 2], eye: [f32; 2], angle: f32, tick: u32) -> [[f32; 
 mod tests {
     // Geometry oracle cases reuse one real asset owner; no placeholder primitive.
     fn supplied_navigator() -> super::Navigator {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -472,8 +472,8 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original upper Navigator mesh"]
     fn original_upper_navigator_regions() {
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = std::fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = std::fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let e = index
@@ -510,7 +510,7 @@ mod tests {
             mesh.texture_names[mesh.parts[1].texture as usize],
             "1NEW_MAYA_GREY_BORDER.TT"
         );
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         assert_eq!(image.at(0x5362c0, 4).unwrap(), &0xbb000a28u32.to_le_bytes());
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -591,7 +591,7 @@ mod tests {
             pe::PeImage,
             render_scene::{self, OriginalAssets, Request, Source},
         };
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -697,12 +697,11 @@ mod tests {
     #[ignore = "private original Navigator ownership oracle"]
     fn matches_native_navigator_ownership() {
         let mut navigator = supplied_navigator();
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_NAVIGATOR_OWNERSHIP").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_NAVIGATOR_OWNERSHIP")).unwrap();
         assert_eq!(&b[..8], b"MTNOWN01");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let f = |at| f32::from_bits(w(at));
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
         let colours: Vec<_> = (0..10)
@@ -802,7 +801,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Navigator arrow oracle"]
     fn matches_native_navigator_arrow() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_NAVIGATOR_ARROW").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_NAVIGATOR_ARROW")).unwrap();
         assert_eq!(&b[..8], b"MTNARR01");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let f = |at| f32::from_bits(w(at));
@@ -832,7 +831,7 @@ mod tests {
     #[ignore = "requires original Navigator geometry oracle, executable and archive assets"]
     fn matches_native_navigator() {
         let mut navigator = supplied_navigator();
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_NAVIGATOR").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_NAVIGATOR")).unwrap();
         assert_eq!(&b[..8], b"MTNAV001");
         let w = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let f = |at| f32::from_bits(w(at));

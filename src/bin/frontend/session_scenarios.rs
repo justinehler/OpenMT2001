@@ -98,8 +98,7 @@ mod tests {
                 Ok(())
             }
         }
-        let path = std::env::var_os("OPENMT2001_NATIVE_TUTORIAL_AUCTION_ORDER")
-            .expect("set OPENMT2001_NATIVE_TUTORIAL_AUCTION_ORDER to the private original comparison fixture");
+        let path = openmt2001::fixtures::path("NATIVE_TUTORIAL_AUCTION_ORDER");
         let bytes = fs::read(path).unwrap();
         assert_eq!(&bytes[..8], b"MTTAOR01");
         let mut words = bytes[8..]
@@ -195,7 +194,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied v1.4 bonus scripts and original assets"]
     fn original_bonus_initializes_at_all_difficulties() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         for (address, expected) in [
@@ -215,7 +214,7 @@ mod tests {
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let scripts = executable_path.parent().unwrap().join("scripts");
         let language = executable_path
             .parent()
@@ -225,12 +224,12 @@ mod tests {
             .join("US/language/usa");
         let names = super::super::character_names(&image, &language).unwrap();
         let era_styles = load_era_styles(
-            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                 .parent()
                 .unwrap(),
         )
         .unwrap();
-        let installer = Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = Path::new(&openmt2001::fixtures::path("PARAMETERS"))
             .parent()
             .unwrap()
             .parent()
@@ -472,7 +471,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         assert_eq!(menu.count(), 15);
         #[cfg(feature = "capture")]
@@ -500,7 +499,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(4);
         menu.activate(0);
@@ -514,7 +513,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(5);
         menu.activate(0);
@@ -528,7 +527,7 @@ mod tests {
         menu.open_tutorial(
             "Tutorial startup",
             setup.catalog.clone(),
-            std::path::PathBuf::from("work/economy/tutorial-menu-launch.profile"),
+            openmt2001::fixtures::path("TUTORIAL_MENU_LAUNCH"),
         );
         menu.activate(0);
         let tutorial_setup = menu
@@ -725,7 +724,7 @@ mod tests {
                 auxiliary_prior_bytes: [0; 0x11c],
             },
             crate::campaign_store::load_catalog(&image, &scripts).unwrap(),
-            std::path::PathBuf::from("work/economy/tutorial2-startup.profile"),
+            openmt2001::fixtures::path("TUTORIAL2_STARTUP"),
         )
         .unwrap();
         assert_eq!(second.catalog.selected_level().unwrap().id(), 100001);
@@ -1180,7 +1179,7 @@ mod tests {
         tutorial_eight(crate::compatibility::Mode::Modern);
     }
     fn tutorial_eight(mode: crate::compatibility::Mode) {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -1192,7 +1191,7 @@ mod tests {
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let scripts = executable_path.parent().unwrap().join("scripts");
         let language = executable_path
             .parent()
@@ -1202,12 +1201,12 @@ mod tests {
             .join("US/language/usa");
         let names = super::super::character_names(&image, &language).unwrap();
         let era_styles = load_era_styles(
-            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                 .parent()
                 .unwrap(),
         )
         .unwrap();
-        let installer = Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = Path::new(&openmt2001::fixtures::path("PARAMETERS"))
             .parent()
             .unwrap()
             .parent()
@@ -1238,18 +1237,14 @@ mod tests {
                 let _ = fs::remove_dir_all(&self.0);
             }
         }
-        let scratch = Scratch(
-            std::path::PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").unwrap()).join(
-                format!(
+        let scratch = Scratch(openmt2001::fixtures::scratch("TEST_SCRATCH").join(format!(
                     "tutorial8-{}-{}",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
                         .as_nanos()
-                ),
-            ),
-        );
+                )));
         fs::create_dir_all(&scratch.0).unwrap();
         let profile = scratch.0.join("progress.profile");
         let mut session = Session::initialize_campaign_compatible(
@@ -1673,7 +1668,7 @@ mod tests {
     }
 
     fn tutorial_three_to_five(fifth_mode: Option<crate::compatibility::Mode>) {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -1685,7 +1680,7 @@ mod tests {
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let scripts = executable_path.parent().unwrap().join("scripts");
         let language = executable_path
             .parent()
@@ -1695,12 +1690,12 @@ mod tests {
             .join("US/language/usa");
         let names = super::super::character_names(&image, &language).unwrap();
         let era_styles = load_era_styles(
-            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+            Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                 .parent()
                 .unwrap(),
         )
         .unwrap();
-        let installer = Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = Path::new(&openmt2001::fixtures::path("PARAMETERS"))
             .parent()
             .unwrap()
             .parent()
@@ -2992,7 +2987,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Tutorial6 scripts, models and management assets"]
     fn original_tutorial_six_management_flow() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -3004,7 +2999,7 @@ mod tests {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let scripts = exe_path.parent().unwrap().join("scripts");
         let language = exe_path
             .parent()
@@ -3013,8 +3008,7 @@ mod tests {
             .unwrap()
             .join("US/language/usa");
         let names = character_names(&image, &language).unwrap();
-        let parameter_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter_path = openmt2001::fixtures::path("PARAMETERS");
         let era_styles = load_era_styles(parameter_path.parent().unwrap()).unwrap();
         let installer = parameter_path.parent().unwrap().parent().unwrap();
         let offsets = fs::read(language.join("tycoon.off")).unwrap();
@@ -3905,7 +3899,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Tutorial 12 script, map, assets and GPU"]
     fn original_tutorial_twelve_lease_auction_flow() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -3915,16 +3909,15 @@ mod tests {
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let scripts = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .join("scripts");
         let parameters = read("OPENMT2001_PARAMETERS");
-        let parameter_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter_path = openmt2001::fixtures::path("PARAMETERS");
         let era_styles = load_era_styles(parameter_path.parent().unwrap()).unwrap();
         let timetable = read("OPENMT2001_TIMETABLE");
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let language = executable_path
             .parent()
             .unwrap()
@@ -4634,7 +4627,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 Tutorial 10/11 scripts and assets"]
     fn original_tutorial_ten_eleven_utility_railroad_flow() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -4644,13 +4637,12 @@ mod tests {
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let scripts = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .join("scripts");
         let parameters = read("OPENMT2001_PARAMETERS");
-        let parameter_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter_path = openmt2001::fixtures::path("PARAMETERS");
         let era_styles = load_era_styles(parameter_path.parent().unwrap()).unwrap();
         let timetable = read("OPENMT2001_TIMETABLE");
         let language = parameter_path
@@ -4868,7 +4860,7 @@ mod tests {
     #[test]
     #[ignore = "requires actual v1.4 scripts, original model/road assets"]
     fn original_tutorial_nine_auction_flow() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -4880,7 +4872,7 @@ mod tests {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let scripts = exe_path.parent().unwrap().join("scripts");
         let language = exe_path
             .parent()
@@ -4889,8 +4881,7 @@ mod tests {
             .unwrap()
             .join("US/language/usa");
         let names = character_names(&image, &language).unwrap();
-        let parameter_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter_path = openmt2001::fixtures::path("PARAMETERS");
         let era_styles = load_era_styles(parameter_path.parent().unwrap()).unwrap();
         let installer = parameter_path.parent().unwrap().parent().unwrap();
         let offsets = fs::read(language.join("tycoon.off")).unwrap();
@@ -5307,7 +5298,7 @@ mod tests {
     #[test]
     #[ignore = "requires actual v1.4 scripts, original model/road assets"]
     fn all_original_campaign_scenarios_initialize() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -5319,7 +5310,7 @@ mod tests {
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let scripts = executable_path.parent().unwrap().join("scripts");
         let language = executable_path
             .parent()
@@ -5353,7 +5344,7 @@ mod tests {
                         scripts: &scripts,
                         parameters: std::str::from_utf8(&parameters).unwrap(),
                         era_styles: load_era_styles(
-                            Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                            Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                                 .parent()
                                 .unwrap(),
                         )

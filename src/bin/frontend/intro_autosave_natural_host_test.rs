@@ -11,10 +11,7 @@ use camera_live::{
     endpoint::{Context, Endpoint, PropertyInstall},
     owner::{Input, Owner, Pose},
 };
-use openmt2001::camera::{
-    bank::{Bank, Capture},
-    primary::CursorRequest,
-};
+use openmt2001::camera::{bank::Bank, primary::CursorRequest};
 use std::{
     path::Path,
     sync::{
@@ -53,10 +50,7 @@ impl Budget {
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(
-            std::env::var_os("OPENMT2001_TEST_SCRATCH")
-                .expect("explicit disk scratch parent required"),
-        );
+        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
         let root = parent.join(format!(
@@ -335,10 +329,10 @@ fn natural_host_era_queue_replaced_once_and_future_human_card() {
 fn run(fixture_key: &'static str, expect_era: bool) {
     thread::Builder::new().stack_size(32*1024*1024).spawn(move||{
         let budget=Instant::now();let scratch=Scratch::new();let observer=probe::Observe::start();
-        let read=|key|fs::read(std::env::var(key).unwrap()).unwrap();
-        let original=PathBuf::from(std::env::var(fixture_key).unwrap());let original_bytes=fs::read(&original).unwrap();
-        let parameter=PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-        let exe_path=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());let executable=read("OPENMT2001_EXE");
+        let read=|key|fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let original=openmt2001::fixtures::path(fixture_key);let original_bytes=fs::read(&original).unwrap();
+        let parameter=openmt2001::fixtures::path("PARAMETERS");
+        let exe_path=openmt2001::fixtures::path("EXE");let executable=read("OPENMT2001_EXE");
         let image=openmt2001::pe::PeImage::parse(&executable).unwrap();
         let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let style=crate::block_sidewalk_labels::load_style(&image,parameter.parent().unwrap().parent().unwrap()).unwrap();
@@ -346,7 +340,7 @@ fn run(fixture_key: &'static str, expect_era: bool) {
             style,time_runtime:Default::default(),profile_root:scratch.0.join("profiles"),
             character_names:crate::fresh_city::character_names(&image,&language).unwrap(),
             installer:parameter.parent().unwrap().parent().unwrap().to_path_buf(),language,
-            maps:PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap()).parent().unwrap().to_path_buf(),
+            maps:openmt2001::fixtures::path("MAP").parent().unwrap().to_path_buf(),
             build_file:read("OPENMT2001_BUILD_FILE"),executable:executable.clone(),
             directory:read("OPENMT2001_ARCHIVE_DIR"),archive:read("OPENMT2001_ARCHIVE_BIN"),suncols:read("OPENMT2001_SUNCOLS")};
         let index=openmt2001::archive::ArchiveIndex::parse(&inputs.directory,inputs.archive.len() as u64).unwrap();

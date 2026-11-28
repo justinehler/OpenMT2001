@@ -242,10 +242,9 @@ mod tests {
     #[test]
     #[ignore = "requires original AddCommodity callback fixture"]
     fn matches_native_add_commodity_arguments_and_boundaries() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_ADD_COMMODITY").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_ADD_COMMODITY")).unwrap();
         assert_eq!(&data[..8], b"MTACOM01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -322,18 +321,17 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 settings and native catalog fixture"]
     fn executes_complete_business_settings() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let source = std::fs::read(std::env::var("OPENMT2001_BUSINESS_SETTINGS").unwrap()).unwrap();
-        let native = std::fs::read(std::env::var("OPENMT2001_NATIVE_CATALOG").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("BUSINESS_SETTINGS")).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_CATALOG")).unwrap();
         let mut state = State::from_v14(&image).unwrap();
         let mut commodities = crate::commodity_script::State::from_v14(&image, [0; 5]).unwrap();
         let mut runtime = Runtime::new().unwrap();
         let bindings = Bindings::register(&mut runtime, &image, 100).unwrap();
         let commodity_bindings =
             crate::commodity_script::Bindings::register(&mut runtime, &image, 200).unwrap();
-        let commodity_source =
-            std::fs::read(std::env::var("OPENMT2001_COMMODITY_SETTINGS").unwrap()).unwrap();
+        let commodity_source = std::fs::read(crate::fixtures::path("COMMODITY_SETTINGS")).unwrap();
         runtime
             .execute(
                 "commoditysettings.lua",
@@ -386,7 +384,7 @@ mod tests {
         let cost = crate::building_binding::construction_cost(&input, &image).unwrap();
         assert!(cost.total > 0 && cost.components[1] > 0.);
         let properties =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_PROPERTIES").unwrap()).unwrap();
+            std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_PROPERTIES")).unwrap();
         assert_eq!(&properties[..8], b"MTBIP001");
         let word = |at| u32::from_le_bytes(properties[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 45);
@@ -433,7 +431,7 @@ mod tests {
         assert_eq!(at, properties.len());
         // Independent supplied save corroborates configured scalar settings;
         // availability can be changed by scenario scripts after DEFAULT.
-        let saved = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let saved = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&saved).unwrap();
         let saved_info = save
             .sections

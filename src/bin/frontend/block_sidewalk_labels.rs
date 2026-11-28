@@ -374,19 +374,19 @@ pub(crate) fn capture_marvin(
     report: &crate::block_information::Report,
     path: &str,
 ) {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let board = openmt2001::board::Board::from_v14(&image).unwrap();
     let block = board.blocks.iter().find(|block| block.id == 23).unwrap();
     // The v1.4 base-language table has the global IDs used by GUI rows;
     // installer USA strings are an older table with different indexing.
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 4b3230 label-alpha oracle"]
     fn matches_native_sidewalk_alpha_and_initial_gate() {
-        let fixture = fs::read("work/frontend/native-sidewalk-alpha.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_SIDEWALK_ALPHA")).unwrap();
         assert_eq!(&fixture[..8], b"MTALPH01");
         let count = u32::from_le_bytes(fixture[8..12].try_into().unwrap()) as usize;
         assert_eq!(fixture.len(), 12 + count * 16);
@@ -561,12 +561,11 @@ mod tests {
     #[test]
     #[ignore = "requires original455970/455780 mesh observations"]
     fn matches_original_full_label_meshes() {
-        let fixture =
-            fs::read(std::env::var("OPENMT2001_NATIVE_SIDEWALK_LABELS").unwrap()).unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_SIDEWALK_LABELS")).unwrap();
         assert_eq!(&fixture[..8], b"MTPAVL02");
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let colors = load_style(&image, installer).unwrap().text;
         assert_eq!(colors[1], 0xff000000, "USA Oriental black lettering");
@@ -671,7 +670,7 @@ mod tests {
     #[test]
     #[ignore = "requires original board and font assets"]
     fn original_names_have_ground_geometry() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -704,7 +703,7 @@ mod tests {
             LETTER_Y, top,
             "native455780/455970 lettering is on pavement top"
         );
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let assets = Assets::load(
             &index,

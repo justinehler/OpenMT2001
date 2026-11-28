@@ -340,9 +340,8 @@ mod tests {
     #[test]
     #[ignore = "requires original4779b0/4675f0 offer-service observations"]
     fn matches_native_offer_service() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_OFFER_SERVICE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_OFFER_SERVICE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAOFS01");

@@ -280,8 +280,8 @@ mod tests {
     #[test]
     #[ignore = "requires original471320 observations"]
     fn matches_native_projected_income() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PROJECTED").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_PROJECTED")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIPR01");
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     #[ignore = "requires original466fa0 observations"]
     fn matches_native_finance() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_FINANCE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_FINANCE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAFIN03");
         for _ in 0..r.word() {

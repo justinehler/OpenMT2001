@@ -315,7 +315,8 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original whole building appearance phase oracle"]
     fn matches_native_appearance_phase() {
-        let data = std::fs::read("work/frontend/native-building-appearance-phase.bin").unwrap();
+        let data =
+            std::fs::read(crate::fixtures::path("NATIVE_BUILDING_APPEARANCE_PHASE")).unwrap();
         assert_eq!(&data[..8], b"MTAPPH01");
         let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
         assert_eq!(data.len(), 12 + count * 20);
@@ -340,10 +341,9 @@ mod tests {
     #[test]
     #[ignore = "requires private BuildFile and native entrance fixture"]
     fn matches_native_housing_entrance_emission_and_bound_registration() {
-        let build = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
-        let native =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_POSITIONS").unwrap()).unwrap();
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let build = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_POSITIONS")).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let file = BuildFile::parse(&build).unwrap();
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();

@@ -952,7 +952,7 @@ mod tests {
             .stack_size(32 * 1024 * 1024)
             .spawn(|| {
                 use crate::fresh_city::{CommandAssets, Inputs, Policy};
-                let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+                let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let exe = read("OPENMT2001_EXE");
                 let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
                 let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -965,11 +965,10 @@ mod tests {
                         .unwrap();
                 let parameters = read("OPENMT2001_PARAMETERS");
                 let timetable = read("OPENMT2001_TIMETABLE");
-                let default =
-                    std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+                let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
                 let scripts = default.parent().unwrap().parent().unwrap();
                 let styles = crate::fresh_city::load_era_styles(
-                    std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                    std::path::Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                         .parent()
                         .unwrap(),
                 )
@@ -1103,13 +1102,13 @@ mod tests {
     fn retained_save_host_roundtrip_and_delayed_terms() {
         std::thread::Builder::new().stack_size(32*1024*1024).spawn(||{
             use crate::fresh_city::{Inputs,Policy,CommandAssets};
-            let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let read=|key|std::fs::read(openmt2001::fixtures::path(key)).unwrap();
             let exe=read("OPENMT2001_EXE");let image=openmt2001::pe::PeImage::parse(&exe).unwrap();
             let board=openmt2001::board::Board::from_v14(&image).unwrap();let build=read("OPENMT2001_BUILD_FILE");let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let directory=read("OPENMT2001_ARCHIVE_DIR");let archive=read("OPENMT2001_ARCHIVE_BIN");let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
             let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
-            let default=std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());let scripts=default.parent().unwrap().parent().unwrap();
-            let styles=crate::fresh_city::load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
+            let default=openmt2001::fixtures::path("DEFAULT_SETTINGS");let scripts=default.parent().unwrap().parent().unwrap();
+            let styles=crate::fresh_city::load_era_styles(std::path::Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
             let names=std::array::from_fn(|_|Vec::new());
             let inputs=||Inputs{tree_locators: None, image:&image,board:&board,file:&file,people:openmt2001::people::PeopleModels::load(&image,&index,&archive).unwrap(),vehicle_models:openmt2001::traffic::road::models::Models::from_original(&image,&index,&archive).unwrap(),transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts,parameters:std::str::from_utf8(&parameters).unwrap(),era_styles:styles.clone(),timetable:std::str::from_utf8(&timetable).unwrap(),scenario:"SCENARIO3",difficulty:0,selected_character:4,profile_name:b"Save fixture",character_names:&names};
             let policy=||Policy{seed:0x12345678,auxiliary_prior_bytes:[0;284]};
@@ -1766,7 +1765,7 @@ impl SaveProjection<'_> {
         self.encode_continuation(image, cameras, game_mode, host, interface_mode, None)
     }
     fn encode_continuation(
-        mut self,
+        self,
         image: &openmt2001::pe::PeImage<'_>,
         cameras: [[u8; 196]; 2],
         game_mode: u32,

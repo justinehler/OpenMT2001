@@ -699,12 +699,12 @@ mod tests {
     #[ignore = "requires original two-tick housing fixture and timetable"]
     fn matches_native_housing_ticks() {
         use crate::resident::{Resident, TickEvent, Timetables};
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_TICK").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_TICK")).unwrap();
         assert_eq!(&data[..8], b"MTHATK01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(12), word(16), word(20)), (4, 4, 0x037f));
         let objectives = DailyObjectives::from_timetable(
-            &std::fs::read_to_string(std::env::var("OPENMT2001_TIMETABLE").unwrap()).unwrap(),
+            &std::fs::read_to_string(crate::fixtures::path("TIMETABLE")).unwrap(),
         )
         .unwrap();
         let timetable = Timetables::from_timetable("TIMETABLE 0 HOUR9 LOOK_FOR_A_HOUSE").unwrap();
@@ -929,7 +929,7 @@ mod tests {
     }
 
     fn check_saved_cycles(hourly: bool, market_dirty: bool) {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
@@ -1187,19 +1187,18 @@ mod tests {
     #[test]
     #[ignore = "requires both original saves and native saved housing topology observations"]
     fn matches_native_saved_housing() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let board =
             crate::board::Board::from_v14(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
-        let build_data = std::fs::read(std::env::var("OPENMT2001_BUILD_FILE").unwrap()).unwrap();
+        let build_data = std::fs::read(crate::fixtures::path("BUILD_FILE")).unwrap();
         let file = crate::build_file::BuildFile::parse(&build_data).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVED_HOUSING").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVED_HOUSING")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHSAVE1");
         assert_eq!(word(8), 2);
         let mut at = 12;
         for (name, expected_housed) in [("OPENMT2001_SAVE_ONE", 264), ("OPENMT2001_SAVE_TWO", 0)] {
-            let data = std::fs::read(std::env::var(name).unwrap()).unwrap();
+            let data = std::fs::read(crate::fixtures::path(name)).unwrap();
             let save = crate::save::SaveFile::parse(&data).unwrap();
             // This fixture isolates topology/cache from the geometry rebuild.
             // Coordinates supplied here are explicit probe inputs, not recovered
@@ -1256,10 +1255,9 @@ mod tests {
     #[test]
     #[ignore = "requires original class-setting callback fixture and executable"]
     fn matches_native_housing_settings() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_SETTINGS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_SETTINGS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHSET01");
         assert_eq!((word(8), word(12)), (6, 0x027f));
@@ -1316,21 +1314,17 @@ mod tests {
     }
 
     fn check_native(evening: bool, terms: bool, assignment: bool) {
-        let bytes = std::fs::read(
-            std::env::var(if assignment {
-                "OPENMT2001_NATIVE_HOUSING_ASSIGNMENT"
-            } else if terms {
-                "OPENMT2001_NATIVE_BUSINESS_TERMS"
-            } else if evening {
-                "OPENMT2001_NATIVE_HOUSING_EVENING"
-            } else {
-                "OPENMT2001_NATIVE_HOUSING_MOVE"
-            })
-            .unwrap(),
-        )
+        let bytes = std::fs::read(crate::fixtures::path(if assignment {
+            "OPENMT2001_NATIVE_HOUSING_ASSIGNMENT"
+        } else if terms {
+            "OPENMT2001_NATIVE_BUSINESS_TERMS"
+        } else if evening {
+            "OPENMT2001_NATIVE_HOUSING_EVENING"
+        } else {
+            "OPENMT2001_NATIVE_HOUSING_MOVE"
+        }))
         .unwrap();
-        let timetable =
-            std::fs::read_to_string(std::env::var("OPENMT2001_TIMETABLE").unwrap()).unwrap();
+        let timetable = std::fs::read_to_string(crate::fixtures::path("TIMETABLE")).unwrap();
         let objectives = DailyObjectives::from_timetable(&timetable).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));

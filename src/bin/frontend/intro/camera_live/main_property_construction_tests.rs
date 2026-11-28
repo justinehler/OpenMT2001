@@ -7,9 +7,7 @@ use super::super::super::{
 use super::*;
 use std::{fs, path::PathBuf};
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 struct Supplied {
     exe: Vec<u8>,
@@ -752,8 +750,8 @@ fn actual_assets_entry_advances_once_and_failed_load_cannot_replace_published_as
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     };
     let mut published = Box::new(crate::intro::Assets::load(paths()).unwrap());
     assert_eq!(
@@ -774,7 +772,8 @@ fn actual_assets_entry_advances_once_and_failed_load_cannot_replace_published_as
         .unwrap();
     let child_ptr = published.reordered_main().unwrap().node(child).unwrap() as *const Node;
     let mut missing = paths();
-    missing.executable = path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");
+    missing.executable =
+        openmt2001::fixtures::scratch("TEXT_PROFILE").join("intentionally-missing-original.exe");
     if let Ok(replacement) = crate::intro::Assets::load(missing) {
         published = Box::new(replacement);
         panic!("missing supplied PE unexpectedly published");

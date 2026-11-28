@@ -4474,8 +4474,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Locator list and vertical scrollbar fixture"]
     fn matches_native_locator_list_and_scrollbar() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_LOCATOR_LIST").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_LOCATOR_LIST")).unwrap();
         assert_eq!(&bytes[..8], b"MTLOCL01");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -4555,7 +4554,7 @@ mod tests {
         }
         assert_eq!(at, bytes.len());
         let native = std::fs::read(
-            std::path::Path::new(&std::env::var("OPENMT2001_NATIVE_LOCATOR_LIST").unwrap())
+            std::path::Path::new(&openmt2001::fixtures::path("NATIVE_LOCATOR_LIST"))
                 .with_file_name("native-locator-selection.bin"),
         )
         .unwrap();
@@ -4589,8 +4588,7 @@ mod tests {
     #[test]
     #[ignore = "requires original commodity Locator oracle"]
     fn matches_native_locator_commodities() {
-        let bytes =
-            fs::read(std::env::var("OPENMT2001_NATIVE_LOCATOR_COMMODITIES").unwrap()).unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_LOCATOR_COMMODITIES")).unwrap();
         assert_eq!(&bytes[..8], b"MTLCM001");
         let mut at = 8;
         let rows = std::array::from_fn(|_| {
@@ -4634,7 +4632,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Locator owner and ground quad oracle"]
     fn matches_native_locator_overlay() {
-        let bytes = fs::read(std::env::var("OPENMT2001_NATIVE_LOCATOR_OVERLAY").unwrap()).unwrap();
+        let bytes = fs::read(openmt2001::fixtures::path("NATIVE_LOCATOR_OVERLAY")).unwrap();
         assert_eq!(&bytes[..8], b"MTLOV001");
         let mut at = 8;
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
@@ -4682,12 +4680,12 @@ mod tests {
     #[ignore = "requires original save, scene, font and language assets"]
     fn locator_saved_inspection_flow() {
         use openmt2001::render_scene::{OriginalAssets, Request, Source, assemble};
-        let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let build = read("OPENMT2001_BUILD_FILE");
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -4706,7 +4704,7 @@ mod tests {
                 text
             })
             .collect::<Vec<_>>();
-        let sun = std::path::PathBuf::from(std::env::var("OPENMT2001_SUNCOLS").unwrap());
+        let sun = openmt2001::fixtures::path("SUNCOLS");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let assets = Assets::load(
             &index,
@@ -5064,7 +5062,7 @@ mod tests {
             assert_eq!(state.take_category_selection(), Some(0));
             state.scroll(&assets, 20);
             assert_eq!(state.ownership_scroll, 16);
-            if let Ok(path) = std::env::var("OPENMT2001_OWNERSHIP_SYNTHETIC") {
+            if let Some(path) = openmt2001::fixtures::optional("OWNERSHIP_SYNTHETIC") {
                 let bytes = std::fs::read(path).unwrap();
                 let diagnostic = openmt2001::save::SaveFile::parse(&bytes).unwrap();
                 let old = std::mem::replace(
@@ -5323,8 +5321,7 @@ mod tests {
             assert!(state.open);
             state.refresh_scene(&scene);
             assert!(state.my_business);
-            let oracle =
-                fs::read(std::env::var("OPENMT2001_NATIVE_OWNED_LOCATOR").unwrap()).unwrap();
+            let oracle = fs::read(openmt2001::fixtures::path("NATIVE_OWNED_LOCATOR")).unwrap();
             assert_eq!(&oracle[..8], b"MTOWNLOC");
             let mut at = 8;
             let word = |at: &mut usize| {
@@ -5342,7 +5339,7 @@ mod tests {
                     .map(|_| (word(&mut at), word(&mut at)))
                     .collect::<Vec<_>>();
                 if filename
-                    != std::path::Path::new(&std::env::var(name).unwrap())
+                    != std::path::Path::new(&openmt2001::fixtures::path(name))
                         .file_name()
                         .unwrap()
                         .to_string_lossy()
@@ -5809,7 +5806,7 @@ mod tests {
             "OPENMT2001_NATIVE_LOCATOR",
             "OPENMT2001_NATIVE_LOCATOR_SECOND",
         ] {
-            let bytes = fs::read(std::env::var(name).expect(name)).unwrap();
+            let bytes = fs::read(openmt2001::fixtures::path(name)).unwrap();
             assert_eq!(&bytes[..8], b"MTLOC001");
             let mut at = 8;
             let catalog = BusinessCatalog::from_rows(std::array::from_fn(|_| {
@@ -6043,14 +6040,14 @@ mod ordinary_toolbar_assets_tests {
     #[test]
     #[ignore = "requires supplied archive/installer/v1.4 language; optional capture feature and OPENMT2001_TOOLBAR_CAPTURE directory"]
     fn closed_strip_keeps_disabled_lease_without_body_title_surfaces() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let exe = read("OPENMT2001_EXE");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let param = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let param = openmt2001::fixtures::path("PARAMETERS");
         let installer = param.parent().unwrap().parent().unwrap();
-        let path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let path = openmt2001::fixtures::path("EXE");
         let language = path
             .parent()
             .unwrap()

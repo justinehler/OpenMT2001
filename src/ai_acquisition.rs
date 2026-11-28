@@ -269,9 +269,8 @@ fn matches_native_acquisition() {
     fn read(data: &mut &[u8]) -> u32 {
         word(take(data, 4), 0)
     }
-    let fixture =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_ACQUISITION").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let fixture = std::fs::read(crate::fixtures::path("NATIVE_AI_ACQUISITION")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let mut data = &fixture[..];
     assert_eq!(take(&mut data, 8), b"MTAIACQ1");
@@ -396,9 +395,8 @@ fn matches_native_auction_seeking() {
     fn read(data: &mut &[u8]) -> u32 {
         word(take(data, 4), 0)
     }
-    let fixture =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_AUCTION_SEEKING").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let fixture = std::fs::read(crate::fixtures::path("NATIVE_AI_AUCTION_SEEKING")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let mut data = &fixture[..];
     assert_eq!(take(&mut data, 8), b"MTAISEK1");

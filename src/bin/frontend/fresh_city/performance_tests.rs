@@ -2,7 +2,7 @@
 use super::*;
 use crate::fresh_city::{Inputs, Policy};
 use crate::live_host::process_runtime::{Handle, OriginalGraphicsPolicy};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // Exercise the actual raw current-camera callback. This does not install a
 // synthetic bank in production, widen camera modes, or admit fresh autosave.
@@ -69,7 +69,7 @@ fn eval(session: &mut Session<'_>, source: &[u8], assets: &CommandAssets<'_, '_>
 #[ignore = "requires supplied v1.4 scripts, archive, models, roads and parameter assets"]
 fn actual_process_lua_cross_vm_level_camera_and_complete_bound() {
     std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
-        let read=|key|std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read=|key|std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable=read("OPENMT2001_EXE");let archive=read("OPENMT2001_ARCHIVE_BIN");
         let directory=read("OPENMT2001_ARCHIVE_DIR");let build=read("OPENMT2001_BUILD_FILE");
         let parameters=read("OPENMT2001_PARAMETERS");let timetable=read("OPENMT2001_TIMETABLE");
@@ -77,7 +77,7 @@ fn actual_process_lua_cross_vm_level_camera_and_complete_bound() {
         let board=openmt2001::board::Board::from_v14(&image).unwrap();
         let file=openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index=openmt2001::archive::ArchiveIndex::parse(&directory,archive.len() as u64).unwrap();
-        let exe_path=PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path=openmt2001::fixtures::path("EXE");
         let scripts=exe_path.parent().unwrap().join("scripts");
         let language=exe_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let names=crate::fresh_city::character_names(&image,&language).unwrap();
@@ -88,7 +88,7 @@ fn actual_process_lua_cross_vm_level_camera_and_complete_bound() {
             transport_models:openmt2001::traffic::models::Models::from_original(&image,&index,&archive).unwrap(),
             road_routes:read("OPENMT2001_ROAD_ROUTE_TABLE"),scripts:&scripts,
             parameters:std::str::from_utf8(&parameters).unwrap(),
-            era_styles:crate::fresh_city::load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+            era_styles:crate::fresh_city::load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
             timetable:std::str::from_utf8(&timetable).unwrap(),scenario,difficulty:0,
             selected_character:4,profile_name:b"Process performance regression",character_names:&names,
         };

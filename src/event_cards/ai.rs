@@ -254,8 +254,8 @@ mod tests {
     #[test]
     #[ignore = "requires original46f130/46c080 observations"]
     fn matches_native_event_ai() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_AI").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_EVENT_AI")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECAI01");

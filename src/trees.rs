@@ -507,7 +507,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original archive and v1.4 executable"]
     fn original_tree_pool_and_foliage_records() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =

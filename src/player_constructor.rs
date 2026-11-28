@@ -336,9 +336,8 @@ mod tests {
         fn next(bytes: &[u8], at: &mut usize) -> u32 {
             word(take(bytes, at, 4), 0)
         }
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_ROSTER").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_ROSTER")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         assert_eq!(&bytes[..8], b"MTPROL02");
         assert_eq!(word(&bytes, 8), 2);
@@ -481,10 +480,9 @@ mod tests {
     #[test]
     #[ignore = "requires original466870 reset observations"]
     fn matches_native_reset() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PLAYER_RESET").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_PLAYER_RESET")).unwrap();
         assert_eq!(&data[..8], b"MTAI6870");
         assert_eq!(word(&data, 8), 1);
         let mut at = 20;
@@ -539,11 +537,9 @@ mod tests {
     #[test]
     #[ignore = "requires original4665f0 constructor observations"]
     fn matches_native_full_constructor() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PLAYER_CONSTRUCTOR").unwrap())
-                .unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_AI_PLAYER_CONSTRUCTOR")).unwrap();
         assert_eq!(&fixture[..8], b"MTAI4665");
         assert_eq!(word(&fixture, 8), 2);
         let mut at = 20;

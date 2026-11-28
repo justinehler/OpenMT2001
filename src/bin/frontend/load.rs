@@ -997,7 +997,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable and supplied original save"]
     fn original_load_delete_confirmation_and_profile_scope() {
-        let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         // 4950f0 event12 index2 opens the generic delete question; index0
         // accepts through 494f30, while a nonzero answer returns untouched.
@@ -1013,8 +1013,8 @@ mod tests {
             let displacement = i32::from_le_bytes(bytes[1..5].try_into().unwrap());
             assert_eq!(i64::from(call) + 5 + i64::from(displacement), 0x43f510);
         }
-        let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let (_, bounds) = ui::panel_base(
             &index,
@@ -1044,7 +1044,7 @@ mod tests {
             [593., 332.5, 599., 360.]
         );
         assert_eq!(ui::slider_background(info_track, true, true).1, 0xcc183088);
-        let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+        let original = openmt2001::fixtures::path("SAVE_ONE");
         let original_bytes = fs::read(&original).unwrap();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1229,18 +1229,18 @@ mod tests {
             flyby::CameraSample,
             render_scene::{self, OriginalAssets, Request, Source},
         };
-        let read = |name| fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .join("US/language/usa");
-        let installer = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
@@ -1274,7 +1274,7 @@ mod tests {
             .as_nanos();
         let root = std::env::temp_dir().join(format!("omt-v2-load-capture-{stamp}"));
         fs::create_dir_all(&root).unwrap();
-        let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+        let original = openmt2001::fixtures::path("SAVE_ONE");
         let mut load = Load::new(
             &index,
             &archive,

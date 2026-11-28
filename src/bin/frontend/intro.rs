@@ -10776,11 +10776,11 @@ mod tests {
         std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
             .spawn(|| {
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-                let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-                let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let map = openmt2001::fixtures::path("MAP");
+                let parameter = openmt2001::fixtures::path("PARAMETERS");
                 let executable = read("OPENMT2001_EXE");
-                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe_path = openmt2001::fixtures::path("EXE");
                 let inputs = SceneInputs {
                     process_runtime: None,
                     compatibility: crate::compatibility::Mode::StrictV14,
@@ -10829,7 +10829,7 @@ mod tests {
                 for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
                     let (loaded, mut session) = inputs
                         .saved_preview(
-                            &PathBuf::from(std::env::var(key).unwrap()),
+                            &openmt2001::fixtures::path(key),
                             camera,
                             &mut SnapshotCache::default(),
                         )
@@ -10928,15 +10928,15 @@ mod tests {
     #[test]
     #[ignore = "requires original Time assets and offscreen GPU; release performance measurement"]
     fn original_time_panel_texture_preparation_performance() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -11007,7 +11007,7 @@ mod tests {
     }
 
     fn test_board_style(executable: &[u8]) -> openmt2001::board_style::Style {
-        let parameters = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         crate::block_sidewalk_labels::load_style(
             &openmt2001::pe::PeImage::parse(executable).unwrap(),
             parameters.parent().unwrap().parent().unwrap(),
@@ -11084,7 +11084,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied v1.4 PE and both original saves; read-only camera contract"]
     fn supplied_normal_city_camera_matches_pe_fov_and_projection() {
-        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let word = |address| u32::from_le_bytes(image.at(address, 4).unwrap().try_into().unwrap());
         assert_eq!(word(0x545acc), 53f32.to_bits(), "normal reset FOV data");
@@ -11096,7 +11096,7 @@ mod tests {
         assert_eq!(word(0x52b0bc), 0x3c0efa1e, "original half-degree factor");
         assert_eq!(fresh_city_camera().0.vertical_fov.to_bits(), word(0x545acc));
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
-            let bytes = fs::read(std::env::var(key).unwrap()).unwrap();
+            let bytes = fs::read(openmt2001::fixtures::path(key)).unwrap();
             let save = openmt2001::save::SaveFile::parse(&bytes).unwrap();
             let records = save.cameras().unwrap().map(|row| *row);
             let sample = normal_saved_city_viewpoint(&records).unwrap().0;
@@ -11148,7 +11148,7 @@ mod tests {
     #[test]
     #[ignore = "requires original board and supplied saved business memberships"]
     fn original_category_hyperlinks_keep_native_identity() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -11218,15 +11218,15 @@ mod tests {
     #[test]
     #[ignore = "requires original top-right panel mesh"]
     fn time_panel_hitboxes_at_default_window_size() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let executable = read("OPENMT2001_EXE");
-        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -11269,14 +11269,14 @@ mod tests {
     #[test]
     #[ignore = "requires original menu mesh and language assets"]
     fn game_options_hitboxes_at_default_and_letterboxed_window_size() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -11365,14 +11365,14 @@ mod tests {
     #[test]
     #[ignore = "requires original Settings meshes and language assets"]
     fn settings_menu_hitboxes_at_default_and_letterboxed_window_size() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let executable = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -11452,7 +11452,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Sound mesh and v1.4 executable"]
     fn sound_settings_original_slider_input_and_dispatch() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         // 49bd0f/49bd8c create slider groups 4/5, each with max 100.
@@ -11478,9 +11478,9 @@ mod tests {
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =
             openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
@@ -11556,7 +11556,7 @@ mod tests {
     #[ignore = "requires supplied originals and GPU"]
     fn original_city_refresh_matches_independent_prepare() {
         // Parent must supply a unique on-disk directory; never use shared /tmp.
-        let parent = PathBuf::from(std::env::var("OPENMT2001_EQ_SCRATCH").unwrap());
+        let parent = openmt2001::fixtures::scratch("EQ_SCRATCH");
         assert!(parent.is_absolute() && parent.is_dir());
         let owned = parent.join(format!("city-refresh-{}", std::process::id()));
         fs::create_dir(&owned).expect("scratch must be uniquely owned");
@@ -11567,7 +11567,7 @@ mod tests {
             }
         }
         let _cleanup = Cleanup(owned.clone());
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -11821,7 +11821,7 @@ mod tests {
     #[cfg(feature = "capture")]
     fn verify_menu_vertex_upload_phase(phase: u32) {
         eprintln!("Vertex batch original-city phase{phase}");
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -12072,7 +12072,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro assets and GPU"]
     fn menu_batch_camera_upload_matches_individual_updates() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -12214,8 +12214,8 @@ mod tests {
             "work/frontend/menu-batch-fog.png",
         );
         assert_eq!(
-            fs::read("work/frontend/menu-individual-fog.png").unwrap(),
-            fs::read("work/frontend/menu-batch-fog.png").unwrap()
+            fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_FOG")).unwrap(),
+            fs::read(openmt2001::fixtures::path("MENU_BATCH_FOG")).unwrap()
         );
         // A material replacement introduces a standalone uniform buffer. The
         // batch API must update that live buffer as well as the retained arena.
@@ -12301,8 +12301,8 @@ mod tests {
             "work/frontend/menu-batch-replaced.png",
         );
         assert_eq!(
-            fs::read("work/frontend/menu-individual-replaced.png").unwrap(),
-            fs::read("work/frontend/menu-batch-replaced.png").unwrap()
+            fs::read(openmt2001::fixtures::path("MENU_INDIVIDUAL_REPLACED")).unwrap(),
+            fs::read(openmt2001::fixtures::path("MENU_BATCH_REPLACED")).unwrap()
         );
         eprintln!(
             "Original menu {} draws, 100 moving frames: reframe {reframe_time:?}, individual uploads {old_time:?}, batch uploads {batch_time:?}",
@@ -12314,7 +12314,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro assets and GPU"]
     fn capture_mr_monopoly_in_intro_city() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -12385,9 +12385,9 @@ mod tests {
             &[],
             &path,
         );
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -12422,7 +12422,7 @@ mod tests {
             &[&navigation[0], &time],
             "work/frontend/time-panel-city-corrected.png",
         );
-        let language = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap())
+        let language = openmt2001::fixtures::path("EXE")
             .parent()
             .unwrap()
             .parent()
@@ -12600,7 +12600,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro assets and a GPU adapter"]
     fn normal_city_star_uploads_apply_detail_before_borrowing() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -12744,7 +12744,7 @@ mod tests {
     #[test]
     #[ignore = "requires original intro assets and a GPU adapter"]
     fn right_drag_mode12_reframes_retained_gpu_city() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -12916,11 +12916,11 @@ mod tests {
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-                let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-                let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let map = openmt2001::fixtures::path("MAP");
+                let parameter = openmt2001::fixtures::path("PARAMETERS");
                 let executable = read("OPENMT2001_EXE");
-                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe_path = openmt2001::fixtures::path("EXE");
                 let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
                 let inputs = SceneInputs {
                     process_runtime: None,
@@ -13076,11 +13076,11 @@ mod tests {
     #[ignore = "requires supplied original saves, scripts and assets"]
     fn building_tree_saved_snapshot_retention() {
         std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-            let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+            let map = openmt2001::fixtures::path("MAP");
+            let parameter = openmt2001::fixtures::path("PARAMETERS");
             let executable = read("OPENMT2001_EXE");
-            let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let exe_path = openmt2001::fixtures::path("EXE");
             let inputs = SceneInputs {
                 process_runtime:None,
                 compatibility: crate::compatibility::Mode::Modern,
@@ -13102,7 +13102,7 @@ mod tests {
             for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
                 let mut cache = SnapshotCache::default();
                 let (_, mut session) = inputs.saved_preview(
-                    &PathBuf::from(std::env::var(key).unwrap()), camera, &mut cache).unwrap();
+                    &openmt2001::fixtures::path(key), camera, &mut cache).unwrap();
                 let state = session.models.tree_state.as_ref().unwrap().clone();
                 let revision = state.borrow().revision();
                 let mut seen = std::collections::BTreeSet::new();
@@ -13211,11 +13211,11 @@ mod tests {
     #[ignore = "requires both supplied original saves and v1.4 assets"]
     fn load_menu_uses_retained_original_session() {
         std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-        let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let map = openmt2001::fixtures::path("MAP");
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let executable = read("OPENMT2001_EXE");
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let inputs = SceneInputs {
                 process_runtime:None,
             compatibility: crate::compatibility::Mode::StrictV14,
@@ -13239,7 +13239,7 @@ mod tests {
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
             let mut cache = SnapshotCache::default();
             let (loaded, mut session) = inputs.saved_preview(
-                std::path::Path::new(&std::env::var(key).unwrap()), camera,
+                std::path::Path::new(&openmt2001::fixtures::path(key)), camera,
                 &mut cache,
                         ).unwrap();
             if key == "OPENMT2001_SAVE_ONE" {
@@ -13472,8 +13472,8 @@ mod tests {
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-                let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let parameter = openmt2001::fixtures::path("PARAMETERS");
                 let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
                 let language = installer.join("US/language/usa");
                 let executable = read("OPENMT2001_EXE");
@@ -13490,7 +13490,7 @@ mod tests {
                     .unwrap(),
                     installer,
                     language,
-                    maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+                    maps: openmt2001::fixtures::path("MAP")
                         .parent()
                         .unwrap()
                         .to_path_buf(),
@@ -13509,7 +13509,7 @@ mod tests {
                 let mut cache = SnapshotCache::default();
                 let (loaded, session) = inputs
                     .saved_preview(
-                        std::path::Path::new(&std::env::var("OPENMT2001_SAVE_ONE").unwrap()),
+                        std::path::Path::new(&openmt2001::fixtures::path("SAVE_ONE")),
                         camera,
                         &mut cache,
                     )
@@ -13554,8 +13554,8 @@ mod tests {
     #[ignore = "requires original Scenario1 assets and an offscreen GPU"]
     fn capture_static_details_against_fresh_city() {
         std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+            let parameter = openmt2001::fixtures::path("PARAMETERS");
             let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
             let language = installer.join("US/language/usa");
             let executable = read("OPENMT2001_EXE");
@@ -13568,7 +13568,7 @@ mod tests {
                 profile_root: std::env::temp_dir().join("omt-v2-capture-profiles"),
                 character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
                 installer, language,
-                maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+                maps: openmt2001::fixtures::path("MAP")
                     .parent().unwrap().to_path_buf(),
                 build_file: read("OPENMT2001_BUILD_FILE"), executable,
                 directory: read("OPENMT2001_ARCHIVE_DIR"),
@@ -13645,10 +13645,10 @@ mod tests {
                 std::process::id(), std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
                 fs::create_dir_all(&root.0).unwrap();
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-                let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-                let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let map = openmt2001::fixtures::path("MAP");
+                let parameter = openmt2001::fixtures::path("PARAMETERS");
+                let exe_path = openmt2001::fixtures::path("EXE");
                 let executable = read("OPENMT2001_EXE");
                 let language = exe_path
                     .parent()
@@ -13771,11 +13771,11 @@ mod tests {
     #[test]
     #[ignore = "requires original fresh scenario and graphics assets"]
     fn fresh_preview_worker_retains_session_until_inspection_closes() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-        let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let map = openmt2001::fixtures::path("MAP");
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let executable = read("OPENMT2001_EXE");
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let inputs = SceneInputs {
             process_runtime: None,
             compatibility: crate::compatibility::Mode::StrictV14,
@@ -15138,11 +15138,11 @@ mod tests {
     #[test]
     #[ignore = "requires original Starting Out graphics/script inputs"]
     fn starting_out_early_controls_and_options_remain_live() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-        let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+        let map = openmt2001::fixtures::path("MAP");
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let executable = read("OPENMT2001_EXE");
-        let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let inputs = SceneInputs {
             process_runtime: None,
             compatibility: crate::compatibility::Mode::StrictV14,

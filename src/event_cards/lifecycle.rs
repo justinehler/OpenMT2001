@@ -267,9 +267,8 @@ mod tests {
     #[test]
     #[ignore = "requires original event lifecycle observations"]
     fn matches_native_lifecycle() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_LIFECYCLE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_EVENT_LIFECYCLE")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTECLF01");

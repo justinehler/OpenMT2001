@@ -544,7 +544,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 original BuildFile, archive and native rooftop fixture"]
     fn rooftop11_static_row_reaches_original_mesh_and_draw_pose() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = PeImage::parse(&executable).unwrap();
         let file_bytes = read("OPENMT2001_BUILD_FILE");
@@ -563,7 +563,8 @@ mod tests {
         assert_eq!(row.descriptor, ROOFTOP11_DESCRIPTOR);
         assert_eq!(word(&row.row, 0), 0);
 
-        let fixture = std::fs::read("work/save/appearance-gap-rooftop-draw.bin").unwrap();
+        let fixture =
+            std::fs::read(openmt2001::fixtures::path("APPEARANCE_GAP_ROOFTOP_DRAW")).unwrap();
         assert_eq!(&fixture[..8], b"MTROOFT1");
         assert_eq!(word(&fixture, 40), 0x037f);
         assert_eq!(word(&fixture, 44), 1059);
@@ -639,7 +640,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 original BuildFile, PE, TM archive and suncols"]
     fn additional_static_classes_use_original_mesh_and_registry_rows() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = PeImage::parse(&executable).unwrap();
         let file_bytes = read("OPENMT2001_BUILD_FILE");

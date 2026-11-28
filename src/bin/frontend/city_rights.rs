@@ -167,7 +167,7 @@ mod tests {
     #[test]
     #[ignore = "private original rights overlay oracle"]
     fn matches_native_city_rights() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_RIGHTS").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_CITY_RIGHTS")).unwrap();
         assert_eq!(&b[..8], b"MTRIGHTS");
         let mut at = 8;
         let word = |at: &mut usize| {

@@ -1137,15 +1137,15 @@ fn textured_rect(surface: &mut Surface, b: [f32; 4]) {
 
 #[cfg(test)]
 pub fn verify_card_panel(scene: &openmt2001::render_scene::Scene, player: &[u8; 440]) {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
     let language = exe_path
         .parent()
         .unwrap()
@@ -1283,11 +1283,7 @@ mod tests {
     #[test]
     #[ignore = "original prompt complete glyph streams at037f"]
     fn matches_native_prompt_text_geometry() {
-        let bytes = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/frontend/native-prompt-text.bin"),
-        )
-        .unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PROMPT_TEXT")).unwrap();
         assert_eq!(&bytes[..8], b"MTPGTX01");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -1383,10 +1379,9 @@ mod tests {
     #[ignore = "private original card notice calls"]
     fn matches_native_card_notice() {
         use openmt2001::event_cards::effects::Notice;
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_EVENT_NOTICE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_EVENT_NOTICE")).unwrap();
         assert_eq!(&bytes[..8], b"MTECN002");
         let mut at = 8;
         let read = |at: &mut usize| {
@@ -1503,8 +1498,7 @@ mod tests {
     #[test]
     #[ignore = "private original prompt queue fixture"]
     fn matches_native_prompt_queue() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PROMPT_QUEUE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PROMPT_QUEUE")).unwrap();
         assert_eq!(&bytes[..8], b"MTPQUE01");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> u32 {
@@ -1588,7 +1582,7 @@ mod tests {
     #[test]
     #[ignore = "private original prompt mesh and native parent input fixture"]
     fn matches_native_prompt_parent_input() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let bytes = read("OPENMT2001_NATIVE_PROMPT_INPUT");
         assert_eq!(&bytes[..8], b"MTPINP01");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
@@ -1624,7 +1618,7 @@ mod tests {
         }
     }
     fn check_native_prompt_wrap(key: &str, gap: i32) {
-        let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         assert_eq!(&bytes[..8], b"MTPWRP01");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> usize {
@@ -1662,15 +1656,15 @@ mod tests {
 #[test]
 #[ignore = "requires original modal resources and GPU"]
 fn original_human_dialog_resources() {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let executable = read("OPENMT2001_EXE");
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe = openmt2001::fixtures::path("EXE");
     let language = exe
         .parent()
         .unwrap()
@@ -2030,13 +2024,13 @@ mod desktop_quit_assets_tests {
     #[test]
     #[ignore = "requires supplied v1.4 USA prompt assets; optional capture feature + OPENMT2001_DESKTOP_QUIT_CAPTURE directory"]
     fn original_quit_full_body_colored_buttons_and_offset_surfaces() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let language = exe
             .parent()
             .unwrap()

@@ -230,8 +230,7 @@ mod tests {
     #[test]
     #[ignore = "requires original471c30 housing demand observations"]
     fn matches_native_housing_changes() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_HOUSING_DEMAND").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_HOUSING_DEMAND")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTHDMD01");
         for _ in 0..r.word() {
@@ -287,8 +286,8 @@ mod tests {
     #[test]
     #[ignore = "requires original471a20/471760/4717c0 demand observations"]
     fn matches_native_demand() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_DEMAND").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_DEMAND")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTDMD03\0");
@@ -407,10 +406,9 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 and supplied Sandbox save demand rebuild"]
     fn matches_native_saved_population_rebuild() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SAVED_DEMAND").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let save = std::fs::read(std::env::var("OPENMT2001_SAVE_TWO").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_SAVED_DEMAND")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let save = std::fs::read(crate::fixtures::path("SAVE_TWO")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTSDMD01");
@@ -521,11 +519,9 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 and supplied Scenario 3 active-business demand rebuild"]
     fn matches_native_saved_active_business_rebuild() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_SAVED_ACTIVE_DEMAND").unwrap())
-                .unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let save = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_SAVED_ACTIVE_DEMAND")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let save = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTADMD01");

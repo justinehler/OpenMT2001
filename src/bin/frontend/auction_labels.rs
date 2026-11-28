@@ -162,7 +162,7 @@ fn projected_bounds_keep_original_coordinate_space() {
 #[test]
 #[ignore = "requires original414f90 label observations"]
 fn original_auction_labels() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_LABELS").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_LABELS")).unwrap();
     assert_eq!(&data[..8], b"MTAULB01");
     let mut words = data[8..]
         .chunks_exact(4)
@@ -209,8 +209,7 @@ fn original_auction_labels() {
 #[test]
 #[ignore = "requires original414c40 layout observations"]
 fn original_auction_label_layout() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_LABEL_LAYOUT").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_LABEL_LAYOUT")).unwrap();
     assert_eq!(&data[..8], b"MTAULY01");
     let mut words = data[8..]
         .chunks_exact(4)

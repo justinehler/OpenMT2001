@@ -100,10 +100,9 @@ mod tests {
     #[test]
     #[ignore = "private original ownership badge submissions"]
     fn matches_native_ownership_badges() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&bytes).unwrap();
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_OWNERSHIP_BADGES").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_OWNERSHIP_BADGES")).unwrap();
         assert_eq!(&b[..8], b"MTOWNBD2");
         let mut at = 8;
         let word = |at: &mut usize| {

@@ -410,8 +410,7 @@ mod tests {
     #[test]
     #[ignore = "requires original hourly dispatcher observations"]
     fn matches_native_dispatcher() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOURLY_DISPATCH").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOURLY_DISPATCH")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTDISP02");
         let mut at = 12;

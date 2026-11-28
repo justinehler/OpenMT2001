@@ -14,7 +14,7 @@ fn strategic_auction_countdown_and_bidding_resume() {
 fn natural_auction_resume(prior_mode: u32) {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
         use crate::fresh_city::{CommandAssets, Inputs, Policy};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = std::sync::Arc::new(read("OPENMT2001_EXE"));
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -25,10 +25,10 @@ fn natural_auction_resume(prior_mode: u32) {
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let default = std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default.parent().unwrap().parent().unwrap();
-        let styles = crate::fresh_city::load_era_styles(std::path::Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
-        let executable_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let styles = crate::fresh_city::load_era_styles(std::path::Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
+        let executable_path = openmt2001::fixtures::path("EXE");
         let names = crate::fresh_city::character_names(&image,
             &executable_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         assert!(names.iter().all(|name| !name.is_empty()), "supplied character names must be populated");

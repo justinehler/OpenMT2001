@@ -692,7 +692,7 @@ fn raw_capture_is_exact_and_does_not_run_central_or_publish_pending_save() {
 fn camera_sample_and_ready_result_keep_pcm_behind_unavailable_newer_focus_prefix() {
     use crate::fresh_city::result::ResultPresentation;
     use crate::intro::{FreshRequest, ResultSnapshot, focus, process_frontend::Provider};
-    let scratch = std::path::PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").unwrap())
+    let scratch = openmt2001::fixtures::scratch("TEST_SCRATCH")
         .join(format!("pf-audio-fence-{}", std::process::id()));
     assert!(!scratch.exists());
     std::fs::create_dir_all(&scratch).unwrap();

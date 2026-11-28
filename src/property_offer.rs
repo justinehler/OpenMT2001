@@ -192,10 +192,9 @@ fn native_property_display_and_selection() {
             commit_hover: word(bytes) as u8,
         }
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let fixture =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_DISPLAY").unwrap()).unwrap();
+    let fixture = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_DISPLAY")).unwrap();
     let mut bytes = fixture.as_slice();
     assert_eq!(&take::<8>(&mut bytes), b"MTPDIS01");
     assert_eq!(word(&mut bytes), 0x37f);
@@ -411,9 +410,9 @@ fn matches_native_property_offer() {
             u32::from(p.commit_hover),
         ]
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_OFFER").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_OFFER")).unwrap();
     let mut r = R(&bytes);
     assert_eq!(r.take(8), b"MTPROP01");
     assert_eq!(r.word(), 0x37f);

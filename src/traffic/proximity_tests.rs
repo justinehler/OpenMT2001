@@ -54,8 +54,7 @@ mod tests {
     #[test]
     #[ignore = "requires original0044ee90 proximity observations"]
     fn matches_native_transport_proximity() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_TRANSPORT_PROXIMITY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_TRANSPORT_PROXIMITY")).unwrap();
         let mut reader = Reader(&bytes);
         assert_eq!(reader.take(8), b"MTPRX44\0");
         assert_eq!(reader.word(), 1);

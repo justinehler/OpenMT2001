@@ -35,8 +35,8 @@ fn matches_native_saved_sale_zero_appearance() {
 }
 fn compare_sale_fixture(variable: &str, magic: &[u8; 8]) {
     let bytes =
-        std::fs::read(std::env::var(variable).unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        std::fs::read(openmt2001::fixtures::path(variable)).unwrap();
+    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
     let mut r = Reader {
         bytes: &bytes,
@@ -196,7 +196,7 @@ fn check_cash_presenter(case: u32, trace: &[(u32, Vec<u32>)]) {
 #[test]
 #[ignore = "requires original current-player takeover stream fixture"]
 fn presents_native_takeover_cash_streams() {
-    let bytes = std::fs::read("work/save/native-takeover-cash.bin").unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_TAKEOVER_CASH")).unwrap();
     let mut r = Reader { bytes: &bytes, at: 0 };
     assert_eq!(r.take(8), b"MTTAUI01");
     assert_eq!((r.word(), r.word()), (0x037f, 96));
@@ -220,8 +220,8 @@ fn presents_native_takeover_cash_streams() {
 #[test]
 #[ignore = "requires original sale through positive appearance stage"]
 fn matches_native_sale_at_positive_appearance_boundary() {
-    let bytes = std::fs::read("work/save/native-sale-positive-appearance.bin").unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_SALE_POSITIVE_APPEARANCE")).unwrap();
+    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
     let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
     let mut r = Reader { bytes: &bytes, at: 0 };
     assert_eq!(r.take(8), b"MTSLAPP2");

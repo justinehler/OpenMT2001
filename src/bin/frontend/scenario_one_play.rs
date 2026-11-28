@@ -36,7 +36,7 @@ pub(super) fn build_ranked(
 #[ignore = "requires original assets and the real Scenario12 Win profile"]
 fn legal_scenario_one_date_rank_win_and_profile_reload() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -47,7 +47,7 @@ fn legal_scenario_one_date_rank_win_and_profile_reload() {
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
         let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let scripts = exe.parent().unwrap().join("scripts");
         let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let profile = PathBuf::from(fs::read_to_string("work/economy/scenario3-natural-win-profile-path.txt").unwrap());
@@ -69,7 +69,7 @@ fn legal_scenario_one_date_rank_win_and_profile_reload() {
             transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
             road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
             parameters: std::str::from_utf8(&parameters).unwrap(),
-            era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+            era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
             timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO1", difficulty: 0,
             selected_character: 4, profile_name: b"Scenario3 Legal Sales", character_names: &names,
         }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }, catalog, profile.clone()).unwrap();
@@ -83,9 +83,9 @@ fn legal_scenario_one_date_rank_win_and_profile_reload() {
         let (sender, receiver) = std::sync::mpsc::channel::<crate::auction_bridge::Request>();
         host.auction_renderer = Some(sender);
         let presenter = std::thread::spawn(move || {
-            let exe = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-            let dir = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-            let bin = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+            let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
+            let dir = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+            let bin = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
             let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
             if cfg!(windows) { descriptor.backends = wgpu::Backends::DX12; }
             let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();

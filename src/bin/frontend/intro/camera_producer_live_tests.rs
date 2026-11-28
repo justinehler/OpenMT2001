@@ -7,9 +7,7 @@ use std::{thread::JoinHandle, time::Duration};
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(
-            std::env::var_os("OPENMT2001_TEST_SCRATCH").expect("explicit owned disk scratch"),
-        );
+        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
         let path = parent.join(format!(
@@ -30,10 +28,10 @@ impl Drop for Scratch {
     }
 }
 pub(super) fn inputs(root: PathBuf) -> Arc<SceneInputs> {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
-    let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
-    let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-    let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+    let map = openmt2001::fixtures::path("MAP");
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
+    let exe = openmt2001::fixtures::path("EXE");
     let executable = read("OPENMT2001_EXE");
     let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
     let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
@@ -779,7 +777,7 @@ fn start_source_worker(
         .unwrap();
     run
 }
-fn worker_state(run: &Worker) -> camera_producer::View {
+fn worker_state(_run: &Worker) -> camera_producer::View {
     let fresh = fresh_controls();
     camera_producer::View {
         active: fresh,
@@ -1159,7 +1157,7 @@ fn actual_worker_selection_stale_preflight_cancel_retire_and_new_world_preserve_
     ));
     assert_eq!(fs::read(path).unwrap(), before);
     drop(run);
-    let mut next = start_source_worker(Arc::clone(&inputs), &mut parked, false);
+    let next = start_source_worker(Arc::clone(&inputs), &mut parked, false);
     let next_epoch = next.loaded.as_ref().unwrap().camera_epoch.unwrap();
     assert_ne!(next_epoch, epoch);
     camera_producer::enqueue(

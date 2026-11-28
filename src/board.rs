@@ -456,9 +456,8 @@ mod tests {
     #[test]
     #[ignore = "requires original block-to-road crossing links"]
     fn matches_native_crossing_topology() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_CROSSINGS").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CITY_CROSSINGS")).unwrap();
         assert_eq!(&data[..8], b"MTCITYX1");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let board = Board::from_v14(&PeImage::parse(&exe).unwrap()).unwrap();
@@ -485,8 +484,8 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and native final coordinate observations"]
     fn matches_native_world_coordinates() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let oracle = std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_WORLD").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let oracle = std::fs::read(crate::fixtures::path("NATIVE_CITY_WORLD")).unwrap();
         let board = Board::from_v14(&PeImage::parse(&exe).unwrap()).unwrap();
         assert_eq!(&oracle[..8], b"MTCITYW1");
         let word = |at| u32::from_le_bytes(oracle[at..at + 4].try_into().unwrap());
@@ -528,9 +527,8 @@ mod tests {
     #[test]
     #[ignore = "requires private v1.4 executable and original lane initializer oracle"]
     fn matches_native_crossing_lanes() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
-        let oracle =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_TRAFFIC_LANES").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let oracle = std::fs::read(crate::fixtures::path("NATIVE_TRAFFIC_LANES")).unwrap();
         let board = Board::from_v14(&PeImage::parse(&exe).unwrap()).unwrap();
         let word = |at| u32::from_le_bytes(oracle[at..at + 4].try_into().unwrap()) as usize;
         assert_eq!(&oracle[..8], b"MTLANE02");
@@ -570,10 +568,8 @@ mod tests {
     #[test]
     #[ignore = "requires private v1.4 executable and original-instruction oracle"]
     fn matches_native_topology() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").expect("OPENMT2001_EXE")).unwrap();
-        let oracle =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY").expect("OPENMT2001_NATIVE_CITY"))
-                .unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let oracle = std::fs::read(crate::fixtures::path("NATIVE_CITY")).unwrap();
         let board = Board::topology_prefix(&PeImage::parse(&exe).unwrap()).unwrap();
         assert_eq!(&oracle[..8], b"MTCITY14");
         let word = |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());

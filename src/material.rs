@@ -103,8 +103,7 @@ mod tests {
     #[test]
     #[ignore = "requires original two-texture facade vertex observations"]
     fn matches_native_facade_coordinates() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_FACADE_VERTICES").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FACADE_VERTICES")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"M4FV003\0");
@@ -160,8 +159,7 @@ mod tests {
     #[test]
     #[ignore = "requires original facade state-selection observations"]
     fn matches_native_facade_materials() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_FACADE_MATERIALS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FACADE_MATERIALS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTFMAT01");
         assert_eq!(bytes.len(), 12 + word(8) as usize * 20);
@@ -190,7 +188,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable and native material observations"]
     fn matches_native_selection() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let file = read("OPENMT2001_EXE");
         let native = read("OPENMT2001_NATIVE_MATERIALS");
         let materials = BuildingMaterials::from_v14(&file).unwrap();

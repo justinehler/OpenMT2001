@@ -219,7 +219,7 @@ mod tests {
     #[ignore = "requires original ARCHIVE_DIR/BIN; static mesh decode only"]
     fn original_frame_zero_and_nine_body_and_side_geometry() {
         use openmt2001::{archive::ArchiveIndex, mesh::CachedMesh, ui_mesh};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();

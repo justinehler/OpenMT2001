@@ -54,8 +54,7 @@ pub fn advance(
 #[test]
 #[ignore = "requires original auction announcement capture"]
 fn matches_native_announcement() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_ANNOUNCEMENT").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_ANNOUNCEMENT")).unwrap();
     struct Reader<'a>(&'a [u8]);
     impl<'a> Reader<'a> {
         fn take(&mut self, n: usize) -> &'a [u8] {

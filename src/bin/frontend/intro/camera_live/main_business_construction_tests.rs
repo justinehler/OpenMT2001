@@ -5,9 +5,7 @@ use crate::intro::camera_live::{
 };
 use std::{fs, path::PathBuf};
 fn path(key: &str) -> PathBuf {
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("required {key}"))
+    openmt2001::fixtures::path(key)
 }
 struct Supplied {
     exe: Vec<u8>,
@@ -93,8 +91,8 @@ fn paths() -> crate::intro::Paths {
         map: path("OPENMT2001_INTRO_MAP"),
         quality: "low".into(),
         language: path("OPENMT2001_LANGUAGE"),
-        profile_root: path("OPENMT2001_TEXT_PROFILE"),
-        save_root: path("OPENMT2001_TEXT_SAVES"),
+        profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
+        save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
     }
 }
 #[test]
@@ -688,7 +686,8 @@ fn actual_assets_calls_child2_once_and_failed_replacement_preserves_live_product
     let ptr = published.reordered_main().unwrap().node(child).unwrap() as *const Node;
     let fonts = published.ui_text.fonts() as *const Fonts;
     let mut missing = paths();
-    missing.executable = path("OPENMT2001_TEXT_PROFILE").join("intentionally-missing-original.exe");
+    missing.executable =
+        openmt2001::fixtures::scratch("TEXT_PROFILE").join("intentionally-missing-original.exe");
     if let Ok(candidate) = crate::intro::Assets::load(missing) {
         published = Box::new(candidate);
         panic!("failed candidate unexpectedly published")

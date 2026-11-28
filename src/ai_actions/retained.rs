@@ -313,9 +313,8 @@ mod tests {
     #[test]
     #[ignore = "requires full original planning execution observations"]
     fn matches_native_system() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PLANNING_SYSTEM").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_PLANNING_SYSTEM")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAISYS1");

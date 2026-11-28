@@ -337,8 +337,7 @@ mod tests {
     #[test]
     #[ignore = "requires original sorted queue insertion/drain observations"]
     fn matches_native_scheduled_core() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SCHEDULED_CORE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SCHEDULED_CORE")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCORE01");
         let mut at = 12;
@@ -449,7 +448,7 @@ mod tests {
     #[test]
     #[ignore = "requires original logic-loop boundary observations"]
     fn matches_native_logic_loop() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_LOGIC_LOOP").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_LOGIC_LOOP")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTLOOP01");
         let mut at = 12;

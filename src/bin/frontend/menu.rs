@@ -1536,21 +1536,21 @@ mod settings_route_tests {
         use super::*;
         use crate::profile_settings::Snapshot;
         use crate::settings_menu::{Button, Page};
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe_path = openmt2001::fixtures::path("EXE");
         let language = exe_path
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .join("US/language/usa");
-        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
+        let scripts = openmt2001::fixtures::path("SCRIPTS");
         let root = std::env::current_dir().unwrap().join(format!(
             "target/settings-route-{}-{}",
             std::process::id(),
@@ -1681,22 +1681,22 @@ mod desktop_quit_route_tests {
     #[test]
     #[ignore = "requires supplied menu assets/scripts and OPENMT2001_QUIT_TEST_ROOT disk scratch parent"]
     fn original_quit_no_reopen_yes_preserves_menu_and_blocks_background() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let executable = read("OPENMT2001_EXE");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
-        let exe = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let exe = openmt2001::fixtures::path("EXE");
         let language = exe
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .join("US/language/usa");
-        let scripts = std::path::PathBuf::from(std::env::var("OPENMT2001_SCRIPTS").unwrap());
-        let parent = std::path::PathBuf::from(std::env::var("OPENMT2001_QUIT_TEST_ROOT").unwrap());
+        let scripts = openmt2001::fixtures::path("SCRIPTS");
+        let parent = openmt2001::fixtures::scratch("QUIT_TEST_ROOT");
         let root = parent.join(format!(
             "desktop-quit-{}-{}",
             std::process::id(),

@@ -469,10 +469,10 @@ mod tests {
     #[test]
     #[ignore = "requires original full city road-graph construction observation"]
     fn matches_original_graph() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let settings = ConstructionSettings::from_v14(&image).unwrap();
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_ROAD_GRAPH").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_ROAD_GRAPH")).unwrap();
         assert_eq!(&data[..8], b"MTGRSET1");
         let bundle = data;
         let mut bundle_at = 12;

@@ -212,8 +212,8 @@ mod tests {
     fn naturally_housed_live_polls() {
         std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
             use crate::fresh_city::{Session, Inputs, Policy, CommandAssets, character_names, load_era_styles};
-            use std::{fs, path::{Path, PathBuf}};
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            use std::{fs, path::Path};
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let archive = read("OPENMT2001_ARCHIVE_BIN");
             let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -224,7 +224,7 @@ mod tests {
             let board = openmt2001::board::Board::from_v14(&image).unwrap();
             let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
             let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
             let scripts = exe.parent().unwrap().join("scripts");
             let names = character_names(&image, &exe.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
             let mut session = Session::initialize(Inputs {
@@ -235,7 +235,7 @@ mod tests {
                 transport_models: openmt2001::traffic::models::Models::from_original(&image, &index, &archive).unwrap(),
                 road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"), scripts: &scripts,
                 parameters: std::str::from_utf8(&parameters).unwrap(),
-                era_styles: load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap(),
+                era_styles: load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap(),
                 timetable: std::str::from_utf8(&timetable).unwrap(), scenario: "SCENARIO3", difficulty: 0,
                 selected_character: 4, profile_name: b"Live poll validation", character_names: &names,
             }, Policy { seed: 0x12345678, auxiliary_prior_bytes: [0; 0x11c] }).unwrap();
@@ -331,13 +331,12 @@ mod tests {
     #[test]
     #[ignore = "requires private original poll fixture and supplied saves"]
     fn matches_native_consumer_polls() {
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CONSUMER_POLLS").unwrap()).unwrap();
+        let fixture = std::fs::read(openmt2001::fixtures::path("NATIVE_CONSUMER_POLLS")).unwrap();
         assert_eq!(&fixture[..8], b"MTCPOLL2");
         assert_eq!(u32::from_le_bytes(fixture[8..12].try_into().unwrap()), 2);
         let mut at = 12;
         for key in ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"] {
-            let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+            let bytes = std::fs::read(openmt2001::fixtures::path(key)).unwrap();
             at += 32;
             for (category, poll) in Poll::from_save(&SaveFile::parse(&bytes).unwrap())
                 .unwrap()

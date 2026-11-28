@@ -89,9 +89,8 @@ mod tests {
     #[test]
     #[ignore = "requires original building-panel gate observations"]
     fn matches_native_permissions() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_PERMISSIONS").unwrap())
-            .unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_PERMISSIONS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let mut catalog = BusinessCatalog::from_pe(&image).unwrap();
         assert_eq!(&data[..8], b"MTBPER01");

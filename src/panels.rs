@@ -117,7 +117,7 @@ mod tests {
     #[test]
     #[ignore = "requires original panel atlas observations, archive and v1.4 executable"]
     fn matches_native_panel_atlas() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index =

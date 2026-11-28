@@ -169,9 +169,8 @@ fn matches_native_world_queries() {
         *data = b;
         a
     }
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_WORLD_QUERIES").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_WORLD_QUERIES")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let mut data = &bytes[..];
     assert_eq!(take(&mut data, 8), b"MTAVWQ01");
@@ -397,9 +396,8 @@ fn matches_native_extra_queries() {
         *data = b;
         a
     }
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_VALUATION_EXTRA").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_VALUATION_EXTRA")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
     let mut data = &bytes[..];
     assert_eq!(take(&mut data, 8), b"MTAVEXT1");

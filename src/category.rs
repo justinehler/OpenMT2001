@@ -289,7 +289,7 @@ mod tests {
     #[test]
     #[ignore = "requires original expiry observations and saved shopping bindings"]
     fn matches_native_expiry_and_hourly_caller() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let bytes = read("OPENMT2001_NATIVE_CATEGORY_EXPIRY");
         let exe = read("OPENMT2001_EXE");
         let saved = read("OPENMT2001_SAVE_ONE");
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category hourly observations and supplied saves"]
     fn matches_native_category_hour() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let bytes = read("OPENMT2001_NATIVE_CATEGORY_HOUR");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCATH02");

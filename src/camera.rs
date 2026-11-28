@@ -348,8 +348,7 @@ mod tests {
     #[test]
     #[ignore = "requires original native mode12 inertia observations"]
     fn matches_native_camera_inertia() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMERA_INERTIA").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CAMERA_INERTIA")).unwrap();
         assert_eq!(&bytes[..8], b"MTCINR01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12), word(16)), (3, 60, 5));
@@ -392,8 +391,7 @@ mod tests {
     #[test]
     #[ignore = "requires original scene transform observations"]
     fn matches_native_scene_transforms() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SCENE_TRANSFORM").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SCENE_TRANSFORM")).unwrap();
         assert_eq!(&bytes[..8], b"MTSTRANS");
         let word = |o| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -416,7 +414,7 @@ mod tests {
     #[test]
     #[ignore = "requires original native mode12 mouse observations"]
     fn matches_native_block_mouse() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_BLOCK_MOUSE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BLOCK_MOUSE")).unwrap();
         assert_eq!(&bytes[..8], b"MTBMOU02");
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -462,8 +460,7 @@ mod tests {
     #[test]
     #[ignore = "requires original native mode12 camera observations"]
     fn matches_native_block_camera() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BLOCK_CAMERA").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BLOCK_CAMERA")).unwrap();
         assert_eq!(&bytes[..8], b"MTBCAM02");
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         let count = word(8) as usize;
@@ -499,7 +496,7 @@ mod tests {
     #[test]
     #[ignore = "requires original city clip-policy observations"]
     fn matches_native_city_clip() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_CLIP").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CITY_CLIP")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTCLIP01");
         assert_eq!(word(8), 1);
@@ -521,7 +518,7 @@ mod tests {
     #[test]
     #[ignore = "requires original camera instruction observations"]
     fn matches_native_camera_matrices() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMERA").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CAMERA")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));
         assert_eq!(&bytes[..8], b"MTCAM002");
@@ -570,8 +567,7 @@ mod flyby_tests {
     #[test]
     #[ignore = "requires original flyby camera matrix fixture"]
     fn matches_native_flyby_camera_matrices() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_FLYBY_CAMERA").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_FLYBY_CAMERA")).unwrap();
         assert_eq!(&bytes[..8], b"MTFCAM01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let count = word(8) as usize;

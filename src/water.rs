@@ -177,9 +177,9 @@ mod tests {
     #[test]
     #[ignore = "requires original sun-color image and native direction observations"]
     fn matches_native_sun_direction() {
-        let tga = std::fs::read(std::env::var("OPENMT2001_SUNCOLS").unwrap()).unwrap();
+        let tga = std::fs::read(crate::fixtures::path("SUNCOLS")).unwrap();
         let daylight = Daylight::from_suncols(&tga).unwrap();
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_SUN_PC64").unwrap()).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_SUN_PC64")).unwrap();
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         assert_eq!(&b[..8], b"MTSUNCY3");
         assert_eq!(daylight.sunrise, word(8));
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     #[ignore = "requires original fallback-water observations"]
     fn matches_native_fallback_water() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_WATER").unwrap()).unwrap();
+        let b = std::fs::read(crate::fixtures::path("NATIVE_WATER")).unwrap();
         let word = |at| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
         let f = |at| f32::from_bits(word(at));
         assert_eq!(&b[..8], b"MTWATER2");

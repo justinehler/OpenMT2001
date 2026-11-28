@@ -111,8 +111,7 @@ mod tests {
     #[test]
     #[ignore = "requires original full market/rent cache observations"]
     fn matches_native_cache() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_MARKET_CACHE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_MARKET_CACHE")).unwrap();
         assert_eq!(&bytes[..8], b"MTCACHE1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let float = |at| f32::from_bits(word(at));

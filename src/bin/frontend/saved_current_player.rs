@@ -28,9 +28,7 @@ mod tests {
     #[test]
     #[ignore = "private normal-load player oracle"]
     fn matches_native_saved_current_player() {
-        let path = std::path::PathBuf::from(
-            std::env::var("OPENMT2001_NATIVE_SAVED_CURRENT_PLAYER").unwrap(),
-        );
+        let path = openmt2001::fixtures::path("NATIVE_SAVED_CURRENT_PLAYER");
         let b = std::fs::read(&path).unwrap();
         assert_eq!(&b[..8], b"MTCURPL1");
         let mut at = 8;
@@ -48,7 +46,7 @@ mod tests {
             let n = word(&mut at);
             let file = ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"]
                 .into_iter()
-                .map(|k| std::path::PathBuf::from(std::env::var(k).unwrap()))
+                .map(|k| openmt2001::fixtures::path(k))
                 .find(|p| p.file_name().unwrap() == name)
                 .unwrap_or_else(|| path.parent().unwrap().join(name));
             let bytes = std::fs::read(file).unwrap();

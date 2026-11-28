@@ -893,7 +893,7 @@ mod tests {
     #[test]
     #[ignore = "requires original saved-world shopping choices"]
     fn matches_native_saved_choices() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
@@ -1042,7 +1042,7 @@ mod tests {
     #[test]
     #[ignore = "requires original settings, saves and native settings observations"]
     fn matches_native_saved_settings_and_catalogs() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let source = String::from_utf8(read("OPENMT2001_BUSINESS_SETTINGS")).unwrap();
@@ -1112,7 +1112,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied retail geometry and original entrance observations"]
     fn matches_native_saved_retail_entrances() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let board =
             crate::board::Board::from_v14(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();
@@ -1158,7 +1158,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied saves and original saved shopping bindings"]
     fn matches_native_saved_bindings() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let board =
             crate::board::Board::from_v14(&crate::pe::PeImage::parse(&exe).unwrap()).unwrap();

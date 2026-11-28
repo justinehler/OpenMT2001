@@ -35,8 +35,8 @@ mod tests {
     #[test]
     #[ignore = "requires original430480/4419f0 executions"]
     fn matches_original_text_layout_and_palette() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_REPORT_TEXT").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_REPORT_TEXT")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         assert_eq!(&bytes[..8], b"MTBTXT01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());

@@ -200,7 +200,8 @@ mod tests {
     #[test]
     #[ignore = "requires original cash vertex emitter observation"]
     fn matches_native_cash_vertices() {
-        let bytes = std::fs::read("work/save/native-cash-arrow-vertices.bin").unwrap();
+        let bytes =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_CASH_ARROW_VERTICES")).unwrap();
         assert_eq!(&bytes[..8], b"MTCPVRT1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x037f, 6));
@@ -230,7 +231,8 @@ mod tests {
     #[test]
     #[ignore = "requires original cash render matrix observation"]
     fn matches_native_cash_matrix() {
-        let bytes = std::fs::read("work/save/native-cash-arrow-projection.bin").unwrap();
+        let bytes =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_CASH_ARROW_PROJECTION")).unwrap();
         assert_eq!(&bytes[..8], b"MTCPRJ01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x037f, 3));
@@ -261,7 +263,7 @@ mod tests {
     #[test]
     #[ignore = "requires original money model and GPU"]
     fn capture_original_cash_frames() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -295,7 +297,7 @@ mod tests {
     #[test]
     #[ignore = "requires original cash sequence/dispatcher observations"]
     fn matches_native_cash_sequence() {
-        let data = std::fs::read("work/save/native-cash-arrow-sequence.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_CASH_ARROW_SEQUENCE")).unwrap();
         assert_eq!(&data[..8], b"MTCASH01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 0x037f);

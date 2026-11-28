@@ -133,7 +133,7 @@ fn prompt_swallowed_right_edges_block_whitelisted_collapsed_info_dispatch() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
-            let root = PathBuf::from(std::env::var("OPENMT2001_TOOLBAR_RIGHT_TEST_ROOT").unwrap());
+            let root = openmt2001::fixtures::scratch("TOOLBAR_RIGHT_TEST_ROOT");
             assert!(
                 root.is_dir(),
                 "supply an existing owned disk scratch parent"
@@ -154,13 +154,13 @@ fn prompt_swallowed_right_edges_block_whitelisted_collapsed_info_dispatch() {
                 }
             }
             let cleanup = Cleanup(scratch.clone());
-            let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+            let original = openmt2001::fixtures::path("SAVE_ONE");
             let save_bytes = fs::read(&original).unwrap();
             let save = scratch.join("fixture.sav");
             fs::write(&save, &save_bytes).unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-            let params = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-            let directory = PathBuf::from(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
+            let params = openmt2001::fixtures::path("PARAMETERS");
+            let directory = openmt2001::fixtures::path("ARCHIVE_DIR");
             let mut builder = EventLoop::builder();
             builder.with_x11().with_any_thread(true);
             let event_loop = builder.build().unwrap();
@@ -182,7 +182,7 @@ fn prompt_swallowed_right_edges_block_whitelisted_collapsed_info_dispatch() {
                 ),
                 scene: directory.parent().unwrap().to_path_buf(),
                 executable: exe.clone(),
-                map: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap()),
+                map: openmt2001::fixtures::path("MAP"),
                 quality: "low".into(),
                 language: exe
                     .parent()
@@ -304,7 +304,7 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
-            let root = PathBuf::from(std::env::var("OPENMT2001_TOOLBAR_RIGHT_TEST_ROOT").unwrap());
+            let root = openmt2001::fixtures::scratch("TOOLBAR_RIGHT_TEST_ROOT");
             assert!(
                 root.is_dir(),
                 "supply an existing owned disk scratch parent"
@@ -325,13 +325,13 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
                 }
             }
             let cleanup = Cleanup(scratch.clone());
-            let original = PathBuf::from(std::env::var("OPENMT2001_SAVE_ONE").unwrap());
+            let original = openmt2001::fixtures::path("SAVE_ONE");
             let save_bytes = fs::read(&original).unwrap();
             let save = scratch.join("fixture.sav");
             fs::write(&save, &save_bytes).unwrap();
-            let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-            let params = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
-            let directory = PathBuf::from(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap());
+            let exe = openmt2001::fixtures::path("EXE");
+            let params = openmt2001::fixtures::path("PARAMETERS");
+            let directory = openmt2001::fixtures::path("ARCHIVE_DIR");
             let mut builder = EventLoop::builder();
             builder.with_x11().with_any_thread(true);
             let event_loop = builder.build().unwrap();
@@ -353,7 +353,7 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
                 ),
                 scene: directory.parent().unwrap().to_path_buf(),
                 executable: exe.clone(),
-                map: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap()),
+                map: openmt2001::fixtures::path("MAP"),
                 quality: "low".into(),
                 language: exe
                     .parent()

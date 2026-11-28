@@ -254,9 +254,9 @@ mod tests {
     fn constructs_original_rosters_and_initializes_ai() {
         use crate::player_constructor::{Allocation, RosterConstruction};
         use crate::player_manager::{Manager, RandomRegistry, word};
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let ai_path = std::path::PathBuf::from(std::env::var("OPENMT2001_AI_SCRIPT").unwrap());
+        let ai_path = crate::fixtures::path("AI_SCRIPT");
         let root = ai_path.parent().unwrap().parent().unwrap();
         let default_ai = std::fs::read(&ai_path).unwrap();
         let mapping = crate::ai_ownership::group_mapping(&image).unwrap();
@@ -433,8 +433,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4a8610 token-resolution observations"]
     fn matches_native_token_resolution() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_TOKENS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_TOKENS")).unwrap();
         assert_eq!(&bytes[..8], b"MTPLTOK1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -473,8 +472,7 @@ mod tests {
     #[test]
     #[ignore = "requires original RegisterPlayer callback observations"]
     fn matches_native_registration() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_REGISTRATION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PLAYER_REGISTRATION")).unwrap();
         assert_eq!(&bytes[..8], b"MTPLR001");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 1);
@@ -510,7 +508,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original players.lua scripts"]
     fn evaluates_original_rosters_and_difficulty_branches() {
-        let ai = std::path::PathBuf::from(std::env::var("OPENMT2001_AI_SCRIPT").unwrap());
+        let ai = crate::fixtures::path("AI_SCRIPT");
         let root = ai.parent().unwrap().parent().unwrap();
         let load = |name: &str, difficulty| {
             evaluate(

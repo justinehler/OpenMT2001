@@ -4,12 +4,12 @@ use super::*;
 #[ignore = "requires original Starting Out assets and offscreen GPU"]
 fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
     std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
-        let executable_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
         let language = executable_path.parent().unwrap().parent().unwrap()
             .join("US/language/usa");
         let inputs = SceneInputs {
@@ -19,7 +19,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
             profile_root: std::env::temp_dir().join("omt-v2-gui-regression"),
             character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
             installer, language,
-            maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+            maps: openmt2001::fixtures::path("MAP")
                 .parent().unwrap().to_path_buf(),
             build_file: read("OPENMT2001_BUILD_FILE"), executable,
             directory: read("OPENMT2001_ARCHIVE_DIR"),
@@ -99,12 +99,12 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let executable = read("OPENMT2001_EXE");
             let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
-            let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+            let parameter = openmt2001::fixtures::path("PARAMETERS");
             let installer = parameter.parent().unwrap().parent().unwrap().to_path_buf();
-            let executable_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+            let executable_path = openmt2001::fixtures::path("EXE");
             let language = executable_path
                 .parent()
                 .unwrap()
@@ -125,7 +125,7 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                 character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
                 installer,
                 language,
-                maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+                maps: openmt2001::fixtures::path("MAP")
                     .parent()
                     .unwrap()
                     .to_path_buf(),

@@ -1735,7 +1735,7 @@ mod tests {
     #[test]
     #[ignore = "requires original home-arrival income fixture"]
     fn matches_native_home_arrival_income() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_HOME_ARRIVAL").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_HOME_ARRIVAL")).unwrap();
         assert_eq!(&data[..8], b"MTHINC01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -1766,7 +1766,7 @@ mod tests {
     #[test]
     #[ignore = "requires original Lua money binding observations"]
     fn matches_native_script_money() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_MONEY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_MONEY")).unwrap();
         assert_eq!(&bytes[..8], b"MTAICSH1");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
         let mut at = 12;
@@ -1802,7 +1802,7 @@ mod tests {
     }
 
     fn check_local_business_commands(variable: &str, batch: bool) {
-        let bytes = std::fs::read(std::env::var(variable).unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path(variable)).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], if batch { b"MTLOCB02" } else { b"MTLOCAL1" });
         let mut at = 12;
@@ -1890,8 +1890,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pending-business submission fixture"]
     fn matches_native_business_submission() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_SUBMISSION").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_SUBMISSION")).unwrap();
         assert_eq!(&bytes[..8], b"MTBSUB01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -1961,8 +1960,7 @@ mod tests {
     #[test]
     #[ignore = "requires original stock-adjustment instructions fixture"]
     fn matches_native_stock_adjustment() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_STOCK_ADJUSTMENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_STOCK_ADJUSTMENT")).unwrap();
         assert_eq!(&bytes[..8], b"MTSTADJ1");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let mut at = 12;
@@ -2033,8 +2031,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business ownership transfer observations"]
     fn matches_native_business_owner_transfer() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_OWNER").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_OWNER")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MT462B00");
         assert_eq!(word(8), 16);
@@ -2100,8 +2097,7 @@ mod tests {
     #[test]
     #[ignore = "requires original hourly business table observations"]
     fn matches_native_hourly_business_state() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_HOUR").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_HOUR")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHOUR02");
         let mut at = 12;
@@ -2132,7 +2128,7 @@ mod tests {
                     } else {
                         "OPENMT2001_SAVE_TWO"
                     };
-                    let data = std::fs::read(std::env::var(variable).unwrap()).unwrap();
+                    let data = std::fs::read(crate::fixtures::path(variable)).unwrap();
                     let save = crate::save::SaveFile::parse(&data).unwrap();
                     let mut clock = save.clock().unwrap();
                     // Controlled 24-hour observation sequence, not save resumption.
@@ -2192,8 +2188,7 @@ mod tests {
     #[test]
     #[ignore = "requires original combined hourly ledger observations"]
     fn matches_native_hourly_ledger_sequence() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOURLY_LEDGERS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOURLY_LEDGERS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHRLED2");
         assert_eq!(word(12), 0x37f);
@@ -2316,8 +2311,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident-slot observations"]
     fn matches_native_resident_slots() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_SLOTS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_SLOTS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTRSLOTS");
         assert_eq!(word(8), 8);
@@ -2377,9 +2371,7 @@ mod tests {
     #[test]
     #[ignore = "requires original resident account-pool observations"]
     fn matches_native_resident_account_pool() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_RESIDENT_ACCOUNT_POOL").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RESIDENT_ACCOUNT_POOL")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTACPOOL");
         assert_eq!(word(8), 8);
@@ -2431,8 +2423,7 @@ mod tests {
     #[test]
     #[ignore = "requires native housing append/unlink observations"]
     fn matches_native_housing_links() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING_LINKS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING_LINKS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHLINK1");
         assert_eq!((word(8), word(12)), (18, 4));
@@ -2718,7 +2709,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction retail fixture"]
     fn matches_native_retail_purchase() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RETAIL").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RETAIL")).unwrap();
         assert_eq!(&bytes[..8], b"MTBUY002");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0x37f);
@@ -2771,7 +2762,7 @@ mod tests {
     #[test]
     #[ignore = "requires original daily rent observations"]
     fn matches_native_rent() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_RENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_RENT")).unwrap();
         assert_eq!(&bytes[..8], b"MTRNT001");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 7);
         assert_eq!(bytes.len(), 12 + 7 * 84);
@@ -2823,8 +2814,7 @@ mod tests {
     #[test]
     #[ignore = "requires original business history observations"]
     fn matches_native_business_history() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_HISTORY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_HISTORY")).unwrap();
         assert_eq!(&bytes[..8], b"MTBHIST2");
         let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0x37f);
@@ -2844,7 +2834,7 @@ mod tests {
     #[test]
     #[ignore = "requires original owner payout observations"]
     fn matches_native_owner_payouts() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_PAYOUTS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PAYOUTS")).unwrap();
         assert_eq!(&bytes[..8], b"MTPAYOUT");
         assert_eq!(bytes.len(), 12 + 4 * 116);
         for r in bytes[12..].chunks_exact(116) {
@@ -2883,8 +2873,7 @@ mod tests {
     #[test]
     #[ignore = "requires original property-income payout observations"]
     fn matches_native_property_income() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PROPERTY_INCOME").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PROPERTY_INCOME")).unwrap();
         assert_eq!(&bytes[..8], b"MTPROPIN");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 4);
         assert_eq!(bytes.len(), 12 + 4 * 116);
@@ -2984,8 +2973,8 @@ mod tests {
     #[test]
     #[ignore = "requires original utility observations and supplied save"]
     fn matches_native_utilities() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_UTILITIES").unwrap()).unwrap();
-        let saved = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_UTILITIES")).unwrap();
+        let saved = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&saved).unwrap();
         let economy = save.economy().unwrap();
         let buildings = save.buildings().unwrap();
@@ -3044,7 +3033,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied saved player for native rotation comparison"]
     fn saved_player_ledger_rotation() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&bytes).unwrap();
         let players = save.players().unwrap();
         let mut account = PlayerAccount::from_saved(&players[0]).unwrap();
@@ -3068,8 +3057,7 @@ mod tests {
     #[test]
     #[ignore = "requires save-backed original replenishment observations"]
     fn matches_saved_replenishment_accounting() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVED_REPLENISHMENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_SAVED_REPLENISHMENT")).unwrap();
         let mut at = 0;
         let mut cases = 0;
         while at < bytes.len() {
@@ -3140,12 +3128,12 @@ mod tests {
     #[test]
     #[ignore = "requires supplied save and original housing observations"]
     fn matches_native_housing_records() {
-        let source = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&source).unwrap();
         let saved_residents = save.residents().unwrap();
         let economy = save.economy().unwrap();
         let businesses: Vec<_> = economy.businesses().collect();
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_HOUSING").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_HOUSING")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTHOUS01");
         let mut at = 12;
@@ -3230,22 +3218,19 @@ mod tests {
     }
 
     fn check_phase_six(hourly: bool) {
-        let source = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&source).unwrap();
         let saved_economy = save.economy().unwrap();
         let buildings = save.buildings().unwrap();
-        let bytes = std::fs::read(
-            std::env::var(if hourly {
-                "OPENMT2001_NATIVE_HOURLY_FINANCE"
-            } else {
-                "OPENMT2001_NATIVE_PHASE_SIX"
-            })
-            .unwrap(),
-        )
+        let bytes = std::fs::read(crate::fixtures::path(if hourly {
+            "OPENMT2001_NATIVE_HOURLY_FINANCE"
+        } else {
+            "OPENMT2001_NATIVE_PHASE_SIX"
+        }))
         .unwrap();
         assert_eq!(&bytes[..8], if hourly { b"MTHFIN03" } else { b"MTDAY007" });
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0x37f);
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
@@ -3434,17 +3419,15 @@ mod tests {
     #[test]
     #[ignore = "requires supplied save and original complete business-day observation"]
     fn matches_native_business_day() {
-        let source = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
         let save = crate::save::SaveFile::parse(&source).unwrap();
         let saved_economy = save.economy().unwrap();
         let buildings = save.buildings().unwrap();
         let category_owners = std::array::from_fn(|i| save.category_owner(i).unwrap());
         let mut records: Vec<_> = saved_economy.businesses().map(|b| *b.bytes).collect();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let defaults =
-            std::fs::read_to_string(std::env::var("OPENMT2001_BUSINESS_SETTINGS").unwrap())
-                .unwrap();
+        let defaults = std::fs::read_to_string(crate::fixtures::path("BUSINESS_SETTINGS")).unwrap();
         let catalogs = crate::shopping::Catalogs::from_v14_defaults(&defaults, &image).unwrap();
         catalogs.validate_saved(&saved_economy).unwrap();
         let prefixes: Vec<[u8; 64]> = save
@@ -3476,8 +3459,7 @@ mod tests {
             .iter()
             .map(|p| PlayerAccount::from_saved(p).unwrap())
             .collect();
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_DAY").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_DAY")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTDAY002");
         assert_eq!(word(32), 0x37f);
@@ -3532,7 +3514,7 @@ mod tests {
     #[test]
     #[ignore = "requires original multi-product current-world daily observations"]
     fn matches_native_current_day_inputs() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_DAY_INPUTS").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_DAY_INPUTS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTDAYIN2");
         let mut at = 12;
@@ -3634,9 +3616,7 @@ mod tests {
     #[test]
     #[ignore = "requires original whole-record replenishment observations"]
     fn matches_replenished_business_records() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_REPLENISHMENT_RECORDS").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_REPLENISHMENT_RECORDS")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTNSBIN1");
         assert_eq!(word(8), 1);
@@ -3702,8 +3682,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction replenishment observations"]
     fn matches_native_replenishment() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_REPLENISHMENT").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_REPLENISHMENT")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTREPLN1");
         let mut at = 12;
@@ -3752,7 +3731,7 @@ mod tests {
     #[test]
     #[ignore = "requires original-instruction restocking observations"]
     fn matches_native_restocking_cost() {
-        let native = std::fs::read(std::env::var("OPENMT2001_NATIVE_RESTOCK").unwrap()).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_RESTOCK")).unwrap();
         let word = |at| u32::from_le_bytes(native[at..at + 4].try_into().unwrap());
         assert_eq!(&native[..8], b"MTRESTK1");
         let mut at = 12;

@@ -96,9 +96,8 @@ mod tests {
     #[test]
     #[ignore = "requires original campaign-language and population query fixture"]
     fn original_campaign_event_bindings() {
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMPAIGN_EVENTS").unwrap()).unwrap();
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_CAMPAIGN_EVENTS")).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&executable).unwrap();
         let mut vm = Runtime::new().unwrap();
         crate::level_catalog::script::register_language(&mut vm, &image).unwrap();
@@ -146,7 +145,7 @@ mod tests {
     #[test]
     #[ignore = "requires original configuration, scripts and people models"]
     fn starting_out_preferences_construct_real_population_without_a_save() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let text = |name| String::from_utf8(read(name)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
@@ -169,8 +168,7 @@ mod tests {
         let geometry = crate::board::Board::from_v14(&image)
             .unwrap()
             .category_geometry();
-        let default_path =
-            std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default_path = crate::fixtures::path("DEFAULT_SETTINGS");
         let prefs = std::fs::read(
             default_path
                 .parent()
@@ -317,9 +315,7 @@ mod tests {
     #[test]
     #[ignore = "requires original People.Create callback observations"]
     fn matches_native_callback_calls_through_lua() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PEOPLE_CREATE_CALLBACK").unwrap())
-                .unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_PEOPLE_CREATE_CALLBACK")).unwrap();
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTPCALL1");
         assert_eq!(word(8), 1);

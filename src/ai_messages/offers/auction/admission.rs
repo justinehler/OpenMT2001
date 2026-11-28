@@ -191,8 +191,7 @@ mod tests {
     #[test]
     #[ignore = "requires original auction admission capture"]
     fn matches_native_admission() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_ADMISSION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_ADMISSION")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTACAD02");
         assert_eq!(r.word(), 0x037f);

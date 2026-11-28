@@ -145,11 +145,10 @@ mod tests {
     #[test]
     #[ignore = "requires original commodity script, native membership fixture, and supplied save"]
     fn executes_complete_commodity_settings_without_saved_inputs() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let source =
-            std::fs::read(std::env::var("OPENMT2001_COMMODITY_SETTINGS").unwrap()).unwrap();
-        let native = std::fs::read(std::env::var("OPENMT2001_NATIVE_MEMBERSHIP").unwrap()).unwrap();
+        let source = std::fs::read(crate::fixtures::path("COMMODITY_SETTINGS")).unwrap();
+        let native = std::fs::read(crate::fixtures::path("NATIVE_MEMBERSHIP")).unwrap();
         let word = |at| u32::from_le_bytes(native[at..at + 4].try_into().unwrap());
         assert_eq!(&native[..8], b"MTCMEM01");
         for at in [16, 56] {
@@ -172,7 +171,7 @@ mod tests {
                 assert_eq!(&old[0x11..0x14], &new[0x11..0x14]);
             }
             assert_eq!(state.rows.iter().filter(|r| r[0x10] != 0).count(), 22);
-            let saved = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+            let saved = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
             let save = crate::save::SaveFile::parse(&saved).unwrap();
             for (fresh, saved) in state
                 .resident_inputs()

@@ -62,7 +62,7 @@ fn retained_original_mode12_keyboard_and_mouse() {
         ("OPENMT2001_NATIVE_BLOCK_CAMERA", b"MTBCAM02", 60),
         ("OPENMT2001_NATIVE_BLOCK_MOUSE", b"MTBMOU02", 76),
     ] {
-        let bytes = std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path(key)).unwrap();
         assert_eq!(&bytes[..8], magic);
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(12), 0x37f);
@@ -117,7 +117,7 @@ fn retained_original_mode12_keyboard_and_mouse() {
 #[test]
 #[ignore = "requires retained own-code x87 diagnostics, not original gameplay"]
 fn retained_own_hardware_common_and_direct() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_CAMERA_OWN_X87").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("CAMERA_OWN_X87")).unwrap();
     assert_eq!(&bytes[..8], b"MTX87C01");
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     assert_eq!((word(8), word(12)), (295, 291));

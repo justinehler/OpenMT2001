@@ -121,8 +121,7 @@ pub fn fits(building: &[u8; 916], info: &[u8; 116]) -> Result<bool, String> {
 #[test]
 #[ignore = "requires original48adf0 packets"]
 fn matches_native_conversion_producer() {
-    let d = std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_CONVERSION_PRODUCER").unwrap())
-        .unwrap();
+    let d = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_CONVERSION_PRODUCER")).unwrap();
     assert_eq!(&d[..8], b"MTBCPR01");
     assert_eq!(word(&d, 8), 0x37f);
     for r in d[16..].chunks_exact(76) {
@@ -140,8 +139,7 @@ fn matches_native_conversion_producer() {
 #[test]
 #[ignore = "requires complete original463bb0 eligibility observations"]
 fn matches_native_conversion_fit() {
-    let d =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_CONVERSION_FIT").unwrap()).unwrap();
+    let d = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_CONVERSION_FIT")).unwrap();
     assert_eq!(&d[..8], b"MTBCFIT1");
     assert_eq!(word(&d, 8), 0x37f);
     for (i, r) in d[16..].chunks_exact(1036).enumerate() {
@@ -174,10 +172,9 @@ fn matches_native_conversion_entry() {
     fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
         b.chunks_exact(N).map(|r| r.try_into().unwrap()).collect()
     }
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = PeImage::parse(&exe).unwrap();
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_BUSINESS_CONVERSION").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_BUSINESS_CONVERSION")).unwrap();
     let mut r = R(&data);
     assert_eq!(r.take(8), b"MTBCONV1");
     assert_eq!(r.word(), 0x37f);

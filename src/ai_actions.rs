@@ -423,8 +423,8 @@ mod tests {
     #[test]
     #[ignore = "requires original business-planning observations"]
     fn matches_native_planning() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_ACTIONS").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_ACTIONS")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIACT1");

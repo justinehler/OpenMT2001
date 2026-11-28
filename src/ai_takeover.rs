@@ -124,9 +124,9 @@ fn matches_native_takeovers() {
     fn rows<const N: usize>(b: &[u8]) -> Vec<[u8; N]> {
         b.chunks_exact(N).map(|r| r.try_into().unwrap()).collect()
     }
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_TAKEOVER").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("NATIVE_AI_TAKEOVER")).unwrap();
     let mut r = R(&data);
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = crate::pe::PeImage::parse(&exe).unwrap();
     assert_eq!(r.take(8), b"MTAITAK1");
     assert_eq!(r.word(), 0x37f);

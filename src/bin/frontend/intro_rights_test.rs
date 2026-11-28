@@ -99,10 +99,10 @@ fn rights_acquisition_prompts(
 #[test]
 #[ignore = "requires original Scenario2/assets and the retained saved worker"]
 fn saved_worker_rights_input_and_native_delay() {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
-    let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-    let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let exe_path = openmt2001::fixtures::path("EXE");
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let language = exe_path
         .parent()
         .unwrap()
@@ -122,7 +122,7 @@ fn saved_worker_rights_input_and_native_delay() {
         .unwrap(),
         installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
         language,
-        maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+        maps: openmt2001::fixtures::path("MAP")
             .parent()
             .unwrap()
             .to_path_buf(),
@@ -551,10 +551,10 @@ fn saved_worker_rights_input_and_native_delay() {
 #[ignore = "requires original v1.4 Tutorial5 scripts and city assets"]
 fn original_tutorial_five_starts_with_disabled_building_rights() {
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
-        let executable_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
-        let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let executable_path = openmt2001::fixtures::path("EXE");
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let language = executable_path.parent().unwrap().parent().unwrap().join("US/language/usa");
         let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
         let inputs = SceneInputs {
@@ -566,7 +566,7 @@ fn original_tutorial_five_starts_with_disabled_building_rights() {
             character_names: crate::fresh_city::character_names(&image, &language).unwrap(),
             installer: parameter.parent().unwrap().parent().unwrap().to_path_buf(),
             language,
-            maps: PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap())
+            maps: openmt2001::fixtures::path("MAP")
                 .parent().unwrap().to_path_buf(),
             executable,
             build_file: read("OPENMT2001_BUILD_FILE"),

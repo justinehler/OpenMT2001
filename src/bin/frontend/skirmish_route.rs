@@ -596,9 +596,9 @@ mod keyboard_and_failure_tests {
     // Inert rendering resources deliberately have no pointer hit regions: a
     // keyboard test cannot accidentally pass by using a last cursor position.
     fn fixture() -> Route {
-        let exe = fs::read(std::env::var_os("OPENMT2001_EXE").expect("original PE")).unwrap();
+        let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let scripts = PathBuf::from(std::env::var_os("OPENMT2001_SCRIPTS").expect("scripts"));
+        let scripts = openmt2001::fixtures::path("SCRIPTS");
         let catalog = crate::campaign_store::load_catalog(&image, &scripts).unwrap();
         let options = openmt2001::skirmish::Options::from_pe(&image).unwrap();
         let state = setup::State::open(

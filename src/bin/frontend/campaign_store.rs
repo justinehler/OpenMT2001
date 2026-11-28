@@ -611,9 +611,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and supplied patch Essential scripts"]
     fn supplied_eight_custom_registrations_append_to_gamestart() {
-        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let scripts = PathBuf::from(std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").unwrap());
+        let scripts = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
         let sources = registration_sources(&scripts).unwrap();
         assert_eq!(sources.len(), 9);
         let base = script::load(&image, &sources[0].1, false, |name| {
@@ -805,9 +805,9 @@ mod tests {
     #[test]
     #[ignore = "requires original executable and installed level scripts"]
     fn original_catalog_and_retained_profile_roundtrip() {
-        let executable = fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
-        let scripts = PathBuf::from(std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").unwrap());
+        let scripts = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
         let mut catalog = load_catalog(&image, &scripts).unwrap();
         let hub = original_path(&scripts, "GAMESTART/hub.lua")
             .unwrap()

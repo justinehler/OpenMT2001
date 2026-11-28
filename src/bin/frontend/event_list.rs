@@ -240,8 +240,8 @@ mod tests {
         value
     }
     fn original_regions() -> Vec<(String, [f32; 4])> {
-        let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let entry = index
             .find("gamedata2/brand_new_panels/day_tutor_panel.tm")
@@ -260,15 +260,8 @@ mod tests {
     #[ignore = "original EventList constructor/background and full font3 native streams /037f"]
     fn original_event_list_resources() {
         let labels = labels(&original_regions()).unwrap();
-        let read = |name: &str| {
-            fs::read(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("work/frontend")
-                    .join(name),
-            )
-            .unwrap()
-        };
-        let bytes = read("native-tutorial-event-list.bin");
+        let read = |name: &str| fs::read(openmt2001::fixtures::path(name)).unwrap();
+        let bytes = read("EVENTLIST_LAYOUT");
         assert_eq!(&bytes[..8], b"MTEVLST1");
         let mut at = 8;
         assert_eq!(word(&bytes, &mut at), 0x037f);
@@ -303,7 +296,7 @@ mod tests {
             }
         }
         assert_eq!(at, bytes.len());
-        let bytes = read("native-event-list-text.bin");
+        let bytes = read("NATIVE_EVENT_LIST_TEXT");
         assert_eq!(&bytes[..8], b"MTEVTXT1");
         let mut at = 8;
         assert_eq!(word(&bytes, &mut at), 0x037f);
@@ -343,13 +336,13 @@ mod tests {
     #[test]
     #[ignore = "original EventList parent input and opening/settled GPU resources"]
     fn original_event_list_input_and_capture() {
-        let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -369,10 +362,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let assets = Assets::load(&index, &archive, installer, &strings).unwrap();
-        let bytes = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("work/frontend/native-tutorial-event-list-input.bin"),
-        )
+        let bytes = fs::read(openmt2001::fixtures::path(
+            "NATIVE_TUTORIAL_EVENT_LIST_INPUT",
+        ))
         .unwrap();
         assert_eq!(&bytes[..8], b"MTEVINP1");
         let mut at = 8;

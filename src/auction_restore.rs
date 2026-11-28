@@ -129,8 +129,7 @@ mod tests {
                 u32::from_le_bytes(self.take(4).try_into().unwrap())
             }
         }
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_RESTORE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_RESTORE")).unwrap();
         let mut reader = Reader(&bytes);
         assert_eq!(reader.take(8), b"MTAURST2");
         assert_eq!(reader.word(), 2);

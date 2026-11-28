@@ -1248,17 +1248,20 @@ mod tests {
     #[test]
     #[ignore = "requires original language/font4 and native valid-ID text-family oracle"]
     fn original_refresh_text_families() {
-        let data = std::fs::read("work/save/native-appearance-label-families.bin").unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path(
+            "NATIVE_APPEARANCE_LABEL_FAMILIES",
+        ))
+        .unwrap();
         assert_eq!(&data[..8], b"MTLBLF01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!((word(8), word(12)), (0x37f, 40));
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
         let tab = std::fs::read(installer.join("Standard/fonts/coppgoth23p.tab")).unwrap();
         let language = installer.join("US/language/usa");
         let offsets = std::fs::read(language.join("tycoon.off")).unwrap();
         let text = std::fs::read(language.join("tycoon.bin")).unwrap();
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let assets = Assets::from_original(
             &read("OPENMT2001_ARCHIVE_DIR"),
             &read("OPENMT2001_ARCHIVE_BIN"),
@@ -1366,8 +1369,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 text constructor and original font4 metrics"]
     fn supplied_text_sign_geometry_matches_native_constructor() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_TEXT_GEOMETRY").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_SAVE_TEXT_GEOMETRY")).unwrap();
         assert_eq!(&bytes[..8], b"MTDTXT01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
         let sha: Vec<_> = pinned
@@ -1378,7 +1380,7 @@ mod tests {
         assert_eq!(&bytes[8..40], sha);
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 4));
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let tab = std::fs::read(
             parameter
                 .parent()
@@ -1454,8 +1456,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 retail text geometry and original font4 metrics"]
     fn original_double_backed_text_matches_native_constructor() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_APPEARANCE_GAP").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_APPEARANCE_GAP")).unwrap();
         assert_eq!(&bytes[..8], b"MTRETGE1");
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!((word(40), word(44)), (0x037f, 2));
@@ -1483,7 +1484,7 @@ mod tests {
             raw.push(&bytes[at..at + len]);
             at += len;
         }
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let tab = std::fs::read(
             parameter
                 .parent()
@@ -1536,11 +1537,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 456440 wrapper fixture and original font4"]
     fn original_vertical_text_signs_match_complete_native_buffers() {
-        let bytes = std::fs::read("work/save/text-sign-constructor-probe.bin").unwrap();
+        let bytes =
+            std::fs::read(openmt2001::fixtures::path("TEXT_SIGN_CONSTRUCTOR_PROBE")).unwrap();
         assert_eq!(&bytes[..8], b"MT456440");
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(word(40), 0x037f);
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let tab = std::fs::read(
             parameter
                 .parent()
@@ -1639,12 +1641,12 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 save, font4 and texture archive"]
     fn supplied_text_sign_rows_construct_and_release_owned_draws() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let parameter = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameter = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameter.parent().unwrap().parent().unwrap();
         let tab = std::fs::read(installer.join("Standard/fonts/coppgoth23p.tab")).unwrap();
         let language = installer.join("US/language/usa");
@@ -1695,8 +1697,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 4e3380 matrix fixture"]
     fn saved_detail_basis_matches_native_matrix_after_scene_z_flip() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SAVE_DETAIL_MATRIX").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_SAVE_DETAIL_MATRIX")).unwrap();
         assert_eq!(&bytes[..8], b"MTDMAT01");
         let pinned = "1401be713210eec37f2eddfedb49afb358cc252a566c6bb0e0d6a64e1c7d4e2b";
         let sha: Vec<_> = pinned
@@ -1731,7 +1732,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 geometry fixture and original texture collections"]
     fn supplied_sign_detail_geometry_and_draw_assets_match_native() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let bytes = read("OPENMT2001_NATIVE_SAVE_DETAIL_GEOMETRY");
@@ -1821,7 +1822,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 double-sided sign fixture and original collections"]
     fn supplied_double_sign_geometry_and_draw_assets_match_native() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let bytes = read("OPENMT2001_NATIVE_SAVE_DOUBLE_SIGN_GEOMETRY");
@@ -1909,7 +1910,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 awning fixture and original texture collections"]
     fn supplied_awning_detail_geometry_and_draw_assets_match_native() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let bytes = read("OPENMT2001_NATIVE_SAVE_POLE_GEOMETRY");
@@ -2004,7 +2005,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 banner fixture and original texture collections"]
     fn supplied_banner_detail_geometry_and_draw_assets_match_native() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let bytes = read("OPENMT2001_NATIVE_SAVE_BANNER_GEOMETRY");
@@ -2106,7 +2107,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned v1.4 488230 final detail-origin fixture"]
     fn supplied_saved_detail_origins_match_native_world_transform() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let bytes = read("OPENMT2001_NATIVE_SAVE_DETAIL_POSE");

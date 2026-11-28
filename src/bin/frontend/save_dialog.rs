@@ -1092,12 +1092,12 @@ mod tests {
     #[test]
     #[ignore = "original v1.4 Save Game mesh/button fixture"]
     fn original_save_panel_bounds_and_buttons() {
-        let directory = fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
-        let archive = fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
         let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let executable = openmt2001::fixtures::path("EXE");
         let language = executable
             .parent()
             .unwrap()
@@ -1105,7 +1105,7 @@ mod tests {
             .unwrap()
             .join("US/language/usa");
         let assets = Assets::load(&index, &archive, installer, &language).unwrap();
-        let fixture = fs::read("work/frontend/native-save-dialog.bin").unwrap();
+        let fixture = fs::read(openmt2001::fixtures::path("NATIVE_SAVE_DIALOG")).unwrap();
         assert_eq!(&fixture[..8], b"MTSAVE01");
         let mut at = 8;
         fn word(fixture: &[u8], at: &mut usize) -> u32 {
@@ -1145,7 +1145,8 @@ mod tests {
             );
         }
         assert_eq!(at, fixture.len());
-        let scroll_fixture = fs::read("work/frontend/native-save-scrollbars.bin").unwrap();
+        let scroll_fixture =
+            fs::read(openmt2001::fixtures::path("NATIVE_SAVE_SCROLLBARS")).unwrap();
         assert_eq!(&scroll_fixture[..8], b"MTSVSL01");
         let mut scroll_at = 8;
         assert_eq!(word(&scroll_fixture, &mut scroll_at), 0x037f);
@@ -1181,7 +1182,7 @@ mod tests {
                 descriptor.backends = wgpu::Backends::DX12;
             }
             let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
-            let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+            let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
             let build_file = read("OPENMT2001_BUILD_FILE");
             let suncols = read("OPENMT2001_SUNCOLS");
             let map = read("OPENMT2001_INTRO_MAP");

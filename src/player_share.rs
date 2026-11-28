@@ -711,7 +711,7 @@ mod tests {
     #[test]
     #[ignore = "requires OPENMT2001_NATIVE_PLAYER_SHARE"]
     fn matches_native_player_share() {
-        let path = std::env::var("OPENMT2001_NATIVE_PLAYER_SHARE").unwrap();
+        let path = crate::fixtures::path("NATIVE_PLAYER_SHARE");
         let bytes = std::fs::read(path).unwrap();
         let mut reader = Reader {
             bytes: &bytes,

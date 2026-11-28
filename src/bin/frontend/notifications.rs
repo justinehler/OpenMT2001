@@ -94,7 +94,7 @@ impl Queue {
 #[test]
 #[ignore = "requires original420500/4207d0 observations"]
 fn original_notification_queue() {
-    let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_NOTIFICATIONS").unwrap()).unwrap();
+    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_NOTIFICATIONS")).unwrap();
     assert_eq!(&bytes[..8], b"MTNOTI01");
     let mut words = bytes[8..]
         .chunks_exact(4)

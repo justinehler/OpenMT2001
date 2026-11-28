@@ -327,7 +327,7 @@ mod tests {
     #[test]
     #[ignore = "requires original people world vertex observations"]
     fn matches_native_people_world() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     #[ignore = "requires original people preparation observations"]
     fn matches_native_people_preparation() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     #[ignore = "requires original people registry trace and archives"]
     fn matches_native_people_registry() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = PeImage::parse(&exe).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");

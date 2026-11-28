@@ -1010,9 +1010,9 @@ impl SetupPanel {
 mod tests {
     use super::*;
     fn original() -> (Options, Catalog) {
-        let exe = fs::read(std::env::var_os("OPENMT2001_EXE").expect("original PE")).unwrap();
+        let exe = fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
-        let scripts = std::env::var_os("OPENMT2001_SCRIPTS").expect("original scripts root");
+        let scripts = openmt2001::fixtures::path("SCRIPTS");
         (
             Options::from_pe(&image).unwrap(),
             crate::campaign_store::load_catalog(&image, Path::new(&scripts)).unwrap(),
@@ -1087,7 +1087,7 @@ mod tests {
     #[test]
     #[ignore = "player-supplied original archive, installer, PE, language and scripts"]
     fn original_v5_regions_labels_and_scroll_geometry() {
-        let read = |name| fs::read(std::env::var_os(name).expect(name)).unwrap();
+        let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
@@ -1102,14 +1102,14 @@ mod tests {
                 &glyphs[start..at]
             })
             .collect::<Vec<_>>();
-        let installer = std::path::PathBuf::from(std::env::var_os("OPENMT2001_INSTALLER").unwrap());
+        let installer = openmt2001::fixtures::path("INSTALLER");
         let localized = crate::tooltip::localized_strings(&installer, &strings).unwrap();
         let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
         assert_eq!(strings[2243], crate::load::ascii("$"));
         let panel = SetupPanel::new(
             &index,
             &archive,
-            Path::new(&std::env::var_os("OPENMT2001_INSTALLER").unwrap()),
+            Path::new(&openmt2001::fixtures::path("INSTALLER")),
             &strings,
             &read("OPENMT2001_EXE"),
             0xbb000a28,

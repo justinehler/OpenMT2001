@@ -158,9 +158,7 @@ mod tests {
     #[test]
     #[ignore = "requires original scenario text oracle fixture"]
     fn matches_native_scenario_currency_text() {
-        let b =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SCENARIO_TEXT").expect("fixture path"))
-                .unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_SCENARIO_TEXT")).unwrap();
         assert_eq!(&b[..8], b"MTSTXT01");
         let mut at = 8;
         fn word(b: &[u8], at: &mut usize) -> usize {
@@ -190,9 +188,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied original installer scripts"]
     fn original_campaign_registration_and_maps() {
-        let root = std::path::PathBuf::from(
-            std::env::var("OPENMT2001_ORIGINAL_SCRIPTS").expect("scripts root"),
-        );
+        let root = openmt2001::fixtures::path("ORIGINAL_SCRIPTS");
         let registrations = std::fs::read_to_string(root.join("GAMESTART/hub.lua")).unwrap();
         let ids: Vec<u32> = registrations
             .lines()
@@ -219,7 +215,7 @@ mod tests {
                 .collect();
             assert_eq!(maps, s.map.into_iter().collect::<Vec<_>>(), "{}", s.token);
             if let Some(map) = s.map {
-                let input = std::fs::read_to_string(root.join("maps").join(map)).unwrap();
+                let input = std::fs::read_to_string(root.join("MAPS").join(map)).unwrap();
                 openmt2001::scene::parse_static_map(&input).unwrap();
             }
         }

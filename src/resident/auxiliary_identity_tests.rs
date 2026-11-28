@@ -82,33 +82,28 @@ fn check_retained_owned_creation(load: bool) {
         ResidentAccounts, ResidentCreationError, ResidentCreationInputs, ResidentCreationState,
         ResidentModelBinding,
     };
-    let bytes = std::fs::read(
-        std::env::var(if load {
-            "OPENMT2001_NATIVE_RESIDENT_LOAD"
-        } else {
-            "OPENMT2001_NATIVE_RESIDENT_CREATION"
-        })
-        .unwrap(),
-    )
+    let bytes = std::fs::read(crate::fixtures::path(if load {
+        "OPENMT2001_NATIVE_RESIDENT_LOAD"
+    } else {
+        "OPENMT2001_NATIVE_RESIDENT_CREATION"
+    }))
     .unwrap();
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     assert_eq!(&bytes[..8], if load { b"MTLOADR1" } else { b"MTCREATE" });
     assert_eq!(word(8), if load { 4 } else { 8 });
-    let source =
-        std::fs::read_to_string(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap()).unwrap();
-    let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+    let source = std::fs::read_to_string(crate::fixtures::path("DEFAULT_SETTINGS")).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
     let image = crate::pe::PeImage::parse(&exe).unwrap();
     let preferences = super::Preferences::from_v14_defaults(&source, &image).unwrap();
     let groups = super::PreferenceGroups::from_v14_defaults(&source).unwrap();
-    let parameters =
-        std::fs::read_to_string(std::env::var("OPENMT2001_PARAMETERS").unwrap()).unwrap();
+    let parameters = std::fs::read_to_string(crate::fixtures::path("PARAMETERS")).unwrap();
     let movement = super::MovementSettings::from_parameters(&parameters, &image).unwrap();
     assert_eq!(
         movement.speed_by_age.map(f32::to_bits),
         std::array::from_fn(|i| word(12 + i * 4))
     );
     assert_eq!(movement.variation.to_bits(), word(32));
-    let saved_bytes = std::fs::read(std::env::var("OPENMT2001_SAVE_ONE").unwrap()).unwrap();
+    let saved_bytes = std::fs::read(crate::fixtures::path("SAVE_ONE")).unwrap();
     let save = crate::save::SaveFile::parse(&saved_bytes).unwrap();
     let commodities = save.economy().unwrap().resident_commodities();
     let objectives = super::DailyObjectives {

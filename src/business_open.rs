@@ -152,8 +152,7 @@ mod tests {
     #[test]
     #[ignore = "requires original construction completion observations"]
     fn matches_native_construction_completion() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CONSTRUCTION_COMPLETE").unwrap())
-            .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CONSTRUCTION_COMPLETE")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTCCMP01");
         assert_eq!(r.word(), 2);

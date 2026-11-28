@@ -621,8 +621,7 @@ mod tests {
     #[ignore = "requires original composed vehicle admission/creation observations"]
     fn matches_native_composed_vehicles() {
         use super::*;
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_COMPOSED").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_COMPOSED")).unwrap();
         assert_eq!(&data[..8], b"MTVCOMP1");
         assert_eq!(word(&data, 8), 1);
         let mut at = 16;
@@ -725,8 +724,7 @@ mod tests {
     #[ignore = "requires original road vehicle creation observations"]
     fn matches_native_vehicle_creation() {
         use super::*;
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_CREATE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_CREATE")).unwrap();
         assert_eq!(&data[..8], b"MTVCREA1");
         assert_eq!(word(&data, 8), 1);
         let mut at = 16;
@@ -830,8 +828,7 @@ mod tests {
     #[ignore = "requires original road vehicle initialization observations"]
     fn matches_native_vehicle_initialization() {
         use super::*;
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_INITIALIZE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_INITIALIZE")).unwrap();
         assert_eq!(&data[..8], b"MTVINIT1");
         assert_eq!(word(&data, 8), 1);
         let mut at = 16;
@@ -913,8 +910,7 @@ mod tests {
     #[ignore = "requires original vehicle admission observations"]
     fn matches_native_vehicle_admission() {
         use super::*;
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_VEHICLE_ADMISSION").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_VEHICLE_ADMISSION")).unwrap();
         assert_eq!(&data[..8], b"MTVADMIT");
         assert_eq!(word(&data, 8), 1);
         let mut at = 16;
@@ -980,7 +976,7 @@ mod tests {
     #[ignore = "requires original route producer observations and train locator assets"]
     fn matches_native_route_records() {
         use super::*;
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(crate::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -1092,17 +1088,16 @@ mod tests {
 
     fn check_hourly_effects(environment: &str, secondary_mode: bool) {
         use super::*;
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let data = std::fs::read(std::env::var(environment).unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path(environment)).unwrap();
         assert_eq!(&data[..8], b"MTH44F2A");
         let version = word(&data, 8);
         assert!((1..=2).contains(&version));
         let global_count = if version == 1 { 10 } else { 13 };
         let real_routes = if environment == "OPENMT2001_NATIVE_HOURLY_TRANSPORT" {
-            let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-            let directory =
-                std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+            let archive = std::fs::read(crate::fixtures::path("ARCHIVE_BIN")).unwrap();
+            let directory = std::fs::read(crate::fixtures::path("ARCHIVE_DIR")).unwrap();
             let index =
                 crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
             Some(RouteGeometry::load_routes(&image, &index, &archive).unwrap())
@@ -1297,10 +1292,9 @@ mod tests {
     #[test]
     #[ignore = "requires private original signal-phase observations"]
     fn matches_native_signal_phase() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_TRAFFIC_SIGNALS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_TRAFFIC_SIGNALS")).unwrap();
         assert_eq!(&data[..8], b"MTSIGNAL");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         let mut at = 12;

@@ -561,7 +561,7 @@ mod tests {
     #[ignore = "requires original auction models and v1.4 animation tables"]
     fn original_auction_win_waits_for_actor_completion() {
         use openmt2001::ai_messages::offers::auction::{self, Command};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -678,7 +678,7 @@ mod tests {
     #[ignore = "requires original v1.4 auction character assets"]
     fn original_auction_withdraw_notice_uses_third_voice_at_callback() {
         use openmt2001::ai_messages::offers::auction::{self, Command};
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     #[ignore = "requires original result character meshes and texture pages"]
     fn original_result_actor_resources() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -788,14 +788,14 @@ mod tests {
     fn capture_original_result_actors_on_flyby() {
         let output =
             std::env::var("OPENMT2001_RESULT_ACTOR_CAPTURE").expect("capture output directory");
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let image = PeImage::parse(&exe).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let actors = Assets::load_result(&image, &index, &archive).unwrap();
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
@@ -853,14 +853,14 @@ mod tests {
     fn capture_original_result_actor_highlight() {
         let output =
             std::path::PathBuf::from(std::env::var("OPENMT2001_RESULT_ACTOR_CAPTURE").unwrap());
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let image = PeImage::parse(&exe).unwrap();
         let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let actors = Assets::load_result(&image, &index, &archive).unwrap();
-        let installer = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap())
+        let installer = openmt2001::fixtures::path("PARAMETERS")
             .parent()
             .unwrap()
             .parent()
@@ -922,8 +922,7 @@ mod tests {
     #[test]
     #[ignore = "requires original auction scene observations"]
     fn original_auction_poses_and_camera() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_SCENE").unwrap()).unwrap();
+        let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_SCENE")).unwrap();
         struct Reader<'a>(&'a [u8]);
         impl Reader<'_> {
             fn word(&mut self) -> u32 {
@@ -985,7 +984,7 @@ mod tests {
     #[test]
     #[ignore = "requires original auction meshes and texture pages"]
     fn original_auction_scene_resources() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = read("OPENMT2001_ARCHIVE_DIR");

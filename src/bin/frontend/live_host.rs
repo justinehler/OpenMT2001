@@ -3908,7 +3908,7 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 executable"]
     fn original_property_broadcast_dispatcher_is_inert_after_refresh() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&bytes).unwrap();
         // 451720 has already called 405260 for kind 0x26. The following
         // 48c1a0 dispatcher selects 48c3c6: clear flag and return.

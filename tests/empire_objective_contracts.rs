@@ -25,7 +25,7 @@ fn float(bytes: &[u8], at: usize) -> f32 {
 }
 
 fn original_bytes() -> Vec<u8> {
-    std::fs::read(std::env::var_os("OPENMT2001_EXE").expect("original v1.4 PE data path")).unwrap()
+    std::fs::read(openmt2001::fixtures::path("EXE")).unwrap()
 }
 
 fn check_literals(image: &PeImage<'_>) {

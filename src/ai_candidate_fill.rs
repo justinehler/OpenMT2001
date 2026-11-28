@@ -243,9 +243,8 @@ mod tests {
     #[test]
     #[ignore = "requires original candidate production observations"]
     fn matches_native_candidate_fill() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CANDIDATE_FILL").unwrap()).unwrap();
-        let original = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_CANDIDATE_FILL")).unwrap();
+        let original = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let mut reader = Reader(&bytes);
         assert_eq!(reader.take(8), b"MTCFILL1");
         let h: [u32; 8] = std::array::from_fn(|_| reader.word());

@@ -76,8 +76,7 @@ mod tests {
     #[test]
     #[ignore = "requires original category reset observations"]
     fn matches_native_reset() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CATEGORY_RESET").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_CATEGORY_RESET")).unwrap();
         assert_eq!(&bytes[..8], b"MTNCATRS");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         assert_eq!(

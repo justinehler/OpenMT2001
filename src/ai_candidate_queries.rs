@@ -167,9 +167,8 @@ mod tests {
     #[test]
     #[ignore = "requires original candidate world-query observations"]
     fn matches_native_candidate_queries() {
-        let bytes = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CANDIDATE_QUERIES").unwrap())
-            .unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_AI_CANDIDATE_QUERIES")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&bytes);
         assert_eq!(r.take(8), b"MTCQRY02");
@@ -238,9 +237,7 @@ mod tests {
     #[ignore = "requires complete original candidate feasibility observations"]
     fn matches_native_candidate_feasibility() {
         use crate::player_manager::Player;
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_CANDIDATE_FEASIBILITY").unwrap())
-                .unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_CANDIDATE_FEASIBILITY")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTCFEAS2");
         assert_eq!(r.word(), 0x037f);

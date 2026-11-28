@@ -246,8 +246,7 @@ mod tests {
     #[test]
     #[ignore = "requires original4896e0/489df0 observations"]
     fn matches_native_objective_ticks() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_OBJECTIVE_TICK").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_OBJECTIVE_TICK")).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(7), b"MTOBJ02");
         assert_eq!(r.word(), 2);

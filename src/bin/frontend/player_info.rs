@@ -403,9 +403,8 @@ mod tests {
     #[test]
     #[ignore = "private original player button/order fixture"]
     fn matches_native_player_style() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_STYLE").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PLAYER_STYLE")).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let word_at = |a| u32::from_le_bytes(image.at(a, 4).unwrap().try_into().unwrap());
         assert_eq!(&bytes[..8], b"MTPLRSTY");
@@ -452,8 +451,7 @@ mod tests {
     #[test]
     #[ignore = "requires original saved/synthetic financial report oracle"]
     fn matches_native_player_report() {
-        let bytes =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_PLAYER_REPORT").unwrap()).unwrap();
+        let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_PLAYER_REPORT")).unwrap();
         assert_eq!(&bytes[..8], b"MTPRPT01");
         let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let count = word(8);

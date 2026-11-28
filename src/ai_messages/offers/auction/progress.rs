@@ -170,8 +170,7 @@ pub fn update(
 #[test]
 #[ignore = "requires original auction progress capture"]
 fn matches_native_progress() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_PROGRESS").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_PROGRESS")).unwrap();
     struct Reader<'a>(&'a [u8]);
     impl<'a> Reader<'a> {
         fn take(&mut self, n: usize) -> &'a [u8] {

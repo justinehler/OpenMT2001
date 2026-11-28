@@ -356,8 +356,8 @@ mod tests {
     #[test]
     #[ignore = "requires original AI planning helper observations"]
     fn matches_native_helpers() {
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AI_PLANNING").unwrap()).unwrap();
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_AI_PLANNING")).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut r = Reader(&data);
         assert_eq!(r.take(8), b"MTAIPLN2");

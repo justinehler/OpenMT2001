@@ -198,7 +198,7 @@ mod tests {
                 building::{OWNER_COUNT_OFFSET, OWNER_INDICES_OFFSET},
             },
         };
-        let read = |key| std::fs::read(std::env::var_os(key).expect(key)).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     #[ignore = "requires original map, executable, BuildFile and scenery assets"]
     fn live_building_records_match_map_scene() {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let directory = read("OPENMT2001_ARCHIVE_DIR");
         let archive = read("OPENMT2001_ARCHIVE_BIN");

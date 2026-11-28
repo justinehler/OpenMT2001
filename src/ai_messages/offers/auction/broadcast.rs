@@ -74,8 +74,7 @@ pub fn dispatch(
 #[test]
 #[ignore = "requires original property broadcast capture"]
 fn matches_native_broadcast() {
-    let bytes =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_BROADCAST").unwrap()).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_AUCTION_BROADCAST")).unwrap();
     struct Reader<'a>(&'a [u8]);
     impl<'a> Reader<'a> {
         fn take(&mut self, n: usize) -> &'a [u8] {

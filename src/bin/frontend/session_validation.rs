@@ -48,7 +48,7 @@ mod tests {
         std::thread::Builder::new()
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
-                let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
                 let executable = read("OPENMT2001_EXE");
                 let archive = read("OPENMT2001_ARCHIVE_BIN");
                 let directory = read("OPENMT2001_ARCHIVE_DIR");
@@ -61,7 +61,7 @@ mod tests {
                 let index =
                     openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64)
                         .unwrap();
-                let exe_path = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+                let exe_path = openmt2001::fixtures::path("EXE");
                 let scripts = exe_path.parent().unwrap().join("scripts");
                 let language = exe_path
                     .parent()
@@ -71,7 +71,7 @@ mod tests {
                     .join("US/language/usa");
                 let names = character_names(&image, &language).unwrap();
                 let era_styles = load_era_styles(
-                    Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap())
+                    Path::new(&openmt2001::fixtures::path("PARAMETERS"))
                         .parent()
                         .unwrap(),
                 )

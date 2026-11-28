@@ -10,9 +10,7 @@ use std::{
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = std::env::var_os("OPENMT2001_TEST_SCRATCH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("work/test-scratch"));
+        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
         std::fs::create_dir_all(&parent).unwrap();
         let root = parent.join(format!(
             "autosave-live-{}-{}",
@@ -77,7 +75,7 @@ fn ordinary_midnight_does_not_manufacture_modern_era_introduction() {
 }
 fn run(era: bool) {
     std::thread::Builder::new().stack_size(32*1024*1024).spawn(move|| {
-        let read = |key| std::fs::read(std::env::var(key).unwrap()).unwrap();
+        let read = |key| std::fs::read(openmt2001::fixtures::path(key)).unwrap();
         let exe = Arc::new(read("OPENMT2001_EXE"));
         let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
         let board = openmt2001::board::Board::from_v14(&image).unwrap();
@@ -88,10 +86,10 @@ fn run(era: bool) {
         let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let parameters = read("OPENMT2001_PARAMETERS");
         let timetable = read("OPENMT2001_TIMETABLE");
-        let default = std::path::PathBuf::from(std::env::var("OPENMT2001_DEFAULT_SETTINGS").unwrap());
+        let default = openmt2001::fixtures::path("DEFAULT_SETTINGS");
         let scripts = default.parent().unwrap().parent().unwrap();
-        let styles = crate::fresh_city::load_era_styles(Path::new(&std::env::var("OPENMT2001_PARAMETERS").unwrap()).parent().unwrap()).unwrap();
-        let exe_path = std::path::PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+        let styles = crate::fresh_city::load_era_styles(Path::new(&openmt2001::fixtures::path("PARAMETERS")).parent().unwrap()).unwrap();
+        let exe_path = openmt2001::fixtures::path("EXE");
         let names = crate::fresh_city::character_names(&image, &exe_path.parent().unwrap().parent().unwrap().join("US/language/usa")).unwrap();
         let inputs = || Inputs {
             tree_locators: None, image: &image, board: &board, file: &file,

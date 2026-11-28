@@ -189,7 +189,7 @@ mod tests {
         check_city(true);
     }
     fn check_city(actual_assets: bool) {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = crate::pe::PeImage::parse(&exe).unwrap();
         let board = crate::board::Board::from_v14(&image).unwrap();
         let (roads, segment_count) = board.traffic_roads().unwrap();
@@ -208,16 +208,13 @@ mod tests {
             &super::super::construction::ConstructionSettings::from_v14(&image).unwrap(),
         )
         .unwrap();
-        let table = std::fs::read(std::env::var("OPENMT2001_ROAD_ROUTE_TABLE").unwrap()).unwrap();
+        let table = std::fs::read(crate::fixtures::path("ROAD_ROUTE_TABLE")).unwrap();
         let routes = RoadRoutes::from_bytes(&table, segment_count as u32).unwrap();
-        let data = std::fs::read(
-            std::env::var(if actual_assets {
-                "OPENMT2001_NATIVE_VEHICLE_CITY_ASSETS"
-            } else {
-                "OPENMT2001_NATIVE_VEHICLE_CITY"
-            })
-            .unwrap(),
-        )
+        let data = std::fs::read(crate::fixtures::path(if actual_assets {
+            "OPENMT2001_NATIVE_VEHICLE_CITY_ASSETS"
+        } else {
+            "OPENMT2001_NATIVE_VEHICLE_CITY"
+        }))
         .unwrap();
         assert_eq!(&data[..8], b"MTVCITY1");
         let size = word(&data, 8) as usize;
@@ -284,8 +281,8 @@ mod tests {
                 Ok(ModelExtent { low: -2., high: 2. })
             }
         }
-        let archive = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_BIN").unwrap()).unwrap();
-        let directory = std::fs::read(std::env::var("OPENMT2001_ARCHIVE_DIR").unwrap()).unwrap();
+        let archive = std::fs::read(crate::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let directory = std::fs::read(crate::fixtures::path("ARCHIVE_DIR")).unwrap();
         let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
         let mut models = Models {
             tick: 0,

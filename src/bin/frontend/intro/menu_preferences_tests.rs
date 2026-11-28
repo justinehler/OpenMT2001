@@ -6,7 +6,7 @@ use std::{fs, path::PathBuf};
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
-        let parent = PathBuf::from(std::env::var_os("OPENMT2001_TEST_SCRATCH").unwrap());
+        let parent = openmt2001::fixtures::scratch("TEST_SCRATCH");
         assert!(parent.is_absolute());
         fs::create_dir_all(&parent).unwrap();
         let path = parent.join(format!(
@@ -27,21 +27,21 @@ impl Drop for Scratch {
     }
 }
 fn fixture(root: &std::path::Path) -> (Menu, SettingsAssets, Owner) {
-    let read = |key| fs::read(std::env::var(key).unwrap()).unwrap();
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let directory = read("OPENMT2001_ARCHIVE_DIR");
     let archive = read("OPENMT2001_ARCHIVE_BIN");
     let executable = read("OPENMT2001_EXE");
     let index = openmt2001::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-    let parameter = PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+    let parameter = openmt2001::fixtures::path("PARAMETERS");
     let installer = parameter.parent().unwrap().parent().unwrap();
-    let exe = PathBuf::from(std::env::var("OPENMT2001_EXE").unwrap());
+    let exe = openmt2001::fixtures::path("EXE");
     let language = exe
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .join("US/language/usa");
-    let map = PathBuf::from(std::env::var("OPENMT2001_MAP").unwrap());
+    let map = openmt2001::fixtures::path("MAP");
     let scripts = map.parent().unwrap().parent().unwrap();
     let assets = crate::menu::Assets::load(
         &index,

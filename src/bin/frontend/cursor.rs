@@ -71,7 +71,7 @@ mod tests {
     #[test]
     #[ignore = "requires original pan cursor oracle and archive"]
     fn matches_native_pan_cursor() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = openmt2001::archive::ArchiveIndex::parse(
             &read("OPENMT2001_ARCHIVE_DIR"),
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     #[ignore = "requires original archive and native cursor setter observations"]
     fn matches_native_inspection_cursor() {
-        let read = |name| std::fs::read(std::env::var(name).unwrap()).unwrap();
+        let read = |name| std::fs::read(openmt2001::fixtures::path(name)).unwrap();
         let archive = read("OPENMT2001_ARCHIVE_BIN");
         let directory = openmt2001::archive::ArchiveIndex::parse(
             &read("OPENMT2001_ARCHIVE_DIR"),

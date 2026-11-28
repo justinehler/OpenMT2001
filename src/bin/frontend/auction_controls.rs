@@ -198,7 +198,7 @@ impl State {
 #[test]
 #[ignore = "requires native auction button handler observations"]
 fn original_auction_buttons() {
-    let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_BUTTONS").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_BUTTONS")).unwrap();
     assert_eq!(&data[..8], b"MTAUBT01");
     let mut words = data[8..]
         .chunks_exact(4)
@@ -261,8 +261,7 @@ fn original_auction_buttons() {
 #[test]
 #[ignore = "requires native auction turn timer observations"]
 fn original_auction_turn_timer() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_TURN_TIMER").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_TURN_TIMER")).unwrap();
     assert_eq!(&data[..8], b"MTAUTM01");
     let mut words = data[8..]
         .chunks_exact(4)
@@ -305,8 +304,7 @@ fn original_auction_turn_timer() {
 #[test]
 #[ignore = "requires native auction bidder eligibility observations"]
 fn original_auction_bidder_tick() {
-    let data =
-        std::fs::read(std::env::var("OPENMT2001_NATIVE_AUCTION_BIDDER_TICK").unwrap()).unwrap();
+    let data = std::fs::read(openmt2001::fixtures::path("NATIVE_AUCTION_BIDDER_TICK")).unwrap();
     assert_eq!(&data[..8], b"MTAUBK01");
     let mut words = data[8..]
         .chunks_exact(4)

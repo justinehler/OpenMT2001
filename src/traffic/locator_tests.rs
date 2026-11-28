@@ -22,7 +22,7 @@ impl<'a> Reader<'a> {
 #[test]
 #[ignore = "requires original transport matrix and aircraft fixture"]
 fn native_locator_and_aircraft_match() {
-    let data = std::fs::read(std::env::var("OPENMT2001_LOCATOR_FIXTURE").unwrap()).unwrap();
+    let data = std::fs::read(crate::fixtures::path("LOCATOR_FIXTURE")).unwrap();
     let mut reader = Reader(&data);
     assert_eq!(reader.take(8), b"MTLOCAT1");
     assert_eq!(reader.word(), 1);

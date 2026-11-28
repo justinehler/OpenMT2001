@@ -200,7 +200,7 @@ mod tests {
     #[test]
     #[ignore = "private original Land Rent fixture"]
     fn matches_original_land_rent() {
-        let b = std::fs::read(std::env::var("OPENMT2001_NATIVE_LAND_RENT").unwrap()).unwrap();
+        let b = std::fs::read(openmt2001::fixtures::path("NATIVE_LAND_RENT")).unwrap();
         assert_eq!(&b[..8], b"MTLRENT1");
         let mut at = 8;
         let word = |at: &mut usize| {
@@ -208,7 +208,7 @@ mod tests {
             *at += 4;
             v
         };
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         for _ in 0..word(&mut at) {
             let owner = word(&mut at) as u8;
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     #[ignore = "private original saved Land Rent reports"]
     fn matches_original_saved_land_rent() {
-        let path = std::path::PathBuf::from(std::env::var("OPENMT2001_NATIVE_LAND_RENT").unwrap());
+        let path = openmt2001::fixtures::path("NATIVE_LAND_RENT");
         let b = std::fs::read(path.with_file_name("native-land-rent-saved.bin")).unwrap();
         assert_eq!(&b[..8], b"MTLRSAV1");
         let mut at = 8;
@@ -251,7 +251,7 @@ mod tests {
             *at += 4;
             v
         };
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         for _ in 0..word(&mut at) {
             let n = word(&mut at) as usize;
@@ -263,7 +263,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let path = ["OPENMT2001_SAVE_ONE", "OPENMT2001_SAVE_TWO"]
                 .into_iter()
-                .map(|key| std::path::PathBuf::from(std::env::var(key).unwrap()))
+                .map(|key| openmt2001::fixtures::path(key))
                 .find(|p| p.file_name().unwrap() == name)
                 .unwrap();
             let bytes = std::fs::read(path).unwrap();

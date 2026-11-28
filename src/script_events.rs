@@ -170,8 +170,7 @@ mod tests {
     #[test]
     #[ignore = "requires supplied-original native script event fixture"]
     fn matches_original_countdown_traversal() {
-        let data =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_SCRIPT_EVENTS").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_SCRIPT_EVENTS")).unwrap();
         assert_eq!(&data[..8], b"MTSEVTQ1");
         let mut reader = Reader(&data[8..]);
         let count = reader.word();

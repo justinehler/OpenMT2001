@@ -381,7 +381,7 @@ fn supplied_bank_capture_entry_and_return_match_static_instruction_expectations(
         ),
     ] {
         // Read-only runtime inputs. No include_bytes!, source payload or writes.
-        let path = std::env::var_os(env).unwrap();
+        let path = crate::fixtures::path(env);
         let bytes = std::fs::read(&path).unwrap();
         hash(&bytes, save_hash);
         let save = crate::save::SaveFile::parse(&bytes).unwrap();

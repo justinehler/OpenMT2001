@@ -107,7 +107,7 @@ fn matches_native_human_replies() {
             self.take(n)
         }
     }
-    let d = std::fs::read(std::env::var("OPENMT2001_NATIVE_HUMAN_REPLY").unwrap()).unwrap();
+    let d = std::fs::read(crate::fixtures::path("NATIVE_HUMAN_REPLY")).unwrap();
     let mut r = R(&d);
     assert_eq!(r.take(8), b"MTHREPL1");
     assert_eq!(r.word(), 0x37f);

@@ -122,11 +122,11 @@ mod tests {
     #[test]
     #[ignore = "requires original PE and native24 board-style command observations"]
     fn original_board_style_commands() {
-        let executable = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let executable = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&executable).unwrap();
         let board = Board::from_v14(&image).unwrap();
         let mut style = Style::from_v14(&image).unwrap();
-        let parameters = std::path::PathBuf::from(std::env::var("OPENMT2001_PARAMETERS").unwrap());
+        let parameters = crate::fixtures::path("PARAMETERS");
         let source = std::fs::read_to_string(
             parameters
                 .parent()
@@ -145,7 +145,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(lines.len(), 24);
-        let bytes = std::fs::read("work/frontend/native-board-style.bin").unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("NATIVE_BOARD_STYLE")).unwrap();
         assert_eq!(&bytes[..8], b"MTBSTY01");
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0x037f);
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 24);

@@ -866,7 +866,7 @@ mod mode13_tests {
         // Portable mathematical trig; this finite fixture comparison does not
         // establish general native x87 equivalence.
         use crate::x87::portable_trig::PortableTrig;
-        let data = std::fs::read(std::env::var("OPENMT2001_NATIVE_CAMERA_PAN").unwrap()).unwrap();
+        let data = std::fs::read(crate::fixtures::path("NATIVE_CAMERA_PAN")).unwrap();
         assert_eq!(&data[..8], b"MTCPAN01");
         let word = |at| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
         assert_eq!(word(8), 240);
@@ -1172,7 +1172,7 @@ mod tests {
                     expected
                 );
             }
-            let bytes = std::fs::read(std::env::var(env).unwrap()).unwrap();
+            let bytes = std::fs::read(crate::fixtures::path(env)).unwrap();
             guard(&bytes, hash);
             let save = crate::save::SaveFile::parse(&bytes).unwrap();
             let raw = *save.cameras().unwrap()[0];

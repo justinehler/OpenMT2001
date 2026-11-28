@@ -243,7 +243,7 @@ mod tests {
     #[test]
     #[ignore = "requires original BuildFile and native facade UV observations"]
     fn matches_native_facade_uvs() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let data = read("OPENMT2001_BUILD_FILE");
         let native = read("OPENMT2001_NATIVE_FACADE_UVS");
         let file = crate::build_file::BuildFile::parse(&data).unwrap();
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     #[ignore = "requires private BuildFile and native facade vertex observations"]
     fn matches_native_facade_vertices() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let data = read("OPENMT2001_BUILD_FILE");
         let native = read("OPENMT2001_NATIVE_FACADES");
         let file = crate::build_file::BuildFile::parse(&data).unwrap();
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     #[ignore = "requires private BuildFile and original-instruction prepared profiles"]
     fn matches_native_preparation() {
-        let read = |name| std::fs::read(std::env::var(name).expect(name)).unwrap();
+        let read = |name| std::fs::read(crate::fixtures::path(name)).unwrap();
         let data = read("OPENMT2001_BUILD_FILE");
         let native = read("OPENMT2001_NATIVE_PREPARED");
         let file = crate::build_file::BuildFile::parse(&data).unwrap();

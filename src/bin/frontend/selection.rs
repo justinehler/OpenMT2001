@@ -431,7 +431,8 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 category-visibility oracle"]
     fn category_frustum_matches_native_bit_one() {
-        let fixture = std::fs::read("work/frontend/native-category-visibility.bin").unwrap();
+        let fixture =
+            std::fs::read(openmt2001::fixtures::path("NATIVE_CATEGORY_VISIBILITY")).unwrap();
         assert_eq!(&fixture[..8], b"MTCVIS01");
         let word = |at: usize| u32::from_le_bytes(fixture[at..at + 4].try_into().unwrap());
         let float = |at: usize| f32::from_bits(word(at));

@@ -152,11 +152,10 @@ mod tests {
     #[test]
     #[ignore = "requires pinned original v1.4 executable and 101-tick native fixture"]
     fn native_four_row_pulse_lifecycle() {
-        let exe = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+        let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
         let image = PeImage::parse(&exe).unwrap();
         let mut state = PulseLights::from_original(&image).unwrap();
-        let fixture =
-            std::fs::read(std::env::var("OPENMT2001_NATIVE_CITY_PULSE").unwrap()).unwrap();
+        let fixture = std::fs::read(crate::fixtures::path("NATIVE_CITY_PULSE")).unwrap();
         assert_eq!(&fixture[..8], b"MTPULS01");
         assert_eq!(u32::from_le_bytes(fixture[8..12].try_into().unwrap()), 101);
         assert_eq!(fixture.len(), 12 + 101 * 96);

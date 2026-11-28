@@ -410,12 +410,12 @@ fn world_rebuild_requires_preexisting_active_source_for_same_epoch() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
-            let bytes = std::fs::read(std::env::var("OPENMT2001_EXE").unwrap()).unwrap();
+            let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
             let image = PeImage::parse(&bytes).unwrap();
             let parameters =
-                std::fs::read_to_string(std::env::var("OPENMT2001_PARAMETERS").unwrap()).unwrap();
+                std::fs::read_to_string(openmt2001::fixtures::path("PARAMETERS")).unwrap();
             let timetable =
-                std::fs::read_to_string(std::env::var("OPENMT2001_TIMETABLE").unwrap()).unwrap();
+                std::fs::read_to_string(openmt2001::fixtures::path("TIMETABLE")).unwrap();
             let board = openmt2001::board::Board::from_v14(&image).unwrap();
             let make_world = || {
                 let configuration = openmt2001::resident::Configuration::before_defaults(
