@@ -59,6 +59,7 @@ pub enum Button {
     Graphics,
     Gameplay,
     Board,
+    Credits,
     BoardRow(usize),
     BoardUp,
     BoardDown,
@@ -424,6 +425,7 @@ impl Assets {
             (Page::Main, Button::Graphics) => 7,
             (Page::Main, Button::Gameplay) => 10,
             (Page::Main, Button::Board) => 11,
+            (Page::Main, Button::Credits) => 12,
             (Page::Board, Button::Back) => 4,
             (Page::Main, Button::Back) => 8,
             (Page::Main, Button::Reset) => 9,
@@ -481,6 +483,7 @@ impl Assets {
                 Button::Graphics,
                 Button::Gameplay,
                 Button::Board,
+                Button::Credits,
                 Button::Reset,
                 Button::Back,
             ]
@@ -508,6 +511,7 @@ impl Assets {
                 Button::Graphics,
                 Button::Gameplay,
                 Button::Board,
+                Button::Credits,
                 Button::Reset,
                 Button::Back,
             ]
@@ -515,7 +519,7 @@ impl Assets {
             &[Button::Back]
         };
         buttons.iter().any(|&button| {
-            if matches!(button, Button::Reset | Button::Board) && !reset_enabled {
+            if matches!(button, Button::Reset | Button::Board | Button::Credits) && !reset_enabled {
                 return false;
             }
             self.bounds(page, button)
@@ -754,7 +758,12 @@ impl Assets {
                     reset_enabled.then_some(Button::Board),
                     [110, 4, 171],
                 ),
-                (12, 1770, None, [110, 4, 171]),
+                (
+                    12,
+                    1770,
+                    reset_enabled.then_some(Button::Credits),
+                    [110, 4, 171],
+                ),
             ] {
                 let active = button.is_some();
                 let selected = active && button == hovered;
@@ -1058,6 +1067,7 @@ pub struct View {
     board_scroll: usize,
     reset_enabled: bool,
     reset_pending: bool,
+    credits_pending: bool,
     pressed: Option<Button>,
     button_down: bool,
     click_latch: Option<Button>,
@@ -1074,6 +1084,7 @@ impl View {
     pub fn open(&mut self) {
         self.reset_enabled = true;
         self.reset_pending = false;
+        self.credits_pending = false;
         self.page = Some(Page::Main);
         self.pressed = None;
         self.button_down = false;
@@ -1088,13 +1099,16 @@ impl View {
     pub fn take_reset(&mut self) -> bool {
         std::mem::take(&mut self.reset_pending)
     }
+    pub(crate) fn take_credits(&mut self) -> bool {
+        std::mem::take(&mut self.credits_pending)
+    }
     fn hit(&self, assets: &Assets, page: Page, pointer: [f32; 2]) -> Option<Button> {
         if page == Page::Board {
             return self.board_hit(assets, pointer);
         }
-        assets
-            .button(page, pointer)
-            .filter(|button| !matches!(button, Button::Reset | Button::Board) || self.reset_enabled)
+        assets.button(page, pointer).filter(|button| {
+            !matches!(button, Button::Reset | Button::Board | Button::Credits) || self.reset_enabled
+        })
     }
     pub fn back(&mut self) {
         self.page = match self.page {
@@ -1272,6 +1286,11 @@ impl View {
                 self.gameplay = GameplayLevels::default();
                 self.shown = None;
                 return *levels != old;
+            }
+            Some(Button::Credits) => {
+                //496a97 hides Settings, starts flyby1, then sets credits11d.
+                self.back();
+                self.credits_pending = true;
             }
             Some(Button::Sound) => {
                 self.page = Some(Page::Sound);
@@ -1493,12 +1512,17 @@ mod graphics_tests {
             }
         }
         {
-            // Credits remains outside the board-selection implementation.
+            // Credits shares Board/Default's outside-city availability.
             let [l, t, r, b] = assets.panel(Page::Main).regions[12];
-            assert!(!assets.action_cursor_hover(
+            assert!(assets.action_cursor_hover(
                 Page::Main,
                 Some([(l + r) * 0.5, (t + b) * 0.5]),
                 true
+            ));
+            assert!(!assets.action_cursor_hover(
+                Page::Main,
+                Some([(l + r) * 0.5, (t + b) * 0.5]),
+                false
             ));
         }
         for (page, button) in [

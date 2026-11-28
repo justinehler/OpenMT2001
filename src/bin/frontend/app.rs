@@ -253,6 +253,20 @@ impl App {
         let Some(process) = self.process_frontend.clone() else {
             return;
         };
+        if self
+            .intro
+            .as_mut()
+            .is_some_and(|intro| std::mem::take(&mut intro.restart_intro_music))
+        {
+            if let Err(error) = process.borrow_mut().stop_menu() {
+                self.failure = Some(error);
+                return;
+            }
+            self.intro_music_loading = None;
+            self.intro_music_token = None;
+            self.intro_music_attempted = false;
+            self.intro_music_playing = false;
+        }
         if self.intro.as_ref().is_some_and(|intro| intro.inspecting()) {
             self.intro_music_loading = None;
             self.intro_music_token = None;

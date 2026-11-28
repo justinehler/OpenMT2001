@@ -46,6 +46,37 @@ fn state(page: Page) -> MenuState {
     }
 }
 
+#[test]
+fn settings_credits_click_hides_settings_and_requests_one_presentation_only_outside_city() {
+    let assets = synthetic_assets();
+    let bounds = assets.bounds(Page::Main, Button::Credits).unwrap();
+    let pointer = [(bounds[0] + bounds[2]) / 2., (bounds[1] + bounds[3]) / 2.];
+    let mut view = View::default();
+    let mut levels = Levels::default();
+    let click = |view: &mut View, levels: &mut Levels| {
+        view.mouse(&assets, Some(pointer), true, levels);
+        view.mouse(&assets, Some(pointer), false, levels);
+    };
+    view.open_in_game();
+    click(&mut view, &mut levels);
+    assert_eq!(view.page, Some(Page::Main));
+    assert!(!view.take_credits());
+    view.open();
+    assert!(assets.action_cursor_hover(Page::Main, Some(pointer), true));
+    click(&mut view, &mut levels);
+    assert_eq!(view.page, None);
+    assert!(view.take_credits());
+    assert!(!view.take_credits());
+    assert_eq!(levels, Levels::default());
+    assert_eq!(view.graphics, GraphicsLevels::default());
+    assert_eq!(view.gameplay, GameplayLevels::default());
+    // A press dragged off the action must not start a presentation.
+    view.open();
+    view.mouse(&assets, Some(pointer), true, &mut levels);
+    view.mouse(&assets, None, false, &mut levels);
+    assert!(!view.take_credits());
+}
+
 fn rect(vertices: &[[f32; 8]]) -> [f32; 4] {
     [
         vertices.iter().map(|v| v[0]).fold(f32::INFINITY, f32::min),

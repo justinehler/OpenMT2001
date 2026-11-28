@@ -137,6 +137,19 @@ impl Assets {
         self.prepare_surfaces(renderer, &surfaces).map(Some)
     }
 
+    /// Settings and campaign completion use the same original credit layout.
+    pub(crate) fn prepare_credit_rows(
+        &self,
+        renderer: &Renderer,
+        rows: &[crate::fresh_city::result::CreditRow],
+        row: usize,
+        alpha: u8,
+    ) -> Result<Option<PreparedScene>, String> {
+        self.credit_row_surfaces(rows, row, alpha)?
+            .map(|surfaces| self.prepare_surfaces(renderer, &surfaces))
+            .transpose()
+    }
+
     fn prepare_surfaces(
         &self,
         renderer: &Renderer,
@@ -193,13 +206,19 @@ impl Assets {
         row: usize,
         alpha: u8,
     ) -> Result<Option<Vec<Surface>>, String> {
+        self.credit_row_surfaces(&result.credit_lines, row, alpha)
+    }
+
+    fn credit_row_surfaces(
+        &self,
+        rows: &[crate::fresh_city::result::CreditRow],
+        row: usize,
+        alpha: u8,
+    ) -> Result<Option<Vec<Surface>>, String> {
         if alpha == 0 {
             return Ok(None);
         }
-        let record = result
-            .credit_lines
-            .get(row)
-            .ok_or("result credit row index")?;
+        let record = rows.get(row).ok_or("result credit row index")?;
         let mut heading = self.credit_heading_pages.clone();
         if let Some(id) = record.heading_id {
             let glyphs = self
@@ -254,6 +273,45 @@ fn centered_line(
 mod tests {
     use super::*;
     use openmt2001::outcome_notice::Sequence;
+
+    #[test]
+    fn settings_credits_layout_centres_small_role_and_five_large_names_with_shared_fade() {
+        let assets = Assets {
+            pages: vec![Surface::solid(); 2],
+            tab: ui::synthetic_text_font(11, 14),
+            credit_heading_pages: vec![Surface::solid(); 2],
+            credit_heading_tab: ui::synthetic_text_font(3, 6),
+            strings: vec![vec![33; 3]],
+        };
+        let rows = vec![crate::fresh_city::result::CreditRow {
+            heading_id: Some(0),
+            names: (1..=5).map(|n| vec![33; n]).collect(),
+        }];
+        let surfaces = assets.credit_row_surfaces(&rows, 0, 128).unwrap().unwrap();
+        let rect = |pages: &[Surface], top: f32| {
+            let vertices = pages
+                .iter()
+                .flat_map(|p| &p.vertices)
+                .filter(|v| v[1] >= top - 0.5 && v[1] < top + 15.)
+                .collect::<Vec<_>>();
+            let left = vertices.iter().map(|v| v[0]).fold(f32::INFINITY, f32::min);
+            let right = vertices
+                .iter()
+                .map(|v| v[0])
+                .fold(f32::NEG_INFINITY, f32::max);
+            (left, right)
+        };
+        let (left, right) = rect(&surfaces[..2], 220.);
+        assert_eq!((left, right), (315.5, 324.5));
+        for row in 0..5 {
+            let (left, right) = rect(&surfaces[2..], 240. + row as f32 * 20.);
+            assert!((left + right - 639.).abs() <= 1.);
+            assert_eq!(right - left, (row + 1) as f32 * 11.);
+        }
+        assert!(surfaces.iter().flat_map(|s| &s.alpha).all(|&a| a == 128));
+        assert!(assets.credit_row_surfaces(&rows, 0, 0).unwrap().is_none());
+        assert!(assets.credit_row_surfaces(&rows, 1, 128).is_err());
+    }
 
     #[test]
     #[ignore = "requires original v1.4 font atlas, language and optional GPU"]

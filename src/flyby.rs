@@ -65,6 +65,18 @@ impl Playback {
         }
         Ok(())
     }
+    /// 483c20 restarts an unhandled FlybyEnded route. Credits outlive one
+    /// camera circuit; preserve the primary camera when wrapping the requests.
+    pub fn advance_looping_to(&mut self, tick: usize) -> Result<(), String> {
+        while self.frame < tick.saturating_add(1) {
+            let request = self.requests[self.frame % self.requests.len()];
+            self.camera
+                .request_flyby(request.eye, request.target, request.up)?;
+            self.camera.common()?;
+            self.frame += 1;
+        }
+        Ok(())
+    }
     /// The menu inherits the simulation pose, rather than a render extrapolation.
     pub fn current(&self) -> CameraSample {
         let view = self.camera.view();
@@ -240,6 +252,28 @@ mod tests {
             assert_eq!(playback.camera, before);
             assert_eq!(playback.frame, 1);
         }
+    }
+    #[test]
+    fn settings_credits_camera_wraps_without_resetting_the_primary_camera() {
+        let poses = [pose([120.; 3], [60.; 3]), pose([100.; 3], [40.; 3])];
+        let bytes = authored_track(&poses);
+        let mut playback = Playback::new(&Flyby::parse(&bytes).unwrap()).unwrap();
+        let mut reference = playback.camera.clone();
+        for tick in 1..20 {
+            let request = poses[tick % poses.len()];
+            reference
+                .request_flyby(request.eye, request.target, request.up)
+                .unwrap();
+            reference.common().unwrap();
+            playback.advance_looping_to(tick).unwrap();
+            assert_eq!(playback.camera, reference);
+        }
+        let current = playback.camera.clone();
+        playback.advance_looping_to(19).unwrap();
+        assert_eq!(
+            playback.camera, current,
+            "render redraw does not advance callbacks"
+        );
     }
     #[test]
     fn attract_restarts_the_same_track_from_the_live_menu_pose() {

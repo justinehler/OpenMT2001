@@ -63,67 +63,85 @@ impl Intro {
             && !self.focus_pending();
         for _ in 0..self.menu_clock.delivered(elapsed, enabled) {
             if self.menu.as_mut().is_some_and(|menu| menu.attract_event1()) {
-                let tick =
-                    (now.saturating_duration_since(self.started).as_secs_f64() * 50.) as usize;
-                let current = self
-                    .menu_camera
-                    .as_mut()
-                    .ok_or("attract menu camera missing")?
-                    .sample(tick, 0.);
-                let seed = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?
-                    .as_secs() as u32;
-                let backdrop = openmt2001::flyby_script::select_seeded(
-                    &self.assets.flyby_hub,
-                    self.assets.flyby_quality.as_deref(),
-                    seed,
-                    || {
-                        self.assets
-                            .process_runtime
-                            .performance8b26cc()
-                            .map_err(|e| e.to_string())
-                    },
-                )?;
-                let bytes = std::fs::read(
-                    self.assets
-                        .inputs
-                        .installer
-                        .join("Standard/Cut_scenes")
-                        .join(&backdrop.track),
-                )
-                .map_err(|e| e.to_string())?;
-                self.assets
-                    .flyby
-                    .restart_track(&Flyby::parse(&bytes)?, current)?;
-                self.assets.opening_logos = backdrop.logos;
-                let camera = self.assets.flyby.current();
-                for index in self
-                    .assets
-                    .scene
-                    .advance_daylight(backdrop.hour, 0, camera)?
-                {
-                    let draw = &self.assets.scene.draws[index];
-                    self.renderer.update_dynamic_surface(
-                        &mut self.prepared,
-                        index,
-                        &draw.borrowed(),
-                        draw.view_projection.unwrap_or(self.assets.scene.camera),
-                        self.assets.scene.fog,
-                    )?;
-                }
-                self.opening = Default::default();
-                self.ended = false;
-                self.attract_menu = self.menu.take();
-                self.menu_camera = None;
-                self.started = now;
-                self.last_sample = None;
+                self.start_menu_presentation(now, false)?;
                 break;
             }
+        }
+        if enabled && self.menu.as_mut().is_some_and(|menu| menu.take_credits()) {
+            self.start_menu_presentation(now, true)?;
         }
         if self.attract_menu.is_some() && self.attract_input.skip() {
             self.opening.request_end();
         }
+        Ok(())
+    }
+    fn start_menu_presentation(&mut self, now: Instant, credits: bool) -> Result<(), String> {
+        let tick = (now.saturating_duration_since(self.started).as_secs_f64() * 50.) as usize;
+        let current = self
+            .menu_camera
+            .as_mut()
+            .ok_or("attract menu camera missing")?
+            .sample(tick, 0.);
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs() as u32;
+        let backdrop = openmt2001::flyby_script::select_seeded(
+            &self.assets.flyby_hub,
+            self.assets.flyby_quality.as_deref(),
+            seed,
+            || {
+                self.assets
+                    .process_runtime
+                    .performance8b26cc()
+                    .map_err(|e| e.to_string())
+            },
+        )?;
+        let bytes = std::fs::read(
+            self.assets
+                .inputs
+                .installer
+                .join("Standard/Cut_scenes")
+                .join(&backdrop.track),
+        )
+        .map_err(|e| e.to_string())?;
+        self.assets
+            .flyby
+            .restart_track(&Flyby::parse(&bytes)?, current)?;
+        self.assets.opening_logos = backdrop.logos;
+        let camera = self.assets.flyby.current();
+        for index in self
+            .assets
+            .scene
+            .advance_daylight(backdrop.hour, 0, camera)?
+        {
+            let draw = &self.assets.scene.draws[index];
+            self.renderer.update_dynamic_surface(
+                &mut self.prepared,
+                index,
+                &draw.borrowed(),
+                draw.view_projection.unwrap_or(self.assets.scene.camera),
+                self.assets.scene.fog,
+            )?;
+        }
+        self.credit_rows.clear();
+        if credits {
+            let seed = openmt2001::startup_rng::Snapshot::from_seed(seed);
+            let mut random = seed.state(0x8b06e8);
+            self.credit_rows = crate::fresh_city::result::credit_lines(
+                &openmt2001::pe::PeImage::parse(&self.assets.inputs.executable)?,
+                &mut random,
+            )?;
+        }
+        self.opening =
+            openmt2001::opening_sequence::Controller::with_credits(self.credit_rows.len());
+        //4b1800 resets the media catalog before starting music_intro.wma.
+        self.restart_intro_music = credits;
+        self.ended = false;
+        self.attract_menu = self.menu.take();
+        self.menu_camera = None;
+        self.started = now;
+        self.last_sample = None;
         Ok(())
     }
 }
