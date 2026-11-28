@@ -152,29 +152,27 @@ fn original_live_modal_keys_and_timeouts() {
                     level_script::Command::Prompt,
                     level_script::Command::TutorialMessage,
                 ] {
-                    let is_prompt = matches!(command, level_script::Command::Prompt);
                     session.hooks.commands.push((
                         command,
                         vec![Value::Number(1.), Value::Number(2.), Value::Number(0.)],
                     ));
-                    let prompts = host.take_prompts(&session);
-                    let request = if is_prompt {
-                        prompts.into_iter().next().unwrap()
-                    } else {
-                        host.tutorial_message.clone().unwrap()
-                    };
+                    let request = host.take_prompts(&session).into_iter().next().unwrap();
                     let mut tutorial = prompt::State::default();
                     tutorial.advance_to(0);
                     tutorial.submit(request);
                     assert!(tutorial.advance_to(1002).is_empty());
                     assert!(tutorial.request().is_some());
                     assert!(tutorial.take_dialog_replies().is_empty());
-                    tutorial.begin_dismiss();
+                    tutorial.dialog_event1([false; 2]);
+                    tutorial.dialog_event1([true, false]);
+                    let replies = tutorial.take_dialog_replies();
+                    assert_eq!(replies.len(), 1);
+                    host.human_dialog_reply(&mut session, &assets, replies[0])
+                        .unwrap();
+                    tutorial.finish_dismiss(host.take_prompts(&session));
                     assert!(tutorial.request().is_none());
                 }
                 session.tutorial_state = 0;
-                host.tutorial_message = None;
-                host.tutorial_prompt = None;
 
                 // Admit a real one-button outcome and execute its actual worker
                 // callback before closing the frontend's old queue head.

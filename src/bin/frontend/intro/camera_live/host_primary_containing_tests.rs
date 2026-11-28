@@ -81,7 +81,6 @@ pub(crate) fn inspection_products(
         card_input: Default::default(),
         card_selection: None,
         prompts: Default::default(),
-        tutorial_message: Default::default(),
         event_list: Default::default(),
         stats_panel: Default::default(),
         market_share_panel: Default::default(),

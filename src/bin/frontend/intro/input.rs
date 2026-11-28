@@ -82,7 +82,7 @@ impl Intro {
                 }
                 return Ok(());
             }
-            if view.prompts.request().is_some() {
+            if view.prompts.blocks_controls() {
                 if key == NamedKey::Enter
                     && let Some(id) = view.prompts.begin_dismiss()
                 {
@@ -305,7 +305,7 @@ impl Intro {
             if view.adjustment.is_none()
                 && !view.options_visible()
                 && view.auction.scene.is_none()
-                && view.prompts.request().is_none()
+                && !view.prompts.blocks_controls()
                 && !view.stats_requested
                 && !view
                     .live_status
@@ -342,7 +342,7 @@ impl Intro {
                     .is_some_and(|status| status.stats.is_some())
                 && !view.options_visible()
                 && view.settings_menu.page.is_none()
-                && view.prompts.request().is_none()
+                && !view.prompts.blocks_controls()
                 && view
                     .live_status
                     .as_ref()
@@ -459,7 +459,7 @@ impl Intro {
                     menu.auction_panel_assets(),
                     auction,
                     view.pointer
-                        .filter(|_| view.prompts.request().is_none() && !view.stats_requested)
+                        .filter(|_| !view.prompts.blocks_controls() && !view.stats_requested)
                         .map(|point| point.map(|v| v as f32 * 0.5)),
                 )
                 && let Err(error) = view
@@ -507,7 +507,7 @@ impl Intro {
         if self
             .inspection
             .as_ref()
-            .is_some_and(|v| v.auction.scene.is_some() || v.prompts.request().is_some())
+            .is_some_and(|v| v.auction.scene.is_some() || v.prompts.blocks_controls())
         {
             return;
         }
@@ -601,7 +601,7 @@ impl Intro {
                 .live_status
                 .as_ref()
                 .is_some_and(|s| s.market_share.is_some())
-                && view.prompts.request().is_none()
+                && !view.prompts.blocks_controls()
                 && let Some(menu) = &self.menu
             {
                 if button == winit::event::MouseButton::Left {
@@ -669,7 +669,7 @@ impl Intro {
             if stats_modal
                 || view.settings_visible()
                 || view.options_visible()
-                || view.prompts.request().is_some()
+                || view.prompts.blocks_controls()
             {
                 view.time_panel.cancel_input();
                 view.time_pressed = None;
@@ -954,7 +954,7 @@ impl Intro {
                             .is_some_and(|a| a.tutorial_control_pressed())
                         || view.operations.tutorial_control_pressed()
                 });
-            if view.prompts.request().is_some()
+            if (view.prompts.blocks_controls() || prompt_input_occupied)
                 && !tutorial_locator_hit
                 && !tutorial_property_hit
                 && !tutorial_planning_hit
@@ -969,10 +969,23 @@ impl Intro {
                     );
                     if button == winit::event::MouseButton::Left {
                         if let Some(dialog) = view.prompts.request().and_then(|r| r.dialog) {
-                            view.prompts.dialog_mouse(
-                                pressed,
-                                &menu.prompt_assets().dialog_buttons(dialog.button_count),
-                            );
+                            let offset = view.live_status.as_ref().map_or([0.; 2], |status| {
+                                status.tutorial_interaction.prompt_offset()
+                            });
+                            let buttons = menu
+                                .prompt_assets()
+                                .dialog_buttons(dialog.button_count)
+                                .into_iter()
+                                .map(|b| {
+                                    [
+                                        b[0] + offset[0],
+                                        b[1] + offset[1],
+                                        b[2] + offset[0],
+                                        b[3] + offset[1],
+                                    ]
+                                })
+                                .collect::<Vec<_>>();
+                            view.prompts.dialog_mouse(pressed, &buttons);
                         } else if let Some(id) = view.prompts.request_left_button(
                             pressed,
                             menu.prompt_assets().button_at(

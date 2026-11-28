@@ -43,7 +43,10 @@ pub struct Status {
     pub tutorial_controls: TutorialControls,
     pub source_picking: Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
+    /// Diagnostic view of the active zero-button tutorial record.
     pub tutorial_message: Option<prompt::Request>,
+    /// Close operations, indexed between the requests in `prompts`.
+    pub prompt_closes: Vec<usize>,
     pub tutorial_enabled_controls: Vec<u32>,
     pub tutorial_interaction: crate::tutorial_two_interaction::State,
     /// Ordered native Camera callbacks from the retained tutorial VM.
@@ -290,8 +293,8 @@ pub struct Host {
     tutorial_started: bool,
     tutorial_controls: TutorialControls,
     tutorial_arrows: Vec<[i32; 2]>,
-    tutorial_message: Option<prompt::Request>,
-    tutorial_prompt: Option<prompt::Request>,
+    pending_prompt_closes: Vec<usize>,
+    script_closes_seen: usize,
     tutorial_enabled_controls: std::collections::BTreeSet<u32>,
     tutorial_interaction: crate::tutorial_two_interaction::State,
     tutorial_camera_events: Vec<TutorialCameraAction>,
@@ -508,8 +511,8 @@ impl Host {
             tutorial_started: false,
             tutorial_controls: TutorialControls::default(),
             tutorial_arrows: Vec::new(),
-            tutorial_message: None,
-            tutorial_prompt: None,
+            pending_prompt_closes: Vec::new(),
+            script_closes_seen: 0,
             tutorial_enabled_controls: Default::default(),
             tutorial_interaction: Default::default(),
             tutorial_camera_events: Vec::new(),
@@ -1442,7 +1445,11 @@ impl Host {
                 .as_ref()
                 .and_then(|p| p.picking_projection().ok()),
             tutorial_arrows: self.tutorial_arrows.clone(),
-            tutorial_message: self.tutorial_message.clone(),
+            tutorial_message: session
+                .hooks
+                .script_prompt()
+                .filter(|r| r.dialog.is_some_and(|d| d.button_count == 0)),
+            prompt_closes: std::mem::take(&mut self.pending_prompt_closes),
             tutorial_enabled_controls: self.tutorial_enabled_controls.iter().copied().collect(),
             tutorial_interaction: self.tutorial_interaction,
             tutorial_camera_events: self.tutorial_camera_events.clone(),
@@ -1495,7 +1502,7 @@ impl Host {
         std::mem::take(&mut self.pending_prompts)
     }
     /// Deliver an enabled tutorial control action through the original Lua
-    /// CATCHEVENT, then close its nonmodal message when the script requests it.
+    /// CATCHEVENT, then close the queued message when the script requests it.
     pub fn tutorial_event(
         &mut self,
         session: &mut Session<'_>,
@@ -1550,10 +1557,7 @@ impl Host {
             return Ok(());
         }
         self.collect_script_prompts(session);
-        let active = self
-            .tutorial_message
-            .clone()
-            .or_else(|| self.tutorial_prompt.clone());
+        let active = session.hooks.script_prompt();
         let before = session.hooks.commands.len();
         session.dispatch_session_event("TutorialEvent", callback as i32, assets, false)?;
         if session.hooks.commands[before..]
@@ -1562,12 +1566,21 @@ impl Host {
         {
             // Native43bed0 skips dismissal when its active byte+345 is zero.
             if let Some(message) = active {
-                session.dispatch_session_event(
-                    "InterfacePromptDismiss",
-                    message.dismissal_id as i32,
-                    assets,
-                    false,
-                )?;
+                if message.dismissal_id != 0 {
+                    session.dispatch_session_event(
+                        "InterfacePromptDismiss",
+                        message.dismissal_id as i32,
+                        assets,
+                        false,
+                    )?;
+                }
+                if message.dismissal_id == 0 {
+                    session.hooks.close_script_prompt(false);
+                }
+                session
+                    .hooks
+                    .script_prompt_closes
+                    .push(session.hooks.commands.len());
             }
         }
         self.collect_script_prompts(session);
@@ -1598,13 +1611,11 @@ impl Host {
         let Some(callback) = self.tutorial_pick_callback(pick) else {
             return Ok(false);
         };
-        // The original scripts also attach a 3D pick gate to a modal prompt
-        // (Tutorials 10/11 Navigator steps). Dismiss whichever presenter owns
-        // the active prompt before publishing its scripted successor.
-        let message = self
-            .tutorial_message
-            .clone()
-            .or_else(|| self.tutorial_prompt.clone())
+        // Tutorials 10/11 attach pick gates to prompts too. The active queue
+        // head supplies the continuation, independently of its button count.
+        let message = session
+            .hooks
+            .script_prompt()
             .ok_or("Tutorial pick has no active prompt")?;
         let before = session.hooks.commands.len();
         session.dispatch_session_event("Picked3D", callback, assets, false)?;
@@ -1612,12 +1623,21 @@ impl Host {
             .iter()
             .any(|(command, _)| matches!(command, level_script::Command::TutorialDismissPrompt))
         {
-            session.dispatch_session_event(
-                "InterfacePromptDismiss",
-                message.dismissal_id as i32,
-                assets,
-                false,
-            )?;
+            if message.dismissal_id != 0 {
+                session.dispatch_session_event(
+                    "InterfacePromptDismiss",
+                    message.dismissal_id as i32,
+                    assets,
+                    false,
+                )?;
+            }
+            if message.dismissal_id == 0 {
+                session.hooks.close_script_prompt(false);
+            }
+            session
+                .hooks
+                .script_prompt_closes
+                .push(session.hooks.commands.len());
         }
         self.collect_script_prompts(session);
         Ok(true)
@@ -1831,11 +1851,24 @@ impl Host {
             }
         })
     }
+    fn collect_script_closes(&mut self, session: &Session<'_>, boundary: usize) {
+        while session
+            .hooks
+            .script_prompt_closes
+            .get(self.script_closes_seen)
+            == Some(&boundary)
+        {
+            self.pending_prompt_closes.push(self.pending_prompts.len());
+            self.script_closes_seen += 1;
+        }
+    }
     fn collect_script_prompts(&mut self, session: &Session<'_>) {
         if self.stop_retired_camera() || (self.camera_bridge.is_some() && self.failure.is_some()) {
             return;
         }
-        for (command, arguments) in &session.hooks.commands[self.commands_seen..] {
+        for index in self.commands_seen..session.hooks.commands.len() {
+            self.collect_script_closes(session, index);
+            let (command, arguments) = &session.hooks.commands[index];
             if let Some(process) = &self.process_runtime {
                 if let Err(error) = apply_source_picking_command(process, command, arguments) {
                     self.fail(error);
@@ -1864,14 +1897,16 @@ impl Host {
                         self.fail(error);
                     }
                 }
-                level_script::Command::Prompt => {
-                    match prompt_request(arguments, session.tutorial_state == 1) {
+                level_script::Command::Prompt | level_script::Command::TutorialMessage => {
+                    let request = script_request(
+                        arguments,
+                        session.tutorial_state == 1,
+                        matches!(command, level_script::Command::Prompt),
+                    );
+                    match request {
                         Ok(request) => {
                             self.tutorial_arrows.clear();
-                            if session.tutorial_state == 1 {
-                                self.tutorial_prompt = Some(request.clone());
-                            }
-                            self.pending_prompts.push(request)
+                            self.pending_prompts.push(request);
                         }
                         Err(error) => self.fail(error),
                     }
@@ -1895,19 +1930,7 @@ impl Host {
                         self.fail("Tutorial arrow coordinates changed".into());
                     }
                 }
-                level_script::Command::TutorialMessage => {
-                    match prompt_request(arguments, session.tutorial_state == 1) {
-                        Ok(request) => {
-                            self.tutorial_arrows.clear();
-                            self.tutorial_prompt = None;
-                            self.tutorial_message = Some(request);
-                        }
-                        Err(error) => self.fail(error),
-                    }
-                }
                 level_script::Command::TutorialDismissPrompt => {
-                    self.tutorial_message = None;
-                    self.tutorial_prompt = None;
                     self.tutorial_arrows.clear();
                 }
                 level_script::Command::TutorialEnableControl
@@ -2072,6 +2095,7 @@ impl Host {
                 return;
             }
         }
+        self.collect_script_closes(session, session.hooks.commands.len());
         self.commands_seen = session.hooks.commands.len();
     }
     pub fn tick(&mut self, session: &mut Session<'_>, assets: &CommandAssets<'_, '_>) {
@@ -2894,6 +2918,10 @@ impl Host {
         }
         //429d50 closes only after the button callback; it dispatches nonzero
         //slot+0c through the script VM before unlinking the old prompt.
+        let script = session
+            .hooks
+            .script_prompt()
+            .is_some_and(|r| r.dismissal_id == reply.context);
         if reply.context != 0 {
             session.dispatch_session_event(
                 "InterfacePromptDismiss",
@@ -2901,6 +2929,9 @@ impl Host {
                 assets,
                 false,
             )?;
+        }
+        if script && reply.context == 0 {
+            session.hooks.close_script_prompt(false);
         }
         Ok(())
     }
@@ -3766,9 +3797,10 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
     })
 }
 
-pub(crate) fn prompt_request(
+pub(crate) fn script_request(
     arguments: &[Value],
     tutorial: bool,
+    continue_button: bool,
 ) -> Result<prompt::Request, String> {
     let number = |at: usize| match arguments.get(at) {
         Some(Value::Number(value)) => openmt2001::x87::Sum::from_f64(*value)
@@ -3795,7 +3827,17 @@ pub(crate) fn prompt_request(
             format_value: number(3)?,
             timeout: !tutorial,
         }),
-        dialog: None,
+        dialog: Some(crate::human_dialog::Dialog {
+            title,
+            body,
+            buttons: [1707, 0],
+            button_count: usize::from(continue_button),
+            context: number(2)?,
+            context_written: true,
+            timeout: !tutorial,
+            timeout_written: tutorial,
+            ..Default::default()
+        }),
         card: None,
         title,
         body,
@@ -4320,13 +4362,14 @@ mod tests {
     #[test]
     fn scenario_prompt_preserves_callback_identity() {
         assert_eq!(
-            prompt_request(
+            script_request(
                 &[
                     Value::Number(1898.),
                     Value::Number(1899.),
                     Value::Number(1.)
                 ],
-                false
+                false,
+                true
             )
             .unwrap(),
             prompt::Request {
@@ -4336,7 +4379,15 @@ mod tests {
                     format_value: 0,
                     timeout: true
                 }),
-                dialog: None,
+                dialog: Some(crate::human_dialog::Dialog {
+                    title: 1898,
+                    body: 1899,
+                    buttons: [1707, 0],
+                    button_count: 1,
+                    context: 1,
+                    context_written: true,
+                    ..Default::default()
+                }),
                 card: None,
                 title: 1898,
                 body: 1899,
@@ -4344,15 +4395,16 @@ mod tests {
             }
         );
         assert_eq!(
-            prompt_request(&[Value::Number(1898.), Value::Number(1899.)], false)
+            script_request(&[Value::Number(1898.), Value::Number(1899.)], false, true)
                 .unwrap()
                 .dismissal_id,
             0
         );
         assert!(
-            prompt_request(
+            script_request(
                 &[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)],
-                false
+                false,
+                true
             )
             .is_ok()
         );
@@ -4390,7 +4442,14 @@ mod literal_lua_bridge_tests {
         let requests = hooks
             .commands
             .iter()
-            .map(|(_, args)| prompt_request(args, false).unwrap())
+            .map(|(command, args)| {
+                script_request(
+                    args,
+                    false,
+                    matches!(command, level_script::Command::Prompt),
+                )
+                .unwrap()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             requests[0].script.as_ref().unwrap().title.as_deref(),

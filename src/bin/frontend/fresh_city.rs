@@ -2239,11 +2239,42 @@ pub struct Hooks {
     forced_auction_handlers: std::collections::BTreeMap<String, Vec<u8>>,
     pub notifications: Vec<(u32, usize)>,
     pub commands: Vec<(level_script::Command, Vec<Value>)>,
+    // Worker-side metadata uses the same four-record admission as presentation.
+    script_prompts: std::cell::RefCell<(usize, crate::prompt::State)>,
+    pub(crate) script_prompt_closes: Vec<usize>,
     pub utilities: economy::Utilities,
     pub frequency: openmt2001::timers::CalendarFrequency,
     pub timers: Vec<openmt2001::timers::Task>,
 }
 impl Hooks {
+    pub(crate) fn script_prompt(&self) -> Option<crate::prompt::Request> {
+        let mut metadata = self.script_prompts.borrow_mut();
+        let (seen, state) = &mut *metadata;
+        for (command, arguments) in &self.commands[*seen..] {
+            if matches!(
+                command,
+                level_script::Command::Prompt | level_script::Command::TutorialMessage
+            ) && let Ok(request) = crate::live_host::script_request(
+                arguments,
+                true,
+                matches!(command, level_script::Command::Prompt),
+            ) {
+                state.submit(request);
+            }
+        }
+        *seen = self.commands.len();
+        state.request()
+    }
+    pub(crate) fn close_script_prompt(&mut self, notify_presenter: bool) {
+        // Continuations enqueue their requests before the old head is freed.
+        if self.script_prompt().is_none() {
+            return;
+        }
+        self.script_prompts.borrow_mut().1.dismiss_with(|_, _| {});
+        if notify_presenter {
+            self.script_prompt_closes.push(self.commands.len());
+        }
+    }
     pub(crate) fn new() -> Self {
         Self::with_dispatch(
             openmt2001::timers::startup_tasks([0; 20]),
@@ -2264,6 +2295,8 @@ impl Hooks {
             forced_auction_handlers: Default::default(),
             notifications: vec![],
             commands: vec![],
+            script_prompts: Default::default(),
+            script_prompt_closes: vec![],
             utilities: economy::Utilities::new([0; 4]),
             frequency,
             timers,

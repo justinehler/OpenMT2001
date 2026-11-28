@@ -25,29 +25,9 @@ impl GeometryBinding for Geometry<'_> {
     }
 }
 
-/// Hooks retains every original CreatePrompt/CreateMessage/DismissPrompt call.
-/// Explicit user dismissal executes CreatePrompt(next), so the replacement is
-/// recorded here as well. Match the Host's message.or(prompt) precedence.
-fn active_dismissal(hooks: &super::Hooks) -> Result<Option<i32>, String> {
-    let mut prompt = None;
-    let mut message = None;
-    for (command, args) in &hooks.commands {
-        match command {
-            level_script::Command::Prompt => {
-                prompt = Some(crate::live_host::prompt_request(args, true)?.dismissal_id as i32)
-            }
-            level_script::Command::TutorialMessage => {
-                message = Some(crate::live_host::prompt_request(args, true)?.dismissal_id as i32);
-                prompt = None;
-            }
-            level_script::Command::TutorialDismissPrompt => {
-                prompt = None;
-                message = None;
-            }
-            _ => {}
-        }
-    }
-    Ok(message.or(prompt))
+/// The worker and presenter use the same four-record queue order.
+fn active_dismissal(hooks: &super::Hooks) -> Option<i32> {
+    hooks.script_prompt().map(|r| r.dismissal_id as i32)
 }
 
 impl Bridge<'_, '_, '_, '_> {
@@ -77,7 +57,7 @@ impl PartsBridge<'_, '_, '_, '_> {
         utilities: &mut openmt2001::economy::Utilities,
     ) -> Result<(), String> {
         let mut hooks = self.hooks.borrow_mut();
-        let active = active_dismissal(&hooks)?;
+        let active = active_dismissal(&hooks);
         let first = hooks.commands.len();
         self.context.update_clock(state.clock);
         let mut geometry = Geometry(geometry);
@@ -102,16 +82,19 @@ impl PartsBridge<'_, '_, '_, '_> {
                 // when no prompt is shown. Tutorial12 does this after prompt4
                 // closes, so no InterfacePromptDismiss callback is emitted.
                 if let Some(dismissal) = active {
-                    level_startup::Scripts::dispatch_catch_event_parts(
-                        self.runtime,
-                        self.bindings,
-                        self.events,
-                        ("InterfacePromptDismiss", dismissal),
-                        state,
-                        self.context,
-                        &mut geometry,
-                        &mut **hooks,
-                    )?;
+                    if dismissal != 0 {
+                        level_startup::Scripts::dispatch_catch_event_parts(
+                            self.runtime,
+                            self.bindings,
+                            self.events,
+                            ("InterfacePromptDismiss", dismissal),
+                            state,
+                            self.context,
+                            &mut geometry,
+                            &mut **hooks,
+                        )?;
+                    }
+                    hooks.close_script_prompt(true);
                 }
             }
             Ok(())

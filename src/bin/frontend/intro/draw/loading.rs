@@ -283,7 +283,6 @@ impl Intro {
                         card_input: crate::card_panel::Input::default(),
                         card_selection: None,
                         prompts: crate::prompt::State::default(),
-                        tutorial_message: crate::prompt::State::default(),
                         event_list: crate::event_list::View::default(),
                         stats_panel: crate::stats_panel::View::default(),
                         market_share_panel: crate::market_share_panel::View::default(),
@@ -512,8 +511,6 @@ impl Intro {
                                 view.card_input = std::mem::take(&mut previous.card_input);
                                 view.card_selection = previous.card_selection;
                                 view.prompts = std::mem::take(&mut previous.prompts);
-                                view.tutorial_message =
-                                    std::mem::take(&mut previous.tutorial_message);
                                 view.event_list = std::mem::take(&mut previous.event_list);
                                 view.stats_panel = std::mem::take(&mut previous.stats_panel);
                                 view.market_share_panel =
