@@ -20,7 +20,7 @@ fn original_live_modal_keys_and_timeouts() {
             let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
             let settings = openmt2001::fixtures::path("DEFAULT_SETTINGS");
             let exe = openmt2001::fixtures::path("EXE");
-            let names = fresh_city::character_names(
+            let names = openmt2001::session::character_names(
                 &image,
                 &exe.parent()
                     .unwrap()
@@ -36,7 +36,7 @@ fn original_live_modal_keys_and_timeouts() {
             };
             for edges in [[false, true], [true, true]] {
                 let mut session = Session::initialize(
-                    fresh_city::Inputs {
+                    openmt2001::session::Inputs {
                         tree_locators: None,
                         image: &image,
                         board: &board,
@@ -54,7 +54,7 @@ fn original_live_modal_keys_and_timeouts() {
                         road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
                         scripts: settings.parent().unwrap().parent().unwrap(),
                         parameters: std::str::from_utf8(&parameters).unwrap(),
-                        era_styles: fresh_city::load_era_styles(
+                        era_styles: openmt2001::session::load_era_styles(
                             openmt2001::fixtures::path("PARAMETERS").parent().unwrap(),
                         )
                         .unwrap(),
@@ -65,7 +65,7 @@ fn original_live_modal_keys_and_timeouts() {
                         profile_name: b"Modal test",
                         character_names: &names,
                     },
-                    fresh_city::Policy {
+                    openmt2001::session::Policy {
                         seed: 0x12345678,
                         auxiliary_prior_bytes: [0; 0x11c],
                     },
@@ -73,9 +73,10 @@ fn original_live_modal_keys_and_timeouts() {
                 .unwrap();
                 let mut host = Host::new([0.; 3]);
                 host.begin_presentation(&session).unwrap();
-                let mut ui = prompt::State::default();
+                let mut ui = prompt_queue::State::default();
                 ui.advance_to(host.status(&session).prompt_updates);
-                let mut request = prompt::scenario_reminder(&session.catalog.levels[0], false, 0);
+                let mut request =
+                    prompt_queue::scenario_reminder(&session.catalog.levels[0], false, 0);
                 let dialog = request.dialog.as_mut().unwrap();
                 dialog.timeout = true;
                 dialog.timeout_ticks = Some(2);
@@ -113,7 +114,7 @@ fn original_live_modal_keys_and_timeouts() {
                 assert!(ui.request().is_none());
 
                 let mut confirmation =
-                    prompt::scenario_reminder(&session.catalog.levels[0], false, 0);
+                    prompt_queue::scenario_reminder(&session.catalog.levels[0], false, 0);
                 confirmation
                     .dialog
                     .as_mut()
@@ -157,7 +158,7 @@ fn original_live_modal_keys_and_timeouts() {
                         vec![Value::Number(1.), Value::Number(2.), Value::Number(0.)],
                     ));
                     let request = host.take_prompts(&session).into_iter().next().unwrap();
-                    let mut tutorial = prompt::State::default();
+                    let mut tutorial = prompt_queue::State::default();
                     tutorial.advance_to(0);
                     tutorial.submit(request);
                     assert!(tutorial.advance_to(1002).is_empty());
@@ -210,7 +211,8 @@ fn original_live_modal_keys_and_timeouts() {
                 assert_eq!(request.dialog.unwrap().button_count, 1);
                 ui.submit(request);
                 // Queue an independent zero-button modal behind the outcome.
-                let mut next = prompt::scenario_reminder(&session.catalog.levels[0], false, 0);
+                let mut next =
+                    prompt_queue::scenario_reminder(&session.catalog.levels[0], false, 0);
                 next.dialog.as_mut().unwrap().button_count = 0;
                 ui.submit(next);
                 ui.dialog_event1([false; 2]);

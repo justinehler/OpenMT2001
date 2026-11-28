@@ -7,15 +7,15 @@ pub mod camera_bridge;
 mod camera_session_service;
 #[path = "live_host/process_runtime.rs"]
 pub mod process_runtime;
-use crate::{
-    fresh_city::{self, CommandAssets, Session},
-    prompt,
-};
 use openmt2001::auction_panel::Auction;
 use openmt2001::{
     audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests,
     audio_requests::transport as transport_requests, hourly, level_script, lua4::Value,
     render_requests::auction as auction_requests, scheduler,
+};
+use openmt2001::{
+    prompt_queue,
+    session::{CommandAssets, Session},
 };
 
 fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
@@ -51,7 +51,7 @@ pub struct Status {
     pub source_picking: Option<process_runtime::PickingProjection>,
     pub tutorial_arrows: Vec<[i32; 2]>,
     /// Diagnostic view of the active zero-button tutorial record.
-    pub tutorial_message: Option<prompt::Request>,
+    pub tutorial_message: Option<prompt_queue::Request>,
     /// Close operations, indexed between the requests in `prompts`.
     pub prompt_closes: Vec<usize>,
     pub tutorial_enabled_controls: Vec<u32>,
@@ -98,7 +98,7 @@ pub struct Status {
     /// Most recent warning, formatted like the retained stderr diagnostic.
     pub last_ai_warning: Option<String>,
     pub pending_presentation: Vec<u32>,
-    pub prompts: Vec<prompt::Request>,
+    pub prompts: Vec<prompt_queue::Request>,
     pub auction_seconds: Option<i32>,
     pub auction_notice: Option<openmt2001::auction_notice::Notice>,
     pub auction_locked_categories: Vec<usize>,
@@ -344,7 +344,7 @@ pub struct Host {
     pub failure: Option<String>,
     /// Saved on the worker, rather than inferred from an asynchronous UI poll.
     options_resume: Option<bool>,
-    pub policy: fresh_city::tick::Policy,
+    pub policy: openmt2001::session::tick::Policy,
     commands_seen: usize,
     tutorial_started: bool,
     tutorial_controls: TutorialControls,
@@ -362,7 +362,7 @@ pub struct Host {
     event_list_opening: bool,
     tutorial_applied: bool,
     pending_presentation: std::collections::BTreeSet<u32>,
-    pending_prompts: Vec<prompt::Request>,
+    pending_prompts: Vec<prompt_queue::Request>,
     interface_ticks: u64,
     prompt_updates: u64,
     auction_seconds: Option<i32>,
@@ -605,7 +605,7 @@ impl Host {
             outcome_callback_seen: false,
             outcome_context: None,
             result_context: None,
-            policy: fresh_city::tick::Policy {
+            policy: openmt2001::session::tick::Policy {
                 scheduler: scheduler::Controls {
                     iterations: 1,
                     abort: false,
@@ -1292,7 +1292,7 @@ impl Host {
     /// Original428dc0 child1 ->428b30. This informational prompt changes
     /// neither GUI/camera mode nor any pause owner;429b50 selects offline1x.
     pub fn scenario_reminder(&mut self, level: &openmt2001::level_catalog::Level, objective: i32) {
-        self.pending_prompts.push(prompt::scenario_reminder(
+        self.pending_prompts.push(prompt_queue::scenario_reminder(
             level,
             self.policy.scheduler.network_enabled,
             objective,
@@ -1607,7 +1607,7 @@ impl Host {
                 .collect(),
         }
     }
-    pub fn take_prompts(&mut self, session: &Session<'_>) -> Vec<prompt::Request> {
+    pub fn take_prompts(&mut self, session: &Session<'_>) -> Vec<prompt_queue::Request> {
         self.collect_script_prompts(session);
         std::mem::take(&mut self.pending_prompts)
     }
@@ -1713,12 +1713,12 @@ impl Host {
         &mut self,
         session: &mut Session<'_>,
         assets: &CommandAssets<'_, '_>,
-        action: fresh_city::cards::Action,
+        action: openmt2001::session::cards::Action,
     ) -> Result<(), String> {
         if self.failure.is_some() {
             return Err("Stopped session cannot accept card controls".into());
         }
-        if matches!(action, fresh_city::cards::Action::Open) {
+        if matches!(action, openmt2001::session::cards::Action::Open) {
             let player = session
                 .roster
                 .manager
@@ -1736,7 +1736,7 @@ impl Host {
                 return Ok(());
             }
         }
-        if let fresh_city::cards::Action::Button { button, .. } = action
+        if let openmt2001::session::cards::Action::Button { button, .. } = action
             && (!self.card_visible
                 || !self
                     .card
@@ -2247,7 +2247,7 @@ impl Host {
                 }
                 Ok(())
             }, |event, clock| {
-            use fresh_city::tick::Event;
+            use openmt2001::session::tick::Event;
             match event {
                 Event::Autosave(request)=>{
                     use openmt2001::save_menu::{AutosaveFailure as Failure,AutosaveStatus as Status,PreparedAutosave};
@@ -2656,7 +2656,7 @@ impl Host {
                 Event::Script { .. } | Event::ScriptCommands(_) => Ok(0),
                 Event::Command(openmt2001::live_commands::Event::EventCardNotice(notice)) => {
                     if notice.enabled {
-                        prompts.push(prompt::card_request(
+                        prompts.push(prompt_queue::card_request(
                             assets.image,
                             players
                                 .get(notice.player)
@@ -3579,12 +3579,12 @@ impl Host {
 /// Test adapter for the same two envelopes consumed by the live match arm.
 #[cfg(test)]
 fn account_event_ui_post(
-    event: &fresh_city::tick::Event<'_>,
+    event: &openmt2001::session::tick::Event<'_>,
     current_slot: Option<u8>,
     post: impl FnMut(f32) -> Result<u32, String>,
 ) -> Option<Result<u32, String>> {
-    use fresh_city::tick::Event;
     use openmt2001::live_commands;
+    use openmt2001::session::tick::Event;
     let posting = match event {
         Event::AccountPosted(posting)
         | Event::Command(live_commands::Event::AccountPosted(posting)) => *posting,
@@ -3829,14 +3829,14 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
 pub(crate) use openmt2001::prompt_queue::script_request;
 
 fn human_dialog_ui(
-    prompts: &mut Vec<prompt::Request>,
+    prompts: &mut Vec<prompt_queue::Request>,
     address: u32,
     arguments: [u32; 4],
     count: usize,
     name: Option<[u8; 96]>,
 ) -> Result<(), String> {
     if address == 0x43be20 && count == 0 {
-        prompts.push(prompt::Request {
+        prompts.push(prompt_queue::Request {
             script: None,
             title: 0,
             body: 0,
@@ -4009,7 +4009,7 @@ mod tests {
             );
             host.policy.scheduler.iterations = 4;
             host.scenario_reminder(&level, 6);
-            let mut ui = prompt::State::default();
+            let mut ui = prompt_queue::State::default();
             ui.submit(host.pending_prompts.pop().unwrap());
             assert_eq!(host.policy.scheduler.iterations, 1);
             ui.dialog_button(0);
@@ -4440,8 +4440,8 @@ mod tests {
                 true
             )
             .unwrap(),
-            prompt::Request {
-                script: Some(prompt::ScriptText {
+            prompt_queue::Request {
+                script: Some(prompt_queue::ScriptText {
                     title: None,
                     body: None,
                     format_value: 0,
@@ -4493,7 +4493,7 @@ mod literal_lua_bridge_tests {
             calls.push((id,args.to_vec())); Ok(None)
         }).unwrap();
         // Hooks::command is the production owned argument-copy boundary.
-        let mut hooks = fresh_city::Hooks::new();
+        let mut hooks = openmt2001::session::Hooks::new();
         for (id, args) in calls {
             openmt2001::level_script::Hooks::command(
                 &mut hooks,
