@@ -4,7 +4,6 @@ use crate::ui::{self, Surface};
 use openmt2001::{
     archive::ArchiveIndex,
     render::{PreparedScene, Renderer},
-    save::SaveFile,
     texture::TextureSet,
 };
 use std::{fs, path::PathBuf, time::SystemTime};
@@ -20,6 +19,27 @@ struct Entry {
     /// Only a validated slot in this V2 profile may be removed here.
     writable_id: Option<String>,
 }
+impl Entry {
+    fn read(
+        path: PathBuf,
+        name: Vec<u8>,
+        modified: Option<SystemTime>,
+        writable_id: Option<String>,
+    ) -> Self {
+        let metadata = (|| {
+            let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+            openmt2001::save::read_level_metadata(&bytes)
+        })();
+        Self {
+            path,
+            name,
+            metadata,
+            modified,
+            writable_id,
+        }
+    }
+}
+
 pub struct Load {
     base: Vec<Surface>,
     bounds: Vec<[f32; 4]>,
@@ -206,27 +226,8 @@ impl Load {
                         .then(|| file.file_name().to_str().map(str::to_owned))
                         .flatten()
                         .filter(|id| writable_ids.contains(id));
-                    let metadata = (|| {
-                        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-                        let save = SaveFile::parse(&bytes)?;
-                        let tables: Vec<_> =
-                            save.sections.iter().filter(|s| s.tag == 0x2000).collect();
-                        if tables.len() != 1 || tables[0].payload.len() != 16 {
-                            return Err("Invalid saved-game metadata".into());
-                        }
-                        Ok(std::array::from_fn(|i| {
-                            u32::from_le_bytes(
-                                tables[0].payload[i * 4..i * 4 + 4].try_into().unwrap(),
-                            )
-                        }))
-                    })();
-                    self.entries.push(Entry {
-                        path,
-                        name,
-                        metadata,
-                        modified,
-                        writable_id,
-                    });
+                    self.entries
+                        .push(Entry::read(path, name, modified, writable_id));
                 }
             }
             self.entries.sort_by(|a, b| {
@@ -1384,3 +1385,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "load_metadata_tests.rs"]
+mod load_metadata_tests;
