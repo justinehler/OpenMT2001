@@ -1486,3 +1486,52 @@ fn singleplayer_text_style_section_header_preserves_campaign_green_centered_glyp
     assert_eq!(pages[0].vertices[0][0], 53.5);
     assert_eq!(pages[0].vertices[2][1], 19.5);
 }
+
+#[cfg(test)]
+mod text_widget_style4_tests {
+    use super::*;
+
+    // Glyph cells 5 wide (advance 4 with the -1 gap) and 6 high, no rise;
+    // glyph 2 is 4 wide so the odd width exercises the +0.5 rounding.
+    fn synthetic_font() -> Vec<u8> {
+        let mut tab = vec![0; 4 + 64 * 44];
+        tab[..4].copy_from_slice(&64u32.to_le_bytes());
+        for glyph in 0..64 {
+            let at = 4 + glyph * 44;
+            let width: i32 = if glyph == 2 { 4 } else { 5 };
+            tab[at + 32..at + 36].copy_from_slice(&width.to_le_bytes());
+            tab[at + 36..at + 40].copy_from_slice(&6i32.to_le_bytes());
+        }
+        tab
+    }
+    fn extent(pages: &[Surface]) -> [f32; 4] {
+        pages.iter().flat_map(|p| p.vertices.iter()).fold(
+            [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            |b, v| {
+                [
+                    b[0].min(v[0]),
+                    b[1].min(v[1]),
+                    b[2].max(v[0]),
+                    b[3].max(v[1]),
+                ]
+            },
+        )
+    }
+
+    #[test]
+    fn style4_centres_a_title_in_the_main_panel_bar() {
+        let tab = synthetic_font();
+        // The block panel's title bar: panel content left/right, 14 high.
+        let bar = [30., 57.6, 190., 71.6];
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        text_widget_style4(&mut pages, &tab, &[33; 5], bar, 0xffffffff).unwrap();
+        // Width 20: x = 30 + trunc((160 - 20) / 2 + 0.5) = 100, and
+        // y = trunc(57.6) + trunc((14 - 6) / 2) = 61, less the half pixel.
+        assert_eq!(extent(&pages), [99.5, 60.5, 120.5, 66.5]);
+
+        let mut pages = vec![Surface::solid(), Surface::solid()];
+        text_widget_style4(&mut pages, &tab, &[2], bar, 0xffffffff).unwrap();
+        // Width 3 rounds up to x 109; plain centring would start at 108.5.
+        assert_eq!(extent(&pages)[0], 108.5);
+    }
+}
