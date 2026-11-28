@@ -637,6 +637,12 @@ fn ordinary_level_blockcam_uses_player_block_entry_and_information_target() {
     assert!(!startup.holds_loading(2, true, false));
     assert!(!TutorialStart::new(false).holds_loading(0, false, false));
     assert!(!TutorialStart::new(true).holds_loading(0, false, true));
+    // A tutorial that never sends a camera event still leaves loading.
+    let mut silent = TutorialStart::new(true);
+    for _ in 0..TutorialStart::MAX_HELD_FRAMES {
+        assert!(silent.holds_loading(0, false, false));
+    }
+    assert!(!silent.holds_loading(0, false, false));
     assert_eq!(script_core.kind(), 12);
     assert_eq!(script_core.capture(), click_core.capture());
     assert_eq!(scripted.active.selected, Some(selected));

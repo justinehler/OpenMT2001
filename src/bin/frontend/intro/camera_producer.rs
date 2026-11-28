@@ -529,10 +529,18 @@ pub(super) fn deliver(
 #[derive(Default)]
 pub(super) struct TutorialStart {
     waiting: bool,
+    held_frames: u32,
 }
 impl TutorialStart {
+    /// A tutorial whose script never moves the camera (or a restored save that
+    /// does not re-run its start event) must still leave the loading frame.
+    pub(super) const MAX_HELD_FRAMES: u32 = 600;
+
     pub(super) fn new(tutorial: bool) -> Self {
-        Self { waiting: tutorial }
+        Self {
+            waiting: tutorial,
+            held_frames: 0,
+        }
     }
     pub(super) fn holds_loading(
         &mut self,
@@ -540,7 +548,12 @@ impl TutorialStart {
         turns_pending: bool,
         failed: bool,
     ) -> bool {
-        self.waiting &= !failed && (events_seen == 0 || turns_pending);
+        self.waiting &= !failed
+            && (events_seen == 0 || turns_pending)
+            && self.held_frames < Self::MAX_HELD_FRAMES;
+        if self.waiting {
+            self.held_frames += 1;
+        }
         self.waiting
     }
 }
