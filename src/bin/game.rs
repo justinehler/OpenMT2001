@@ -1,7 +1,7 @@
 //! Native boot host. Shared simulation and asset modules do not depend on it.
 // Session dependencies that moved into the library (#99); kept nameable as
-// crate::compatibility and crate::skirmish_maps.
-use openmt2001::{compatibility, skirmish_maps};
+// crate::<module> in the binary.
+use openmt2001::{campaign_store, compatibility, result_controller, skirmish_maps};
 #[path = "frontend/app.rs"]
 mod app;
 #[path = "frontend/auction_bridge.rs"]
@@ -28,8 +28,6 @@ mod business_edit;
 mod business_operations;
 #[path = "frontend/business_view.rs"]
 mod business_view;
-#[path = "frontend/campaign_store.rs"]
-pub mod campaign_store;
 #[path = "frontend/card_panel.rs"]
 pub mod card_panel;
 #[path = "frontend/category_distance.rs"]
@@ -78,8 +76,6 @@ mod profile;
 mod profile_settings;
 #[path = "frontend/prompt.rs"]
 pub mod prompt;
-#[path = "frontend/result_controller.rs"]
-mod result_controller;
 #[path = "frontend/save_appearance.rs"]
 pub mod save_appearance;
 #[path = "frontend/save_dialog.rs"]

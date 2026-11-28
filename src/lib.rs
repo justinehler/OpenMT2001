@@ -6,6 +6,8 @@ pub mod board_style;
 pub mod build_file;
 pub mod business_pool;
 pub mod business_report;
+#[cfg(feature = "lua4")]
+pub mod campaign_store;
 pub mod category_reset;
 pub mod clock;
 pub mod compatibility;
@@ -33,6 +35,7 @@ pub mod pulse_lights;
 #[cfg(feature = "graphics")]
 pub mod render;
 pub mod resident;
+pub mod result_controller;
 pub mod roof;
 pub mod routing;
 pub mod save;
