@@ -45,6 +45,7 @@ pub mod prompt_queue;
 pub mod pulse_lights;
 #[cfg(feature = "graphics")]
 pub mod render;
+pub mod render_requests;
 pub mod resident;
 pub mod result_controller;
 pub mod roof;
