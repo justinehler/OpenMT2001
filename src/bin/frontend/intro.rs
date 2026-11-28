@@ -118,7 +118,7 @@ pub struct Paths {
     pub scene: PathBuf,
     pub executable: PathBuf,
     pub map: PathBuf,
-    pub quality: String,
+    pub quality: Option<String>,
     pub language: PathBuf,
     pub profile_root: PathBuf,
     pub save_root: PathBuf,
@@ -369,12 +369,16 @@ impl Assets {
             .map_err(|e| e.to_string())?
             .as_secs() as u32;
         let mut random_state = openmt2001::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
-        let backdrop =
-            openmt2001::flyby_script::select(&hub, &paths.quality, &mut random_state, || {
+        let backdrop = openmt2001::flyby_script::select(
+            &hub,
+            paths.quality.as_deref(),
+            &mut random_state,
+            || {
                 process_runtime
                     .performance8b26cc()
                     .map_err(|e| e.to_string())
-            })?;
+            },
+        )?;
         let track = read(
             paths
                 .installer

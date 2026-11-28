@@ -355,7 +355,7 @@ fn shared_text_real_intro_asset_load_retains_process_resource_and_default_ret() 
         scene: path("OPENMT2001_SCENE"),
         executable: path("OPENMT2001_EXE"),
         map: path("OPENMT2001_INTRO_MAP"),
-        quality: "low".into(),
+        quality: Some("low".into()),
         language: path("OPENMT2001_LANGUAGE"),
         profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
         save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),
