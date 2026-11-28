@@ -134,6 +134,9 @@ pub struct Scene {
     animation: Option<Animation>,
     runtime_patches: Option<RuntimePatches>,
     ground_colors: [u32; 2],
+    street_furniture: Vec<(crate::street_furniture::Kind, usize)>,
+    street_furniture_era: u32,
+    street_furniture_detail: u8,
 }
 
 /// Original model-space inputs for the portions of shared material batches
@@ -334,6 +337,8 @@ fn assemble_with_style_internal(
     let mut water_families = Vec::new();
     let mut water_meshes = Vec::new();
     let mut saved_phase = None;
+    let mut street_furniture_era = 0;
+    let mut furniture_families = BTreeMap::new();
     let mut saved_category_owners = None;
     let mut saved_business_catalog = None;
     let mut saved_commodity_rows = None;
@@ -373,7 +378,9 @@ fn assemble_with_style_internal(
         let buildings = match request.source {
             Source::Save(data) => {
                 let save = crate::save::SaveFile::parse(data)?;
-                saved_phase = Some(request.phase.unwrap_or(save.clock()?.calendar[0]));
+                let clock = save.clock()?;
+                saved_phase = Some(request.phase.unwrap_or(clock.calendar[0]));
+                street_furniture_era = clock.calendar[2];
                 save.validate_compatibility(&PeImage::parse(executable.unwrap())?)?;
                 let players = save.players()?;
                 let player_count = players.len();
@@ -993,6 +1000,11 @@ fn assemble_with_style_internal(
             // animated water pass. It uses the recovered base-water blend.
             "gamedata2/New_building stuff/surrounds/land&sea/river.tm",
             "gamedata2/New_building stuff/surrounds/land&sea/sea.tm",
+            crate::street_furniture::EARLY_LAMP,
+            crate::street_furniture::LATE_LAMP,
+            crate::street_furniture::BENCH,
+            crate::street_furniture::SUBWAY,
+            crate::street_furniture::PARKING,
         ] {
             let entry = directory
                 .find(mesh_path)
@@ -1026,25 +1038,6 @@ fn assemble_with_style_internal(
                     water_meshes.push((positions.clone(), indices));
                 }
             }
-            let colors = if !water_families.contains(&first_family) {
-                if let (Some(light), Some(palette)) = (&light, &palette) {
-                    Some(
-                        mesh.normal_bytes
-                            .chunks_exact(12)
-                            .map(|b| {
-                                let normal = std::array::from_fn(|i| {
-                                    f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap())
-                                });
-                                palette.shade_static(normal, light.direction)
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
             let folder = mesh_path.rsplit_once('/').unwrap().0;
             for (material, name) in mesh.texture_names.iter().enumerate() {
                 let path = format!("{folder}/{name}");
@@ -1062,17 +1055,81 @@ fn assemble_with_style_internal(
                     scenery_families.insert(sets.len(), scenery_regions[i].page);
                 }
             }
-            let instances = if mesh_path.ends_with("/pavement.tm") {
+            use crate::street_furniture::{self, Kind, Pose};
+            let kind = match mesh_path {
+                street_furniture::EARLY_LAMP => Some(Kind::EarlyLamp),
+                street_furniture::LATE_LAMP => Some(Kind::LateLamp),
+                street_furniture::BENCH => Some(Kind::Bench),
+                street_furniture::SUBWAY | street_furniture::PARKING => Some(Kind::Entrance),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                for family in first_family..first_family + mesh.texture_names.len() {
+                    furniture_families.insert((family, 0), kind);
+                }
+            }
+            let instances = if matches!(kind, Some(Kind::EarlyLamp | Kind::LateLamp)) {
+                street_furniture::lamps(&board.blocks)
+                    .into_iter()
+                    .map(|pose| (pose, 0xffffffff))
+                    .collect::<Vec<_>>()
+            } else if mesh_path == street_furniture::SUBWAY {
+                street_furniture::subways(&board.blocks)
+                    .into_iter()
+                    .map(|pose| (pose, 0xffffffff))
+                    .collect()
+            } else if mesh_path == street_furniture::PARKING {
+                street_furniture::parking(&board)?
+                    .into_iter()
+                    .map(|pose| (pose, 0xffffffff))
+                    .collect()
+            } else if kind == Some(Kind::Bench) {
+                let entry = directory
+                    .find(street_furniture::BENCH_LOCATORS)
+                    .ok_or("missing original bench locators")?;
+                let bytes = archive
+                    .get(entry.offset as usize..(entry.offset + entry.length) as usize)
+                    .ok_or("bench locators outside archive")?;
+                street_furniture::benches(&crate::mesh::CachedMesh::parse(bytes)?)?
+                    .into_iter()
+                    .map(|pose| (pose, 0xffffffff))
+                    .collect()
+            } else if mesh_path.ends_with("/pavement.tm") {
                 board
                     .blocks
                     .iter()
                     .filter(|b| b.flags & 1 == 0)
-                    .map(|b| (b.center, b.pavement_color))
-                    .collect::<Vec<_>>()
+                    .map(|b| {
+                        (
+                            Pose::identity([b.center[0], 0., b.center[1]]),
+                            b.pavement_color,
+                        )
+                    })
+                    .collect()
             } else {
-                vec![([0.; 2], 0xffffffff)]
+                vec![(Pose::identity([0.; 3]), 0xffffffff)]
             };
-            for (translation, tint) in instances {
+            for (pose, tint) in instances {
+                let transform = pose.transform();
+                let colors = if !water_families.contains(&first_family) {
+                    if let (Some(light), Some(palette)) = (&light, &palette) {
+                        Some(
+                            mesh.normal_bytes
+                                .chunks_exact(12)
+                                .map(|b| {
+                                    let normal = std::array::from_fn(|i| {
+                                        f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap())
+                                    });
+                                    palette.shade_static(normal, pose.sunlight(light.direction))
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 for part in &mesh.parts {
                     if usize::from(part.texture) >= mesh.texture_names.len() {
                         return Err("city mesh texture index out of bounds".into());
@@ -1081,7 +1138,7 @@ fn assemble_with_style_internal(
                     let start = batches.get(&(family, 0)).map_or(0, Vec::len);
                     let mut source_normals = Vec::new();
                     for index in part.vertex_indices() {
-                        let [x, y, z] = positions[index];
+                        let position = transform.position(positions[index]);
                         let [u, v] = uvs[index];
                         let unpack = |color: u32| {
                             [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.)
@@ -1117,13 +1174,13 @@ fn assemble_with_style_internal(
                         batches
                             .entry((family, 0))
                             .or_default()
-                            // Original 004f2029..004f2042 expands an identity
-                            // scene object as translation + [x, y, -z]. Pavement
-                            // instances use their original block centers.
+                            // Shared native object transform: static scenery
+                            // uses identity, pavements use block centers, and
+                            // furniture also retains its original yaw.
                             .push([
-                                (f64::from(translation[0]) + f64::from(x)) as f32,
-                                y,
-                                (f64::from(translation[1]) - f64::from(z)) as f32,
+                                position[0],
+                                position[1],
+                                position[2],
                                 rgb[0],
                                 rgb[1],
                                 rgb[2],
@@ -1141,8 +1198,13 @@ fn assemble_with_style_internal(
                                 runtime: None,
                                 inputs: if tint != 0xffffffff {
                                     CityLightingInputs::Constant { color: tint, count }
-                                } else {
+                                } else if pose.yaw == 0. {
                                     CityLightingInputs::Normals(source_normals)
+                                } else {
+                                    CityLightingInputs::OrientedNormals {
+                                        normals: source_normals,
+                                        pose,
+                                    }
                                 },
                             });
                         }
@@ -1801,6 +1863,17 @@ fn assemble_with_style_internal(
             palette,
         })
     };
+    let street_furniture = furniture_families
+        .into_iter()
+        .map(|(key, kind)| {
+            let vertices = batches.get(&key).ok_or("street furniture batch missing")?;
+            let index = draws
+                .iter()
+                .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
+                .ok_or("street furniture draw missing")?;
+            Ok((kind, index))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let draws = draws
         .into_iter()
         .map(|draw| OwnedDraw {
@@ -1824,7 +1897,7 @@ fn assemble_with_style_internal(
             }),
         })
         .collect();
-    Ok(Scene {
+    let mut scene = Scene {
         draws,
         camera: camera.to_cols_array(),
         fog,
@@ -1840,7 +1913,12 @@ fn assemble_with_style_internal(
         animation,
         runtime_patches,
         ground_colors,
-    })
+        street_furniture,
+        street_furniture_era,
+        street_furniture_detail: 2,
+    };
+    scene.apply_street_furniture_options(street_furniture_era, 2)?;
+    Ok(scene)
 }
 
 type FacadeInputs = Vec<([f32; 3], [f32; 2])>;
@@ -1851,7 +1929,14 @@ type FacadeInputs = Vec<([f32; 3], [f32; 2])>;
 #[derive(Clone)]
 enum CityLightingInputs {
     Normals(Vec<[f32; 3]>),
-    Constant { color: u32, count: usize },
+    OrientedNormals {
+        normals: Vec<[f32; 3]>,
+        pose: crate::street_furniture::Pose,
+    },
+    Constant {
+        color: u32,
+        count: usize,
+    },
 }
 #[derive(Clone)]
 struct CityLightingSpan {
@@ -1888,7 +1973,8 @@ fn relight_city(
             return Err("retained lighting leaves ordinary city material".into());
         }
         let count = match &span.inputs {
-            CityLightingInputs::Normals(normals) => normals.len(),
+            CityLightingInputs::Normals(normals)
+            | CityLightingInputs::OrientedNormals { normals, .. } => normals.len(),
             CityLightingInputs::Constant { color, count } => {
                 // Preserve the source-selected constant branch, including its
                 // sentinel distinction; no normal or material is fabricated.
@@ -1912,10 +1998,14 @@ fn relight_city(
         specular
             .get(span.start..end)
             .ok_or("retained lighting specular span leaves draw")?;
-        let CityLightingInputs::Normals(normals) = &span.inputs else {
-            continue;
+        let (normals, direction) = match &span.inputs {
+            CityLightingInputs::Normals(normals) => (
+                normals,
+                span.runtime.map_or(sun, |(_, pose)| pose.sunlight(sun)),
+            ),
+            CityLightingInputs::OrientedNormals { normals, pose } => (normals, pose.sunlight(sun)),
+            CityLightingInputs::Constant { .. } => continue,
         };
-        let direction = span.runtime.map_or(sun, |(_, pose)| pose.sunlight(sun));
         let colors = normals
             .iter()
             .map(|&normal| palette.shade_static(normal, direction))
@@ -2008,6 +2098,38 @@ struct Animation {
 }
 
 impl Scene {
+    ///4b6940's era selection and452600's nonzero-detail bench gate.
+    pub fn apply_street_furniture_options(
+        &mut self,
+        era: u32,
+        detail: u8,
+    ) -> Result<Vec<usize>, String> {
+        let mut changed = Vec::new();
+        for &(kind, index) in &self.street_furniture {
+            let draw = self
+                .draws
+                .get_mut(index)
+                .ok_or("street furniture draw missing")?;
+            let count = if kind.visible(era, detail) {
+                draw.vertices.len()
+            } else {
+                0
+            };
+            if draw.active_vertices != Some(count) {
+                draw.active_vertices = Some(count);
+                changed.push(index);
+            }
+        }
+        self.street_furniture_era = era;
+        self.street_furniture_detail = detail;
+        Ok(changed)
+    }
+    pub fn set_street_furniture_era(&mut self, era: u32) -> Result<Vec<usize>, String> {
+        self.apply_street_furniture_options(era, self.street_furniture_detail)
+    }
+    pub fn set_street_furniture_detail(&mut self, detail: u8) -> Result<Vec<usize>, String> {
+        self.apply_street_furniture_options(self.street_furniture_era, detail)
+    }
     /// The shared 64x64 night facade image (BuildingTextures[26], 689688).
     /// Updating both retained selectors and current draws preserves it across
     /// subsequent daylight/camera changes without touching the daytime image.
@@ -3754,7 +3876,9 @@ mod temporal_city_lighting_regressions {
             for span in &state.lighting {
                 let draw = &scene.draws[span.draw];
                 match &span.inputs {
-                    CityLightingInputs::Normals(_) => assert!(changed.contains(&span.draw)),
+                    CityLightingInputs::Normals(_) | CityLightingInputs::OrientedNormals { .. } => {
+                        assert!(changed.contains(&span.draw))
+                    }
                     CityLightingInputs::Constant { count, .. } => {
                         let end = span.start + *count;
                         assert_eq!(
@@ -3954,3 +4078,7 @@ mod temporal_city_lighting_regressions {
         assert_native_normal_colors(&scene, &observations, row_for(7, 0), Some(slot));
     }
 }
+
+#[cfg(test)]
+#[path = "render_scene/street_furniture_tests.rs"]
+mod street_furniture_tests;

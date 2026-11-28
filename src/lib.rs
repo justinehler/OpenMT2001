@@ -48,6 +48,7 @@ pub mod scheduler;
 pub mod script_events;
 pub mod skirmish_maps;
 pub mod sky;
+pub mod street_furniture;
 pub mod texture;
 pub mod timers;
 pub mod traffic;
