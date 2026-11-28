@@ -20,12 +20,12 @@ impl fmt::Display for PlayerFacingError {
         match self {
             Self::MissingPath { path, flag, kind } => write!(
                 f,
-                "Expected {kind} '{}' was not found; set {flag} to its location; See 'Nightly alpha builds' in the README.",
+                "Could not find the {kind} at '{}'; pass {flag} with its location (see 'Nightly alpha builds' in the README).",
                 path.display()
             ),
             Self::FfmpegUnavailable(path) => write!(
                 f,
-                "FFmpeg '{}' could not be run; it is needed for original movies and compressed audio; install FFmpeg on PATH or set --ffmpeg to its executable; See 'Nightly alpha builds' in the README.",
+                "Could not run FFmpeg ('{}'), which the original movies and compressed audio need; install it on PATH or pass --ffmpeg with its location (see 'Nightly alpha builds' in the README).",
                 path.display()
             ),
         }
@@ -158,7 +158,7 @@ mod tests {
             assert_eq!(
                 error.to_string(),
                 format!(
-                    "Expected {kind} '{}' was not found; set {flag} to its location; See 'Nightly alpha builds' in the README.",
+                    "Could not find the {kind} at '{}'; pass {flag} with its location (see 'Nightly alpha builds' in the README).",
                     path.display()
                 )
             );
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             format!(
-                "FFmpeg '{}' could not be run; it is needed for original movies and compressed audio; install FFmpeg on PATH or set --ffmpeg to its executable; See 'Nightly alpha builds' in the README.",
+                "Could not run FFmpeg ('{}'), which the original movies and compressed audio need; install it on PATH or pass --ffmpeg with its location (see 'Nightly alpha builds' in the README).",
                 path.display()
             )
         );
