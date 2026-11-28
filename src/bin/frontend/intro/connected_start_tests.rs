@@ -573,6 +573,58 @@ fn with_linked_pair(body: impl for<'s> FnOnce(&mut LinkedPair<'s, '_>)) {
     });
 }
 
+/// Record 12 without its activity timer list. Those timers accumulate each
+/// peer's own frame time, and `LinkedPair::align` runs one peer's frames alone.
+/// The list follows the utility and property words (80 bytes), the pause
+/// bytes, and three frequency words, as a length-prefixed blob.
+fn without_activity_timers(record: &[u8], pause: usize) -> Vec<u8> {
+    let at = 80 + pause + 12;
+    let len = u32::from_le_bytes(record[at..at + 4].try_into().unwrap()) as usize;
+    [&record[..at], &record[at + 4 + len..]].concat()
+}
+
+/// Run `body` with each player's last consumed inbox message hidden: the
+/// message reference at +0x20c and the +0x210 scratch record it was copied to
+/// (0x48bc70). A peer consumes only its own human's messages (0x450a30), so
+/// this is local state.
+fn without_local_inbox<T>(
+    session: &mut crate::fresh_city::Session<'_>,
+    body: impl FnOnce(&mut crate::fresh_city::Session<'_>) -> T,
+) -> T {
+    let word = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+    let saved: Vec<_> = session
+        .roster
+        .manager
+        .players
+        .iter_mut()
+        .map(|player| {
+            let pending: [u8; 4] = player.bytes[0x20c..0x210].try_into().unwrap();
+            player.bytes[0x20c..0x210].fill(0);
+            let scratch = word(&player.bytes, 0x210);
+            let record = player
+                .auxiliaries
+                .iter_mut()
+                .find(|a| a.reference == scratch)
+                .map(|a| std::mem::replace(&mut a.bytes, [0; 0x30]));
+            (pending, scratch, record)
+        })
+        .collect();
+    let result = body(session);
+    for (player, (pending, scratch, record)) in session.roster.manager.players.iter_mut().zip(saved)
+    {
+        player.bytes[0x20c..0x210].copy_from_slice(&pending);
+        if let Some(record) = record
+            && let Some(a) = player
+                .auxiliaries
+                .iter_mut()
+                .find(|a| a.reference == scratch)
+        {
+            a.bytes = record;
+        }
+    }
+    result
+}
+
 /// Peer 0 is the host, peer 1 the client; each human is its peer's slot.
 struct LinkedPair<'s, 'a> {
     sessions: [crate::fresh_city::Session<'s>; 2],
@@ -620,29 +672,69 @@ impl LinkedPair<'_, '_> {
             .each_ref()
             .map(|s| s.world.auction.controller.active_count)
     }
-    /// Compare the shared gameplay save sections of both peers and print the
-    /// sample.
-    fn sample(&mut self, label: &str) {
-        let [host, client] = &mut self.sessions;
-        for (tag, (left, right)) in (2..=13).chain([16, 17, 18]).zip(
-            shared_state(host, self.image)
-                .into_iter()
-                .zip(shared_state(client, self.image)),
-        ) {
-            assert!(left == right, "{label}: shared gameplay tag {tag} differs");
+    /// Run only the peer that is behind until both reach the same tick. The
+    /// host may run ahead of the client inside its granted window.
+    fn align(&mut self, label: &str) {
+        let mut frames = 0;
+        loop {
+            let ticks = self.sessions.each_ref().map(|s| s.world.clock.timing[0]);
+            if ticks[0] == ticks[1] {
+                return;
+            }
+            let behind = usize::from(ticks[1] < ticks[0]);
+            self.frames[behind].frame(&mut self.sessions[behind], self.assets, 40);
+            assert!(
+                self.frames[behind].failure.is_none(),
+                "peer {behind}: {:?}",
+                self.frames[behind].failure
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            frames += 1;
+            assert!(
+                frames < 2000,
+                "{label}: peers never met at one tick {ticks:?}"
+            );
         }
+    }
+    /// Compare the shared gameplay save sections of both peers at one tick and
+    /// print the sample.
+    fn sample(&mut self, label: &str) {
+        self.align(label);
+        let auctions = self.auctions();
+        let [host, client] = &mut self.sessions;
+        // The save writer refuses an auction whose bidding scene this
+        // frame-only harness never builds, so while one is open the sample
+        // compares the world it changes directly.
+        let saved = auctions == [0, 0];
+        if saved {
+            let pause = host.world.pause.bytes.len();
+            for (tag, (mut left, mut right)) in (2..=13).chain([16, 17, 18]).zip(
+                without_local_inbox(host, |s| shared_state(s, self.image))
+                    .into_iter()
+                    .zip(without_local_inbox(client, |s| shared_state(s, self.image))),
+            ) {
+                if tag == 12 {
+                    left = without_activity_timers(&left, pause);
+                    right = without_activity_timers(&right, pause);
+                }
+                assert!(left == right, "{label}: shared gameplay tag {tag} differs");
+            }
+        }
+        assert_eq!(host.world.clock, client.world.clock, "{label}");
         assert_eq!(host.world.categories, client.world.categories, "{label}");
         assert_eq!(
             host.world.auction.controller.record[..0x8c],
             client.world.auction.controller.record[..0x8c],
             "{label}: auction state differs"
         );
-        let ticks = [host.world.clock.timing[0], client.world.clock.timing[0]];
         println!(
-            "{label}: host tick {} client tick {}, auctions {:?}, shared gameplay sections identical",
-            ticks[0],
-            ticks[1],
-            self.auctions(),
+            "{label}: tick {} on both peers, auctions {auctions:?}, {} identical",
+            host.world.clock.timing[0],
+            if saved {
+                "shared gameplay sections"
+            } else {
+                "clock, categories and auction state"
+            },
         );
     }
     /// The proposer's human offers, through the property panel, for the
@@ -715,13 +807,14 @@ fn human_to_human_offers_accepted_and_rejected_match_on_both_peers() {
                     let busy = pair.auctions()[0] != 0;
                     let category = pair.offer(proposer, u32::from(!accept));
                     // A refusal, or an admission refused while another auction
-                    // runs, is a kind-38 notice for the proposer only.
+                    // runs, is a kind-38 notice for the proposer only: one OK
+                    // button and no callback (0x48bc70).
                     let notice = !accept || busy;
                     let mut frames = 0;
                     loop {
                         let dialogs = pair.step();
-                        if notice && dialogs[proposer].contains(&(0x48b480, 0)) {
-                            pair.reply(proposer, 0x48b480, 0, 0);
+                        if notice && dialogs[proposer].contains(&(0, 0)) {
+                            pair.reply(proposer, 0, 0, 0);
                             break;
                         }
                         if !notice && pair.auctions() == [1, 1] {
