@@ -70,6 +70,8 @@ pub struct Status {
     pub script_paused: bool,
     pub ticks: u32,
     pub interface_ticks: u64,
+    /// Delivered updates of the normal modal UI group, after the central gate.
+    pub prompt_updates: u64,
     pub year: u32,
     pub hour: u32,
     /// Original822d48 fraction within the625-tick hour.
@@ -300,6 +302,7 @@ pub struct Host {
     pending_presentation: std::collections::BTreeSet<u32>,
     pending_prompts: Vec<prompt::Request>,
     interface_ticks: u64,
+    prompt_updates: u64,
     auction_seconds: Option<i32>,
     result_request: Option<ResultRequest>,
     result_applied: bool,
@@ -517,6 +520,7 @@ impl Host {
             pending_presentation: Default::default(),
             pending_prompts: Vec::new(),
             interface_ticks: 0,
+            prompt_updates: 0,
             auction_seconds: None,
             result_request: None,
             result_applied: false,
@@ -1457,6 +1461,7 @@ impl Host {
             script_paused: session.world.pause.has_reason(),
             ticks: session.world.clock.timing[0],
             interface_ticks: self.interface_ticks,
+            prompt_updates: self.prompt_updates,
             year: 1930 + session.world.clock.calendar[2] * 10 + session.world.clock.calendar[1],
             hour: session.world.clock.hour(),
             hour_fraction: session.world.clock.timing[2],
@@ -1848,16 +1853,18 @@ impl Host {
                         self.fail(error);
                     }
                 }
-                level_script::Command::Prompt => match prompt_request(arguments) {
-                    Ok(request) => {
-                        self.tutorial_arrows.clear();
-                        if session.tutorial_state == 1 {
-                            self.tutorial_prompt = Some(request.clone());
+                level_script::Command::Prompt => {
+                    match prompt_request(arguments, session.tutorial_state == 1) {
+                        Ok(request) => {
+                            self.tutorial_arrows.clear();
+                            if session.tutorial_state == 1 {
+                                self.tutorial_prompt = Some(request.clone());
+                            }
+                            self.pending_prompts.push(request)
                         }
-                        self.pending_prompts.push(request)
+                        Err(error) => self.fail(error),
                     }
-                    Err(error) => self.fail(error),
-                },
+                }
                 level_script::Command::TutorialDisableAllControls => {
                     self.tutorial_controls.all_disabled = true;
                     self.tutorial_enabled_controls.clear();
@@ -1877,14 +1884,16 @@ impl Host {
                         self.fail("Tutorial arrow coordinates changed".into());
                     }
                 }
-                level_script::Command::TutorialMessage => match prompt_request(arguments) {
-                    Ok(request) => {
-                        self.tutorial_arrows.clear();
-                        self.tutorial_prompt = None;
-                        self.tutorial_message = Some(request);
+                level_script::Command::TutorialMessage => {
+                    match prompt_request(arguments, session.tutorial_state == 1) {
+                        Ok(request) => {
+                            self.tutorial_arrows.clear();
+                            self.tutorial_prompt = None;
+                            self.tutorial_message = Some(request);
+                        }
+                        Err(error) => self.fail(error),
                     }
-                    Err(error) => self.fail(error),
-                },
+                }
                 level_script::Command::TutorialDismissPrompt => {
                     self.tutorial_message = None;
                     self.tutorial_prompt = None;
@@ -3030,6 +3039,14 @@ impl Host {
         {
             return Ok(());
         }
+        let mode = if !self.game_active || self.stats.is_some() {
+            4
+        } else {
+            u32::from(self.auction.is_some())
+        };
+        self.prompt_updates = self.prompt_updates.wrapping_add(u64::from(
+            crate::time_panel::instance_passes(mode, self.policy.scheduler.iterations)[0],
+        ));
         //465490 switches GUI8b1050 to1 before any auction widget is shown.
         //Normal GUI0/2/3 share the other manager. Hidden Time widgets do not
         //receive428dc0, and their Chance caches survive subsequent city loads.
@@ -3057,11 +3074,6 @@ impl Host {
             .ok_or("Time debt status outside roster")?
             != 0;
         let cash = current_cash(session)?;
-        let mode = if !self.game_active || self.stats.is_some() {
-            4
-        } else {
-            u32::from(self.auction.is_some())
-        };
         let mut runtime = self
             .time_runtime
             .lock()
@@ -3730,7 +3742,10 @@ fn tutorial_pick_target(arguments: &[Value]) -> Result<Option<u32>, String> {
     })
 }
 
-pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, String> {
+pub(crate) fn prompt_request(
+    arguments: &[Value],
+    tutorial: bool,
+) -> Result<prompt::Request, String> {
     let number = |at: usize| match arguments.get(at) {
         Some(Value::Number(value)) => openmt2001::x87::Sum::from_f64(*value)
             .map(|v| v.ftol_low_word() as u32)
@@ -3754,6 +3769,7 @@ pub(crate) fn prompt_request(arguments: &[Value]) -> Result<prompt::Request, Str
             title: literal_title,
             body: literal_body,
             format_value: number(3)?,
+            timeout: !tutorial,
         }),
         dialog: None,
         card: None,
@@ -4280,17 +4296,21 @@ mod tests {
     #[test]
     fn scenario_prompt_preserves_callback_identity() {
         assert_eq!(
-            prompt_request(&[
-                Value::Number(1898.),
-                Value::Number(1899.),
-                Value::Number(1.)
-            ])
+            prompt_request(
+                &[
+                    Value::Number(1898.),
+                    Value::Number(1899.),
+                    Value::Number(1.)
+                ],
+                false
+            )
             .unwrap(),
             prompt::Request {
                 script: Some(prompt::ScriptText {
                     title: None,
                     body: None,
-                    format_value: 0
+                    format_value: 0,
+                    timeout: true
                 }),
                 dialog: None,
                 card: None,
@@ -4300,12 +4320,18 @@ mod tests {
             }
         );
         assert_eq!(
-            prompt_request(&[Value::Number(1898.), Value::Number(1899.)])
+            prompt_request(&[Value::Number(1898.), Value::Number(1899.)], false)
                 .unwrap()
                 .dismissal_id,
             0
         );
-        assert!(prompt_request(&[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)]).is_ok());
+        assert!(
+            prompt_request(
+                &[Value::Bytes(b"custom".to_vec()), Value::Number(1899.)],
+                false
+            )
+            .is_ok()
+        );
     }
 }
 
@@ -4340,7 +4366,7 @@ mod literal_lua_bridge_tests {
         let requests = hooks
             .commands
             .iter()
-            .map(|(_, args)| prompt_request(args).unwrap())
+            .map(|(_, args)| prompt_request(args, false).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(
             requests[0].script.as_ref().unwrap().title.as_deref(),
@@ -4594,3 +4620,7 @@ mod ai_warning_tests;
 #[cfg(test)]
 #[path = "account_posting_tests.rs"]
 mod account_posting_tests;
+
+#[cfg(test)]
+#[path = "live_host/modal_tests.rs"]
+mod modal_tests;

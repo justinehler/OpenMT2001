@@ -9471,18 +9471,17 @@ impl Intro {
                     }
                 }
             }
-            for id in view
-                .prompts
-                .advance_to((view.started.elapsed().as_secs_f64() * 50.).floor() as u64)
-            {
-                view.dismiss_prompt(id)?;
-            }
             for response in view.prompts.take_dialog_replies() {
                 view.reply_human_dialog(response)?;
             }
             if let Some(receiver) = &view.status_pending {
                 match receiver.try_recv() {
                     Ok(mut status) => {
+                        // Advance existing slots before admitting requests from
+                        // this snapshot: they did not exist in earlier updates.
+                        for id in view.prompts.advance_to(status.prompt_updates) {
+                            view.dismiss_prompt(id)?;
+                        }
                         if let Some(image) = &status.window_texture {
                             self.renderer.publish_window_texture(image.pixels.clone())?;
                             for index in view.scene.set_window_pixels(image.pixels.clone())? {
