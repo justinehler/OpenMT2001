@@ -10,6 +10,9 @@ pub struct Row {
     pub wanted: i16,
     pub stock: u16,
     pub today: u16,
+    pub yesterday_profit: f32,
+    pub today_profit: f32,
+    pub spoilage: u16,
 }
 pub fn rows(
     record: &[u8; 544],
@@ -63,6 +66,9 @@ pub fn rows(
                 wanted: short(0x1e0 + slot * 2) as i16,
                 stock: short(stock),
                 today: short(stock + 2 + bank * 2),
+                yesterday_profit: f32::from_bits(word(stock + 0x18)),
+                today_profit: f32::from_bits(word(stock + 0x14)),
+                spoilage: short(stock + 0xa + ((bank + 3) & 3) * 2),
             })
         })
         .collect()
@@ -223,9 +229,8 @@ fn apply_presentation(disabled: bool, hover: bool, pressed: bool) -> (usize, u32
     }
 }
 // Submitted terms can await the delayed command with dirty already cleared.
-// A retail edit that restores all applied terms has nothing left to submit.
 fn pending_terms(record: &[u8; 544]) -> bool {
-    record[0x208] != 0 && (record[..4] != [0; 4] || record[0x1b8..0x1dc] != record[0x1e0..0x204])
+    record[0x208] != 0
 }
 fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
     openmt2001::economy::stock_capacity(
@@ -234,24 +239,84 @@ fn retail_capacity(lot: [u8; 4], height: u8, info: &[u8; 116]) -> i32 {
         f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap()),
     )
 }
-fn retail_totals(rows: &[Row], capacity: i32) -> [String; 4] {
-    let mut totals = [0i32; 4];
-    for row in rows {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RetailColumns {
+    price: usize,
+    yesterday: usize,
+    today: usize,
+}
+impl RetailColumns {
+    // 419820: price toggles in either direction; the other groups wrap at three.
+    fn cycle(&mut self, column: usize, forward: bool) {
+        let (selected, count) = match column {
+            0 => (&mut self.price, 2),
+            1 => (&mut self.yesterday, 3),
+            2 => (&mut self.today, 3),
+            _ => unreachable!(),
+        };
+        *selected = navigation_index(*selected, count, forward);
+    }
+    fn price(self, row: &Row) -> f32 {
+        if self.price == 0 {
+            row.price
+        } else {
+            (f64::from(row.price) - f64::from(row.cost)) as f32
+        }
+    }
+    fn yesterday(self, row: &Row) -> f32 {
+        match self.yesterday {
+            0 => f32::from(row.yesterday),
+            1 => row.yesterday_profit,
+            2 => f32::from(row.spoilage),
+            _ => unreachable!(),
+        }
+    }
+    fn today(self, row: &Row) -> f32 {
+        match self.today {
+            0 => f32::from(row.today),
+            1 => row.today_profit,
+            2 => ((f64::from(row.price) - f64::from(row.cost)) * f64::from(row.stock)) as f32,
+            _ => unreachable!(),
+        }
+    }
+}
+fn retail_totals(rows: &[Row], columns: RetailColumns) -> [f32; 4] {
+    let mut totals = [0.; 4];
+    // 4169f0 traverses products from last to first, spilling each running
+    // metric total to f32. Changing the order loses cents for large profits.
+    for row in rows.iter().rev() {
         for (total, value) in totals.iter_mut().zip([
-            i32::from(row.yesterday),
-            i32::from(row.wanted),
-            i32::from(row.stock),
-            i32::from(row.today),
+            columns.yesterday(row),
+            f32::from(row.wanted),
+            f32::from(row.stock),
+            columns.today(row),
         ]) {
             *total += value;
         }
     }
-    [
-        totals[0].to_string(),
-        format!("{}/{capacity}", totals[1]),
-        format!("{}/{capacity}", totals[2]),
-        totals[3].to_string(),
-    ]
+    totals
+}
+fn metric_text(value: f32, money: bool, currency: &[u8], suffix: bool) -> Result<Vec<u8>, String> {
+    if money {
+        ui::formatted_float_money(value, currency, suffix)
+    } else {
+        Ok((value as i32).to_string().bytes().map(|b| b - 32).collect())
+    }
+}
+// The v1.4 handlers retain selector IDs 2..7, but bap_v2 has no TYPE
+// parts and 417830 never instantiates those buttons. Restore usable controls
+// within the original title regions, using the original small arrow artwork.
+fn retail_header_controls(regions: &[[f32; 4]]) -> [(usize, [f32; 4]); 6] {
+    std::array::from_fn(|index| {
+        let b = regions[[10, 11, 14][index / 2]];
+        let middle = (b[1] + b[3]) * 0.5;
+        let (left, right) = if index % 2 == 0 {
+            (b[0], b[0] + 8.)
+        } else {
+            (b[2] - 8., b[2])
+        };
+        (index + 6, [left, middle - 4., right, middle + 4.])
+    })
 }
 // 416bf9/416d61/41702e/4172c3/4173b6/417495 configure every
 // numeric column as style 1. 440720..440747 rounds the centered X origin;
@@ -393,7 +458,6 @@ impl PreparedRefresh {
             state.edit_request = None;
             state.edit_pending = None;
             state.edit_inflight = None;
-            state.close_after_apply = false;
             state.requested_building = None;
             state.tutorial_control = None;
             state.tutorial_producer = None;
@@ -409,7 +473,7 @@ impl PreparedRefresh {
         state.owner_color = fresh.owner_color;
         state.initialized = fresh.initialized;
         state.navigation = fresh.navigation;
-        state.dirty_terms = fresh.dirty_terms;
+        state.dirty_terms = fresh.dirty_terms || (!admission_changed && state.dirty_terms);
         state.prepared = None;
         state.dirty = true;
     }
@@ -419,8 +483,6 @@ pub struct State {
     pub edit_request: Option<crate::business_edit::Action>,
     pub edit_pending: Option<std::sync::mpsc::Receiver<Result<[u8; 544], String>>>,
     pub edit_inflight: Option<crate::business_edit::Action>,
-    pub close: bool,
-    close_after_apply: bool,
     dirty_terms: bool,
     last_refresh: Instant,
     edit_hover: Option<crate::business_edit::Action>,
@@ -431,6 +493,7 @@ pub struct State {
     pub rows: Vec<Row>,
     stock_capacity: i32,
     row_hover: Option<usize>,
+    columns: RetailColumns,
     pub apartment: Option<Apartment>,
     pub name: u32,
     block_name: u32,
@@ -472,7 +535,6 @@ impl State {
             crate::business_edit::Action::Stock { slot: 0, increase } => {
                 Some(if increase { 43 } else { 44 })
             }
-            crate::business_edit::Action::Apply => Some(53),
             // Apartment controls have separate native registrations.
             _ => None,
         }
@@ -533,10 +595,16 @@ impl State {
                     .iter()
                     .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.apartment_regions[i]))
             } else {
-                [4, 5]
-                    .iter()
-                    .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.regions[i]))
-                    .map(|i| i + 4)
+                retail_header_controls(&assets.regions)
+                    .into_iter()
+                    .find(|(_, b)| inside(p.map(|v| v as f32 * 0.5), *b))
+                    .map(|(id, _)| id)
+                    .or_else(|| {
+                        [4, 5]
+                            .iter()
+                            .position(|&i| inside(p.map(|v| v as f32 * 0.5), assets.regions[i]))
+                            .map(|i| i + 4)
+                    })
             }
         });
         if arrow != self.arrow_hover {
@@ -561,16 +629,15 @@ impl State {
         {
             self.edit_request = Some(action);
             self.diagnostic = None;
-            if action == crate::business_edit::Action::Apply {
-                self.tutorial_control = Some(53);
-            }
         }
         self.edit_pressed = if down { self.edit_hover } else { None };
         if !down
             && self.arrow_pressed == self.arrow_hover
             && let Some(arrow) = self.arrow_hover
         {
-            if arrow < 4 {
+            if arrow >= 6 {
+                self.columns.cycle((arrow - 6) / 2, arrow % 2 != 0);
+            } else if arrow < 4 {
                 if let Some(apartment) = &mut self.apartment {
                     apartment.toggle(arrow / 2);
                 }
@@ -583,31 +650,24 @@ impl State {
         }
         self.arrow_pressed = if down { self.arrow_hover } else { None };
         let close = !down && self.pressed && self.hover;
-        if close {
-            self.tutorial_control = Some(53);
-        }
         self.pressed = down && self.hover;
         self.dirty = true;
         close && self.request_close()
     }
     pub fn request_close(&mut self) -> bool {
-        if self.edit_target.is_some() {
-            self.close_after_apply = true;
-            self.edit_request = Some(crate::business_edit::Action::Apply);
-            false
-        } else {
-            true
+        // 419938/40c890: OK only dismisses; dirty terms remain in the city.
+        if self.apartment.is_none() {
+            self.tutorial_control = Some(53);
         }
+        true
     }
     pub fn receive_edit(&mut self, result: Result<[u8; 544], String>) {
         self.dirty = true;
         self.last_refresh = Instant::now();
         let action = self.edit_inflight.take();
-        let applied = action == Some(crate::business_edit::Action::Apply);
         match result {
             Err(error) => {
                 self.diagnostic = Some(error);
-                self.close_after_apply = false;
             }
             Ok(record) => {
                 // Native419d99..419da7 emits7 after all four retail edits,
@@ -634,7 +694,18 @@ impl State {
                     };
                     self.tutorial_producer = control.map(|control| (control, 7));
                 }
-                self.dirty_terms = pending_terms(&record);
+                // 419d99 enables Apply independently of the record's dirty
+                // byte: a stock clamp can leave that byte clear. Refresh must
+                // preserve the control until an explicit successful Apply.
+                self.dirty_terms = match action {
+                    Some(crate::business_edit::Action::Apply) => false,
+                    Some(
+                        crate::business_edit::Action::Price { .. }
+                        | crate::business_edit::Action::Stock { .. }
+                        | crate::business_edit::Action::Rent { .. },
+                    ) => true,
+                    _ => self.dirty_terms || pending_terms(&record),
+                };
                 let refreshed = if let Some(apartment) = &self.apartment {
                     Apartment::from_record(&record, apartment.modes[0], apartment.modes[1])
                         .map(|value| self.apartment = Some(value))
@@ -644,9 +715,6 @@ impl State {
                 if let Err(error) = refreshed {
                     self.diagnostic = Some(error);
                 }
-                if self.close_after_apply && applied && !self.dirty_terms {
-                    self.close = true;
-                }
             }
         }
     }
@@ -654,7 +722,6 @@ impl State {
         // The original adjustment refresh reads the live record. Polling is a
         // UI adapter cadence; the original dispatch interval is not recovered.
         if self.edit_target.is_some()
-            && !self.close_after_apply
             && self.diagnostic.is_none()
             && self.edit_request.is_none()
             && self.edit_pending.is_none()
@@ -694,6 +761,11 @@ fn refresh_retail_rows(rows: &mut [Row], record: &[u8; 544]) -> Result<(), Strin
         row.wanted = short(0x1e0 + slot * 2) as i16;
         row.stock = short(stock);
         row.today = short(stock + 2 + bank * 2);
+        row.yesterday_profit =
+            f32::from_le_bytes(record[stock + 0x18..stock + 0x1c].try_into().unwrap());
+        row.today_profit =
+            f32::from_le_bytes(record[stock + 0x14..stock + 0x18].try_into().unwrap());
+        row.spoilage = short(stock + 0xa + ((bank + 3) & 3) * 2);
     }
     rows.clone_from_slice(&updated);
     Ok(())
@@ -1092,8 +1164,6 @@ impl Assets {
                 edit_request: edit_target.map(|_| crate::business_edit::Action::Refresh),
                 edit_pending: None,
                 edit_inflight: None,
-                close: false,
-                close_after_apply: false,
                 dirty_terms: pending_terms(record),
                 last_refresh: Instant::now(),
                 edit_hover: None,
@@ -1104,6 +1174,7 @@ impl Assets {
                 rows: vec![],
                 stock_capacity: 0,
                 row_hover: None,
+                columns: RetailColumns::default(),
                 apartment: Some(Apartment::from_record(record, false, false)?),
                 name: b
                     .business()
@@ -1141,8 +1212,6 @@ impl Assets {
             edit_request: edit_target.map(|_| crate::business_edit::Action::Refresh),
             edit_pending: None,
             edit_inflight: None,
-            close: false,
-            close_after_apply: false,
             dirty_terms: pending_terms(record),
             last_refresh: Instant::now(),
             edit_hover: None,
@@ -1158,6 +1227,7 @@ impl Assets {
                     .ok_or("adjustment business kind")?,
             ),
             row_hover: None,
+            columns: RetailColumns::default(),
             apartment: None,
             name: business.name_text_id,
             block_name: self.block_names[b.category],
@@ -1181,6 +1251,7 @@ impl Assets {
         let mut next = self
             .open(scene, building)?
             .ok_or("adjustment navigation target missing")?;
+        next.columns = state.columns;
         if state.edit_target.is_none() {
             next.edit_target = None;
             next.edit_request = None;
@@ -1277,10 +1348,49 @@ impl Assets {
             );
             surfaces.push(arrow);
         }
+        for (id, b) in retail_header_controls(&self.regions) {
+            let phase = if state.arrow_hover == Some(id) {
+                if state.arrow_pressed == Some(id) {
+                    2
+                } else {
+                    1
+                }
+            } else {
+                0
+            };
+            let mut arrow = self.arrows[(id % 2) * 3 + phase].clone();
+            arrow.quad(
+                [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]]],
+                [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+                [0xffffffff; 4],
+            );
+            surfaces.push(arrow);
+        }
         let titles = [1421, 1470, 1471, 1472, 1473, 1474, 1475];
         for (i, id) in titles.into_iter().enumerate() {
-            let b = self.regions[8 + i];
-            let text = label(id)?;
+            let mut b = self.regions[8 + i];
+            // Keep the native first-column text IDs. Alternate captions are
+            // literal English strings in 419820, rather than language IDs.
+            let alternate: Option<&[u8]> = match i {
+                2 if state.columns.price != 0 => Some(b"Markup"),
+                3 => [
+                    None,
+                    Some(b"Profit".as_slice()),
+                    Some(b"Spoilage".as_slice()),
+                ][state.columns.yesterday],
+                6 => [
+                    None,
+                    Some(b"Profit".as_slice()),
+                    Some(b"Potential".as_slice()),
+                ][state.columns.today],
+                _ => None,
+            };
+            let encoded = alternate.map(|s| s.iter().map(|b| b - 32).collect::<Vec<_>>());
+            let text = encoded.as_deref().unwrap_or(label(id)?);
+            if matches!(i, 2 | 3 | 6) {
+                b[0] += 8.;
+                b[2] -= 8.;
+            }
             let (offsets, copy) =
                 crate::prompt::wrap_with_gap(&self.tab, text, (b[2] - b[0] - 4.) as i32, -1)?;
             for (line, pair) in offsets.windows(2).enumerate() {
@@ -1303,11 +1413,21 @@ impl Assets {
             let numbers = [
                 Vec::new(),
                 ui::formatted_float_money(item.cost, currency, currency_suffix)?,
-                ui::formatted_float_money(item.price, currency, currency_suffix)?,
-                item.yesterday.to_string().bytes().map(|b| b - 32).collect(),
+                ui::formatted_float_money(state.columns.price(item), currency, currency_suffix)?,
+                metric_text(
+                    state.columns.yesterday(item),
+                    state.columns.yesterday == 1,
+                    currency,
+                    currency_suffix,
+                )?,
                 item.wanted.to_string().bytes().map(|b| b - 32).collect(),
                 item.stock.to_string().bytes().map(|b| b - 32).collect(),
-                item.today.to_string().bytes().map(|b| b - 32).collect(),
+                metric_text(
+                    state.columns.today(item),
+                    state.columns.today != 0,
+                    currency,
+                    currency_suffix,
+                )?,
             ];
             for (column, text) in numbers.iter().enumerate() {
                 let encoded = if column == 0 {
@@ -1334,15 +1454,37 @@ impl Assets {
             false,
             0xffffffff,
         )?;
-        for (i, total) in retail_totals(&state.rows, state.stock_capacity)
-            .into_iter()
-            .enumerate()
+        let totals = retail_totals(&state.rows, state.columns);
+        for (i, total) in [
+            metric_text(
+                totals[0],
+                state.columns.yesterday == 1,
+                currency,
+                currency_suffix,
+            )?,
+            format!("{}/{}", totals[1] as i32, state.stock_capacity)
+                .bytes()
+                .map(|b| b - 32)
+                .collect(),
+            format!("{}/{}", totals[2] as i32, state.stock_capacity)
+                .bytes()
+                .map(|b| b - 32)
+                .collect(),
+            metric_text(
+                totals[3],
+                state.columns.today != 0,
+                currency,
+                currency_suffix,
+            )?,
+        ]
+        .into_iter()
+        .enumerate()
         {
             // 417545/4175b9/4176a9/41775d use centered style 4 totals.
             ui::text_widget_style4(
                 &mut fonts,
                 &self.tab,
-                &total.bytes().map(|b| b - 32).collect::<Vec<_>>(),
+                &total,
                 self.regions[23 + i],
                 0xffffffff,
             )?;
@@ -1877,8 +2019,6 @@ mod tests {
             edit_request: None,
             edit_pending: None,
             edit_inflight: None,
-            close: false,
-            close_after_apply: false,
             dirty_terms: false,
             last_refresh: Instant::now(),
             edit_hover: None,
@@ -1889,6 +2029,7 @@ mod tests {
             rows: retail_fixture().0,
             stock_capacity: 30,
             row_hover: None,
+            columns: RetailColumns::default(),
             apartment: None,
             name: 0,
             block_name: 0,
@@ -1907,10 +2048,430 @@ mod tests {
     }
 
     #[test]
+    fn metric_header_clicks_cycle_in_both_directions_and_wrap() {
+        let mut state = retail_state_fixture();
+        let mut assets = refresh_assets_fixture();
+        assets.regions = vec![[0.; 4]; 30];
+        for (column, region) in [10, 11, 14].into_iter().enumerate() {
+            assets.regions[region] = [
+                100. + column as f32 * 100.,
+                100.,
+                180. + column as f32 * 100.,
+                120.,
+            ];
+        }
+        assert_eq!(state.columns, RetailColumns::default());
+        for column in 0..3 {
+            let count = if column == 0 { 2 } else { 3 };
+            for forward in [true, false] {
+                for step in 1..=count {
+                    let (id, b) =
+                        retail_header_controls(&assets.regions)[column * 2 + usize::from(forward)];
+                    state.pointer(&assets, Some([(b[0] + b[2]) as i32, (b[1] + b[3]) as i32]));
+                    assert_eq!(state.arrow_hover, Some(id));
+                    state.mouse(true);
+                    state.mouse(false);
+                    let expected = if forward {
+                        step % count
+                    } else {
+                        (count - step) % count
+                    };
+                    assert_eq!(
+                        [
+                            state.columns.price,
+                            state.columns.yesterday,
+                            state.columns.today
+                        ][column],
+                        expected
+                    );
+                    assert!(state.edit_request.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn metric_values_follow_history_wrap_and_refresh_profit_and_potential() {
+        let (mut rows, mut record) = retail_fixture();
+        for bank in 0..4 {
+            record[0x209] = bank;
+            for period in 0..4 {
+                let at = 0x82 + period * 2;
+                record[at..at + 2].copy_from_slice(&(10 + period as u16).to_le_bytes());
+                let at = 0x8a + period * 2;
+                record[at..at + 2].copy_from_slice(&(20 + period as u16).to_le_bytes());
+            }
+            record[0x94..0x98].copy_from_slice(&1.25f32.to_le_bytes());
+            record[0x98..0x9c].copy_from_slice(&2.5f32.to_le_bytes());
+            record[0x1ec..0x1f0].copy_from_slice(&2.75f32.to_le_bytes());
+            rows[0].cost = 0.75;
+            refresh_retail_rows(&mut rows, &record).unwrap();
+            let row = &rows[0];
+            let mut catalog = [[0; 116]; 45];
+            catalog[0][0x4c] = 2;
+            catalog[0][0x70..0x74].copy_from_slice(&5u32.to_le_bytes());
+            let opened = super::rows(
+                &record,
+                &BusinessCatalog::from_rows(catalog),
+                &[[0; 28]; 32],
+                &[2, 0],
+            )
+            .unwrap();
+            assert_eq!(opened[0].today, row.today);
+            assert_eq!(opened[0].yesterday, row.yesterday);
+            assert_eq!(opened[0].today_profit, row.today_profit);
+            assert_eq!(opened[0].yesterday_profit, row.yesterday_profit);
+            assert_eq!(opened[0].spoilage, row.spoilage);
+            assert_eq!(row.today, 10 + u16::from(bank));
+            assert_eq!(row.yesterday, 10 + u16::from((bank + 3) & 3));
+            assert_eq!(row.spoilage, 20 + u16::from((bank + 3) & 3));
+            let mut columns = RetailColumns::default();
+            columns.cycle(0, true);
+            assert_eq!(columns.price(row), 2.);
+            columns.cycle(1, true);
+            columns.cycle(2, true);
+            assert_eq!(columns.yesterday(row), 2.5);
+            assert_eq!(columns.today(row), 1.25);
+            columns.cycle(2, true);
+            assert_eq!(columns.today(row), 8.);
+        }
+        // Reverse accumulation with a spill after each row is observable.
+        let mut rows = vec![rows[0].clone(); 3];
+        for (row, profit) in rows.iter_mut().zip([1., -16777216., 16777216.]) {
+            row.today_profit = profit;
+        }
+        let columns = RetailColumns {
+            today: 1,
+            ..RetailColumns::default()
+        };
+        assert_eq!(retail_totals(&rows, columns)[3], 1.);
+        let currency = [b'$' - 32];
+        let decode = |s: Vec<u8>| {
+            s.into_iter()
+                .map(|b| char::from(b + 32))
+                .collect::<String>()
+        };
+        assert_eq!(
+            decode(metric_text(1.25, true, &currency, false).unwrap()),
+            "$1.25"
+        );
+        assert_eq!(
+            decode(metric_text(12., false, &currency, false).unwrap()),
+            "12"
+        );
+    }
+
+    #[test]
+    fn ok_closes_retail_and_apartment_without_requesting_apply() {
+        let (_, mut record) = retail_fixture();
+        record[0x208] = 1;
+        for apartment in [false, true] {
+            let mut state = retail_state_fixture();
+            if apartment {
+                record[..4].copy_from_slice(&1u32.to_le_bytes());
+                state.apartment = Some(Apartment::from_record(&record, false, false).unwrap());
+            }
+            state.dirty_terms = true;
+            assert!(state.request_close());
+            assert!(state.edit_request.is_none());
+            assert!(state.dirty_terms);
+            assert_eq!(
+                state.take_tutorial_control(),
+                if apartment { None } else { Some(53) }
+            );
+        }
+    }
+
+    #[test]
+    fn clamped_edit_enables_apply_even_when_refresh_returns_clean_terms() {
+        use crate::business_edit::Action;
+        let (_, record) = retail_fixture();
+        for action in [
+            Action::Price {
+                slot: 0,
+                increase: false,
+            },
+            Action::Stock {
+                slot: 0,
+                increase: true,
+            },
+            Action::Stock {
+                slot: 0,
+                increase: false,
+            },
+        ] {
+            let mut state = retail_state_fixture();
+            state.edit_inflight = Some(action);
+            state.receive_edit(Ok(record));
+            assert!(state.dirty_terms);
+            assert_eq!(state.take_tutorial_control(), Some(7));
+            state.edit_inflight = Some(Action::Refresh);
+            state.receive_edit(Ok(record));
+            assert!(state.dirty_terms);
+            assert_eq!(state.take_tutorial_control(), None);
+            state.edit_inflight = Some(Action::Apply);
+            state.receive_edit(Ok(record));
+            assert!(!state.dirty_terms);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires original scripts and models for the real business command queue"]
+    fn ok_retains_player_wide_terms_until_explicit_apply_and_delayed_consumption() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                use crate::business_edit::{Action, Target, edit};
+                use crate::fresh_city::{
+                    CommandAssets, Inputs, Policy, Session, character_names, load_era_styles,
+                };
+                let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+                let executable = read("OPENMT2001_EXE");
+                let archive = read("OPENMT2001_ARCHIVE_BIN");
+                let directory = read("OPENMT2001_ARCHIVE_DIR");
+                let build = read("OPENMT2001_BUILD_FILE");
+                let parameters = read("OPENMT2001_PARAMETERS");
+                let timetable = read("OPENMT2001_TIMETABLE");
+                let image = openmt2001::pe::PeImage::parse(&executable).unwrap();
+                let board = openmt2001::board::Board::from_v14(&image).unwrap();
+                let file = openmt2001::build_file::BuildFile::parse(&build).unwrap();
+                let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+                let exe = openmt2001::fixtures::path("EXE");
+                let scripts = exe.parent().unwrap().join("scripts");
+                let names = character_names(
+                    &image,
+                    &exe.parent()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .join("US/language/usa"),
+                )
+                .unwrap();
+                let mut session = Session::initialize(
+                    Inputs {
+                        tree_locators: None,
+                        image: &image,
+                        board: &board,
+                        file: &file,
+                        people: openmt2001::people::PeopleModels::load(&image, &index, &archive)
+                            .unwrap(),
+                        vehicle_models: openmt2001::traffic::road::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        transport_models: openmt2001::traffic::models::Models::from_original(
+                            &image, &index, &archive,
+                        )
+                        .unwrap(),
+                        road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+                        scripts: &scripts,
+                        parameters: std::str::from_utf8(&parameters).unwrap(),
+                        era_styles: load_era_styles(
+                            openmt2001::fixtures::path("PARAMETERS").parent().unwrap(),
+                        )
+                        .unwrap(),
+                        timetable: std::str::from_utf8(&timetable).unwrap(),
+                        scenario: "SCENARIO3",
+                        difficulty: 0,
+                        selected_character: 4,
+                        profile_name: b"Business report validation",
+                        character_names: &names,
+                    },
+                    Policy {
+                        seed: 0x12345678,
+                        auxiliary_prior_bytes: [0; 0x11c],
+                    },
+                )
+                .unwrap();
+                let assets = CommandAssets {
+                    image: &image,
+                    board: &board,
+                    file: &file,
+                };
+                // Controlled active records in a real initialized session. Ownership
+                // and a retail catalog are test setup; edits and queue execution use
+                // the same entry points as the running report.
+                let active = session
+                    .world
+                    .ledgers
+                    .businesses
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r[0x21c] != 0)
+                    .take(3)
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>();
+                assert_eq!(active.len(), 3);
+                let target = |business: usize, record: &[u8; 544]| Target {
+                    business,
+                    building: usize::from(u16::from_le_bytes(record[8..10].try_into().unwrap())),
+                };
+                let retail = target(active[0], &session.world.ledgers.businesses[active[0]]);
+                let apartment = target(active[1], &session.world.ledgers.businesses[active[1]]);
+                for &business in &active {
+                    session.world.ledgers.businesses[business][10] = 1;
+                    session.world.ledgers.businesses[business][0x208] = 0;
+                }
+                session.world.ledgers.businesses[active[2]][10] = 2;
+                session.world.ledgers.businesses[active[2]][0x208] = 1;
+                let record = &mut session.world.ledgers.businesses[retail.business];
+                record[..4].fill(0);
+                record[4..8].copy_from_slice(&2u32.to_le_bytes());
+                record[0x1b8..0x204].fill(0);
+                record[0x1c4..0x1c8].copy_from_slice(&0.1f32.to_le_bytes());
+                record[0x1ec..0x1f0].copy_from_slice(&0.1f32.to_le_bytes());
+                let original = *record;
+                let mut state = retail_state_fixture();
+                state.edit_target = Some(retail);
+                for action in [
+                    Action::Stock {
+                        slot: 0,
+                        increase: false,
+                    },
+                    Action::Price {
+                        slot: 0,
+                        increase: false,
+                    },
+                ] {
+                    let record = edit(&mut session, &assets, retail, action).unwrap();
+                    assert_eq!(&record[0x1e0..0x204], &original[0x1e0..0x204]);
+                    state.edit_inflight = Some(action);
+                    state.receive_edit(Ok(record));
+                    assert!(state.dirty_terms);
+                    assert_eq!(state.take_tutorial_control(), Some(7));
+                    state.take_tutorial_producer();
+                }
+                // A quota-limited increment also enables Apply without changing units.
+                let building = &session.world.buildings[retail.building];
+                let info = session.world.catalog.info.row(2).unwrap();
+                let capacity = openmt2001::economy::stock_capacity(
+                    (i32::from(building[7]) - i32::from(building[5]) + 1)
+                        * (i32::from(building[6]) - i32::from(building[4]) + 1),
+                    building[8],
+                    f32::from_le_bytes(info[0x58..0x5c].try_into().unwrap()),
+                );
+                let fraction = f32::from_bits(session.world.catalog.products[2][0][1]);
+                let capacity = (f64::from(capacity) * f64::from(fraction)).trunc() as i16;
+                session.world.ledgers.businesses[retail.business][0x1e0..0x1e2]
+                    .copy_from_slice(&capacity.to_le_bytes());
+                let action = Action::Stock {
+                    slot: 0,
+                    increase: true,
+                };
+                let record = edit(&mut session, &assets, retail, action).unwrap();
+                assert_eq!(
+                    i16::from_le_bytes(record[0x1e0..0x1e2].try_into().unwrap()),
+                    capacity
+                );
+                state.edit_inflight = Some(action);
+                state.receive_edit(Ok(record));
+                assert!(state.dirty_terms);
+                state.take_tutorial_control();
+                state.take_tutorial_producer();
+                let price = edit(
+                    &mut session,
+                    &assets,
+                    retail,
+                    Action::Price {
+                        slot: 0,
+                        increase: true,
+                    },
+                )
+                .unwrap();
+                let old_rent =
+                    session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0].to_vec();
+                let rent = edit(
+                    &mut session,
+                    &assets,
+                    apartment,
+                    Action::Rent { increase: true },
+                )
+                .unwrap();
+                let terms_count = |session: &Session<'_>| {
+                    session
+                        .live_commands
+                        .snapshot()
+                        .unwrap()
+                        .iter()
+                        .filter(|(_, _, _, _, c)| {
+                            matches!(c, openmt2001::live_commands::Command::Terms(_))
+                        })
+                        .count()
+                };
+                for record in [price, rent] {
+                    let mut report = retail_state_fixture();
+                    let apartment = record[..4] == [1, 0, 0, 0];
+                    if apartment {
+                        report.apartment =
+                            Some(Apartment::from_record(&record, false, false).unwrap());
+                    }
+                    report.dirty_terms = pending_terms(&record);
+                    assert!(report.request_close());
+                    assert!(report.edit_request.is_none());
+                    assert_eq!(
+                        report.take_tutorial_control(),
+                        if apartment { None } else { Some(53) }
+                    );
+                }
+                assert_eq!(terms_count(&session), 0);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1b8..0x1dc],
+                    &original[0x1b8..0x1dc]
+                );
+                assert_eq!(
+                    &session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0],
+                    old_rent
+                );
+                let mut controls = refresh_assets_fixture();
+                controls.regions = vec![[0.; 4]; 30];
+                controls.regions[29] = [100., 100., 160., 124.];
+                state.pointer(&controls, Some([240, 220]));
+                state.mouse(true);
+                state.mouse(false);
+                assert_eq!(state.take_tutorial_control(), None);
+                let due = session.world.clock.timing[0] + 25;
+                let result = edit(
+                    &mut session,
+                    &assets,
+                    retail,
+                    state.edit_request.take().unwrap(),
+                )
+                .unwrap();
+                assert_eq!(terms_count(&session), 2);
+                state.edit_inflight = Some(Action::Apply);
+                state.receive_edit(Ok(result));
+                assert!(!state.dirty_terms);
+                assert_eq!(state.take_tutorial_control(), None);
+                assert_eq!(session.world.ledgers.businesses[active[2]][0x208], 1);
+                session.world.clock.timing[0] = due - 1;
+                session.drain_commands(&assets, |_| Ok(())).unwrap();
+                assert_eq!(terms_count(&session), 2);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1c4..0x1c8],
+                    &original[0x1c4..0x1c8]
+                );
+                session.world.clock.timing[0] = due;
+                session.drain_commands(&assets, |_| Ok(())).unwrap();
+                assert_eq!(terms_count(&session), 0);
+                assert_eq!(
+                    &session.world.ledgers.businesses[retail.business][0x1c4..0x1c8],
+                    &price[0x1ec..0x1f0]
+                );
+                assert_eq!(
+                    &session.world.ledgers.businesses[apartment.business][0x1dc..0x1e0],
+                    &rent[0x204..0x208]
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn retail_columns_center_values_without_moving_commodity_labels() {
         let mut tab = vec![0; 4 + 96 * 44];
         tab[..4].copy_from_slice(&96u32.to_le_bytes());
-        for glyph in tab[4..].chunks_exact_mut(44) {
+        for glyph in tab[4..].as_chunks_mut::<44>().0.iter_mut() {
             glyph[32..36].copy_from_slice(&8i32.to_le_bytes());
             glyph[36..40].copy_from_slice(&10i32.to_le_bytes());
         }
@@ -1984,13 +2545,16 @@ mod tests {
         info[0x58..0x5c].copy_from_slice(&1.25f32.to_le_bytes());
         let capacity = retail_capacity([9, 3, 4, 3], 2, &info);
         assert_eq!(capacity, 30);
-        assert_eq!(retail_totals(&rows, capacity), ["10", "20/30", "9/30", "8"]);
+        assert_eq!(
+            retail_totals(&rows, RetailColumns::default()),
+            [10., 20., 9., 8.]
+        );
         record[0x1e0..0x1e2].copy_from_slice(&15u16.to_le_bytes());
         record[0x80..0x82].copy_from_slice(&11u16.to_le_bytes());
         refresh_retail_rows(&mut rows, &record).unwrap();
         assert_eq!(
-            retail_totals(&rows, capacity),
-            ["10", "23/30", "16/30", "8"]
+            retail_totals(&rows, RetailColumns::default()),
+            [10., 23., 16., 8.]
         );
     }
 
@@ -2007,18 +2571,18 @@ mod tests {
     }
 
     #[test]
-    fn apply_disables_after_submission_or_reverting_stock_and_price_edits() {
+    fn apply_stays_enabled_after_reverting_stock_and_price_until_submission() {
         let (_, mut record) = retail_fixture();
         assert!(!pending_terms(&record));
         record[0x208] = 1;
         record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
         assert!(pending_terms(&record));
         record[0x1e0..0x1e2].copy_from_slice(&12u16.to_le_bytes());
-        assert!(!pending_terms(&record));
+        assert!(pending_terms(&record));
         record[0x1ec..0x1f0].copy_from_slice(&1.5f32.to_le_bytes());
         assert!(pending_terms(&record));
         record[0x1ec..0x1f0].copy_from_slice(&0f32.to_le_bytes());
-        assert!(!pending_terms(&record));
+        assert!(pending_terms(&record));
         record[0x1e0..0x1e2].copy_from_slice(&13u16.to_le_bytes());
         record[0x208] = 0;
         assert!(!pending_terms(&record));
@@ -2046,7 +2610,7 @@ mod tests {
             increase: true,
         });
         state.receive_edit(Ok(record));
-        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "21/30");
+        assert_eq!(retail_totals(&state.rows, state.columns)[1], 21.);
         assert_eq!(apply(&mut state), Some(Action::Apply));
         let (_sender, pending) = std::sync::mpsc::channel();
         state.edit_pending = Some(pending);
@@ -2058,12 +2622,12 @@ mod tests {
             increase: false,
         });
         state.receive_edit(Ok(record));
-        assert_eq!(apply(&mut state), None);
+        assert_eq!(apply(&mut state), Some(Action::Apply));
         record[0x1e0..0x1e2].copy_from_slice(&14u16.to_le_bytes());
         record[0x208] = 0;
         state.edit_inflight = Some(Action::Apply);
         state.receive_edit(Ok(record));
-        assert_eq!(retail_totals(&state.rows, state.stock_capacity)[1], "22/30");
+        assert_eq!(retail_totals(&state.rows, state.columns)[1], 22.);
         assert_eq!(apply(&mut state), None);
     }
 
