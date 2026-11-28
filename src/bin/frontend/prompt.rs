@@ -89,19 +89,7 @@ fn text_quads(
             .try_into()
             .unwrap(),
     );
-    let mut rows = Vec::new();
-    for text in paragraphs {
-        let (offsets, copy) = wrap_with_gap(
-            tab,
-            text,
-            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32,
-            -1,
-        )?;
-        for pair in offsets.windows(2) {
-            let end = pair[1].saturating_sub(1).min(copy.len());
-            rows.push(copy[pair[0].min(end)..end].to_vec());
-        }
-    }
+    let rows = text_rows(tab, paragraphs, bounds, x_margin)?;
     let top = (f64::from(bounds[1]) + f64::from(y_margin)).trunc() as f32
         + ((f64::from(bounds[3])
             - f64::from(bounds[1])
@@ -136,6 +124,54 @@ fn text_quads(
         )?);
     }
     Ok(quads)
+}
+
+fn text_rows(
+    tab: &[u8],
+    paragraphs: &[Vec<u8>],
+    bounds: [f32; 4],
+    x_margin: i32,
+) -> Result<Vec<Vec<u8>>, String> {
+    let mut rows = Vec::new();
+    for text in paragraphs {
+        let (offsets, copy) = wrap_with_gap(
+            tab,
+            text,
+            (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_margin) * 2.).trunc() as i32,
+            -1,
+        )?;
+        for pair in offsets.windows(2) {
+            let end = pair[1].saturating_sub(1).min(copy.len());
+            rows.push(copy[pair[0].min(end)..end].to_vec());
+        }
+    }
+    Ok(rows)
+}
+
+/// 428fd0 resolves the mesh's named title/main/portrait rectangles; 429af0
+/// reserves the portrait column and 429630 places buttons in the lower quarter.
+struct PanelLayout {
+    main: [f32; 4],
+    title: [f32; 4],
+    portrait: [f32; 4],
+    body: [f32; 4],
+    button: [f32; 4],
+}
+impl PanelLayout {
+    fn from_regions(regions: &[[f32; 4]]) -> Result<Self, String> {
+        let [_, title, main, portrait, ..] = regions else {
+            return Err("prompt mesh needs border, title, main and portrait regions".into());
+        };
+        let y = ((f64::from(main[1]) + 3. * f64::from(main[3])) * 0.25 + 2.) as f32;
+        let x = ((f64::from(main[2]) - f64::from(main[0]) - 60.) / 2. + f64::from(main[0])) as f32;
+        Ok(Self {
+            main: *main,
+            title: *title,
+            portrait: *portrait,
+            body: [portrait[2], main[1], main[2], y],
+            button: [x, y, x + 60., y + 24.],
+        })
+    }
 }
 
 /// Native43b5f0 computes the root hit rectangle from every vertex in the
@@ -176,14 +212,45 @@ impl Assets {
         strings: &[&[u8]],
         image: &openmt2001::pe::PeImage<'_>,
     ) -> Result<Self, String> {
+        Self::load_panel(index, archive, installer, strings, image, "prompt_panel.tm")
+    }
+    /// In-game primary prompt owner: 43ced7..43cee9 attaches panel slot 7,
+    /// registered from prompt_objectives.tm at 4bd794..4bd79f. Frontend dialogs
+    /// retain the distinct prompt_panel.tm registered at 4bd942..4bd94b.
+    pub fn load_portrait(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        strings: &[&[u8]],
+        image: &openmt2001::pe::PeImage<'_>,
+    ) -> Result<Self, String> {
+        Self::load_panel(
+            index,
+            archive,
+            installer,
+            strings,
+            image,
+            "prompt_objectives.tm",
+        )
+    }
+    fn load_panel(
+        index: &ArchiveIndex,
+        archive: &[u8],
+        installer: &Path,
+        strings: &[&[u8]],
+        image: &openmt2001::pe::PeImage<'_>,
+        panel: &str,
+    ) -> Result<Self, String> {
+        let name = format!("gamedata2/brand_new_panels/{panel}");
         let (mut base, regions) = ui::panel_base(
             index,
             archive,
-            "gamedata2/brand_new_panels/prompt_panel.tm",
+            &name,
             // Only the border is visible model geometry; parts1/2 are
             // reverse-facing layout regions replaced by native runtime fills.
             &[0],
         )?;
+        let layout = PanelLayout::from_regions(&regions)?;
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index.find(name).ok_or("prompt asset missing")?;
             archive
@@ -192,11 +259,10 @@ impl Assets {
         };
         let generic = TextureSet::parse(payload("gamedata2/GenericTextures640/textures.gtd")?)
             .map_err(|e| e.to_string())?;
-        let input_bounds =
-            parent_input_bounds(payload("gamedata2/brand_new_panels/prompt_panel.tm")?)?;
+        let input_bounds = parent_input_bounds(payload(&name)?)?;
         let mut portrait =
             Surface::new(generic.textures.get(302).ok_or("prompt portrait missing")?);
-        textured_rect(&mut portrait, regions[3]);
+        textured_rect(&mut portrait, layout.portrait);
         let card_portraits = generic
             .textures
             .get(263..273)
@@ -204,7 +270,7 @@ impl Assets {
             .iter()
             .map(|texture| {
                 let mut surface = Surface::new(texture);
-                textured_rect(&mut surface, regions[3]);
+                textured_rect(&mut surface, layout.portrait);
                 surface
             })
             .collect();
@@ -222,15 +288,13 @@ impl Assets {
             .iter()
             .map(|n| fs::read(installer.join("Standard/fonts").join(n)).map_err(|e| e.to_string()))
             .collect::<Result<Vec<_>, _>>()?;
-        let main = regions[2];
+        let main = layout.main;
         // Original5254c0+10 ->42a150 draws this PE-backed body before
         // the model border;43c3a0 then draws429e30's title and children.
         let body_color = u32::from_le_bytes(image.at(0x5362c0, 4)?.try_into().unwrap());
         let mut backing = Surface::solid();
         backing.rect(main, [body_color; 4]);
         base.insert(0, backing);
-        let y = ((f64::from(main[1]) + 3. * f64::from(main[3])) * 0.25 + 2.) as f32;
-        let x = ((f64::from(main[2]) - f64::from(main[0]) - 60.) / 2. + f64::from(main[0])) as f32;
         Ok(Self {
             main,
             input_bounds,
@@ -241,9 +305,9 @@ impl Assets {
             fonts,
             tabs,
             strings: crate::tooltip::localized_strings(installer, strings)?,
-            title: regions[1],
-            body: [regions[3][2], main[1], main[2], y],
-            button: [x, y, x + 60., y + 24.],
+            title: layout.title,
+            body: layout.body,
+            button: layout.button,
         })
     }
     pub fn dialog_buttons(&self, count: usize) -> Vec<[f32; 4]> {
@@ -610,30 +674,34 @@ impl Assets {
         surfaces: &[Surface],
     ) -> Result<PreparedScene, String> {
         let draws = surfaces.iter().map(Surface::draw).collect::<Vec<_>>();
-        renderer.prepare(
-            &draws,
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        renderer.prepare(&draws, PROJECTION, None)
     }
 }
+// Original 4f093f..4f0957 builds the HUD projection with 640x480 extents.
+// The viewport scales these coordinates; the mesh width and anchor stay fixed.
+const PROJECTION: [f32; 16] = [
+    2. / 640.,
+    0.,
+    0.,
+    0.,
+    0.,
+    -2. / 480.,
+    0.,
+    0.,
+    0.,
+    0.,
+    1.,
+    0.,
+    -1.,
+    1.,
+    0.,
+    1.,
+];
+
+#[cfg(test)]
+#[path = "prompt_layout_tests.rs"]
+mod layout_tests;
+
 fn textured_rect(surface: &mut Surface, b: [f32; 4]) {
     surface.quad(
         [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]]],

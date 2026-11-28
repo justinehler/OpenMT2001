@@ -37,6 +37,7 @@ pub struct Assets {
     settings: crate::settings_menu::Assets,
     planning: crate::build_view::Assets,
     prompts: crate::prompt::Assets,
+    portrait_prompts: crate::prompt::Assets,
     event_list: crate::event_list::Assets,
     stats: crate::stats_panel::Assets,
     market_share: crate::market_share_panel::Assets,
@@ -258,6 +259,13 @@ impl Assets {
                 index, archive, installer, &strings, executable,
             )?,
             prompts: crate::prompt::Assets::load(
+                index,
+                archive,
+                installer,
+                &strings,
+                &openmt2001::pe::PeImage::parse(executable)?,
+            )?,
+            portrait_prompts: crate::prompt::Assets::load_portrait(
                 index,
                 archive,
                 installer,
@@ -593,7 +601,7 @@ impl Menu {
         &self.assets.stats
     }
     pub fn prompt_assets(&self) -> &crate::prompt::Assets {
-        &self.assets.prompts
+        &self.assets.portrait_prompts
     }
     pub fn card_assets(&self) -> &crate::card_panel::Assets {
         &self.assets.cards
