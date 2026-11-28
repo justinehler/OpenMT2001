@@ -636,7 +636,7 @@ impl Host {
                 // Local portable texture1 corresponds to the first original
                 //billboard-repeat registration687c78 selected by4b0c39.
                 effect_model: 1,
-                market_share_prior: [0.; 6],
+                market_share_prior: openmt2001::player_share::INACTIVE_SLOT_RESIDUE,
                 player_message_prior: [0; 48],
                 ai_event_gate: false,
             },
