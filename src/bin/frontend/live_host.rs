@@ -1084,7 +1084,7 @@ impl Host {
         self.running = running
             && !self.camera_retired()
             && self.failure.is_none()
-            && self.options_resume.is_none()
+            && (self.options_resume.is_none() || self.policy.scheduler.network_enabled)
             && !self.result_completed;
         if self.running != was_running {
             eprintln!(
@@ -1198,6 +1198,9 @@ impl Host {
     ///49e860/49e994 local Options owns one reason0 transition. The UI's
     ///oneshot acknowledgement is sent only after this actual owner operation.
     ///Keep the existing player-run latch distinct from native pause bytes.
+    ///In a network game (93bbb9) 49e860 pauses nothing: the menu opens over
+    ///the running simulation, and the deadline and barrier reasons stay
+    ///owned by their network producers.
     pub fn options(
         &mut self,
         pause: &mut openmt2001::pause::State,
@@ -1207,32 +1210,36 @@ impl Host {
         if self.stop_retired_camera() {
             return Err("Options session retired".into());
         }
+        let network = self.policy.scheduler.network_enabled;
         if open {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
             if self.options_resume.is_none() {
-                if !self.policy.scheduler.network_enabled {
+                if !network {
                     pause.pause(0, |change, _| {
                         change.apply(timers);
                         Ok(())
                     })?;
                 }
                 self.options_resume = Some(self.running);
-                self.set_running(false);
+                if !network {
+                    self.set_running(false);
+                }
             }
         } else if let Some(running) = self.options_resume {
-            if !self.policy.scheduler.network_enabled {
+            self.options_resume = None;
+            if !network {
                 pause.unpause(0, |change, _| {
                     change.apply(timers);
                     Ok(())
                 })?;
+                self.set_running(running);
             }
-            self.options_resume = None;
-            self.set_running(running);
         }
         Ok(())
     }
+
     ///Recheck the SAME worker/Session at ordinary captured-save consumption.
     ///This is a current modal hold check, not a native construction token.
     pub fn options_save_allowed(
@@ -1240,17 +1247,19 @@ impl Host {
         pause: &openmt2001::pause::State,
         timers: &[openmt2001::timers::Task],
     ) -> bool {
-        self.options_resume.is_some()
+        // A network game never holds the simulation for Options, and 49e860
+        // disables its Save action, so no manual save is ever consumed there.
+        !self.policy.scheduler.network_enabled
+            && self.options_resume.is_some()
             && !self.running
             && self.failure.is_none()
             && !self.camera_retired()
-            && (self.policy.scheduler.network_enabled
-                || (pause.bytes[0] != 0
-                    && pause.bytes[8] != 0
-                    && timers
-                        .iter()
-                        .filter(|t| u32::from_le_bytes(t[4..8].try_into().unwrap()) & 2 != 0)
-                        .all(|t| t[0] == 0)))
+            && pause.bytes[0] != 0
+            && pause.bytes[8] != 0
+            && timers
+                .iter()
+                .filter(|t| u32::from_le_bytes([t[4], t[5], t[6], t[7]]) & 2 != 0)
+                .all(|t| t[0] == 0)
     }
     /// Project only this live Options owner's transient pause into a cold-load
     /// continuation. The actual Session stays held until the UI closes Options.
@@ -1266,9 +1275,6 @@ impl Host {
         if !self.options_save_allowed(pause, timers) {
             return Err("Options save owner is not held".into());
         }
-        if self.policy.scheduler.network_enabled {
-            return Ok(None);
-        }
         // Native unpause is signed. A wrapped/nonpositive count cannot account
         // for the one owned release: refuse rather than clear or repair it.
         if pause.bytes[0] as i8 <= 0 {
@@ -1282,11 +1288,16 @@ impl Host {
         })?;
         Ok(Some((continuation, tasks)))
     }
-    /// Everything a manual save of `session` reads from this Host.
+    /// Everything a manual save of `session` reads from this Host. Every
+    /// manual write reads this view, so it is where a network game's disabled
+    /// Save (49e860) is enforced against a stale menu that still offers it.
     pub(crate) fn save_view(
         &self,
         session: &Session<'_>,
     ) -> Result<crate::session_save::HostSaveView, String> {
+        if self.policy.scheduler.network_enabled || session.connected.is_some() {
+            return Err("Save is disabled in a network game".into());
+        }
         Ok(crate::session_save::HostSaveView {
             options: self.options_save_projection(&session.world.pause, &session.hooks.timers)?,
             auction: self.auction_save_state(),
@@ -4357,6 +4368,84 @@ mod tests {
         host.options(&mut pause, &mut timers, false).unwrap();
         assert_eq!(pause.bytes, [0; 9]);
         assert_eq!(timers, before);
+    }
+    #[test]
+    fn network_options_keeps_the_connected_simulation_running() {
+        // No reason, the tick-ceiling reason 1, the barrier reason 2, or both.
+        for held in [&[][..], &[1], &[2], &[1, 2]] {
+            let mut host = Host::new([0.; 3]);
+            host.policy.scheduler.network_enabled = true;
+            host.set_running(true);
+            let mut pause = openmt2001::pause::State::default();
+            let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+            let mut apply = |change: openmt2001::pause::Timers, _: &mut _| {
+                change.apply(&mut timers);
+                Ok(())
+            };
+            for &reason in held {
+                pause.pause(reason, &mut apply).unwrap();
+            }
+            let network = (pause.clone(), timers.clone());
+            host.options(&mut pause, &mut timers, true).unwrap();
+            // Logic dispatch keys off `running`: it stays on under Options,
+            // and repeated opens neither stop it nor add a reason.
+            assert!(host.running, "{held:?}");
+            host.options(&mut pause, &mut timers, true).unwrap();
+            assert!(host.running);
+            assert_eq!((pause.clone(), timers.clone()), network);
+            // The network producers still own their reasons while Options is up.
+            let mut apply = |change: openmt2001::pause::Timers, _: &mut _| {
+                change.apply(&mut timers);
+                Ok(())
+            };
+            for &reason in held {
+                pause.unpause(reason, &mut apply).unwrap();
+            }
+            assert!(!pause.has_reason());
+            for &reason in held {
+                pause.pause(reason, &mut apply).unwrap();
+            }
+            assert!(host.running);
+            // Stats and focus are also not local pause owners here.
+            host.toggle_player_pause(&mut pause, &mut timers, |_, _| Ok(()))
+                .unwrap();
+            host.focus(&mut pause, &mut timers, false, |_| {
+                Ok(crate::intro::focus::Prefix::Complete(None))
+            })
+            .unwrap();
+            assert_eq!((pause.clone(), timers.clone()), network);
+            host.options(&mut pause, &mut timers, false).unwrap();
+            assert!(host.running);
+            assert_eq!((pause, timers), network);
+        }
+    }
+    #[test]
+    fn network_options_never_admits_a_manual_save() {
+        let mut host = Host::new([0.; 3]);
+        host.policy.scheduler.network_enabled = true;
+        host.set_running(true);
+        let mut pause = openmt2001::pause::State::default();
+        let mut timers = openmt2001::timers::startup_tasks([0x6b; 20]);
+        assert!(!host.options_save_allowed(&pause, &timers));
+        host.options(&mut pause, &mut timers, true).unwrap();
+        // A menu that still shows Save cannot get a write admitted, even with
+        // the player's run latch off as an offline Options hold would leave it.
+        assert!(!host.options_save_allowed(&pause, &timers));
+        assert!(host.options_save_projection(&pause, &timers).is_err());
+        host.set_running(false);
+        assert!(!host.options_save_allowed(&pause, &timers));
+        assert!(host.options_save_projection(&pause, &timers).is_err());
+        // The same Host offline admits the held save.
+        host.options(&mut pause, &mut timers, false).unwrap();
+        host.policy.scheduler.network_enabled = false;
+        host.set_running(true);
+        host.options(&mut pause, &mut timers, true).unwrap();
+        assert!(host.options_save_allowed(&pause, &timers));
+        assert!(
+            host.options_save_projection(&pause, &timers)
+                .unwrap()
+                .is_some()
+        );
     }
     #[test]
     fn scenario_prompt_preserves_callback_identity() {

@@ -306,9 +306,15 @@ impl Session<'_> {
                     )?,
                 )?;
             }
+            // 47f660 tests the network flag 93bbb9 at the rollover itself, so
+            // a connected game never writes an autosave, for host or client,
+            // whatever calendar controls the caller left behind.
+            let mut calendar = policy.calendar;
+            calendar.autosave_disabled |=
+                policy.scheduler.network_enabled || self.connected.is_some();
             let mut context = HourlyContext {
                 board,
-                calendar: policy.calendar,
+                calendar,
                 hourly: policy.hourly,
                 utilities: &mut utilities,
             };

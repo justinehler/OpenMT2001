@@ -228,6 +228,7 @@ impl Intro {
                         view.game_options.set_save_disabled(
                             !view.options_ack.ready()
                                 || status.tutorial_session
+                                || status.network_enabled
                                 || status.failure.is_some()
                                 || view
                                     .camera_producer

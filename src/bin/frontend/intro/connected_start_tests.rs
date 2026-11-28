@@ -298,3 +298,142 @@ fn connected_roster_does_not_weaken_offline_skirmish_validation() {
     assert!(launch.validate_roster(true).is_ok());
     assert!(launch.validate_roster(false).is_err());
 }
+/// Construct the staged host and client cities of `ticket()` and hand them,
+/// with the host's command assets, to `body`.
+fn with_connected_pair(
+    body: impl for<'s> FnOnce(
+        &mut crate::fresh_city::Session<'s>,
+        &mut crate::fresh_city::Session<'s>,
+        &crate::fresh_city::CommandAssets<'_, '_>,
+        &openmt2001::pe::PeImage<'_>,
+    ),
+) {
+    let host_inputs = inputs();
+    let client_inputs = inputs();
+    let host_ticket = ticket();
+    let host_stage = host_inputs.stage_connected(&host_ticket).unwrap();
+    let mut client_ticket = host_ticket.clone();
+    client_ticket.view.local_peer = 4;
+    client_ticket.view.host = false;
+    client_ticket.expected = Some(host_stage.content);
+    let client_stage = client_inputs.stage_connected(&client_ticket).unwrap();
+    let mut host = host_inputs
+        .construct_connected(&host_ticket, &host_stage, None)
+        .unwrap();
+    let mut client = client_inputs
+        .construct_connected(&client_ticket, &client_stage, None)
+        .unwrap();
+    let image = openmt2001::pe::PeImage::parse(&host_inputs.executable).unwrap();
+    let board = host_inputs.styled_board(&image).unwrap();
+    let file = openmt2001::build_file::BuildFile::parse(&host_inputs.build_file).unwrap();
+    let assets = crate::fresh_city::CommandAssets {
+        image: &image,
+        board: &board,
+        file: &file,
+    };
+    body(&mut host, &mut client, &assets, &image);
+}
+#[test]
+#[ignore = "requires original assets; real two-Session connected frames under an open Options menu"]
+fn open_options_keeps_both_connected_cities_ticking_and_never_saves() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            with_connected_pair(|host, client, assets, image| {
+                let saves = openmt2001::fixtures::scratch("TEST_SCRATCH").join("connected-37");
+                let _ = std::fs::remove_dir_all(&saves);
+                std::fs::create_dir_all(saves.join("saves")).unwrap();
+                let mut host_frame = crate::live_host::Host::new([100., 120., 100.]);
+                let mut client_frame = crate::live_host::Host::new([120., 140., 120.]);
+                for frame in [&mut host_frame, &mut client_frame] {
+                    frame.running = true;
+                    frame.policy.scheduler.network_enabled = true;
+                    // No worker grants tick-ceiling windows here, so both
+                    // peers start inside one wide window.
+                    frame.policy.scheduler.deadline = 100_000;
+                    frame.autosave_profile_root = Some(saves.clone());
+                }
+                for _ in 0..10 {
+                    host_frame.frame(host, assets, 40);
+                    client_frame.frame(client, assets, 40);
+                }
+                let opened_at = host.world.clock.timing[0];
+                assert!(opened_at > 0);
+                // Both peers open Options through the same Host operation the
+                // menu's acknowledgement waits on.
+                for (frame, session) in [
+                    (&mut host_frame, &mut *host),
+                    (&mut client_frame, &mut *client),
+                ] {
+                    frame
+                        .options(&mut session.world.pause, &mut session.hooks.timers, true)
+                        .unwrap();
+                    assert!(frame.running);
+                    assert_eq!(session.world.pause.bytes[0], 0);
+                    assert!(frame.status(session).network_enabled);
+                }
+                // Fast speed stays refused while the menu is up.
+                for frame in [&mut host_frame, &mut client_frame] {
+                    frame.toggle_speed();
+                    frame.set_fast(true);
+                    assert_eq!(frame.policy.scheduler.iterations, 1);
+                }
+                // Both cities keep ticking in step under the open menu.
+                for _ in 0..10 {
+                    host_frame.frame(host, assets, 40);
+                    client_frame.frame(client, assets, 40);
+                }
+                assert!(host.world.clock.timing[0] > opened_at);
+                assert_eq!(host.world.clock, client.world.clock);
+                for (tag, (left, right)) in (2..=13).chain([16, 17, 18]).zip(
+                    shared_state(host, image)
+                        .into_iter()
+                        .zip(shared_state(client, image)),
+                ) {
+                    assert!(left == right, "Shared gameplay tag {tag} differs");
+                }
+                // Run both cities across a midnight with the menu open.
+                for session in [&mut *host, &mut *client] {
+                    let clock = &mut session.world.clock;
+                    clock.calendar[0] = 23;
+                    clock.calendar[3] = 23 + (clock.calendar[1] + clock.calendar[2] * 10) * 24;
+                    // AdvanceHour follows the normal-tick word (timing 1).
+                    clock.timing[1] = 620;
+                    clock.timing[2] = 620;
+                    clock.timing[3] = 14995;
+                }
+                let day = host.world.clock.calendar[4];
+                for _ in 0..40 {
+                    host_frame.frame(host, assets, 40);
+                    client_frame.frame(client, assets, 40);
+                }
+                for frame in [&host_frame, &client_frame] {
+                    assert!(frame.failure.is_none(), "{:?}", frame.failure);
+                    assert!(frame.autosave_status.is_none());
+                }
+                assert_eq!(host.world.clock, client.world.clock);
+                assert_ne!(host.world.clock.calendar[4], day, "no midnight passed");
+                assert_eq!(std::fs::read_dir(saves.join("saves")).unwrap().count(), 0);
+                // A manual save reaching the write is refused on both peers,
+                // with Options open or closed.
+                for (frame, session) in [
+                    (&mut host_frame, &mut *host),
+                    (&mut client_frame, &mut *client),
+                ] {
+                    assert!(
+                        !frame.options_save_allowed(&session.world.pause, &session.hooks.timers)
+                    );
+                    assert!(frame.save_view(session).is_err());
+                    frame
+                        .options(&mut session.world.pause, &mut session.hooks.timers, false)
+                        .unwrap();
+                    assert!(frame.running);
+                    assert!(frame.save_view(session).is_err());
+                    assert_eq!(session.world.pause.bytes[0], 0);
+                }
+            });
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
