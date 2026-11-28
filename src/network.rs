@@ -1,7 +1,8 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
 //! Direct-IP transport is pumped by the lobby worker through this owner.
 //! The lobby worker validates staged startup content before binding an actual
-//! city. The adapter qualifies construction, short property transfers and deadlines;
+//! city. Connected sessions retain maintenance/barriers and diagnostic samples.
+//! The command adapter qualifies construction, short property transfers and deadlines;
 //! remaining command families explicitly remain unsupported.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{
@@ -13,6 +14,7 @@ pub mod codec;
 pub mod commands;
 pub mod lobby;
 pub mod stream;
+pub mod synchronization;
 #[cfg(test)]
 mod tests;
 pub mod transport;
@@ -23,6 +25,7 @@ pub struct SessionLink {
     pub binding: SessionBinding,
     pub worker: lobby::worker::Handle,
     pub commands: commands::Adapter,
+    pub synchronization: synchronization::Synchronization,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -191,17 +194,23 @@ impl State {
             | Message::CommandRequest(_)
             | Message::CommandCommit(_)
             | Message::CommandDeadline { .. }
-            | Message::CommandRejected { .. } => self.binding(binding.ok_or(Error::World)?)?,
+            | Message::CommandRejected { .. }
+            | Message::Barrier { .. }
+            | Message::StateSample(_) => self.binding(binding.ok_or(Error::World)?)?,
             Message::Hello | Message::Probe | Message::Welcome { .. } => return Err(Error::Tag),
         }
         let peer = self.peers[usize::from(connection.slot)]
             .as_mut()
             .ok_or(Error::Peer)?;
+        let synchronization = matches!(
+            frame.message,
+            Message::Barrier { .. } | Message::StateSample(_)
+        );
         let request = matches!(
             frame.message,
             Message::LobbyRequest(_) | Message::StartReady(_) | Message::CommandRequest(_)
         ) || (matches!(frame.message, Message::StartFailure) && !peer.authority);
-        if peer.identity != connection.identity || peer.authority == request {
+        if peer.identity != connection.identity || (!synchronization && peer.authority == request) {
             return Err(Error::Peer);
         }
         peer.decoder.accept(&frame)?;
@@ -441,6 +450,11 @@ pub enum Message {
     StartCommit,
     StartFailure,
     Transfer(Transfer),
+    Barrier {
+        sender: u8,
+        complete: u8,
+    },
+    StateSample(synchronization::Sample),
     CommandRequest(commands::Request),
     CommandCommit(commands::Commit),
     /// Original kind8 deadline, following `after` shared commits.

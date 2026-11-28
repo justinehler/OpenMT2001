@@ -238,7 +238,7 @@ impl SceneInputs {
         hash_part(
             &mut hash,
             "startup-version",
-            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-3").as_bytes(),
+            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-4").as_bytes(),
         );
         for (name, bytes) in [
             ("original-executable", self.executable.as_slice()),
@@ -319,7 +319,23 @@ impl SceneInputs {
             stage.peers.clone(),
         )
         .map_err(|e| e.to_string())?;
+        let mut synchronization = network::synchronization::Synchronization::new(
+            binding,
+            request.ticket.view.host,
+            request.ticket.view.local_peer,
+            stage.peers.clone(),
+        )
+        .map_err(|e| e.to_string())?;
+        session.network_command_timer = Some(
+            synchronization
+                .enable(&mut session.hooks.timers)
+                .map_err(|e| e.to_string())?,
+        );
+        synchronization
+            .barrier
+            .open(&mut session.world.city.pause, &mut session.hooks.timers)?;
         session.connected = Some(Connection {
+            synchronization,
             commands,
             binding,
             worker: request.worker,

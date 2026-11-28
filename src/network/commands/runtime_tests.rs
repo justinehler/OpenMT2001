@@ -164,6 +164,19 @@ impl TestSession {
         }
     }
     fn tick(&mut self, image: &crate::pe::PeImage<'_>, board: &crate::board::Board) {
+        self.tick_observing(image, board, |_, _, _, _| Ok(()));
+    }
+    fn tick_observing(
+        &mut self,
+        image: &crate::pe::PeImage<'_>,
+        board: &crate::board::Board,
+        mut observe: impl FnMut(
+            scheduler::Event,
+            &crate::clock::Clock,
+            &mut level_startup::City,
+            &[player_manager::Player],
+        ) -> std::result::Result<(), String>,
+    ) {
         if self.world.pause.has_reason() {
             return;
         }
@@ -180,6 +193,7 @@ impl TestSession {
             &mut self.world.clock,
             &mut self.controls,
             |event, clock, _| {
+                observe(event, clock, city, &self.roster.manager.players)?;
                 if event == scheduler::Event::Helper(0x480ec0) {
                     let mut runtime = live_commands::Runtime {
                         city,
@@ -736,3 +750,6 @@ fn connected_hour_boundary_keeps_shared_accounts_and_rng_with_ai_on_both_peers()
         right.world.objective.cash_statuses
     );
 }
+
+#[path = "../synchronization/runtime_tests.rs"]
+mod synchronization;

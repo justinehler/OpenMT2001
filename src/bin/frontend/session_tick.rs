@@ -82,6 +82,22 @@ impl Session<'_> {
         policy.scheduler.deadline = connection.commands.deadline();
         Ok(())
     }
+    /// Retained group-0 callback 0x450410. Read human activity from the live
+    /// manager on each pass; AI and eliminated rows never hold the barrier.
+    pub fn pump_connected_synchronization(&mut self, policy: &mut Policy) -> Result<bool, String> {
+        self.pump_connected_commands(policy)?;
+        let Some(connection) = &mut self.connected else {
+            return Ok(false);
+        };
+        let active =
+            openmt2001::network::synchronization::active_humans(&self.roster.manager.players);
+        connection.synchronization.pump(
+            &connection.worker,
+            active,
+            &mut self.world.city.pause,
+            &mut self.hooks.timers,
+        )
+    }
     /// One original4ba580 interface tick, independent of25Hz logic dispatch.
     /// The caller must drive its registered50Hz task; paused logic alone does
     /// not suppress interface dispatch. Only retained8b22d8 gates the countdown.
@@ -312,9 +328,12 @@ impl Session<'_> {
                     if matches!(event, scheduler::Event::Helper(0x4ed6f0 | 0x4ed6e0)) {
                         return Ok(u32::from(matches!(event, scheduler::Event::Helper(0x4ed6f0))));
                     }
-                    //481340 is network synchronization/checksum sampling. Its
-                    // original first gate returns in an offline session.
-                    if matches!(event, scheduler::Event::Helper(0x481340)) && !scheduler.network_enabled {
+                    // Scheduler emits this after incrementing Total, before
+                    // command draining, resident movement or any world mutation.
+                    if matches!(event, scheduler::Event::Helper(0x481340)) {
+                        if let Some(connection) = &mut self.connected {
+                            connection.synchronization.capture(&connection.worker, clock.timing[0], city, dispatch.roads, &self.roster.manager.players)?;
+                        }
                         return Ok(0);
                     }
                     if matches!(event, scheduler::Event::Helper(0x4bac90)) && self.connected.is_some() {
