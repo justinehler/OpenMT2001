@@ -63,6 +63,13 @@ pub enum SurfaceMode {
     ResultFireworks,
     /// City state4: SRCALPHA/ONE, LESSEQUAL, no depth writes (004b69f0).
     LightHalos,
+    /// Original state8 ("Combined volumetric lights", built by 00458fb0):
+    /// DESTCOLOR/SRCALPHA, untextured, D3DCULL_CW, no depth writes; the
+    /// depth test is inherited from state1. 004b69f0 also disables fog.
+    LightPoolVolume,
+    /// State4 inner lamp cone: textured SRCALPHA/ONE, D3DCULL_CW, no depth
+    /// writes or fog (004b69f0).
+    LightPoolGlow,
     /// Original mode19 smoke: SRCALPHA/INVSRCALPHA, LESSEQUAL, no depth writes.
     ChimneySmoke,
     /// Original tree state10: two-sided GREATER64 cutout, ONE/ZERO, depth writes and LESSEQUAL.
@@ -155,6 +162,8 @@ pub struct Renderer {
     result_particle_pipeline: wgpu::RenderPipeline,
     result_firework_pipeline: wgpu::RenderPipeline,
     halo_pipeline: wgpu::RenderPipeline,
+    light_pool_volume_pipeline: wgpu::RenderPipeline,
+    light_pool_glow_pipeline: wgpu::RenderPipeline,
     chimney_smoke_pipeline: wgpu::RenderPipeline,
     tree_foliage_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
@@ -252,20 +261,25 @@ impl Renderer {
                 None
             } else {
                 let component = wgpu::BlendComponent {
-                    src_factor: if matches!(mode, SurfaceMode::Clouds | SurfaceMode::TreeFoliage) {
+                    src_factor: if mode == SurfaceMode::LightPoolVolume {
+                        wgpu::BlendFactor::Dst
+                    } else if matches!(mode, SurfaceMode::Clouds | SurfaceMode::TreeFoliage) {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
                         wgpu::BlendFactor::SrcAlpha
                     } else {
                         wgpu::BlendFactor::Zero
                     },
-                    dst_factor: if mode == SurfaceMode::TreeFoliage {
+                    dst_factor: if mode == SurfaceMode::LightPoolVolume {
+                        wgpu::BlendFactor::SrcAlpha
+                    } else if mode == SurfaceMode::TreeFoliage {
                         wgpu::BlendFactor::Zero
                     } else if matches!(
                         mode,
                         SurfaceMode::Clouds
                             | SurfaceMode::ResultFireworks
                             | SurfaceMode::LightHalos
+                            | SurfaceMode::LightPoolGlow
                     ) {
                         wgpu::BlendFactor::One
                     } else if mode != SurfaceMode::WaterFallback {
@@ -307,7 +321,12 @@ impl Renderer {
                         wgpu::PrimitiveTopology::TriangleList
                     },
                     // D3D CULL_CW discards clockwise screen triangles.
-                    cull_mode: static_lit.then_some(wgpu::Face::Back),
+                    cull_mode: (static_lit
+                        || matches!(
+                            mode,
+                            SurfaceMode::LightPoolVolume | SurfaceMode::LightPoolGlow
+                        ))
+                    .then_some(wgpu::Face::Back),
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
@@ -321,6 +340,8 @@ impl Renderer {
                             | SurfaceMode::ResultParticles
                             | SurfaceMode::ResultFireworks
                             | SurfaceMode::LightHalos
+                            | SurfaceMode::LightPoolVolume
+                            | SurfaceMode::LightPoolGlow
                             | SurfaceMode::ChimneySmoke
                             | SurfaceMode::Celestial
                             | SurfaceMode::Overlay
@@ -343,6 +364,8 @@ impl Renderer {
                                     | SurfaceMode::TreeFoliage
                                     | SurfaceMode::ResultFireworks
                                     | SurfaceMode::LightHalos
+                                    | SurfaceMode::LightPoolVolume
+                                    | SurfaceMode::LightPoolGlow
                                     | SurfaceMode::ChimneySmoke
                             )
                         {
@@ -378,6 +401,8 @@ impl Renderer {
                         | SurfaceMode::ResultParticles
                         | SurfaceMode::ResultFireworks
                         | SurfaceMode::LightHalos => "star_fragment",
+                        SurfaceMode::LightPoolVolume => "light_pool_volume_fragment",
+                        SurfaceMode::LightPoolGlow => "light_pool_glow_fragment",
                     }),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -403,6 +428,8 @@ impl Renderer {
         let result_particle_pipeline = make_pipeline(SurfaceMode::ResultParticles);
         let result_firework_pipeline = make_pipeline(SurfaceMode::ResultFireworks);
         let halo_pipeline = make_pipeline(SurfaceMode::LightHalos);
+        let light_pool_volume_pipeline = make_pipeline(SurfaceMode::LightPoolVolume);
+        let light_pool_glow_pipeline = make_pipeline(SurfaceMode::LightPoolGlow);
         let chimney_smoke_pipeline = make_pipeline(SurfaceMode::ChimneySmoke);
         let tree_foliage_pipeline = make_pipeline(SurfaceMode::TreeFoliage);
         let celestial_pipeline = make_pipeline(SurfaceMode::Celestial);
@@ -432,6 +459,8 @@ impl Renderer {
             result_particle_pipeline,
             result_firework_pipeline,
             halo_pipeline,
+            light_pool_volume_pipeline,
+            light_pool_glow_pipeline,
             chimney_smoke_pipeline,
             tree_foliage_pipeline,
             celestial_pipeline,
@@ -1231,6 +1260,8 @@ impl Renderer {
             SurfaceMode::ResultParticles => &self.result_particle_pipeline,
             SurfaceMode::ResultFireworks => &self.result_firework_pipeline,
             SurfaceMode::LightHalos => &self.halo_pipeline,
+            SurfaceMode::LightPoolVolume => &self.light_pool_volume_pipeline,
+            SurfaceMode::LightPoolGlow => &self.light_pool_glow_pipeline,
             SurfaceMode::ChimneySmoke => &self.chimney_smoke_pipeline,
             SurfaceMode::TreeFoliage => &self.tree_foliage_pipeline,
             SurfaceMode::Celestial => &self.celestial_pipeline,

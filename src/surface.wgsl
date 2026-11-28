@@ -137,3 +137,19 @@ fn water_multitexture_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let second = textureSample(secondary_texture, surface_sampler, in.secondary_uv);
     return apply_fog(first * second * vec4(in.color, in.diffuse_alpha), in.eye_depth);
 }
+
+// 004b69f0 disables fog for both lamp cone passes. State8 disables the
+// texture stage; state4 modulates BuildingTextures record2 by diffuse.
+@fragment
+fn light_pool_volume_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    // The sample is discarded. It keeps the texture and sampler in the
+    // derived layout so this pipeline accepts the shared surface bind group.
+    _ = textureSample(surface_texture, surface_sampler, in.uv);
+    return vec4(in.color, in.diffuse_alpha);
+}
+
+@fragment
+fn light_pool_glow_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let texel = textureSampleBias(surface_texture, surface_sampler, in.uv, -0.5);
+    return texel * vec4(in.color, in.diffuse_alpha);
+}

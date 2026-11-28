@@ -85,6 +85,7 @@ pub(crate) struct Layer {
     pub enabled: bool,
     pub detail: u8,
     road_draw: Option<usize>,
+    pools: Option<crate::light_pools::Layer>,
     pub camera: crate::flyby::CameraSample,
     pub viewport: [u32; 2],
 }
@@ -127,6 +128,11 @@ impl Layer {
             )?);
         }
         let textures = TextureSet::parse(payload(TEXTURES)?).map_err(|e| e.to_string())?;
+        let pools = Some(crate::light_pools::Layer::load(
+            payload(crate::light_pools::TEXTURES)?,
+            lamps.clone(),
+            draws,
+        )?);
         let mut groups = Vec::new();
         for (record, instances) in [(1, roads), (2, lamps)] {
             let texture = textures
@@ -150,6 +156,7 @@ impl Layer {
             enabled: true,
             detail: 2,
             road_draw,
+            pools,
             camera,
             viewport,
         })
@@ -170,7 +177,11 @@ impl Layer {
             self.camera.target,
             self.camera.up,
         ));
-        let mut changed = Vec::new();
+        let mut changed = if let Some(pools) = &self.pools {
+            pools.fill(draws, view, projection, near, self.threshold, self.enabled)?
+        } else {
+            Vec::new()
+        };
         for (index, halos) in &self.groups {
             let draw = draws.get_mut(*index).ok_or("halo surface missing")?;
             draw.view_projection = Some(projection);
@@ -321,6 +332,7 @@ mod tests {
             enabled: true,
             detail: 2,
             road_draw: None,
+            pools: None,
             camera: crate::flyby::CameraSample {
                 eye: [0., 17., 0.],
                 target: [0., 17., -100.],
