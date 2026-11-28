@@ -13,22 +13,12 @@ use super::{
     ui_graph::PanelId,
     ui_text_resources::UiTextResources,
 };
+pub(super) use crate::ui_text::ResourceIdentity;
 use openmt2001::{archive::ArchiveIndex, mesh::CachedMesh, pe::PeImage, x87::Sum};
 use std::{
     collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
 };
-///Opaque move-stable resource allocation identity, never a native pointer/key.
-#[derive(Clone, Debug)]
-pub(super) struct ResourceIdentity(std::sync::Arc<()>);
-impl ResourceIdentity {
-    pub(super) fn new() -> Self {
-        Self(std::sync::Arc::new(()))
-    }
-    pub(super) fn same(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.0, &other.0)
-    }
-}
 const A: u32 = 0x58e3c0;
 static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

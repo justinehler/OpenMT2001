@@ -93,7 +93,7 @@ impl Assets {
         profile_root: std::path::PathBuf,
         save_root: std::path::PathBuf,
         executable: &[u8],
-        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+        shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         Self::load_impl(
             index,
@@ -117,7 +117,7 @@ impl Assets {
         profile_root: std::path::PathBuf,
         save_root: std::path::PathBuf,
         executable: &[u8],
-        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+        shared: Option<&crate::ui_text::resources::UiTextResources>,
     ) -> Result<Self, String> {
         let payload = |name: &str| -> Result<&[u8], String> {
             let e = index

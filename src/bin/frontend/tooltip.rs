@@ -34,7 +34,7 @@ impl Tooltip {
         archive: &[u8],
         installer: &Path,
         language: &Path,
-        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+        shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, Some(shared))
     }
@@ -43,7 +43,7 @@ impl Tooltip {
         archive: &[u8],
         installer: &Path,
         language: &Path,
-        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+        shared: Option<&crate::ui_text::resources::UiTextResources>,
     ) -> Result<Self, String> {
         let (pages, tab) = if let Some(shared) = shared {
             (shared.surfaces(0)?, shared.table(0)?.to_vec())

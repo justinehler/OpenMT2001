@@ -319,7 +319,7 @@ impl Assets {
         installer: &Path,
         language: &Path,
         executable: &[u8],
-        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+        shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         Self::load_impl(
             index,
@@ -336,7 +336,7 @@ impl Assets {
         installer: &Path,
         language: &Path,
         executable: &[u8],
-        shared: Option<&crate::intro::camera_live::ui_text_resources::UiTextResources>,
+        shared: Option<&crate::ui_text::resources::UiTextResources>,
     ) -> Result<Self, String> {
         let entry = index
             .find(PANEL)

@@ -101,7 +101,7 @@ pub struct FontData {
 #[derive(Clone, Debug)]
 pub struct Fonts {
     pub fonts: BTreeMap<u32, FontData>,
-    pub language: super::ui_text_resources::PackedLanguage,
+    pub language: super::resources::PackedLanguage,
     pub current: u32,
     pub gap: i32,
     pub line_mode: u8,
@@ -144,7 +144,7 @@ impl Fonts {
     ///455420 finite retained construction path. Cache hit precedes all reads;
     ///missing page-batch/notify callbacks remain unsupported frontiers.
     ///4e7470 stores current BEFORE calling notify; cache publishes afterward.
-    pub(super) fn select455420_retained(&mut self, id: u32) -> Result<(), String> {
+    pub(crate) fn select455420_retained(&mut self, id: u32) -> Result<(), String> {
         if self.selector.cached == id {
             return Ok(());
         }
@@ -396,7 +396,7 @@ pub fn trunc(v: f64) -> Result<i32, String> {
 }
 ///Finite signed-result layout admission for50e928. Preserve fractional
 ///values whose truncation still fits (MIN-1 < x < MAX+1).
-pub(super) fn ftol_layout(s: openmt2001::x87::Sum) -> Result<i32, String> {
+pub(crate) fn ftol_layout(s: openmt2001::x87::Sum) -> Result<i32, String> {
     use openmt2001::x87::Sum;
     use std::cmp::Ordering;
     let mut lower = Sum::from_i32(i32::MIN);
@@ -457,7 +457,7 @@ impl Text {
     ///transient148 are not consumed by a live normal-success field. Native
     ///x87 status/traps and allocation-failure unwind are outside this API.
     ///Node context/padding live in the typed Node's explicit Unknown carrier.
-    pub(super) fn normal_fields() -> Self {
+    pub(crate) fn normal_fields() -> Self {
         Self {
             reset_target: ResetTarget::Ret43b370,
             bounds: [0.; 4],
@@ -490,7 +490,7 @@ impl Text {
             background: 0,
         }
     }
-    pub(super) fn extent440900(&mut self, bounds: [f32; 4]) -> Result<(), String> {
+    pub(crate) fn extent440900(&mut self, bounds: [f32; 4]) -> Result<(), String> {
         if self.pitch == 0 {
             return Err("440900 Text live pitch zero".into());
         }
@@ -508,7 +508,7 @@ impl Text {
         self.dirty = 0;
         Ok(()) //native setter ignores incoming depth
     }
-    pub(super) fn style440650(&mut self, style: u32, inset: i32, scroll: i32) {
+    pub(crate) fn style440650(&mut self, style: u32, inset: i32, scroll: i32) {
         if inset != -999 {
             self.inset = inset
         }
@@ -529,7 +529,7 @@ impl Text {
     ///Unpadded441220 through4412ed, before440330's array growth.
     ///One SAME Fonts/Group algorithm for the retained construction callers.
     ///A reached modern refusal retains preceding effects; no cleanup/replay.
-    pub(super) fn identifier441220_before_resize(
+    pub(crate) fn identifier441220_before_resize(
         &mut self,
         font: &mut Fonts,
         id: u32,
@@ -571,7 +571,7 @@ impl Text {
     }
     ///Retained construction441220 using the existing ordinary array carrier.
     ///Unwritten native X provenance is a separate owner concern; no alignment.
-    pub(super) fn identifier441220_unpadded(
+    pub(crate) fn identifier441220_unpadded(
         &mut self,
         font: &mut Fonts,
         id: u32,
@@ -580,7 +580,7 @@ impl Text {
         self.resize()
     }
     ///440b70 using the retained selector frontier for original constructors.
-    pub(super) fn set_font440b70_retained(
+    pub(crate) fn set_font440b70_retained(
         &mut self,
         font: &mut Fonts,
         id: u32,
@@ -593,7 +593,7 @@ impl Text {
     }
     ///Plain441220 with explicit unknown X allocation state, no4406a0.
     ///The retained caller owns this SAME Text and its actual X capacity carrier.
-    pub(super) fn identifier441220_unaligned(
+    pub(crate) fn identifier441220_unaligned(
         &mut self,
         font: &mut Fonts,
         id: u32,
@@ -607,7 +607,7 @@ impl Text {
     }
     ///One native440330 growth body for retained unaligned Text owners.
     ///Native X storage has capacity but no first writer on construction paths.
-    pub(super) fn resize_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
+    pub(crate) fn resize_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
         if !self.x.is_empty() || x.len() != self.colors.len() {
             return Err("unaligned Text capacity authority differs".into());
         }
@@ -628,7 +628,7 @@ impl Text {
         }
         Ok(())
     }
-    pub(super) fn reset_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
+    pub(crate) fn reset_unaligned(&mut self, x: &mut Vec<Option<i16>>) -> Result<(), String> {
         self.reset_before_resize()?;
         self.resize_unaligned(x)?;
         self.colors[..self.group.count as usize].fill(0);
@@ -747,7 +747,7 @@ impl Text {
     }
     ///441770 retained construction branch, zero extra arguments. Uses the
     ///SAME formatter as literal; retains native reached selector/scale/mode.
-    pub(super) fn literal441770_unaligned(
+    pub(crate) fn literal441770_unaligned(
         &mut self,
         font: &mut Fonts,
         format: &[u8],
@@ -1039,8 +1039,8 @@ impl Literals {
 
 #[cfg(test)]
 mod style_nine_regressions {
-    use super::super::main_panel::regression_tests::{fonts, set_metric, text};
     use super::*;
+    use crate::intro::camera_live::main_panel::regression_tests::{fonts, set_metric, text};
     #[test]
     fn style_nine_centers_from_first_row_rise_plus_truncated_height_only() {
         let mut fonts = fonts();
@@ -1133,8 +1133,8 @@ mod style_nine_regressions {
 
 #[cfg(test)]
 mod active_font_regressions {
-    use super::super::main_panel::regression_tests::{fonts, text};
     use super::*;
+    use crate::intro::camera_live::main_panel::regression_tests::{fonts, text};
     fn divergent() -> Fonts {
         let mut font = fonts();
         let mut active = font.fonts[&0].clone();

@@ -29,16 +29,17 @@ pub(crate) mod resident_descriptors;
 pub mod case_zero;
 #[path = "camera_live/case_zero_factories.rs"]
 pub mod case_zero_factories;
-#[path = "camera_live/case_zero_text.rs"]
-pub mod case_zero_text;
+pub use crate::ui_text::case_zero_text;
 #[path = "camera_live/f_generic.rs"]
 pub(crate) mod f_generic;
 #[path = "camera_live/other_child_resets.rs"]
 pub mod other_child_resets;
 #[path = "camera_live/strategic_panel.rs"]
 pub(crate) mod strategic_panel;
-#[path = "camera_live/ui_text_resources.rs"]
-pub(crate) mod ui_text_resources;
+pub(crate) use crate::ui_text::resources as ui_text_resources;
+#[cfg(test)]
+#[path = "camera_live/ui_text_resource_tests.rs"]
+mod ui_text_resource_tests;
 #[path = "camera_live/upper_f.rs"]
 pub(crate) mod upper_f;
 
@@ -103,8 +104,7 @@ pub(crate) mod primitive_factory;
 
 #[path = "camera_live/main_construction.rs"]
 pub(crate) mod main_construction;
-#[path = "camera_live/process_images.rs"]
-pub(crate) mod process_images;
+pub(crate) use crate::ui_text::images as process_images;
 #[cfg(test)]
 #[path = "camera_live/process_owner_tests.rs"]
 mod process_owner_tests;

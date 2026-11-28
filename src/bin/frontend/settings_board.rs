@@ -381,7 +381,7 @@ mod tests {
             .unwrap();
         assert!(surfaces.iter().any(|surface| !surface.vertices.is_empty()));
         let executable = read("EXE");
-        let mut resources = crate::intro::camera_live::ui_text_resources::UiTextResources::load(
+        let mut resources = crate::ui_text::resources::UiTextResources::load(
             &executable,
             &installer,
             &language,

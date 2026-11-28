@@ -14,7 +14,7 @@ pub struct Record {
     pub scale: Option<f32>,
 }
 pub struct Images {
-    pub(super) construction_identity: super::main_construction::ResourceIdentity,
+    pub(crate) construction_identity: super::ResourceIdentity,
     pub path: String,
     pub archive_range: Range<usize>,
     pub metadata: [u32; 13],
@@ -86,7 +86,7 @@ impl Images {
             return Err("4c0f9f unaccounted selected collection tail".into());
         }
         Ok(Self {
-            construction_identity: super::main_construction::ResourceIdentity::new(),
+            construction_identity: super::ResourceIdentity::new(),
             path,
             archive_range: first..last,
             metadata: e.metadata,

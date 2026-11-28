@@ -25,7 +25,7 @@ pub struct Assets {
 }
 impl Assets {
     pub(crate) fn load_shared(
-        shared: &crate::intro::camera_live::ui_text_resources::UiTextResources,
+        shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         let rows = shared.fonts().language.rows();
         let row = |id: u32| {

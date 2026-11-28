@@ -22,19 +22,14 @@ pub struct Navigation {
 }
 impl Navigation {
     pub fn load(index: &ArchiveIndex, archive: &[u8], executable: &[u8]) -> Result<Self, String> {
-        let images = crate::intro::camera_live::process_images::Images::load(
-            executable,
-            index,
-            archive,
-            [640, 480],
-        )?;
+        let images = crate::ui_text::images::Images::load(executable, index, archive, [640, 480])?;
         Self::load_shared(index, archive, executable, &images)
     }
     pub(crate) fn load_shared(
         index: &ArchiveIndex,
         archive: &[u8],
         executable: &[u8],
-        images: &crate::intro::camera_live::process_images::Images,
+        images: &crate::ui_text::images::Images,
     ) -> Result<Self, String> {
         let (mut surfaces, regions) = ui::panel_base(
             index,

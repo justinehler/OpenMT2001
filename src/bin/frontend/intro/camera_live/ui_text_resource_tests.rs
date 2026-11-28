@@ -1,10 +1,12 @@
 //! Supplied-original regressions are ignored and use real loaders
 //! and retained CPU owners. No production provider or font fallback is faked.
-use super::super::{
+use super::{
     case_zero_text::{ErrorWord, ScratchByte},
     main_panel,
 };
-use super::*;
+use crate::ui_text::{case_zero_text::Fonts, resources::*};
+use openmt2001::{archive::ArchiveIndex, font::Font, pe::PeImage};
+use std::{fs, path::PathBuf};
 fn path(key: &str) -> PathBuf {
     openmt2001::fixtures::path(key)
 }
@@ -386,7 +388,7 @@ fn shared_text_real_intro_asset_load_retains_process_resource_and_default_ret() 
 ///with the real resource producer borrowed rather than a second installed font.
 struct BorrowedMain<'a> {
     main: main_panel::State,
-    panel: super::super::ui_graph::Panel,
+    panel: super::ui_graph::Panel,
     resources: &'a mut UiTextResources,
 }
 impl main_panel::Access for BorrowedMain<'_> {
@@ -402,10 +404,10 @@ impl main_panel::Access for BorrowedMain<'_> {
     fn text_parts_mut(&mut self) -> Result<(&mut main_panel::State, &mut Fonts), String> {
         Ok((&mut self.main, self.resources.fonts_mut()))
     }
-    fn panel(&self) -> Result<&super::super::ui_graph::Panel, String> {
+    fn panel(&self) -> Result<&super::ui_graph::Panel, String> {
         Ok(&self.panel)
     }
-    fn panel_mut(&mut self) -> Result<&mut super::super::ui_graph::Panel, String> {
+    fn panel_mut(&mut self) -> Result<&mut super::ui_graph::Panel, String> {
         Ok(&mut self.panel)
     }
 }

@@ -116,6 +116,8 @@ pub mod time_panel;
 mod tooltip;
 #[path = "frontend/ui.rs"]
 mod ui;
+#[path = "frontend/ui_text.rs"]
+mod ui_text;
 fn main() -> std::process::ExitCode {
     if std::env::args().nth(1).as_deref() == Some("headless") {
         std::process::exit(headless::main(std::env::args().skip(2)));
