@@ -46,6 +46,15 @@ pub(crate) fn capture_scene_overlays(
 ) {
     capture_impl(renderer, &[], panels, Some(scene), None, path);
 }
+pub(crate) fn capture_scene_overlays_at_size(
+    renderer: &Renderer,
+    scene: &Scene,
+    panels: &[&PreparedScene],
+    path: &str,
+    size: [u32; 2],
+) {
+    capture_impl_at_size(renderer, &[], panels, Some(scene), None, path, size);
+}
 pub(crate) fn capture_scene_world_overlays(
     renderer: &Renderer,
     scene: &Scene,
