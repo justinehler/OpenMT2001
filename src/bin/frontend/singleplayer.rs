@@ -28,11 +28,8 @@ const SCENARIO_LIST_SCROLL: [f32; 4] = [303., 97., 319., 445.];
 const SCENARIO_ROW_HEIGHT: f32 = 12.;
 const SCENARIO_CUP_EMPTY: usize = 296;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Preview {
-    Scenario(u32),
-    Sandbox,
-}
+// Launch choices moved into the library with the Session inputs (#99).
+pub use openmt2001::singleplayer_setup::{Difficulty, Preview, Setup};
 
 #[cfg(test)]
 mod campaign_picker_tests {
@@ -727,22 +724,6 @@ mod character_biography_tests {
         .unwrap();
         assert_eq!(regions[68], bounds);
     }
-}
-#[derive(Clone, Copy, Debug)]
-pub enum Difficulty {
-    Easy,
-    Medium,
-    Hard,
-}
-#[derive(Clone, Debug)]
-pub struct Setup {
-    pub preview: Preview,
-    pub difficulty: Difficulty,
-    pub character_index: usize,
-    pub profile_name: Vec<u8>,
-    /// The selected profile's authoritative progression at launch time.
-    pub catalog: openmt2001::level_catalog::Catalog,
-    pub profile_path: PathBuf,
 }
 struct Panel {
     base: Vec<Surface>,
