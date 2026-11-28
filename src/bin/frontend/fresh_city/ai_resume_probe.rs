@@ -259,7 +259,6 @@ fn run(controlled_retail: bool) {
         let mut settings_applied = None;
         let mut retail_restocked = false;
         let mut controlled_bakery = None;
-        let mut auction_announcements = 0;
         let horizon = if key == "OPENMT2001_SAVE_TWO" {
             14_200
         } else {
@@ -382,7 +381,6 @@ fn run(controlled_retail: bool) {
                 assert!((word(0x5c) as usize) < session.roster.manager.players.len());
                 assert_eq!(auction.presentation.countdown, 120 * 50);
                 assert_eq!(session.world.categories[category as usize][0x6c], 1);
-                auction_announcements += 1;
             }
             completed += 1;
             if outcome_notice.is_some() {
@@ -547,10 +545,13 @@ fn run(controlled_retail: bool) {
             "saved AI stopped before a real controller interval"
         );
         if key == "OPENMT2001_SAVE_TWO" {
-            assert!(
-                auction_announcements > 0,
-                "resumed AI never announced an auction"
-            );
+            // Native loading preserves the AI RNG instead of drawing a fresh
+            // build delay. Its resulting strategy need not auction a block
+            // within this bounded run; require overnight management instead.
+            let (changed, _, _, _, hour) =
+                settings_change.expect("resumed AI never revised overnight retail settings");
+            assert_eq!(hour, 2);
+            assert_eq!(settings_applied, Some(changed + 25));
             assert!(
                 ai_business_opened,
                 "resumed AI did not open an owned business"
