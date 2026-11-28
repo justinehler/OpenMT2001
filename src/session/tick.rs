@@ -620,8 +620,7 @@ impl Session<'_> {
                                                         buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
                                                         catalog:&city.catalog.info,products:&city.catalog.products,commodities:&city.commodities.rows,
                                                         utilities:context.utilities.enabled.map(u8::from),hour:clock.hour() as i32,tick:clock.timing[1],
-                                                        // Fresh-process BSS word7a3f90, outside the business pool.
-                                                        unselected_building:0,
+                                                        unselected_building:event_cards::selection::unselected_building(&city.configuration.timetables),
                                                     },
                                                     targets:event_cards::lifecycle::Targets {
                                                         buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
