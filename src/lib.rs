@@ -89,6 +89,7 @@ pub mod atlas;
 #[cfg(feature = "lua4")]
 pub mod business_script;
 pub mod camera;
+pub mod cash_arrow;
 pub mod category;
 pub mod category_lease;
 #[cfg(feature = "lua4")]
