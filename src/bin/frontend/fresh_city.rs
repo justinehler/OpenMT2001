@@ -1053,6 +1053,7 @@ impl<'data> Session<'data> {
         } else {
             openmt2001::render_scene::assemble_with_style(request, style)?
         };
+        scene.set_street_furniture_era(self.world.clock.calendar[2])?;
         self.refresh_scene_records(&mut scene)?;
         if let Some(image) = self.window_texture.current() {
             scene.set_window_pixels(image.pixels)?;

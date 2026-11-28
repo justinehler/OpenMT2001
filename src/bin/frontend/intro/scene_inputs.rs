@@ -1888,6 +1888,8 @@ impl SceneInputs {
                 // Move the base out while patching: a pose/metadata error can
                 // leave partial writes, and must discard that base. Successful
                 // snapshots clone only once for their actor layers.
+                updated_city_draws
+                    .extend(city.set_street_furniture_era(session.world.clock.calendar[2])?);
                 session.refresh_scene_records(&mut city)?;
                 if let Some(image) = session.window_texture.current() {
                     updated_city_draws.extend(city.set_window_pixels(image.pixels)?);

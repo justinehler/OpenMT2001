@@ -83,6 +83,7 @@ fn normal_city_scene_updates(
 ) -> Result<Vec<usize>, String> {
     if let Some(detail) = detail {
         changed.extend(scene.apply_normal_star_detail(detail, camera)?);
+        changed.extend(scene.set_street_furniture_detail(detail)?);
     }
     changed.sort_unstable();
     changed.dedup();
