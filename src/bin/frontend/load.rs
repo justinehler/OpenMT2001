@@ -481,6 +481,7 @@ impl Load {
         renderer: &Renderer,
         selected: Option<usize>,
         pressed: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
@@ -700,6 +701,7 @@ impl Load {
             )?;
         }
         let mut surfaces = self.base.clone();
+        crate::menu::modal_frame::set_alpha(&mut surfaces, panel_alpha);
         surfaces.push(shapes);
         surfaces.push(slider_shapes);
         surfaces.extend(controls);
@@ -1341,7 +1343,7 @@ mod tests {
             animated: true,
         })
         .unwrap();
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
@@ -1349,7 +1351,7 @@ mod tests {
             "work/frontend/load-open-unselected-city.png",
         );
         load.chosen = load.entries.iter().position(|entry| entry.path == original);
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
@@ -1370,7 +1372,7 @@ mod tests {
         assert!(load.chosen.is_some());
         load.activate(2);
         assert!(load.delete_confirmation.is_some());
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 125).unwrap();
         let prompt = prompt_assets
             .prepare_dialog(&renderer, load.generic_prompt().unwrap(), [-1.; 2], None)
             .unwrap();

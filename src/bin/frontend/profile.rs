@@ -292,6 +292,9 @@ impl Profile {
             pointer_position: None,
         })
     }
+    pub(crate) fn modal_open(&self) -> bool {
+        self.name.is_some() || self.deleting
+    }
     pub fn count(&self) -> usize {
         if self.name.is_some() || self.deleting {
             2
@@ -501,6 +504,7 @@ impl Profile {
         renderer: &Renderer,
         selected: Option<usize>,
         pressed: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
@@ -681,7 +685,9 @@ impl Profile {
                 0xffff9999,
             )?;
         }
-        let mut draws: Vec<_> = self.assets.base.iter().map(Surface::draw).collect();
+        let backdrop = crate::menu::modal_frame::Backdrop::new(&self.assets.base[..5], panel_alpha);
+        let mut draws = backdrop.draws();
+        draws.extend(self.assets.base[5..].iter().map(Surface::draw));
         draws.push(shapes.draw());
         draws.push(slider_shapes.draw());
         draws.extend(slider_controls.iter().map(Surface::draw));
@@ -931,7 +937,7 @@ mod tests {
             animated: true,
         })
         .unwrap();
-        let panel = profile.draw(&renderer, None, false).unwrap();
+        let panel = profile.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
