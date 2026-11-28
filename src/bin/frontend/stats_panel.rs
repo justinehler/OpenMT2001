@@ -128,6 +128,21 @@ fn stats_mesh_triangles<'a>(
 }
 
 impl Assets {
+    #[cfg(test)]
+    pub(crate) fn input_test_assets() -> Self {
+        Self {
+            model: vec![],
+            regions: vec![("STATS_OK_BUTTON".into(), [300., 400., 340., 430.])],
+            generic: vec![],
+            fonts: vec![],
+            tabs: Default::default(),
+            strings: vec![],
+            colors: [0; 10],
+            icons: [[0; 2]; 10],
+            body: 0,
+            root: [50., 40., 550., 450.],
+        }
+    }
     pub fn load(
         index: &ArchiveIndex,
         archive: &[u8],
