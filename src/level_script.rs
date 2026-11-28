@@ -2,6 +2,7 @@
 //! The host owns script buffers, geometry registration, notifications and game
 //! objectives. This is the map/population stage, not the complete boot sequence.
 pub mod objective_selection;
+pub mod random;
 
 use crate::{
     business_binding,
