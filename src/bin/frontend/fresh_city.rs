@@ -3697,7 +3697,8 @@ mod tests {
                     ));
                 }
                 tick::Event::Command(
-                    live_commands::Event::RefreshInterface
+                    live_commands::Event::AccountPosted(_)
+                    | live_commands::Event::RefreshInterface
                     | live_commands::Event::ConstructionNotice { .. }
                     | live_commands::Event::Business(
                         openmt2001::business_binding::Call::RefreshBuilding { .. },
@@ -5146,7 +5147,13 @@ mod tests {
                     &mut tasks,
                     Some(host_frame * 40),
                     |event, clock, _, _, tasks, _| {
-                        let TimedEvent::Logic(Event::Helper(address)) = event else {
+                        if matches!(event, openmt2001::level_runtime::Event::AccountPosted(_)) {
+                            return Ok(0);
+                        }
+                        let openmt2001::level_runtime::Event::Scheduled(TimedEvent::Logic(
+                            Event::Helper(address),
+                        )) = event
+                        else {
                             return Err(format!(
                                 "unexpected retained population fixture boundary {event:?}"
                             ));

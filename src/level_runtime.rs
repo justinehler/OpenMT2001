@@ -279,11 +279,11 @@ impl Population {
                 let owners = self.shopping.categories.map(|category| category.owner);
                 utilities.owners = [2, 35, 39, 42].map(|i| owners[i]);
                 self.properties.owners = [4, 17, 43, 44].map(|i| owners[i]);
-                city.settings.selected_income().pay_owners(
+                postings.extend(city.settings.selected_income().pay_owners(
                     utilities,
                     &mut self.properties,
                     &mut city.ledgers.players,
-                )?;
+                )?);
             }
             Event::MorningResidents => {
                 self.refresh_city(city, board)?;
@@ -512,6 +512,7 @@ impl Population {
         tick: u32,
         hour: u32,
         distance_disabled: bool,
+        postings: &mut Vec<crate::economy::AccountPosting>,
         other: impl FnMut(
             usize,
             crate::resident::ActionHelper,
@@ -526,6 +527,7 @@ impl Population {
             0x269ec3,
         ];
         let mut population = shopping::Population {
+            postings,
             topology: &mut self.shopping,
             settings: &self.settings,
             routes: &mut self.routes,
@@ -581,6 +583,7 @@ impl Population {
         ) -> Result<(), String>,
     ) -> Result<(), String> {
         shopping::Population {
+            postings: &mut Vec::new(),
             topology: &mut self.shopping,
             settings: &self.settings,
             routes: &mut self.routes,
@@ -601,6 +604,13 @@ fn building_prefixes(city: &City) -> Vec<[u8; 64]> {
         .collect()
 }
 
+/// Notifications from the retained dispatcher, including completed account posts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Event<T> {
+    Scheduled(T),
+    AccountPosted(crate::economy::AccountPosting),
+}
+
 /// The normal scheduler borrows retained population and traffic state. The
 /// callback must implement every other world/host boundary synchronously;
 /// returning success is never supplied implicitly for an unknown operation.
@@ -618,7 +628,7 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
         world: &mut crate::level_startup::World,
         controls: &mut crate::scheduler::Controls,
         boundary: impl FnMut(
-            crate::scheduler::Event,
+            Event<crate::scheduler::Event>,
             &mut crate::clock::Clock,
             &mut City,
             &mut crate::scheduler::Controls,
@@ -637,7 +647,7 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
         controls: &mut crate::scheduler::Controls,
         mut animations: impl FnMut() -> Result<(), String>,
         mut boundary: impl FnMut(
-            crate::scheduler::Event,
+            Event<crate::scheduler::Event>,
             &mut crate::clock::Clock,
             &mut City,
             &mut crate::scheduler::Controls,
@@ -645,13 +655,31 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
         ) -> Result<u32, String>,
     ) -> Result<(), String> {
         crate::scheduler::advance(&mut world.clock, controls, |event, clock, controls| {
-            if self.event(event, clock, &mut world.city)? {
+            let mut postings = Vec::new();
+            let result = self.event(event, clock, &mut world.city, &mut postings);
+            // A later resident failure does not undo preceding account posts.
+            for posting in postings {
+                boundary(
+                    Event::AccountPosted(posting),
+                    clock,
+                    &mut world.city,
+                    controls,
+                    self,
+                )?;
+            }
+            if result? {
                 if matches!(event, crate::scheduler::Event::Animations) {
                     animations()?;
                 }
                 Ok(0)
             } else {
-                boundary(event, clock, &mut world.city, controls, self)
+                boundary(
+                    Event::Scheduled(event),
+                    clock,
+                    &mut world.city,
+                    controls,
+                    self,
+                )
             }
         })
     }
@@ -666,7 +694,7 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
         tasks: &mut Vec<crate::timers::Task>,
         milliseconds: Option<u32>,
         mut boundary: impl FnMut(
-            crate::scheduler::TimedEvent,
+            Event<crate::scheduler::TimedEvent>,
             &mut crate::clock::Clock,
             &mut City,
             &mut crate::scheduler::Controls,
@@ -681,12 +709,31 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
             &mut world.clock,
             controls,
             |event, clock, controls, tasks| {
-                if let crate::scheduler::TimedEvent::Logic(logic) = event
-                    && self.event(logic, clock, &mut world.city)?
-                {
-                    return Ok(0);
+                if let crate::scheduler::TimedEvent::Logic(logic) = event {
+                    let mut postings = Vec::new();
+                    let result = self.event(logic, clock, &mut world.city, &mut postings);
+                    for posting in postings {
+                        boundary(
+                            Event::AccountPosted(posting),
+                            clock,
+                            &mut world.city,
+                            controls,
+                            tasks,
+                            self,
+                        )?;
+                    }
+                    if result? {
+                        return Ok(0);
+                    }
                 }
-                boundary(event, clock, &mut world.city, controls, tasks, self)
+                boundary(
+                    Event::Scheduled(event),
+                    clock,
+                    &mut world.city,
+                    controls,
+                    tasks,
+                    self,
+                )
             },
         )
     }
@@ -696,6 +743,7 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
         event: crate::scheduler::Event,
         clock: &mut crate::clock::Clock,
         city: &mut City,
+        postings: &mut Vec<crate::economy::AccountPosting>,
     ) -> Result<bool, String> {
         match event {
             crate::scheduler::Event::Residents => self.population.tick_residents(
@@ -703,6 +751,7 @@ impl<M: crate::traffic::road::runtime::VehicleModels> Dispatch<'_, M> {
                 clock.timing[0],
                 clock.hour(),
                 self.distance_disabled,
+                postings,
                 |index, helper, _, _| Err(format!("resident {index} requires {helper:?}")),
             )?,
             crate::scheduler::Event::Animations => {

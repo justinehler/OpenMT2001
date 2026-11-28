@@ -2632,13 +2632,14 @@ impl Host {
                     omitted.insert(0x407660);
                     Ok(0)
                 }
-                Event::AccountPosted(posting)
+                Event::AccountPosted(_)
+                | Event::Command(openmt2001::live_commands::Event::AccountPosted(_))
                 | Event::Command(openmt2001::live_commands::Event::EventCardEffect(
-                    openmt2001::event_cards::effects::Call::AccountPosted(posting),
-                )) => account_ui_post(posting, current_slot, |amount| {
+                    openmt2001::event_cards::effects::Call::AccountPosted(_),
+                )) => account_event_ui_post(&event, current_slot, |amount| {
                     ledger_ui_post(&mut cash_arrow.borrow_mut(), &gameplay_sound, true, amount,
                         assets.image.f32_at(0x525040)?)
-                }),
+                }).expect("matched account posting"),
                 Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::Posted { player, amount, .. },
                 )) => {
@@ -3438,6 +3439,25 @@ impl Host {
             }
         }
     }
+}
+
+/// Common account notification route used by live ticks and command effects.
+fn account_event_ui_post(
+    event: &fresh_city::tick::Event<'_>,
+    current_slot: Option<u8>,
+    post: impl FnMut(f32) -> Result<u32, String>,
+) -> Option<Result<u32, String>> {
+    use fresh_city::tick::Event;
+    use openmt2001::{event_cards::effects, live_commands};
+    let posting = match event {
+        Event::AccountPosted(posting)
+        | Event::Command(live_commands::Event::AccountPosted(posting))
+        | Event::Command(live_commands::Event::EventCardEffect(effects::Call::AccountPosted(
+            posting,
+        ))) => *posting,
+        _ => return None,
+    };
+    Some(account_ui_post(posting, current_slot, post))
 }
 
 /// Route an already-applied posting without touching balances or netting amounts.
@@ -4419,3 +4439,7 @@ mod final_statistics_tests;
 #[cfg(test)]
 #[path = "live_host/ai_warning_tests.rs"]
 mod ai_warning_tests;
+
+#[cfg(test)]
+#[path = "account_posting_tests.rs"]
+mod account_posting_tests;

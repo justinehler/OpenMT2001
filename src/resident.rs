@@ -1178,6 +1178,7 @@ pub struct RetailWorld<'a> {
 
 /// Mutable city state needed to travel to and buy from a selected local business.
 pub struct LocalPurchaseState<'a, 'w> {
+    pub postings: &'a mut Vec<crate::economy::AccountPosting>,
     pub retail: &'a RetailWorld<'w>,
     pub centers: &'a [[f32; 2]; 52],
     pub boundary: i32,
@@ -1920,11 +1921,12 @@ impl Resident {
                 state.local.category_counts,
             ),
             ActionHelper::At45f660 => {
-                r.purchase_selected(
+                r.purchase_selected_with_postings(
                     state.local.retail,
                     state.local.businesses,
                     state.local.accounts,
                     state.local.owners,
+                    state.local.postings,
                 )?;
                 Ok(false)
             }
@@ -2311,11 +2313,12 @@ impl Resident {
                     state.category_counts,
                 ),
                 ActionHelper::At45f660 => {
-                    r.purchase_selected(
+                    r.purchase_selected_with_postings(
                         state.retail,
                         state.businesses,
                         state.accounts,
                         state.owners,
+                        state.postings,
                     )?;
                     Ok(false)
                 }
@@ -2671,6 +2674,18 @@ impl Resident {
         accounts: &mut [SpendingAccount],
         owners: &mut [crate::economy::PlayerAccount],
     ) -> Result<Option<i32>, String> {
+        self.purchase_selected_with_postings(world, businesses, accounts, owners, &mut Vec::new())
+    }
+
+    /// Retain each actual seller posting, using its independently rounded amount.
+    pub fn purchase_selected_with_postings(
+        &mut self,
+        world: &RetailWorld<'_>,
+        businesses: &mut [[u8; 544]],
+        accounts: &mut [SpendingAccount],
+        owners: &mut [crate::economy::PlayerAccount],
+        postings: &mut Vec<crate::economy::AccountPosting>,
+    ) -> Result<Option<i32>, String> {
         let building = i16::from_le_bytes(self.bytes[0x46..0x48].try_into().unwrap());
         let link = usize::try_from(building)
             .ok()
@@ -2718,7 +2733,8 @@ impl Resident {
                     .ok_or("retail owner leaves player pool")?,
             )
         };
-        self.purchase_resolved(
+        let owner_id = business[0xa];
+        self.purchase_resolved_with_postings(
             business,
             account,
             RetailInputs {
@@ -2729,6 +2745,12 @@ impl Resident {
                 tick: world.tick,
             },
             owner,
+            |amount| {
+                postings.push(crate::economy::AccountPosting {
+                    player: usize::from(owner_id - 1),
+                    amount,
+                })
+            },
         )
     }
 
@@ -3303,10 +3325,22 @@ impl Resident {
         business: &mut [u8; 0x220],
         account: &mut SpendingAccount,
         inputs: RetailInputs,
-        mut owner: Option<&mut crate::economy::PlayerAccount>,
+        owner: Option<&mut crate::economy::PlayerAccount>,
     ) -> Result<Option<i32>, String> {
+        self.purchase_resolved_with_postings(business, account, inputs, owner, |_| {})
+    }
+
+    fn purchase_resolved_with_postings(
+        &mut self,
+        business: &mut [u8; 0x220],
+        account: &mut SpendingAccount,
+        inputs: RetailInputs,
+        owner: Option<&mut crate::economy::PlayerAccount>,
+        mut posting: impl FnMut(f32),
+    ) -> Result<Option<i32>, String> {
+        let mut owner = owner;
         self.purchase_with_seller(business, account, inputs, |record, commodity, quantity| {
-            crate::economy::purchase_business_record(
+            if let Some(amount) = crate::economy::purchase_business_record(
                 record,
                 inputs.slot,
                 commodity,
@@ -3314,7 +3348,10 @@ impl Resident {
                 quantity,
                 inputs.tick,
                 owner.take(),
-            )
+            )? {
+                posting(amount);
+            }
+            Ok(())
         })
     }
 
@@ -4839,6 +4876,7 @@ mod tests {
                                     _: &mut crate::scheduler::Controls|
                  -> Result<u32, String> {
                     let mut population = crate::shopping::Population {
+                        postings: &mut Vec::new(),
                         topology: &mut topology,
                         settings: &shopping_settings,
                         routes: &mut routes,
@@ -5150,6 +5188,7 @@ mod tests {
                         &mut auxiliary,
                         &mut super::ShoppingState {
                             local: super::LocalPurchaseState {
+                                postings: &mut Vec::new(),
                                 retail: &retail,
                                 businesses: &mut [],
                                 accounts: &mut [],
@@ -5356,6 +5395,7 @@ mod tests {
                         &mut auxiliary,
                         &mut super::ShoppingState {
                             local: super::LocalPurchaseState {
+                                postings: &mut Vec::new(),
                                 retail: &retail,
                                 centers: &[[0.; 2]; 52],
                                 boundary: 31,
@@ -5915,6 +5955,7 @@ mod tests {
                         &mut auxiliary,
                         &mut super::ShoppingState {
                             local: super::LocalPurchaseState {
+                                postings: &mut Vec::new(),
                                 retail: &retail,
                                 centers: &centers,
                                 boundary: 31,

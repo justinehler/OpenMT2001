@@ -157,6 +157,7 @@ impl CommandContext<'_, '_> {
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
+    AccountPosted(economy::AccountPosting),
     PropertyOffer(crate::property_offer::Call),
     LeaseNotification(crate::category::Call),
     /// Original465490 visual/interface prefix; return4b5370 prior interface mode.
@@ -1917,6 +1918,7 @@ fn bind_open(
             })
         })
         .collect();
+    let event = std::cell::RefCell::new(&mut event);
     let accounts = std::cell::RefCell::new(&mut city.ledgers.players);
     let mut world = business_binding::World {
         buildings: &mut city.buildings,
@@ -1965,12 +1967,20 @@ fn bind_open(
                         .position(|p| p.as_ref().is_some_and(|p| p.identity == identity))
                         .ok_or("business landlord unresolved")?;
                     accounts.borrow_mut()[slot].post(amount, 0x22)?;
+                    event.borrow_mut()(Event::AccountPosted(economy::AccountPosting {
+                        player: slot,
+                        amount,
+                    }))?;
                 }
                 business_binding::Call::ChargeUtilities { business } => {
                     world.assess_binding_utilities(business, utilities)?
                 }
                 business_binding::Call::PayUtilityOwners => {
-                    utilities.pay_owners(&mut accounts.borrow_mut(), context.utility_factor)?
+                    for posting in
+                        utilities.pay_owners(&mut accounts.borrow_mut(), context.utility_factor)?
+                    {
+                        event.borrow_mut()(Event::AccountPosted(posting))?;
+                    }
                 }
                 business_binding::Call::DetachBusiness { business } => {
                     DetachRuntime {
@@ -1988,7 +1998,7 @@ fn bind_open(
                         world,
                         residents,
                         context,
-                        &mut event,
+                        &mut **event.borrow_mut(),
                     )?;
                 }
                 business_binding::Call::NotifyOwner {
@@ -2012,7 +2022,7 @@ fn bind_open(
                         &city.catalog.products,
                     )?
                 }
-                other => event(Event::Business(other))?,
+                other => event.borrow_mut()(Event::Business(other))?,
             }
             Ok(())
         },
@@ -2029,6 +2039,10 @@ fn bind_open(
                     .get_mut((i32::from(owner) - 1) as usize)
                     .ok_or("initial stock owner unresolved")?
                     .post(amount, 0x11)?;
+                event.borrow_mut()(Event::AccountPosted(economy::AccountPosting {
+                    player: (i32::from(owner) - 1) as usize,
+                    amount,
+                }))?;
             }
             Ok(())
         },
