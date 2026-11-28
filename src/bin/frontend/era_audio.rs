@@ -156,6 +156,8 @@ pub struct Player {
     song: Option<crate::audio_bus::focus::Music>,
     pending: Option<(bool, TrackDecode)>,
     pending_token: Option<crate::audio_bus::focus::MusicToken>,
+    prepared: Option<(bool, Vec<f32>)>,
+    change_queued: bool,
     before_six: Option<(u32, rodio::Sink)>,
     next_handle: u32,
 }
@@ -171,6 +173,8 @@ impl Player {
             song: None,
             pending: None,
             pending_token: None,
+            prepared: None,
+            change_queued: false,
             before_six: None,
             next_handle: 1,
         }
@@ -184,7 +188,7 @@ impl Player {
         if self.audio.same_owner(&audio) {
             return Ok(());
         }
-        if self.song.is_some() || self.pending.is_some() {
+        if self.song.is_some() || self.pending.is_some() || self.prepared.is_some() {
             return Err("Cannot replace an active era music owner".into());
         }
         self.audio = audio;
@@ -216,35 +220,111 @@ impl Player {
         Ok(())
     }
 
-    /// Finish a selected song without blocking the UI frame on WMA decoding.
-    /// A later Select or Stop drops the pending receiver, so an older decode
-    /// cannot revive music after the city changes era or enters a result view.
+    /// Poll decoding without advancing the per-frame fade. Camera request drains
+    /// can call this several times in one draw; they are not audio services.
     pub fn poll(&mut self) -> Result<(), String> {
         let Some((_, receiver)) = &self.pending else {
             return Ok(());
         };
-        match receiver.try_recv() {
-            Ok(result) => {
-                let (repeat, _) = self.pending.take().unwrap();
-                let token = self
-                    .pending_token
-                    .take()
-                    .ok_or("Era decode has no generation token")?;
-                if !token.is_current() {
-                    return Err("Stale era decode generation".into());
-                }
-                let samples = result?;
-                let source = rodio::buffer::SamplesBuffer::new(2, 44_100, samples);
-                self.start_song(source, repeat, token)?;
-                Ok(())
-            }
-            Err(mpsc::TryRecvError::Empty) => Ok(()),
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending = None;
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return Ok(()),
+            Err(mpsc::TryRecvError::Disconnected) => Err("era music decoder disconnected".into()),
+        };
+        let (repeat, _) = self.pending.take().ok_or("Era decode missing")?;
+        if !self
+            .pending_token
+            .as_ref()
+            .is_some_and(|token| token.is_current())
+        {
+            self.pending_token = None;
+            self.change_queued = false;
+            return Err("Stale era decode generation".into());
+        }
+        match result {
+            Ok(samples) => self.prepared = Some((repeat, samples)),
+            Err(error) => {
                 self.pending_token = None;
-                Err("era music decoder disconnected".into())
+                self.change_queued = false;
+                return Err(error);
             }
         }
+        if !self.change_queued {
+            self.replace_song()?;
+        }
+        Ok(())
+    }
+
+    fn replace_song(&mut self) -> Result<(), String> {
+        let Some((repeat, samples)) = self.prepared.take() else {
+            return Ok(());
+        };
+        let token = self
+            .pending_token
+            .take()
+            .ok_or("Era decode has no generation token")?;
+        if !token.is_current() {
+            return Err("Stale era decode generation".into());
+        }
+        if let Some(old) = self.song.take() {
+            old.stop();
+        }
+        self.change_queued = false;
+        // Registration applies the current target before any new PCM is appended.
+        self.start_song(
+            rodio::buffer::SamplesBuffer::new(2, 44_100, samples),
+            repeat,
+            token,
+        )
+    }
+
+    /// Exactly one 0x4acd30 step per frontend audio service, independent of
+    /// simulation pause/speed. Keep the outgoing source alive while decoding.
+    pub fn service(&mut self) -> Result<(), String> {
+        if !self.change_queued {
+            return Ok(());
+        }
+        if let Some(song) = &self.song {
+            let level = song.source_level();
+            if level >= 30 {
+                song.set_source_level(level - 1);
+                return Ok(());
+            }
+        }
+        // A slow decoder can delay replacement, but never stop the old song
+        // early or consume extra fade steps through request polling.
+        self.replace_song()
+    }
+
+    fn select_with(
+        &mut self,
+        era: u32,
+        repeat: bool,
+        decoder: impl FnOnce(usize, PathBuf, PathBuf) -> Result<TrackDecode, String>,
+    ) -> Result<(), String> {
+        let index = usize::try_from(era).map_err(|_| "era song index exceeds usize")?;
+        let path = self
+            .assets
+            .songs
+            .get(index)
+            .ok_or("era song index outside original catalog")?
+            .clone();
+        let receiver = decoder(index, self.assets.ffmpeg.clone(), path)?;
+        // A new decode owns its own generation. The old source retains
+        // its owner until replacement, so settings/focus can still reach it.
+        self.music_owner = crate::audio_bus::focus::MusicOwner::new();
+        self.pending = None;
+        self.pending_token = None;
+        self.prepared = None;
+        self.change_queued = repeat && self.song.as_ref().is_some_and(|song| !song.empty());
+        if !self.change_queued
+            && let Some(old) = self.song.take()
+        {
+            old.stop();
+        }
+        self.pending_token = Some(self.music_owner.token()?);
+        self.pending = Some((repeat, receiver));
+        Ok(())
     }
 
     pub fn apply(&mut self, operation: Operation) -> Result<u32, String> {
@@ -253,6 +333,8 @@ impl Player {
                 self.music_owner.cancel()?;
                 self.pending = None;
                 self.pending_token = None;
+                self.prepared = None;
+                self.change_queued = false;
                 if let Some(song) = self.song.take() {
                     song.stop();
                 }
@@ -262,29 +344,16 @@ impl Player {
                 Ok(0)
             }
             Operation::Select { era, repeat } => {
-                let index = usize::try_from(era).map_err(|_| "era song index exceeds usize")?;
-                let path = self
-                    .assets
-                    .songs
-                    .get(index)
-                    .ok_or("era song index outside original catalog")?
-                    .clone();
-                self.music_owner.cancel()?;
-                self.pending = None;
-                self.pending_token = None;
-                if let Some(old) = self.song.take() {
-                    old.stop();
-                }
-                let ffmpeg = self.assets.ffmpeg.clone();
-                let (sender, receiver) = mpsc::channel();
-                std::thread::Builder::new()
-                    .name(format!("openmt-era-music-{index}"))
-                    .spawn(move || {
-                        let _ = sender.send(decode(&ffmpeg, &path));
-                    })
-                    .map_err(|error| format!("era music decoder thread: {error}"))?;
-                self.pending_token = Some(self.music_owner.token()?);
-                self.pending = Some((repeat, receiver));
+                self.select_with(era, repeat, |index, ffmpeg, path| {
+                    let (sender, receiver) = mpsc::channel();
+                    std::thread::Builder::new()
+                        .name(format!("openmt-era-music-{index}"))
+                        .spawn(move || {
+                            let _ = sender.send(decode(&ffmpeg, &path));
+                        })
+                        .map_err(|error| format!("era music decoder thread: {error}"))?;
+                    Ok(receiver)
+                })?;
                 Ok(0)
             }
             Operation::BeforeSixCreate => {
@@ -331,10 +400,15 @@ impl Drop for Player {
         self.music_owner.retire();
         self.pending = None;
         self.pending_token = None;
+        self.prepared = None;
         // Music's Drop stops its non-detached Sink; Bus stream drops afterward.
         self.song = None;
     }
 }
+
+#[cfg(test)]
+#[path = "era_audio_fade_tests.rs"]
+mod fade_tests;
 
 #[cfg(test)]
 mod focus_tests {

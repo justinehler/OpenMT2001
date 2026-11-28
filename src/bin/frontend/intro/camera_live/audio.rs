@@ -3,6 +3,25 @@
 use super::super::Inspection;
 use std::time::Instant;
 
+/// Draw-owned audio service. Request drains also poll decoding, but only this
+/// once-per-draw entry advances the outgoing music level.
+pub(crate) fn service_frame(view: &mut Inspection, allow_music_poll: bool) -> Result<(), String> {
+    service_with_music_poll(view, allow_music_poll)?;
+    if music_admitted(view, allow_music_poll)
+        && let Err(error) = view.era_audio_player.service()
+    {
+        eprintln!("Era music unavailable: {error}");
+    }
+    Ok(())
+}
+fn music_admitted(view: &Inspection, allow_music_poll: bool) -> bool {
+    allow_music_poll
+        && view
+            .music_admission
+            .as_ref()
+            .is_none_or(|gate| gate.permits_attachment())
+}
+
 pub fn service_available(view: &mut Inspection) -> Result<(), String> {
     service_with_music_poll(view, true)
 }
@@ -37,11 +56,7 @@ pub(crate) fn service_with_music_poll(
             .reply
             .send(view.era_audio_player.apply(request.operation));
     }
-    let admitted = allow_music_poll
-        && view
-            .music_admission
-            .as_ref()
-            .is_none_or(|gate| gate.permits_attachment());
+    let admitted = music_admitted(view, allow_music_poll);
     if admitted && let Err(error) = view.era_audio_player.poll() {
         eprintln!("Era music unavailable: {error}");
     }
