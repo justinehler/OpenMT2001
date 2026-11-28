@@ -2,7 +2,10 @@
 //! Fixed 36-byte header, all integers little-endian:
 //! [0..4] "OMT1", [4..6] version u16, [6..8] tag u16,
 //! [8..12] payload byte length u32, [12..28] session bytes, [28..36] sequence u64.
-//! Tags: 1=roster, 2=start, 3=committed transfer. Payloads are field encodings,
+//! Tags: 1=roster, 2=start, 3=committed transfer, 4=Hello, 5=Welcome.
+//! Hello has a zero session and no payload; Welcome has the host's session and
+//! one assigned-slot byte (1 through 5). Both use sequence zero, outside the application
+//! sequence. Payloads are field encodings,
 //! never Rust/native struct copies. Sequences start at zero per adopted link.
 use super::{Content, Error, Frame, Message, Result, Row, RowKind, SLOTS, Start, Transfer};
 
@@ -27,6 +30,9 @@ impl Decoder {
         Ok(frame)
     }
     pub(super) fn accept(&mut self, frame: &Frame) -> Result<()> {
+        if matches!(frame.message, Message::Hello | Message::Welcome { .. }) {
+            return Err(Error::Tag);
+        }
         if frame.session != self.session {
             return Err(Error::Session);
         }
@@ -40,6 +46,12 @@ impl Decoder {
 
 fn validate(message: &Message) -> Result<()> {
     match message {
+        Message::Hello => {}
+        Message::Welcome { slot } => {
+            if !(1..SLOTS as u8).contains(slot) {
+                return Err(Error::Peer);
+            }
+        }
         Message::Roster { content, rows } => {
             content.validate()?;
             let mut tokens = [false; 10];
@@ -71,12 +83,15 @@ fn content(out: &mut Vec<u8>, content: Content) {
     out.extend_from_slice(&content.fingerprint);
 }
 pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
-    if frame.session == [0; 16] {
-        return Err(Error::Session);
-    }
+    envelope(frame)?;
     validate(&frame.message)?;
     let mut payload = Vec::new();
     let tag: u16 = match &frame.message {
+        Message::Hello => 4,
+        Message::Welcome { slot } => {
+            payload.push(*slot);
+            5
+        }
         Message::Roster {
             content: setup,
             rows,
@@ -214,9 +229,6 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
     if bytes.len() > HEADER + length {
         return Err(Error::TrailingBytes);
     }
-    if session == [0; 16] {
-        return Err(Error::Session);
-    }
     let mut reader = Reader {
         bytes: &bytes[HEADER..],
         at: 0,
@@ -243,15 +255,31 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
             amount: reader.word()? as i32,
             due: reader.word()?,
         }),
+        4 => Message::Hello,
+        5 => Message::Welcome {
+            slot: reader.byte()?,
+        },
         _ => return Err(Error::Tag),
     };
     if reader.at != reader.bytes.len() {
         return Err(Error::TrailingBytes);
     }
     validate(&message)?;
-    Ok(Frame {
+    let frame = Frame {
         session,
         sequence,
         message,
-    })
+    };
+    envelope(&frame)?;
+    Ok(frame)
+}
+
+fn envelope(frame: &Frame) -> Result<()> {
+    if matches!(frame.message, Message::Hello) != (frame.session == [0; 16]) {
+        return Err(Error::Session);
+    }
+    if matches!(frame.message, Message::Hello | Message::Welcome { .. }) && frame.sequence != 0 {
+        return Err(Error::Sequence);
+    }
+    Ok(())
 }

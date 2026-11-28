@@ -1,6 +1,7 @@
 //! Process multiplayer owner and modern OpenMT peer protocol, independent of Lua.
-//! #32 wires transport adoption; #33 wires the lobby. Connected startup and
-//! command consumers follow in #30. This API alone opens no connection or match.
+//! Direct-IP transport is pumped explicitly by this owner; #33 wires the lobby.
+//! Connected startup and command consumers follow in #30. Only explicit
+//! listen/connect calls open sockets; there is no menu or match wiring yet.
 //! Ownership references: 0x4e1020, 0x4e2740, 0x451fe0; peer creation: 0x4e1360.
 use std::sync::{
     Mutex, MutexGuard, OnceLock,
@@ -8,8 +9,10 @@ use std::sync::{
 };
 
 pub mod codec;
+pub mod stream;
 #[cfg(test)]
 mod tests;
+pub mod transport;
 
 pub const SLOTS: usize = 6;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -78,6 +81,7 @@ impl SessionBinding {
 pub struct Connection {
     attempt: Attempt,
     slot: u8,
+    identity: u64,
 }
 impl Connection {
     pub fn slot(self) -> u8 {
@@ -86,6 +90,7 @@ impl Connection {
 }
 
 struct Peer {
+    identity: u64,
     authority: bool,
     decoder: codec::Decoder,
 }
@@ -95,6 +100,8 @@ struct State {
     session: Option<[u8; 16]>,
     binding: Option<SessionBinding>,
     peers: [Option<Peer>; SLOTS],
+    next_connection: u64,
+    transport: Option<transport::Transport>,
 }
 impl State {
     fn attempt(&self, attempt: Attempt) -> Result<()> {
@@ -116,6 +123,62 @@ impl State {
             return Err(Error::World);
         }
         Ok(())
+    }
+    fn opened(&mut self, attempt: Attempt, session: [u8; 16]) -> Result<()> {
+        self.attempt(attempt)?;
+        self.phase(Phase::Opening)?;
+        if session == [0; 16] {
+            return Err(Error::Session);
+        }
+        self.session = Some(session);
+        self.phase = Phase::Lobby;
+        Ok(())
+    }
+    fn adopt(&mut self, attempt: Attempt, slot: u8, authority: bool) -> Result<Connection> {
+        self.attempt(attempt)?;
+        self.phase(Phase::Lobby)?;
+        let index = usize::from(slot);
+        if index >= SLOTS
+            || self.peers[index].is_some()
+            || (authority && self.peers.iter().flatten().any(|peer| peer.authority))
+        {
+            return Err(Error::Peer);
+        }
+        let decoder = codec::Decoder::new(self.session.ok_or(Error::Session)?)?;
+        let identity = self.next_connection;
+        self.next_connection = identity.checked_add(1).ok_or(Error::Exhausted)?;
+        self.peers[index] = Some(Peer {
+            identity,
+            authority,
+            decoder,
+        });
+        Ok(Connection {
+            attempt,
+            slot,
+            identity,
+        })
+    }
+    fn receive(
+        &mut self,
+        connection: Connection,
+        binding: Option<SessionBinding>,
+        bytes: &[u8],
+    ) -> Result<Message> {
+        let frame = codec::decode(bytes)?;
+        self.attempt(connection.attempt)?;
+        match &frame.message {
+            Message::Roster { .. } | Message::Start(_) => self.phase(Phase::Lobby)?,
+            Message::Transfer(_) => self.binding(binding.ok_or(Error::World)?)?,
+            Message::Hello | Message::Welcome { .. } => return Err(Error::Tag),
+        }
+        let peer = self.peers[usize::from(connection.slot)]
+            .as_mut()
+            .ok_or(Error::Peer)?;
+        if peer.identity != connection.identity || !peer.authority {
+            return Err(Error::Peer);
+        }
+        peer.decoder.accept(&frame)?;
+        Ok(frame.message)
     }
 }
 
@@ -144,6 +207,8 @@ impl Owner {
                 session: None,
                 binding: None,
                 peers: std::array::from_fn(|_| None),
+                next_connection: 0,
+                transport: None,
             }),
         })
     }
@@ -171,35 +236,17 @@ impl Owner {
         state.session = None;
         state.binding = None;
         state.peers = std::array::from_fn(|_| None);
+        state.next_connection = 0;
+        state.transport = None;
         Ok(state.attempt)
     }
     pub fn opened(&self, attempt: Attempt, session: [u8; 16]) -> Result<()> {
-        let mut state = self.lock()?;
-        state.attempt(attempt)?;
-        state.phase(Phase::Opening)?;
-        if session == [0; 16] {
-            return Err(Error::Session);
-        }
-        state.session = Some(session);
-        state.phase = Phase::Lobby;
-        Ok(())
+        self.lock()?.opened(attempt, session)
     }
     /// Called by the trusted adapter with its assigned slot and role. A roster
     /// row is descriptive data and cannot modify these adopted identities.
     pub fn adopt(&self, attempt: Attempt, slot: u8, authority: bool) -> Result<Connection> {
-        let mut state = self.lock()?;
-        state.attempt(attempt)?;
-        state.phase(Phase::Lobby)?;
-        let index = usize::from(slot);
-        if index >= SLOTS
-            || state.peers[index].is_some()
-            || (authority && state.peers.iter().flatten().any(|peer| peer.authority))
-        {
-            return Err(Error::Peer);
-        }
-        let decoder = codec::Decoder::new(state.session.ok_or(Error::Session)?)?;
-        state.peers[index] = Some(Peer { authority, decoder });
-        Ok(Connection { attempt, slot })
+        self.lock()?.adopt(attempt, slot, authority)
     }
     /// Coordinator calls after setup validation. This does not construct a world.
     pub fn begin_start(&self, attempt: Attempt) -> Result<()> {
@@ -238,6 +285,7 @@ impl Owner {
         state.binding = None;
         state.session = None;
         state.peers = std::array::from_fn(|_| None);
+        state.transport = None;
         Ok(())
     }
     /// Admit only authority commits from the adopted connection. Rejected input
@@ -249,21 +297,7 @@ impl Owner {
         binding: Option<SessionBinding>,
         bytes: &[u8],
     ) -> Result<Message> {
-        let frame = codec::decode(bytes)?;
-        let mut state = self.lock()?;
-        state.attempt(connection.attempt)?;
-        match &frame.message {
-            Message::Roster { .. } | Message::Start(_) => state.phase(Phase::Lobby)?,
-            Message::Transfer(_) => state.binding(binding.ok_or(Error::World)?)?,
-        }
-        let peer = state.peers[usize::from(connection.slot)]
-            .as_mut()
-            .ok_or(Error::Peer)?;
-        if !peer.authority {
-            return Err(Error::Peer);
-        }
-        peer.decoder.accept(&frame)?;
-        Ok(frame.message)
+        self.lock()?.receive(connection, binding, bytes)
     }
 }
 
@@ -338,6 +372,13 @@ pub struct Transfer {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    /// Admission only: zero session, zero sequence, no payload or chosen role.
+    Hello,
+    /// Admission only: the host's nonzero session and assigned client slot.
+    /// The authority is always slot zero. Application sequences restart at zero.
+    Welcome {
+        slot: u8,
+    },
     Roster {
         content: Content,
         rows: [Row; SLOTS],
