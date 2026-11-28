@@ -16,6 +16,11 @@ mod tests;
 pub mod transport;
 
 pub const SLOTS: usize = 6;
+/// A connected city's peer binding and the lobby worker that carries it.
+pub struct SessionLink {
+    pub binding: SessionBinding,
+    pub worker: lobby::worker::Handle,
+}
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

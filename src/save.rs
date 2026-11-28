@@ -700,6 +700,30 @@ impl<'a> SavedEconomy<'a> {
     }
 }
 
+///Timing400 does NOT directly store its fifth word. First4 words are stored,
+///then current-human sampled,4b5370 runs synchronously, then sixth is stored.
+///The actual ordered section iterator must invoke this at its encountered tag;
+///later camera sections may overwrite camera setters emitted by this command.
+pub fn restore_timing400<T>(
+    payload: &[u8],
+    state: &mut T,
+    store: fn(&mut T, usize, u32) -> Result<(), String>,
+    human_present: fn(&T) -> bool,
+    change_mode: fn(&mut T, i32) -> Result<(), String>,
+) -> Result<(), String> {
+    if payload.len() != 24 {
+        return Err("actual timing400 length must be24".into());
+    }
+    let word = |i| u32::from_le_bytes(payload[i * 4..i * 4 + 4].try_into().unwrap());
+    for i in 0..4 {
+        store(state, i, word(i))?;
+    }
+    if human_present(state) {
+        change_mode(state, word(4) as i32)?;
+    }
+    store(state, 5, word(5))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

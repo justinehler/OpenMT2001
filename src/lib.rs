@@ -101,6 +101,7 @@ pub mod process_dispatch;
 pub mod property_offer;
 pub mod property_rights;
 pub mod scenario_objective;
+pub mod singleplayer_setup;
 pub mod startup_rng;
 pub mod water;
 
