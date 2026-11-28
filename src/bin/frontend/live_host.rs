@@ -69,9 +69,9 @@ pub struct Status {
     pub event_list_visible: bool,
     ///43bce0 clears the one-frame window's opening state at its first UI callback.
     pub event_list_settled: bool,
-    pub card: Option<crate::card_panel::Panel>,
-    pub card_entry: crate::card_panel::Entry,
-    pub card_visual: crate::card_panel::EntryVisual,
+    pub card: Option<openmt2001::card_panel::Panel>,
+    pub card_entry: openmt2001::card_panel::Entry,
+    pub card_visual: openmt2001::card_panel::EntryVisual,
     /// Original822b0c/822b0e/822af4, retained independently of clock arithmetic.
     pub day_night_flags: [u8; 3],
     pub notices: Vec<crate::notifications::Notice>,
@@ -352,7 +352,7 @@ pub struct Host {
     market_share: crate::market_share_panel::State,
     cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
-    card: Option<crate::card_panel::Panel>,
+    card: Option<openmt2001::card_panel::Panel>,
     card_visible: bool,
     day_night_flags: [u8; 3],
     notices: crate::notifications::Queue,
@@ -1468,7 +1468,7 @@ impl Host {
             .find(|p| p.reference == session.roster.status.current_player)
             .ok_or_else(|| "Card entry current player missing".to_string())
             .and_then(|p| {
-                crate::card_panel::Entry::player(
+                openmt2001::card_panel::Entry::player(
                     p,
                     session.world.city.auction.controller.reference != 0
                         && session.world.city.auction.controller.record[0x7c] != 0,
@@ -1735,7 +1735,7 @@ impl Host {
                 .iter()
                 .find(|p| p.reference == session.roster.status.current_player)
                 .ok_or("Card current player missing")?;
-            if !crate::card_panel::Entry::player(
+            if !openmt2001::card_panel::Entry::player(
                 player,
                 session.world.city.auction.controller.reference != 0
                     && session.world.city.auction.controller.record[0x7c] != 0,
@@ -1760,7 +1760,7 @@ impl Host {
         session.human_card(action, assets, network, |call, player| {
             match call {
                 openmt2001::event_cards::human::Call::Present(card) => {
-                    self.card = Some(crate::card_panel::Panel::present(
+                    self.card = Some(openmt2001::card_panel::Panel::present(
                         card,
                         player,
                         assets.image,
@@ -3145,7 +3145,7 @@ impl Host {
             .iter()
             .find(|p| p.reference == session.roster.status.current_player)
             .ok_or("Time current player missing")?;
-        let entry = crate::card_panel::Entry::player(
+        let entry = openmt2001::card_panel::Entry::player(
             p,
             session.world.city.auction.controller.reference != 0
                 && session.world.city.auction.controller.record[0x7c] != 0,
