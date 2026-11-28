@@ -677,8 +677,13 @@ fn tutorial_blockcam_flies_into_block_view_while_camera_control_is_disabled() {
         normal_return: None,
     };
     let overview = view.active.camera;
-    let mut core = Core::new(new_process_owner().unwrap());
+    // The same reset boundaries as Producer::attach on a fresh world.
+    let mut owner = new_process_owner().unwrap();
+    owner.reset_yaw();
+    owner.world_reset_final_fields();
+    let mut core = Core::new(owner);
     core.project(overview).unwrap();
+    assert_eq!(core.kind(), 6);
     assert!(!core.legacy_callback_enabled(view.strategic));
     // EVENT_Level: BlockCam (Camera.SetMode(BLOCKCAM, 7)), then
     // Interface.DisableCameraControl before the first callback.

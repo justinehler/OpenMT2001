@@ -2474,15 +2474,35 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
             let center = assets.center(category);
             let mut block_view = state.active.controls;
             let (block_eye, block_target) = block_view.tick([false; 4]);
-            // Advance the Host and the legacy camera callback together, 20 ms
-            // per frame, as the game does (one 50 Hz callback per frame).
-            let mut run = |frames: usize,
-                           host: &mut crate::live_host::Host,
-                           session: &mut crate::fresh_city::Session<'_>,
-                           state: &mut camera_producer::View| {
-                for _ in 0..frames {
-                    host.frame(session, &command_assets, 20);
-                    let status = host.status(session);
+            let assert_block_view = |(eye, target): ([f32; 3], [f32; 3])| {
+                for (actual, expected) in eye
+                    .into_iter()
+                    .zip(block_eye)
+                    .chain(target.into_iter().zip(block_target))
+                {
+                    assert!((actual - expected).abs() < 0.01, "{eye:?} {target:?}");
+                }
+                // Close and low over Pacific Avenue, not the high overview.
+                assert!(eye[1] < 200. && eye[1] < overview.eye[1] - 300.);
+                let reach = (target[0] - center[0]).hypot(target[2] - center[2]);
+                assert!(reach < 30., "{target:?} {center:?}");
+            };
+            // Hold the first prompt for six seconds, then dismiss it and hold
+            // the second for six more. Host frames and the legacy camera
+            // callback advance together, one 50 Hz callback per 20 ms frame.
+            for prompt in [2, 3] {
+                if prompt == 3 {
+                    session
+                        .dispatch_session_event("InterfacePromptDismiss", 2, &command_assets, true)
+                        .unwrap();
+                }
+                let status = host.status(&session);
+                assert!(status.failure.is_none(), "{:?}", status.failure);
+                assert_eq!(status.prompts.len(), 1);
+                assert_eq!(status.prompts[0].dismissal_id, prompt);
+                for _ in 0..300 {
+                    host.frame(&mut session, &command_assets, 20);
+                    let status = host.status(&session);
                     assert!(status.failure.is_none(), "{:?}", status.failure);
                     assert_eq!(status.tutorial_camera_events.len(), 1);
                     assert!(producer.legacy_callback_enabled(state.strategic));
@@ -2510,32 +2530,8 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                     )
                     .unwrap();
                 }
-                state.active.inertia.sample(0.).unwrap()
-            };
-            let assert_block_view = |(eye, target): ([f32; 3], [f32; 3])| {
-                for (actual, expected) in eye
-                    .into_iter()
-                    .zip(block_eye)
-                    .chain(target.into_iter().zip(block_target))
-                {
-                    assert!((actual - expected).abs() < 0.01, "{eye:?} {target:?}");
-                }
-                // Close and low over Pacific Avenue, not the high overview.
-                assert!(eye[1] < 200. && eye[1] < overview.eye[1] - 300.);
-                let reach = (target[0] - center[0]).hypot(target[2] - center[2]);
-                assert!(reach < 30., "{target:?} {center:?}");
-            };
-            // First prompt, held for six seconds.
-            assert_block_view(run(300, &mut host, &mut session, &mut state));
-            session
-                .dispatch_session_event("InterfacePromptDismiss", 2, &command_assets, true)
-                .unwrap();
-            let second = host.status(&session);
-            assert!(second.failure.is_none(), "{:?}", second.failure);
-            assert_eq!(second.prompts.len(), 1);
-            assert_eq!(second.prompts[0].dismissal_id, 3);
-            // Second prompt: the camera stays in Pacific's block view.
-            assert_block_view(run(300, &mut host, &mut session, &mut state));
+                assert_block_view(state.active.inertia.sample(0.).unwrap());
+            }
             assert_eq!(producer.kind(), 12);
             let _ = producer.retire();
         })
