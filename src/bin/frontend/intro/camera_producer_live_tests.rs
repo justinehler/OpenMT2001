@@ -2447,6 +2447,8 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
             assert!(status.failure.is_none(), "{:?}", status.failure);
             assert_eq!(status.prompts.len(), 1);
             assert!(status.tutorial_controls.camera_disabled);
+            // Status hands each new prompt out once; keep the latest one.
+            let mut latest_prompt = status.prompts.last().map(|p| p.dismissal_id);
             let pacific = session
                 .scripts
                 .runtime
@@ -2496,14 +2498,13 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                         .dispatch_session_event("InterfacePromptDismiss", 2, &command_assets, true)
                         .unwrap();
                 }
-                let status = host.status(&session);
-                assert!(status.failure.is_none(), "{:?}", status.failure);
-                assert_eq!(status.prompts.len(), 1);
-                assert_eq!(status.prompts[0].dismissal_id, prompt);
                 for _ in 0..300 {
                     host.frame(&mut session, &command_assets, 20);
                     let status = host.status(&session);
                     assert!(status.failure.is_none(), "{:?}", status.failure);
+                    if let Some(opened) = status.prompts.last() {
+                        latest_prompt = Some(opened.dismissal_id);
+                    }
                     assert_eq!(status.tutorial_camera_events.len(), 1);
                     assert!(producer.legacy_callback_enabled(state.strategic));
                     let disabled = status.tutorial_controls.camera_disabled
@@ -2530,6 +2531,7 @@ fn original_tutorial_one_holds_pacific_block_view_through_second_prompt() {
                     )
                     .unwrap();
                 }
+                assert_eq!(latest_prompt, Some(prompt));
                 assert_block_view(state.active.inertia.sample(0.).unwrap());
             }
             assert_eq!(producer.kind(), 12);
