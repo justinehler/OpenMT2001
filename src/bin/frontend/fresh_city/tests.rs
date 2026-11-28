@@ -4718,7 +4718,7 @@ fn original_live_auction_host() {
             if let Ok(path) = std::env::var("OPENMT2001_LIVE_AUCTION_LABEL_CAPTURE") {
                 let installer = openmt2001::fixtures::path("PARAMETERS");
                 let language = exe_path.parent().unwrap().parent().unwrap().join("US/language/usa/tycoon");
-                let packed = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(&language).unwrap();
+                let packed = openmt2001::packed_language::PackedLanguage::load(&language).unwrap();
                 let panel_assets = crate::auction_panel::Assets::load(&index, &archive,
                     installer.parent().unwrap().parent().unwrap(), &packed.rows(), &executable).unwrap();
                 let renderer = pollster::block_on(openmt2001::render::Renderer::new(wgpu::InstanceDescriptor::new_without_display_handle())).unwrap();

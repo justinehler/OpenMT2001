@@ -91,9 +91,8 @@ impl Assets {
         let packed = match shared {
             Some(text) => &text.fonts().language,
             None => {
-                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
-                    &language.join("tycoon"),
-                )?;
+                loaded =
+                    openmt2001::packed_language::PackedLanguage::load(&language.join("tycoon"))?;
                 &loaded
             }
         };

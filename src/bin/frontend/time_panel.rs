@@ -439,7 +439,7 @@ pub struct Assets {
 impl Assets {
     pub(crate) fn apply_board(
         &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
         self.currency = board.row(2)?.to_vec();
         self.currency_left = board.row(3)?.first() == Some(&0x4c);
@@ -599,9 +599,8 @@ impl Assets {
         let packed = match shared {
             Some(text) => &text.fonts().language,
             None => {
-                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
-                    &language.join("tycoon"),
-                )?;
+                loaded =
+                    openmt2001::packed_language::PackedLanguage::load(&language.join("tycoon"))?;
                 &loaded
             }
         };

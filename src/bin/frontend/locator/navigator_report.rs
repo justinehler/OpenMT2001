@@ -451,7 +451,7 @@ mod tests {
         let index =
             openmt2001::archive::ArchiveIndex::parse(&read("ARCHIVE_DIR"), archive.len() as u64)
                 .unwrap();
-        let language = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
+        let language = openmt2001::packed_language::PackedLanguage::load(
             &openmt2001::fixtures::path("LANGUAGE").join("tycoon"),
         )
         .unwrap();

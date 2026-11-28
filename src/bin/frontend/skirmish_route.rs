@@ -76,7 +76,7 @@ pub(super) fn objective(exe: &[u8], scripts: &Path, level: &Level) -> Result<i32
 impl Route {
     pub(crate) fn apply_board(
         &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
         strings: &[Vec<u8>],
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.strings, board)?;

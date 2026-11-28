@@ -133,7 +133,7 @@ fn stats_mesh_triangles<'a>(
 impl Assets {
     pub(crate) fn apply_board(
         &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.strings, board)
     }

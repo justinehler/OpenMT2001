@@ -153,7 +153,7 @@ impl Assets {
         installer: &Path,
         blocks: &[Block],
         style: &openmt2001::board_style::Style,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<Self, String> {
         let entry = index
             .find("gamedata2/font640/textures.gtd")

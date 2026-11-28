@@ -176,9 +176,8 @@ impl Assets {
         let packed = match shared {
             Some(text) => &text.fonts().language,
             None => {
-                loaded = crate::intro::camera_live::ui_text_resources::PackedLanguage::load(
-                    &language.join("tycoon"),
-                )?;
+                loaded =
+                    openmt2001::packed_language::PackedLanguage::load(&language.join("tycoon"))?;
                 &loaded
             }
         };
@@ -399,7 +398,7 @@ fn main_button_state(
 impl Menu {
     pub(crate) fn apply_board(
         &mut self,
-        board: &crate::intro::camera_live::ui_text_resources::PackedLanguage,
+        board: &openmt2001::packed_language::PackedLanguage,
         blocks: &[openmt2001::board::Block],
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.assets.language, board)?;
