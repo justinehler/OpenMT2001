@@ -3549,7 +3549,7 @@ impl Assets {
         Action::None
     }
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Action {
     None,
     Toggle,

@@ -5,11 +5,11 @@ use crate::{
     ui::{self, Surface},
 };
 
-pub fn title_bounds(first: [f32; 4], second: [f32; 4]) -> [f32; 4] {
+pub(super) fn title_bounds(first: [f32; 4], second: [f32; 4]) -> [f32; 4] {
     [first[0] + 8., first[1], first[2] + 8., second[3]]
 }
 
-pub fn paint_title(
+pub(super) fn paint_title(
     pages: &[Surface],
     tab: &[u8],
     text: &[u8],
@@ -22,12 +22,12 @@ pub fn paint_title(
     Ok(pages)
 }
 
-pub struct Layout {
-    pub list: report_text::Layout,
-    pub scrollbar: [f32; 4],
+pub(super) struct Layout {
+    pub(super) list: report_text::Layout,
+    pub(super) scrollbar: [f32; 4],
 }
 impl Layout {
-    pub fn new(main: [f32; 4], slider_width: f32) -> Self {
+    pub(super) fn new(main: [f32; 4], slider_width: f32) -> Self {
         // 40df24 calls 413500 at main.top+60; both children stop five
         // pixels before main.bottom, and the list reserves the choice width.
         let [l, t, r, b] = main;
@@ -38,10 +38,10 @@ impl Layout {
             scrollbar: [r - slider_width, t + 60., r, b - 5.],
         }
     }
-    pub fn maximum(&self, count: usize) -> usize {
+    pub(super) fn maximum(&self, count: usize) -> usize {
         count.saturating_sub(self.list.visible_rows())
     }
-    pub fn hit(&self, point: [f32; 2], count: usize) -> Option<Action> {
+    pub(super) fn hit(&self, point: [f32; 2], count: usize) -> Option<Action> {
         if self.maximum(count) == 0 {
             return None;
         }
@@ -55,7 +55,7 @@ impl Layout {
         }
         super::inside(point, ui::slider_track(self.scrollbar, true)).then_some(Action::ScrollTrack)
     }
-    pub fn selection(&self, y: f32, count: usize) -> usize {
+    pub(super) fn selection(&self, y: f32, count: usize) -> usize {
         ui::slider_selection(
             ui::slider_track(self.scrollbar, true),
             y,
@@ -65,15 +65,15 @@ impl Layout {
     }
 }
 
-pub struct Finance<'a> {
-    pub pages: &'a [Surface],
-    pub tab: &'a [u8],
-    pub strings: &'a [Vec<u8>],
-    pub palette: &'a [u32; 18],
-    pub arrows: &'a [[Surface; 4]; 2],
+pub(super) struct Finance<'a> {
+    pub(super) pages: &'a [Surface],
+    pub(super) tab: &'a [u8],
+    pub(super) strings: &'a [Vec<u8>],
+    pub(super) palette: &'a [u32; 18],
+    pub(super) arrows: &'a [[Surface; 4]; 2],
 }
 impl Finance<'_> {
-    pub fn paint(
+    pub(super) fn paint(
         &self,
         player: &player_info::State,
         layout: &Layout,
