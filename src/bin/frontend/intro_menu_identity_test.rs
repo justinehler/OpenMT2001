@@ -265,7 +265,13 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
                         let selected = (0..52).find(|&category_id| state.tutorial_interaction.callback(
                             crate::tutorial_two_interaction::Pick::BlockEntry { category_id }) == Some(1))
                             .expect("subsequent original utility/railroad block-entry gate");
-                        if (id == 100010 && step == 0) || (id == 100011 && step == 1) {
+                        // After the first stage each lesson's nested dismiss catch
+                        // (0x4db6b0 -> 0x43bed0 -> 0x429d50, #370) disables world
+                        // picks, so those stages continue through Navigator 103.
+                        if (id == 100010 && step != 1) || (id == 100011 && step >= 1) {
+                            if step > 0 {
+                                assert!(state.tutorial_controls.picking_disabled);
+                            }
                             assert!(state.tutorial_enabled_controls.contains(&103));
                             sender.send(FreshRequest::TutorialControl(103)).unwrap();
                         } else {

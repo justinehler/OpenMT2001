@@ -61,16 +61,21 @@ fn saved_auction_worker_rebuilds_and_saves() {
             let expected = std::thread::Builder::new()
                 .stack_size(32 * 1024 * 1024)
                 .spawn(move || {
-                    let (loaded, _session) = expected_inputs
+                    let (loaded, session) = expected_inputs
                         .saved_preview(&expected_path, camera, &mut SnapshotCache::default())
                         .unwrap();
                     assert_eq!(loaded.saved_prior_mode, Some(prior));
                     assert_eq!(loaded.saved_viewpoint.unwrap().0.eye, camera.eye);
-                    loaded.saved_auction
+                    // A restored announcement reopens with empty seconds (41d700);
+                    // 41d900 writes the next whole-second boundary (#266).
+                    let announcing = session.saved_logic_mode != Some(2)
+                        && session.world.auction.controller.record[0x7d] != 0;
+                    (loaded.saved_auction, announcing)
                 })
                 .unwrap()
                 .join()
                 .unwrap();
+            let (expected, announcing) = expected;
             if let Some(expected) = &expected {
                 assert_eq!(expected.prior_mode, prior);
             }
@@ -218,9 +223,13 @@ fn saved_auction_worker_rebuilds_and_saves() {
             assert!(status.failure.is_none(), "{:?}", status.failure);
             assert_eq!(
                 status.auction_seconds,
-                expected_host
-                    .as_ref()
-                    .and_then(|host| host.announcement_seconds)
+                if announcing {
+                    None
+                } else {
+                    expected_host
+                        .as_ref()
+                        .and_then(|host| host.announcement_seconds)
+                }
             );
             if mode == 2 {
                 let expected_host = expected_host.as_ref().unwrap();

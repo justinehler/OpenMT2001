@@ -2489,16 +2489,24 @@ fn load_menu_uses_retained_original_session() {
                         for index in range.clone() {
                             let draw = &scene.draws[index];
                             assert!(!draw.vertices.is_empty(), "static page must contain geometry");
+                            // Category spans are distance gated; fixed utility/marina
+                            // details are submitted directly (004b7bbf, #376).
                             let mut spans = visibility.spans.iter().filter(|span| span.draw == index)
+                                .map(|span| (span.start, span.positions.len(), Some(span.category)))
+                                .chain(detail_cache.fixed_detail_spans.iter()
+                                    .filter(|(draw, _)| *draw == index)
+                                    .map(|(_, vertices)| (vertices.start, vertices.len(), None)))
                                 .collect::<Vec<_>>();
-                            spans.sort_by_key(|span| span.start);
+                            spans.sort_by_key(|span| span.0);
                             let mut vertex_end = 0;
-                            for span in spans {
-                                assert_eq!(span.start, vertex_end, "static spans must cover each page once");
-                                vertex_end += span.positions.len();
-                                assert!(static_categories.contains(&span.category),
-                                    "static category must own an eligible supported inactive row");
-                                categories.insert(span.category);
+                            for (start, len, category) in spans {
+                                assert_eq!(start, vertex_end, "static spans must cover each page once");
+                                vertex_end += len;
+                                if let Some(category) = category {
+                                    assert!(static_categories.contains(&category),
+                                        "static category must own an eligible supported inactive row");
+                                    categories.insert(category);
+                                }
                             }
                             assert_eq!(vertex_end, draw.vertices.len(), "static page has untracked vertices");
                         }

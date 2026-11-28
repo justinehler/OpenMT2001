@@ -230,7 +230,9 @@ fn menu_loaded_active_auction_still_freezes_normal_city_clock() {
             source_host.auction_renderer = Some(renderer);
             source_host.begin_presentation(&source).unwrap();
             source_host.set_running(true);
-            for _ in 0..5000 {
+            // With the corrected startup RNG order (#306) this seed's first
+            // natural auction activates on day two, at tick 22750.
+            for _ in 0..30000 {
                 source_host.frame(&mut source, &assets, 40);
                 assert!(source_host.failure.is_none(), "{:?}", source_host.failure);
                 for prompt in source_host.take_prompts(&source) {

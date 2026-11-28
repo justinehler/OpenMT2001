@@ -513,6 +513,10 @@ struct StaticAppearanceContext<'a, 'b> {
     board: &'a openmt2001::board::Board,
     image: &'a openmt2001::pe::PeImage<'b>,
     hour: u32,
+    /// Submit the fixed utility/marina details (004b7bbf). They belong to the
+    /// scene, not to any prepared building, so exactly one static pass per
+    /// scene assembly may include them.
+    fixed_structures: bool,
 }
 
 /// Native 4b7fd0 submits pass-3 descriptors only after the building's
@@ -919,6 +923,10 @@ struct SnapshotCache {
     static_details: Option<crate::static_detail::Resources>,
     #[cfg(test)]
     static_detail_ranges: Vec<std::ops::Range<usize>>,
+    /// Fixed-structure vertex spans (draw, vertices), drawn without the
+    /// category visibility gate.
+    #[cfg(test)]
+    fixed_detail_spans: Vec<(usize, std::ops::Range<usize>)>,
     trees: Option<std::sync::Arc<crate::tree_scene::Resources>>,
     tree_instances: Option<(u64, std::sync::Arc<crate::tree_scene::Instances>)>,
     people: Option<crate::people_scene::Resources>,

@@ -295,7 +295,7 @@ fn all_three_start_routes_full_join_and_warm_settings_keep_process_ownership() {
 }
 #[test]
 #[ignore = "private supplied inputs and owned disk scratch; actual cold record12 and joined CPU worker"]
-fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio() {
+fn cold_record12_keeps_process_dispatch_input_wrapper_and_audio() {
     let scratch = Scratch::new();
     let (inputs, owner) = inputs(scratch.0.join("profiles"));
     let (camera, _) = fresh_city_camera();
@@ -307,8 +307,9 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
             &mut cache,
         )
         .unwrap();
-    let expected = [2, 1, 0, 0, 0, 0xa5, 0x5a, 0xee, 1];
-    session.world.pause.bytes = expected;
+    // A saved process image with player/script owners, focus padding and the
+    // transition latch, and marked timer records and frequency below.
+    session.world.pause.bytes = [2, 1, 0, 0, 0, 0xa5, 0x5a, 0xee, 1];
     for task in &mut session.hooks.timers {
         task[0] = 0;
         task[1..4].copy_from_slice(&[0x71, 0x82, 0x93]);
@@ -370,20 +371,33 @@ fn cold_record12_supersedes_menu_numeric_image_but_keeps_input_wrapper_and_audio
     assert!(!audio.music_paused());
     let (reply, probe) = mpsc::channel();
     run.send(FreshRequest::DispatchProbe(reply));
-    assert_eq!(
-        probe.recv_timeout(Duration::from_secs(15)).unwrap().pause,
-        expected
+    // Record 12's process-dispatch fields are consumed, never applied (#255):
+    // native completion (4bcd6d..4bcd7b) releases reason0 once, and the saved
+    // owners, padding, latch, frequency and timer records do not return.
+    let probe = probe.recv_timeout(Duration::from_secs(15)).unwrap();
+    assert_eq!(probe.pause, [0; 9]);
+    assert_eq!(probe.frequency, (0., None, None));
+    assert!(!probe.tasks.is_empty());
+    assert!(
+        probe.tasks.iter().all(|task| task[..4] == [1, 0, 0, 0]),
+        "load-time registrations, not the saved disabled/marked records"
     );
+    assert!(rows.iter().all(|task| !probe.tasks.contains(task)));
     let custody = run.finish().unwrap();
-    assert_eq!(custody.pause.bytes, [1, 0, 0, 0, 0, 0xa5, 0x5a, 0xee, 1]);
-    assert_eq!(custody.tasks, rows);
+    // City retirement holds reason0 and sets the transition latch over the
+    // current process image; it keeps the load-time registrations.
+    assert_eq!(custody.pause.bytes, [1, 0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(custody.tasks.len(), probe.tasks.len());
+    for (retired, live) in custody.tasks.iter().zip(&probe.tasks) {
+        assert_eq!(retired[1..], live[1..]);
+    }
     assert_eq!(
         (
             custody.frequency.frequency,
             custody.frequency.calendar_timer,
             custody.frequency.logic_timer
         ),
-        (17., Some(1), Some(2))
+        probe.frequency
     );
     owner.borrow_mut().return_custody(custody).unwrap();
 }
