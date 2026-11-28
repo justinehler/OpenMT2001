@@ -1345,7 +1345,7 @@ mod tests {
             &renderer,
             &scene,
             &[&panel],
-            "work/frontend/load-open-unselected-city.png",
+            "frontend/load-open-unselected-city.png",
         );
         load.chosen = load.entries.iter().position(|entry| entry.path == original);
         let panel = load.draw(&renderer, None, false, 255).unwrap();
@@ -1353,7 +1353,7 @@ mod tests {
             &renderer,
             &scene,
             &[&panel],
-            "work/frontend/load-import-selected-city.png",
+            "frontend/load-import-selected-city.png",
         );
         crate::save_menu::write_target(
             &selected,
@@ -1379,7 +1379,7 @@ mod tests {
             &renderer,
             &scene,
             &[&panel, &prompt],
-            "work/frontend/load-v2-delete-prompt-city.png",
+            "frontend/load-v2-delete-prompt-city.png",
         );
         fs::remove_dir_all(root).unwrap();
     }

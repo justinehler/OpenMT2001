@@ -90,7 +90,7 @@ fn menu_profile_identity_reaches_live_hud_with_and_without_locator() {
             assert_eq!(time.displayed_name(), Some("Justin"));
         }
         crate::capture_test::capture(&renderer, None, &loaded.scene,
-            "work/frontend/fresh-native-startup-overview.png");
+            "frontend/fresh-native-startup-overview.png");
     }).unwrap().join().unwrap();
 }
 #[test]
@@ -116,8 +116,8 @@ fn proven_tutorial_menu_rows_launch_retained_city_worker() {
             compatibility: crate::compatibility::Mode::default(),
                 style: test_board_style(&executable),
                 time_runtime: Default::default(),
-                profile_root: PathBuf::from(format!(
-                    "work/frontend/tutorial-menu-worker-{}-{}",
+                profile_root: openmt2001::fixtures::scratch("FRONTEND").join(format!(
+                    "tutorial-menu-worker-{}-{}",
                     std::process::id(),
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
                         .unwrap().as_nanos()

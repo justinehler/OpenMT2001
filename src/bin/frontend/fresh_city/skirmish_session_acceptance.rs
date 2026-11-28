@@ -644,7 +644,7 @@ fn skirmish_map_cold_reload_continuation(map: &'static str) {
                     let _ = fs::remove_dir_all(&self.0);
                 }
             }
-            let path = std::path::PathBuf::from("work/save").join(format!(
+            let path = openmt2001::fixtures::scratch("SAVE").join(format!(
                 "net1-cold-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()

@@ -260,7 +260,7 @@ mod tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 view.prepared.as_ref().unwrap(),
-                &format!("work/frontend/cash-arrow-{frame}.png"),
+                &format!("frontend/cash-arrow-{frame}.png"),
             );
         }
     }

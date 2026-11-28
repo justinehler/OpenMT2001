@@ -1513,7 +1513,7 @@ mod tests {
             &renderer,
             &scene,
             &[&panel],
-            "work/frontend/profile-scrollbar-city.png",
+            "frontend/profile-scrollbar-city.png",
         );
     }
 }

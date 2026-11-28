@@ -1696,7 +1696,7 @@ mod graphics_tests {
                 crate::capture_test::capture_standalone(
                     &renderer,
                     &panel,
-                    &format!("work/frontend/graphics-options-{name}.png"),
+                    &format!("frontend/graphics-options-{name}.png"),
                 );
             }
             let sound = assets
@@ -1705,7 +1705,7 @@ mod graphics_tests {
             crate::capture_test::capture_standalone(
                 &renderer,
                 &sound,
-                "work/frontend/sound-options-native-slider.png",
+                "frontend/sound-options-native-slider.png",
             );
             for (name, gameplay) in [
                 ("default", GameplayLevels::default()),
@@ -1728,7 +1728,7 @@ mod graphics_tests {
                 crate::capture_test::capture_standalone(
                     &renderer,
                     &panel,
-                    &format!("work/frontend/gameplay-options-{name}.png"),
+                    &format!("frontend/gameplay-options-{name}.png"),
                 );
             }
         }

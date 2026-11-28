@@ -1706,8 +1706,8 @@ fn tutorial_three_to_five(fifth_mode: Option<crate::compatibility::Mode>) {
     // Tutorial 3 starts on Pacific Avenue and reuses the wired compass
     // control before opening the Strategic View information sequence.
     let tutorial_three = crate::scenarios::find(100002).unwrap();
-    let profile = std::path::PathBuf::from(format!(
-        "work/economy/tutorial3-{}-{}.profile",
+    let profile = openmt2001::fixtures::scratch("ECONOMY").join(format!(
+        "tutorial3-{}-{}.profile",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3044,8 +3044,8 @@ fn original_tutorial_six_management_flow() {
         board: &board,
         file: &file,
     };
-    let profile = std::path::PathBuf::from(format!(
-        "work/economy/tutorial6-lifecycle-{}-{}.lua",
+    let profile = openmt2001::fixtures::scratch("ECONOMY").join(format!(
+        "tutorial6-lifecycle-{}-{}.lua",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3940,8 +3940,8 @@ fn original_tutorial_twelve_lease_auction_flow() {
         },
     )
     .unwrap();
-    let profile = std::path::PathBuf::from(format!(
-        "work/economy/tutorial12-{}-{}.profile",
+    let profile = openmt2001::fixtures::scratch("ECONOMY").join(format!(
+        "tutorial12-{}-{}.profile",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4668,8 +4668,8 @@ fn original_tutorial_ten_eleven_utility_railroad_flow() {
             },
         )
         .unwrap();
-        let profile = std::path::PathBuf::from(format!(
-            "work/economy/tutorial{id}-{}-{}.profile",
+        let profile = openmt2001::fixtures::scratch("ECONOMY").join(format!(
+            "tutorial{id}-{}-{}.profile",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4922,8 +4922,8 @@ fn original_tutorial_nine_auction_flow() {
         board: &board,
         file: &file,
     };
-    let profile = std::path::PathBuf::from(format!(
-        "work/economy/tutorial9-lifecycle-{}-{}.lua",
+    let profile = openmt2001::fixtures::scratch("ECONOMY").join(format!(
+        "tutorial9-lifecycle-{}-{}.lua",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

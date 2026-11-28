@@ -231,7 +231,7 @@ mod tests {
                         .sum::<usize>(),
                     points.len() * 6
                 );
-                let path = format!("work/frontend/dust-{tick}.png");
+                let path = format!("frontend/dust-{tick}.png");
                 crate::capture_test::capture_standalone(
                     &renderer,
                     view.prepared.as_ref().unwrap(),

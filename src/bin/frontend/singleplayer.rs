@@ -794,7 +794,8 @@ mod tutorial_title_tests {
         let mut panel =
             SinglePlayer::new(&index, &archive, &installer, scripts, &refs, &exe).unwrap();
         let mut catalog = crate::campaign_store::load_catalog(&image, scripts).unwrap();
-        let fresh = std::path::PathBuf::from("work/frontend/capture-fresh-profile-missing.lua");
+        let fresh =
+            openmt2001::fixtures::scratch("FRONTEND").join("capture-fresh-profile-missing.lua");
         assert!(!fresh.exists());
         crate::campaign_store::load_progress(&mut catalog, &fresh).unwrap();
         assert_eq!(super::scenario_rows_for(&catalog).len(), 1);
@@ -832,7 +833,7 @@ mod tutorial_title_tests {
             &renderer,
             &scene,
             &[&overlay],
-            "work/frontend/tutorial-caption-city.png",
+            "frontend/tutorial-caption-city.png",
         );
         panel.open(true, "Capture", catalog.clone(), fresh.clone());
         assert!(panel.character_screen && panel.sandbox);
@@ -850,7 +851,7 @@ mod tutorial_title_tests {
             &renderer,
             &scene,
             &[&racecar],
-            "work/frontend/sandbox-racecar-biography-city.png",
+            "frontend/sandbox-racecar-biography-city.png",
             [1024, 768],
         );
         panel.open(false, "Capture", catalog, fresh);
@@ -859,7 +860,7 @@ mod tutorial_title_tests {
             &renderer,
             &scene,
             &[&scenario],
-            "work/frontend/scenario-scrollbars-city.png",
+            "frontend/scenario-scrollbars-city.png",
         );
         panel.activate(0); // the unlocked Starting Out row opens Character Selection
         assert!(panel.character_screen);
@@ -880,7 +881,7 @@ mod tutorial_title_tests {
             &renderer,
             &scene,
             &[&dog],
-            "work/frontend/character-dog-biography-city.png",
+            "frontend/character-dog-biography-city.png",
             [1024, 768],
         );
     }

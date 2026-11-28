@@ -433,7 +433,7 @@ mod tests {
         crate::capture_test::capture_standalone(
             &renderer,
             &label,
-            "work/frontend/strategic-tooltip-locator.png",
+            "frontend/strategic-tooltip-locator.png",
         );
     }
 

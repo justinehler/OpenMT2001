@@ -244,7 +244,7 @@ fn bridge(
                     crate::capture_test::capture_standalone(
                         &renderer,
                         &view.scene.as_ref().unwrap().0,
-                        &format!("work/save/auction-{label}-{prior_mode}.png"),
+                        &format!("save/auction-{label}-{prior_mode}.png"),
                     );
                 }
                 request.reply.send(result).unwrap();

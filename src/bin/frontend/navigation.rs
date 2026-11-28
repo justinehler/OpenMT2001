@@ -200,11 +200,7 @@ fn capture_native_nav_control_textures() {
             None,
         )
         .unwrap();
-    crate::capture_test::capture_standalone(
-        &renderer,
-        &prepared,
-        "work/frontend/nav-control-atlas.png",
-    );
+    crate::capture_test::capture_standalone(&renderer, &prepared, "frontend/nav-control-atlas.png");
 }
 fn prepare_icons(
     renderer: &Renderer,
