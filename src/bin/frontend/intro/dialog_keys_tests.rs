@@ -72,6 +72,40 @@ fn request(button_count: usize, context: u32) -> prompt::Request {
 }
 
 #[test]
+fn fresh_preview_worker_script_prompt_uses_dialog_reply() {
+    use openmt2001::lua4::Value;
+
+    for (code, button) in [(KeyCode::Enter, 0), (KeyCode::Backspace, 1)] {
+        let mut h = Harness::new();
+        let request = crate::live_host::script_request(
+            &[Value::Number(1.), Value::Number(2.), Value::Number(1.)],
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(request.dialog.unwrap().button_count, 0);
+        h.prompts.submit(request);
+        assert_eq!(h.prompts.begin_dismiss(), None);
+        h.event1(true);
+        h.key(code, true, false);
+        h.event1(true);
+        assert_eq!(
+            h.prompts.take_dialog_replies(),
+            vec![crate::human_dialog::Reply {
+                callback: 0,
+                context: 1,
+                button,
+            }]
+        );
+        assert!(h.prompts.request().is_some(), "callback precedes unlink");
+        h.prompts.finish_dismiss(vec![]);
+        assert!(h.prompts.request().is_none());
+        h.event1(true);
+        h.no_reply();
+    }
+}
+
+#[test]
 fn options_quit_menu_backspace_and_return_use_original_replies() {
     for (code, button) in [(KeyCode::Backspace, 1), (KeyCode::Enter, 0)] {
         let mut h = Harness::new();

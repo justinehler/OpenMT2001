@@ -2948,6 +2948,16 @@ fn exercise_retained_population(session: &mut Session<'_>) {
 #[test]
 #[ignore = "requires original level scripts, people meshes and rendering assets"]
 fn original_construction_lifecycle() {
+    // The retained city records exceed the default debug test-thread stack.
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(original_construction_lifecycle_body)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn original_construction_lifecycle_body() {
     use openmt2001::{building_pool, construction, live_commands, scene};
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");

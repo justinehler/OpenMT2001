@@ -2960,6 +2960,16 @@ fn custom_fresh_save_and_cold_selected_profile_ownership() {
 #[test]
 #[ignore = "requires original fresh scenario and graphics assets"]
 fn fresh_preview_worker_retains_session_until_inspection_closes() {
+    // The retained city records exceed the default debug test-thread stack.
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(fresh_preview_worker_retains_session_until_inspection_closes_body)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn fresh_preview_worker_retains_session_until_inspection_closes_body() {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let map = openmt2001::fixtures::path("MAP");
     let parameter = openmt2001::fixtures::path("PARAMETERS");
@@ -4023,10 +4033,28 @@ fn fresh_preview_worker_retains_session_until_inspection_closes() {
             );
             let mut ui = crate::prompt::State::default();
             ui.submit(prompt.clone());
-            let id = ui.begin_dismiss().unwrap();
+            // Script messages share the modal queue. Drive the physical Return
+            // path used by the window, including the first event that arms it.
+            let mut keys = dialog_keys::Input::default();
+            keys.event1(Some(&mut ui));
+            keys.physical(process_frontend::PhysicalSample::Key {
+                key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter),
+                down: true,
+                repeat: false,
+            });
+            keys.event1(Some(&mut ui));
+            let responses = ui.take_dialog_replies();
+            assert_eq!(
+                responses,
+                vec![crate::human_dialog::Reply {
+                    callback: 0,
+                    context: 1,
+                    button: 0,
+                }]
+            );
             let (reply, answer) = mpsc::channel();
             sender
-                .send(FreshRequest::DismissPrompt(id, Some(reply)))
+                .send(FreshRequest::HumanDialog(responses[0], reply))
                 .unwrap();
             assert!(
                 ui.request().is_some(),
