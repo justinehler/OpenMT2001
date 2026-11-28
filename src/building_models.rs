@@ -182,16 +182,6 @@ impl ModelRegistrar for Models {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        board::Board,
-        build_file::BuildFile,
-        building_geometry::{BuildingGeometry, V14_CATEGORY_BASE},
-        building_pool,
-        pe::PeImage,
-        render_scene::{self, OriginalAssets, Request, Source},
-        scene,
-    };
     #[test]
     #[ignore = "requires player-supplied original model/board/tree data"]
     fn original_building_tree_binding_release_and_slot_reuse() {

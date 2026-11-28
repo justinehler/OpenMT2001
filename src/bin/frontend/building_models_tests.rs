@@ -4,11 +4,11 @@ use openmt2001::building_models::*;
 use openmt2001::{
     board::Board,
     build_file::BuildFile,
-    building_geometry::{BuildingGeometry, V14_CATEGORY_BASE},
+    building_geometry::{BuildingGeometry, RegisteredModel, V14_CATEGORY_BASE},
     building_pool,
     pe::PeImage,
     render_scene::{self, OriginalAssets, Request, Source},
-    scene,
+    scene::{self, SceneBuilding},
 };
 #[test]
 #[ignore = "requires original map, executable, BuildFile and scenery assets"]
