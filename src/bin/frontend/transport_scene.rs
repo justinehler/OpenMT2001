@@ -224,14 +224,28 @@ impl Layer {
                 continue;
             };
             let transform = crate::people_scene::transform_from_matrix(matrix);
-            let light = crate::people_scene::sunlight(matrix, light.direction);
+            let sun = crate::people_scene::sunlight(matrix, light.direction);
+            // 0x4b3870 turns the specular switch (009701e0) on before the
+            // 44f0b0 transport pass, so 004f2390 gives every train, aircraft
+            // and boat a half-vector highlight. Its eye direction starts at
+            // the descriptor position (+4), not the matrix translation: the
+            // train and effect callbacks leave it at 004df9c0's origin.
+            let position = std::array::from_fn(|axis| {
+                let at = 4 + axis * 4;
+                f32::from_le_bytes(std::array::from_fn(|byte| auxiliary[at + byte]))
+            });
+            let eye = openmt2001::lighting::eye_direction(sample.eye, position)?;
+            let half = openmt2001::lighting::specular_half_vector(
+                sun,
+                crate::people_scene::sunlight(matrix, eye),
+            );
             for part in &model.parts {
                 let draw = &mut draws[part.page];
                 for (vertex, &normal) in part.vertices.iter().zip(&part.normals) {
                     let mut vertex = *vertex;
                     let position = transform.position([vertex[0], vertex[1], vertex[2]]);
                     vertex[..3].copy_from_slice(&position);
-                    let shades = palette.shade_static(normal, light)?;
+                    let shades = palette.shade_specular(normal, sun, half)?;
                     vertex[3..6].copy_from_slice(&color(shades[0]));
                     draw.vertices.push(vertex);
                     draw.specular.as_mut().unwrap().push(color(shades[1]));

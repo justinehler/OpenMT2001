@@ -134,7 +134,42 @@ impl Palette {
     /// 004f2580 with bit4 clear and an identity static-object transform.
     /// The original scene transform flips Z before scaling sunlight by127.
     pub fn shade_static(&self, normal: [f32; 3], sun: [f32; 3]) -> Result<[u32; 2], String> {
-        let vector = [sun[0], sun[1], -sun[2]].map(|v| (f64::from(v) * 127.) as f32);
+        let color = self.primary_shade(normal, sun)?;
+        Ok([color | 0xff000000, self.secondary_shade(color, 0)?])
+    }
+
+    /// 004f2580 with object flag 4, set by 004f1b40 while the scene's
+    /// specular switch (009701e0) is on. The diffuse word matches
+    /// `shade_static`; the secondary (specular) word moves up the secondary
+    /// palette by a highlight from the 004f2390 half vector: ((n.h)/2+1/2)^16
+    /// mapped onto 0..127. `half` comes from `specular_half_vector`.
+    pub fn shade_specular(
+        &self,
+        normal: [f32; 3],
+        sun: [f32; 3],
+        half: [f32; 3],
+    ) -> Result<[u32; 2], String> {
+        let color = self.primary_shade(normal, sun)?;
+        // 004f2686..004f26d5: the z, y, x product order and the f32 store of
+        // the scaled power before FISTP.
+        let [x, y, z] = std::array::from_fn(|i| f64::from(normal[i]) * f64::from(half[i]));
+        let cosine = (z + y) + x;
+        if !cosine.is_finite() {
+            return Err("non-finite specular lighting normal".into());
+        }
+        let mut power = cosine * 0.5 + 0.5;
+        for _ in 0..3 {
+            power *= power;
+        }
+        let highlight = ((power * power * 254. - 127.) as f32).round_ties_even();
+        Ok([
+            color | 0xff000000,
+            self.secondary_shade(color, (highlight as i32).max(0))?,
+        ])
+    }
+
+    fn primary_shade(&self, normal: [f32; 3], sun: [f32; 3]) -> Result<u32, String> {
+        let vector = scaled_sunlight(sun);
         let products =
             std::array::from_fn::<_, 3, _>(|i| f64::from(normal[i]) * f64::from(vector[i]));
         let dot = products[2] + (products[1] + products[0]);
@@ -145,13 +180,18 @@ impl Palette {
         if !(-127. ..=128.).contains(&shade) {
             return Err("static normal exceeds original lighting palette".into());
         }
-        let color = self.primary[(shade as i32 + 127) as usize];
-        let secondary_index = ((color as i32 >> 24) + 127) as usize;
-        let secondary = *self
-            .secondary
-            .get(secondary_index)
-            .ok_or("secondary lighting index exceeds palette")?;
-        Ok([color | 0xff000000, secondary])
+        Ok(self.primary[(shade as i32 + 127) as usize])
+    }
+
+    /// The secondary palette is addressed from its middle entry (00945554)
+    /// by the primary word's overbright byte plus any specular highlight.
+    fn secondary_shade(&self, color: u32, highlight: i32) -> Result<u32, String> {
+        let index = usize::try_from((color as i32 >> 24) + highlight + 127)
+            .map_err(|_| "secondary lighting index precedes palette")?;
+        self.secondary
+            .get(index)
+            .copied()
+            .ok_or_else(|| "secondary lighting index exceeds palette".into())
     }
 
     /// Five original 004ebbc0 inputs. The normal scene passes diffuse again
@@ -195,9 +235,107 @@ impl Palette {
     }
 }
 
+/// 004f2390 stores object-local sunlight after the local-Z flip, scaled
+/// by127.
+fn scaled_sunlight(sun: [f32; 3]) -> [f32; 3] {
+    [sun[0], sun[1], -sun[2]].map(|v| (f64::from(v) * 127.) as f32)
+}
+
+/// 004e2b20: unit direction from an object's descriptor position to the
+/// camera eye (renderer 164e0), in world coordinates.
+pub fn eye_direction(eye: [f32; 3], position: [f32; 3]) -> Result<[f32; 3], String> {
+    let offset: [f32; 3] = std::array::from_fn(|i| eye[i] - position[i]);
+    let [x, y, z] = offset.map(f64::from);
+    let inverse = 1. / ((x * x + y * y) + z * z).sqrt();
+    if !inverse.is_finite() {
+        return Err("specular eye direction has no length".into());
+    }
+    Ok(offset.map(|v| (inverse * f64::from(v)) as f32))
+}
+
+/// 004f2390 with the specular switch on: the half vector between
+/// object-local sunlight and the object-local eye direction, both given
+/// before the local-Z flip, as `people_scene::sunlight` returns them. Each
+/// sum is stored as f32 before 004e2ba0 normalizes it; a near-zero sum uses
+/// 004e2ba0's fixed reciprocal.
+pub fn specular_half_vector(sun: [f32; 3], eye: [f32; 3]) -> [f32; 3] {
+    let sun = scaled_sunlight(sun);
+    let eye = [eye[0], eye[1], -eye[2]];
+    let sum: [f32; 3] =
+        std::array::from_fn(|i| (f64::from(eye[i]) * 127. + f64::from(sun[i])) as f32);
+    let [x, y, z] = sum.map(f64::from);
+    let length = ((x * x + y * y) + z * z).sqrt();
+    let inverse = if length < f64::from(f32::from_bits(0x3a83126f)) {
+        f64::from(f32::from_bits(0x4479ffff))
+    } else {
+        1. / length
+    };
+    sum.map(|v| (inverse * f64::from(v)) as f32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_palette() -> Palette {
+        // Grey diffuse, dark ambient, white specular at full scale.
+        Palette::new(0x808080, 0x202020, 0xffffff, 0, 1.)
+    }
+
+    #[test]
+    fn specular_shade_keeps_diffuse_and_adds_highlight_towards_half_vector() {
+        let palette = test_palette();
+        let sun = [0., 1., 0.];
+        let up = [0., 1., 0.];
+        let half = specular_half_vector(sun, [0., 1., 0.]);
+        assert_eq!(half, [0., 1., 0.]);
+        let [plain_diffuse, plain_specular] = palette.shade_static(up, sun).unwrap();
+        let [diffuse, specular] = palette.shade_specular(up, sun, half).unwrap();
+        assert_eq!(diffuse, plain_diffuse);
+        // Without the highlight the unlit secondary entry is black; a normal
+        // on the half vector reaches the last entry: the full specular colour.
+        assert_eq!(plain_specular, 0xff000000);
+        assert_eq!(specular, 0xffffffff);
+        assert_eq!(specular, palette.secondary[127 + 127]);
+    }
+
+    #[test]
+    fn specular_highlight_falls_off_with_sixteenth_power() {
+        let palette = test_palette();
+        let sun = [0., 1., 0.];
+        let half = [0., 1., 0.];
+        // cos 60 deg: (0.75)^16 * 254 - 127 is negative, so no highlight.
+        let side = [0.866_025_4, 0.5, 0.];
+        let [_, specular] = palette.shade_specular(side, sun, half).unwrap();
+        assert_eq!(specular, palette.shade_static(side, sun).unwrap()[1]);
+        // cos 10 deg: ((1+0.98481)/2)^16 = 0.885, so 0.885*254-127 rounds to 98.
+        let near = [0.173_648_18, 0.984_807_7, 0.];
+        let [_, specular] = palette.shade_specular(near, sun, half).unwrap();
+        assert_eq!(specular, palette.secondary[127 + 98]);
+        assert_ne!(specular, 0xff000000);
+    }
+
+    #[test]
+    fn half_vector_bisects_flipped_sun_and_eye() {
+        // Object-local inputs arrive before the local-Z flip.
+        let half = specular_half_vector([1., 0., 0.], [0., 0., -1.]);
+        let expected = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((half[0] - expected).abs() < 1e-6);
+        assert_eq!(half[1], 0.);
+        assert!((half[2] - expected).abs() < 1e-6);
+        // Opposite vectors cancel; 004e2ba0 then scales by its fixed reciprocal.
+        assert_eq!(
+            specular_half_vector([0., 1., 0.], [0., -1., 0.]),
+            [0., 0., 0.]
+        );
+    }
+
+    #[test]
+    fn eye_direction_is_unit_from_position_to_eye() {
+        let direction = eye_direction([3., 4., 0.], [0., 0., 0.]).unwrap();
+        assert_eq!(direction, [0.6, 0.8, 0.]);
+        assert!(eye_direction([1., 2., 3.], [1., 2., 3.]).is_err());
+    }
     #[test]
     #[ignore = "requires original sun-color image and lighting observations"]
     fn matches_native_lighting() {
