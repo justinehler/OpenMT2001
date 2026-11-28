@@ -23,7 +23,7 @@ fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> b
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
-    pub autosave: Option<crate::save_menu::AutosaveStatus>,
+    pub autosave: Option<openmt2001::save_menu::AutosaveStatus>,
     pub time_display: crate::time_panel::DisplayState,
     pub cash_arrow: crate::cash_arrow::State,
     pub window_texture: Option<openmt2001::window_texture::Publication>,
@@ -238,7 +238,7 @@ pub struct ResultRequest {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Auction {
-    pub controls: crate::auction_controls::State,
+    pub controls: openmt2001::auction_controls::State,
     pub visible: bool,
     /// 414160 disables the textureless title-right child in network mode.
     pub hidden_bid_toggle_enabled: bool,
@@ -312,10 +312,10 @@ pub struct Host {
     camera_bridge: Option<camera_bridge::Worker>,
     /// Explicit legacy UI snapshot source, mutually exclusive with the native
     /// camera bridge. Absence retains the pre-connection supported routes.
-    ui_camera_source: Option<crate::save_menu::camera_source::Reader>,
+    ui_camera_source: Option<openmt2001::save_menu::camera_source::Reader>,
     /// Authority supplied only by Inputs::session_worker selected profile.
     pub(crate) autosave_profile_root: Option<std::path::PathBuf>,
-    pub autosave_status: Option<crate::save_menu::AutosaveStatus>,
+    pub autosave_status: Option<openmt2001::save_menu::AutosaveStatus>,
     /// Headless only: the camera records and interface view an autosave
     /// writes when neither camera owner is installed.
     pub(crate) fixed_save_cameras: Option<([[u8; 196]; 2], u32)>,
@@ -433,7 +433,7 @@ impl Host {
             .era_styles
             .get(session.world.clock.calendar[2] as usize)
             .ok_or("build era outside original parameter banks")?;
-        let choices = crate::build_panel::placement_choices(
+        let choices = openmt2001::build_panel::placement_choices(
             &mut session.build_random_state,
             styles.qualities.each_ref().map(Vec::len),
         )?;
@@ -736,7 +736,7 @@ impl Host {
     pub(crate) fn install_ui_camera_source(
         &mut self,
         session: &Session<'_>,
-        source: crate::save_menu::camera_source::Reader,
+        source: openmt2001::save_menu::camera_source::Reader,
     ) -> Result<(), String> {
         if self.failure.is_some() || self.camera_bridge.is_some() || self.ui_camera_source.is_some()
         {
@@ -757,7 +757,7 @@ impl Host {
         session: &mut Session<'_>,
         image: &openmt2001::pe::PeImage<'_>,
         root: &std::path::Path,
-        target: &crate::save_menu::Target,
+        target: &openmt2001::save_menu::Target,
         game_mode: u32,
     ) -> Result<std::path::PathBuf, String> {
         if !self.options_save_allowed(&session.world.pause, &session.hooks.timers) {
@@ -776,7 +776,7 @@ impl Host {
             view,
             snapshot.interface_mode(),
         )?;
-        crate::save_menu::write_target_from_snapshot(root, target, &bytes, source, &snapshot)
+        openmt2001::save_menu::write_target_from_snapshot(root, target, &bytes, source, &snapshot)
     }
     /// Legacy Status clients supply their render sample. An installed owner
     /// already supplies current vectors at the acknowledged boundaries; a
@@ -2226,7 +2226,7 @@ impl Host {
             use fresh_city::tick::Event;
             match event {
                 Event::Autosave(request)=>{
-                    use crate::save_menu::{AutosaveFailure as Failure,AutosaveStatus as Status,PreparedAutosave};
+                    use openmt2001::save_menu::{AutosaveFailure as Failure,AutosaveStatus as Status,PreparedAutosave};
                     let destination=autosave_root.as_ref().map(|root|root.join("saves/autosave.sav"));
                     let attempt=(||->Result<std::path::PathBuf,Failure>{
                         let root=autosave_root.as_deref().ok_or(Failure::MissingSelectedProfile)?;
@@ -2818,7 +2818,7 @@ impl Host {
         &mut self,
         session: &mut Session<'_>,
         assets: &CommandAssets<'_, '_>,
-        reply: crate::human_dialog::Reply,
+        reply: openmt2001::human_dialog::Reply,
     ) -> Result<(), String> {
         if reply.callback == crate::game_options::QUIT_CALLBACK {
             return self.reply_options_quit(
@@ -2935,7 +2935,7 @@ impl Host {
         }
         catalog.finish(false, 0)?;
         if let Some(path) = profile {
-            crate::campaign_store::save_progress(catalog, path)?;
+            openmt2001::campaign_store::save_progress(catalog, path)?;
         }
         self.stats = None;
         self.result_request = None;
@@ -3015,7 +3015,7 @@ impl Host {
             .result_request
             .ok_or("No result sequence is active")?
             .sequence;
-        crate::campaign_store::commit_result(
+        openmt2001::campaign_store::commit_result(
             catalog,
             profile,
             &mut self.result_applied,
@@ -3146,7 +3146,7 @@ impl Host {
                         bidder.winner,
                         no_sale,
                         |call| {
-                            use crate::auction_controls::TimerCall;
+                            use openmt2001::auction_controls::TimerCall;
                             match call {
                                 TimerCall::CreateSound => {
                                     if self.auction_audio.is_some() {
@@ -3170,13 +3170,16 @@ impl Host {
                                     Ok(0)
                                 }
                                 TimerCall::WriteSeconds(seconds) => {
-                                    controls.timer_text =
-                                        Some(crate::auction_controls::TimerText::Seconds(seconds));
+                                    controls.timer_text = Some(
+                                        openmt2001::auction_controls::TimerText::Seconds(seconds),
+                                    );
                                     Ok(0)
                                 }
                                 TimerCall::Label { no_sale } => {
                                     controls.timer_text =
-                                        Some(crate::auction_controls::TimerText::Label { no_sale });
+                                        Some(openmt2001::auction_controls::TimerText::Label {
+                                            no_sale,
+                                        });
                                     Ok(0)
                                 }
                             }
@@ -3184,7 +3187,7 @@ impl Host {
                     )?;
                 }
                 controls.tick(bidder, player, session.tutorial_state, |call| {
-                    use crate::auction_controls::TickCall;
+                    use openmt2001::auction_controls::TickCall;
                     match call {
                         TickCall::Withdraw(participant) => {
                             self.apply_auction_action(
@@ -3285,7 +3288,7 @@ impl Host {
         let mut controls = std::mem::take(&mut auction.controls);
         let allowance = i32::from_le_bytes(assets.image.at(0x541c7c, 4)?.try_into().unwrap());
         let result = controls.button(button, view.current, player, view.price, |call| {
-            use crate::auction_controls::Call;
+            use openmt2001::auction_controls::Call;
             match call {
                 Call::Affordable(amount) => Ok(openmt2001::construction::affordable(
                     session.world.ledgers.players[usize::from(player)].cash,
@@ -3333,7 +3336,7 @@ impl Host {
                 if completed && !self.tutorial_completed {
                     // Native 4ba2bb selects the tutorial-specific mark-complete
                     // branch; Catalog::finish ignores the Win/Lose distinction.
-                    if let Err(error) = crate::campaign_store::commit_result(
+                    if let Err(error) = openmt2001::campaign_store::commit_result(
                         &mut session.catalog,
                         session.campaign_profile.as_deref(),
                         &mut self.tutorial_applied,
@@ -3661,13 +3664,13 @@ fn local_player(session: &Session<'_>) -> Result<u8, String> {
 fn bidder_view(
     session: &Session<'_>,
     player: u8,
-) -> Result<crate::auction_controls::Bidder, String> {
+) -> Result<openmt2001::auction_controls::Bidder, String> {
     if player >= 6 {
         return Err("Auction local player exceeds six participants".into());
     }
     let record = &session.world.city.auction.controller.record;
     let word = |at| u32::from_le_bytes(record[at..at + 4].try_into().unwrap());
-    Ok(crate::auction_controls::Bidder {
+    Ok(openmt2001::auction_controls::Bidder {
         current: word(0x58),
         winner: word(0x60),
         price: word(0x6c),
@@ -3803,7 +3806,7 @@ fn human_dialog_ui(
             body: 0,
             dismissal_id: 0,
             card: None,
-            dialog: Some(crate::human_dialog::Dialog::default()),
+            dialog: Some(openmt2001::human_dialog::Dialog::default()),
         });
         return Ok(());
     }
@@ -3969,7 +3972,7 @@ mod tests {
             ui.dialog_button(0);
             assert_eq!(
                 ui.take_dialog_replies(),
-                vec![crate::human_dialog::Reply {
+                vec![openmt2001::human_dialog::Reply {
                     callback: 0,
                     context: 0,
                     button: 0
@@ -4323,7 +4326,7 @@ mod tests {
                     format_value: 0,
                     timeout: true
                 }),
-                dialog: Some(crate::human_dialog::Dialog {
+                dialog: Some(openmt2001::human_dialog::Dialog {
                     title: 1898,
                     body: 1899,
                     buttons: [1707, 0],
