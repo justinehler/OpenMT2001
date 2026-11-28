@@ -3,6 +3,8 @@
 //! runtime allocations/RNG that the native format deliberately omits.
 use crate::session::Session;
 pub mod auction;
+#[cfg(test)]
+mod queued_command_tests;
 pub mod transport;
 use crate::{
     live_commands::Command,
@@ -269,8 +271,68 @@ pub fn restore_market_runtime(
     Ok(())
 }
 
+/// One tag-4000 record as 0x481010 writes it: the 24-byte queue header
+/// (+0 kind, +4 clock-list selector, +8 outer due) and, for kind-zero
+/// packet nodes, the complete command object.
+pub fn scheduled_record(
+    domain: crate::scheduler::ClockDomain,
+    outer: u32,
+    admission: u32,
+    direct: bool,
+    command: &Command,
+) -> Result<([u8; 24], Vec<u8>), String> {
+    let mut header = [0; 24];
+    let selector = match domain {
+        crate::scheduler::ClockDomain::Total => 0,
+        crate::scheduler::ClockDomain::Normal => 1,
+    };
+    put(&mut header, 4, selector);
+    put(&mut header, 8, outer);
+    let packet = if let Command::CategoryReady { category } = command {
+        if !direct {
+            return Err("non-direct category queue encoding unsupported".into());
+        }
+        put(&mut header, 0, 1);
+        put(&mut header, 12, *category);
+        vec![]
+    } else {
+        if direct {
+            return Err("direct packet queue encoding unsupported".into());
+        }
+        packet(command, admission)?
+    };
+    Ok((header, packet))
+}
+
 pub fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
     let mut bytes = match command {
+        // 4896e0 and 489df0 build the result command (kind 9, vtable
+        // 525db8, size 0x1c from 489560): winner at +0x14, reason at +0x18.
+        // 48cc50 builds the removal command (kind 10, vtable 525e10, size
+        // 0x18 from 48cc90) with the player slot at +0x14. Both clear the
+        // relative delay at +0xc and set flag +0x10 before 450490 routes
+        // them; 481010 saves the whole object, vtable word included.
+        Command::OutcomeNotice { player, reason } => {
+            let mut b = vec![0; 28];
+            put(&mut b, 0, 0x525db8);
+            put(&mut b, 4, 9);
+            b[16] = 1;
+            put(&mut b, 20, *player as u32);
+            put(&mut b, 24, *reason);
+            b
+        }
+        Command::Eliminate { slot } => {
+            let mut b = vec![0; 24];
+            put(&mut b, 0, 0x525e10);
+            put(&mut b, 4, 10);
+            b[16] = 1;
+            put(
+                &mut b,
+                20,
+                u32::try_from(*slot).map_err(|_| "elimination slot exceeds DWORD")?,
+            );
+            b
+        }
         Command::Build(c) => c.packet().to_vec(),
         Command::Demolish(c) => c.packet().to_vec(),
         Command::Open(c) => {
@@ -315,6 +377,15 @@ pub fn packet(command: &Command, due: u32) -> Result<Vec<u8>, String> {
             put(&mut b, 24, c.player);
             put(&mut b, 28, c.target as u32);
             b
+        }
+        // 465330's auction room-start (kind 0x1e, vtable 525c70) is a
+        // header-only object: its size method 465480 returns 0x14. The live
+        // auction adapter pads it to 52 bytes with zeros; only the native
+        // 20 bytes are saved.
+        Command::Auction { descriptor }
+            if word(descriptor, 4) == 0x1e && descriptor[20..].iter().all(|&b| b == 0) =>
+        {
+            descriptor[..20].to_vec()
         }
         Command::Auction { descriptor } => descriptor.to_vec(),
         Command::PropertyTransfer {
@@ -1244,26 +1315,8 @@ impl SaveProjection<'_> {
         let snapshots = self.live_commands.snapshot()?;
         queue.word(snapshots.len() as u32);
         for (domain, outer, admission, direct, command) in snapshots {
-            let domain = match domain {
-                crate::scheduler::ClockDomain::Total => 0,
-                crate::scheduler::ClockDomain::Normal => 1,
-            };
-            let mut h = [0; 24];
-            put(&mut h, 4, domain);
-            put(&mut h, 8, outer);
-            let p = if let Command::CategoryReady { category } = command {
-                if !direct {
-                    return Err("non-direct category queue encoding unsupported".into());
-                }
-                put(&mut h, 0, 1);
-                put(&mut h, 12, *category);
-                vec![]
-            } else {
-                if direct {
-                    return Err("direct packet queue encoding unsupported".into());
-                }
-                packet(command, admission)?
-            };
+            let (h, p) = scheduled_record(domain, outer, admission, direct, command)?;
+            let domain = word(&h, 4);
             queue.word(domain);
             queue.word(outer);
             queue.word(admission);
