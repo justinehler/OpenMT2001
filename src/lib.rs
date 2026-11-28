@@ -165,6 +165,8 @@ pub mod auction_panel;
 #[cfg(feature = "lua4")]
 pub mod city_people;
 #[cfg(feature = "lua4")]
+pub mod comparison;
+#[cfg(feature = "lua4")]
 pub mod level_startup;
 #[cfg(feature = "lua4")]
 pub mod notifications;

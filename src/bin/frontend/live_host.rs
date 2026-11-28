@@ -31,7 +31,7 @@ pub struct Status {
     pub chimney_smoke: openmt2001::chimney_smoke::Smoke,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<openmt2001::stats_panel::Snapshot>,
-    pub comparison: Option<crate::comparison::Snapshot>,
+    pub comparison: Option<openmt2001::comparison::Snapshot>,
     pub chat: Option<openmt2001::network::chat::View>,
     pub market_share: Option<openmt2001::market_share_panel::Snapshot>,
     pub result_request: Option<ResultRequest>,
@@ -350,7 +350,7 @@ pub struct Host {
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
     stats: Option<openmt2001::stats_panel::State>,
-    comparison: Option<crate::comparison::Runtime>,
+    comparison: Option<openmt2001::comparison::Runtime>,
     market_share: openmt2001::market_share_panel::State,
     cash_arrow: openmt2001::cash_arrow::State,
     player_panels: [bool; 2],
@@ -1403,13 +1403,13 @@ impl Host {
     fn comparison_data(
         session: &Session<'_>,
         assets: &CommandAssets<'_, '_>,
-    ) -> Result<crate::comparison::Data, String> {
+    ) -> Result<openmt2001::comparison::Data, String> {
         let players = openmt2001::player_info::Snapshot::from_runtime(
             &session.roster.manager,
             &session.world.ledgers.players,
             session.roster.status.current_player,
         )?;
-        crate::comparison::Data::from_runtime(
+        openmt2001::comparison::Data::from_runtime(
             &session.world,
             &players.records,
             assets.image,
@@ -1425,7 +1425,7 @@ impl Host {
         if let Some(runtime) = &mut self.comparison {
             runtime.refresh(data);
         } else {
-            self.comparison = Some(crate::comparison::Runtime::new(data));
+            self.comparison = Some(openmt2001::comparison::Runtime::new(data));
         }
         Ok(())
     }

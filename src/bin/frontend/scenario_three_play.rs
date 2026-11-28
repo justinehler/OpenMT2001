@@ -246,7 +246,7 @@ fn legal_scenario_three_sales_win_and_profile_reload() {
         assert!(check_sales(&session,&image)>=100);assert!(checks.iter().all(|c|c.checked));
         assert_eq!((session.world.objective.kind,session.world.objective.target),(6,100.));
         let financial=crate::player_info::State::from_runtime(&session.roster.manager,&session.world.ledgers.players,session.roster.status.current_player).unwrap();
-        crate::comparison::Data::verify_runtime(&session.world,&financial.records,&image,"SCENARIO3",0);
+        crate::comparison::verify_runtime(&session.world,&financial.records,&image,"SCENARIO3",0);
         assert_eq!(session.catalog.selected_level().unwrap().attempts(),0);assert!(!profile.exists());
         host.human_dialog_reply(&mut session,&assets,crate::human_dialog::Reply{callback:dialog.callback,context:dialog.context,button:0}).unwrap();
         assert_eq!(host.result_sequence(),Some(openmt2001::outcome_notice::Sequence::Win));
@@ -721,7 +721,7 @@ fn campaign_continuation(
                 println!("{scenario} natural tick{} day{} hour{} builds{submitted} objective{metric}/{target} cash{} sales{}", session.world.clock.timing[0], session.world.clock.calendar[4], previous_hour, session.world.ledgers.players[0].cash, session.world.ledgers.players[0].retail_counters[1]);
                 if kind == 3 && previous_hour == 23 {
                     let financial = crate::player_info::State::from_runtime(&session.roster.manager, &session.world.ledgers.players, session.roster.status.current_player).unwrap();
-                    crate::comparison::Data::verify_runtime(&session.world, &financial.records, &image, &format!("{scenario}-DAY{}", session.world.clock.calendar[4]), 0);
+                    crate::comparison::verify_runtime(&session.world, &financial.records, &image, &format!("{scenario}-DAY{}", session.world.clock.calendar[4]), 0);
                     export_live_price_scores(&session);
                     for (slot, b) in session.world.ledgers.businesses.iter().enumerate().filter(|(_, b)| b[0x21c] != 0 && b[10] == 1 && word(*b, 0) == 0) {
                         let business = word(b, 4) as usize;
@@ -742,7 +742,7 @@ fn campaign_continuation(
             if winning_dialog.is_some() { break; }
         }
         let financial = crate::player_info::State::from_runtime(&session.roster.manager, &session.world.ledgers.players, session.roster.status.current_player).unwrap();
-        let snapshot = crate::comparison::Data::verify_runtime(&session.world, &financial.records, &image, scenario, 0);
+        let snapshot = crate::comparison::verify_runtime(&session.world, &financial.records, &image, scenario, 0);
         println!("{scenario} bounded final metrics{:?}", snapshot.rows);
         let result_tick = session.world.clock.timing[0];
         let dialog = winning_dialog.expect("bounded legal campaign strategy did not reach an original result");
