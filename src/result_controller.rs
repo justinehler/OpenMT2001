@@ -68,6 +68,15 @@ impl Controller {
     pub fn take_credit_construction_edge(&mut self) -> bool {
         std::mem::take(&mut self.credit_construction_edge)
     }
+    /// Letterbox bar height (+0x14): grows to 85 one row per tick, then
+    /// retracts in the closing mode before CutSceneEnded.
+    pub fn letterbox_height(&self) -> u8 {
+        if self.state.active {
+            self.state.fade.min(85) as u8
+        } else {
+            0
+        }
+    }
     pub fn set_identifier(&mut self, identifier: Option<u32>) {
         self.text_present = identifier.is_some();
     }

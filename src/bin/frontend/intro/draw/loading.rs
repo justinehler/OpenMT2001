@@ -72,7 +72,11 @@ impl Intro {
                     }
                     let pulse_draw = retained_session.as_ref().map(|_| {
                         let index = scene.draws.len();
-                        scene.draws.push(self.assets.city_pulse.empty_draw());
+                        scene.draws.push(
+                            self.assets
+                                .city_pulse
+                                .empty_draw(&self.assets.result_firework_texture),
+                        );
                         index
                     });
                     let smoke_draw = retained_session.as_ref().map(|_| {

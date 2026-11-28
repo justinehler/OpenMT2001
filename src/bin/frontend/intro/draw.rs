@@ -216,7 +216,7 @@ impl Intro {
                         phase: ResultPhase::Flyby,
                         controller,
                         serviced_ticks: 0,
-                        bypass_input: false,
+                        bypass: Default::default(),
                         pending: None,
                         credit_pending: None,
                         cutscene_pending: None,
@@ -225,6 +225,7 @@ impl Intro {
                         actors,
                         actor_draws: actor_draws.len(),
                         title: None,
+                        letterbox: None,
                     });
                     view.keys = [false; 4];
                     view.taps = [false; 4];
@@ -256,9 +257,7 @@ impl Intro {
             && result.credit_pending.is_none()
         {
             result.serviced_ticks += 1;
-            let ended = result
-                .controller
-                .tick(std::mem::take(&mut result.bypass_input));
+            let ended = result.controller.tick(result.bypass.sample());
             if result.controller.take_credit_construction_edge() {
                 let sender = view
                     ._fresh_session
@@ -477,6 +476,17 @@ impl Intro {
             .draw_prepared(&self.color_view, &self.depth_view, &view.prepared);
         self.renderer
             .draw_world_overlay(&self.color_view, &self.depth_view, &result.actors);
+        // 4b27e0 draws the bars over the world, before the caption, and the
+        // HUD stays hidden for the whole sequence.
+        let height = result.controller.letterbox_height();
+        if result.letterbox.as_ref().is_none_or(|(h, _)| *h != height) {
+            let bars = result_cut_scene::letterbox(&result.controller);
+            result.letterbox = Some((height, opening::prepare_overlay(&self.renderer, &[bars])?));
+        }
+        if let Some((_, bars)) = &result.letterbox {
+            self.renderer
+                .draw_overlay(&self.color_view, &self.depth_view, bars);
+        }
         let title_id = result
             .controller
             .title_visible()

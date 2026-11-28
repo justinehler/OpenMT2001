@@ -58,7 +58,8 @@ pub enum SurfaceMode {
     /// billboards with ARGB modulation and no depth writes.
     ResultParticles,
     /// Original result mode12: textured ARGB billboards, SRCALPHA/ONE,
-    /// LESSEQUAL with no depth writes. Shared dust/pulse keep ResultParticles.
+    /// LESSEQUAL with no depth writes; also the city pulse lights' flare.
+    /// Shared dust keeps ResultParticles.
     ResultFireworks,
     /// Original mode19 smoke: SRCALPHA/INVSRCALPHA, LESSEQUAL, no depth writes.
     ChimneySmoke,
