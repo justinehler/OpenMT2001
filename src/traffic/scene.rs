@@ -6,6 +6,9 @@ pub struct Scene {
     pub aircraft: [[u8; 304]; 8],
     pub trains: [[u8; 60]; 10],
     pub environment: Environment,
+    /// The per-process one-shot flag at0539d4c: while set, the next frame
+    /// creates the four marina boats in effect rows 0..3 and clears it. Only
+    /// the frontend backdrop city ever sees it set; games start with it clear.
     pub first_frame: bool,
 }
 #[derive(Default)]
@@ -238,9 +241,11 @@ impl Scene {
         }
         Ok(())
     }
-    /// Fresh transport state after0044bac0 startup. Reloads must retain/restore
-    /// their state instead. Static boats are admitted separately by44f0b0 on
-    /// the first rendered frame, so this does not pretend that frame occurred.
+    /// Fresh transport state after0044bac0 startup, for a started or loaded
+    /// game. The four marina boats belong to the frontend backdrop city: the
+    /// one-shot flag at0539d4c that lets44f0b0 create them is consumed by the
+    /// frontend's first city render and nothing re-arms it, so a game's effect
+    /// bank starts empty and the noon ship takes row 0.
     pub fn fresh(image: &crate::pe::PeImage<'_>, random: [u32; 3]) -> Result<Self, String> {
         let mut models = [0; 4];
         for (i, model) in models.iter_mut().enumerate() {
@@ -268,7 +273,7 @@ impl Scene {
                 sequence_active: 0,
                 frozen: 0,
             },
-            first_frame: true,
+            first_frame: false,
         };
         // CRT0044df30 constructs every embedded auxiliary through4df9b0,
         // which delegates to the shared4df9c0 initializer before gameplay.
@@ -279,6 +284,14 @@ impl Scene {
             crate::resident::initialize_auxiliary((&mut row[16..]).try_into().unwrap());
         }
         Ok(state)
+    }
+    /// Loading a save clears every effect row and restarts the shared ship
+    /// frame at one, so a ship that was mid-route when the game was saved does
+    /// not come back. The boat flag stays consumed for the rest of the process.
+    pub fn clear_effects_for_load(&mut self) {
+        self.hourly.effects = [[0; 20]; 9];
+        self.environment.frame = 1;
+        self.first_frame = false;
     }
     /// Compose the original hourly scheduler with actual retained pools,
     /// locator geometry and model definitions. Audio submission remains host I/O.

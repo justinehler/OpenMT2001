@@ -16,9 +16,8 @@ fn submitted_poses(state: &mut Scene, models: &Models<'_>, tick: u32) -> Vec<(u3
     poses
 }
 
-#[test]
-fn fresh_transport_submits_water_poses_instead_of_locator_reference_frame() {
-    // Minimal synthetic PE supplying the startup sequence tick and ship table.
+/// Minimal synthetic PE supplying the startup crane tick and ship table.
+fn synthetic_executable() -> Vec<u8> {
     let mut executable = vec![0; 0x500];
     executable[..2].copy_from_slice(b"MZ");
     super::put(&mut executable, 0x3c, 0x40);
@@ -32,38 +31,47 @@ fn fresh_transport_submits_water_poses_instead_of_locator_reference_frame() {
     super::put(&mut executable, 0x88, 0x300);
     super::put(&mut executable, 0x8c, 0x100);
     super::put(&mut executable, 0x17c, 1);
-    let ships = [0x689970, 0x688b98, 0x6896e8, 0x687830];
-    for (index, &reference) in ships.iter().enumerate() {
+    for (index, &reference) in SHIPS.iter().enumerate() {
         super::put(&mut executable, 0x350 + index * 4, reference);
     }
-    let image = crate::pe::PeImage::parse(&executable).unwrap();
-    let header = [0; 164];
-    // Frame zero is an exporter reference pose at the city origin. Only
-    // animation frame one contains a world position on this synthetic river.
-    let vertices: Vec<_> = [[0_f32; 3], [1200., -10., 700.]]
-        .into_iter()
-        .flat_map(|origin| {
+    executable
+}
+
+/// liner_1930, cargo_ship, cruise_ship and tanker, as 44f2a0 indexes them.
+const SHIPS: [u32; 4] = [0x689970, 0x688b98, 0x6896e8, 0x687830];
+const SHIP_LOCATOR: u32 = 0x687690;
+const SINKING_SHIP_LOCATOR: u32 = 0x6876a0;
+const CRANE: u32 = 0x6883b0;
+
+/// Four-vertex locator frames whose origin is `origin(frame)`.
+fn locator_vertices(frames: usize, origin: impl Fn(usize) -> [f32; 3]) -> Vec<u8> {
+    (0..frames)
+        .flat_map(|frame| {
+            let origin = origin(frame);
             [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
                 .map(|offset| std::array::from_fn::<_, 3, _>(|axis| origin[axis] + offset[axis]))
         })
         .flatten()
         .flat_map(f32::to_le_bytes)
-        .collect();
+        .collect()
+}
+
+fn synthetic_models<'a>(header: &'a [u8; 164], vertices: &'a [u8], frames: usize) -> Models<'a> {
     let references = (0..4)
         .flat_map(|i| [0x688db0 + i * 16, 0x687790 + i * 16])
-        .chain(ships)
-        .chain([0x687690, 0x6876a0]);
-    let models = Models::from_fixture_entries(
+        .chain(SHIPS)
+        .chain([SHIP_LOCATOR, SINKING_SHIP_LOCATOR, CRANE]);
+    Models::from_fixture_entries(
         references
             .map(|reference| {
                 (
                     reference,
                     CachedMesh {
-                        header: &header,
+                        header,
                         vertex_count: 4,
-                        frames: 2,
+                        frames,
                         flags: 0,
-                        vertex_bytes: &vertices,
+                        vertex_bytes: vertices,
                         uv_bytes: &[],
                         normal_bytes: &[],
                         opaque_records_35: &[],
@@ -75,33 +83,155 @@ fn fresh_transport_submits_water_poses_instead_of_locator_reference_frame() {
             })
             .collect(),
     )
-    .unwrap();
-    for (choice, ship) in ships.into_iter().enumerate() {
+    .unwrap()
+}
+
+/// 44f2a0's noon draw picks `kind` when the RNG state is `kind << 16`; eras
+/// 0..2 swap the cruise ship for the liner.
+fn noon(state: &mut Scene, era: u32, tick: u32) {
+    state
+        .hourly
+        .advance(
+            &mut super::HourlyInputs {
+                era,
+                hour: 12,
+                population: 0,
+                tick,
+            },
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+}
+
+fn environment_ticks(state: &mut Scene, models: &Models<'_>, ticks: std::ops::Range<u32>) {
+    for tick in ticks {
+        state.environment_tick(tick, models, |_, _| Ok(())).unwrap();
+    }
+}
+
+#[test]
+fn fresh_transport_submits_water_poses_instead_of_locator_reference_frame() {
+    let executable = synthetic_executable();
+    let image = crate::pe::PeImage::parse(&executable).unwrap();
+    let header = [0; 164];
+    // Frame zero is an exporter reference pose at the city origin. Only
+    // animation frame one contains a world position on this synthetic river.
+    let vertices = locator_vertices(2, |frame| [[0.; 3], [1200., -10., 700.]][frame]);
+    let models = synthetic_models(&header, &vertices, 2);
+    for (choice, ship) in SHIPS.into_iter().enumerate() {
         let mut state = Scene::fresh(&image, [(choice as u32) << 16, 1, 0]).unwrap();
-        let boats = submitted_poses(&mut state, &models, 1);
-        assert_eq!(boats.len(), 4);
+        // A started game has an empty basin: the frontend consumed 0539d4c.
+        assert!(submitted_poses(&mut state, &models, 1).is_empty());
+        noon(&mut state, 8, 100);
+        for tick in [100, 200] {
+            let poses = submitted_poses(&mut state, &models, tick);
+            assert_eq!(poses, [(ship, [1200., -10., -700.])]);
+        }
+    }
+}
+
+#[test]
+fn frontend_city_render_creates_the_four_marina_boats_once() {
+    let executable = synthetic_executable();
+    let image = crate::pe::PeImage::parse(&executable).unwrap();
+    let header = [0; 164];
+    let vertices = locator_vertices(2, |frame| [[0.; 3], [1200., -10., 700.]][frame]);
+    let models = synthetic_models(&header, &vertices, 2);
+    let mut state = Scene::fresh(&image, [1 << 16, 1, 0]).unwrap();
+    state.first_frame = true;
+    for tick in [1, 2] {
+        let boats = submitted_poses(&mut state, &models, tick);
+        assert_eq!(boats.len(), 4, "the boats stay; the flag does not re-arm");
         for (index, (reference, position)) in boats.iter().enumerate() {
             assert_eq!(*reference, 0x688db0 + index as u32 * 16);
             assert_eq!(*position, [1200., -10., -700.]);
         }
-        state
-            .hourly
-            .advance(
-                &mut super::HourlyInputs {
-                    era: 8,
-                    hour: 12,
-                    population: 0,
-                    tick: 100,
-                },
-                |_, _, _| Ok(()),
-            )
-            .unwrap();
-        for tick in [100, 200] {
-            let poses = submitted_poses(&mut state, &models, tick);
-            assert_eq!(poses.len(), 5);
-            assert_eq!(poses[4], (ship, [1200., -10., -700.]));
-        }
+        assert!(!state.first_frame);
     }
+    let boat_rows: Vec<_> = state.hourly.effects[..4]
+        .iter()
+        .map(|row| {
+            (
+                super::word(row, 0),
+                super::word(row, 12),
+                super::word(row, 16),
+            )
+        })
+        .collect();
+    assert_eq!(boat_rows, [(2, 0, 0); 4]);
+}
+
+#[test]
+fn noon_ship_takes_row_zero_and_the_cargo_ship_stops_for_the_crane() {
+    let executable = synthetic_executable();
+    let image = crate::pe::PeImage::parse(&executable).unwrap();
+    let header = [0; 164];
+    let vertices = locator_vertices(6000, |frame| [frame as f32, 0., -500.]);
+    let models = synthetic_models(&header, &vertices, 6000);
+    // Kind 1 is the cargo ship; kind 3 the tanker, which never stops.
+    for (kind, stops) in [(1, true), (3, false)] {
+        let mut state = Scene::fresh(&image, [kind << 16, 1, 0]).unwrap();
+        noon(&mut state, 0, 100);
+        let row = &state.hourly.effects[0];
+        assert_eq!(
+            [0, 4, 8, 12, 16].map(|at| super::word(row, at)),
+            [1, SHIPS[kind as usize], SHIP_LOCATOR, 1, 100],
+            "kind {kind} ship row"
+        );
+        assert!(
+            state.hourly.effects[1..]
+                .iter()
+                .all(|row| super::word(row, 0) == 0)
+        );
+        assert_eq!(state.environment.frame, 1);
+        environment_ticks(&mut state, &models, 100..1599);
+        assert_eq!(
+            state.environment.frame, 1500,
+            "kind {kind} after 1499 ticks"
+        );
+        assert_eq!(state.environment.ship_position, [1500., 0., 500.]);
+        assert_eq!(state.environment.frozen, u8::from(stops), "kind {kind}");
+        environment_ticks(&mut state, &models, 1599..1699);
+        let expected = if stops { 1500 } else { 1600 };
+        assert_eq!(
+            state.environment.frame, expected,
+            "kind {kind} 100 ticks on"
+        );
+        if stops {
+            // The crane runs to tick 1790, then the ship sails on.
+            environment_ticks(&mut state, &models, 1699..3500);
+            assert_eq!(state.environment.frozen, 0);
+            assert!(state.environment.frame > 1500);
+        }
+        let ship = submitted_poses(&mut state, &models, 3500);
+        assert_eq!(ship.len(), 1);
+        assert_eq!(ship[0].0, SHIPS[kind as usize]);
+    }
+}
+
+#[test]
+fn load_clears_the_effect_bank_and_restarts_the_ship_frame() {
+    let executable = synthetic_executable();
+    let image = crate::pe::PeImage::parse(&executable).unwrap();
+    let header = [0; 164];
+    let vertices = locator_vertices(6000, |frame| [frame as f32, 0., -500.]);
+    let models = synthetic_models(&header, &vertices, 6000);
+    // A ship mid-route in a game.
+    let mut state = Scene::fresh(&image, [3 << 16, 1, 0]).unwrap();
+    noon(&mut state, 0, 100);
+    environment_ticks(&mut state, &models, 100..900);
+    assert_eq!(state.environment.frame, 801);
+    state.clear_effects_for_load();
+    assert_eq!(state.hourly.effects, [[0; 20]; 9]);
+    assert_eq!(state.environment.frame, 1);
+    assert!(submitted_poses(&mut state, &models, 901).is_empty());
+    // A V2 save written before the flag was consumed still loads with an
+    // empty basin.
+    let mut state = Scene::fresh(&image, [3 << 16, 1, 0]).unwrap();
+    state.first_frame = true;
+    state.clear_effects_for_load();
+    assert!(!state.first_frame);
+    assert!(submitted_poses(&mut state, &models, 901).is_empty());
 }
 
 #[test]
@@ -115,21 +245,12 @@ fn original_fresh_transport_keeps_harbour_boats_and_tanker_off_plaza() {
     let index = crate::archive::ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
     let models = Models::from_original(&image, &index, &archive).unwrap();
     let mut state = Scene::fresh(&image, [3 << 16, 1, 0]).unwrap();
-    let boats = submitted_poses(&mut state, &models, 1);
-    state
-        .hourly
-        .advance(
-            &mut super::HourlyInputs {
-                era: 0,
-                hour: 12,
-                population: 0,
-                tick: 100,
-            },
-            |_, _, _| Ok(()),
-        )
-        .unwrap();
-    let poses = submitted_poses(&mut state, &models, 100);
-    eprintln!("transport submissions: {poses:?}");
+    // A started game has an empty basin; only the frontend city's first
+    // render creates the boats.
+    assert!(submitted_poses(&mut state, &models, 1).is_empty());
+    let mut frontend = Scene::fresh(&image, [3 << 16, 1, 0]).unwrap();
+    frontend.first_frame = true;
+    let boats = submitted_poses(&mut frontend, &models, 1);
     assert_eq!(boats.len(), 4);
     for (index, &(reference, position)) in boats.iter().enumerate() {
         assert_eq!(reference, 0x688db0 + index as u32 * 16);
@@ -139,11 +260,23 @@ fn original_fresh_transport_keeps_harbour_boats_and_tanker_off_plaza() {
         assert_eq!(position, matrix[9..]);
         assert!(position[0] > 190. && position[2] < -160.);
     }
-    assert_eq!(&poses[..4], boats);
-    let (reference, position) = poses[4];
+    noon(&mut state, 0, 100);
+    let poses = submitted_poses(&mut state, &models, 100);
+    eprintln!("transport submissions: {poses:?}");
+    assert_eq!(poses.len(), 1);
+    let (reference, position) = poses[0];
     assert_eq!(reference, 0x687830); // tanker.tm, selected by the noon table.
     assert_eq!(position, models.locator_matrix(0x687690, 1).unwrap()[9..]);
     assert!(position[0] > 1600. && position[2] < -700.);
+    // The ship advances from row 0. It reaches the crane's pier at frame
+    // 1500 after 1499 ticks.
+    environment_ticks(&mut state, &models, 100..1599);
+    assert_eq!(state.environment.frame, 1500);
+    let pier = models.locator_matrix(0x687690, 1500).unwrap();
+    assert!(
+        (pier[9] - 377.).abs() < 10. && (pier[11] + 519.).abs() < 10.,
+        "{pier:?}"
+    );
 }
 
 struct Reader<'a>(&'a [u8]);
