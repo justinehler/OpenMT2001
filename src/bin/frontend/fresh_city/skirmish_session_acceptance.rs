@@ -666,6 +666,11 @@ fn skirmish_map_cold_reload_continuation(map: &'static str) {
             resumed
                 .restore_v2_extension_with_image(&save, &image)
                 .unwrap();
+            crate::session_save::continuation_test::opponent_load_boundary(
+                &mut session,
+                &resumed,
+                &assets,
+            );
             assert_eq!(
                 resumed.catalog.selected_level().unwrap().objective_target(),
                 3500.

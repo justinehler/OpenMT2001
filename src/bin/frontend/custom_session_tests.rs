@@ -188,6 +188,11 @@ fn original_custom500000_cold_reload_continuation() {
                 .restore_v2_extension_with_image(&saved, &image)
                 .unwrap()
                 .unwrap();
+            crate::session_save::continuation_test::opponent_load_boundary(
+                &mut session,
+                &resumed,
+                &assets,
+            );
             assert!(metadata.profile_filename.is_none());
             assert!(resumed.campaign_profile.is_none());
             assert_eq!(
