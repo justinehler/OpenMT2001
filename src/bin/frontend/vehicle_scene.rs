@@ -85,6 +85,9 @@ pub struct Layer {
     suncolors: openmt2001::lighting::SunColors,
     surfaces: Vec<OwnedDraw>,
     range: Range<usize>,
+    /// Crossing green/amber masks from the same road tick, for the junction
+    /// traffic-light glows (0x44dbe0).
+    signal_lanes: Vec<[u8; 32]>,
 }
 
 impl Layer {
@@ -136,7 +139,12 @@ impl Layer {
             suncolors,
             surfaces: resources.surfaces.clone(),
             range: 0..0,
+            signal_lanes: session.world.road_network.lanes.clone(),
         })
+    }
+
+    pub fn signal_lanes(&self) -> &[[u8; 32]] {
+        &self.signal_lanes
     }
 
     pub fn replace_attachment(&mut self, previous: &Self) -> Result<(), String> {

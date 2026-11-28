@@ -160,6 +160,14 @@ impl Intro {
                                 scene.camera, scene.fog,
                             )?;
                         }
+                        // The loaded road tick's crossing masks (0x44dbe0 glows).
+                        for i in scene.set_signal_lanes(vehicles.signal_lanes())? {
+                            let draw = &scene.draws[i];
+                            self.renderer.update_dynamic_surface(
+                                &mut prepared, i, &draw.borrowed(),
+                                draw.view_projection.unwrap_or(scene.camera), scene.fog,
+                            )?;
+                        }
                     }
                     if let Some(transport) = &transport {
                         for i in transport.reframe(&mut scene, inspection_camera, draw_distance)? {

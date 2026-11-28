@@ -32,11 +32,15 @@ fn original_city_halos_follow_clock_camera_and_option() {
         animated: true,
     })
     .unwrap();
+    // The junction signal glows have no night or option gate (0x44dbe0).
     let halo_count = |scene: &Scene| {
+        let signals = scene.halos.as_ref().unwrap().signal_draw();
         scene
             .draws
             .iter()
-            .filter(|d| d.mode == SurfaceMode::LightHalos)
+            .enumerate()
+            .filter(|&(i, d)| d.mode == SurfaceMode::LightHalos && Some(i) != signals)
+            .map(|(_, d)| d)
             .map(|d| d.borrowed().vertices.len() / 6)
             .sum::<usize>()
     };

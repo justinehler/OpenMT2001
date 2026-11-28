@@ -140,6 +140,9 @@ pub enum Kind {
     LateLamp,
     Bench,
     Entrance,
+    /// Junction traffic-light posts (0x44dbe0's model rows 0x687858/0x687868).
+    EarlySignal,
+    LateSignal,
 }
 impl Kind {
     pub fn visible(self, era: u32, detail: u8) -> bool {
@@ -149,6 +152,12 @@ impl Kind {
             Self::LateLamp => era >= 2,
             Self::Bench => detail != 0,
             Self::Entrance => true,
+            Self::EarlySignal => {
+                crate::traffic_lights::post_model(era) == crate::traffic_lights::EARLY_POST
+            }
+            Self::LateSignal => {
+                crate::traffic_lights::post_model(era) == crate::traffic_lights::LATE_POST
+            }
         }
     }
 }
