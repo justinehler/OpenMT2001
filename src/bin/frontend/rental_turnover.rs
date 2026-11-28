@@ -41,7 +41,7 @@ fn assert_apartment_members(session: &Session<'_>, target: crate::business_edit:
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.housing_building() == target.building as i16)
+        .filter(|(_, r)| r.is_active() && r.housing_building() == target.building as i16)
         .map(|(id, _)| id)
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
@@ -142,6 +142,70 @@ impl Pools {
         out.push(self.demand.ready);
     }
 }
+fn shadow_average_rent<'a>(
+    retained: &openmt2001::market::Cache,
+    buildings: &'a [[u8; 64]],
+    catalogs: &'a openmt2001::shopping::Catalogs,
+    commodities: &'a [openmt2001::resident::Commodity; 32],
+) -> impl FnMut(&[[u8; 544]]) -> Result<f32, String> + 'a {
+    // Rent edits retain the live cache, including its pending refresh state.
+    let mut market = openmt2001::market::Cache {
+        dirty: retained.dirty,
+        prices: retained.prices,
+        rent: retained.rent,
+    };
+    move |businesses| {
+        market.residential_rent(&openmt2001::market::Inputs {
+            businesses,
+            buildings,
+            catalogs,
+            commodities,
+        })
+    }
+}
+
+#[test]
+fn rental_turnover_shadow_retains_and_lazily_refreshes_market() {
+    let catalogs = openmt2001::shopping::Catalogs {
+        commodities: std::array::from_fn(|_| Vec::new()),
+        fractions: std::array::from_fn(|_| Vec::new()),
+    };
+    let commodities = [openmt2001::resident::Commodity {
+        active: false,
+        value: 10.,
+        markup: 1.,
+    }; 32];
+    let mut buildings = vec![[0; 64]; 600];
+    buildings[0][0x3f] = 1;
+    let mut businesses = vec![[0; 544]; 600];
+    businesses[0][..4].copy_from_slice(&1u32.to_le_bytes());
+    businesses[0][0xe..0x10].copy_from_slice(&3u16.to_le_bytes());
+    businesses[0][0x1dc..0x1e0].copy_from_slice(&27f32.to_le_bytes());
+    let retained = openmt2001::market::Cache {
+        dirty: false,
+        prices: [7.; 32],
+        rent: 18.,
+    };
+    let mut warm = shadow_average_rent(&retained, &buildings, &catalogs, &commodities);
+    assert_eq!(warm(&businesses).unwrap(), 18.);
+
+    let dirty = openmt2001::market::Cache {
+        dirty: true,
+        ..retained
+    };
+    let mut cold = shadow_average_rent(&dirty, &buildings, &catalogs, &commodities);
+    assert_eq!(cold(&businesses).unwrap(), 27.);
+    businesses[0][0x1dc..0x1e0].copy_from_slice(&54f32.to_le_bytes());
+    assert_eq!(cold(&businesses).unwrap(), 27.);
+    assert_eq!(warm(&businesses).unwrap(), 18.);
+    assert!(
+        dirty.dirty,
+        "shadow refresh mutated the retained live cache"
+    );
+    assert_eq!(dirty.rent, 18.);
+    assert_eq!(dirty.prices, [7.; 32]);
+}
+
 fn shadow_terms(
     session: &Session<'_>,
     target: crate::business_edit::Target,
@@ -150,8 +214,18 @@ fn shadow_terms(
 ) -> Pools {
     let before = Pools::from_session(session);
     let mut after = Pools::from_session(session);
-    let mut no_average =
-        |_: &[[u8; 544]]| Err("no affordable alternative should request market average".into());
+    let buildings = session
+        .world
+        .buildings
+        .iter()
+        .map(|building| building[..64].try_into().unwrap())
+        .collect::<Vec<_>>();
+    let mut average_rent = shadow_average_rent(
+        &session.population.market,
+        &buildings,
+        &session.population.settings.catalogs,
+        &session.population.settings.commodities,
+    );
     let mut world = housing::World {
         demand: Some(&mut after.demand),
         buildings: &session.population.housing.buildings,
@@ -162,7 +236,7 @@ fn shadow_terms(
         players: &mut after.players,
         welfare: &session.world.welfare,
         settings: &session.population.housing_settings,
-        average_rent: &mut no_average,
+        average_rent: &mut average_rent,
     };
     housing::apply_business_terms(
         &mut after.residents,
@@ -341,42 +415,298 @@ fn delayed_terms(
 #[test]
 #[ignore = "requires original assets; legal rental turnover and full native terms replay"]
 fn legal_rental_eviction_rehousing_and_next_income() {
-    std::thread::Builder::new().stack_size(32*1024*1024).spawn(|| {
-        with_legal_rental_save(|mut session, mut host, assets, target, path| {
-        let initial_income=session.world.ledgers.players[0].ledger(0x21).unwrap(); assert!(initial_income>0.);
-        let tenants=session.world.ledgers.residents.nodes.iter().enumerate().filter(|(_,r)|r.housing_building()==target.building as i16).map(|(i,_)|i).collect::<Vec<_>>(); assert_eq!(tenants.len(),68);
-        let mut export=b"MTRTURN1".to_vec(); for n in [0x37fu32,2] { export.extend_from_slice(&n.to_le_bytes()); }
-        delayed_terms(&mut session,&mut host,&assets,target,true,600,&mut export);
-        assert_apartment_members(&session,target); assert_eq!(occupied(&session,target),0); assert_eq!(word(&session.world.ledgers.businesses[target.business],0x20c),u32::MAX);
-        for &id in &tenants { let r=&session.world.ledgers.residents.nodes[id]; assert_eq!(r.housing_building(),-1); assert_eq!(r.next_in_housing(),-1); assert_eq!(r.housing_category(),-1); }
-        assert!(session.world.available.contains(&target.business));
-        delayed_terms(&mut session,&mut host,&assets,target,false,600,&mut export);
-        assert_eq!(occupied(&session,target),0,"lowering rent must wait for natural housing actions");
-        for _ in 0..16_000 { frame(&mut session,&mut host,&assets); if session.world.clock.calendar[4]>=2 && session.world.clock.hour()>=5 { break; } }
-        assert_eq!(occupied(&session,target),68,"natural timetable did not refill before rent collection");
-        let before_rent=Pools::from_session(&session);
-        let mut after_rent=Pools::from_session(&session);
-        let rent_total=after_rent.residents.collect_housing_income(&mut after_rent.businesses[target.business],Some(&mut after_rent.players[0])).unwrap();
-        export.extend_from_slice(b"MTRENT01");
-        for n in [target.business as u32,before_rent.players.len() as u32] { export.extend_from_slice(&n.to_le_bytes()); }
-        for row in &session.world.categories { export.extend_from_slice(row); }
-        for row in &session.world.buildings { export.extend_from_slice(row); }
-        before_rent.encode(&session,&mut export);after_rent.encode(&session,&mut export);
-        for _ in 0..2_000 { frame(&mut session,&mut host,&assets); if session.world.clock.calendar[4]>=2 && session.world.clock.hour()>=7 { break; } }
-        assert!(session.world.clock.calendar[4]>=2 && session.world.clock.hour()>=7);
-        assert_eq!(occupied(&session,target),68,"next original timetable did not naturally refill apartment");
-        let next_income=session.world.ledgers.players[0].ledger(0x21).unwrap(); assert!(next_income>0.); assert_eq!(next_income.to_bits(),rent_total.to_bits(),"natural next cycle differs from native rent-chain total");
-        assert_eq!(word(&session.world.ledgers.businesses[target.business],0x50),next_income.to_bits(),"next real rental cycle lost business/player posting equality");
-        assert!(!session.world.available.contains(&target.business),"full apartment remained available");
-        assert_apartment_members(&session,target); crate::session_validation::assert_live_links(&session);
-        let polls=crate::consumer_polls::Poll::from_runtime(&session.world).unwrap(); assert_eq!(polls.iter().map(|p|p.residents).sum::<u16>(),68);
-        let financial=crate::player_info::State::from_runtime(&session.roster.manager,&session.world.ledgers.players,session.roster.status.current_player).unwrap();
-        assert_eq!(crate::player_info::report(&financial.records[0],true).unwrap().iter().find(|r|r.label==0x5bb).unwrap().amount,next_income.to_bits());
-        fs::write("work/economy/natural-rental-turnover.bin",export).unwrap();
-        println!("legal rental turnover:68 naturally housed ->68 evicted ->68 naturally rehoused, day{} hour{}, rental income{} -> {}, full native term snapshots2",session.world.clock.calendar[4],session.world.clock.hour(),initial_income,next_income);
-        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
-        });
-    }).unwrap().join().unwrap();
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| with_legal_rental_save(check_rental_turnover))
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn check_rental_turnover(
+    mut session: Session<'_>,
+    mut host: crate::live_host::Host,
+    assets: CommandAssets<'_, '_>,
+    target: crate::business_edit::Target,
+    path: std::path::PathBuf,
+) {
+    let initial_income = session.world.ledgers.players[0].ledger(0x21).unwrap();
+    assert!(initial_income > 0.);
+    let tenants = session
+        .world
+        .ledgers
+        .residents
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, resident)| resident.housing_building() == target.building as i16)
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    assert_eq!(tenants.len(), 68);
+    let tenant_count = u16::try_from(tenants.len()).unwrap();
+
+    // The city already offers other apartments. Eviction should use
+    // their real vacancies rather than leave these tenants homeless.
+    let alternatives = session
+        .population
+        .housing
+        .buildings
+        .iter()
+        .enumerate()
+        .filter_map(|(building, housing)| {
+            let business = housing.business?;
+            let row = &session.world.ledgers.businesses[business];
+            let capacity = u16::from_le_bytes(row[0xe..0x10].try_into().unwrap());
+            let occupied = u16::from_le_bytes(row[0x10..0x12].try_into().unwrap());
+            if business == target.business
+                || housing.category < 0
+                || word(row, 0) != 1
+                || capacity <= occupied
+            {
+                return None;
+            }
+            Some((
+                crate::business_edit::Target { business, building },
+                capacity - occupied,
+                occupied,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let affordable_alternatives = tenants
+        .iter()
+        .map(|&id| {
+            let resident = &session.world.ledgers.residents.nodes[id];
+            let budget = f64::from(session.population.housing_settings.affordability_factor)
+                * f64::from(
+                    session.world.welfare.amounts[resident.class() as usize]
+                        [resident.age() as usize],
+                );
+            let affordable = alternatives
+                .iter()
+                .enumerate()
+                .filter(|(_, (home, _, _))| {
+                    f64::from(f32::from_bits(word(
+                        &session.world.ledgers.businesses[home.business],
+                        0x1dc,
+                    ))) <= budget
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            let affordable_units = affordable
+                .iter()
+                .map(|&index| usize::from(alternatives[index].1))
+                .sum::<usize>();
+            assert!(
+                affordable_units >= tenants.len(),
+                "setup lacks affordable relocation capacity for resident {id}"
+            );
+            affordable
+        })
+        .collect::<Vec<_>>();
+
+    let mut export = b"MTRTURN1".to_vec();
+    for n in [0x37fu32, 2] {
+        export.extend_from_slice(&n.to_le_bytes());
+    }
+    delayed_terms(
+        &mut session,
+        &mut host,
+        &assets,
+        target,
+        true,
+        600,
+        &mut export,
+    );
+    assert_apartment_members(&session, target);
+    assert_eq!(occupied(&session, target), 0);
+    assert_eq!(
+        word(&session.world.ledgers.businesses[target.business], 0x20c),
+        u32::MAX
+    );
+    let mut relocated = vec![0u16; alternatives.len()];
+    for (&id, affordable) in tenants.iter().zip(&affordable_alternatives) {
+        let resident = &session.world.ledgers.residents.nodes[id];
+        let (index, (home, _, _)) = alternatives
+            .iter()
+            .enumerate()
+            .find(|(_, (home, _, _))| resident.housing_building() == home.building as i16)
+            .unwrap_or_else(|| {
+                panic!("evicted resident {id} did not move into available city housing")
+            });
+        assert!(
+            affordable.contains(&index),
+            "resident {id} moved into unaffordable housing"
+        );
+        assert_eq!(
+            resident.housing_category(),
+            session.population.housing.buildings[home.building].category
+        );
+        relocated[index] += 1;
+    }
+    for ((home, vacancies, prior_occupied), moved) in alternatives.iter().zip(relocated) {
+        assert!(
+            moved <= *vacancies,
+            "relocation exceeded available city units"
+        );
+        assert_eq!(occupied(&session, *home), prior_occupied + moved);
+        assert_apartment_members(&session, *home);
+    }
+    assert!(session.world.available.contains(&target.business));
+    delayed_terms(
+        &mut session,
+        &mut host,
+        &assets,
+        target,
+        false,
+        600,
+        &mut export,
+    );
+    assert_eq!(
+        occupied(&session, target),
+        0,
+        "lowering rent must wait for natural housing actions"
+    );
+    // City apartments can retain tenants, so the next day's apartment need
+    // not be full. Observe the real chain just before the hour-six collection.
+    for _ in 0..16_000 {
+        frame(&mut session, &mut host, &assets);
+        if session.world.clock.calendar[4] == 2
+            && session.world.clock.hour() == 5
+            && session.world.clock.timing[2] == 624
+        {
+            break;
+        }
+    }
+    assert_eq!(session.world.clock.calendar[4], 2);
+    assert_eq!(session.world.clock.hour(), 5);
+    assert_eq!(session.world.clock.timing[2], 624);
+    assert_apartment_members(&session, target);
+    let rehoused = occupied(&session, target);
+    assert!(
+        rehoused > 0,
+        "natural timetable did not rehouse any tenants before rent collection"
+    );
+    let capacity = u16::from_le_bytes(
+        session.world.ledgers.businesses[target.business][0xe..0x10]
+            .try_into()
+            .unwrap(),
+    );
+    assert!(rehoused <= capacity);
+    let rent = f32::from_bits(word(
+        &session.world.ledgers.businesses[target.business],
+        0x1dc,
+    ));
+    let expected_income = (0..rehoused).fold(0f32, |total, _| total + rent);
+    let before_rent = Pools::from_session(&session);
+    let mut after_rent = Pools::from_session(&session);
+    let rent_total = after_rent
+        .residents
+        .collect_housing_income(
+            &mut after_rent.businesses[target.business],
+            Some(&mut after_rent.players[0]),
+        )
+        .unwrap();
+    assert_eq!(
+        rent_total.to_bits(),
+        expected_income.to_bits(),
+        "rent-chain total differs from occupied units at the actual rent"
+    );
+    export.extend_from_slice(b"MTRENT01");
+    for n in [target.business as u32, before_rent.players.len() as u32] {
+        export.extend_from_slice(&n.to_le_bytes());
+    }
+    for row in &session.world.categories {
+        export.extend_from_slice(row);
+    }
+    for row in &session.world.buildings {
+        export.extend_from_slice(row);
+    }
+    before_rent.encode(&session, &mut export);
+    after_rent.encode(&session, &mut export);
+    frame(&mut session, &mut host, &assets);
+    assert_eq!(session.world.clock.hour(), 6);
+    assert_eq!(
+        session.world.ledgers.players[0]
+            .ledger(0x21)
+            .unwrap()
+            .to_bits(),
+        expected_income.to_bits(),
+        "next hour-six update did not post the occupied apartment's rent"
+    );
+    assert_eq!(
+        u16::from_le_bytes(
+            session.world.ledgers.businesses[target.business][0x12..0x14]
+                .try_into()
+                .unwrap()
+        ),
+        rehoused,
+        "rent collection did not record the actual tenant count"
+    );
+    for _ in 0..2_000 {
+        frame(&mut session, &mut host, &assets);
+        if session.world.clock.calendar[4] >= 2 && session.world.clock.hour() >= 7 {
+            break;
+        }
+    }
+    assert!(session.world.clock.calendar[4] >= 2 && session.world.clock.hour() >= 7);
+    let current_occupied = occupied(&session, target);
+    assert!(current_occupied > 0 && current_occupied <= capacity);
+    let next_income = session.world.ledgers.players[0].ledger(0x21).unwrap();
+    assert!(next_income > 0.);
+    assert_eq!(
+        next_income.to_bits(),
+        rent_total.to_bits(),
+        "natural next cycle differs from native rent-chain total"
+    );
+    assert_eq!(
+        word(&session.world.ledgers.businesses[target.business], 0x50),
+        next_income.to_bits(),
+        "next real rental cycle lost business/player posting equality"
+    );
+    assert_eq!(
+        session.world.available.contains(&target.business),
+        current_occupied < capacity,
+        "housing availability differs from the remaining apartment capacity"
+    );
+    assert_apartment_members(&session, target);
+    crate::session_validation::assert_live_links(&session);
+    let polls = crate::consumer_polls::Poll::from_runtime(&session.world).unwrap();
+    // Polls cover every city apartment, including the alternative housing.
+    let expected_polls: [u16; 52] = std::array::from_fn(|category| {
+        session.population.housing.categories[category]
+            .buildings
+            .iter()
+            .filter_map(|&building| session.population.housing.buildings[building].business)
+            .map(|business| &session.world.ledgers.businesses[business])
+            .filter(|&row| word(row, 4) == 42)
+            .map(|row| u16::from_le_bytes(row[0x10..0x12].try_into().unwrap()))
+            .sum()
+    });
+    assert_eq!(polls.map(|poll| poll.residents), expected_polls);
+    let financial = crate::player_info::State::from_runtime(
+        &session.roster.manager,
+        &session.world.ledgers.players,
+        session.roster.status.current_player,
+    )
+    .unwrap();
+    assert_eq!(
+        crate::player_info::report(&financial.records[0], true)
+            .unwrap()
+            .iter()
+            .find(|row| row.label == 0x5bb)
+            .unwrap()
+            .amount,
+        next_income.to_bits()
+    );
+    fs::write("work/economy/natural-rental-turnover.bin", export).unwrap();
+    println!(
+        "legal rental turnover: {tenant_count} evicted, {rehoused} paying rent next cycle, day{} hour{}, rental income{} -> {}",
+        session.world.clock.calendar[4],
+        session.world.clock.hour(),
+        initial_income,
+        next_income
+    );
+    fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
 }
 
 /// Reach a naturally occupied apartment and publish an isolated input save.
