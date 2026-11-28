@@ -3040,7 +3040,12 @@ impl Assets {
         state: &Locator,
         fonts: &mut [Surface],
     ) -> Result<Vec<Surface>, String> {
-        let mut surfaces = Vec::new();
+        let mut backing = Surface::solid();
+        backing.rect(
+            self.player_period_backing(),
+            [crate::player_info::PERIOD_BACKING_COLOR; 4],
+        );
+        let mut surfaces = vec![backing];
         let ordered = state.player_display_order();
         for (position, player) in ordered.iter().enumerate() {
             let character = u32::from_le_bytes(
@@ -3152,6 +3157,12 @@ impl Assets {
     }
     fn finance_layout(&self) -> navigator_report::Layout {
         navigator_report::Layout::new(self.bounds, self.scrollbar[2] - self.scrollbar[0])
+    }
+    // Original 410130 (from 40fe50 on the Player Info tab): the navy backing
+    // behind the period caption, from texture97's extents and the main bounds.
+    fn player_period_backing(&self) -> [f32; 4] {
+        let texture = &self.people_arrows[0][0];
+        crate::player_info::period_backing(self.bounds, [texture.width, texture.height])
     }
     // Original40dd0a..40df24: texture97 dimensions and main-window bounds.
     fn player_period_rects(&self) -> [[f32; 4]; 2] {
@@ -3316,7 +3327,7 @@ impl Assets {
             }
             return self
                 .finance_layout()
-                .hit(p, state.player.rows.len())
+                .hit(p, state.player.line_count())
                 .unwrap_or(Action::None);
         }
         for index in 0..3 {
@@ -3549,7 +3560,7 @@ impl Locator {
                     .position(|p| Some(*p) == self.player.current)
             })
             .unwrap_or(0);
-        let rows = self
+        self.player.rows = self
             .player
             .players
             .get(selected)
@@ -3558,11 +3569,11 @@ impl Locator {
             .unwrap_or_default();
         self.player.selected = selected;
         self.player.today = old.player.today;
-        self.player.scroll = old
-            .player
-            .scroll
-            .min(rows.len().saturating_sub(self.player.visible_rows));
-        self.player.rows = rows;
+        self.player.scroll = old.player.scroll.min(
+            self.player
+                .line_count()
+                .saturating_sub(self.player.visible_rows),
+        );
 
         self.open = old.open;
         self.city_info = old.city_info && self.city_people.is_some();
@@ -3897,7 +3908,7 @@ impl Locator {
                 .player
                 .scroll
                 .saturating_add_signed(delta as isize)
-                .min(assets.finance_layout().maximum(self.player.rows.len()));
+                .min(assets.finance_layout().maximum(self.player.line_count()));
             self.dirty = true;
             return;
         }
@@ -4023,7 +4034,7 @@ impl Locator {
                     } else if self.player_info {
                         self.player.scroll = assets
                             .finance_layout()
-                            .selection(point[1] as f32 * 0.5, self.player.rows.len());
+                            .selection(point[1] as f32 * 0.5, self.player.line_count());
                     } else {
                         self.scroll = ui::slider_selection(
                             ui::slider_track(assets.scrollbar, true),

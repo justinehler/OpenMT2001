@@ -82,6 +82,10 @@ impl Layout {
     }
 }
 
+/// The salmon rule of the original list update (state-3 entries) and the
+/// Building Rights legend (411dd0).
+pub(super) const RULE_COLOR: u32 = 0xffe55f49;
+
 pub(super) struct List<'a> {
     pub(super) pages: &'a [Surface],
     pub(super) tab: &'a [u8],
@@ -99,13 +103,17 @@ impl List<'_> {
     ) -> Result<Vec<Surface>, String> {
         let mut pages = self.pages.to_vec();
         let mut solid = Surface::solid();
-        for (i, row) in player
-            .rows
+        for (i, line) in player_info::lines(&player.rows)
             .iter()
             .skip(player.scroll)
             .take(layout.list.visible_rows())
             .enumerate()
         {
+            if line.rule {
+                let [l, y, r, _] = layout.list.line(i, false);
+                solid.line([l, y + 2.], [r, y + 2.], RULE_COLOR);
+            }
+            let row = &line.row;
             if row.style >= 2 {
                 continue;
             }
@@ -142,7 +150,7 @@ impl List<'_> {
         let mut out = self.paint_scrollbar(
             solid,
             layout,
-            player.rows.len(),
+            player.line_count(),
             player.scroll,
             hover,
             pressed,
@@ -404,7 +412,7 @@ impl Rights<'_> {
                 [l + 40., t + y, r + 2., t + y + 30.],
                 self.color,
             )?;
-            rules.rect([l + 40., t + y + 12., r, t + y + 13.], [0xffe55f49; 4]);
+            rules.rect([l + 40., t + y + 12., r, t + y + 13.], [RULE_COLOR; 4]);
             let (offsets, text) = openmt2001::prompt_queue::wrap_with_gap(
                 self.description_tab,
                 &self.strings[description],
@@ -504,7 +512,7 @@ mod tests {
         locator.scroll(&assets, 1000);
         assert_eq!(
             locator.player.scroll,
-            assets.finance_layout().maximum(locator.player.rows.len())
+            assets.finance_layout().maximum(locator.player.line_count())
         );
     }
 
@@ -957,6 +965,60 @@ mod tests {
     }
 
     #[test]
+    fn navigator_finance_totals_follow_their_items_under_a_salmon_rule() {
+        let owner = finance_owner();
+        // Tall enough that nothing scrolls.
+        let layout = Layout::new([30., 40., 190., 600.], 16.);
+        let mut locator = crate::locator::refresh_ui_tests::fresh();
+        locator.player.set_visible_rows(layout.list.visible_rows());
+        locator.install_strategic(owner).unwrap();
+        let lines = player_info::lines(&locator.player.rows);
+        assert_eq!(locator.player.line_count(), lines.len());
+        assert!(lines.len() < layout.list.visible_rows());
+        let labels: Vec<_> = lines.iter().map(|l| (l.row.label, l.rule)).collect();
+        let income = labels.iter().position(|&l| l == (0x3f, true)).unwrap();
+        let costs = labels.iter().position(|&l| l == (0x40, true)).unwrap();
+        // 412810: the last item precedes each total directly; only the space
+        // line (430210) separates Total Income from the Costs heading.
+        assert_eq!(labels[income - 1], (0x5c, false));
+        assert_eq!(&labels[income + 1..income + 3], [(0, false), (0x43, false)]);
+        assert_eq!(labels[costs - 1], (0x5bd, false));
+        assert_eq!(labels.iter().filter(|l| l.1).count(), 2);
+        assert_eq!(lines[income + 1].row.style, 3);
+
+        let mut strings = vec![vec![1]; 2244];
+        strings[2243] = vec![b'$' - 32];
+        let palette = [0xffffffff; 18];
+        let arrows = std::array::from_fn(|_| std::array::from_fn(|_| Surface::solid()));
+        let pages = [Surface::solid(), Surface::solid()];
+        let tab = font(4, 9);
+        let finance = List {
+            pages: &pages,
+            tab: &tab,
+            strings: &strings,
+            palette: &palette,
+            arrows: &arrows,
+        };
+        let output = finance.paint(&locator.player, &layout, None, None).unwrap();
+        let salmon = [229. / 255., 95. / 255., 73. / 255.];
+        let rules: Vec<_> = output[0]
+            .vertices
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .filter(|quad| quad[0][3..6] == salmon)
+            .map(|quad| [quad[0][0], quad[0][1], quad[2][0], quad[2][1]])
+            .collect();
+        // Original list update: a line two units below the entry's top, at
+        // the 11-unit report pitch, across the list.
+        let rule = |line: usize| {
+            let [l, y, r, _] = layout.list.line(line, false);
+            [l, y + 1.5, r, y + 2.5]
+        };
+        assert_eq!(rules, [rule(income), rule(costs)]);
+    }
+
+    #[test]
     fn navigator_finance_projection_paints_and_retains_scrollable_cost_rows() {
         let owner = finance_owner();
         let layout = Layout::new([30., 40., 190., 320.], 16.);
@@ -965,7 +1027,7 @@ mod tests {
         let mut locator = crate::locator::refresh_ui_tests::fresh();
         locator.player.set_visible_rows(layout.list.visible_rows());
         locator.install_strategic(owner).unwrap();
-        let count = locator.player.rows.len();
+        let count = locator.player.line_count();
         let maximum = layout.maximum(count);
         assert!(maximum > 0);
         assert_eq!(layout.hit([182., 108.], count), Some(Action::Scroll(-1)));

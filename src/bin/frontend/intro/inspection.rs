@@ -875,6 +875,13 @@ impl Inspection {
         }
         self.live_status.as_ref().is_none_or(|s| s.player_panels[0])
     }
+    /// Interface mode 3 (4b52f0), the City View. Without an installed
+    /// navigation state, the strategic camera flag carries the same mode.
+    pub(super) fn city_view(&self) -> bool {
+        self.camera_navigation
+            .as_ref()
+            .map_or(self.strategic, |n| n.mode() == 3)
+    }
     pub(super) fn statistics_visible(&self) -> bool {
         if !self.city_layers().hud_visible() {
             return false;

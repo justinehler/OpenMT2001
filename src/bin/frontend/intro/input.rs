@@ -1577,9 +1577,11 @@ impl Intro {
                 }
                 return;
             }
+            let city_view = view.city_view();
             if view.statistics_visible()
                 && let (Some(comparison), Some(menu)) = (&mut view.comparison, &self.menu)
             {
+                comparison.set_city_view(city_view);
                 comparison.pointer(menu.comparison_assets(), view.pointer);
                 if view.pointer.is_some_and(|p| comparison.contains(p)) || comparison.pressed() {
                     if button == winit::event::MouseButton::Left {

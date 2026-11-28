@@ -1062,8 +1062,7 @@ impl Locator {
             } else {
                 self.player.scroll.min(
                     self.player
-                        .rows
-                        .len()
+                        .line_count()
                         .saturating_sub(self.player.visible_rows),
                 )
             };
