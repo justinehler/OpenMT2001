@@ -1,7 +1,7 @@
 //! Original4b22e8 result title draw: font4, center X=320, top Y=340,
 //! white RGB with the 4b1eb0 controller's alpha byte. Text comes from the
 //! original language table via4dad30/4b17e0, not from embedded English.
-use super::ResultPresentation;
+use crate::fresh_city::result::ResultPresentation;
 use crate::ui::{self, Surface};
 use openmt2001::{
     archive::ArchiveIndex,
@@ -334,7 +334,7 @@ mod tests {
         let assets = Assets::load(&index, &archive, installer, &language).unwrap();
         let mut result = ResultPresentation::new(Sequence::Complete, (0, 1));
         let mut state = 0x1234_5678;
-        result.credit_lines = super::super::credit_lines(&image, &mut state).unwrap();
+        result.credit_lines = crate::fresh_city::result::credit_lines(&image, &mut state).unwrap();
         result.credit_rows = result.credit_lines.len();
         assert_eq!(result.credit_rows, 32);
         for row in [0, 1, 14, 24, 31] {

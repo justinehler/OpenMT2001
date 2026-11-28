@@ -74,27 +74,8 @@ impl Pending {
 // The Session's multiplayer link moved into the library (#99).
 pub use openmt2001::network::SessionLink as Connection;
 
-pub(crate) struct Staged {
-    pub catalog: openmt2001::level_catalog::Catalog,
-    pub launch: crate::fresh_city::SkirmishLaunch,
-    pub scripts: BTreeMap<String, Vec<u8>>,
-    pub map: crate::skirmish_maps::ResolvedMap,
-    pub peers: Vec<Option<u8>>,
-    pub local_slot: usize,
-    parameters: String,
-    timetable: String,
-    era_styles: [openmt2001::building_styles::Styles; 8],
-    road_routes: Vec<u8>,
-    pub content: Content,
-}
-impl Staged {
-    pub fn read(&self, relative: &str) -> Result<Vec<u8>, String> {
-        self.scripts
-            .get(&relative.to_ascii_lowercase())
-            .cloned()
-            .ok_or_else(|| format!("Missing staged connected content: {relative}"))
-    }
-}
+// The staged connected content moved into the library (#99).
+pub(crate) use openmt2001::skirmish::launch::Staged;
 fn hash_part(hash: &mut Sha256, name: &str, bytes: &[u8]) {
     hash.update((name.len() as u64).to_le_bytes());
     hash.update(name);

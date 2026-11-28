@@ -836,3 +836,40 @@ mod tests {
         assert_eq!(reader.at, bytes.len());
     }
 }
+
+/// Test observation of the Session's 18:00 market-share pass (helper 4899e0).
+/// A test registers hooks for its own thread; nothing sets them in the game.
+#[cfg(feature = "lua4")]
+pub mod observer {
+    use crate::{level_startup::City, player_manager::Manager};
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy)]
+    pub struct Hooks {
+        /// manager, city, current player reference, day, prior shares, network flags.
+        pub before: fn(&Manager, &City, u32, u32, [f32; 6], [bool; 2]),
+        pub after: fn(&Manager, &City),
+    }
+    thread_local! { static HOOKS: Cell<Option<Hooks>> = const { Cell::new(None) }; }
+
+    pub fn set(hooks: Option<Hooks>) {
+        HOOKS.with(|h| h.set(hooks));
+    }
+    pub fn before(
+        manager: &Manager,
+        city: &City,
+        current: u32,
+        day: u32,
+        prior: [f32; 6],
+        network: [bool; 2],
+    ) {
+        if let Some(hooks) = HOOKS.with(Cell::get) {
+            (hooks.before)(manager, city, current, day, prior, network);
+        }
+    }
+    pub fn after(manager: &Manager, city: &City) {
+        if let Some(hooks) = HOOKS.with(Cell::get) {
+            (hooks.after)(manager, city);
+        }
+    }
+}

@@ -4,18 +4,6 @@ use openmt2001::level_script::random::zero_to as random_zero_to;
 use openmt2001::{
     business_binding, level_script, level_startup, lua4::Value, outcome_notice::Sequence,
 };
-#[path = "../result_audio.rs"]
-pub mod audio;
-#[path = "../result_fireworks.rs"]
-pub mod fireworks;
-#[path = "../result_lighting.rs"]
-pub mod lighting;
-#[path = "../result_medallions.rs"]
-pub mod medallions;
-#[path = "../result_particles_gpu.rs"]
-pub mod particles_gpu;
-#[path = "../result_text.rs"]
-pub mod text;
 
 /// One original4b1b20 record: optional localized heading plus up to five
 /// ASCII names from mc.exe, converted to the original font glyph indices.
@@ -47,7 +35,7 @@ pub struct ResultPresentation {
 }
 
 impl ResultPresentation {
-    fn new(sequence: Sequence, characters: (u32, u32)) -> Self {
+    pub fn new(sequence: Sequence, characters: (u32, u32)) -> Self {
         Self {
             sequence,
             characters,
@@ -402,7 +390,7 @@ fn credit_descriptors(
     Ok(rows)
 }
 
-fn credit_lines(
+pub(crate) fn credit_lines(
     image: &openmt2001::pe::PeImage<'_>,
     random_state: &mut u32,
 ) -> Result<Vec<CreditRow>, String> {

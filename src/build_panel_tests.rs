@@ -17,7 +17,7 @@ fn hotel_admission_requires_a_player_landlord() {
 #[test]
 #[ignore = "requires pinned native424010 completion observations"]
 fn matches_native_placement_choices() {
-    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_TUTORIAL_BUILD_DRAG")).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_TUTORIAL_BUILD_DRAG")).unwrap();
     assert_eq!(&bytes[..8], b"MTBDRG01");
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     assert_eq!(word(8), 0x037f);
@@ -39,8 +39,8 @@ fn matches_native_placement_choices() {
 #[test]
 #[ignore = "requires private original v1.4 executable"]
 fn original_special_residential_group() {
-    let exe = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
-    let image = openmt2001::pe::PeImage::parse(&exe).unwrap();
+    let exe = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+    let image = crate::pe::PeImage::parse(&exe).unwrap();
     let members = special_residential_group(&image, 33).unwrap();
     assert_eq!(members, [27, 23, 33, -1]);
     let mut owners = [0u8; 52];
@@ -62,7 +62,7 @@ fn original_special_residential_group() {
 #[test]
 #[ignore = "private original planning grid oracle"]
 fn original_grid_points() {
-    let path = openmt2001::fixtures::path("NATIVE_BUILD_UI");
+    let path = crate::fixtures::path("NATIVE_BUILD_UI");
     let b = std::fs::read(path.with_file_name("native-build-ui-grid.bin")).unwrap();
     assert_eq!(&b[..8], b"MTBLDGRD");
     assert_eq!(
@@ -86,7 +86,7 @@ fn original_grid_points() {
 #[test]
 #[ignore = "private original projected grid oracle"]
 fn original_cell_centers() {
-    let path = openmt2001::fixtures::path("NATIVE_BUILD_UI");
+    let path = crate::fixtures::path("NATIVE_BUILD_UI");
     let b = std::fs::read(path.with_file_name("native-build-ui-centers.bin")).unwrap();
     assert_eq!(&b[..8], b"MTBLDCEN");
     assert_eq!(
@@ -107,7 +107,7 @@ fn original_cell_centers() {
 #[test]
 #[ignore = "private original projected lot selection oracle"]
 fn original_cell_picking() {
-    let path = openmt2001::fixtures::path("NATIVE_BUILD_UI");
+    let path = crate::fixtures::path("NATIVE_BUILD_UI");
     let b = std::fs::read(path.with_file_name("native-build-ui-picking.bin")).unwrap();
     assert_eq!(&b[..8], b"MTBLDPCK");
     let n = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
@@ -127,7 +127,7 @@ fn original_cell_picking() {
 #[test]
 #[ignore = "private original planning entry oracle"]
 fn original_planning_entry() {
-    let path = openmt2001::fixtures::path("NATIVE_BUILD_UI");
+    let path = crate::fixtures::path("NATIVE_BUILD_UI");
     let b = std::fs::read(path.with_file_name("native-build-ui-entry.bin")).unwrap();
     assert_eq!(&b[..8], b"MTBLDENT");
     let n = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
@@ -150,7 +150,7 @@ fn original_planning_entry() {
 #[test]
 #[ignore = "private original construction UI request oracle"]
 fn original_build_button_requests() {
-    let bytes = std::fs::read(openmt2001::fixtures::path("NATIVE_BUILD_UI")).unwrap();
+    let bytes = std::fs::read(crate::fixtures::path("NATIVE_BUILD_UI")).unwrap();
     assert_eq!(&bytes[..8], b"MTBLDUI1");
     let mut at = 8;
     let word = |at: &mut usize| {
@@ -203,7 +203,7 @@ fn original_build_button_requests() {
 #[test]
 #[ignore = "private original construction rectangle oracle"]
 fn original_drag_rectangles() {
-    let path = openmt2001::fixtures::path("NATIVE_BUILD_UI");
+    let path = crate::fixtures::path("NATIVE_BUILD_UI");
     let b = std::fs::read(path.with_file_name("native-build-ui-rectangles.bin")).unwrap();
     assert_eq!(&b[..8], b"MTBLDREC");
     let n = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;

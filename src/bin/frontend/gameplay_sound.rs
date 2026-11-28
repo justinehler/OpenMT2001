@@ -26,7 +26,7 @@ pub enum Operation {
         positive: bool,
     },
     /// Original result particle 4549a9/453c1c cue, after a 50 Hz firework tick.
-    ResultFirework(crate::fresh_city::result::fireworks::Cue),
+    ResultFirework(crate::result_presentation::fireworks::Cue),
     /// 465980 dispatches these only when 4ecc20 completes an auction actor
     /// animation, after the producer has stored its participant state.
     AuctionActor(crate::auction_scene::ActorCue),
@@ -490,7 +490,7 @@ impl Player {
                 Ok(0)
             }
             Operation::ResultFirework(cue) => {
-                use crate::fresh_city::result::fireworks::Cue;
+                use crate::result_presentation::fireworks::Cue;
                 let (samples, source_level, whistle) = match cue {
                     Cue::Launch1 => (&self.assets.firework_launch1, 100, false),
                     Cue::Launch2 => (&self.assets.firework_launch2, 100, false),

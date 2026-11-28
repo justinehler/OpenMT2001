@@ -551,8 +551,7 @@ impl Session<'_> {
                                             }
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x4899e0)) => {
-                                            #[cfg(test)]
-                                            crate::scenario_three_play::scenario_six_play::observe_before(
+                                            openmt2001::player_share::observer::before(
                                                 &self.roster.manager, city, self.roster.status.current_player,
                                                 clock.calendar[4], policy.market_share_prior,
                                                 [scheduler.network_enabled, scheduler.network_override]);
@@ -592,8 +591,7 @@ impl Session<'_> {
                                                     Ok(openmt2001::x87::Sum::from_i32(0))
                                                 },
                                             )?;
-                                            #[cfg(test)]
-                                            crate::scenario_three_play::scenario_six_play::observe_after(
+                                            openmt2001::player_share::observer::after(
                                                 &self.roster.manager, city);
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x470b80)) => {

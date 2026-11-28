@@ -1,9 +1,11 @@
 //! Original file decoding and game logic, independent of host I/O.
 pub mod archive;
+pub mod auction_controls;
 pub mod auction_restore;
 pub mod board;
 pub mod board_style;
 pub mod build_file;
+pub mod build_panel;
 pub mod building_models;
 pub mod business_pool;
 pub mod business_report;
@@ -20,6 +22,7 @@ pub mod fixtures;
 pub mod geometry;
 pub mod hourly;
 pub mod housing;
+pub mod human_dialog;
 pub mod lighting;
 pub mod market;
 pub mod material;
@@ -34,6 +37,7 @@ pub mod picking;
 pub mod player_startup;
 pub mod polygon;
 pub mod prompt_format;
+pub mod prompt_queue;
 pub mod pulse_lights;
 #[cfg(feature = "graphics")]
 pub mod render;

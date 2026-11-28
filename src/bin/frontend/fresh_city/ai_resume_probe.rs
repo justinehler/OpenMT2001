@@ -377,6 +377,11 @@ fn run(controlled_retail: bool) {
         assert_eq!(session.roster.manager.players.len(), 2);
         assert!(session.roster.status.has_ai);
         let ai = &mut session.roster.manager.players[1];
+        assert_eq!(
+            &ai.bytes[0xb4c..0xb4e],
+            &[0; 2],
+            "load must retain the reset strategy deadline, not a fresh-game build delay"
+        );
         // The copied human row is disabled for AI ticking until this byte is cleared.
         ai.bytes[0x1403] = 0;
         let initial_cash = f32::from_le_bytes(ai.bytes[4..8].try_into().unwrap());
@@ -433,7 +438,6 @@ fn run(controlled_retail: bool) {
         let mut settings_applied = None;
         let mut retail_restocked = false;
         let mut controlled_bakery = None;
-        let mut auction_announcements = 0;
         let mut auction = ProbeAuction::default();
         let horizon = if key == "OPENMT2001_SAVE_TWO" {
             14_200
@@ -470,6 +474,14 @@ fn run(controlled_retail: bool) {
                     Ok(0)
                 }
                 tick::Event::Command(openmt2001::live_commands::Event::Outcome(_)) => Ok(0),
+                // Ownership/accounting and local timer changes are completed
+                // by Session before these presentation-only callbacks.
+                tick::Event::Command(openmt2001::live_commands::Event::Elimination(
+                    openmt2001::player_elimination::Call::BuildingOwner { .. }
+                    | openmt2001::player_elimination::Call::BuildingRefresh { .. }
+                    | openmt2001::player_elimination::Call::PlayerUi { .. }
+                    | openmt2001::player_elimination::Call::FinishLocal,
+                )) => Ok(0),
                 tick::Event::Command(openmt2001::live_commands::Event::Construction(
                     openmt2001::construction::Event::Appearance(_),
                 )) => Ok(0),
@@ -601,7 +613,6 @@ fn run(controlled_retail: bool) {
                 assert!((word(0x5c) as usize) < session.roster.manager.players.len());
                 assert_eq!(auction.presentation.countdown, 120 * 50);
                 assert_eq!(session.world.categories[category as usize][0x6c], 1);
-                auction_announcements += 1;
             }
             completed += 1;
             if outcome_notice.is_some() {
@@ -766,10 +777,13 @@ fn run(controlled_retail: bool) {
             "saved AI stopped before a real controller interval"
         );
         if key == "OPENMT2001_SAVE_TWO" {
-            assert!(
-                auction_announcements > 0,
-                "resumed AI never announced an auction"
-            );
+            // Native loading preserves the AI RNG instead of drawing a fresh
+            // build delay. Its resulting strategy need not auction a block
+            // within this bounded run; require overnight management instead.
+            let (changed, _, _, _, hour) =
+                settings_change.expect("resumed AI never revised overnight retail settings");
+            assert_eq!(hour, 2);
+            assert_eq!(settings_applied, Some(changed + 25));
             assert!(
                 ai_business_opened,
                 "resumed AI did not open an owned business"
@@ -813,9 +827,11 @@ fn run(controlled_retail: bool) {
                 assert!(retail_restocked);
             }
         } else {
+            // The inserted opponent inherits the human's saved objective
+            // progress. With the native immediate strategy start it wins first.
             assert_eq!(
                 outcome_notice,
-                Some((0, 2)),
+                Some((1, 2)),
                 "saved scenario result boundary changed"
             );
         }

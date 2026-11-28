@@ -4,7 +4,7 @@ use openmt2001::{
     render_scene::OwnedDraw,
 };
 
-use crate::fresh_city::result::{fireworks::Point, particles_gpu};
+use crate::result_presentation::{fireworks::Point, particles_gpu};
 
 pub struct Assets {
     positions: [[f32; 3]; 4],

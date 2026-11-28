@@ -512,22 +512,23 @@ impl<'data> Session<'data> {
     }
     /// UI SaveSelected owns the actual worker Host. Serialize its cold-load
     /// continuation without dropping the live Options hold before the cut.
+    /// `view` is the Host's projection of this Session (`Host::save_view`).
     pub(crate) fn save_v2_with_options_view(
         &mut self,
         image: &openmt2001::pe::PeImage<'_>,
         cameras: [[u8; 196]; 2],
         game_mode: u32,
-        host: &crate::live_host::Host,
+        view: HostSaveView,
         interface_mode: u32,
     ) -> Result<Vec<u8>, String> {
-        let continuation = host
-            .options_save_projection(&self.world.pause, &self.hooks.timers)?
+        let continuation = view
+            .options
             .map(|(pause, timers)| OptionsContinuation { pause, timers });
         self.save_v2_with_auction_view_inner(
             image,
             cameras,
             game_mode,
-            host.auction_save_state(),
+            view.auction,
             interface_mode,
             continuation,
         )
@@ -1163,6 +1164,13 @@ pub(crate) struct SaveProjection<'a> {
 }
 // Private serialized projection: produced only by the actual worker Host's
 // owned Options operation. It is not a native owner, saved token or live state.
+/// What a manual save needs from the live Host: the Options owner's
+/// cold-load continuation (pause and timers with its one hold released) and
+/// the auction presentation state.
+pub(crate) struct HostSaveView {
+    pub options: Option<(openmt2001::pause::State, Vec<openmt2001::timers::Task>)>,
+    pub auction: Option<AuctionHostState>,
+}
 struct OptionsContinuation {
     pause: openmt2001::pause::State,
     timers: Vec<openmt2001::timers::Task>,

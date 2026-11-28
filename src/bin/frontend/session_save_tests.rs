@@ -94,7 +94,13 @@ fn options_save_cold_load_retires_saved_pause_owners() {
                 let live_pause = session.world.pause.clone();
                 let live_timers = session.hooks.timers.clone();
                 let bytes = session
-                    .save_v2_with_options_view(&image, cameras, 1, &host, 0)
+                    .save_v2_with_options_view(
+                        &image,
+                        cameras,
+                        1,
+                        host.save_view(&session).unwrap(),
+                        0,
+                    )
                     .unwrap();
                 assert_eq!(session.world.pause, live_pause);
                 assert_eq!(session.hooks.timers, live_timers);

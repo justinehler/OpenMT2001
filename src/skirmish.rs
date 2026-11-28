@@ -2,6 +2,7 @@
 //! The network-family level catalog is also used by offline Skirmish. This
 //! module does not create a network session or guess the participant roster.
 use crate::{level_catalog::Catalog, pe::PeImage};
+pub mod launch;
 pub mod roster;
 
 pub const OPTION_BASE: u32 = 0x544340;

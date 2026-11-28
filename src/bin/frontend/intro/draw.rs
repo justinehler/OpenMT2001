@@ -129,7 +129,7 @@ impl Intro {
                         (Some(setting), Some(seed)) => {
                             let image =
                                 openmt2001::pe::PeImage::parse(&self.assets.inputs.executable)?;
-                            Some(crate::fresh_city::result::fireworks::Fireworks::new(
+                            Some(crate::result_presentation::fireworks::Fireworks::new(
                                 &image, setting, seed,
                             )?)
                         }
@@ -444,7 +444,7 @@ impl Intro {
         }
         if let (Some(fireworks), Some(index)) = (&result.fireworks, result.fireworks_draw) {
             let draw = &mut view.scene.draws[index];
-            crate::fresh_city::result::particles_gpu::fill(draw, fireworks.points(), view.camera)?;
+            crate::result_presentation::particles_gpu::fill(draw, fireworks.points(), view.camera)?;
             self.renderer.update_surface(
                 &mut view.prepared,
                 index,
