@@ -50,6 +50,7 @@ pub mod render;
 pub mod render_requests;
 pub mod resident;
 pub mod result_controller;
+pub mod road_textures;
 pub mod roof;
 pub mod routing;
 pub mod save;

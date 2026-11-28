@@ -1886,6 +1886,18 @@ impl SceneInputs {
         Ok(())
     }
 
+    /// Draws the era's road markings (004b8d20) from the installed
+    /// `roadtextures` folder; returns the road draws whose pages changed.
+    fn set_road_era(
+        &self,
+        scene: &mut Scene,
+        era: u32,
+        loader: &mut openmt2001::road_textures::Loader,
+    ) -> Result<Vec<usize>, String> {
+        let directory = self.installer.join("Standard/roadtextures");
+        scene.set_road_era(era, |era, widths| loader.pages(&directory, era, widths))
+    }
+
     pub(super) fn inspect_fresh(
         &self,
         session: &mut crate::fresh_city::Session<'_>,
@@ -1931,6 +1943,11 @@ impl SceneInputs {
                 // snapshots clone only once for their actor layers.
                 updated_city_draws
                     .extend(city.set_street_furniture_era(session.world.clock.calendar[2])?);
+                updated_city_draws.extend(self.set_road_era(
+                    &mut city,
+                    session.world.clock.calendar[2],
+                    &mut cache.road_textures,
+                )?);
                 session.refresh_scene_records(&mut city)?;
                 if let Some(image) = session.window_texture.current() {
                     updated_city_draws.extend(city.set_window_pixels(image.pixels)?);
@@ -1964,6 +1981,12 @@ impl SceneInputs {
                 true,
                 Some(&self.style),
                 Some(&mut cache.converted_textures),
+            )?;
+            // A new scene holds roads.tm's built-in pages until its first draw.
+            self.set_road_era(
+                &mut scene,
+                session.world.clock.calendar[2],
+                &mut cache.road_textures,
             )?;
             assembly_elapsed = assembly_started.elapsed();
             let appearance_started = Instant::now();
