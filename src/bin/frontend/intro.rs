@@ -2,6 +2,8 @@
 pub(crate) mod connected_start;
 use crate::present::Presenter;
 
+#[path = "intro/attract.rs"]
+mod attract;
 #[path = "intro/camera_keys.rs"]
 mod camera_keys;
 #[path = "intro/camera_live.rs"]
@@ -1344,6 +1346,11 @@ pub struct Intro {
     last_sample: Option<usize>,
     ended: bool,
     opening: openmt2001::opening_sequence::Controller,
+    attract_menu: Option<crate::menu::Menu>,
+    attract_input: attract::Input,
+    menu_clock: crate::menu::front_main::Clock,
+    menu_updated: Instant,
+    menu_focused: bool,
     pub menu: Option<crate::menu::Menu>,
     menu_camera: Option<MenuCamera>,
     loading: Option<mpsc::Receiver<Result<LoadedInspection, crate::load::Failure>>>,
@@ -1371,6 +1378,12 @@ impl Drop for Intro {
 }
 impl Intro {
     pub(crate) fn window_focus(&mut self, focused: bool) -> Result<(), String> {
+        let now = Instant::now();
+        if !self.menu_focused && self.attract_menu.is_some() {
+            self.started += now.saturating_duration_since(self.menu_updated);
+        }
+        self.menu_focused = focused;
+        self.menu_updated = now;
         self.dialog_keys.focus(focused);
         self.service_camera_turns();
         if let Some(process) = &self.process_frontend {
@@ -1383,6 +1396,7 @@ impl Intro {
         Ok(())
     }
     pub(crate) fn dialog_physical_sample(&mut self, sample: process_frontend::PhysicalSample) {
+        self.attract_input.sample(sample);
         self.dialog_keys.physical(sample);
     }
     pub(crate) fn dialog_ui_event1(&mut self) {
@@ -1751,6 +1765,11 @@ impl Intro {
             last_sample: None,
             ended: false,
             opening: Default::default(),
+            attract_menu: None,
+            attract_input: Default::default(),
+            menu_clock: Default::default(),
+            menu_updated: Instant::now(),
+            menu_focused: true,
             menu: None,
             menu_camera: None,
             loading: None,
@@ -1775,14 +1794,30 @@ impl Intro {
         })
     }
     pub fn open_menu(&mut self) {
+        if let Some(mut menu) = self.attract_menu.take() {
+            menu.return_from_attract();
+            self.menu = Some(menu);
+            self.menu_camera = Some(MenuCamera::new(self.assets.flyby.current()));
+            self.started = Instant::now();
+            self.menu_updated = self.started;
+            self.menu_clock = Default::default();
+            self.last_sample = None;
+            return;
+        }
         if let Some(assets) = self.assets.menu.take() {
             self.menu_camera = Some(MenuCamera::new(self.assets.flyby.current()));
             self.menu = Some(crate::menu::Menu::new(assets));
             self.started = Instant::now();
+            self.menu_updated = self.started;
             self.last_sample = None;
         }
     }
     pub fn skip_opening(&mut self, key: winit::keyboard::NamedKey) {
+        if self.attract_menu.is_some() {
+            // Attract uses admitted physical held samples and the controller's
+            // closing animation, rather than the startup convenience shortcut.
+            return;
+        }
         if opening::skip_key(key) {
             self.open_menu();
         }

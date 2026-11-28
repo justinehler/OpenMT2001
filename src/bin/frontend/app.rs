@@ -662,7 +662,7 @@ impl App {
                         light_click =
                             route_menu_left(menu, state == ElementState::Pressed, participant_down);
                     } else if state == ElementState::Pressed {
-                        intro.open_menu();
+                        intro.skip_opening(NamedKey::Enter);
                     }
                 }
                 if light_click {

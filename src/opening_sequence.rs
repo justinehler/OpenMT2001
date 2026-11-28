@@ -45,6 +45,11 @@ impl Controller {
     pub fn ended(&self) -> bool {
         self.ended
     }
+    /// 4b1980 requests state2: fade the current caption and retract the bars.
+    /// Repeated held input must not restart or postpone the closing animation.
+    pub fn request_end(&mut self) {
+        self.closing = true;
+    }
     /// The caller supplies elapsed camera-service ticks, independently of FPS.
     pub fn advance_to(&mut self, tick: usize) {
         while self.tick < tick && !self.ended {
@@ -103,6 +108,23 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attract_skip_retracts_the_shared_bars_without_restarting_on_held_input() {
+        let mut clock = Controller::default();
+        clock.advance_to(300);
+        assert_eq!(clock.height(), 85);
+        for tick in 301..=385 {
+            clock.request_end();
+            clock.advance_to(tick);
+            assert!(!clock.ended());
+        }
+        assert_eq!(clock.height(), 0);
+        clock.request_end();
+        clock.advance_to(386);
+        assert!(clock.ended());
+        assert_eq!(clock.card(), None);
+    }
 
     #[test]
     fn original_card_edges_and_automatic_finish() {

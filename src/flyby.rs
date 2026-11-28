@@ -33,6 +33,13 @@ impl Playback {
     pub fn duration_ticks(&self) -> usize {
         self.requests.len()
     }
+    /// Re-enter kind17 from the live menu pose, using the same decoded track.
+    /// The loader preserves the current camera triples before its first request.
+    pub fn restart(&mut self, current: CameraSample) -> Result<(), String> {
+        self.camera = crate::camera::primary::Primary::flyby([current.eye, current.target])?;
+        self.frame = 0;
+        self.advance_to(0)
+    }
     /// Catch up every callback, including those between two rendered frames.
     /// Completion remains the frontend's separate FlybyEnded/menu transition.
     pub fn advance_to(&mut self, tick: usize) -> Result<(), String> {
@@ -220,6 +227,23 @@ mod tests {
             playback.sample(fraction).unwrap();
             assert_eq!(playback.camera, before);
             assert_eq!(playback.frame, 1);
+        }
+    }
+    #[test]
+    fn attract_restarts_the_same_track_from_the_live_menu_pose() {
+        let first = pose([12., 6., -6.], [2., 4., -2.]);
+        let bytes = authored_track(&[first, pose([100.; 3], [-100.; 3])]);
+        let mut playback = Playback::new(&Flyby::parse(&bytes).unwrap()).unwrap();
+        playback.advance_to(100).unwrap();
+        for _ in 0..2 {
+            playback
+                .restart(pose([10., 4., -4.], [0., 2., 0.]))
+                .unwrap();
+            assert_eq!(playback.frame, 1);
+            assert_eq!(playback.duration_ticks(), 2);
+            assert_eq!(playback.current(), pose([11., 5., -5.], [1., 3., -1.]));
+            playback.advance_to(1).unwrap();
+            assert_eq!(playback.current(), pose([100.; 3], [-100.; 3]));
         }
     }
     #[test]
