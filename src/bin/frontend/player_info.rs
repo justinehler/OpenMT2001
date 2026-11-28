@@ -94,6 +94,8 @@ pub fn report(saved: &[u8; 440], today: bool) -> Result<Vec<Row>, String> {
         (f64::from(get(0x44)?) + f64::from(get(0x54)?) + f64::from(get(0x18)?)) as f32,
         false,
     );
+    // 412810: Buy out (category3), Chance Cards (18), Spoilage (19).
+    // Like Building Work above, these rows are omitted when their bank is zero.
     for (label, offset) in [(0x5b, 0x20), (0x5c, 0x5c), (0x5bd, 0x60)] {
         append(label, get(offset)?, false);
     }
@@ -205,6 +207,7 @@ pub struct State {
     pub selected: usize,
     pub today: bool,
     pub scroll: usize,
+    pub visible_rows: usize,
     pub rows: Vec<Row>,
 }
 impl State {
@@ -221,6 +224,7 @@ impl State {
             selected: 0,
             today: true,
             scroll: 0,
+            visible_rows: 19,
             rows: vec![],
         };
         state.refresh()?;
@@ -272,8 +276,14 @@ impl State {
         self.players = players;
         self.selected = selected;
         self.rows = rows;
-        self.scroll = self.scroll.min(self.rows.len().saturating_sub(19));
+        self.scroll = self
+            .scroll
+            .min(self.rows.len().saturating_sub(self.visible_rows));
         Ok(true)
+    }
+    pub fn set_visible_rows(&mut self, count: usize) {
+        self.visible_rows = count;
+        self.scroll = self.scroll.min(self.rows.len().saturating_sub(count));
     }
     pub fn refresh(&mut self) -> Result<(), String> {
         self.rows = if let Some(&index) = self.players.get(self.selected) {
