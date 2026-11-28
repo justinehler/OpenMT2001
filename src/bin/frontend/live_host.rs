@@ -143,6 +143,27 @@ pub(crate) fn report_status(status: &Status, previous: Option<&Status>) {
         }
     );
 }
+/// Native 4e6960 kind 1 returns after acknowledgement; kind 0 terminates.
+/// The frontend's game prompts need resource IDs and gameplay dismissal events,
+/// so native debug dialogs are recorded in the terminal instead.
+fn ai_diagnostic(diagnostic: openmt2001::ai_diagnostic::Diagnostic) -> Result<u32, String> {
+    use openmt2001::ai_diagnostic::Kind;
+    match diagnostic.kind {
+        Kind::RecoverableWarning => {
+            eprintln!("[AI warning] {diagnostic}");
+            Ok(0)
+        }
+        Kind::Fatal => Err(format!("AI fatal diagnostic: {diagnostic}")),
+    }
+}
+
+fn ai_callback(call: openmt2001::ai_runtime::Call) -> Result<u32, String> {
+    match call {
+        openmt2001::ai_runtime::Call::Diagnostic(diagnostic) => ai_diagnostic(diagnostic),
+        other => Err(format!("Live session requires Ai({other:?})")),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TutorialCameraAction {
     Mode { mode: u32, target: u32 },
@@ -2675,6 +2696,7 @@ impl Host {
                         &mut construction_sounds, group, position, camera)?;
                     Ok(0)
                 }
+                Event::Ai(call) => ai_callback(call),
                 // Every other callback must be bound deliberately. In particular,
                 // controller/transaction outcomes may not be faked with success.
                 other => Err(format!("Live session requires {other:?}")),
@@ -4391,3 +4413,7 @@ mod card_account_feedback_test;
 #[cfg(test)]
 #[path = "live_host/final_statistics_tests.rs"]
 mod final_statistics_tests;
+
+#[cfg(test)]
+#[path = "live_host/ai_warning_tests.rs"]
+mod ai_warning_tests;

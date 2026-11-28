@@ -48,6 +48,7 @@ pub mod ai_candidate_fill;
 pub mod ai_candidate_queries;
 pub mod ai_candidate_scores;
 pub mod ai_developed_targets;
+pub mod ai_diagnostic;
 pub mod ai_dispatch;
 pub mod ai_events;
 pub mod ai_maintenance;

@@ -118,7 +118,7 @@ pub fn consume_player(
     secondary: bool,
     category_locks: &[u8; 52],
     mut log: impl FnMut(
-        i32,
+        crate::ai_diagnostic::Diagnostic,
         &mut crate::player_manager::Player,
         &mut [[u8; 0x650]],
     ) -> Result<(), String>,
@@ -147,13 +147,21 @@ pub fn consume_player(
         if !rejected {
             if secondary {
                 if !matches!(event.code, 0 | 7) {
-                    log(event.code, player, profiles)?;
+                    log(
+                        crate::ai_diagnostic::Diagnostic::timetable(secondary, event.code),
+                        player,
+                        profiles,
+                    )?;
                 }
             } else if let Some(bit) = event_bit(event.code) {
                 let flags = word(&player.bytes, 0x220) | bit;
                 put(&mut player.bytes, 0x220, flags);
             } else {
-                log(event.code, player, profiles)?;
+                log(
+                    crate::ai_diagnostic::Diagnostic::timetable(secondary, event.code),
+                    player,
+                    profiles,
+                )?;
             }
         }
     }
@@ -519,7 +527,16 @@ mod tests {
                         clock,
                         step == 1,
                         &categories.map(|c| c[0x6c]),
-                        |code, p, _| {
+                        |diagnostic, p, _| {
+                            let crate::ai_diagnostic::Message::Timetable { code, .. } =
+                                diagnostic.message
+                            else {
+                                panic!("expected timetable diagnostic")
+                            };
+                            assert_eq!(
+                                diagnostic.kind,
+                                crate::ai_diagnostic::Kind::RecoverableWarning
+                            );
                             trace.push(code as u32);
                             if mutate {
                                 crate::player_manager::put(&mut p.bytes, 0x150, 1);
