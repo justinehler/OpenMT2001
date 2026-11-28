@@ -3,7 +3,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires original v1.4 game assets and audited scripts"]
-fn engine_save_keeps_native_ai_bootstrap_and_invalidates_market() {
+fn natural_ai_session_continues_after_host_save() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {

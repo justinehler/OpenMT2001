@@ -3898,11 +3898,19 @@ mod tests {
             let loaded = fs::read(&path).unwrap();
             let save = SaveFile::parse(&loaded).unwrap();
             let mut resumed = Session::load_original(inputs(), load_policy(), &loaded).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             assert!(
                 resumed
                     .restore_v2_extension_with_image(&save, &image)
                     .unwrap()
                     .is_some()
+            );
+            crate::session_save::continuation_test::load_boundary(
+                &mut session,
+                &resumed,
+                &assets,
+                &save,
+                native_allocation_next,
             );
             assert_eq!(resumed.saved_cameras, Some(cameras));
             let mut resumed_policy = tick_policy();

@@ -1114,6 +1114,10 @@ mod resident_test;
 mod pause_test;
 
 #[cfg(test)]
+#[path = "session_save_continuation_test.rs"]
+pub(crate) mod continuation_test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -1307,7 +1311,10 @@ mod tests {
             let root=std::path::PathBuf::from("work/save/v2-roundtrip-profile");let path=crate::save_menu::write_new(&root,&bytes).unwrap();
             let loaded=std::fs::read(&path).unwrap();let save=SaveFile::parse(&loaded).unwrap();
             let mut resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
-            let metadata=resumed.restore_v2_extension(&save).unwrap().unwrap();assert_eq!(metadata.profile_filename.as_deref(),Some("536176652066697874757265.lua"));
+            let native_allocation_next = resumed.allocation_next;
+            let metadata=resumed.restore_v2_extension(&save).unwrap().unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
+            assert_eq!(metadata.profile_filename.as_deref(),Some("536176652066697874757265.lua"));
             assert_eq!(resumed.world.clock,session.world.clock);
             assert_eq!(resumed.world.ledgers.businesses,session.world.ledgers.businesses);
             assert_eq!(resumed.world.pending_world.to_bytes(),session.world.pending_world.to_bytes());
@@ -1399,7 +1406,9 @@ mod tests {
             let pending_save=SaveFile::parse(&pending_bytes).unwrap();
             assert!(verified_modern_presentation_queue(&pending_save).unwrap().iter().all(|deferred| !deferred));
             resumed=Session::load_original(inputs(),policy(),&pending_bytes).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension(&pending_save).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &pending_save, native_allocation_next);
             resumed_host=crate::live_host::Host::new(camera.eye);resumed_host.running=true;
             assert_eq!(resumed.world.clock,session.world.clock);
             assert_eq!(queue_image(&resumed),queue_image(&session));
@@ -1426,7 +1435,10 @@ mod tests {
                 "native pass3 must not draw a legally growing bakery");
             let bytes=session.save_v2(&image,cameras,1).unwrap();let path=crate::save_menu::write_new(&root,&bytes).unwrap();
             let bytes=std::fs::read(path).unwrap();let save=SaveFile::parse(&bytes).unwrap();
-            resumed=Session::load_original(inputs(),policy(),&bytes).unwrap();resumed.restore_v2_extension(&save).unwrap();
+            resumed=Session::load_original(inputs(),policy(),&bytes).unwrap();
+            let native_allocation_next = resumed.allocation_next;
+            resumed.restore_v2_extension(&save).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert!(!crate::intro::detail_model_at_unit_scale(&resumed.world.buildings[slot]),
                 "restored growth must retain the native pass3 admission gate");
             resumed_host=crate::live_host::Host::new(camera.eye);resumed_host.running=true;
@@ -1442,6 +1454,8 @@ mod tests {
                 let differing=session.world.ledgers.businesses.iter().zip(&resumed.world.ledgers.businesses).position(|(a,b)|a!=b);
                 assert!(differing.is_none(),"business state diverged at tick{} row{:?}",session.world.clock.timing[0],differing);
                 assert_eq!(resumed.world.pending_world.to_bytes(),session.world.pending_world.to_bytes());
+                // The load step draws no traffic RNG. Equal pedestrian lane
+                // reservations must still yield identical later vehicle draws.
                 assert_eq!(resumed.road_traffic.admission.random,session.road_traffic.admission.random);
                 assert_eq!(resumed.world.creation.initialization_rng.constructor,session.world.creation.initialization_rng.constructor);
                 if open_due.is_none() {
@@ -1457,7 +1471,9 @@ mod tests {
                         let open_save=SaveFile::parse(&open_bytes).unwrap();
                         assert!(verified_modern_presentation_queue(&open_save).unwrap().iter().all(|deferred| !deferred));
                         resumed=Session::load_original(inputs(),policy(),&open_bytes).unwrap();
+                        let native_allocation_next = resumed.allocation_next;
                         resumed.restore_v2_extension(&open_save).unwrap();
+                        continuation_test::load_boundary(&mut session, &resumed, &assets, &open_save, native_allocation_next);
                         resumed_host=crate::live_host::Host::new(camera.eye);resumed_host.running=true;
                         assert_eq!(queue_image(&resumed),queue_image(&session));
                         assert_eq!(accounts(&resumed),accounts(&session));
@@ -1523,7 +1539,9 @@ mod tests {
             let loaded=std::fs::read(path).unwrap();
             let save=SaveFile::parse(&loaded).unwrap();
             resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension(&save).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert_eq!(resumed.world.ledgers.businesses,session.world.ledgers.businesses,
                 "loading must not execute the modern sale early");
             assert_eq!(resumed.live_commands.snapshot().unwrap().len(),1);
@@ -1575,7 +1593,9 @@ mod tests {
                 let loaded=std::fs::read(path).unwrap();
                 let save=SaveFile::parse(&loaded).unwrap();
                 resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
+                let native_allocation_next = resumed.allocation_next;
                 resumed.restore_v2_extension(&save).unwrap();
+                continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
                 for (left,right) in session.roster.manager.players.iter().zip(&resumed.roster.manager.players) {
                     assert_eq!(left.bytes,right.bytes,"load must not post cash early");
                 }
@@ -1624,7 +1644,9 @@ mod tests {
             let save=SaveFile::parse(&bytes).unwrap();
             assert_eq!(verified_modern_presentation_queue(&save).unwrap(),[true]);
             resumed=Session::load_original(inputs(),policy(),&bytes).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension(&save).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert_eq!(resumed.world.categories[released_category][5],buyer,
                 "zero-price release must remain pending at load");
             host=crate::live_host::Host::new(camera.eye);host.running=true;
@@ -1650,7 +1672,9 @@ mod tests {
             let save=SaveFile::parse(&bytes).unwrap();
             assert_eq!(verified_modern_presentation_queue(&save).unwrap(),[true]);
             resumed=Session::load_original(inputs(),policy(),&bytes).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension(&save).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert_eq!(word(&resumed.world.categories[ready_category],0x78),1,
                 "direct category expiry must remain pending at load");
             host=crate::live_host::Host::new(camera.eye);host.running=true;
@@ -1694,7 +1718,9 @@ mod tests {
             let path=crate::save_menu::write_new(&root,&bytes).unwrap();
             let loaded=std::fs::read(path).unwrap();let save=SaveFile::parse(&loaded).unwrap();
             resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension_with_image(&save,&image).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert_eq!(word(&resumed.world.buildings[slot],0x7c),effect as u32);
             assert_eq!(session.demolition_points,resumed.demolition_points);
             resumed_host=crate::live_host::Host::new(camera.eye);resumed_host.running=true;
@@ -1826,7 +1852,9 @@ mod tests {
             let loaded=std::fs::read(path).unwrap();let save=SaveFile::parse(&loaded).unwrap();
             assert_eq!(verified_modern_presentation_queue(&save).unwrap(),[true]);
             resumed=Session::load_original(inputs(),policy(),&loaded).unwrap();
+            let native_allocation_next = resumed.allocation_next;
             resumed.restore_v2_extension_with_image(&save,&image).unwrap();
+            continuation_test::load_boundary(&mut session, &resumed, &assets, &save, native_allocation_next);
             assert_eq!(session.world.ledgers.businesses,resumed.world.ledgers.businesses);
             for (left,right) in session.roster.manager.players.iter().zip(&resumed.roster.manager.players) {
                 assert_eq!(left.bytes,right.bytes,"takeover must not post during loading");
