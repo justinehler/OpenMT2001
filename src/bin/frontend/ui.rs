@@ -541,6 +541,14 @@ pub fn text(
 }
 /// Character palette entry 16 (440ad0), shared by green section captions.
 pub const SECTION_HEADER_COLOR: u32 = 0xff00ff00;
+/// Text palette 0x536288 entry 16 (mint), the attribute that Save 496c70
+/// and Load 4940f0 give the captions on their green field bars.
+pub const FIELD_CAPTION_COLOR: u32 = 0xff3afd87;
+/// Save 497ab0 and Load 494d70 fill each field's caption bar with this green
+/// (palette entry 17) and the value region under it with this half-alpha
+/// navy band (entry 15 at alpha 0x80), over the 0x5362c0 panel backing.
+pub const FIELD_HEADER_BAR: u32 = 0xff01762f;
+pub const FIELD_VALUE_BAND: u32 = 0x801f2f70;
 
 /// Green section captions shared by the single-player setup screens.
 pub fn section_header(

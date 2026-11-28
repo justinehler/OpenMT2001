@@ -32,6 +32,15 @@ const LIST_SCROLL: [f32; 4] = [305., 70., 321., 383.];
 const INFO_SCROLL: [f32; 4] = [588., 287., 604., 378.];
 // Supplied Mac frame270, normalized against the native Save mesh landmarks.
 // The Save As singleton's v1.4 constructor remains unrecovered.
+/// Caption region and language row of Name, Scenario, Time, Cash and
+/// Scenario Information (0x542f40); each value region follows its caption.
+const FIELD_CAPTIONS: [(usize, usize); 5] = [
+    (12, 0x64c),
+    (14, 0x64f),
+    (16, 0x64d),
+    (18, 0x653),
+    (20, 0x6a7),
+];
 const NAME_MODAL: [f32; 4] = [192., 178., 452., 308.];
 const NAME_HEADER: [f32; 4] = [192., 178., 452., 203.];
 const NAME_INPUT: [f32; 4] = [218., 220., 428., 247.];
@@ -235,6 +244,16 @@ impl Assets {
         view: &View,
         pointer: Option<[f32; 2]>,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.surfaces(view, pointer)?;
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            VIEW,
+            None,
+        )
+    }
+    /// The panel in draw order: mesh, 497ab0's rectangles, sliders,
+    /// headings, then the three fonts.
+    fn surfaces(&self, view: &View, pointer: Option<[f32; 2]>) -> Result<Vec<Surface>, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
         let mut headings = Surface::solid();
@@ -244,9 +263,11 @@ impl Assets {
         let mut controls = Vec::new();
         let mut info_rows = 0usize;
         let b = &self.bounds;
-        // Native 497ab0 submits the 433370 panel rectangles before 4419f0.
+        // Native 497ab0 submits the 433370 panel rectangles before 4419f0:
+        // the SAVE_TITLE_AREA gradient, then the 0x5362c0 list and
+        // information backings. Region 6 is SAVE_BORDER04, drawn only by the
+        // mesh; Load's region 6 is its title area.
         shapes.rect(b[5], [0xff0000c0, 0xff0000c0, 0x800000c0, 0x800000c0]);
-        shapes.rect(b[6], [0xff0000ff, 0xff0000ff, 0x800000ff, 0x800000ff]);
         for part in [8, 11] {
             shapes.rect(b[part], [0xbb000a28; 4]);
         }
@@ -267,20 +288,17 @@ impl Assets {
             b[5],
             0xffffffff,
         )?;
-        for (part, id) in [
-            (12, 0x64c),
-            (14, 0x64f),
-            (16, 0x64d),
-            (18, 0x653),
-            (20, 0x6a7),
-        ] {
-            shapes.rect(b[part], [0xff01762f; 4]);
+        // 497ab0 fills each SAVE_LABELn caption bar, then its SAVE_INFOn
+        // value band; 496c70 gives the captions text attribute 16.
+        for (part, id) in FIELD_CAPTIONS {
+            shapes.rect(b[part], [ui::FIELD_HEADER_BAR; 4]);
+            shapes.rect(b[part + 1], [ui::FIELD_VALUE_BAND; 4]);
             ui::text_widget_style4(
                 &mut font1,
                 &self.tab1,
                 &self.strings[id],
                 b[part],
-                0xffffffff,
+                ui::FIELD_CAPTION_COLOR,
             )?;
         }
         for (i, slot) in view
@@ -472,11 +490,7 @@ impl Assets {
         surfaces.extend(font1);
         surfaces.extend(font2);
         surfaces.extend(font4);
-        renderer.prepare(
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            VIEW,
-            None,
-        )
+        Ok(surfaces)
     }
     pub fn prepare_name_modal(
         &self,
@@ -592,6 +606,8 @@ impl View {
         }
         Some((
             crate::human_dialog::Dialog {
+                // 497f60 and 4981d0 never set a portrait on the 88c0d4 owner.
+                portrait: crate::human_dialog::NO_PORTRAIT,
                 title,
                 body,
                 arguments: [
@@ -1152,6 +1168,90 @@ mod tests {
         assert!(!view.visible);
     }
     #[test]
+    #[ignore = "requires original v1.4 Save Game mesh, fonts, USA language and a supplied save"]
+    fn original_save_panel_field_bars_bands_and_mint_captions() {
+        let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
+        let archive = fs::read(openmt2001::fixtures::path("ARCHIVE_BIN")).unwrap();
+        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+        let parameters = openmt2001::fixtures::path("PARAMETERS");
+        let installer = parameters.parent().unwrap().parent().unwrap();
+        let executable = openmt2001::fixtures::path("EXE");
+        let language = executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("US/language/usa");
+        let assets = Assets::load(&index, &archive, installer, &language).unwrap();
+        let saved = fs::read(openmt2001::fixtures::path("SAVE_ONE")).unwrap();
+        let metadata = openmt2001::save::SaveFile::parse(&saved)
+            .unwrap()
+            .level_metadata();
+        let mut view = View {
+            visible: true,
+            ..View::default()
+        };
+        view.slots.push(crate::save_menu::Slot {
+            id: "s9tmp.sav".into(),
+            name: "s9tmp".into(),
+            modified: None,
+            metadata,
+        });
+        view.selected = Some(0);
+        let surfaces = assets.surfaces(&view, None).unwrap();
+        let rects = solid_rects(&surfaces[assets.base.len()]);
+        // 497ab0: the title gradient and the two 0x5362c0 backings only; no
+        // full-panel blue fill brightens the Overwrite panel.
+        assert_eq!(
+            rects[..3],
+            [
+                (assets.bounds[5], 0xff0000c0),
+                (assets.bounds[8], 0xbb000a28),
+                (assets.bounds[11], 0xbb000a28),
+            ]
+        );
+        let mut fields = Vec::new();
+        for (part, _) in FIELD_CAPTIONS {
+            let bar = rects
+                .iter()
+                .position(|r| *r == (assets.bounds[part], ui::FIELD_HEADER_BAR))
+                .unwrap();
+            assert_eq!(
+                rects[bar + 1],
+                (assets.bounds[part + 1], ui::FIELD_VALUE_BAND)
+            );
+            fields.push((assets.bounds[part], assets.bounds[part + 1]));
+            let fonts = &surfaces[surfaces.len() - 6..];
+            assert!(glyphs_in(fonts, assets.bounds[part], ui::FIELD_CAPTION_COLOR) > 0);
+            assert_eq!(glyphs_in(fonts, assets.bounds[part], 0xffffffff), 0);
+        }
+        assert_eq!(fields, ORIGINAL_SAVE_FIELDS);
+    }
+    /// SAVE_LABELn caption bars and their SAVE_INFOn value bands in the
+    /// original save_menu_V2.tm (640x480 panel units).
+    const ORIGINAL_SAVE_FIELDS: [([f32; 4], [f32; 4]); 5] = [
+        (
+            [337.91446, 98.10548, 604.47546, 116.04093],
+            [337.91446, 119.04093, 604.47546, 136.97638],
+        ),
+        (
+            [337.91446, 140.07507, 604.4219, 158.1092],
+            [337.91446, 161.15662, 604.48016, 179.19075],
+        ),
+        (
+            [337.91446, 182.25648, 604.4485, 200.23598],
+            [337.91446, 203.2561, 604.46356, 221.2356],
+        ),
+        (
+            [337.91446, 224.22992, 604.4485, 242.20941],
+            [337.91446, 245.22954, 604.46356, 263.20905],
+        ),
+        (
+            [337.91446, 266.19623, 604.4575, 284.09625],
+            [337.91446, 287.08127, 604.495, 378.99414],
+        ),
+    ];
+    #[test]
     #[ignore = "original v1.4 Save Game mesh/button fixture"]
     fn original_save_panel_bounds_and_buttons() {
         let directory = fs::read(openmt2001::fixtures::path("ARCHIVE_DIR")).unwrap();
@@ -1311,8 +1411,10 @@ mod tests {
                 &openmt2001::pe::PeImage::parse(&exe).unwrap(),
             )
             .unwrap();
-            let buttons = generic.dialog_buttons(2);
-            assert_eq!(buttons.len(), 2);
+            // The portrait-free 88c0d4 owner that 497f60 and 4981d0 raise,
+            // shifted by (-40, 0) like the in-city Quit confirmation.
+            let buttons = generic.frontend_dialog_buttons(2);
+            assert_original_confirmation_buttons(&buttons);
             view.modal = Some(Modal::Overwrite);
             let yes = [
                 (buttons[0][0] + buttons[0][2]) * 0.5,
@@ -1332,9 +1434,10 @@ mod tests {
             ] {
                 view.modal = Some(modal);
                 let (dialog, pressed_button) = view.generic_prompt().unwrap();
+                assert_eq!(dialog.portrait, crate::human_dialog::NO_PORTRAIT);
                 let page = assets.prepare(&renderer, &view, None).unwrap();
                 let popup = generic
-                    .prepare_dialog(&renderer, dialog, [-1.; 2], pressed_button)
+                    .prepare_screen_confirmation(&renderer, dialog, [-1.; 2], pressed_button)
                     .unwrap();
                 crate::capture_test::capture_scene_overlays(
                     &renderer,
@@ -1361,4 +1464,63 @@ mod tests {
             );
         }
     }
+}
+/// The original's Overwrite and Delete Saved Game Yes/No buttons, measured at
+/// 1024x768 under Wine (#531): Yes about (382-477, 441-478), No about
+/// (565-658, 441-478), the same on Save Game and Load Game. 429630 makes each
+/// button 60 units (96 pixels) wide, so the measurements are good to a few
+/// pixels.
+#[cfg(any(test, feature = "test-support"))]
+pub fn assert_original_confirmation_buttons(buttons: &[[f32; 4]]) {
+    let expected = [[382., 441., 477., 478.], [565., 441., 658., 478.]];
+    assert_eq!(buttons.len(), 2);
+    for (bounds, expected) in buttons.iter().zip(expected) {
+        let at_1024 = bounds.map(|v| v * 1.6);
+        for (actual, expected) in at_1024.into_iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() <= 3.,
+                "{at_1024:?} differs from the original {expected:?}"
+            );
+        }
+    }
+}
+/// Solid rectangles of a shapes surface in submission order, with their
+/// ARGB colour (each `Surface::rect` is one six-vertex quad).
+#[cfg(any(test, feature = "test-support"))]
+pub fn solid_rects(surface: &Surface) -> Vec<([f32; 4], u32)> {
+    surface
+        .vertices
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .zip(surface.alpha.as_chunks::<6>().0)
+        .map(|(quad, alpha)| {
+            (
+                [quad[0][0], quad[0][1], quad[2][0], quad[2][1]],
+                vertex_color(&quad[0], alpha[0]),
+            )
+        })
+        .collect()
+}
+#[cfg(any(test, feature = "test-support"))]
+fn vertex_color(vertex: &[f32; 8], alpha: u8) -> u32 {
+    let channel = |v: f32| (v * 255.).round() as u32;
+    u32::from(alpha) << 24 | channel(vertex[3]) << 16 | channel(vertex[4]) << 8 | channel(vertex[5])
+}
+/// Number of glyph quads inside `bounds` drawn in `color` across `pages`.
+#[cfg(any(test, feature = "test-support"))]
+pub fn glyphs_in(pages: &[Surface], bounds: [f32; 4], color: u32) -> usize {
+    pages
+        .iter()
+        .flat_map(|page| {
+            page.vertices
+                .as_chunks::<6>()
+                .0
+                .iter()
+                .zip(page.alpha.as_chunks::<6>().0)
+        })
+        .filter(|(quad, alpha)| {
+            vertex_color(&quad[0], alpha[0]) == color && inside(bounds, [quad[0][0], quad[0][1]])
+        })
+        .count()
 }

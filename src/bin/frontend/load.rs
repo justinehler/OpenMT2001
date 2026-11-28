@@ -341,6 +341,14 @@ impl Load {
             _ => None,
         };
     }
+    /// The Delete Saved Game confirmation while it is the visible prompt (a
+    /// refusal notice is drawn over it first).
+    pub fn delete_prompt(&self) -> Option<crate::human_dialog::Dialog> {
+        if self.refusal_prompt.is_some() {
+            return None;
+        }
+        self.generic_prompt()
+    }
     /// Original 495191 opens the shared 0x88c0d4 generic prompt. Its
     /// answer callback remains local to Load and deletes only a profile slot.
     pub fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
@@ -355,6 +363,8 @@ impl Load {
             };
         }
         Some(crate::human_dialog::Dialog {
+            // 495191 never sets a portrait on the 88c0d4 owner.
+            portrait: crate::human_dialog::NO_PORTRAIT,
             title: 0x65e,
             body: 0x660,
             arguments: [
@@ -561,6 +571,38 @@ impl Load {
         pressed: bool,
         panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
+        let surfaces = self.surfaces(selected, pressed, panel_alpha)?;
+        renderer.prepare(
+            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
+            [
+                2. / 640.,
+                0.,
+                0.,
+                0.,
+                0.,
+                -2. / 480.,
+                0.,
+                0.,
+                0.,
+                0.,
+                1.,
+                0.,
+                -1.,
+                1.,
+                0.,
+                1.,
+            ],
+            None,
+        )
+    }
+    /// The panel in draw order: mesh, 494d70's rectangles, sliders,
+    /// headings, then the fonts.
+    fn surfaces(
+        &self,
+        selected: Option<usize>,
+        pressed: bool,
+        panel_alpha: u8,
+    ) -> Result<Vec<Surface>, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
         let mut headings = Surface::solid();
@@ -637,15 +679,18 @@ impl Load {
                 )?;
             }
         }
+        // 494d70 fills each caption bar, then the value band under it; the
+        // captions carry text attribute 16.
         for (part, id) in [(12, 1612), (14, 1615), (16, 1613), (18, 1619), (20, 1703)] {
-            shapes.rect(self.bounds[part], [0xff087b18; 4]);
+            shapes.rect(self.bounds[part], [ui::FIELD_HEADER_BAR; 4]);
+            shapes.rect(self.bounds[part + 1], [ui::FIELD_VALUE_BAND; 4]);
             ui::text(
                 &mut fonts,
                 &self.tab,
                 &self.strings[id],
                 self.bounds[part],
                 true,
-                0xff00ff00,
+                ui::FIELD_CAPTION_COLOR,
             )?;
         }
         if let Some(entry) = self.chosen.and_then(|i| self.entries.get(i)) {
@@ -812,28 +857,7 @@ impl Load {
         surfaces.extend(list_fonts);
         surfaces.extend(title_fonts);
         surfaces.extend(description_fonts);
-        renderer.prepare(
-            &surfaces.iter().map(Surface::draw).collect::<Vec<_>>(),
-            [
-                2. / 640.,
-                0.,
-                0.,
-                0.,
-                0.,
-                -2. / 480.,
-                0.,
-                0.,
-                0.,
-                0.,
-                1.,
-                0.,
-                -1.,
-                1.,
-                0.,
-                1.,
-            ],
-            None,
-        )
+        Ok(surfaces)
     }
 }
 /// Native 494c90/494cb0 append the name and formatted modified time as two
@@ -1232,6 +1256,31 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// Caption bars and value bands of Name, Scenario, Time, Cash and Scenario
+    /// Information in the original load_menu_V2.tm (640x480 panel units).
+    #[cfg(feature = "capture")]
+    const ORIGINAL_LOAD_FIELDS: [([f32; 4], [f32; 4]); 5] = [
+        (
+            [337.91446, 98.10548, 604.47546, 116.04093],
+            [337.91446, 119.04093, 604.47546, 136.97638],
+        ),
+        (
+            [337.91446, 140.07507, 604.4219, 158.1092],
+            [337.91446, 161.15662, 604.48016, 179.19075],
+        ),
+        (
+            [337.91446, 182.25648, 604.4485, 200.23598],
+            [337.91446, 203.2561, 604.46356, 221.2356],
+        ),
+        (
+            [337.91446, 224.22992, 604.4485, 242.20941],
+            [337.91446, 245.22954, 604.46356, 263.20905],
+        ),
+        (
+            [337.91446, 266.19623, 604.4575, 284.09625],
+            [337.91446, 287.08127, 604.495, 378.99414],
+        ),
+    ];
     #[test]
     #[cfg(feature = "capture")]
     #[ignore = "requires original v1.4 inputs and an offscreen graphics device"]
@@ -1348,6 +1397,31 @@ mod tests {
             "frontend/load-open-unselected-city.png",
         );
         load.chosen = load.entries.iter().position(|entry| entry.path == original);
+        // 494d70: green caption bars with the navy value band under each,
+        // and mint captions (#391).
+        let surfaces = load.surfaces(None, false, 255).unwrap();
+        let rects = crate::save_dialog::solid_rects(&surfaces[load.base.len()]);
+        let mut fields = Vec::new();
+        for part in [12, 14, 16, 18, 20] {
+            let bar = rects
+                .iter()
+                .position(|r| *r == (load.bounds[part], ui::FIELD_HEADER_BAR))
+                .unwrap();
+            assert_eq!(
+                rects[bar + 1],
+                (load.bounds[part + 1], ui::FIELD_VALUE_BAND)
+            );
+            fields.push((load.bounds[part], load.bounds[part + 1]));
+            let text = &surfaces[load.base.len() + 1..];
+            assert!(
+                crate::save_dialog::glyphs_in(text, load.bounds[part], ui::FIELD_CAPTION_COLOR) > 0
+            );
+            assert_eq!(
+                crate::save_dialog::glyphs_in(text, load.bounds[part], 0xff00ff00),
+                0
+            );
+        }
+        assert_eq!(fields, ORIGINAL_LOAD_FIELDS);
         let panel = load.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
@@ -1370,11 +1444,15 @@ mod tests {
         load.activate(2);
         assert!(load.delete_confirmation.is_some());
         let panel = load.draw(&renderer, None, false, 125).unwrap();
+        let dialog = load.delete_prompt().unwrap();
+        assert_eq!(dialog.portrait, crate::human_dialog::NO_PORTRAIT);
         let prompt = prompt_assets
-            .prepare_dialog(&renderer, load.generic_prompt().unwrap(), [-1.; 2], None)
+            .prepare_screen_confirmation(&renderer, dialog, [-1.; 2], None)
             .unwrap();
-        let yes = prompt_assets.dialog_buttons(2)[0];
-        assert!(yes[2] > yes[0] && yes[3] > yes[1]);
+        // 495191 raises the same shifted 88c0d4 owner as Save Game.
+        crate::save_dialog::assert_original_confirmation_buttons(
+            &prompt_assets.frontend_dialog_buttons(2),
+        );
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
