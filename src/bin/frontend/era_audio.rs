@@ -158,7 +158,7 @@ pub struct Player {
     pending_token: Option<crate::audio_bus::focus::MusicToken>,
     prepared: Option<(bool, Vec<f32>)>,
     change_queued: bool,
-    before_six: Option<(u32, rodio::Sink)>,
+    before_six: Option<(u32, crate::audio_bus::effects::Handle)>,
     next_handle: u32,
 }
 
@@ -365,9 +365,19 @@ impl Player {
                 let Some(mixer) = self.effects_bus.combined_mixer() else {
                     return Ok(0);
                 };
-                let sink = rodio::Sink::connect_new(mixer);
-                sink.set_volume(gain);
-                sink.append(rodio::buffer::SamplesBuffer::new(1, 22_050, samples));
+                let Some(sink) = self.audio.effect(
+                    mixer,
+                    crate::audio_bus::effects::Request {
+                        name: "presixoclock.wav",
+                        streamed: true,
+                        looping: false,
+                        unique: false,
+                    },
+                    &samples,
+                    gain,
+                ) else {
+                    return Ok(0);
+                };
                 let handle = self.next_handle;
                 self.next_handle = handle
                     .checked_add(1)
