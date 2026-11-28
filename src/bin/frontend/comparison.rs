@@ -3,7 +3,7 @@
 pub use openmt2001::comparison::{Data, Runtime, Snapshot, State, order};
 
 /// Test helper: build the live comparison data and check it against the world.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn verify_runtime(
     world: &openmt2001::level_startup::World,
     players: &[[u8; 440]],
@@ -243,14 +243,14 @@ pub struct Assets {
     icons: [usize; 10],
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.strings, board)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn verify_fresh(
         &self,
         data: Data,

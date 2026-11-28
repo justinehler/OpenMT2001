@@ -63,7 +63,7 @@ impl Deref for Handle {
         &self.0.sink
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl From<rodio::Sink> for Handle {
     fn from(sink: rodio::Sink) -> Self {
         Self(Rc::new(Voice {

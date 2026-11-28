@@ -3,18 +3,18 @@
 #[path = "ui_text/case_zero_text.rs"]
 pub mod case_zero_text;
 #[path = "ui_text/images.rs"]
-pub(crate) mod images;
+pub mod images;
 #[path = "ui_text/resources.rs"]
-pub(crate) mod resources;
+pub mod resources;
 
 /// Opaque move-stable resource allocation identity, never a native pointer/key.
 #[derive(Clone, Debug)]
-pub(crate) struct ResourceIdentity(std::sync::Arc<()>);
+pub struct ResourceIdentity(std::sync::Arc<()>);
 impl ResourceIdentity {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(std::sync::Arc::new(()))
     }
-    pub(crate) fn same(&self, other: &Self) -> bool {
+    pub fn same(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &other.0)
     }
 }

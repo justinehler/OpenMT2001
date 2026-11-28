@@ -66,7 +66,7 @@ fn auction_voice_name(image: &PeImage<'_>, character: u32, kind: usize) -> Resul
     Ok(name.to_ascii_lowercase())
 }
 
-pub(crate) fn pcm16(path: &Path) -> Result<Vec<f32>, String> {
+pub fn pcm16(path: &Path) -> Result<Vec<f32>, String> {
     let path = crate::transport_audio::original_case_path(path)?;
     let bytes = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     if bytes.len() < 44

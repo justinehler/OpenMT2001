@@ -17,7 +17,7 @@ pub struct Tooltip {
     speed_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
-    pub(crate) fn apply_board(&mut self, board: &openmt2001::packed_language::PackedLanguage) {
+    pub fn apply_board(&mut self, board: &openmt2001::packed_language::PackedLanguage) {
         self.names = board.rows().into_iter().map(<[u8]>::to_vec).collect();
     }
 
@@ -29,7 +29,7 @@ impl Tooltip {
     ) -> Result<Self, String> {
         Self::load_impl(index, archive, installer, language, None)
     }
-    pub(crate) fn load_shared(
+    pub fn load_shared(
         index: &ArchiveIndex,
         archive: &[u8],
         installer: &Path,
@@ -159,7 +159,7 @@ impl Tooltip {
         Ok(name)
     }
     /// Real 43e0a0 font/extent consumer for the finite identifier captions.
-    pub(crate) fn measure_focus_identifier(&self, text_id: u32) -> Result<i32, String> {
+    pub fn measure_focus_identifier(&self, text_id: u32) -> Result<i32, String> {
         let name = self.focus_identifier(text_id)?;
         let width = measure_with_gap(&self.tab, name, -1)?;
         if width >= 150 {
@@ -292,7 +292,7 @@ pub(crate) fn board_strings(installer: &Path) -> Result<Vec<Vec<u8>>, String> {
 
 /// Original4922e0 replaces base-language placeholders with the selected board's
 /// currency and property labels. The current frontend selects supplied USA.
-pub(crate) fn localized_strings(installer: &Path, base: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
+pub fn localized_strings(installer: &Path, base: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
     let mut strings: Vec<_> = base.iter().map(|s| s.to_vec()).collect();
     for (i, text) in board_strings(installer)?.into_iter().skip(1).enumerate() {
         *strings

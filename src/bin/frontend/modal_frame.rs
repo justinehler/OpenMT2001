@@ -4,7 +4,7 @@
 use crate::ui::Surface;
 use openmt2001::render::TexturedDraw;
 
-pub(crate) struct Fade {
+pub struct Fade {
     alpha: u8,
     modal: bool,
     step: i8,
@@ -21,13 +21,13 @@ impl Default for Fade {
 }
 
 impl Fade {
-    pub(crate) fn alpha(&self) -> u8 {
+    pub fn alpha(&self) -> u8 {
         self.alpha
     }
 
     /// One delivered frontend UI sample, independent of OS input repeats.
     /// The native stop test is <=128, not a clamp: 255-26*5 settles at125.
-    pub(crate) fn advance(&mut self, modal: bool) -> bool {
+    pub fn advance(&mut self, modal: bool) -> bool {
         if self.modal != modal {
             self.modal = modal;
             self.step = if modal {
@@ -51,13 +51,13 @@ impl Fade {
 
 /// Borrow textures/geometry and override only the model descriptor's alpha.
 /// Keeping the source immutable prevents successive modal draws compounding it.
-pub(crate) struct Backdrop<'a> {
+pub struct Backdrop<'a> {
     surfaces: &'a [Surface],
     alpha: Vec<Vec<u8>>,
 }
 
 impl<'a> Backdrop<'a> {
-    pub(crate) fn new(surfaces: &'a [Surface], alpha: u8) -> Self {
+    pub fn new(surfaces: &'a [Surface], alpha: u8) -> Self {
         Self {
             surfaces,
             alpha: surfaces
@@ -67,7 +67,7 @@ impl<'a> Backdrop<'a> {
         }
     }
 
-    pub(crate) fn draws(&self) -> Vec<TexturedDraw<'_>> {
+    pub fn draws(&self) -> Vec<TexturedDraw<'_>> {
         self.surfaces
             .iter()
             .zip(&self.alpha)
@@ -80,7 +80,7 @@ impl<'a> Backdrop<'a> {
     }
 }
 
-pub(crate) fn set_alpha(surfaces: &mut [Surface], alpha: u8) {
+pub fn set_alpha(surfaces: &mut [Surface], alpha: u8) {
     for surface in surfaces {
         surface.alpha.fill(alpha);
     }

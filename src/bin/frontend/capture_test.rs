@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 /// `openmt2001::fixtures::scratch("CAPTURE")`; a leading `work/` is dropped so
 /// older names keep their layout. Tests that read a capture back use this to
 /// find it.
-pub(crate) fn output_path(path: &str) -> PathBuf {
+pub fn output_path(path: &str) -> PathBuf {
     let path = Path::new(path);
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -35,12 +35,7 @@ pub(crate) fn output_path(path: &str) -> PathBuf {
     }
     resolved
 }
-pub(crate) fn capture(
-    renderer: &Renderer,
-    panel: Option<&PreparedScene>,
-    scene: &Scene,
-    path: &str,
-) {
+pub fn capture(renderer: &Renderer, panel: Option<&PreparedScene>, scene: &Scene, path: &str) {
     capture_impl(
         renderer,
         &[],
@@ -50,18 +45,13 @@ pub(crate) fn capture(
         path,
     );
 }
-pub(crate) fn capture_prepared(
-    renderer: &Renderer,
-    scene: &Scene,
-    prepared: &PreparedScene,
-    path: &str,
-) {
+pub fn capture_prepared(renderer: &Renderer, scene: &Scene, prepared: &PreparedScene, path: &str) {
     capture_impl(renderer, &[], &[], Some(scene), Some(prepared), path);
 }
-pub(crate) fn capture_standalone(renderer: &Renderer, prepared: &PreparedScene, path: &str) {
+pub fn capture_standalone(renderer: &Renderer, prepared: &PreparedScene, path: &str) {
     capture_impl(renderer, &[], &[], None, Some(prepared), path);
 }
-pub(crate) fn capture_overlay(
+pub fn capture_overlay(
     renderer: &Renderer,
     prepared: &PreparedScene,
     panel: &PreparedScene,
@@ -69,7 +59,7 @@ pub(crate) fn capture_overlay(
 ) {
     capture_impl(renderer, &[], &[panel], None, Some(prepared), path);
 }
-pub(crate) fn capture_scene_overlays(
+pub fn capture_scene_overlays(
     renderer: &Renderer,
     scene: &Scene,
     panels: &[&PreparedScene],
@@ -77,7 +67,7 @@ pub(crate) fn capture_scene_overlays(
 ) {
     capture_impl(renderer, &[], panels, Some(scene), None, path);
 }
-pub(crate) fn capture_scene_overlays_at_size(
+pub fn capture_scene_overlays_at_size(
     renderer: &Renderer,
     scene: &Scene,
     panels: &[&PreparedScene],
@@ -86,7 +76,7 @@ pub(crate) fn capture_scene_overlays_at_size(
 ) {
     capture_impl_at_size(renderer, &[], panels, Some(scene), None, path, size);
 }
-pub(crate) fn capture_scene_world_overlays(
+pub fn capture_scene_world_overlays(
     renderer: &Renderer,
     scene: &Scene,
     world: &[&PreparedScene],
@@ -95,7 +85,7 @@ pub(crate) fn capture_scene_world_overlays(
 ) {
     capture_impl(renderer, world, panels, Some(scene), None, path);
 }
-pub(crate) fn capture_prepared_world_overlays(
+pub fn capture_prepared_world_overlays(
     renderer: &Renderer,
     prepared: &PreparedScene,
     world: &[&PreparedScene],
@@ -115,12 +105,7 @@ fn capture_impl(
     capture_impl_at_size(renderer, world, panels, scene, prepared, path, [1280, 960]);
 }
 
-pub(crate) fn capture_scene_at_size(
-    renderer: &Renderer,
-    scene: &Scene,
-    path: &str,
-    size: [u32; 2],
-) {
+pub fn capture_scene_at_size(renderer: &Renderer, scene: &Scene, path: &str, size: [u32; 2]) {
     capture_impl_at_size(renderer, &[], &[], Some(scene), None, path, size);
 }
 
@@ -230,8 +215,8 @@ fn capture_impl_at_size(
 }
 
 /// Capture an actual retained construction record without advancing its state.
-pub(crate) fn construction_stage(
-    session: &crate::fresh_city::Session,
+pub fn construction_stage(
+    session: &openmt2001::session::Session,
     build: &[u8],
     original: openmt2001::render_scene::OriginalAssets<'_>,
     slot: usize,

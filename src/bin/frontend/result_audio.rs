@@ -560,8 +560,8 @@ mod repeat_tests {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn composition_result_pcm(
+#[cfg(any(test, feature = "test-support"))]
+pub fn composition_result_pcm(
     mixer: &rodio::mixer::Mixer,
     audio: &crate::audio_bus::focus::SharedAudio,
 ) -> crate::audio_bus::focus::Music {

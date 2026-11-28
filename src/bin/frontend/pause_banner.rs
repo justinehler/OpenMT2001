@@ -24,7 +24,7 @@ pub struct Assets {
     reason_two: Vec<u8>,
 }
 impl Assets {
-    pub(crate) fn load_shared(
+    pub fn load_shared(
         shared: &crate::ui_text::resources::UiTextResources,
     ) -> Result<Self, String> {
         let rows = shared.fonts().language.rows();

@@ -147,7 +147,7 @@ impl Assets {
             &crate::board_selection::Name::default().language(installer)?,
         )
     }
-    pub(crate) fn load_board(
+    pub fn load_board(
         index: &ArchiveIndex,
         archive: &[u8],
         installer: &Path,
@@ -392,8 +392,8 @@ fn rgb(color: u32) -> [f32; 3] {
     [16, 8, 0].map(|shift| ((color >> shift) & 255) as f32 / 255.)
 }
 
-#[cfg(all(test, feature = "capture"))]
-pub(crate) fn capture_marvin(
+#[cfg(all(any(test, feature = "test-support"), feature = "capture"))]
+pub fn capture_marvin(
     scene: &openmt2001::render_scene::Scene,
     report: &crate::block_information::Report,
     path: &str,

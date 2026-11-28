@@ -6,7 +6,7 @@ use openmt2001::{
     pe::PeImage,
 };
 
-pub(crate) use openmt2001::pavement_resource;
+pub use openmt2001::pavement_resource;
 
 pub struct Assets {
     pub blocks: Vec<Block>,
@@ -22,7 +22,7 @@ pub struct Hit {
 
 /// Geometry is independent of camera frames; only the world pulse phase moves it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MarkerState {
+pub struct MarkerState {
     selected: Option<Hit>,
     hovered: Option<Hit>,
     pulse_phase: u32,
@@ -31,7 +31,7 @@ pub(crate) struct MarkerState {
 /// Original 4b880c updates each category's dynamic +0xb8 bit1 from 4e0a10.
 /// Picking already uses the matching 4e07d0/4e0910 classifier; share its
 /// transformed box rather than substituting a category-center depth test.
-pub(crate) struct CategoryFrustum {
+pub struct CategoryFrustum {
     view: [f32; 12],
     projection: openmt2001::picking::QueryProjection,
 }
@@ -149,19 +149,19 @@ impl Assets {
         })
     }
     /// Sole retained occupied definition owner; callers resolve typed bindings.
-    pub(crate) fn pavement_resource(&self) -> &pavement_resource::Directory {
+    pub fn pavement_resource(&self) -> &pavement_resource::Directory {
         &self.pavement
     }
-    pub(crate) fn pavement_definition(&self) -> Result<[u8; 116], String> {
+    pub fn pavement_definition(&self) -> Result<[u8; 116], String> {
         self.pavement.binding()?.definition()
     }
     /// Actual asset removal only. Root must retire dependent Pool allocations
     /// BEFORE calling this, replacing Assets, or dropping the process owner.
-    pub(crate) fn retire_pavement_resource(&mut self) -> Result<(), String> {
+    pub fn retire_pavement_resource(&mut self) -> Result<(), String> {
         self.pavement.retire()
     }
-    #[cfg(test)]
-    pub(crate) fn descriptor_test_assets(blocks: Vec<Block>, definition: [u8; 116]) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn descriptor_test_assets(blocks: Vec<Block>, definition: [u8; 116]) -> Self {
         // Authored test fixture only; never used as a live/default producer.
         let center = [24, 25, 26].map(|i| {
             f32::from_bits(u32::from_le_bytes(
@@ -175,8 +175,8 @@ impl Assets {
             pavement: pavement_resource::Directory::synthetic(definition),
         }
     }
-    #[cfg(test)]
-    pub(crate) fn replace_descriptor_test_resource(
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn replace_descriptor_test_resource(
         &mut self,
         definition: [u8; 116],
     ) -> Result<(), String> {
@@ -190,7 +190,7 @@ impl Assets {
     }
     /// Refresh the retained marker geometry only on identity/scene invalidation
     /// or a new selected pulse phase. A paused world keeps the same tick.
-    pub(crate) fn refresh_marker_surface(
+    pub fn refresh_marker_surface(
         &self,
         state: &mut Option<MarkerState>,
         hits: [Option<Hit>; 2],
@@ -316,7 +316,7 @@ impl Assets {
     /// 482580 consumes actor translation and model center SEPARATELY, with
     /// retained x87 addition. Do not feed already-rounded center(index).
     /// Original44faf0 creates pavement descriptors at [blockX,0,blockZ].
-    pub(crate) fn camera_block_initialization(
+    pub fn camera_block_initialization(
         &self,
         category_id: u32,
         height_word: u32,

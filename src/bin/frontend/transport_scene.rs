@@ -255,14 +255,14 @@ impl Layer {
         Ok(self.range.clone())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn submitted_references(&self) -> impl Iterator<Item = u32> + '_ {
         self.auxiliaries
             .iter()
             .map(|auxiliary| u32::from_le_bytes(auxiliary[..4].try_into().unwrap()))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn first_position(&self) -> Option<[f32; 3]> {
         self.auxiliaries.first().map(|auxiliary| {
             std::array::from_fn(|axis| {

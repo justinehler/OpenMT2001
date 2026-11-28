@@ -40,11 +40,11 @@ pub struct PageSource {
 pub struct FontPages {
     pub name: String,
     pub archive_range: Range<usize>,
-    pub(crate) bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
     pub records: Vec<PageSource>,
 }
 impl FontPages {
-    pub(crate) fn parse(
+    pub fn parse(
         name: String,
         archive_range: Range<usize>,
         bytes: Vec<u8>,
@@ -95,7 +95,7 @@ impl FontPages {
 /// No Clone implementation and no move-out manager API: panels borrow it.
 #[derive(Debug)]
 pub struct UiTextResources {
-    pub(crate) construction_identity: super::ResourceIdentity,
+    pub construction_identity: super::ResourceIdentity,
     manager: Box<Fonts>,
     pub literals: Literals,
     pub tables: Vec<TableSource>,
@@ -304,7 +304,7 @@ pub(crate) fn write_filename(
     }
     Ok(())
 }
-pub(crate) fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>, String> {
+pub fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>, String> {
     let b = pe.at(address, max)?;
     let n = b
         .iter()
@@ -312,7 +312,7 @@ pub(crate) fn ntbs(pe: &PeImage<'_>, address: u32, max: usize) -> Result<Vec<u8>
         .ok_or_else(|| format!("PE text resource{address:x} unterminated"))?;
     Ok(b[..n].to_vec())
 }
-pub(crate) fn expand_one(format: &[u8], value: &[u8]) -> Result<Vec<u8>, String> {
+pub fn expand_one(format: &[u8], value: &[u8]) -> Result<Vec<u8>, String> {
     let at = format
         .windows(2)
         .position(|b| b == b"%s")

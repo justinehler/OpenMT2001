@@ -436,7 +436,7 @@ fn apartment_numeric_controls(
 }
 /// Borrowed authoritative refresh inputs; no renderer or retained owner is consumed.
 #[derive(Clone, Copy)]
-pub(crate) struct RefreshScene<'a> {
+pub struct RefreshScene<'a> {
     pub buildings: &'a [openmt2001::render_scene::InspectionBuilding],
     pub catalog: Option<&'a openmt2001::business_pool::BusinessCatalog>,
     pub commodities: Option<&'a [[u8; 0x1c]; 32]>,
@@ -452,12 +452,12 @@ impl<'a> From<&'a Scene> for RefreshScene<'a> {
 }
 /// All fallible decoding is complete. Commit preserves the actual State's
 /// channels, pending edits and control owners unless admission changed.
-pub(crate) struct PreparedRefresh {
+pub struct PreparedRefresh {
     fresh: State,
     admission_changed: bool,
 }
 impl PreparedRefresh {
-    pub(crate) fn commit(self, state: &mut State) {
+    pub fn commit(self, state: &mut State) {
         let Self {
             fresh,
             admission_changed,
@@ -814,7 +814,7 @@ fn inside(p: [f32; 2], b: [f32; 4]) -> bool {
     p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
@@ -831,7 +831,7 @@ impl Assets {
     ) -> Result<Option<State>, String> {
         self.open_for_owner_view(scene.into(), building, owner)
     }
-    pub(crate) fn open_for_owner_view(
+    pub fn open_for_owner_view(
         &self,
         scene: RefreshScene<'_>,
         building: usize,
@@ -869,7 +869,7 @@ impl Assets {
             Ok(false)
         }
     }
-    pub(crate) fn prepare_refresh(
+    pub fn prepare_refresh(
         &self,
         scene: RefreshScene<'_>,
         previous: &[openmt2001::render_scene::InspectionBuilding],
@@ -1652,7 +1652,7 @@ impl Assets {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn verify_live_panels(scene: &Scene) {
     let read = |name| fs::read(openmt2001::fixtures::path(name)).unwrap();
     let executable = read("OPENMT2001_EXE");
@@ -1830,8 +1830,8 @@ pub fn verify_live_panels(scene: &Scene) {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn refresh_assets_fixture() -> Assets {
+#[cfg(any(test, feature = "test-support"))]
+pub fn refresh_assets_fixture() -> Assets {
     // The refresh path reads only owner_colors, products and block_names.
     Assets {
         base: vec![],

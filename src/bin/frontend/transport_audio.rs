@@ -259,8 +259,8 @@ pub struct Player {
     train_toot: Option<Handle>,
     road_ambient: Option<Handle>,
     road_motors: [Option<Handle>; 3],
-    resident_crowd: Option<Handle>,
-    coast: Option<Handle>,
+    pub resident_crowd: Option<Handle>,
+    pub coast: Option<Handle>,
     near_aircraft: Option<Handle>,
     ship_engine: Option<Handle>,
     ship_horn: Option<Handle>,
@@ -268,12 +268,12 @@ pub struct Player {
     crane_end: Option<Handle>,
     crane_lift: Option<Handle>,
     crane_loop: Option<Handle>,
-    construction: [Option<Handle>; 8],
-    block_sinks: [Option<Handle>; 52],
+    pub construction: [Option<Handle>; 8],
+    pub block_sinks: [Option<Handle>; 52],
     block_controller: Option<block_audio::Controller>,
     pending_ship_random: u32,
     interface_mode: u32,
-    city: Option<Box<CityInputs>>,
+    pub city: Option<Box<CityInputs>>,
     listener: Listener,
 }
 
@@ -1161,6 +1161,75 @@ fn road_gain(sum: f32) -> f32 {
     road_level(sum) as f32 / 100.
 }
 
+/// A player over half-amplitude PCM for every effect, with a test output.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_owner() -> (
+    Player,
+    crate::audio_bus::focus::SharedAudio,
+    rodio::mixer::MixerSource,
+) {
+    let samples = vec![0.5; 65536];
+    let assets = Assets {
+        spatial_enabled: false,
+        train_motion: samples.clone(),
+        train_toot: samples.clone(),
+        road_ambient: samples.clone(),
+        road_motor: samples.clone(),
+        resident_crowd: samples.clone(),
+        coast: Some(samples.clone()),
+        near_aircraft: samples.clone(),
+        ship_engine: samples.clone(),
+        ship_horn: samples.clone(),
+        ocean_liner: samples.clone(),
+        crane_start: samples.clone(),
+        crane_end: samples.clone(),
+        crane_lift: samples.clone(),
+        crane_loop: samples.clone(),
+        construction_scaffold: samples.clone(),
+        construction_saw: samples.clone(),
+        construction_hammer: samples.clone(),
+        block_factory: samples.clone(),
+        block_school: samples.clone(),
+        block_park_one: samples.clone(),
+        block_park_two: samples.clone(),
+        block_owl: samples,
+    };
+    let mut player = Player::new(assets);
+    let audio = crate::audio_bus::focus::SharedAudio::new(75, 25);
+    player.bind_audio(audio.clone());
+    let (mixer, output) = rodio::mixer::mixer(1, 22050);
+    mixer.add(rodio::source::Zero::new(1, 22050));
+    player.bus.connect_test_output(&mixer, 1, 22050);
+    (player, audio, output)
+}
+
+/// City inputs with a nearby factory, resident category and construction source.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_city_inputs(tick: u32) -> CityInputs {
+    let mut categories = [[0; 0x17c]; 52];
+    for category in &mut categories {
+        category[4] = 1;
+        category[0xe0..0xe4].copy_from_slice(&1000f32.to_le_bytes());
+        category[0xe4..0xe8].copy_from_slice(&1000f32.to_le_bytes());
+    }
+    // A nearby factory and resident category let the frame update both beds.
+    categories[2][0xe0..0xe4].copy_from_slice(&0f32.to_le_bytes());
+    categories[2][0xe4..0xe8].copy_from_slice(&(-300f32).to_le_bytes());
+    categories[2][0x88..0x8c].copy_from_slice(&200i32.to_le_bytes());
+    let mut construction = [[None; 2]; 4];
+    insert_construction_source(&mut construction, 0, [0., 40., -300.], [0., 40., -300.]).unwrap();
+    CityInputs {
+        reciprocal_sum: 0.1,
+        nearest: [[101f32.to_bits(), 0, 0]; 3],
+        categories,
+        construction,
+        hour: 8,
+        tick,
+        previous_tick: 100,
+        initial_random_state: 205,
+    }
+}
+
 #[cfg(test)]
 mod focus_tests {
     include!("transport_audio_focus_tests.rs");
@@ -1186,18 +1255,15 @@ mod tests {
         let (auction, receiver) = mpsc::channel();
         drop(receiver);
         assert_eq!(
-            crate::live_host::auction_audio::request(
+            crate::auction_audio::request(
                 &Some(auction.clone()),
-                crate::live_host::auction_audio::Operation::Reset
+                crate::auction_audio::Operation::Reset
             )
             .unwrap(),
             0
         );
-        crate::live_host::auction_audio::enqueue(
-            &Some(auction),
-            crate::live_host::auction_audio::Operation::Reset,
-        )
-        .unwrap();
+        crate::auction_audio::enqueue(&Some(auction), crate::auction_audio::Operation::Reset)
+            .unwrap();
 
         let (era, receiver) = mpsc::channel();
         drop(receiver);

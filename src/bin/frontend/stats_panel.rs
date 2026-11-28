@@ -130,15 +130,15 @@ fn stats_mesh_triangles<'a>(
 }
 
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
         crate::board_selection::overlay(&mut self.strings, board)
     }
 
-    #[cfg(test)]
-    pub(crate) fn input_test_assets() -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn input_test_assets() -> Self {
         Self {
             model: vec![],
             regions: vec![("STATS_OK_BUTTON".into(), [300., 400., 340., 430.])],

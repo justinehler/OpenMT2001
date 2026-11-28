@@ -8,7 +8,7 @@
 
 /// Keep the existing modern u8/clamp policy. This is not the original raw
 /// signed32/exceptional-input API, whose out-of-domain behavior differs.
-pub(crate) fn normalized_percentage(level: u8) -> f32 {
+pub fn normalized_percentage(level: u8) -> f32 {
     let percent = f32::from_bits(0x3c23_d70a);
     // One binary32 preference/member store, under ordinary nearest/even.
     (f64::from(level.min(100)) * f64::from(percent)) as f32

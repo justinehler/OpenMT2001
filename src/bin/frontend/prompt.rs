@@ -198,7 +198,7 @@ pub struct Assets {
     pub button: [f32; 4],
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
@@ -429,7 +429,7 @@ impl Assets {
     pub fn desktop_quit_hit_at(&self, cursor: [f32; 2], right: bool) -> Option<usize> {
         self.frontend_dialog_hit_at(cursor, right, 2)
     }
-    pub(crate) fn frontend_dialog_hit_at(
+    pub fn frontend_dialog_hit_at(
         &self,
         cursor: [f32; 2],
         right: bool,
@@ -457,7 +457,7 @@ impl Assets {
     }
     /// The frontend uses the same portrait-free prompt owner (88c0d4) for
     /// Quit, profile deletion and duplicate registration.
-    pub(crate) fn prepare_frontend_dialog(
+    pub fn prepare_frontend_dialog(
         &self,
         renderer: &Renderer,
         dialog: crate::human_dialog::Dialog,
@@ -490,7 +490,7 @@ impl Assets {
         let surfaces = self.frontend_prompt_surfaces(state)?;
         self.prepare_surfaces(renderer, &surfaces)
     }
-    pub(crate) fn frontend_prompt_surfaces(&self, state: &State) -> Result<Vec<Surface>, String> {
+    pub fn frontend_prompt_surfaces(&self, state: &State) -> Result<Vec<Surface>, String> {
         let modal = crate::desktop_quit::Modal::presented(state.cursor, state.pressed_dialog);
         self.message_surfaces(state, true, crate::desktop_quit::OFFSET, Some(&modal))
     }
@@ -755,7 +755,7 @@ fn textured_rect(surface: &mut Surface, b: [f32; 4]) {
     );
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn verify_card_panel(scene: &openmt2001::render_scene::Scene, player: &[u8; 440]) {
     let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
     let executable = read("OPENMT2001_EXE");
@@ -1872,7 +1872,7 @@ mod script_message_tests {
     };
 
     fn request(context: u32, tutorial: bool, button: bool) -> Request {
-        crate::live_host::script_request(
+        openmt2001::prompt_queue::script_request(
             &[
                 Value::Number(1.),
                 Value::Number(2.),
@@ -1909,8 +1909,12 @@ mod script_message_tests {
         let mut state = State::default();
         for (command, args) in &hooks.commands {
             state.submit(
-                crate::live_host::script_request(args, false, matches!(command, Command::Prompt))
-                    .unwrap(),
+                openmt2001::prompt_queue::script_request(
+                    args,
+                    false,
+                    matches!(command, Command::Prompt),
+                )
+                .unwrap(),
             );
         }
         for (context, count) in [(11, 0), (12, 1), (13, 0), (15, 0)] {
@@ -2061,7 +2065,7 @@ mod script_message_tests {
         .unwrap();
         let (command, args) = &hooks.commands[0];
         assert!(matches!(command, Command::TutorialMessage));
-        let current = crate::live_host::script_request(args, true, false).unwrap();
+        let current = openmt2001::prompt_queue::script_request(args, true, false).unwrap();
         assert_eq!(
             (current.dialog.unwrap().button_count, current.dismissal_id),
             (0, 5)

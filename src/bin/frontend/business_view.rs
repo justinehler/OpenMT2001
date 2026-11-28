@@ -66,7 +66,7 @@ fn information_heading_style(info: usize) -> (usize, usize, usize) {
     (0, 16, [30, 1405][info])
 }
 impl Assets {
-    pub(crate) fn apply_board(
+    pub fn apply_board(
         &mut self,
         board: &openmt2001::packed_language::PackedLanguage,
     ) -> Result<(), String> {
@@ -1134,12 +1134,49 @@ mod tutorial_two_tests {
     }
 }
 
-#[cfg(all(test, feature = "capture"))]
+/// The original-backed panel assets the tests and captures load.
+#[cfg(any(test, feature = "test-support"))]
+pub fn original_assets() -> (Assets, Vec<u8>) {
+    let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
+    let directory = read("OPENMT2001_ARCHIVE_DIR");
+    let archive = read("OPENMT2001_ARCHIVE_BIN");
+    let exe = read("OPENMT2001_EXE");
+    let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
+    let parameters = openmt2001::fixtures::path("PARAMETERS");
+    let installer = parameters.parent().unwrap().parent().unwrap();
+    let executable = openmt2001::fixtures::path("EXE");
+    let language = executable
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("US/language/usa");
+    let offsets = fs::read(language.join("tycoon.off")).unwrap();
+    let bytes = fs::read(language.join("tycoon.bin")).unwrap();
+    let mut at = 0;
+    let strings = offsets
+        .chunks_exact(2)
+        .map(|n| {
+            let end = at + u16::from_le_bytes(n.try_into().unwrap()) as usize;
+            let text = &bytes[at..end];
+            at = end;
+            text
+        })
+        .collect::<Vec<_>>();
+    //4922e0 replaces currency/property placeholders before Main is shown.
+    let localized = crate::tooltip::localized_strings(installer, &strings).unwrap();
+    let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let assets = Assets::load(&index, &archive, installer, &strings, &exe).unwrap();
+    assert_eq!(assets.strings[2243], [4], "USA currency is encoded $");
+    (assets, exe)
+}
+
+#[cfg(all(any(test, feature = "test-support"), feature = "capture"))]
 pub fn capture_inspection(data: &Inspection) {
     let Ok(path) = std::env::var("OPENMT2001_BUILDING_PANEL_CAPTURE") else {
         return;
     };
-    let (assets, _) = tests::original_assets();
+    let (assets, _) = original_assets();
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     if cfg!(windows) {
         desc.backends = wgpu::Backends::DX12;
@@ -1172,40 +1209,6 @@ mod tests {
     fn information_heading_uses_native_font_color_and_language() {
         assert_eq!(information_heading_style(0), (0, 16, 30));
         assert_eq!(information_heading_style(1), (0, 16, 1405));
-    }
-    pub(super) fn original_assets() -> (Assets, Vec<u8>) {
-        let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
-        let directory = read("OPENMT2001_ARCHIVE_DIR");
-        let archive = read("OPENMT2001_ARCHIVE_BIN");
-        let exe = read("OPENMT2001_EXE");
-        let index = ArchiveIndex::parse(&directory, archive.len() as u64).unwrap();
-        let parameters = openmt2001::fixtures::path("PARAMETERS");
-        let installer = parameters.parent().unwrap().parent().unwrap();
-        let executable = openmt2001::fixtures::path("EXE");
-        let language = executable
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("US/language/usa");
-        let offsets = fs::read(language.join("tycoon.off")).unwrap();
-        let bytes = fs::read(language.join("tycoon.bin")).unwrap();
-        let mut at = 0;
-        let strings = offsets
-            .chunks_exact(2)
-            .map(|n| {
-                let end = at + u16::from_le_bytes(n.try_into().unwrap()) as usize;
-                let text = &bytes[at..end];
-                at = end;
-                text
-            })
-            .collect::<Vec<_>>();
-        //4922e0 replaces currency/property placeholders before Main is shown.
-        let localized = crate::tooltip::localized_strings(installer, &strings).unwrap();
-        let strings = localized.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let assets = Assets::load(&index, &archive, installer, &strings, &exe).unwrap();
-        assert_eq!(assets.strings[2243], [4], "USA currency is encoded $");
-        (assets, exe)
     }
     #[test]
     #[ignore = "original Main41e40f/407b07 constructor and icon oracle"]
