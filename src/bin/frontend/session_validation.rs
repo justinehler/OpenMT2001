@@ -37,10 +37,7 @@ mod tests {
         live_host::Host,
     };
     use openmt2001::{live_commands, outcome_notice::Sequence};
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
+    use std::{fs, path::Path};
 
     #[test]
     #[ignore = "requires original v1.4 scripts and model/road assets"]
@@ -76,6 +73,12 @@ mod tests {
                         .unwrap(),
                 )
                 .unwrap();
+                let installer = openmt2001::fixtures::path("PARAMETERS");
+                let style = crate::block_sidewalk_labels::load_style(
+                    &image,
+                    installer.parent().unwrap().parent().unwrap(),
+                )
+                .unwrap();
                 let assets = CommandAssets {
                     image: &image,
                     board: &board,
@@ -85,12 +88,20 @@ mod tests {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos();
-                let root = PathBuf::from("work/validation")
+                let root = openmt2001::fixtures::scratch("RESULT_ROUTE")
                     .join(format!("result-profile-{}-{nonce}", std::process::id()));
-                for (label, local_wins, expected, complete) in [
-                    ("cancel", false, Sequence::Lose, false),
-                    ("loss", false, Sequence::Lose, true),
-                    ("win", true, Sequence::Win, true),
+                for (label, local_wins, expected, complete, scenario, level_id) in [
+                    ("cancel", false, Sequence::Lose, false, "SCENARIO1", 200001),
+                    ("loss", false, Sequence::Lose, true, "SCENARIO1", 200001),
+                    ("win", true, Sequence::Win, true, "SCENARIO1", 200001),
+                    (
+                        "complete",
+                        true,
+                        Sequence::Complete,
+                        true,
+                        "SCENARIO16",
+                        200016,
+                    ),
                 ] {
                     let path = campaign_store::profile_path(&root, label.as_bytes());
                     assert!(
@@ -100,52 +111,64 @@ mod tests {
                     let mut catalog = campaign_store::load_catalog(&image, &scripts).unwrap();
                     campaign_store::load_progress(&mut catalog, &path).unwrap();
                     // The GAMESTART registration order unlocks a different first
-                    // scenario. Represent a profile that can legally launch 1.
-                    catalog.unlock(200001);
-                    let selected = catalog.find(200001).unwrap();
-                    let next_id = catalog.levels[selected + 1..]
-                        .iter()
-                        .find(|level| !level.tutorial())
+                    // scenario. Represent a profile that can legally launch this level.
+                    catalog.unlock(level_id);
+                    let selected = catalog.find(level_id).unwrap();
+                    let next_id = if level_id == 200016 {
+                        400001
+                    } else {
+                        catalog.levels[selected + 1..]
+                            .iter()
+                            .find(|level| !level.tutorial())
+                            .unwrap()
+                            .id()
+                    };
+                    let process = crate::live_host::process_runtime::startup(&executable, "")
                         .unwrap()
-                        .id();
-                    let mut session = Session::initialize_campaign(
-                        Inputs {
-                            tree_locators: None,
-                            image: &image,
-                            board: &board,
-                            file: &file,
-                            people: openmt2001::people::PeopleModels::load(
-                                &image, &index, &archive,
-                            )
-                            .unwrap(),
-                            vehicle_models:
-                                openmt2001::traffic::road::models::Models::from_original(
+                        .0;
+                    let mut session =
+                        Session::initialize_campaign_with_style_and_compatibility_in_process(
+                            Inputs {
+                                tree_locators: None,
+                                image: &image,
+                                board: &board,
+                                file: &file,
+                                people: openmt2001::people::PeopleModels::load(
                                     &image, &index, &archive,
                                 )
                                 .unwrap(),
-                            transport_models: openmt2001::traffic::models::Models::from_original(
-                                &image, &index, &archive,
-                            )
-                            .unwrap(),
-                            road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
-                            scripts: &scripts,
-                            parameters: std::str::from_utf8(&parameters).unwrap(),
-                            era_styles: era_styles.clone(),
-                            timetable: std::str::from_utf8(&timetable).unwrap(),
-                            scenario: "SCENARIO1",
-                            difficulty: 0,
-                            selected_character: 4,
-                            profile_name: b"Result validation",
-                            character_names: &names,
-                        },
-                        Policy {
-                            seed: 0x12345678,
-                            auxiliary_prior_bytes: [0; 0x11c],
-                        },
-                        catalog,
-                        path.clone(),
-                    )
-                    .unwrap();
+                                vehicle_models:
+                                    openmt2001::traffic::road::models::Models::from_original(
+                                        &image, &index, &archive,
+                                    )
+                                    .unwrap(),
+                                transport_models:
+                                    openmt2001::traffic::models::Models::from_original(
+                                        &image, &index, &archive,
+                                    )
+                                    .unwrap(),
+                                road_routes: read("OPENMT2001_ROAD_ROUTE_TABLE"),
+                                scripts: &scripts,
+                                parameters: std::str::from_utf8(&parameters).unwrap(),
+                                era_styles: era_styles.clone(),
+                                timetable: std::str::from_utf8(&timetable).unwrap(),
+                                scenario,
+                                difficulty: 0,
+                                selected_character: 4,
+                                profile_name: b"Result validation",
+                                character_names: &names,
+                            },
+                            Policy {
+                                seed: 0x12345678,
+                                auxiliary_prior_bytes: [0; 0x11c],
+                            },
+                            catalog,
+                            path.clone(),
+                            &style,
+                            crate::compatibility::Mode::StrictV14,
+                            Some(process),
+                        )
+                        .unwrap();
                     let local = session
                         .roster
                         .manager
@@ -276,7 +299,7 @@ mod tests {
                         drop(session);
                         let mut reloaded = campaign_store::load_catalog(&image, &scripts).unwrap();
                         campaign_store::load_progress(&mut reloaded, &path).unwrap();
-                        let level = &reloaded.levels[reloaded.find(200001).unwrap()];
+                        let level = &reloaded.levels[reloaded.find(level_id).unwrap()];
                         assert_eq!(
                             level.attempts(),
                             0,
@@ -287,27 +310,72 @@ mod tests {
                         continue;
                     }
 
-                    // The renderer's completion callback is controlled here; it is
-                    // deliberately separate from the naturally scheduled modal.
+                    // Drive the same controller and retained host events as the
+                    // live presentation, without requiring an audio device.
                     assert!(
                         host.complete_result_sequence(&mut session).is_err(),
                         "campaign progressed before the result VM requested Game.End"
                     );
-                    session
-                        .dispatch_result_event("FlybyEnded", &assets)
+                    let presentation = session.result_presentation().unwrap();
+                    let mut controller = crate::result_controller::Controller::new(
+                        presentation.bypass_enabled,
+                        presentation.credits,
+                        presentation.credit_rows,
+                    );
+                    controller.set_identifier(presentation.cut_scene_identifier);
+                    for _ in 0..300 {
+                        assert!(!controller.tick(false));
+                        if controller.take_credit_construction_edge() {
+                            session.construct_result_credits(&image).unwrap();
+                        }
+                        host.frame(&mut session, &assets, 20);
+                    }
+                    host.dispatch_result_event(&mut session, &assets, "FlybyEnded")
                         .unwrap();
+                    let presentation = session.result_presentation().unwrap();
+                    controller.set_identifier(presentation.cut_scene_identifier);
+                    controller.set_bypass(presentation.bypass_enabled);
                     assert!(
                         host.complete_result_sequence(&mut session).is_err(),
                         "campaign progressed before CutSceneEnded"
                     );
-                    session
-                        .dispatch_result_event("CutSceneEnded", &assets)
-                        .unwrap();
+                    let mut ended = false;
+                    for tick in 0..10000 {
+                        host.frame(&mut session, &assets, 20);
+                        let finished = controller.tick(tick == 0 && expected != Sequence::Complete);
+                        if controller.take_credit_construction_edge() {
+                            session.construct_result_credits(&image).unwrap();
+                        }
+                        if finished {
+                            ended = true;
+                            host.dispatch_result_event(&mut session, &assets, "CutSceneEnded")
+                                .unwrap();
+                            break;
+                        }
+                    }
+                    assert!(
+                        ended,
+                        "result controller did not reach the original end callback"
+                    );
                     assert_eq!(
                         host.complete_result_sequence(&mut session).unwrap(),
                         expected
                     );
                     assert!(host.complete_result_sequence(&mut session).is_err());
+                    let status = host.status(&session);
+                    assert_eq!(
+                        status.result_review,
+                        Some(crate::live_host::ResultReview::Statistics)
+                    );
+                    assert!(status.stats.is_some());
+                    host.stats_action(&mut session, crate::live_host::StatsAction::Close)
+                        .unwrap();
+                    assert_eq!(
+                        host.status(&session).result_review,
+                        Some(crate::live_host::ResultReview::Menu(
+                            crate::live_host::ResultMenu::Scenarios
+                        ))
+                    );
                     assert_eq!(session.catalog.selected_level().unwrap().attempts(), 1);
                     assert_eq!(
                         session.catalog.selected_level().unwrap().completed()[0],
@@ -315,7 +383,7 @@ mod tests {
                     );
                     let mut reloaded = campaign_store::load_catalog(&image, &scripts).unwrap();
                     campaign_store::load_progress(&mut reloaded, &path).unwrap();
-                    let level = &reloaded.levels[reloaded.find(200001).unwrap()];
+                    let level = &reloaded.levels[reloaded.find(level_id).unwrap()];
                     assert_eq!(
                         level.attempts(),
                         1,
@@ -333,6 +401,7 @@ mod tests {
                         "{label} next scenario unlock changed on reload"
                     );
                 }
+                fs::remove_dir_all(root).unwrap();
             })
             .unwrap()
             .join()

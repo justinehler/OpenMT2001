@@ -936,7 +936,7 @@ mod mixed_boundary_test;
 mod ai_test;
 #[cfg(all(test, feature = "capture"))]
 #[path = "session_save_auction_test.rs"]
-mod auction_test;
+pub(crate) mod auction_test;
 
 #[cfg(test)]
 #[path = "session_save_terms_test.rs"]
@@ -1927,8 +1927,6 @@ impl SaveProjection<'_> {
             game_mode,
         };
         let mut bytes = writer::encode(&mut state, 0x7fffff, [0; 4])?;
-        #[cfg(test)]
-        natural_observer::after(&self.city.categories, &self.city.auction.controller.record);
         let profile = self
             .campaign_profile
             .as_ref()
@@ -2207,10 +2205,6 @@ impl AutosaveRequest for SaveRequest<'_, '_> {
             .projection
             .take()
             .ok_or("Autosave request already consumed")?;
-        #[cfg(test)]
-        let mut projection = projection;
-        #[cfg(test)]
-        natural_observer::before(&mut projection);
         projection.encode(self.image, cameras, game_mode, host, interface_mode)
     }
 }
