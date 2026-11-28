@@ -1587,7 +1587,11 @@ impl Intro {
             graphics: &mut self.graphics_levels,
             gameplay: &mut self.gameplay_levels,
         }
-        .sync_profile(self.menu.as_mut(), self.process_frontend.as_ref())?;
+        // The presentation retains the selected profile while its menu is hidden.
+        .sync_profile(
+            self.menu.as_mut().or(self.attract_menu.as_mut()),
+            self.process_frontend.as_ref(),
+        )?;
         self.sync_board_names()
     }
     /// App invokes this once after EVERY synchronous window-event dispatch,

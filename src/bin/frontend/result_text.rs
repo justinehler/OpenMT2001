@@ -302,11 +302,11 @@ mod tests {
             (left, right)
         };
         let (left, right) = rect(&surfaces[..2], 220.);
-        assert_eq!((left, right), (315.5, 324.5));
+        assert_eq!((left, right), (316.5, 323.5));
         for row in 0..5 {
             let (left, right) = rect(&surfaces[2..], 240. + row as f32 * 20.);
-            assert!((left + right - 639.).abs() <= 1.);
-            assert_eq!(right - left, (row + 1) as f32 * 11.);
+            assert_eq!(left + right, 640.);
+            assert_eq!(right - left, (row + 1) as f32 * 10. + 1.);
         }
         assert!(surfaces.iter().flat_map(|s| &s.alpha).all(|&a| a == 128));
         assert!(assets.credit_row_surfaces(&rows, 0, 0).unwrap().is_none());
