@@ -1,5 +1,6 @@
 //! Original file decoding and game logic, independent of host I/O.
 pub mod archive;
+pub mod auction_controls;
 pub mod auction_restore;
 pub mod board;
 pub mod board_style;
