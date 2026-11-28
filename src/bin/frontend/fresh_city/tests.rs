@@ -4857,7 +4857,7 @@ fn original_live_auction_host() {
             host.set_running(false);
             for _ in 0..350 {frame(&mut host,&mut session);}
             assert!(host.status(&session).notices.is_empty());
-            crate::card_panel::verify_host(&mut host,&mut session,&assets);
+            verify_card_host(&mut host,&mut session,&assets);
             exercise_host_outcome(&mut host,&mut session,&assets);
             host.auction_renderer.take();presenter.join().unwrap();
             println!("Real Host auction: timed admission, original GPU scene handoff, UI eligibility, human bid, settlement, ledger and restored view verified");
@@ -5421,4 +5421,124 @@ fn original_fresh_city_renders_live_records() {
             );
         }
     }
+}
+
+/// The real Host card flow during a live auction run (moved from card_panel, #99).
+fn verify_card_host(
+    host: &mut crate::live_host::Host,
+    session: &mut openmt2001::session::Session<'_>,
+    assets: &openmt2001::session::CommandAssets<'_, '_>,
+) {
+    use openmt2001::session::cards::Action;
+    fn word(bytes: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+    }
+    let current = session
+        .roster
+        .manager
+        .players
+        .iter()
+        .position(|p| p.reference == session.roster.status.current_player)
+        .unwrap();
+    host.set_running(true);
+    for card in [65, 1] {
+        session.event_cards.release(card).unwrap();
+        session.event_cards.rebuild();
+        host.human_card(session, assets, Action::Request(Some(card)))
+            .unwrap();
+        for _ in 0..100 {
+            host.frame(session, assets, 40);
+            assert!(host.failure.is_none(), "card request {:?}", host.failure);
+            if word(&session.roster.manager.players[current].bytes, 0x1b8) == card {
+                break;
+            }
+        }
+        assert_eq!(
+            word(&session.roster.manager.players[current].bytes, 0x1b8),
+            card
+        );
+        let speed = host.policy.scheduler.iterations;
+        let (sound_sender, sound_receiver) = std::sync::mpsc::channel();
+        let prior_sound = host.gameplay_sound.replace(sound_sender);
+        host.human_card(session, assets, Action::Open).unwrap();
+        assert_eq!(
+            sound_receiver.try_recv().unwrap().operation,
+            crate::gameplay_sound::Operation::CardOpen { positive: true },
+            "native card row {card} must choose Positivepluck",
+        );
+        assert!(
+            sound_receiver.try_recv().is_err(),
+            "card open plays one cue"
+        );
+        host.gameplay_sound = prior_sound;
+        let panel = host.status(session).card.unwrap();
+        assert_eq!(panel.card, card);
+        assert_eq!(host.policy.scheduler.iterations, speed);
+        if card == 65 {
+            assert_eq!(panel.buttons, [false, false, true, true]);
+            host.human_card(
+                session,
+                assets,
+                Action::Button {
+                    event: 12,
+                    button: 2,
+                },
+            )
+            .unwrap();
+            assert!(host.status(session).card.is_none());
+            // A scene-category selection validates through the authoritative card API.
+            host.human_card(
+                session,
+                assets,
+                Action::Select {
+                    category: 0,
+                    building: -1,
+                },
+            )
+            .unwrap();
+            host.human_card(session, assets, Action::Open).unwrap();
+            assert!(host.status(session).card.is_some());
+            host.human_card(
+                session,
+                assets,
+                Action::Button {
+                    event: 12,
+                    button: 3,
+                },
+            )
+            .unwrap();
+            assert!(host.status(session).card.is_none());
+            assert_eq!(session.event_cards.used[card as usize], 0);
+        } else {
+            let ledger = session.world.ledgers.players[current].ledger(0x24).unwrap();
+            assert_eq!(panel.buttons, [true, false, false, false]);
+            host.human_card(
+                session,
+                assets,
+                Action::Button {
+                    event: 12,
+                    button: 0,
+                },
+            )
+            .unwrap();
+            assert!(host.status(session).card.is_none());
+            let due = session.world.clock.timing[0] + 25;
+            while session.world.clock.timing[0] < due {
+                host.frame(session, assets, 40);
+                assert!(
+                    host.failure.is_none(),
+                    "card application {:?}",
+                    host.failure
+                );
+            }
+            assert_eq!(
+                session.world.ledgers.players[current].ledger(0x24).unwrap(),
+                ledger + 200.
+            );
+            assert_eq!(session.event_cards.used[card as usize], 0);
+        }
+    }
+    println!(
+        "Real Host cards: request/inbox, original entry gate, held card panel, Keep/Discard and delayed financial card application verified"
+    );
 }

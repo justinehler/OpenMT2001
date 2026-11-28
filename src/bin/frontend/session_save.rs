@@ -6,15 +6,13 @@ pub mod auction;
 #[cfg(test)]
 #[path = "session_save_ai_test.rs"]
 mod ai_test;
-#[cfg(all(test, feature = "capture"))]
-#[path = "session_save_auction_test.rs"]
-pub(crate) mod auction_test;
 #[cfg(test)]
 #[path = "session_autosave_live_test.rs"]
 mod autosave_live_tests;
-#[cfg(test)]
+// The game binary's session-save tests use its load boundary.
+#[cfg(any(test, feature = "test-support"))]
 #[path = "session_save_continuation_test.rs"]
-pub(crate) mod continuation_test;
+pub mod continuation_test;
 #[cfg(all(test, feature = "capture"))]
 #[path = "session_save_mixed_boundary_test.rs"]
 mod mixed_boundary_test;
@@ -24,18 +22,16 @@ mod pause_test;
 #[cfg(test)]
 #[path = "session_save_resident_test.rs"]
 mod resident_test;
-#[cfg(test)]
-#[path = "session_save_terms_test.rs"]
-mod terms_test;
-#[cfg(test)]
-#[path = "session_save_tests.rs"]
-mod tests;
+// The auction, terms and main save tests need intro, the time panel or the
+// rental fixtures, so they build with the game binary (game.rs
+// `session_save_host_tests`, #99).
 
-// The moved module's imports, for its tests' `use super::*`.
-#[cfg(test)]
+// The moved module's imports, for its tests' `use super::*` (the load
+// boundary in continuation_test is also built for the game's tests).
+#[cfg(any(test, feature = "test-support"))]
 #[allow(unused_imports)]
 use openmt2001::session::Session;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[allow(unused_imports)]
 use openmt2001::{
     live_commands::Command,

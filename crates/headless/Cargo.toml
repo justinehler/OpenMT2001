@@ -7,9 +7,12 @@ license = "MIT"
 repository = "https://github.com/justinehler/OpenMT2001"
 autobins = false
 
-# `game headless` without the native stack (#99): the same runner, Host and
-# session sources as the game binary, mounted from src/bin, built against the
-# library alone. No wgpu, winit or rodio.
+# The game's Host and session modules (lib) and `game headless` without the
+# native stack (bin), mounted from src/bin and built against the library
+# alone: no wgpu, winit or rodio (#99). The game binary links the lib.
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "headless"
 path = "src/main.rs"
@@ -21,6 +24,20 @@ test = false
 openmt2001 = { path = "../..", features = ["lua4"] }
 sha2 = "0.10"
 
-# The mounted sources gate some tests on the game's `capture` feature.
+# The Host and session tests use interface-layer types and helpers.
+[dev-dependencies]
+openmt2001 = { path = "../..", features = ["lua4", "test-support"] }
+openmt-frontend = { path = "../frontend", features = ["native", "test-support"] }
+glam = "0.33.7"
+pollster = "1.0.1"
+wgpu = "30.0.1"
+
+[features]
+# Test helpers the game binary's tests use; the game enables it as a dev-dependency.
+test-support = ["openmt2001/test-support"]
+# Tests that drive the capture path (the game's `capture` feature turns it on).
+capture = ["openmt2001/capture", "openmt-frontend/capture"]
+
+# headless.rs (bin) picks its connected-play module on the game's `native` feature.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("capture", "native"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("native"))'] }

@@ -5,10 +5,7 @@ use super::{
     camera_bridge::{RequestError, SessionCall, SessionReply},
 };
 
-pub(super) fn handle(
-    session: &mut Session<'_>,
-    call: SessionCall,
-) -> Result<SessionReply, RequestError> {
+pub fn handle(session: &mut Session<'_>, call: SessionCall) -> Result<SessionReply, RequestError> {
     if let SessionCall::Resident { source, read } = call {
         return apply_resident(
             super::camera_bridge::PropertyEpoch::World(session.world.topology.epoch()),
@@ -52,7 +49,7 @@ pub(super) fn handle_with_process(
     }
     apply_process(process, &session.world.clock.timing[5], call)
 }
-fn apply_process(
+pub fn apply_process(
     process: Option<&super::process_runtime::Handle>,
     scene: &u32,
     call: SessionCall,
@@ -97,7 +94,7 @@ fn apply_process(
         _ => unreachable!(),
     }
 }
-fn apply(
+pub fn apply(
     pause: &mut openmt2001::pause::State,
     timers: &mut [openmt2001::timers::Task],
     catalog: &openmt2001::level_catalog::Catalog,
@@ -145,16 +142,12 @@ fn apply(
     }
 }
 
-#[cfg(test)]
-#[path = "camera_session_service/process_tests.rs"]
-mod process_tests;
-#[cfg(test)]
-#[path = "camera_session_service/tests.rs"]
-mod tests;
+// process_tests.rs, tests.rs and resident_tests.rs need intro, so they build
+// with the game binary (game.rs `live_host_process_host_tests`, #99).
 
 /// Actual handler body; every request reborrows current Session storage after
 /// earlier callbacks. Source origin AND expected World epoch are checked first.
-fn apply_resident(
+pub fn apply_resident(
     expected: super::camera_bridge::PropertyEpoch,
     residents: &openmt2001::economy::ResidentAccounts,
     pool: &openmt2001::resident::AuxiliaryPool,
@@ -208,6 +201,3 @@ fn apply_resident(
         }
     }
 }
-#[cfg(test)]
-#[path = "camera_session_service/resident_tests.rs"]
-mod resident_tests;

@@ -51,22 +51,23 @@ impl PropertySource {
             .as_ref()
             .ok_or_else(|| "actual Session resident source absent".into())
     }
-    /// Only explicit cfg(test) property-only fixtures may omit resident authority.
+    /// Only explicit test property-only fixtures (cfg(test), or the game's tests
+    /// through test-support) may omit resident authority.
     pub fn resident_for_install(&self) -> Result<Option<&ResidentSource>, String> {
         if let Some(source) = &self.resident {
             return Ok(Some(source));
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             Ok(None)
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         {
             Err("actual completed Session resident source absent".into())
         }
     }
-    #[cfg(test)]
-    pub(crate) fn test_with_resident(mut self, source: ResidentSource) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_with_resident(mut self, source: ResidentSource) -> Self {
         self.resident = Some(source);
         self
     }
@@ -82,7 +83,7 @@ impl PropertySource {
     pub fn count(&self) -> i32 {
         self.count
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic(
         epoch: u64,
         rows: [[u8; 380]; 52],
@@ -184,7 +185,7 @@ pub enum Operation {
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Boundary {
+pub enum Boundary {
     Install,
     Apply,
     Admission,
@@ -510,7 +511,7 @@ pub struct Worker {
     failure: Option<String>,
     sender: mpsc::Sender<Request>,
     retired: Arc<AtomicBool>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     enqueued: Option<(Option<Boundary>, mpsc::Sender<()>)>,
 }
 /// Move this together with the same bank on Inspection refresh. A true session
@@ -540,7 +541,7 @@ pub fn channel(generation: Generation) -> (Worker, Inbox) {
             failure: None,
             sender,
             retired: Arc::clone(&retired),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             enqueued: None,
         },
         Inbox {
@@ -584,22 +585,22 @@ fn validate_observation(boundary: Boundary, observation: &Observation) -> Result
 
 impl Worker {
     /// Read-only observer of the actual retirement flag, not a mirror state.
-    #[cfg(test)]
-    pub(crate) fn test_retirement_flag(&self) -> Arc<AtomicBool> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_retirement_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.retired)
     }
     /// One-shot notification after the actual successful request enqueue.
-    #[cfg(test)]
-    pub(crate) fn test_notify_next_enqueue(&mut self, sender: mpsc::Sender<()>) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_notify_next_enqueue(&mut self, sender: mpsc::Sender<()>) {
         self.enqueued = Some((None, sender));
     }
     /// Same actual-enqueue witness, filtered so CurrentPose does not consume a
     /// RawCapture retirement observer. This changes no non-test transport code.
-    #[cfg(test)]
-    fn test_notify_enqueue_at(&mut self, boundary: Boundary, sender: mpsc::Sender<()>) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_notify_enqueue_at(&mut self, boundary: Boundary, sender: mpsc::Sender<()>) {
         self.enqueued = Some((Some(boundary), sender));
     }
-    pub(crate) fn central_identity(&self) -> Result<CentralIdentity, RequestError> {
+    pub fn central_identity(&self) -> Result<CentralIdentity, RequestError> {
         if let Some(error) = &self.failure {
             return Err(RequestError::Failed(error.clone()));
         }
@@ -685,7 +686,7 @@ impl Worker {
                 reply,
             })
             .map_err(|_| self.disconnected("Camera event-thread inbox disconnected"))?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if self
             .enqueued
             .as_ref()
@@ -946,6 +947,5 @@ mod tests;
 #[path = "camera_bridge/session_service_tests.rs"]
 mod session_service_tests;
 
-#[cfg(test)]
-#[path = "camera_bridge/autosave_producer_failure_tests.rs"]
-mod autosave_producer_failure_tests;
+// autosave_producer_failure_tests.rs needs intro, so it builds with the game
+// binary (game.rs, #99).

@@ -1,9 +1,9 @@
 //! Session side of the process dispatch controllers; the controllers themselves
 //! live in the library (`openmt2001::process_dispatch`, #99).
-pub(crate) use openmt2001::process_dispatch::{DispatchCustody, Seed, Timing};
+pub use openmt2001::process_dispatch::{DispatchCustody, Seed, Timing};
 
 /// Take the controllers back from a departing city (`DispatchCustody::from_parts`).
-pub(crate) fn custody_from_session(
+pub fn custody_from_session(
     session: &mut crate::fresh_city::Session<'_>,
     timing: Timing,
 ) -> Result<DispatchCustody, String> {
@@ -26,9 +26,7 @@ pub(crate) fn custody_from_session(
 ///4bcd6d..4bcd7b: native load completes with ONE unpause0, not fresh's
 ///positive-count drain. Modern record12 leaves these process-owned pause and
 ///timer fields intact, including any remaining load-time script owners.
-pub(crate) fn native_load_completed(
-    session: &mut crate::fresh_city::Session<'_>,
-) -> Result<(), String> {
+pub fn native_load_completed(session: &mut crate::fresh_city::Session<'_>) -> Result<(), String> {
     session.world.pause.unpause(0, |change, _| {
         change.apply(&mut session.hooks.timers);
         Ok(())

@@ -294,9 +294,8 @@ mod tests {
             .unwrap();
     }
 }
-#[cfg(test)]
-#[path = "performance_tests.rs"]
-mod performance_tests;
+// performance_tests.rs needs intro, so it builds with the game binary
+// (game.rs `fresh_city_result_host_tests`, #99).
 
 // The moved module's imports, for its tests' `use super::*`.
 #[cfg(test)]
