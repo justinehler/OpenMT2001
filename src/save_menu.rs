@@ -298,7 +298,7 @@ pub fn list_slots(profile_root: &Path) -> Result<Vec<Slot>, String> {
             .and_then(|metadata| metadata.modified().ok());
         let metadata = (|| {
             let bytes = fs::read(&path).map_err(|e| format!("Read saved game: {e}"))?;
-            crate::save::SaveFile::parse(&bytes)?.level_metadata()
+            crate::save::read_level_metadata(&bytes)
         })();
         slots.push(Slot {
             id,

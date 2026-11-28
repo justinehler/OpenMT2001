@@ -4,7 +4,6 @@ use crate::ui::{self, Surface};
 use openmt2001::{
     archive::ArchiveIndex,
     render::{PreparedScene, Renderer},
-    save::SaveFile,
     texture::TextureSet,
 };
 use std::{fs, path::PathBuf, time::SystemTime};
@@ -29,14 +28,7 @@ impl Entry {
     ) -> Self {
         let metadata = (|| {
             let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-            let save = SaveFile::parse(&bytes)?;
-            let tables: Vec<_> = save.sections.iter().filter(|s| s.tag == 0x2000).collect();
-            if tables.len() != 1 || tables[0].payload.len() != 16 {
-                return Err("Invalid saved-game metadata".into());
-            }
-            Ok(std::array::from_fn(|i| {
-                u32::from_le_bytes(tables[0].payload[i * 4..i * 4 + 4].try_into().unwrap())
-            }))
+            openmt2001::save::read_level_metadata(&bytes)
         })();
         Self {
             path,

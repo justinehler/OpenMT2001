@@ -26,8 +26,8 @@ fn record(bytes: &mut Vec<u8>, tag: u32, payload: &[u8]) {
 
 pub fn cases() -> Vec<Case> {
     let mut cases = Vec::new();
-    for v2 in [false, true] {
-        let format = if v2 { "v2" } else { "original" };
+    for version in [None, Some(1), Some(6)] {
+        let format = version.map_or_else(|| "original".into(), |v| format!("v2-version{v}"));
         let mut bytes = Vec::new();
         record(&mut bytes, 1, &[0x5a; 40]);
         record(
@@ -42,9 +42,17 @@ pub fn cases() -> Vec<Case> {
         record(&mut bytes, 4, &[0; 32]);
         bytes.extend_from_slice(&u32::MAX.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
-        if v2 {
-            let records = (1..=13).map(|tag| (tag, vec![0; 32])).collect::<Vec<_>>();
-            extension::append(&mut bytes, &records).unwrap();
+        if let Some(version) = version {
+            let mut records = (1..=13).map(|tag| (tag, vec![0; 32])).collect::<Vec<_>>();
+            if version == 6 {
+                records.extend((16..=18).map(|tag| (tag, vec![0; 32])));
+            }
+            extension::append_version(&mut bytes, &records, version).unwrap();
+            extension::Extension::parse(&SaveFile::parse(&bytes).unwrap())
+                .unwrap()
+                .unwrap()
+                .validate_runtime_section_set()
+                .unwrap();
         }
         let mut mismatch = bytes.clone();
         mismatch[8..48].fill(0xa5);
@@ -64,7 +72,7 @@ pub fn cases() -> Vec<Case> {
             ),
             ("compatibility-mismatch", mismatch, true, None),
         ];
-        if v2 {
+        if version.is_some() {
             variants.push((
                 "truncated-extension",
                 bytes[..bytes.len() - 8 - 1].to_vec(),
