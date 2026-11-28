@@ -97,6 +97,10 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
         195,
         &mut left.queue,
         &mut left.world.city.categories,
+        crate::network::commands::Targets {
+            buildings: &left.world.city.buildings,
+            businesses: &left.world.city.ledgers.businesses,
+        },
         &mut left.world.city.pause,
         &mut left.tasks,
     )
@@ -118,6 +122,10 @@ fn loopback_live_scheduler_crosses_200_and_keeps_running_after_desync_to_1000() 
                     session.world.clock.timing[0],
                     &mut session.queue,
                     &mut session.world.city.categories,
+                    crate::network::commands::Targets {
+                        buildings: &session.world.city.buildings,
+                        businesses: &session.world.city.ledgers.businesses,
+                    },
                     &mut session.world.city.pause,
                     &mut session.tasks,
                 )

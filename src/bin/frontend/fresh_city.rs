@@ -536,6 +536,10 @@ impl<'data> Session<'data> {
                 command,
                 &mut self.live_commands,
                 &mut self.world.city.categories,
+                openmt2001::network::commands::Targets {
+                    buildings: &self.world.city.buildings,
+                    businesses: &self.world.city.ledgers.businesses,
+                },
                 self.world.clock.timing[0],
             );
         }

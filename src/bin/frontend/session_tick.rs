@@ -74,6 +74,10 @@ impl Session<'_> {
             tick,
             &mut self.live_commands,
             &mut self.world.city.categories,
+            openmt2001::network::commands::Targets {
+                buildings: &self.world.city.buildings,
+                businesses: &self.world.city.ledgers.businesses,
+            },
             &mut self.world.city.pause,
             &mut self.hooks.timers,
         )?;
@@ -783,7 +787,7 @@ impl Session<'_> {
                                 message_context: &mut messages.borrow_mut(),
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)|live_commands::Command::Demolish(_)|live_commands::Command::Open(_)) {
                                     return Err(openmt2001::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
@@ -836,17 +840,18 @@ impl Session<'_> {
                         scheduler::Event::Helper(0x4b0810) => {
                             let mut removed = false;
                             let tree_state = geometry.registrar().tree_state.clone();
+                            let mut completions = Vec::new();
                             live_commands::PendingRuntime {
                                 city,
                                 roster: &self.roster,
                                 commands: &mut self.live_commands,
                                 selected: &mut self.building_selection,
                             }
-                            .advance(
+                            .advance_with_submission(
                                 clock.timing[0],
                                 &mut openmt2001::pending_world::Controls {
                                     network_enabled: scheduler.network_enabled,
-                                    network_override: scheduler.network_override,
+                                    network_override: self.connected.as_ref().map_or(scheduler.network_override, |c| c.commands.is_host()),
                                     effect_model_reference: policy.effect_model,
                                 },
                                 &mut geometry,
@@ -875,7 +880,25 @@ impl Session<'_> {
                                     if matches!(event, live_commands::PendingCall::ReleaseBuilding { .. }) { Ok(0) }
                                     else { boundary(Event::Pending(event, record), clock) }
                                 },
+                                |command, commands| {
+                                    if self.connected.is_some() {
+                                        completions.push(command);
+                                        Ok(())
+                                    } else {
+                                        commands.submit(command, clock.timing[0], true,
+                                            |_| Err("wrapped construction completion requires reentrant command dispatch".into()))
+                                    }
+                                },
                             )?;
+                            if let Some(connection) = &mut self.connected {
+                                for command in completions {
+                                    let live_commands::Command::Open(command) = command else {
+                                        return Err("pending completion did not produce a business open command".into());
+                                    };
+                                    connection.commands.submit_completion(&connection.worker, &command, &mut self.live_commands, &mut city.categories,
+                                        openmt2001::network::commands::Targets { buildings: &city.buildings, businesses: &city.ledgers.businesses }, clock.timing[0])?;
+                                }
+                            }
                             if removed {
                                 geometry
                                     .registrar_mut()
@@ -973,7 +996,7 @@ impl Session<'_> {
                                                     let command=openmt2001::construction::Command::from_packet(&descriptor)?;
                                                     if let Some(connection) = &mut self.connected {
                                                         connection.commands.submit(&connection.worker,live_commands::Command::Build(command),
-                                                            &mut self.live_commands,world.categories,clock.timing[0])?;
+                                                            &mut self.live_commands,world.categories, openmt2001::network::commands::Targets { buildings: world.buildings, businesses: world.businesses },clock.timing[0])?;
                                                     } else {
                                                         self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
                                                             |_|Err("AI construction delay wrapped into immediate execution".into()))?;
@@ -989,13 +1012,18 @@ impl Session<'_> {
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:address @ (0x48ad20|0x48ad80),arguments,count:3})=call {
                                                     let routing=world.message_routing.ok_or("AI business command routing unresolved")?;
-                                                    if routing.network[0]&&!routing.network[1]{return Err("AI business command requires network transport".into());}
                                                     let command=if address==0x48ad20 {
                                                         live_commands::Command::Demolish(openmt2001::demolition::Command{category:arguments[0] as i8,building:arguments[1] as u16,amount:f32::from_bits(arguments[2])})
                                                     }else{
                                                         live_commands::Command::Open(openmt2001::business_open::Command::from_completion(player,arguments[0],arguments[1],arguments[2] as u8)?)
                                                     };
-                                                    self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI business command delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        connection.commands.submit(&connection.worker, command, &mut self.live_commands, world.categories,
+                                                            openmt2001::network::commands::Targets { buildings: world.buildings, businesses: world.businesses }, clock.timing[0])?;
+                                                    } else {
+                                                        if routing.network[0]&&!routing.network[1]{return Err("AI business command requires network transport".into());}
+                                                        self.live_commands.submit_with_delay(command,clock.timing[0],true,0,|_|Err("AI business command delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::AuctionCommand{descriptor,additional_delay}=call {

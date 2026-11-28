@@ -2259,43 +2259,107 @@ impl PendingRuntime<'_> {
             Option<&mut crate::pending_world::Building>,
         ) -> Result<u32, String>,
     ) -> Result<(), String> {
+        self.advance_with_submission(tick, controls, geometry, effect, |command, commands| {
+            commands.submit(command, tick, true, |_| {
+                Err("wrapped construction completion requires reentrant command dispatch".into())
+            })
+        })
+    }
+    /// Connected callers collect authority-only completion requests here, then
+    /// submit against the live target records after the transition pass releases
+    /// its building borrow. Offline callers retain synchronous queue admission.
+    pub fn advance_with_submission(
+        &mut self,
+        _tick: u32,
+        controls: &mut crate::pending_world::Controls,
+        geometry: &mut impl crate::building_pool::GeometryBinding,
+        effect: impl FnMut(
+            PendingCall,
+            Option<&mut crate::pending_world::Building>,
+        ) -> Result<u32, String>,
+        mut submit: impl FnMut(Command, &mut Queue) -> Result<(), String>,
+    ) -> Result<(), String> {
         use crate::{building_pool, pending_world::Event};
         let effects = std::cell::RefCell::new(effect);
         let [selected, current] = self.selected;
-        self.city.pending_world.advance(&mut self.city.buildings, controls,
+        self.city.pending_world.advance(
+            &mut self.city.buildings,
+            controls,
             |event, _, buildings, _| match event {
-                Event::Complete { owner, payload, building_id } => {
-                    let player = self.roster.manager.players.get(owner.wrapping_sub(1) as usize)
+                Event::Complete {
+                    owner,
+                    payload,
+                    building_id,
+                } => {
+                    let player = self
+                        .roster
+                        .manager
+                        .players
+                        .get(owner.wrapping_sub(1) as usize)
                         .ok_or("construction completion owner leaves roster")?;
                     let command = OpenBusiness::from_completion(player, payload, building_id, 1)?;
-                    self.commands.submit(Command::Open(command), tick, true,
-                        |_| Err("wrapped construction completion requires reentrant command dispatch".into()))?;
+                    submit(Command::Open(command), self.commands)?;
                     Ok(0)
                 }
                 Event::ModelHeight { building } => {
-                    let handle = u32::from_le_bytes(buildings[building][0x170..0x174].try_into().unwrap());
+                    let handle =
+                        u32::from_le_bytes(buildings[building][0x170..0x174].try_into().unwrap());
                     Ok(geometry.model_height(handle)?.to_bits())
                 }
-                Event::Remove { category, building_id } => {
-                    let category = self.city.categories.get_mut(category as usize).ok_or("pending removal category leaves city")?;
-                    building_pool::remove_category_building(category, buildings, building_id, 0x591318,
-                        &mut building_pool::RemovalGlobals { global_590f60: selected, global_6175f8: current },
-                        geometry, &mut building_pool::RemovalCallbacks {
+                Event::Remove {
+                    category,
+                    building_id,
+                } => {
+                    let category = self
+                        .city
+                        .categories
+                        .get_mut(category as usize)
+                        .ok_or("pending removal category leaves city")?;
+                    building_pool::remove_category_building(
+                        category,
+                        buildings,
+                        building_id,
+                        0x591318,
+                        &mut building_pool::RemovalGlobals {
+                            global_590f60: selected,
+                            global_6175f8: current,
+                        },
+                        geometry,
+                        &mut building_pool::RemovalCallbacks {
                             release_resource: &mut |building, reference, record| {
-                                effects.borrow_mut()(PendingCall::ReleaseBuilding { building, reference }, Some(record)).map(|_| ())
+                                effects.borrow_mut()(
+                                    PendingCall::ReleaseBuilding {
+                                        building,
+                                        reference,
+                                    },
+                                    Some(record),
+                                )
+                                .map(|_| ())
                             },
                             release_model: &mut |building, index, record| {
-                                effects.borrow_mut()(PendingCall::ReleaseEffect { building, index }, Some(record)).map(|_| ())
+                                effects.borrow_mut()(
+                                    PendingCall::ReleaseEffect { building, index },
+                                    Some(record),
+                                )
+                                .map(|_| ())
                             },
-                            refresh: &mut || effects.borrow_mut()(PendingCall::Refresh, None).map(|_| ()),
-                        })?;
+                            refresh: &mut || {
+                                effects.borrow_mut()(PendingCall::Refresh, None).map(|_| ())
+                            },
+                        },
+                    )?;
                     Ok(0)
                 }
                 other => {
-                    let record = if let Event::Progress { building, .. } = other { Some(&mut buildings[building]) } else { None };
+                    let record = if let Event::Progress { building, .. } = other {
+                        Some(&mut buildings[building])
+                    } else {
+                        None
+                    };
                     effects.borrow_mut()(PendingCall::World(other), record)
                 }
-            })
+            },
+        )
     }
 }
 
