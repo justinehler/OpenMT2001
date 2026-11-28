@@ -179,18 +179,30 @@ pub fn businesses(
     Ok(sum)
 }
 /// The accumulator is reloaded as signed i32 on each iteration. No f32 spill
-/// occurs between adding cash in PC64 and FTOL (0x4814d6..0x4814fb).
+/// occurs between adding cash and FTOL (0x4814d6..0x4814fb). Network menu
+/// launches have already crossed 4b9c3c even though sampling precedes this
+/// iteration's 4816e9 reset.
 pub fn players<'a>(
     rows: impl IntoIterator<Item = (bool, &'a crate::economy::PlayerAccount)>,
+) -> u32 {
+    players_with_precision(rows, crate::x87::Precision::Pc64)
+}
+
+/// Explicit incoming control for a pre-reset sampler invocation. Individual
+/// f32-to-FTOL conversions are exact loads and independent of PC; FIADD is not.
+pub fn players_with_precision<'a>(
+    rows: impl IntoIterator<Item = (bool, &'a crate::economy::PlayerAccount)>,
+    precision: crate::x87::Precision,
 ) -> u32 {
     let mut sum = 0i32;
     for (active, account) in rows {
         if !active {
             continue;
         }
-        let mut value = crate::x87::Sum::from_i32(sum);
-        sum = if value.add_f32(account.cash).is_ok() {
-            value.ftol_low_word()
+        sum = if let Ok(cash) = crate::x87::Sum::from_f32(account.cash) {
+            precision
+                .add(crate::x87::Sum::from_i32(sum), cash)
+                .ftol_low_word()
         } else {
             0
         };

@@ -180,6 +180,7 @@ pub trait Hooks: business_pool::BusinessPoolHooks {
     fn stock_charge(&mut self, business: &mut [u8; 0x220], amount: f32) -> Result<(), String>;
 }
 pub struct State<'a, 'image> {
+    pub precision: crate::x87::Precision,
     pub building_parameters: crate::building_parameters::BuildingKinds,
     pub world: business_binding::World<'a>,
     pub runtime: business_binding::Runtime<'a>,
@@ -238,6 +239,7 @@ impl State<'_, '_> {
         }
         let cost = crate::building_binding::construction_cost_with_parameters(
             &crate::building_binding::ConstructionInputs {
+                precision: self.precision,
                 volume: request.volume,
                 kind: request.kind,
                 quality: request.quality,
@@ -524,6 +526,8 @@ mod tests {
                 buildings[0][0x40..0x44].copy_from_slice(&0x617628_u32.to_le_bytes());
             }
             let mut state = State {
+                // The retained isolated producer selects CW 0x027f.
+                precision: crate::x87::Precision::Pc53,
                 building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
                     .unwrap(),
                 world: business_binding::World {
@@ -756,6 +760,7 @@ mod tests {
                     &image,
                     &model_bindings,
                     crate::level_startup::HostContext {
+                        precision: crate::x87::Precision::Pc64,
                         accounting_enabled: false,
                         difficulty: difficulty as i32,
                         notifications: false,
@@ -1122,6 +1127,7 @@ mod tests {
                 .initialize(
                     &roster,
                     crate::player_script::RosterInputs {
+                        precision: crate::x87::Precision::Pc64,
                         local_slot: None,
                         names: [b"Fixture Player"; 6],
                         initial_cash: cash,
@@ -1227,6 +1233,7 @@ mod tests {
             // Remaining direct map calls below only exercise refused placement.
             let bindings = Bindings::register(&mut vm, 1, 2).unwrap();
             let mut state = State {
+                precision: crate::x87::Precision::Pc64,
                 building_parameters: crate::building_parameters::BuildingKinds::from_image(&image)
                     .unwrap(),
                 world: business_binding::World {

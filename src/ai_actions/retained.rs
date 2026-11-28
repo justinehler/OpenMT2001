@@ -73,6 +73,7 @@ pub(crate) fn quote(
     }
     crate::building_binding::construction_cost_with_parameters(
         &crate::building_binding::ConstructionInputs {
+            precision: crate::x87::Precision::Pc64,
             volume: arguments[1] as i32,
             kind,
             quality: arguments[4] as i8,

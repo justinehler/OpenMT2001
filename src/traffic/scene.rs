@@ -238,7 +238,7 @@ impl Scene {
         }
         Ok(())
     }
-    /// First-process zero-filled transport pools. Reloads must retain/restore
+    /// Fresh transport state after0044bac0 startup. Reloads must retain/restore
     /// their state instead. Static boats are admitted separately by44f0b0 on
     /// the first rendered frame, so this does not pretend that frame occurred.
     pub fn fresh(image: &crate::pe::PeImage<'_>, random: [u32; 3]) -> Result<Self, String> {
@@ -261,7 +261,9 @@ impl Scene {
             environment: Environment {
                 crane_position: [0.; 3],
                 ship_position: [0.; 3],
-                frame: 0,
+                // 0044bbdd starts transport at frame one. Locator frame zero
+                // is a reference pose at the city origin, not a water position.
+                frame: 1,
                 sequence_tick: u32::from_le_bytes(image.at(0x539b7c, 4)?.try_into().unwrap()),
                 sequence_active: 0,
                 frozen: 0,

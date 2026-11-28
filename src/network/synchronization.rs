@@ -74,6 +74,15 @@ impl Synchronization {
         self.task = Some(index);
         Ok(index)
     }
+    /// 0x465490 opens reason 2 only after the local scene and activation have
+    /// completed. Room exit (0x464bf0) has no second handshake in the original.
+    pub fn auction_prepared(
+        &mut self,
+        pause: &mut crate::pause::State,
+        tasks: &mut [crate::timers::Task],
+    ) -> std::result::Result<(), String> {
+        self.barrier.open(pause, tasks)
+    }
     fn sender(&self, owner: &super::Owner, ingress: &Ingress, slot: u8) -> Result<()> {
         if ingress.binding != self.binding {
             return Err(Error::World);

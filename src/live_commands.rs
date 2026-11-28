@@ -92,8 +92,10 @@ pub fn quote(
         }
     }
     let [x0, y0, x1, y1] = command.rectangle.map(i32::from);
-    let cost = crate::building_binding::construction_cost_with_parameters(
+    let cost = quote_components(
+        command,
         &crate::building_binding::ConstructionInputs {
+            precision: crate::x87::Precision::Pc64,
             volume: (x1 - x0 + 1)
                 .wrapping_mul(y1 - y0 + 1)
                 .wrapping_mul(i32::from(command.height)),
@@ -111,8 +113,21 @@ pub fn quote(
         image,
     )?;
     city.construction_components = cost.components;
-    command.components = cost.components;
     Ok(cost.total)
+}
+
+/// Shared command producer boundary: snapshot all four original quote globals
+/// before enqueueing. In-play producers call this with PC64 inputs.
+pub fn quote_components(
+    command: &mut construction::Command,
+    input: &crate::building_binding::ConstructionInputs<'_>,
+    parameters: &crate::building_parameters::BuildingKinds,
+    image: &PeImage<'_>,
+) -> Result<crate::building_binding::ConstructionCost, String> {
+    let cost =
+        crate::building_binding::construction_cost_with_parameters(input, parameters, image)?;
+    command.components = cost.components;
+    Ok(cost)
 }
 pub struct Context<'a, 'image> {
     pub image: &'a PeImage<'image>,
@@ -695,7 +710,7 @@ impl Runtime<'_> {
                 descriptor: d,
                 size,
             } => {
-                if word(&d, 4) == 0x1f && d[16] == 0 && word(&d, 12) == 0 {
+                if !network[0] && word(&d, 4) == 0x1f && d[16] == 0 && word(&d, 12) == 0 {
                     auction::apply(
                         auction::Command {
                             action: word(&d, 20),
@@ -768,6 +783,26 @@ impl Runtime<'_> {
     ) -> Result<(), String> {
         use crate::{ai_messages::offers::auction::admission, player_manager::word};
         match word(d, 4) {
+            0x27..=0x2a => {
+                // Auction notifications are host-produced, addressed inbox
+                // messages. Only the destination's local human consumes them.
+                let slot = usize::from(d[0x15]);
+                let player = self
+                    .roster
+                    .manager
+                    .players
+                    .get_mut(slot)
+                    .ok_or("auction notification recipient leaves roster")?;
+                if player.reference == self.roster.status.current_player {
+                    let packet = d[..48]
+                        .try_into()
+                        .map_err(|_| "auction notification extent")?;
+                    crate::player_messages::enqueue(player, packet, || {
+                        self.message_context.arena.allocate()
+                    })?;
+                }
+                Ok(())
+            }
             0x19 => {
                 let category = word(d, 20);
                 let row = self

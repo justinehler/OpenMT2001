@@ -2,6 +2,8 @@
 //! FPU emulator: it models finite nearest-even arithmetic, f32 stores and FTOL.
 
 pub mod portable_trig;
+mod precision;
+pub use precision::Precision;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sum {

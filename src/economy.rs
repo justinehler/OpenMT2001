@@ -9,12 +9,23 @@ pub enum ScriptMoneyOperation {
 
 /// Original4d6f10/4d6f40/4d6f80. Both increase and decrease add their signed
 /// argument; DEFAULT's decrease event supplies -100. No ledger entry is posted.
-pub fn script_money(cash: f32, argument: f64, operation: ScriptMoneyOperation) -> f32 {
-    let amount = f64::from(ftol_low_word(argument));
+pub fn script_money(
+    cash: f32,
+    argument: f64,
+    operation: ScriptMoneyOperation,
+    precision: crate::x87::Precision,
+) -> f32 {
+    let amount = ftol_low_word(argument);
     match operation {
         ScriptMoneyOperation::Set => amount as f32,
         ScriptMoneyOperation::Increase | ScriptMoneyOperation::Decrease => {
-            (f64::from(cash) + amount) as f32
+            if let Ok(cash) = crate::x87::Sum::from_f32(cash) {
+                precision
+                    .add(cash, crate::x87::Sum::from_i32(amount))
+                    .to_f32()
+            } else {
+                (f64::from(cash) + f64::from(amount)) as f32
+            }
         }
     }
 }
@@ -47,8 +58,13 @@ pub struct PlayerAccount {
 }
 
 impl PlayerAccount {
-    pub fn apply_script_money(&mut self, argument: f64, operation: ScriptMoneyOperation) {
-        self.cash = script_money(self.cash, argument, operation);
+    pub fn apply_script_money(
+        &mut self,
+        argument: f64,
+        operation: ScriptMoneyOperation,
+        precision: crate::x87::Precision,
+    ) {
+        self.cash = script_money(self.cash, argument, operation, precision);
     }
     pub fn from_saved(player: &crate::save::SavedPlayer<'_>) -> Result<Self, String> {
         Self::from_prefix(player.bytes)
@@ -1861,8 +1877,10 @@ mod tests {
             at += 12;
             let mut player = bytes[at..at + 0x1c0].to_vec();
             let cash = f32::from_le_bytes(player[4..8].try_into().unwrap());
-            player[4..8]
-                .copy_from_slice(&super::script_money(cash, argument, operation).to_le_bytes());
+            player[4..8].copy_from_slice(
+                &super::script_money(cash, argument, operation, crate::x87::Precision::Pc53)
+                    .to_le_bytes(),
+            );
             at += 0x1c0;
             assert_eq!(player, &bytes[at..at + 0x1c0], "money {case}");
             at += 0x1c0;
