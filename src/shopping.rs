@@ -276,6 +276,9 @@ pub struct CityActions<'a> {
     pub demand: Option<&'a mut crate::ai_demand::State>,
     pub housing: &'a crate::housing::Topology,
     pub housing_settings: &'a crate::housing::Settings,
+    /// The retained city statistics shared with evening and rent-edit review.
+    pub market: &'a mut crate::market::Cache,
+    pub buildings: &'a [[u8; 64]],
     pub welfare: &'a crate::resident::Welfare,
     pub objectives: &'a crate::resident::DailyObjectives,
     pub objective_rng: &'a mut u32,
@@ -428,8 +431,14 @@ impl Population<'_> {
                             crossing: &mut crossing,
                         };
                         if action == 0 {
-                            let mut average =
-                                |businesses: &[[u8; 0x220]]| city.housing.average_rent(businesses);
+                            let mut average = |businesses: &[[u8; 0x220]]| {
+                                city.market.residential_rent(&crate::market::Inputs {
+                                    businesses,
+                                    buildings: city.buildings,
+                                    catalogs: &self.settings.catalogs,
+                                    commodities: &self.settings.commodities,
+                                })
+                            };
                             let mut housing = crate::housing::World {
                                 demand: city.demand.as_deref_mut(),
                                 buildings: &city.housing.buildings,
@@ -894,6 +903,230 @@ impl Topology {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    struct HouseHunting {
+        businesses: Vec<[u8; 544]>,
+        buildings: Vec<[u8; 64]>,
+        housing: crate::housing::Topology,
+        market: crate::market::Cache,
+    }
+
+    impl HouseHunting {
+        fn new() -> Self {
+            let mut businesses = vec![[0; 544]; 600];
+            for business in &mut businesses {
+                business[8..10].fill(255);
+            }
+            let mut records = vec![[0; 0x394]; 600];
+            for record in &mut records {
+                record[0x1c..0x20].fill(255);
+            }
+            let mut categories = [[0; 0x17c]; 52];
+            // Three vacant districts, then occupied housing that still counts
+            // toward the city average. Districts 1 and 2 have tied scores.
+            for (i, rent) in [50_f32, 100., 100., 150.].into_iter().enumerate() {
+                businesses[i][..4].copy_from_slice(&1_u32.to_le_bytes());
+                businesses[i][8..10].copy_from_slice(&(i as u16).to_le_bytes());
+                businesses[i][0xe..0x10].copy_from_slice(&1_u16.to_le_bytes());
+                businesses[i][0x1dc..0x1e0].copy_from_slice(&rent.to_le_bytes());
+                businesses[i][0x1c4..0x1c8].copy_from_slice(&30_f32.to_le_bytes());
+                records[i][0x1c..0x20].copy_from_slice(&(i as u32).to_le_bytes());
+                records[i][0x3f] = 1;
+                categories[i][0x15c..0x160]
+                    .copy_from_slice(&(0x591318 + i as u32 * 0x394).to_le_bytes());
+            }
+            businesses[3][0x10..0x12].copy_from_slice(&1_u16.to_le_bytes());
+            let housing =
+                crate::housing::Topology::from_runtime(&records, &categories, 0x591318).unwrap();
+            Self {
+                businesses,
+                buildings: records
+                    .iter()
+                    .map(|row| row[..64].try_into().unwrap())
+                    .collect(),
+                housing,
+                market: crate::market::Cache {
+                    dirty: false,
+                    prices: [17.; 32],
+                    rent: 50.,
+                },
+            }
+        }
+
+        fn hunt(&mut self, welfare: f32) -> u8 {
+            let mut topology = Topology {
+                geometry: crate::board::CategoryGeometry {
+                    centers: [[0.; 2]; 52],
+                    sizes: [[0.; 2]; 52],
+                },
+                crossing: crate::board::CrossingTopology {
+                    category_links: [[255; 4]; 52],
+                    road_neighbors: Vec::new(),
+                    lane_base: 0,
+                },
+                building_businesses: Vec::new(),
+                building_categories: Vec::new(),
+                building_attributes: Vec::new(),
+                entrances: Vec::new(),
+                chains: std::array::from_fn(|_| Vec::new()),
+                nodes: std::array::from_fn(|_| Vec::new()),
+                category_masks: [0; 52],
+                category_factors: std::array::from_fn(|i| if i == 1 || i == 2 { 1.5 } else { 0. }),
+                categories: [crate::category::State::default(); 52],
+                category_counts: [0; 52],
+            };
+            let mut catalogs = Catalogs {
+                commodities: std::array::from_fn(|_| Vec::new()),
+                fractions: std::array::from_fn(|_| Vec::new()),
+            };
+            catalogs.commodities[0].push(0);
+            let settings = Settings {
+                catalogs,
+                preferences: crate::resident::Preferences::empty(),
+                commodities: [crate::resident::Commodity {
+                    active: false,
+                    value: 10.,
+                    markup: 2.,
+                }; 32],
+                weights: [[0.; 4]; 3],
+                business_distance_weights: [0.; 3],
+                interaction_delays: [0.; 45],
+                unit_costs: [0.; 32],
+            };
+            let mut bytes = [0; 0x14a];
+            bytes[0xc] = 255;
+            bytes[0xe..0x10].fill(255);
+            bytes[0x7d] = 51; // preserved if no district qualifies
+            bytes[0xb8..0xbc].copy_from_slice(&1_u32.to_le_bytes());
+            bytes[0xc0..0xc4].copy_from_slice(&10_u32.to_le_bytes());
+            let mut residents = crate::economy::ResidentAccounts {
+                active_count: 1,
+                nodes: vec![crate::resident::Resident::from_bytes(bytes)],
+                accounts: Vec::new(),
+            };
+            let mut auxiliary =
+                crate::resident::AuxiliaryPool::from_slots(vec![[0; 284]], 1).unwrap();
+            let mut routes = crate::routing::CategoryRoutes::from_geometry(
+                &topology.geometry.centers,
+                &topology.geometry.sizes,
+                52,
+            );
+            Population {
+                postings: &mut Vec::new(),
+                topology: &mut topology,
+                settings: &settings,
+                routes: &mut routes,
+                lanes: &mut [],
+                auxiliary: &mut auxiliary,
+                animations: &mut crate::resident::ResidentAnimationPool::default(),
+                animation_settings: &crate::resident::ResidentAnimationSettings {
+                    ranges: [[[0; 2]; 14]; 5],
+                },
+                bindings: &[ResidentBinding {
+                    resident_reference: 0,
+                    auxiliary_reference: 0,
+                    auxiliary_slot: 0,
+                    model_frame_count: 1,
+                }],
+            }
+            .tick_with_city_records(
+                PopulationRecords {
+                    residents: &mut residents,
+                    businesses: &mut self.businesses,
+                    players: &mut [],
+                },
+                PopulationTick {
+                    tick: 0,
+                    boundary: 0,
+                    distance_disabled: false,
+                },
+                &mut CityActions {
+                    demand: None,
+                    housing: &self.housing,
+                    housing_settings: &crate::housing::Settings {
+                        affordability_factor: 1.,
+                        weights: [[1.; 3]; 3],
+                    },
+                    market: &mut self.market,
+                    buildings: &self.buildings,
+                    welfare: &crate::resident::Welfare {
+                        amounts: [[welfare; 5]; 3],
+                    },
+                    objectives: &crate::resident::DailyObjectives::from_timetable(
+                        "Add_Daily_Objective 0 ADULT\nAdd_Daily_Objective 0 UNHOUSED\nAdd_Daily_Objective 0 SENIOR_CITIZENS\nAdd_Daily_Objective 0 CHILDREN_SCHOOL\nAdd_Daily_Objective 0 TEENAGER_UNI\nAdd_Daily_Objective 0 TOURIST",
+                    ).unwrap(),
+                    objective_rng: &mut 0,
+                    constructor_rng: &mut [0; 3],
+                    available: &mut Vec::new(),
+                    category_enabled: &[1; 52],
+                    properties: &mut crate::economy::PropertyIncome {
+                        owners: [0; 4],
+                        totals: [0.; 4],
+                    },
+                },
+                |_, _, _, _| panic!("unexpected tick helper during house hunting"),
+                |_, _, _, _| panic!("unexpected action helper during house hunting"),
+            )
+            .unwrap();
+            residents.nodes[0].as_bytes()[0x7d]
+        }
+    }
+
+    #[test]
+    fn house_hunting_retains_city_rent_until_invalidated() {
+        let mut city = HouseHunting::new();
+        assert_eq!(city.housing.average_rent(&city.businesses).unwrap(), 100.);
+        assert_eq!(city.hunt(500.), 0, "cached 50 favors the cheaper district");
+        assert_eq!(city.market.rent, 50.);
+        assert_eq!(city.market.prices, [17.; 32]);
+        city.market.invalidate(); // city statistics reset on startup/load
+        assert_eq!(
+            city.hunt(500.),
+            1,
+            "refreshed 100 favors the first prestige tie"
+        );
+        assert_eq!(city.market.rent, 100.);
+    }
+
+    #[test]
+    fn house_hunting_refreshes_shared_prices_and_rent_once() {
+        let mut city = HouseHunting::new();
+        city.market.invalidate();
+        assert_eq!(city.hunt(500.), 1);
+        assert!(!city.market.dirty);
+        assert_eq!(city.market.rent, 100.);
+        assert_eq!(city.market.prices[0], 28.); // four offers plus the baseline
+        assert_eq!(city.market.prices[1..], [20.; 31]);
+        for business in &mut city.businesses[..4] {
+            business[0x1dc..0x1e0].copy_from_slice(&200_f32.to_le_bytes());
+            business[0x1c4..0x1c8].copy_from_slice(&70_f32.to_le_bytes());
+        }
+        assert_eq!(city.hunt(500.), 1);
+        assert_eq!(city.market.rent, 100.);
+        assert_eq!(city.market.prices[0], 28.);
+    }
+
+    #[test]
+    fn house_hunting_waits_for_affordable_vacancy_before_refresh() {
+        let mut city = HouseHunting::new();
+        city.market.invalidate();
+        assert_eq!(city.hunt(49.), 51);
+        assert!(city.market.dirty);
+        assert_eq!(city.market.rent, 50.);
+        assert_eq!(city.market.prices, [17.; 32]);
+        for business in &mut city.businesses[..4] {
+            business[0x10..0x12].copy_from_slice(&1_u16.to_le_bytes());
+        }
+        assert_eq!(city.hunt(500.), 51);
+        assert!(city.market.dirty);
+        city.businesses[1][0x10..0x12].fill(0);
+        assert_eq!(city.hunt(100.), 1); // affordability equality qualifies
+        assert!(!city.market.dirty);
+        assert_eq!(city.market.rent, 100.);
+        assert_eq!(city.market.prices[0], 28.);
+    }
+
     #[test]
     #[ignore = "requires original saved-world shopping choices"]
     fn matches_native_saved_choices() {

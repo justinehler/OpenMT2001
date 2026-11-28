@@ -1840,6 +1840,11 @@ mod tests {
                 crate::resident::ResidentAnimationSettings::from_image(&image).unwrap();
             let enabled = categories.map(|row| row[4]);
             let mut rng = [creation.initialization_rng.constructor, 0x343fd, 0x269ec3];
+            let mut market = crate::market::Cache {
+                dirty: true,
+                prices: [0.; 32],
+                rent: 0.,
+            };
             let mut properties = crate::economy::PropertyIncome {
                 owners: [0; 4],
                 totals: [0.; 4],
@@ -1969,6 +1974,8 @@ mod tests {
                     demand: None,
                                             housing: &topology,
                                             housing_settings: &housing_settings,
+                                            market: &mut market,
+                                            buildings: &building_prefixes,
                                             welfare: &welfare,
                                             objectives: &config.objectives,
                                             objective_rng: &mut creation

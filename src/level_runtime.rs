@@ -521,6 +521,7 @@ impl Population {
         ) -> Result<bool, String>,
     ) -> Result<(), String> {
         let enabled = world.categories.map(|row| row[4]);
+        let buildings = building_prefixes(world);
         let mut rng = [
             world.creation.initialization_rng.constructor,
             0x343fd,
@@ -548,6 +549,8 @@ impl Population {
                 demand: Some(&mut world.ai_demand),
                 housing: &self.housing,
                 housing_settings: &self.housing_settings,
+                market: &mut self.market,
+                buildings: &buildings,
                 welfare: &world.welfare,
                 objectives: &world.configuration.objectives,
                 objective_rng: &mut world.creation.initialization_rng.objective,
