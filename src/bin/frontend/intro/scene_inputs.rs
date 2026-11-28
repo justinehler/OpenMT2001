@@ -153,13 +153,11 @@ impl SceneInputs {
         if matches!(
             &start,
             WorkerStart::Fresh(_) | WorkerStart::Skirmish(_) | WorkerStart::Connected(_)
-        ) {
-            if let Some(process) = &self.process_runtime {
-                if let Err(error) = process.source_fresh_world() {
-                    let _ = tx.send(Err(error.to_string()));
-                    return None;
-                }
-            }
+        ) && let Some(process) = &self.process_runtime
+            && let Err(error) = process.source_fresh_world()
+        {
+            let _ = tx.send(Err(error.to_string()));
+            return None;
         }
         let mut cache = SnapshotCache::default();
         let selected_save_root = match &start {

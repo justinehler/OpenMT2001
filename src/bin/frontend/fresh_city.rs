@@ -1464,6 +1464,7 @@ impl<'data> Session<'data> {
             Some(stage),
         )
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn initialize_joined_inner(
         mut input: Inputs<'_, 'data>,
         policy: Policy,
