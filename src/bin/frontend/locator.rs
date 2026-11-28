@@ -1083,16 +1083,13 @@ impl Assets {
                 } else {
                     Vec::new()
                 };
-                line += report_text::paint_pair(
+                line += report_text::paint_information_pair(
                     &mut body,
                     &self.tab,
                     &layout,
                     line,
                     [&self.strings[row.heading as usize], &text],
-                    [
-                        self.text_palette[0],
-                        self.text_palette[report_text::VALUE_PALETTE],
-                    ],
+                    &self.text_palette,
                 )?;
             }
         }

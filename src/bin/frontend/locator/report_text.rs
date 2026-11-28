@@ -42,14 +42,15 @@ impl Layout {
 
 /// Both columns retain full-size glyphs. The original moves a value to the
 /// following line if the two columns would overlap (430480/431a10).
-pub fn paint_pair(
+pub fn paint_information_pair(
     pages: &mut [Surface],
     tab: &[u8],
     layout: &Layout,
     row: usize,
     text: [&[u8]; 2],
-    colors: [u32; 2],
+    palette: &[u32; 18],
 ) -> Result<usize, String> {
+    let colors = [palette[0], palette[VALUE_PALETTE]];
     let [label, value] = text;
     let left = layout.line(row, false);
     let mut right = layout.line(row, true);
@@ -174,7 +175,8 @@ mod tests {
                     paint_linked_pair(&mut pages, &tab, &layout, row, text, colors).unwrap();
                 } else {
                     assert_eq!(
-                        paint_pair(&mut pages, &tab, &layout, row, text, colors).unwrap(),
+                        paint_information_pair(&mut pages, &tab, &layout, row, text, &palette)
+                            .unwrap(),
                         1
                     );
                 }
@@ -207,13 +209,13 @@ mod tests {
             bounds: [30., 100., 60., 320.],
         };
         assert_eq!(
-            paint_pair(
+            paint_information_pair(
                 &mut pages,
                 &synthetic_font(),
                 &layout,
                 0,
                 [&[1, 2], &[3, 4, 5]],
-                [0xffffffff; 2]
+                &[0xffffffff; 18]
             )
             .unwrap(),
             2
