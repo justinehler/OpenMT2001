@@ -86,7 +86,8 @@ pub struct Assets {
     player_buttons: [[Surface; 4]; 10],
     pub city_layout: ui::MppModes,
     people_selector: [f32; 4],
-    city_tab_backgrounds: [Surface; 3],
+    /// Generic images 13..=17, the tab-row backings of `ui::TabState`.
+    tab_backings: [Surface; 5],
     prestige_star: Surface,
     people_dot: Surface,
     rights_icon: Surface,
@@ -669,7 +670,7 @@ impl Assets {
             star_size: [generic.textures[109].width, generic.textures[109].height],
             star_bias: f64::from_le_bytes(image.at(0x525050, 8)?.try_into().unwrap()),
             category_centers,
-            city_tab_backgrounds: [13, 15, 14].map(|i| Surface::new(&generic.textures[i])),
+            tab_backings: std::array::from_fn(|i| Surface::new(&generic.textures[13 + i])),
             // Original40d807..40d859: normal191, pressed192, hover193.
             icon_backgrounds: [191, 192, 193].map(|i| Surface::new(&generic.textures[i])),
             fonts,
@@ -1291,6 +1292,9 @@ impl Assets {
         }
         Ok(())
     }
+    fn tab_backing(&self, state: ui::TabState) -> Surface {
+        self.tab_backings[state.backing_image() - 13].clone()
+    }
     fn property_buttons(
         &self,
         surfaces: &mut Vec<Surface>,
@@ -1299,15 +1303,12 @@ impl Assets {
     ) {
         for (i, icon) in icons.iter().enumerate() {
             let selected = state.property_tab == i;
-            let mut background =
-                self.city_tab_backgrounds[if selected || state.pressed == Some(i) {
-                    1
-                } else if state.hover == Some(i) {
-                    2
-                } else {
-                    0
-                }]
-                .clone();
+            let mut background = self.tab_backing(ui::TabState::of(
+                selected,
+                false,
+                state.pressed == Some(i),
+                state.hover == Some(i),
+            ));
             let [l, t, r, b] = self.city_layout.buttons[i];
             background.quad(
                 [[l, t], [l, b], [r, b], [r, t]],
@@ -2618,16 +2619,12 @@ impl Assets {
                         } else {
                             i == 0
                         };
-                        let mut background = self.city_tab_backgrounds[if selected
-                            || state.pressed == Some(action)
-                        {
-                            1
-                        } else if state.hover == Some(action) {
-                            2
-                        } else {
-                            0
-                        }]
-                        .clone();
+                        let mut background = self.tab_backing(ui::TabState::of(
+                            selected,
+                            false,
+                            state.pressed == Some(action),
+                            state.hover == Some(action),
+                        ));
                         let [l, t, r, b] = self.city_layout.buttons[i];
                         background.quad(
                             [[l, t], [l, b], [r, b], [r, t]],
@@ -2658,16 +2655,12 @@ impl Assets {
                 };
                 for index in 0..3 {
                     let action = Action::Mode(index);
-                    let mut background = self.city_tab_backgrounds[if index == mode
-                        || state.pressed == Some(action)
-                    {
-                        1
-                    } else if state.hover == Some(action) {
-                        2
-                    } else {
-                        0
-                    }]
-                    .clone();
+                    let mut background = self.tab_backing(ui::TabState::of(
+                        index == mode,
+                        false,
+                        state.pressed == Some(action),
+                        state.hover == Some(action),
+                    ));
                     let [l, t, r, b] = self.city_layout.buttons[index];
                     background.quad(
                         [[l, t], [l, b], [r, b], [r, t]],

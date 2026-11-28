@@ -346,14 +346,14 @@ impl Assets {
                 heading_fill.rect(self.information.header, [0xff01762f; 4]);
                 surfaces.push(heading_fill);
                 for (i, icon) in [292, 67].into_iter().enumerate() {
-                    let phase = if state.info == i || state.pressed == Some(100 + i) {
-                        15
-                    } else if state.hovered == Some(100 + i) {
-                        14
-                    } else {
-                        13
-                    };
-                    let mut button = self.textures[phase].clone();
+                    // The same 0x41dcf0 info tabs as the block panel's row.
+                    let phase = ui::TabState::of(
+                        state.info == i,
+                        false,
+                        state.pressed == Some(100 + i),
+                        state.hovered == Some(100 + i),
+                    );
+                    let mut button = self.textures[phase.backing_image()].clone();
                     quad(&mut button, self.information.buttons[i], 0xffffffff);
                     surfaces.push(button);
                     let mut icon = self.textures[icon].clone();
