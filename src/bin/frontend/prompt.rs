@@ -1800,11 +1800,18 @@ mod desktop_quit_assets_tests {
         );
         // Existing ordinary dialog defaults still include portrait302 and keep
         // the historical portrait-column bounds. This variant is not global.
+        // Since #433 the ordinary owner draws the no-portrait word (429b50's
+        // 0xffffffff, which the Quit producers never replace) without a
+        // portrait instead of failing, as in-city Quit needs.
         let ordinary = assets
             .message_surfaces(&state, true, [0.; 2], None)
-            .err()
-            .expect("ordinary sentinel must remain unsupported");
-        assert!(ordinary.contains("portrait")); // sentinel unsupported outside dedicated variant
+            .unwrap();
+        assert!(
+            ordinary
+                .iter()
+                .all(|s| s.vertices != assets.portrait.vertices),
+            "the no-portrait word draws no portrait"
+        );
         let mut ordinary_state = State::default();
         ordinary_state.submit(Request {
             script: None,

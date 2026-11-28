@@ -1397,6 +1397,8 @@ mod tests {
         assert!(matches!(state.confirm(),Outcome::Roster(ref h) if h.map==maps[1]));
         // Actual surface builder used by draw must move exactly one map highlight
         // with selection, independent of condition highlight and keyboard focus.
+        // Since #395 the bar uses the shared 430b50 selection colour, the
+        // executable's 0xff288be1 at 536294, instead of the earlier 0xff008ed0.
         let map_highlights = |state: &State| {
             panel
                 .surfaces(state, None, false, None)
@@ -1404,7 +1406,8 @@ mod tests {
                 .iter()
                 .flat_map(|s| s.vertices.chunks_exact(6))
                 .filter(|q| {
-                    q.iter().all(|v| v[3..6] == [0., 142. / 255., 208. / 255.])
+                    q.iter()
+                        .all(|v| v[3..6] == [40. / 255., 139. / 255., 225. / 255.])
                         && q[0][1] >= mv[1]
                         && q[0][1] < mv[3]
                 })

@@ -3510,6 +3510,27 @@ mod tests {
                 )
                 .unwrap();
         }
+        // Since #379 the lamp and road halo billboards (and, since #429, the
+        // lamp pools) are refilled from the night threshold whenever daylight
+        // changes, so their vertex counts follow the phase 20 -> 6 change above.
+        // Every other draw keeps its assembled topology through daylight, and
+        // all draws, halos included, keep it through the environment ticks.
+        let night_lights = |mode| {
+            matches!(
+                mode,
+                SurfaceMode::LightHalos | SurfaceMode::LightPoolVolume | SurfaceMode::LightPoolGlow
+            )
+        };
+        for (index, draw) in scene.draws.iter().enumerate() {
+            if !night_lights(draw.mode) {
+                assert_eq!(draw.vertices.len(), layout[index], "draw {index}");
+            }
+        }
+        let layout = scene
+            .draws
+            .iter()
+            .map(|draw| draw.vertices.len())
+            .collect::<Vec<_>>();
         for tick in [
             saved_tick,
             saved_tick + 25,
