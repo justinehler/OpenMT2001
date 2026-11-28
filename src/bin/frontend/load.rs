@@ -131,13 +131,21 @@ impl Load {
         let mut list_bounds = bounds[8];
         list_bounds[3] -= 25.;
         list_bounds[2] -= 16.;
-        let list_layout = openmt2001::frontend_list::Layout::from_font(list_bounds, &list_tab)?;
+        // 4940f0's list and info primary payloads use horizontal0/vertical3.
+        let list_layout = openmt2001::frontend_list::Layout::from_font_with_insets(
+            list_bounds,
+            &list_tab,
+            [0., 3.],
+        )?;
         let description_tab = fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
             .map_err(|e| e.to_string())?;
         let mut info_bounds = bounds[21];
         info_bounds[2] -= 16.;
-        let info_layout =
-            openmt2001::frontend_list::Layout::from_font(info_bounds, &description_tab)?;
+        let info_layout = openmt2001::frontend_list::Layout::from_font_with_insets(
+            info_bounds,
+            &description_tab,
+            [0., 3.],
+        )?;
         Ok(Self {
             base,
             bounds,
@@ -600,9 +608,13 @@ impl Load {
             .take(self.list_layout.visible_rows())
         {
             let row = self.list_layout.text_bounds(i - self.first);
-            if self.chosen == Some(i) {
-                shapes.rect(self.list_layout.highlight(i - self.first), [0xff008ed0; 4]);
-            }
+            ui::list_highlight(
+                &mut shapes,
+                self.list_layout,
+                i - self.first,
+                self.chosen == Some(i),
+                selected == Some(3 + i),
+            );
             let (name, timestamp) = row_columns(row);
             ui::text_fit(
                 &mut list_fonts,
