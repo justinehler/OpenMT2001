@@ -480,6 +480,14 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         event: impl FnMut(openmt2001::live_commands::Event) -> Result<(), String>,
     ) -> Result<(), String> {
+        if let Some(connection) = &mut self.connected {
+            return connection.commands.submit(
+                &connection.worker,
+                command,
+                &mut self.live_commands,
+                self.world.clock.timing[0],
+            );
+        }
         self.command_batch(Some(command), assets, event)
     }
 
@@ -601,6 +609,9 @@ impl<'data> Session<'data> {
         assets: &CommandAssets<'_, '_>,
         mut event: impl FnMut(openmt2001::live_commands::Event) -> Result<u32, String>,
     ) -> Result<(), String> {
+        if self.connected.is_some() {
+            return Err(openmt2001::network::Error::Unsupported.to_string());
+        }
         let mut descriptor = [0; 52];
         descriptor[4..8].copy_from_slice(&0x1fu32.to_le_bytes());
         for (off, value) in [

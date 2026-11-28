@@ -1,6 +1,6 @@
-//! Connected construction stops at the initial city. Command/deadline exchange,
-//! auction barriers, chat and peer-loss handling remain #35–#38. The scheduler
-//! holds at its initial deadline (25); no local command transport is substituted.
+//! Connected construction pins the command adapter to the admitted roster and
+//! actual world. Short property transfers/deadlines are qualified; auction
+//! barriers, chat, other command families and peer-loss handling remain follow-ons.
 use super::*;
 use openmt2001::network::{
     self, Content, RowKind, SessionBinding,
@@ -73,6 +73,7 @@ impl Pending {
 pub struct Connection {
     pub binding: SessionBinding,
     pub worker: Handle,
+    pub commands: network::commands::Adapter,
 }
 
 pub(crate) struct Staged {
@@ -313,13 +314,21 @@ impl SceneInputs {
         let binding = request
             .worker
             .bind_world(session.world.topology.epoch().serial())?;
+        let commands = network::commands::Adapter::new(
+            binding,
+            request.ticket.view.host,
+            request.ticket.view.local_peer,
+            stage.peers.clone(),
+        )
+        .map_err(|e| e.to_string())?;
         session.connected = Some(Connection {
+            commands,
             binding,
             worker: request.worker,
         });
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         eprintln!(
-            "Connected city initialized: level {}, local compact slot {}, players {}, seed {}, initial deadline 25. Command/deadline exchange remains unavailable (#35).",
+            "Connected city initialized: level {}, local compact slot {}, players {}, seed {}, initial deadline 25. Property-transfer commands qualified; other command families remain unsupported.",
             stage.launch.level_id,
             stage.local_slot,
             session.roster.manager.players.len(),

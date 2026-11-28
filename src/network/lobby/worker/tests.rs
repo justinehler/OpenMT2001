@@ -350,3 +350,195 @@ fn cancelling_content_staging_cannot_release_or_retire_a_replacement() {
     assert_eq!(owner.phase(), Ok(network::Phase::Lobby));
     assert!(next.validate().is_ok());
 }
+
+#[cfg(feature = "lua4")]
+#[test]
+fn playing_worker_orders_real_commits_before_deadlines_and_resumes_retained_tasks() {
+    use crate::{
+        live_commands,
+        network::{
+            Message, Transfer,
+            commands::{Adapter, Request},
+        },
+    };
+    let host_owner = owner();
+    let client_owner = owner();
+    let host = spawn_worker(host_owner, host_open(settings())).unwrap();
+    let Update::Lobby(initial) = wait(&host, |u| matches!(u, Update::Lobby(_))) else {
+        panic!()
+    };
+    let probe = spawn_worker(owner(), Open::Probe(initial.address)).unwrap();
+    let Update::Probed(selection) = wait(&probe, |u| matches!(u, Update::Probed(_))) else {
+        panic!()
+    };
+    drop(probe);
+    let client = spawn_worker(
+        client_owner,
+        Open::Join {
+            selection,
+            name: b"Client".to_vec(),
+            token: 1,
+        },
+    )
+    .unwrap();
+    let Update::Lobby(view) = wait(&client, |u| matches!(u, Update::Lobby(_))) else {
+        panic!()
+    };
+    client.action(Action::Ready).unwrap();
+    wait(
+        &host,
+        |u| matches!(u,Update::Lobby(v) if v.snapshot.start_enabled()),
+    );
+    host.action(Action::Start).unwrap();
+    let Update::Prepare(ticket) = wait(&host, |u| matches!(u, Update::Prepare(_))) else {
+        panic!()
+    };
+    let content = network::Content {
+        level: ticket.view.snapshot.settings.level,
+        parameter_bits: ticket.view.snapshot.settings.parameter_bits,
+        difficulty: ticket.view.snapshot.settings.difficulty,
+        fingerprint: [5; 32],
+    };
+    host.prepared(Ok(content)).unwrap();
+    wait(&client, |u| matches!(u, Update::Prepare(_)));
+    client.prepared(Ok(content)).unwrap();
+    wait(&host, |u| matches!(u, Update::Validated));
+    wait(&client, |u| matches!(u, Update::Validated));
+    let hb = host.bind_world(100).unwrap();
+    let cb = client.bind_world(200).unwrap();
+    let mut authority = Adapter::new(hb, true, 0, vec![Some(0), Some(view.local_peer)]).unwrap();
+    let mut replica = Adapter::new(
+        cb,
+        false,
+        view.local_peer,
+        vec![Some(0), Some(view.local_peer)],
+    )
+    .unwrap();
+    let (mut left, mut right) = (
+        live_commands::Queue::default(),
+        live_commands::Queue::default(),
+    );
+    let (mut lp, mut rp) = (
+        crate::pause::State::default(),
+        crate::pause::State::default(),
+    );
+    let (mut lt, mut rt) = (
+        crate::timers::startup_tasks([0x5a; 20]),
+        crate::timers::startup_tasks([0x5a; 20]),
+    );
+    for category in [7, 8] {
+        replica
+            .submit(
+                &client,
+                live_commands::Command::PropertyTransfer {
+                    category,
+                    owner: 2,
+                    amount: 500,
+                },
+                &mut right,
+                100,
+            )
+            .unwrap();
+    }
+    let deadline = Instant::now() + WAIT;
+    // Don't publish deadline125 before all requests in this test are admitted.
+    // Pump at101: the host stamps126, then closes it at105 with deadline130.
+    while left.snapshot().unwrap().len() < 2 {
+        authority
+            .pump(&host, 101, &mut left, &mut lp, &mut lt)
+            .unwrap();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    authority
+        .pump(&host, 105, &mut left, &mut lp, &mut lt)
+        .unwrap();
+    crate::network::commands::pause_at_limit(&mut rp, &mut rt).unwrap();
+    let retained = rt.clone();
+    while replica.deadline() < 130 {
+        replica
+            .pump(&client, 125, &mut right, &mut rp, &mut rt)
+            .unwrap();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(right.snapshot().unwrap().len(), 2);
+    assert!(
+        right
+            .snapshot()
+            .unwrap()
+            .iter()
+            .all(|(_, due, inner, _, _)| *due == 126 && *inner == 126)
+    );
+    assert_eq!(rp.bytes[1], 0);
+    for (paused, resumed) in retained.iter().zip(&rt) {
+        assert_eq!(&paused[1..], &resumed[1..]);
+    }
+    // A later frame at the SAME105 Total cannot commit a new request at130:
+    // the client already has permission to run through that deadline.
+    replica
+        .submit(
+            &client,
+            live_commands::Command::PropertyTransfer {
+                category: 9,
+                owner: 2,
+                amount: 10,
+            },
+            &mut right,
+            125,
+        )
+        .unwrap();
+    authority
+        .pump(&host, 105, &mut left, &mut lp, &mut lt)
+        .unwrap();
+    assert_eq!(left.snapshot().unwrap().len(), 2);
+    while left.snapshot().unwrap().len() < 3 {
+        authority
+            .pump(&host, 106, &mut left, &mut lp, &mut lt)
+            .unwrap();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(left.snapshot().unwrap()[2].1, 131);
+    // Unsupported family reaches an explicit host rejection, never the queue.
+    client
+        .send_gameplay(
+            cb,
+            None,
+            Message::CommandRequest(Request {
+                serial: 10,
+                owner: 2,
+                kind: 0x0f,
+                payload: vec![],
+            }),
+        )
+        .unwrap();
+    let error = loop {
+        authority
+            .pump(&host, 106, &mut left, &mut lp, &mut lt)
+            .unwrap();
+        if let Err(error) = replica.pump(&client, 125, &mut right, &mut rp, &mut rt) {
+            break error;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    };
+    assert!(error.contains("unsupported family/schema"));
+    assert_eq!(left.snapshot().unwrap().len(), 3);
+    // Bare legacy commits have no global command order and are not an escape
+    // hatch into the qualified command schema.
+    assert!(
+        client
+            .send_gameplay(
+                cb,
+                None,
+                Message::Transfer(Transfer {
+                    category: 7,
+                    owner: 2,
+                    amount: 1,
+                    due: 150
+                })
+            )
+            .is_err()
+    );
+}

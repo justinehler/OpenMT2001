@@ -90,6 +90,9 @@ impl Session<'_> {
         category: u32,
         panel_mode: u8,
     ) -> Result<openmt2001::property_rights::Inspection, String> {
+        if self.connected.is_some() {
+            return Err(openmt2001::network::Error::Unsupported.to_string());
+        }
         let inspection = self.inspect_property_rights(category, panel_mode)?;
         if !inspection.activate_visible {
             return Ok(inspection);
@@ -218,6 +221,9 @@ impl Session<'_> {
         assets: &CommandAssets<'_, '_>,
         mut event: impl FnMut(live_commands::Event) -> Result<(), String>,
     ) -> Result<Inspection, String> {
+        if self.connected.is_some() {
+            return Err(openmt2001::network::Error::Unsupported.to_string());
+        }
         let amount = panel.amount;
         let mut inspection = self.inspect_property_offer_panel(category, panel, assets)?;
         if inspection.panel.visible == 0 {

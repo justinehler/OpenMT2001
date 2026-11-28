@@ -406,6 +406,18 @@ impl Owner {
         state.transport = Some(transport);
         Ok(events)
     }
+    /// Flush already ordered startup output without reading gameplay ingress
+    /// while the actual world is still being constructed. In particular the
+    /// final StartCommit must leave the host before clients can bind a world.
+    pub(crate) fn flush(&self, attempt: Attempt) -> Result<(), Error> {
+        let mut state = self.lock()?;
+        state.attempt(attempt)?;
+        let transport = state.transport.as_mut().ok_or(Error::Unavailable)?;
+        for link in transport.links.iter_mut().flatten() {
+            link.stream.flush()?;
+        }
+        Ok(())
+    }
     /// Read-only probe metadata, updated only by the host coordinator.
     pub fn advertise(
         &self,
