@@ -703,7 +703,10 @@ impl Menu {
         }
         if let Some(page) = self.settings.page {
             return !self.desktop_quit.blocked_by_right()
-                && self.assets.settings.action_cursor_hover(page, Some(p));
+                && self
+                    .assets
+                    .settings
+                    .action_cursor_hover(page, Some(p), true);
         }
         // These routes have separate control policies; their hover is not yet closed.
         if self.skirmish.visible()
@@ -815,6 +818,17 @@ impl Menu {
                 pressed,
                 &mut self.settings_audio,
             );
+            if self.settings.take_reset()
+                && let Some(name) = self
+                    .profile
+                    .store
+                    .current
+                    .and_then(|index| self.profile.store.names.get(index))
+                && let Err(error) =
+                    preferred_token::reset(&self.assets.profile_root, name.as_bytes())
+            {
+                self.skirmish.error = Some(error);
+            }
             return;
         }
         if pressed

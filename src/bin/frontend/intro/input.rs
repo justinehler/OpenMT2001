@@ -795,7 +795,7 @@ impl Intro {
                             // its abandonment prompt. Its reply owns teardown.
                             Some(crate::game_options::Button::Quit) => {}
                             Some(crate::game_options::Button::Settings) => {
-                                view.settings_menu.open();
+                                view.settings_menu.open_in_game();
                             }
                             Some(crate::game_options::Button::Save)
                                 if view.save_pending.is_none() && view.options_ack.ready() =>
