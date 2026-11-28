@@ -438,6 +438,7 @@ fn per_peer_player_state_is_blanked_and_shared_state_is_kept() {
     let mut truncated = roster(0, 0, 1, 5);
     truncated.pop();
     assert!(per_peer_players(&mut truncated).is_err());
+}
 
 /// Construct one staged city and link it to its lobby worker exactly as
 /// `fresh_connected_joined` does.
