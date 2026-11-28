@@ -136,17 +136,52 @@ pub fn admit(
     if routing.network[0] && !routing.network[1] {
         return Err("construction requires unresolved network command transport".into());
     }
+    if reserve(command, categories)? {
+        return Ok(true);
+    }
+    reject(
+        command,
+        players,
+        arena,
+        broadcast_enabled,
+        routing,
+        external,
+    )?;
+    Ok(false)
+}
+
+/// Original4517f2..45184e: test the rectangle against its category's 7x7
+/// occupancy and, when free, reserve it with the building height. `false`
+/// leaves occupancy untouched; the caller then owes the native rejection.
+pub fn reserve(command: &Command, categories: &mut [[u8; 0x17c]; 52]) -> Result<bool, String> {
     let category = categories
         .get_mut(command.category as usize)
         .ok_or("construction admission category leaves pool")?;
     let occupancy: &mut [u8; 49] = (&mut category[0x9c..0xcd]).try_into().unwrap();
     let rectangle = command.rectangle.map(i32::from);
-    if building_pool::can_place(occupancy, rectangle) {
-        //45184e precedes450a30, including its allocator/error behavior. Do not
-        //roll back this store if the subsequent queue consumer fails.
-        building_pool::fill_occupancy(occupancy, rectangle, command.height as u8)?;
-        return Ok(true);
+    if !building_pool::can_place(occupancy, rectangle) {
+        return Ok(false);
     }
+    //45184e precedes450a30, including its allocator/error behavior. Do not
+    //roll back this store if the subsequent queue consumer fails.
+    building_pool::fill_occupancy(occupancy, rectangle, command.height as u8)?;
+    Ok(true)
+}
+
+/// Original451894..4518c5: a construction whose rectangle could not be
+/// reserved is dropped. A computer owner learns of it through inbox message
+/// 0x30; a human owner gets nothing. The sender always sees success.
+pub fn reject(
+    command: &Command,
+    players: &mut impl crate::player_messages::Players,
+    arena: &mut crate::player_messages::Arena,
+    broadcast_enabled: u32,
+    routing: crate::player_messages::Routing,
+    external: impl FnMut(
+        crate::player_messages::Route,
+        &crate::player_messages::Packet,
+    ) -> Result<(), String>,
+) -> Result<(), String> {
     //451894 sign-extends packet+29;86d1fc+4*owner is the zero-based
     //86d200 player table at owner-1, NOT player table[owner]. Resolve only
     //on rejection, matching the native accepted path's lack of owner lookup.
@@ -181,7 +216,7 @@ pub fn admit(
             external,
         )?;
     }
-    Ok(false)
+    Ok(())
 }
 
 #[cfg(test)]
