@@ -202,7 +202,7 @@ impl Assets {
         self.list_layout.hit(p, first, len)
     }
     fn info_rows(&self, view: &View) -> usize {
-        let Some(slot) = view.selected.and_then(|i| view.slots.get(i)) else {
+        let Some(slot) = view.selected_slot() else {
             return 0;
         };
         let Ok(words) = slot.metadata else { return 0 };
@@ -302,7 +302,7 @@ impl Assets {
                 )?;
             }
         }
-        if let Some(slot) = view.selected.and_then(|i| view.slots.get(i)) {
+        if let Some(slot) = view.selected_slot() {
             ui::text_widget_style4(
                 &mut font1,
                 &self.tab1,
@@ -413,8 +413,7 @@ impl Assets {
             );
         }
         for button in [Button::SaveAs, Button::Save, Button::Back, Button::Delete] {
-            let disabled = view.busy
-                || (matches!(button, Button::Save | Button::Delete) && view.selected.is_none());
+            let disabled = !view.button_enabled(button);
             let color = match button {
                 Button::SaveAs => [166, 133, 0],
                 Button::Save => [80, 148, 34],
@@ -694,9 +693,16 @@ impl View {
         self.scroll_capture = None;
     }
     pub fn selected_name(&self) -> Option<&str> {
-        self.selected
-            .and_then(|i| self.slots.get(i))
-            .map(|s| s.name.as_str())
+        self.selected_slot().map(|s| s.name.as_str())
+    }
+    /// The row whose details fill the Overwrite panel, if any.
+    fn selected_slot(&self) -> Option<&crate::save_menu::Slot> {
+        self.selected.and_then(|i| self.slots.get(i))
+    }
+    /// Save and Delete act on the selected row; every button is disabled
+    /// while a write or delete is in flight.
+    fn button_enabled(&self, button: Button) -> bool {
+        !self.busy && (!matches!(button, Button::Save | Button::Delete) || self.selected.is_some())
     }
     pub fn scroll(&mut self, assets: &Assets, delta: i32) {
         self.first = (self.first as i32 + delta).clamp(
@@ -894,7 +900,7 @@ impl View {
         }
         let target = pointer.and_then(|point| {
             if let Some(button) = assets.hit(point)
-                && (!matches!(button, Button::Save | Button::Delete) || self.selected.is_some())
+                && self.button_enabled(button)
             {
                 return Some(CueTarget::Button(button));
             }
@@ -930,35 +936,39 @@ impl View {
         self.cue_latch = target;
         cue
     }
+    /// A finished Save As or Save. The original rebuilds the rows after every
+    /// write and leaves nothing selected, so the Overwrite panel is empty and
+    /// Save/Delete are disabled; it shows no confirmation text (Save As:
+    /// 0x4965c0 then 0x497660, which resets the selection to -1; Save:
+    /// 0x498110, 0x497d80, 0x497e70).
     pub fn saved(&mut self, result: Result<std::path::PathBuf, String>, profile_root: &Path) {
         self.busy = false;
         match result {
-            Ok(path) => {
-                self.message = Some(format!(
-                    "Saved: {}",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                ));
-                if let Ok(slots) = crate::save_menu::list_slots(profile_root) {
-                    self.selected = slots.iter().position(|s| {
-                        s.id == path.file_name().unwrap_or_default().to_string_lossy()
-                    });
-                    self.slots = slots;
-                }
-            }
+            Ok(_) => self.refresh_rows(profile_root),
             Err(error) => self.message = Some(format!("Save failed: {error}")),
         }
     }
+    /// A finished Delete. Like a write, it rebuilds the rows, clears the
+    /// selection and disables Save/Delete without a status line (0x498030,
+    /// 0x497c70).
     pub fn deleted(&mut self, result: Result<(), String>, profile_root: &Path) {
         self.busy = false;
         match result {
-            Ok(()) => {
-                self.message = Some("Saved game deleted".into());
-                if let Ok(slots) = crate::save_menu::list_slots(profile_root) {
-                    self.slots = slots;
-                    self.selected = None;
-                }
-            }
+            Ok(()) => self.refresh_rows(profile_root),
             Err(error) => self.message = Some(format!("Delete failed: {error}")),
+        }
+    }
+    /// Re-enumerates the profile's saves with no row selected (0x497660).
+    fn refresh_rows(&mut self, profile_root: &Path) {
+        self.selected = None;
+        self.info_first = 0;
+        self.message = None;
+        match crate::save_menu::list_slots(profile_root) {
+            Ok(slots) => self.slots = slots,
+            Err(error) => {
+                self.slots.clear();
+                self.message = Some(error);
+            }
         }
     }
 }
