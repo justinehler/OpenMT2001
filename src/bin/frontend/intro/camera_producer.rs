@@ -771,7 +771,7 @@ impl Core {
                 if bank.primary_kind() == 4 {
                     // Unsupported return preflight is recoverable: current P/S
                     // and its savable snapshot remain committed and unchanged.
-                    let active = self.core.preflight_return(view.normal_return)?;
+                    let active = self.preflight_return(view.normal_return)?;
                     raw = RawCommit::ReturnSecondary;
                     bank.restore_primary(*bank.secondary());
                     view = View {
