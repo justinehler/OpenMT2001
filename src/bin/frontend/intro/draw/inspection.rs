@@ -474,6 +474,7 @@ impl Intro {
                         view.smoke_state.as_ref(),
                         view.settings_menu.graphics.detail,
                     ),
+                    view.trees.as_ref(),
                     view.camera,
                     &mut view.scene,
                     &mut view.prepared,

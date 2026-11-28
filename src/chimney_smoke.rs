@@ -189,8 +189,16 @@ impl Smoke {
     }
 
     /// 004b6123 uses graphics detail 0 to draw only emitter zero. There are
-    /// no weather, hour or camera-distance gates. 008b2248 supplies black RGB.
-    pub fn points(&self, detail: u8) -> Vec<Point> {
+    /// no weather, hour or camera-distance gates.
+    ///
+    /// `lit_white` is the RGB the original reads from 008b2248: the ninth
+    /// entry of the foliage palette that 004b6370 rebuilds earlier in the same
+    /// city pass (white 0xffffffff lit by sun and ambient colour, see
+    /// [`crate::trees::Tables::palette`]). Mode 19 modulates the texture by
+    /// this diffuse colour, so the puffs are a lit light grey. The palette
+    /// stays zero only until 004b6370 first runs.
+    pub fn points(&self, detail: u8, lit_white: u32) -> Vec<Point> {
+        let rgb = lit_white & 0x00ff_ffff;
         self.emitters
             .iter()
             .take(if detail == 0 { 1 } else { self.emitters.len() })
@@ -198,7 +206,7 @@ impl Smoke {
             .map(|puff| Point {
                 position: puff.position,
                 size: puff.size,
-                argb: (puff.alpha as u32) << 24,
+                argb: ((puff.alpha as u32) << 24).wrapping_add(rgb),
             })
             .collect()
     }
@@ -249,8 +257,8 @@ mod tests {
             ]
         );
         smoke.tick(10);
-        assert_eq!(smoke.points(2).len(), 3);
-        assert_eq!(smoke.points(0).len(), 1);
+        assert_eq!(smoke.points(2, 0).len(), 3);
+        assert_eq!(smoke.points(0, 0).len(), 1);
         assert!(locators(&index, &archive[..archive.len() - 1]).is_err());
     }
 
@@ -260,10 +268,10 @@ mod tests {
         for tick in 1..10 {
             smoke.tick(tick);
         }
-        assert!(smoke.points(2).is_empty());
+        assert!(smoke.points(2, 0).is_empty());
         smoke.tick(10);
-        assert_eq!(smoke.points(0).len(), 1);
-        assert_eq!(smoke.points(2).len(), 2);
+        assert_eq!(smoke.points(0, 0).len(), 1);
+        assert_eq!(smoke.points(2, 0).len(), 2);
         let first = smoke.emitters[0].puffs[0];
         // Controlled seed0/two-emitter execution of original 004b5db0.
         assert_eq!(
@@ -278,7 +286,7 @@ mod tests {
         assert!((first.size - 5.1).abs() < 0.00001);
         let frozen = smoke.clone();
         for _ in 0..5 {
-            let _ = smoke.points(2);
+            let _ = smoke.points(2, 0);
         }
         assert_eq!(
             smoke, frozen,
@@ -287,7 +295,7 @@ mod tests {
         for tick in 11..20 {
             smoke.tick(tick);
         }
-        assert_eq!(smoke.points(2).len(), 2);
+        assert_eq!(smoke.points(2, 0).len(), 2);
         let puff = smoke.emitters[0].puffs[0];
         assert_eq!(
             puff.position.map(f32::to_bits),
@@ -297,7 +305,7 @@ mod tests {
         assert!((puff.position[0] - (FIXED_POSITION[0] + first.drift * 10.)).abs() < 0.001);
         assert!(puff.position[1] > first.position[1]);
         smoke.tick(20);
-        assert_eq!(smoke.points(2).len(), 4);
+        assert_eq!(smoke.points(2, 0).len(), 4);
         for tick in 21..=35 {
             smoke.tick(tick);
         }
@@ -318,6 +326,34 @@ mod tests {
         assert_eq!(
             smoke.emitters[0].puffs[0].alpha, 10,
             "first free slot is reused"
+        );
+    }
+
+    #[test]
+    fn chimney_smoke_points_take_lit_white_and_puff_alpha() {
+        let mut smoke = Smoke::new(0, &[]);
+        for tick in 10..=20 {
+            smoke.tick(tick);
+        }
+        let alphas = smoke.emitters[0]
+            .puffs
+            .iter()
+            .filter(|puff| puff.active)
+            .map(|puff| puff.alpha as u32)
+            .collect::<Vec<_>>();
+        assert_eq!(alphas, [110, 10]);
+        // 004b60d0 masks the palette entry's alpha and adds the puff alpha.
+        let points = smoke.points(2, 0xffd8d0c8);
+        assert_eq!(
+            points.iter().map(|point| point.argb).collect::<Vec<_>>(),
+            [0x6ed8d0c8, 0x0ad8d0c8]
+        );
+        // Before 004b6370 first fills the palette the colour is black.
+        assert!(
+            smoke
+                .points(2, 0)
+                .iter()
+                .all(|point| point.argb & 0x00ff_ffff == 0)
         );
     }
 

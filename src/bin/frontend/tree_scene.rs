@@ -263,6 +263,12 @@ impl Layer {
             foliage_counts: [0; 3],
         }
     }
+    /// The foliage palette from the last reframe, the engine's copy of the
+    /// original 008b2228 table that 004b6370 rebuilds each city pass. Chimney
+    /// smoke reads its last entry.
+    pub fn palette(&self) -> Option<[u32; 9]> {
+        self.previous_palette
+    }
     pub fn attach(&mut self, scene: &mut Scene) {
         // A new attachment contains placeholders, even if this layer was used
         // before. Its first frame must fill every draw.
