@@ -147,8 +147,11 @@ pub struct Scene {
     street_furniture_detail: u8,
     halos: Option<crate::light_halos::Layer>,
     station_details: Vec<usize>,
-    /// roads.tm draws in mesh part order, for the era road textures.
-    road_draws: Vec<usize>,
+    /// Every draw that samples each of roads.tm's two texture pages, in the
+    /// mesh's part order, for the era road textures. The bridges and banks
+    /// that name the same road textures hit the original's texture cache, so
+    /// they share these pages and change with them.
+    road_pages: Vec<Vec<usize>>,
     /// Era whose road textures the road draws hold (00545658); none while
     /// they still hold roads.tm's built-in pages.
     road_era: Option<u32>,
@@ -1967,16 +1970,22 @@ fn assemble_with_style_internal(
                 .ok_or_else(|| "station detail draw missing".to_owned())
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let road_draws = road_families
+    let mut road_pages = road_page_families(&road_families, &scenery_families)
         .into_iter()
-        .filter_map(|family| batches.get(&(family, 0)))
-        .map(|vertices| {
-            draws
-                .iter()
-                .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
-                .ok_or_else(|| "road draw missing".to_owned())
+        .map(|families| {
+            families
+                .into_iter()
+                .filter_map(|family| batches.get(&(family, 0)))
+                .map(|vertices| {
+                    draws
+                        .iter()
+                        .position(|draw| draw.vertices.as_ptr() == vertices.as_ptr())
+                        .ok_or_else(|| "road draw missing".to_owned())
+                })
+                .collect::<Result<Vec<_>, String>>()
         })
         .collect::<Result<Vec<_>, String>>()?;
+    road_pages.retain(|draws| !draws.is_empty());
     let draws = draws
         .into_iter()
         .map(|draw| OwnedDraw {
@@ -2022,7 +2031,7 @@ fn assemble_with_style_internal(
         street_furniture_detail: 2,
         halos: None,
         station_details,
-        road_draws,
+        road_pages,
         road_era: None,
     };
     if scene_mode && let Some(original) = request.original {
@@ -2285,39 +2294,55 @@ impl Scene {
     }
     /// 004b8d20, called by the city draw 004b2b60: when the clamped era
     /// differs from the era the road pages hold, replace roads.tm's two pages
-    /// with that era's road textures. `pages` receives the clamped era and the
-    /// two page widths and returns the converted pages in mesh part order.
-    /// Returns the draws whose texture changed.
+    /// with that era's road textures. Every mesh that samples those pages,
+    /// such as the canal bridge decks, changes with them. `pages` receives the
+    /// clamped era and the two page widths and returns the converted pages in
+    /// mesh part order. Returns the draws whose texture changed.
     pub fn set_road_era(
         &mut self,
         era: u32,
         pages: impl FnOnce(u32, [u32; 2]) -> Result<[Arc<[u8]>; 2], String>,
     ) -> Result<Vec<usize>, String> {
         let selected = crate::road_textures::selected_era(era);
-        let [first, second] = match self.road_draws[..] {
-            [first, second] => [first, second],
+        let [first, second] = match &self.road_pages[..] {
+            [first, second] => [first.clone(), second.clone()],
             _ => return Ok(Vec::new()),
         };
         if self.road_era == Some(selected) {
             return Ok(Vec::new());
         }
-        let width = |index: usize| -> Result<u32, String> {
-            let draw = self.draws.get(index).ok_or("road draw missing")?;
-            if draw.width != draw.height {
-                return Err("road texture page is not square".into());
+        let width = |draws: &[usize]| -> Result<u32, String> {
+            let mut width = None;
+            for &index in draws {
+                let draw = self.draws.get(index).ok_or("road draw missing")?;
+                if draw.width != draw.height {
+                    return Err("road texture page is not square".into());
+                }
+                if width.is_some_and(|width| width != draw.width) {
+                    return Err("road texture page draws differ in size".into());
+                }
+                width = Some(draw.width);
             }
-            Ok(draw.width)
+            width.ok_or_else(|| "road texture page has no draw".into())
         };
-        let widths = [width(first)?, width(second)?];
+        let widths = [width(&first)?, width(&second)?];
         let pages = pages(selected, widths)?;
-        for ((index, width), rgba) in [first, second].into_iter().zip(widths).zip(pages) {
-            if rgba.len() != width as usize * width as usize * 4 {
-                return Err("road texture page size changed".into());
+        if pages
+            .iter()
+            .zip(widths)
+            .any(|(rgba, width)| rgba.len() != width as usize * width as usize * 4)
+        {
+            return Err("road texture page size changed".into());
+        }
+        let mut changed = Vec::new();
+        for (draws, rgba) in [first, second].into_iter().zip(pages) {
+            for index in draws {
+                self.draws[index].rgba = rgba.clone();
+                changed.push(index);
             }
-            self.draws[index].rgba = rgba;
         }
         self.road_era = Some(selected);
-        Ok(vec![first, second])
+        Ok(changed)
     }
     /// Era whose road textures the road draws hold, if they were replaced.
     pub fn road_era(&self) -> Option<u32> {
@@ -2923,6 +2948,34 @@ fn validate_camera(sample: crate::flyby::CameraSample) -> Result<(), String> {
         return Err("camera requires finite independent direction/up and FOV in 0..180".into());
     }
     Ok(())
+}
+
+/// The texture families that sample each of roads.tm's road pages, roads.tm's
+/// own family first. The original texture cache (004ffb56) answers a later
+/// mesh's request for an already registered name with the same handle, so
+/// every mesh naming a road texture draws from the page 004b8d20 rewrites.
+/// `scenery_families` maps each registered family to its scenery page; a road
+/// family without a registered page is alone on its page.
+fn road_page_families(
+    road_families: &[usize],
+    scenery_families: &BTreeMap<usize, usize>,
+) -> Vec<Vec<usize>> {
+    road_families
+        .iter()
+        .map(|&road| {
+            let Some(&page) = scenery_families.get(&road) else {
+                return vec![road];
+            };
+            std::iter::once(road)
+                .chain(
+                    scenery_families
+                        .iter()
+                        .filter(|&(&family, &other)| other == page && family != road)
+                        .map(|(&family, _)| family),
+                )
+                .collect()
+        })
+        .collect()
 }
 
 /// 004ffde0 selects dedicated TT registration from flag2. 004de8b0 allocates
