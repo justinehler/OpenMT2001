@@ -2008,6 +2008,39 @@ struct Animation {
 }
 
 impl Scene {
+    /// The shared 64x64 night facade image (BuildingTextures[26], 689688).
+    /// Updating both retained selectors and current draws preserves it across
+    /// subsequent daylight/camera changes without touching the daytime image.
+    pub fn set_window_pixels(&mut self, pixels: Arc<[u8]>) -> Result<Vec<usize>, String> {
+        if pixels.len() != 64 * 64 * 4 {
+            return Err("window texture must be 64x64 RGBA".into());
+        }
+        let Some(state) = &mut self.animation else {
+            return Ok(Vec::new());
+        };
+        let Some(images) = &mut state.facade_images else {
+            return Ok(Vec::new());
+        };
+        if (images[1].width, images[1].height) != (64, 64) {
+            return Ok(Vec::new());
+        }
+        images[1].rgba = pixels.clone();
+        let mut changed = Vec::new();
+        if state
+            .facade_material
+            .is_some_and(|material| material.texture == 26)
+        {
+            for (index, _) in &state.facades {
+                self.draws[*index]
+                    .secondary
+                    .as_mut()
+                    .ok_or("window facade secondary missing")?
+                    .rgba = pixels.clone();
+                changed.push(*index);
+            }
+        }
+        Ok(changed)
+    }
     /// 004c5370: modern devices validate both original water materials.
     /// Keep the alternate draws resident so option changes need only vertex uploads.
     pub fn apply_water_options(&mut self, enabled: bool, detail: u8) -> Result<Vec<usize>, String> {

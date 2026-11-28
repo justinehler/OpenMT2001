@@ -118,6 +118,12 @@ pub struct PreparedScene {
     draws: Vec<GpuDraw>,
 }
 
+struct WindowTextureGpu {
+    pixels: Arc<[u8]>,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
 struct GpuDraw {
     camera: wgpu::Buffer,
     camera_offset: u64,
@@ -153,6 +159,7 @@ pub struct Renderer {
     water_first_pipeline: wgpu::RenderPipeline,
     water_quality_pipeline: wgpu::RenderPipeline,
     texture_cache: RefCell<TextureCache>,
+    window_texture: RefCell<Option<WindowTextureGpu>>,
     surface_sampler: wgpu::Sampler,
     #[cfg(any(test, feature = "capture"))]
     bypass_texture_cache: std::cell::Cell<bool>,
@@ -394,6 +401,7 @@ impl Renderer {
         });
         Self {
             texture_cache: RefCell::default(),
+            window_texture: RefCell::default(),
             surface_sampler,
             #[cfg(any(test, feature = "capture"))]
             bypass_texture_cache: std::cell::Cell::new(false),
@@ -546,9 +554,7 @@ impl Renderer {
             let secondary = draw
                 .secondary
                 .as_ref()
-                .map(|image| {
-                    self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)
-                })
+                .map(|image| self.upload_secondary(draw.mode, image))
                 .transpose()?;
             let old = &scene.draws[index];
             if old.mode == draw.mode
@@ -853,6 +859,23 @@ impl Renderer {
     // Only the existing facade pipeline admits a secondary selector change.
     // The cache resolves the exact retained pixels; primary image, camera slot,
     // sampler and vertex allocation are preserved across a day/night boundary.
+    fn upload_secondary(
+        &self,
+        mode: SurfaceMode,
+        image: &SecondaryTexture<'_>,
+    ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+        if mode == SurfaceMode::FacadeBlend
+            && image.width == 64
+            && image.height == 64
+            && image.mipmaps
+            && let Some(current) = self.window_texture.borrow().as_ref()
+            && current.pixels.as_ref() == image.rgba
+        {
+            return Ok((current.texture.clone(), current.view.clone()));
+        }
+        self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)
+    }
+
     fn retained_facade_image(
         &self,
         draw: &TexturedDraw<'_>,
@@ -864,8 +887,7 @@ impl Renderer {
             .secondary
             .as_ref()
             .ok_or("retained facade secondary missing")?;
-        self.upload_texture(image.width, image.height, image.rgba, image.mipmaps)
-            .map(Some)
+        self.upload_secondary(draw.mode, image).map(Some)
     }
 
     fn bind_retained_facade(
@@ -928,7 +950,7 @@ impl Renderer {
         let secondary = draw
             .secondary
             .as_ref()
-            .map(|s| self.upload_texture(s.width, s.height, s.rgba, s.mipmaps))
+            .map(|image| self.upload_secondary(draw.mode, image))
             .transpose()?;
         let sampler = self.surface_sampler.clone();
         let mut entries = vec![
@@ -972,6 +994,52 @@ impl Renderer {
             bind_group,
             secondary,
         })
+    }
+
+    /// Publish 4801f0's dirty shared window image into one retained GPU image.
+    /// It bypasses the immutable image cache and refreshes every mip level.
+    pub fn publish_window_texture(&self, pixels: Arc<[u8]>) -> Result<(), String> {
+        if pixels.len() != 64 * 64 * 4 {
+            return Err("window texture must be 64x64 RGBA".into());
+        }
+        let mut current = self.window_texture.borrow_mut();
+        if let Some(image) = current.as_mut() {
+            let reduced = crate::texture::page_mipmaps(64, 64, &pixels)?;
+            for (level, bytes) in std::iter::once(pixels.as_ref())
+                .chain(reduced.iter().map(Vec::as_slice))
+                .enumerate()
+            {
+                let side = 64 >> level;
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &image.texture,
+                        mip_level: level as u32,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    bytes,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(side * 4),
+                        rows_per_image: Some(side),
+                    },
+                    wgpu::Extent3d {
+                        width: side,
+                        height: side,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+            image.pixels = pixels;
+        } else {
+            let (texture, view) = self.upload_texture_uncached(64, 64, &pixels, true)?;
+            *current = Some(WindowTextureGpu {
+                pixels,
+                texture,
+                view,
+            });
+        }
+        Ok(())
     }
 
     fn upload_texture(
@@ -1305,6 +1373,72 @@ fn expand_vertices(draw: &TexturedDraw<'_>) -> Result<Vec<[f32; 14]>, String> {
 #[cfg(all(test, feature = "capture"))]
 mod depth_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GPU"]
+    fn window_texture_publication_reuses_image_and_facade_binding() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let renderer = pollster::block_on(Renderer::new(descriptor)).unwrap();
+        let lit: Arc<[u8]> = vec![255; 64 * 64 * 4].into();
+        renderer.publish_window_texture(lit.clone()).unwrap();
+        let texture = renderer
+            .window_texture
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .texture
+            .clone();
+        assert_eq!(texture.mip_level_count(), 7);
+        let vertices = [[0., 0., 0., 1., 1., 1., 0., 0.]; 3];
+        let uv = [[0., 0.]; 3];
+        let draw = |pixels| TexturedDraw {
+            view_projection: None,
+            vertices: &vertices,
+            specular: None,
+            diffuse_alpha: None,
+            mode: SurfaceMode::FacadeBlend,
+            width: 1,
+            height: 1,
+            rgba: &[255; 4],
+            mipmaps: false,
+            secondary: Some(SecondaryTexture {
+                uv: &uv,
+                diffuse_alpha: 255,
+                width: 64,
+                height: 64,
+                rgba: pixels,
+                mipmaps: true,
+            }),
+        };
+        let camera = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        let mut scene = renderer.prepare(&[draw(&lit)], camera, None).unwrap();
+        assert_eq!(scene.draws[0].secondary.as_ref().unwrap().0, texture);
+        let vertices = scene.draws[0].vertices.clone();
+        let unlit: Arc<[u8]> = vec![0; 64 * 64 * 4].into();
+        renderer.publish_window_texture(unlit.clone()).unwrap();
+        renderer
+            .update_dynamic_vertices(&mut scene, 0, &draw(&unlit))
+            .unwrap();
+        assert_eq!(scene.draws[0].secondary.as_ref().unwrap().0, texture);
+        assert_eq!(scene.draws[0].vertices, vertices);
+        assert_eq!(
+            renderer.window_texture.borrow().as_ref().unwrap().pixels,
+            unlit
+        );
+        // A detached scene prepared later also selects the mutable image.
+        let replacement = renderer.prepare(&[draw(&unlit)], camera, None).unwrap();
+        assert_eq!(replacement.draws[0].secondary.as_ref().unwrap().0, texture);
+        renderer.queue.submit([]);
+        renderer
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+    }
 
     #[test]
     #[ignore = "requires GPU"]

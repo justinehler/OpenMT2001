@@ -1023,6 +1023,7 @@ enum FreshRequest {
         event: u32,
     },
     TutorialPick(crate::tutorial_two_interaction::Pick),
+    WindowTexturePublished(u64),
     Status {
         camera: [f32; 3],
         reply: mpsc::Sender<crate::live_host::Status>,
@@ -1244,6 +1245,33 @@ impl SceneInputs {
         };
         match result {
             Ok((mut loaded, mut session)) => {
+                let binding = (|| -> Result<(), String> {
+                    let index = openmt2001::archive::ArchiveIndex::parse(
+                        &self.directory,
+                        self.archive.len() as u64,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let entry = index
+                        .find("gamedata2/BuildingTextures/textures.gtd")
+                        .ok_or("window texture collection missing")?;
+                    let set = openmt2001::texture::TextureSet::parse(
+                        &self.archive
+                            [entry.offset as usize..(entry.offset + entry.length) as usize],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let image = set.textures.get(26).ok_or("window texture missing")?;
+                    session.window_texture.bind(
+                        image.width,
+                        image.height,
+                        openmt2001::texture::loader_pixels(image).into(),
+                    );
+                    Ok(())
+                })();
+                if let Err(error) = binding {
+                    let _ = tx.send(Err(error));
+                    return None;
+                }
+
                 // Ordinary saves belong to the selected profile independently
                 // of whether this session may persist campaign progression.
                 let save_profile_root = selected_save_root;
@@ -1897,6 +1925,9 @@ impl SceneInputs {
                                 {
                                     host.fail(error);
                                 }
+                            }
+                            FreshRequest::WindowTexturePublished(revision) => {
+                                session.window_texture.published(revision);
                             }
                             FreshRequest::Status { camera, reply } => {
                                 host.observe_presentation_camera(camera);
@@ -2881,6 +2912,9 @@ impl SceneInputs {
                 // leave partial writes, and must discard that base. Successful
                 // snapshots clone only once for their actor layers.
                 session.refresh_scene_records(&mut city)?;
+                if let Some(image) = session.window_texture.current() {
+                    updated_city_draws.extend(city.set_window_pixels(image.pixels)?);
+                }
                 retained = Some(city.clone());
                 cache.city = Some(city);
             }
@@ -9392,6 +9426,21 @@ impl Intro {
             if let Some(receiver) = &view.status_pending {
                 match receiver.try_recv() {
                     Ok(mut status) => {
+                        if let Some(image) = &status.window_texture {
+                            self.renderer.publish_window_texture(image.pixels.clone())?;
+                            for index in view.scene.set_window_pixels(image.pixels.clone())? {
+                                self.renderer.update_dynamic_vertices(
+                                    &mut view.prepared,
+                                    index,
+                                    &view.scene.draws[index].borrowed(),
+                                )?;
+                            }
+                            if let Some(sender) = &view._fresh_session {
+                                sender
+                                    .send(FreshRequest::WindowTexturePublished(image.revision))
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        }
                         crate::live_host::report_status(&status, view.live_status.as_ref());
                         view.stats_requested = status.stats.is_some();
                         tutorial_completed = status.tutorial_completed;

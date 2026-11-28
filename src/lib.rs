@@ -182,3 +182,5 @@ pub mod level_catalog;
 pub mod skirmish;
 
 pub mod native_input;
+
+pub mod window_texture;
