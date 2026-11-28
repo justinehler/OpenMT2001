@@ -4,43 +4,7 @@
 
 pub const PARKS: [usize; 7] = [14, 19, 47, 48, 49, 50, 51];
 
-#[derive(Clone, Copy, Debug)]
-pub struct Snapshot {
-    pub centers: [Option<[f32; 2]>; 52],
-    pub camera: [f32; 3],
-    pub hour: u32,
-    pub tick: u32,
-    pub previous_tick: u32,
-    pub initial_random_state: u32,
-}
-
-impl Snapshot {
-    pub fn from_categories(
-        categories: &[[u8; 0x17c]; 52],
-        camera: [f32; 3],
-        hour: u32,
-        tick: u32,
-        previous_tick: u32,
-        initial_random_state: u32,
-    ) -> Self {
-        Self {
-            centers: std::array::from_fn(|index| {
-                let row = &categories[index];
-                (row[4] != 0).then(|| {
-                    [
-                        f32::from_le_bytes(row[0xe0..0xe4].try_into().unwrap()),
-                        f32::from_le_bytes(row[0xe4..0xe8].try_into().unwrap()),
-                    ]
-                })
-            }),
-            camera,
-            hour,
-            tick,
-            previous_tick,
-            initial_random_state,
-        }
-    }
-}
+pub use openmt2001::audio_requests::transport::BlockSnapshot as Snapshot;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Source {

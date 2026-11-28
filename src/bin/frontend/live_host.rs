@@ -12,8 +12,8 @@ use crate::{
     prompt,
 };
 use openmt2001::{
-    audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests, hourly,
-    level_script, lua4::Value, scheduler,
+    audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests,
+    audio_requests::transport as transport_requests, hourly, level_script, lua4::Value, scheduler,
 };
 
 fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
@@ -335,7 +335,7 @@ pub struct Host {
     pub auction_renderer: Option<std::sync::mpsc::Sender<crate::auction_bridge::Request>>,
     auction_actor_events: Option<std::sync::mpsc::Sender<crate::auction_bridge::ActorEvent>>,
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
-    pub transport_audio: Option<std::sync::mpsc::Sender<crate::transport_audio::Request>>,
+    pub transport_audio: Option<std::sync::mpsc::Sender<transport_requests::Request>>,
     pub era_audio: Option<std::sync::mpsc::Sender<era_requests::Request>>,
     pub gameplay_sound: Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     auction: Option<Auction>,
@@ -1349,9 +1349,9 @@ impl Host {
     }
     pub fn fail(&mut self, error: String) {
         self.running = false;
-        let _ = crate::transport_audio::submit(
+        let _ = transport_requests::submit(
             &self.transport_audio,
-            crate::transport_audio::Operation::Construction([[None; 2]; 4]),
+            transport_requests::Operation::Construction([[None; 2]; 4]),
         );
         if self.failure.is_none() {
             eprintln!("[simulation error] {error}");
@@ -2495,9 +2495,9 @@ impl Host {
                     openmt2001::ai_messages::offers::auction::closure::Call::AudioReset4af140,
                 )) => {
                     omitted.insert(0x4af140);
-                    crate::transport_audio::submit(
+                    transport_requests::submit(
                         &transport_audio,
-                        crate::transport_audio::Operation::Reset,
+                        transport_requests::Operation::Reset,
                     )?;
                     gameplay_requests::enqueue(
                         &gameplay_sound,
@@ -2673,9 +2673,9 @@ impl Host {
                     if !matches!(call.id, 0 | 7 | 8 | 11) {
                         omitted.insert(0x44f790);
                     }
-                    crate::transport_audio::submit(
+                    transport_requests::submit(
                         &transport_audio,
-                        crate::transport_audio::Operation::Route(call),
+                        transport_requests::Operation::Route(call),
                     )?;
                     Ok(0)
                 }
@@ -2684,8 +2684,8 @@ impl Host {
                 Event::TransportEnvironment { call, position } => {
                     let distance = camera.into_iter().zip(position)
                         .map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
-                    crate::transport_audio::submit(&transport_audio,
-                        crate::transport_audio::Operation::Environment { call, distance, position })?;
+                    transport_requests::submit(&transport_audio,
+                        transport_requests::Operation::Environment { call, distance, position })?;
                     Ok(0)
                 }
                 Event::Command(openmt2001::live_commands::Event::Construction(
@@ -2764,7 +2764,7 @@ impl Host {
                         let at = 0x58 + axis * 4;
                         f32::from_le_bytes(record[at..at + 4].try_into().unwrap())
                     });
-                    crate::transport_audio::insert_construction_source(
+                    transport_requests::insert_construction_source(
                         &mut construction_sounds, group, position, camera)?;
                     Ok(0)
                 }
@@ -2795,20 +2795,18 @@ impl Host {
         });
         match result {
             Ok(()) => {
-                if let Err(error) = crate::transport_audio::submit(
+                if let Err(error) = transport_requests::submit(
                     &transport_audio,
-                    crate::transport_audio::Operation::City(Box::new(
-                        crate::transport_audio::CityInputs {
-                            reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
-                            nearest: session.road_traffic.proximity.nearest,
-                            categories: session.world.city.categories,
-                            construction: construction_sounds,
-                            hour: session.world.clock.hour(),
-                            tick: session.world.clock.timing[0],
-                            previous_tick: block_previous_tick,
-                            initial_random_state: block_random_state,
-                        },
-                    )),
+                    transport_requests::Operation::City(Box::new(transport_requests::CityInputs {
+                        reciprocal_sum: session.road_traffic.proximity.reciprocal_sum,
+                        nearest: session.road_traffic.proximity.nearest,
+                        categories: session.world.city.categories,
+                        construction: construction_sounds,
+                        hour: session.world.clock.hour(),
+                        tick: session.world.clock.timing[0],
+                        previous_tick: block_previous_tick,
+                        initial_random_state: block_random_state,
+                    })),
                 ) {
                     self.fail(error);
                 }
@@ -2862,9 +2860,9 @@ impl Host {
             self.running = false;
             // Original result entry 4b1881 clears retained city sound handles
             // through 4af140 before winner/loser music starts.
-            let _ = crate::transport_audio::submit(
+            let _ = transport_requests::submit(
                 &self.transport_audio,
-                crate::transport_audio::Operation::Reset,
+                transport_requests::Operation::Reset,
             );
             let _ = gameplay_requests::enqueue(
                 &self.gameplay_sound,
