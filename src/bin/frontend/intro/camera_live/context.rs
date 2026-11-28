@@ -639,13 +639,33 @@ pub fn ui_cursor_pass(
                 .is_some()
         }))
     };
-    view.camera_ui.as_mut().unwrap().cursor.select(
+    let world_pass = requested == 0 && view.settings_menu.page.is_none();
+    // Original 4c2f80 runs at the tail of the world pick. UI occupancy (a
+    // pointer over a panel or an actionable control) leaves the pick empty
+    // and skips the pass, so a control's own cursor stands.
+    let hover = if world_pass && view.scene_pointer().is_some() {
+        view.hovered.map(super::cursor::WorldPick::from_hit)
+    } else {
+        None
+    };
+    let choosing_footprint = view.planning.as_ref().is_some_and(|form| form.step == 2);
+    let right_held = view.mouse_buttons[1];
+    let Some(state) = view.camera_ui.as_mut() else {
+        return Ok(());
+    };
+    state.cursor.select(
         CursorRequest {
             state: requested,
             priority: 1,
         },
         force_default,
-    )
+    )?;
+    if world_pass {
+        for request in super::cursor::pick_status_requests(right_held, hover, choosing_footprint) {
+            state.cursor.select(request, force_default)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

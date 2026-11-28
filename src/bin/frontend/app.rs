@@ -169,7 +169,7 @@ impl Assets {
 struct App {
     intro_loading: std::sync::mpsc::Receiver<Result<crate::intro::Assets, String>>,
     intro: Option<crate::intro::Intro>,
-    cursors: Option<[winit::window::CustomCursor; 4]>,
+    cursors: Option<[winit::window::CustomCursor; crate::cursor::COUNT]>,
     cursor_kind: Option<usize>,
     menu_onload: bool,
     modifiers: ModifiersState,

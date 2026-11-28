@@ -2014,13 +2014,28 @@ impl Intro {
                 return 3;
             }
             // Original mode12/13 use cursor2 for right-only and cursor3 for both buttons.
-            if view.strategic || !view.mouse_buttons[1] {
-                0
-            } else if view.mouse_buttons[0] {
-                2
-            } else {
-                1
+            if view.mouse_buttons[1] {
+                // The pick-status pass (4c2f80) does not run while right is held.
+                return if view.strategic {
+                    0
+                } else if view.mouse_buttons[0] {
+                    2
+                } else {
+                    1
+                };
             }
+            // Otherwise the pass shows what the cached world pick holds; a
+            // pointer over a panel leaves that pick empty.
+            let pick = view
+                .scene_pointer()
+                .and(view.hovered)
+                .map(camera_live::WorldPick::from_hit);
+            let choosing_footprint = view.planning.as_ref().is_some_and(|form| form.step == 2);
+            let paused = view
+                .live_status
+                .as_ref()
+                .is_some_and(|status| status.running && status.script_paused);
+            camera_live::pick_status_host_index(pick, choosing_footprint, paused)
         })
     }
     /// Submit or inspect a form on the thread that owns the retained Lua/world state.

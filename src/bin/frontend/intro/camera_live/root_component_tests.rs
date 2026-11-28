@@ -45,8 +45,8 @@ fn cursor_equal_priority_override_and_real_presentation_decay() {
         .unwrap();
     assert_eq!(cursor.host_index(), 0);
     assert!(
-        Cursor::new(7, 0).is_err(),
-        "additional images remain unsupported"
+        Cursor::new(8, 0).is_err(),
+        "states beyond the eight retained images remain unsupported"
     );
 }
 #[test]
