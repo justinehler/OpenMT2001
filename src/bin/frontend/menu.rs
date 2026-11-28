@@ -566,7 +566,8 @@ impl Menu {
         self.dirty = true;
         Ok(())
     }
-    ///49e630 returns the stopped graph to scenarios or the main menu.
+    ///49e630 returns the stopped graph to scenarios or the main menu; an
+    /// abandoned tutorial reopens the tutorial picker (4ba334).
     pub fn finish_result(&mut self, target: crate::live_host::ResultMenu) -> Result<(), String> {
         self.front_main.shown(false);
         self.skirmish.finish(None);
@@ -578,14 +579,19 @@ impl Menu {
         self.selected = None;
         self.pressed = false;
         self.pressed_origin = None;
-        if target == crate::live_host::ResultMenu::Scenarios {
+        use crate::live_host::ResultMenu;
+        if matches!(target, ResultMenu::Scenarios | ResultMenu::Tutorials) {
             let current = self.profile.store.current.ok_or("Result profile missing")?;
             let name = &self.profile.store.names[current];
             let path =
                 crate::campaign_store::profile_path(&self.assets.profile_root, name.as_bytes());
             let mut catalog = self.assets.catalog.clone();
             crate::campaign_store::load_progress(&mut catalog, &path)?;
-            self.single.open(false, name, catalog, path);
+            if target == ResultMenu::Tutorials {
+                self.single.open_tutorial(name, catalog, path);
+            } else {
+                self.single.open(false, name, catalog, path);
+            }
             self.single_mode = true;
         }
         self.dirty = true;
@@ -605,6 +611,10 @@ impl Menu {
     }
     pub fn prompt_assets(&self) -> &crate::prompt::Assets {
         &self.assets.portrait_prompts
+    }
+    /// prompt_panel.tm, the mesh of the shared portrait-free 88c0d4 owner.
+    pub fn frontend_prompt_assets(&self) -> &crate::prompt::Assets {
+        &self.assets.prompts
     }
     pub fn card_assets(&self) -> &crate::card_panel::Assets {
         &self.assets.cards

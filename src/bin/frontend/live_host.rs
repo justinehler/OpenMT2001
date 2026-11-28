@@ -273,9 +273,31 @@ pub enum ResultReview {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultMenu {
     Scenarios,
+    Tutorials,
     Main,
 }
 impl ResultMenu {
+    /// Screen after an abandoned city, 4ba313..4ba385 in finish_city_runtime
+    /// (4ba1d0) with completed=false. A nonzero session option word (0x8fca9c:
+    /// Skirmish 1, Custom 3) takes the main menu first. Otherwise a tutorial
+    /// opens the tutorial picker (0x88d384) and a campaign scenario the
+    /// scenario picker (0x885e7c). The Custom picker (0x886338, mode-0 Custom
+    /// only) and the network session list (0x86da48) have no counterpart yet
+    /// and keep the main menu.
+    fn after_abandonment(
+        level: &openmt2001::level_catalog::Level,
+        session_option_word: u32,
+    ) -> Self {
+        if session_option_word != 0 {
+            Self::Main
+        } else if level.tutorial() {
+            Self::Tutorials
+        } else if level.single_player() && level.bytes[2] == 0 {
+            Self::Scenarios
+        } else {
+            Self::Main
+        }
+    }
     fn for_level(level: &openmt2001::level_catalog::Level) -> Self {
         //49e722: the single-player flag without the sandbox flag.
         if level.single_player() && level.bytes[2] == 0 {
@@ -371,6 +393,8 @@ pub struct Host {
     result_request: Option<ResultRequest>,
     result_applied: bool,
     result_completed: bool,
+    /// Set by an Options Quit abandonment; replaces the completion route.
+    abandoned_menu: Option<ResultMenu>,
     outcome_callback_seen: bool,
     outcome_context: Option<u32>,
     result_context: Option<u32>,
@@ -601,6 +625,7 @@ impl Host {
             result_request: None,
             result_applied: false,
             result_completed: false,
+            abandoned_menu: None,
             outcome_callback_seen: false,
             outcome_context: None,
             result_context: None,
@@ -2829,6 +2854,7 @@ impl Host {
             return self.reply_options_quit(
                 &mut session.catalog,
                 session.campaign_profile.as_deref(),
+                session.session_option_word,
                 reply.button,
             );
         }
@@ -2930,6 +2956,7 @@ impl Host {
         &mut self,
         catalog: &mut openmt2001::level_catalog::Catalog,
         profile: Option<&std::path::Path>,
+        session_option_word: u32,
         button: u32,
     ) -> Result<(), String> {
         if button != 0 || self.result_completed {
@@ -2938,6 +2965,10 @@ impl Host {
         if self.options_resume.is_none() || !self.game_active {
             return Err("Abandonment requires the active city's Options menu".into());
         }
+        let level = catalog
+            .selected_level()
+            .ok_or("Abandonment has no selected level")?;
+        let menu = ResultMenu::after_abandonment(level, session_option_word);
         catalog.finish(false, 0)?;
         if let Some(path) = profile {
             openmt2001::campaign_store::save_progress(catalog, path)?;
@@ -2945,6 +2976,7 @@ impl Host {
         self.stats = None;
         self.result_request = None;
         self.result_completed = true;
+        self.abandoned_menu = Some(menu);
         self.game_active = false;
         self.running = false;
         Ok(())
@@ -2966,7 +2998,9 @@ impl Host {
     }
     fn result_review(&self, catalog: &openmt2001::level_catalog::Catalog) -> Option<ResultReview> {
         self.result_completed.then(|| {
-            if self.stats.is_some() {
+            if let Some(menu) = self.abandoned_menu {
+                ResultReview::Menu(menu)
+            } else if self.stats.is_some() {
                 ResultReview::Statistics
             } else {
                 ResultReview::Menu(ResultMenu::for_level(
@@ -3833,13 +3867,15 @@ mod tests {
     fn options_quit_menu_replies_preserve_pause_or_abandon_once() {
         use crate::{game_options, human_dialog};
         use openmt2001::level_catalog::{Catalog, Labels, Registration};
-        // Campaign, tutorial, custom and offline skirmish keep their ordinary
-        // end/return route; abandonment never increments attempts or unlocks.
-        for (id, target) in [
-            (200001, ResultMenu::Scenarios),
-            (100001, ResultMenu::Scenarios),
-            (900001, ResultMenu::Main),
-            (500001, ResultMenu::Main),
+        // Abandonment returns as 4ba313..4ba385 does: campaign to scenarios,
+        // tutorial to tutorials, Custom (option word 3), Skirmish (1) and
+        // other modes to the main menu. It never increments attempts or unlocks.
+        for (id, option_word, target) in [
+            (200001, 0, ResultMenu::Scenarios),
+            (200001, 1, ResultMenu::Main),
+            (100001, 0, ResultMenu::Tutorials),
+            (900001, 0, ResultMenu::Main),
+            (500001, 3, ResultMenu::Main),
         ] {
             for player_paused in [false, true] {
                 for button in [0, 1] {
@@ -3904,7 +3940,7 @@ mod tests {
                             button: button as u32,
                         }]
                     );
-                    host.reply_options_quit(&mut catalog, None, replies[0].button)
+                    host.reply_options_quit(&mut catalog, None, option_word, replies[0].button)
                         .unwrap();
                     menu.quit_prompt.finish_dismiss(vec![]);
                     assert!(menu.quit_prompt.request().is_none());
@@ -3932,8 +3968,13 @@ mod tests {
                             Some(ResultReview::Menu(target))
                         );
                         // A repeated callback cannot persist, award, or end again.
-                        host.reply_options_quit(&mut catalog, Some(std::path::Path::new("")), 0)
-                            .unwrap();
+                        host.reply_options_quit(
+                            &mut catalog,
+                            Some(std::path::Path::new("")),
+                            option_word,
+                            0,
+                        )
+                        .unwrap();
                         assert_eq!(catalog.levels, before_levels);
                         assert!(host.result_request.is_none());
                         host.set_running(true);
@@ -4662,6 +4703,10 @@ mod account_posting_tests;
 #[cfg(test)]
 #[path = "live_host/modal_tests.rs"]
 mod modal_tests;
+
+#[cfg(test)]
+#[path = "live_host/options_quit_tests.rs"]
+mod options_quit_tests;
 
 #[cfg(test)]
 #[path = "live_host/prompt_dismiss_tests.rs"]

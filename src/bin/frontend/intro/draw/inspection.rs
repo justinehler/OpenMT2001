@@ -940,8 +940,8 @@ impl Intro {
                         .unwrap_or([-1.; 2]),
                 );
                 let panel = menu
-                    .prompt_assets()
-                    .prepare(&self.renderer, &view.game_options.quit_prompt)?;
+                    .frontend_prompt_assets()
+                    .prepare_frontend_prompt(&self.renderer, &view.game_options.quit_prompt)?;
                 self.renderer
                     .draw_overlay(&self.color_view, &self.depth_view, &panel);
             }

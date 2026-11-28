@@ -351,7 +351,7 @@ impl Profile {
     pub(crate) fn generic_prompt(&self) -> Option<crate::human_dialog::Dialog> {
         use crate::human_dialog::{Argument, Dialog};
         let mut dialog = Dialog {
-            portrait: u32::MAX,
+            portrait: crate::human_dialog::NO_PORTRAIT,
             timeout: false,
             ..Default::default()
         };
