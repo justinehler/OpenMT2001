@@ -289,14 +289,14 @@ impl ResultMenu {
 pub enum CameraSupplierPolicy {
     CameraOnly,
     Graph {
-        upper: crate::navigator::upper::Producer,
+        upper: openmt2001::navigator_inputs::Producer,
     },
 }
 enum CameraSuppliers {
     CameraOnly,
     Graph {
-        tables: std::sync::Arc<crate::locator::strategic::Tables>,
-        upper: crate::navigator::upper::Producer,
+        tables: std::sync::Arc<openmt2001::strategic_inputs::Tables>,
+        upper: openmt2001::navigator_inputs::Producer,
     },
 }
 
@@ -703,7 +703,7 @@ impl Host {
         self.camera_suppliers = Some(match supplier_policy {
             CameraSupplierPolicy::CameraOnly => CameraSuppliers::CameraOnly,
             CameraSupplierPolicy::Graph { upper } => CameraSuppliers::Graph {
-                tables: std::sync::Arc::new(crate::locator::strategic::Tables::capture(image)?),
+                tables: std::sync::Arc::new(openmt2001::strategic_inputs::Tables::capture(image)?),
                 upper,
             },
         });
@@ -888,7 +888,7 @@ impl Host {
             CameraSuppliers::Graph { tables, upper } => {
                 if protected {
                     admission.strategic = Some(std::sync::Arc::new(
-                        crate::locator::strategic::Inputs::capture(session, tables.clone())?,
+                        openmt2001::strategic_inputs::Inputs::capture(session, tables.clone())?,
                     ));
                 }
                 admission.upper = Some(upper.capture(session)?);
