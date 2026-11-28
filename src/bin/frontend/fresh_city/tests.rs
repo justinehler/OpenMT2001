@@ -4966,7 +4966,7 @@ fn original_fresh_city_renders_live_records() {
             .unwrap();
             assert_eq!(financial.players.len(), expected_players);
             assert_eq!(financial.current, Some(0));
-            let comparison = crate::comparison::Data::verify_runtime(
+            let comparison = crate::comparison::verify_runtime(
                 &session.world,
                 &financial.records,
                 &image,

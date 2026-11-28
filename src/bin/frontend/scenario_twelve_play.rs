@@ -50,7 +50,7 @@ pub(super) fn export(session: &Session<'_>, image: &openmt2001::pe::PeImage<'_>,
     )
     .unwrap();
     let snapshot =
-        crate::comparison::Data::verify_runtime(&session.world, &financial.records, image, name, 0);
+        crate::comparison::verify_runtime(&session.world, &financial.records, image, name, 0);
     println!("{name} original metric snapshot{:?}", snapshot.rows);
 }
 
