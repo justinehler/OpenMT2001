@@ -140,7 +140,7 @@ mod tests {
     #[test]
     #[ignore = "requires the supplied original Tutorial 2 script"]
     fn original_tutorial_two_script_requests_match_policy() {
-        let path = openmt2001::fixtures::path("ORIGINAL_SCRIPTS").join("TUTORIAL2/hub.lua");
+        let path = crate::fixtures::path("ORIGINAL_SCRIPTS").join("TUTORIAL2/hub.lua");
         let script = std::fs::read_to_string(path).expect("supplied Tutorial 2 hub.lua");
         for call in [
             "Interface.PositionPrompt(0, 150)",
@@ -163,8 +163,8 @@ mod tests {
     #[test]
     #[ignore = "requires original v1.4 mc.exe"]
     fn original_native_picked_3d_callback_codes() {
-        let bytes = std::fs::read(openmt2001::fixtures::path("EXE")).unwrap();
-        let image = openmt2001::pe::PeImage::parse(&bytes).unwrap();
+        let bytes = std::fs::read(crate::fixtures::path("EXE")).unwrap();
+        let image = crate::pe::PeImage::parse(&bytes).unwrap();
         assert_eq!(image.at(0x54cd98, 9).unwrap(), b"Picked3D\0");
         let table = |address: u32, count: usize| {
             image

@@ -64,6 +64,7 @@ pub mod texture;
 pub mod timers;
 pub mod traffic;
 pub mod trees;
+pub mod tutorial_two_interaction;
 pub mod x87;
 
 pub mod ai_business;
@@ -158,6 +159,8 @@ pub mod level_startup;
 pub mod session;
 #[cfg(feature = "lua4")]
 pub mod session_save;
+#[cfg(feature = "lua4")]
+pub mod stats_panel;
 
 pub mod category_ownership;
 #[cfg(feature = "lua4")]

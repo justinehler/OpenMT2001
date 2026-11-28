@@ -30,7 +30,7 @@ pub struct Status {
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub chimney_smoke: openmt2001::chimney_smoke::Smoke,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
-    pub stats: Option<crate::stats_panel::Snapshot>,
+    pub stats: Option<openmt2001::stats_panel::Snapshot>,
     pub comparison: Option<crate::comparison::Snapshot>,
     pub chat: Option<openmt2001::network::chat::View>,
     pub market_share: Option<crate::market_share_panel::Snapshot>,
@@ -54,7 +54,7 @@ pub struct Status {
     /// Close operations, indexed between the requests in `prompts`.
     pub prompt_closes: Vec<usize>,
     pub tutorial_enabled_controls: Vec<u32>,
-    pub tutorial_interaction: crate::tutorial_two_interaction::State,
+    pub tutorial_interaction: openmt2001::tutorial_two_interaction::State,
     /// Ordered native Camera callbacks from the retained tutorial VM.
     pub tutorial_camera_events: Vec<TutorialCameraAction>,
     /// Effective native builder+788 gate; tutorial byte1 activates restriction,
@@ -347,7 +347,7 @@ pub struct Host {
     presentation_started: bool,
     /// Native8b22dc denotes an active session, independently of player pause.
     game_active: bool,
-    stats: Option<crate::stats_panel::State>,
+    stats: Option<openmt2001::stats_panel::State>,
     comparison: Option<crate::comparison::Runtime>,
     market_share: crate::market_share_panel::State,
     cash_arrow: openmt2001::cash_arrow::State,
@@ -376,7 +376,7 @@ pub struct Host {
     pending_prompt_closes: Vec<usize>,
     script_closes_seen: usize,
     tutorial_enabled_controls: std::collections::BTreeSet<u32>,
-    tutorial_interaction: crate::tutorial_two_interaction::State,
+    tutorial_interaction: openmt2001::tutorial_two_interaction::State,
     tutorial_camera_events: Vec<TutorialCameraAction>,
     tutorial_build_type: i32,
     tutorial_build_use: i32,
@@ -1326,7 +1326,7 @@ impl Host {
                 if self.stats.is_some() || self.result_completed {
                     return Ok(());
                 }
-                let state = crate::stats_panel::State::show(
+                let state = openmt2001::stats_panel::State::show(
                     session.world.objective.kind,
                     self.game_active,
                     session.roster.manager.players.len(),
@@ -1509,7 +1509,7 @@ impl Host {
         let stats = match self
             .stats
             .as_ref()
-            .map(|state| crate::stats_panel::Snapshot::from_session(session, state))
+            .map(|state| openmt2001::stats_panel::Snapshot::from_session(session, state))
             .transpose()
         {
             Ok(snapshot) => snapshot,
@@ -1685,7 +1685,10 @@ impl Host {
     /// 4c3929/4c3979 dispatch 0 for block selection, 4c3beb/4c3cf6 dispatch
     /// 1 for block entry, and 4c3958 dispatches 2 for building selection.
     /// The script owns dismissal and the following prompt.
-    fn tutorial_pick_callback(&self, pick: crate::tutorial_two_interaction::Pick) -> Option<i32> {
+    fn tutorial_pick_callback(
+        &self,
+        pick: openmt2001::tutorial_two_interaction::Pick,
+    ) -> Option<i32> {
         if self.tutorial_controls.picking_disabled {
             None
         } else {
@@ -1696,7 +1699,7 @@ impl Host {
         &mut self,
         session: &mut Session<'_>,
         assets: &CommandAssets<'_, '_>,
-        pick: crate::tutorial_two_interaction::Pick,
+        pick: openmt2001::tutorial_two_interaction::Pick,
     ) -> Result<bool, String> {
         if self.failure.is_some() || session.tutorial_state != 1 || !self.tutorial_started {
             return Ok(false);
@@ -3020,13 +3023,13 @@ impl Host {
             .result_presentation()
             .and_then(|result| result.end_requested);
         self.collect_script_prompts(session);
-        let stats = crate::stats_panel::State::show(
+        let stats = openmt2001::stats_panel::State::show(
             session.world.objective.kind,
             false,
             session.roster.manager.players.len(),
         )?;
         // Validate the retained graph before committing progression.
-        crate::stats_panel::Snapshot::from_session(session, &stats)?;
+        openmt2001::stats_panel::Snapshot::from_session(session, &stats)?;
         self.commit_result_review(
             &mut session.catalog,
             session.campaign_profile.as_deref(),
@@ -3041,7 +3044,7 @@ impl Host {
         &mut self,
         catalog: &mut openmt2001::level_catalog::Catalog,
         profile: Option<&std::path::Path>,
-        stats: crate::stats_panel::State,
+        stats: openmt2001::stats_panel::State,
         end_requested: Option<u32>,
     ) -> Result<openmt2001::outcome_notice::Sequence, String> {
         if self.failure.is_some() {
