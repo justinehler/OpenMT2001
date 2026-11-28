@@ -11,6 +11,9 @@ mod ai_resume_probe;
 pub mod cards;
 #[path = "custom_session.rs"]
 pub mod custom;
+#[cfg(test)]
+#[path = "fresh_city/objective_tests.rs"]
+mod objective_tests;
 #[cfg(all(test, feature = "capture"))]
 #[path = "outcome_capture.rs"]
 mod outcome_capture;
@@ -1466,8 +1469,17 @@ impl<'data> Session<'data> {
         )?;
         let creation = openmt2001::startup_rng::Snapshot::from_seed(policy.seed)
             .resident_creation(openmt2001::resident::AuxiliaryPool::for_residents());
-        let mut world =
-            level_startup::World::fresh(input.image, input.board, configuration, creation)?;
+        let objective = dispatch
+            .as_mut()
+            .map(|seed| std::mem::take(&mut seed.objective))
+            .unwrap_or_default();
+        let mut world = level_startup::World::fresh_with_objective(
+            input.image,
+            input.board,
+            configuration,
+            creation,
+            objective,
+        )?;
         world.city.building_parameters =
             openmt2001::building_parameters::BuildingKinds::from_parameters(
                 input.parameters,

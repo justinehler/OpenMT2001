@@ -111,14 +111,27 @@ impl std::ops::DerefMut for World {
     }
 }
 impl World {
-    /// Fresh city only, not same-process reload cleanup. The caller supplies
-    /// creation RNG/auxiliary state; no new seed or host handle is invented.
+    /// Fresh city for a clean process; same-process starts use fresh_with_objective.
+    /// The caller supplies creation RNG/auxiliary state; no new seed is invented.
     pub fn fresh(
         image: &crate::pe::PeImage<'_>,
         board: &crate::board::Board,
         configuration: crate::resident::Configuration,
         creation: crate::economy::ResidentCreationState,
     ) -> Result<Self, String> {
+        Self::fresh_with_objective(image, board, configuration, creation, Default::default())
+    }
+
+    /// The process-owned controller survives city replacement. Reset before
+    /// any new level scripts, retaining excess words and padding (0x489490).
+    pub fn fresh_with_objective(
+        image: &crate::pe::PeImage<'_>,
+        board: &crate::board::Board,
+        configuration: crate::resident::Configuration,
+        creation: crate::economy::ResidentCreationState,
+        mut objective: crate::scenario_objective::State,
+    ) -> Result<Self, String> {
+        objective.reset();
         let mut clock = crate::clock::Clock {
             calendar: [0; 5],
             timing: [0, 0, 0, 0, 0, 1],
@@ -155,7 +168,7 @@ impl World {
                 building_parameters: crate::building_parameters::BuildingKinds::from_image(image)?,
                 topology,
                 road_network,
-                objective: crate::scenario_objective::State::default(),
+                objective,
                 settings: crate::startup_settings::State::fresh(),
                 configuration,
                 welfare: crate::resident::Welfare {

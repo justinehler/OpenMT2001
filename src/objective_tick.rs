@@ -77,7 +77,7 @@ pub fn advance(
             if slot >= 6 {
                 return Err("objective callback expanded roster beyond6 slots".into());
             }
-            let mut value = if kind == 6 {
+            let value = if kind == 6 {
                 let bytes = manager.players[slot]
                     .bytes
                     .get(0x1b4..0x1b8)
@@ -94,11 +94,9 @@ pub fn advance(
                     controls,
                 )?
             };
-            let target = Sum::from_f32(state.target)?;
-            if value.compare(target) != std::cmp::Ordering::Less {
+            if let Some(excess) = threshold_excess(value, state.target) {
                 state.reached[slot] = 1;
-                value.add_f32(-state.target)?;
-                state.excess[slot] = value.ftol_low_word();
+                state.excess[slot] = excess;
                 matches += 1;
             }
             slot += 1;
@@ -166,6 +164,27 @@ pub fn advance(
         }
     }
     resolve(state, manager, controls, matches, callback)
+}
+
+/// FCOM must reject unordered targets without sending them through the finite
+/// arithmetic layer. Metrics remain extended precision for finite targets.
+fn threshold_excess(mut value: Sum, target: f32) -> Option<i32> {
+    if target.is_nan() || target == f32::INFINITY {
+        return None;
+    }
+    if target == f32::NEG_INFINITY {
+        // Every finite metric qualifies; finite - (-inf) is +inf. Native FTOL
+        // returns integer-indefinite i64, whose low word is zero (not saturation).
+        return Some(crate::economy::ftol_low_word(f64::INFINITY));
+    }
+    let target_value = Sum::from_f32(target).expect("finite objective target");
+    if value.compare(target_value) == std::cmp::Ordering::Less {
+        return None;
+    }
+    value
+        .add_f32(-target)
+        .expect("finite objective subtraction");
+    Some(value.ftol_low_word())
 }
 
 pub fn resolve(

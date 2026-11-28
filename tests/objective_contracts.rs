@@ -253,3 +253,110 @@ fn equal_dated_rank_retains_native_sentinel_and_does_not_eliminate() {
     assert_eq!(state.reached, [1, 1, 0, 0, 0, 0]);
     assert_eq!(state.excess, [0; 6]);
 }
+
+#[test]
+fn nonfinite_threshold_targets_preserve_native_comparison_and_ftol() {
+    for kind in [3, 5, 6] {
+        for target in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut manager = roster(&[true, false]);
+            for player in &mut manager.players {
+                player.bytes[0x1b4..0x1b8].copy_from_slice(&100i32.to_le_bytes());
+            }
+            let mut state = State {
+                kind,
+                target,
+                flag: 0,
+                reached: [2, 3, 4, 5, 6, 7],
+                excess: [20, 30, 40, 50, 60, 70],
+                ..State::default()
+            };
+            let mut metrics = vec![];
+            let mut events = vec![];
+            objective_tick::advance(
+                &mut state,
+                &mut manager,
+                &mut controls(1),
+                &mut |event, _, _, _| {
+                    if let Event::Metric { address, player } = event {
+                        assert_eq!(address, if kind == 3 { 0x47fca0 } else { 0x47fbb0 });
+                        metrics.push(player);
+                        Ok(Sum::from_i32(100))
+                    } else {
+                        events.push(event);
+                        Ok(Sum::from_i32(0))
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                metrics,
+                if kind == 6 { vec![] } else { vec![0, 1] },
+                "native threshold evaluation still visits inactive allocated rows"
+            );
+            if target == f32::NEG_INFINITY {
+                // Finite - (-inf) converts through native FTOL's i64 indefinite
+                // value. Its low word is zero, leaving these two rows tied.
+                assert_eq!(state.reached, [1, 1, 4, 5, 6, 7]);
+                assert_eq!(state.excess, [0, 0, 40, 50, 60, 70]);
+                assert_eq!(
+                    events,
+                    [Event::Outcome {
+                        winner: -1,
+                        reason: 2
+                    }]
+                );
+            } else {
+                assert_eq!(state.reached, [2, 3, 4, 5, 6, 7]);
+                assert_eq!(state.excess, [20, 30, 40, 50, 60, 70]);
+                assert!(
+                    events.is_empty(),
+                    "NaN and +inf never produce a new outcome"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn finite_thresholds_keep_excess_ranking_including_inactive_rows() {
+    for kind in [3, 5, 6] {
+        let mut manager = roster(&[true, false]);
+        for (slot, player) in manager.players.iter_mut().enumerate() {
+            player.bytes[0x1b4..0x1b8].copy_from_slice(&(100 + slot as i32).to_le_bytes());
+        }
+        let mut state = State {
+            kind,
+            target: 99.5,
+            flag: 0,
+            ..State::default()
+        };
+        let mut events = vec![];
+        objective_tick::advance(
+            &mut state,
+            &mut manager,
+            &mut controls(1),
+            &mut |event, _, _, _| {
+                if let Event::Metric { player, .. } = event {
+                    Ok(Sum::from_f32(100.25 + player as f32).unwrap())
+                } else {
+                    events.push(event);
+                    Ok(Sum::from_i32(0))
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(state.reached, [1, 1, 0, 0, 0, 0]);
+        assert_eq!(state.excess, [0, 1, 0, 0, 0, 0]);
+        assert_eq!(
+            events,
+            [
+                Event::Outcome {
+                    winner: 1,
+                    reason: 2
+                },
+                Event::RemovalCommand(0),
+                Event::RemovePlayer(0),
+            ]
+        );
+    }
+}
