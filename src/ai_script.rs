@@ -172,6 +172,19 @@ impl AiScript {
         )
     }
 
+    /// 4bbd20 passes false to 4d7a80 after resetting each loaded AI. Keep the
+    /// reset strategy deadline so its first controller pass can select a
+    /// strategy; fresh-game build-time randomization would delay that selection.
+    pub fn initialize_loaded<const N: usize>(
+        &mut self,
+        state: &mut Initialization<'_, N>,
+        default: &[u8],
+        scenario: Option<(&str, &[u8])>,
+    ) -> Result<(), String> {
+        state.count_tick = None;
+        self.initialize(state, default, scenario)
+    }
+
     /// Evaluate complete DEFAULT first, then the selected scenario's override.
     /// The host supplies buffers; this shared layer performs no filesystem I/O.
     pub fn load(
@@ -962,3 +975,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "ai_script_loaded_retail_test.rs"]
+mod loaded_retail_test;

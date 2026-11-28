@@ -1693,7 +1693,7 @@ impl<'data> Session<'data> {
                 &self.world.buildings,
                 0x591318,
             )?;
-            self.roster.scripts.initialize(
+            self.roster.scripts.initialize_loaded(
                 &mut openmt2001::ai_script::Initialization {
                     profiles: &mut self.roster.profiles,
                     manager: &mut self.roster.manager,
@@ -1703,7 +1703,7 @@ impl<'data> Session<'data> {
                     businesses: &self.world.ledgers.businesses,
                     difficulty: self.difficulty as i32,
                     current_hour: self.world.clock.hour() as i32,
-                    count_tick: Some(self.world.clock.timing[1]),
+                    count_tick: None,
                 },
                 &default_ai,
                 scenario_ai
