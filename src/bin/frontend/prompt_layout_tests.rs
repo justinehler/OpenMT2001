@@ -278,7 +278,7 @@ fn abandonment_prompt_and_unknown_portraits_draw_without_portrait() {
     assert_eq!(
         state.take_dialog_replies(),
         vec![crate::human_dialog::Reply {
-            callback: crate::game_options::QUIT_CALLBACK,
+            callback: openmt2001::human_dialog::quit::CITY_CALLBACK,
             context: 0,
             button: 1,
         }]

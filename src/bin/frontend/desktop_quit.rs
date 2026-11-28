@@ -1,26 +1,8 @@
 //! Original4958f4/495670 main-menu confirmation; ordinary single-modal owner.
 //! UI samples are supplied by App redraws, not OS keydown callbacks.
-use crate::human_dialog::Dialog;
 pub const OFFSET: [f32; 2] = [-40., 0.];
 pub const COLORS: [[u8; 3]; 2] = [[80, 148, 34], [175, 6, 6]];
-pub const CALLBACK: u32 = 0x495670;
-
-pub fn dialog() -> Dialog {
-    Dialog {
-        portrait: crate::human_dialog::NO_PORTRAIT,
-        title: 1765,
-        body: 1766,
-        buttons: [1636, 1637],
-        button_count: 2,
-        callback: CALLBACK,
-        context: 0,
-        timeout: false,
-        handler_written: true,
-        context_written: true,
-        timeout_written: true,
-        ..Dialog::default()
-    }
-}
+pub use openmt2001::human_dialog::quit::{DESKTOP_CALLBACK as CALLBACK, desktop as dialog};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sample {
