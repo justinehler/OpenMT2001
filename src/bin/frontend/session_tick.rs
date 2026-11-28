@@ -73,10 +73,12 @@ impl Session<'_> {
             &connection.worker,
             tick,
             &mut self.live_commands,
+            &mut self.world.city.categories,
             &mut self.world.city.pause,
             &mut self.hooks.timers,
         )?;
         policy.scheduler.network_enabled = true;
+        connection.commands.configure_hourly(&mut policy.hourly);
         policy.scheduler.deadline = connection.commands.deadline();
         Ok(())
     }
@@ -554,32 +556,30 @@ impl Session<'_> {
                                                 &self.roster.manager, city);
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x470b80)) => {
-                                            use openmt2001::{ai_hourly,event_cards};
+                                            use openmt2001::event_cards;
                                             let word=|b:&[u8],at:usize|u32::from_le_bytes(b[at..at+4].try_into().unwrap());
-                                            self.roster.publish_accounts(city)?;
                                             let players:Vec<_>=self.roster.manager.players.iter().map(|p|p.reference).collect();
+                                            let admitted=word(&self.roster.manager.bytes,12)!=0;
                                             // Pointer-free handles for the original category scene nodes.
                                             // The board owns category identity; handles persist across hours.
                                             let nodes:Vec<_>=board.blocks.iter().map(|b|event_cards::lifecycle::Node {
                                                 reference:0xe0000000+b.id as u32*284,kind:4,category:b.id as u32,
                                             }).collect();
-                                            let binding=event_cards::ai::Bindings {
-                                                world:event_cards::selection::World {
-                                                    buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
-                                                    catalog:&city.catalog.info,products:&city.catalog.products,commodities:&city.commodities.rows,
-                                                    utilities:context.utilities.enabled.map(u8::from),hour:clock.hour() as i32,tick:clock.timing[1],
-                                                    // Fresh-process BSS word7a3f90, outside the business pool.
-                                                    unselected_building:0,
-                                                },
-                                                targets:event_cards::lifecycle::Targets {
-                                                    buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
-                                                    players:&players,nodes:&nodes,
-                                                },
-                                                period:clock.calendar[2],image,
-                                            };
-                                            let admitted=word(&self.roster.manager.bytes,12)!=0;
-                                            let result=ai_hourly::advance(&mut self.roster.manager.players,clock.hour(),&mut ai_hourly::Callbacks {
-                                                update:&mut |_,player|ai_hourly::update(player,&city.objective.cash_statuses,image,|update,player| {
+                                            self.roster.advance_hourly_ai(city,image,clock.hour(),|_,update,player,city| {
+                                                let binding=event_cards::ai::Bindings {
+                                                    world:event_cards::selection::World {
+                                                        buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
+                                                        catalog:&city.catalog.info,products:&city.catalog.products,commodities:&city.commodities.rows,
+                                                        utilities:context.utilities.enabled.map(u8::from),hour:clock.hour() as i32,tick:clock.timing[1],
+                                                        // Fresh-process BSS word7a3f90, outside the business pool.
+                                                        unselected_building:0,
+                                                    },
+                                                    targets:event_cards::lifecycle::Targets {
+                                                        buildings:&city.buildings,businesses:&city.ledgers.businesses,categories:&city.categories,
+                                                        players:&players,nodes:&nodes,
+                                                    },
+                                                    period:clock.calendar[2],image,
+                                                };
                                                     event_cards::ai::run_update(player,update,&binding,|call,player| {
                                                         match call {
                                                             event_cards::ai::RuntimeCall::Submit(command)=>{
@@ -601,11 +601,7 @@ impl Session<'_> {
                                                             event_cards::ai::RuntimeCall::Diagnostic{kind,used}=>boundary(Event::Command(live_commands::Event::EventCardDiagnostic{kind,used}),clock).map(|_|()),
                                                         }
                                                     })
-                                                }),
-                                                delay:&mut |_|Ok(u32::from(ai_hourly::delay_signal(city.objective.kind as u32))),
-                                            });
-                                            self.roster.collect_accounts(city)?;
-                                            result?;
+                                            })?;
                                         }
                                         CalendarEvent::Hourly(hourly::Event::Helper(0x4bb500)) => {
                                             let accounts = self.roster.account_prefixes(city)?;
@@ -767,7 +763,7 @@ impl Session<'_> {
                                 message_context: &mut messages.borrow_mut(),
                             };
                             self.live_commands.drain_scheduling(&mut clocks, |command,enqueue| {
-                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}) {
+                                if self.connected.is_some() && !matches!(command,live_commands::Command::PropertyTransfer {..}|live_commands::Command::Build(_)) {
                                     return Err(openmt2001::network::Error::Unsupported.to_string());
                                 }
                                 if let live_commands::Command::Auction{descriptor}=command
@@ -878,6 +874,7 @@ impl Session<'_> {
                                 network_override:scheduler.network_override,
                                 current_player:self.roster.status.current_player,
                             };
+                            if let Some(connection) = &self.connected { connection.commands.configure_players(&mut controls); }
                             let result=openmt2001::player_tick::advance(
                                 &mut self.roster.manager,&mut controls,image,
                                 |event,manager,controls|match event {
@@ -954,8 +951,13 @@ impl Session<'_> {
                                             &mut self.roster.scripts,image,&mut world,|call,player,profiles,world|{
                                                 if let openmt2001::ai_runtime::Call::ConstructionCommand{descriptor}=call {
                                                     let command=openmt2001::construction::Command::from_packet(&descriptor)?;
-                                                    self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
-                                                        |_|Err("AI construction delay wrapped into immediate execution".into()))?;
+                                                    if let Some(connection) = &mut self.connected {
+                                                        connection.commands.submit(&connection.worker,live_commands::Command::Build(command),
+                                                            &mut self.live_commands,world.categories,clock.timing[0])?;
+                                                    } else {
+                                                        self.live_commands.submit_with_delay(live_commands::Command::Build(command),clock.timing[0],descriptor[16]!=0,0,
+                                                            |_|Err("AI construction delay wrapped into immediate execution".into()))?;
+                                                    }
                                                     return Ok(openmt2001::ai_messages::Reply::default());
                                                 }
                                                 if let openmt2001::ai_runtime::Call::OfferExecution(openmt2001::ai_messages::offers::execution::Call::Producer{address:0x48ae60,arguments,count:1})=call {

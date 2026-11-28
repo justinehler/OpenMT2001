@@ -35,9 +35,15 @@ fn mixed_case_load_rows_target_the_displayed_file_after_refresh() {
     bounds[8] = [20., 40., 300., 327.];
     let mut load = Load {
         base: Vec::new(),
+        info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+            .unwrap(),
         bounds,
         fonts: Vec::new(),
         tab: Vec::new(),
+        list_fonts: Vec::new(),
+        list_tab: Vec::new(),
+        list_layout: openmt2001::frontend_list::Layout::new([20., 40., 284., 302.], 11., 3.)
+            .unwrap(),
         description_fonts: Vec::new(),
         description_tab: Vec::new(),
         slider_textures: Vec::new(),
@@ -86,7 +92,9 @@ fn mixed_case_load_rows_target_the_displayed_file_after_refresh() {
                 load.entries[row].name,
                 ascii(path.file_stem().unwrap().to_str().unwrap())
             );
-            let index = load.hit([30., 45. + row as f32 * 14.]).unwrap();
+            let index = load
+                .hit([30., 45. + row as f32 * load.list_layout.pitch])
+                .unwrap();
             load.activate(index);
             assert_eq!(load.chosen, Some(row));
             load.activate(0);

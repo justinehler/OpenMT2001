@@ -492,7 +492,7 @@ impl Intro {
         if let Some(view) = &mut self.inspection
             && view.save_visible()
         {
-            view.save_dialog.scroll(delta);
+            view.save_dialog.scroll(&self.assets.save_dialog, delta);
             return;
         }
         if self.inspection.as_ref().is_some_and(|view| {

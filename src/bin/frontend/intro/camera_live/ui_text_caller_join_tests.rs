@@ -27,7 +27,7 @@ fn assets() -> Assets {
         scene: path("OPENMT2001_SCENE"),
         executable: path("OPENMT2001_EXE"),
         map: path("OPENMT2001_INTRO_MAP"),
-        quality: "low".into(),
+        quality: Some("low".into()),
         language: path("OPENMT2001_LANGUAGE"),
         profile_root: openmt2001::fixtures::scratch("TEXT_PROFILE"),
         save_root: openmt2001::fixtures::scratch("TEXT_SAVES"),

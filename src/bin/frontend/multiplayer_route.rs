@@ -576,6 +576,7 @@ impl Route {
         renderer: &Renderer,
         p: Option<[f32; 2]>,
         pressed: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         if self.page == Page::Setup {
             return self.setup_panel.draw(
@@ -587,6 +588,7 @@ impl Route {
                     Some(Target::Setup(a)) => Some(a),
                     _ => None,
                 },
+                panel_alpha,
             );
         }
         if let Some(view) = self.view.as_ref().filter(|_| self.page == Page::Lobby) {
@@ -648,6 +650,7 @@ impl Route {
                     }),
                     details: &details,
                 },
+                panel_alpha,
             );
         }
         let controls = if self.page == Page::Waiting {

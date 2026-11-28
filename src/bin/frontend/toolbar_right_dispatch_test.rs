@@ -183,7 +183,7 @@ fn prompt_swallowed_right_edges_block_whitelisted_collapsed_info_dispatch() {
                 scene: directory.parent().unwrap().to_path_buf(),
                 executable: exe.clone(),
                 map: openmt2001::fixtures::path("MAP"),
-                quality: "low".into(),
+                quality: Some("low".into()),
                 language: exe
                     .parent()
                     .unwrap()
@@ -354,7 +354,7 @@ fn modal_arrow_releases_retire_held_state_and_preserve_admitted_taps() {
                 scene: directory.parent().unwrap().to_path_buf(),
                 executable: exe.clone(),
                 map: openmt2001::fixtures::path("MAP"),
-                quality: "low".into(),
+                quality: Some("low".into()),
                 language: exe
                     .parent()
                     .unwrap()

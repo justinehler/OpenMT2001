@@ -76,6 +76,9 @@ loading those saves in the original executable is not established.
 
 Install FFmpeg on PATH, or specify --ffmpeg /path/to/ffmpeg, for original
 movie and compressed audio decoding. --menu skips the opening presentation.
+The intro backdrop follows the original script and live process performance by
+default. `--intro-quality low|medium|high` optionally caps that performance at
+0, 1 or 2; the script still chooses the hour and camera track.
 Run the game with --help for the complete argument list.
 Restart the game after connecting or configuring an audio output if it started
 without sound. Settings are available from the main menu and in-game Options,

@@ -49,6 +49,10 @@ pub struct Load {
     bounds: Vec<[f32; 4]>,
     fonts: Vec<Surface>,
     tab: Vec<u8>,
+    list_fonts: Vec<Surface>,
+    list_layout: openmt2001::frontend_list::Layout,
+    info_layout: openmt2001::frontend_list::Layout,
+    list_tab: Vec<u8>,
     description_fonts: Vec<Surface>,
     description_tab: Vec<u8>,
     slider_textures: Vec<Surface>,
@@ -114,15 +118,31 @@ impl Load {
                 );
             }
         }
+        // 493f90 selects font3 with a two-unit gap and three-unit inset.
+        let list_tab = fs::read(installer.join("Standard/fonts/tahoma10bldnoantip.tab"))
+            .map_err(|e| e.to_string())?;
+        let mut list_bounds = bounds[8];
+        list_bounds[3] -= 25.;
+        list_bounds[2] -= 16.;
+        let list_layout = openmt2001::frontend_list::Layout::from_font(list_bounds, &list_tab)?;
+        let description_tab = fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
+            .map_err(|e| e.to_string())?;
+        let mut info_bounds = bounds[21];
+        info_bounds[2] -= 16.;
+        let info_layout =
+            openmt2001::frontend_list::Layout::from_font(info_bounds, &description_tab)?;
         Ok(Self {
             base,
             bounds,
+            list_fonts: textures.textures[6..8].iter().map(Surface::new).collect(),
+            list_layout,
+            info_layout,
+            list_tab,
             fonts: textures.textures[2..4].iter().map(Surface::new).collect(),
             tab: fs::read(installer.join("Standard/fonts/tahoma12bldnoantip.tab"))
                 .map_err(|e| e.to_string())?,
             description_fonts: textures.textures[4..6].iter().map(Surface::new).collect(),
-            description_tab: fs::read(installer.join("Standard/fonts/tahoma11noantip.tab"))
-                .map_err(|e| e.to_string())?,
+            description_tab,
             slider_textures,
             title_fonts: textures.textures[8..10].iter().map(Surface::new).collect(),
             title_tab: fs::read(installer.join("Standard/fonts/coppgoth23p.tab"))
@@ -337,8 +357,8 @@ impl Load {
             let row = i - 3;
             if row < self.first {
                 self.first = row;
-            } else if row >= self.first + 20 {
-                self.first = row - 19;
+            } else if row >= self.first + self.list_layout.visible_rows() {
+                self.first = row + 1 - self.list_layout.visible_rows();
             }
         }
     }
@@ -363,13 +383,19 @@ impl Load {
             return;
         }
         if self.over_description {
-            self.description_first = (self.description_first as i32 + delta)
-                .clamp(0, self.info_rows().saturating_sub(9) as i32)
-                as usize;
+            self.description_first = (self.description_first as i32 + delta).clamp(
+                0,
+                self.info_rows()
+                    .saturating_sub(self.info_layout.visible_rows()) as i32,
+            ) as usize;
             return;
         }
-        self.first = (self.first as i32 + delta)
-            .clamp(0, self.entries.len().saturating_sub(20) as i32) as usize;
+        self.first = (self.first as i32 + delta).clamp(
+            0,
+            self.entries
+                .len()
+                .saturating_sub(self.list_layout.visible_rows()) as i32,
+        ) as usize;
     }
     pub fn pointer(&mut self, p: [f32; 2]) {
         self.pointer_position = Some(p);
@@ -406,16 +432,8 @@ impl Load {
                 return Some(3 + self.entries.len() + index * 3 + part);
             }
         }
-        let b = self.bounds[8];
-        if inside(b) {
-            let visible = ((p[1] - b[1]) / 14.) as usize;
-            let row = self.first + visible;
-            // Native 42f91d tests the visible-list bound (+0x284) before
-            // resolving the backing row. The body mesh has a lower strip
-            // beyond the twentieth painted row.
-            if visible < 20 && row < self.entries.len() {
-                return Some(3 + row);
-            }
+        if let Some(row) = self.list_layout.hit(p, self.first, self.entries.len()) {
+            return Some(3 + row);
         }
         None
     }
@@ -449,9 +467,12 @@ impl Load {
                 let (index, part) = (control / 3, control % 3);
                 let bounds = [LIST_SCROLL, INFO_SCROLL][index];
                 let maximum = if index == 0 {
-                    self.entries.len().saturating_sub(20)
+                    self.entries
+                        .len()
+                        .saturating_sub(self.list_layout.visible_rows())
                 } else {
-                    self.info_rows().saturating_sub(9)
+                    self.info_rows()
+                        .saturating_sub(self.info_layout.visible_rows())
                 };
                 let current = if index == 0 {
                     self.first
@@ -521,12 +542,14 @@ impl Load {
         renderer: &Renderer,
         selected: Option<usize>,
         pressed: bool,
+        panel_alpha: u8,
     ) -> Result<PreparedScene, String> {
         let mut shapes = Surface::solid();
         let mut slider_shapes = Surface::solid();
         let mut headings = Surface::solid();
         let mut controls = Vec::new();
         let mut fonts = self.fonts.clone();
+        let mut list_fonts = self.list_fonts.clone();
         let mut description_fonts = self.description_fonts.clone();
         let mut title_fonts = self.title_fonts.clone();
         shapes.rect(
@@ -562,19 +585,30 @@ impl Load {
             true,
             0xffffffff,
         )?;
-        let list = self.bounds[8];
-        for (i, e) in self.entries.iter().enumerate().skip(self.first).take(20) {
-            let y = list[1] + (i - self.first) as f32 * 14.;
-            let row = [list[0], y, list[2], y + 14.];
+        for (i, e) in self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(self.first)
+            .take(self.list_layout.visible_rows())
+        {
+            let row = self.list_layout.text_bounds(i - self.first);
             if self.chosen == Some(i) {
-                shapes.rect(row, [0xff008ed0; 4]);
+                shapes.rect(self.list_layout.highlight(i - self.first), [0xff008ed0; 4]);
             }
             let (name, timestamp) = row_columns(row);
-            ui::text_fit(&mut fonts, &self.tab, &e.name, name, false, 0xffffffff)?;
+            ui::text_fit(
+                &mut list_fonts,
+                &self.list_tab,
+                &e.name,
+                name,
+                false,
+                0xffffffff,
+            )?;
             if let Some(modified) = crate::save_menu::format_modified_local(e.modified) {
                 ui::text_fit(
-                    &mut fonts,
-                    &self.tab,
+                    &mut list_fonts,
+                    &self.list_tab,
                     &ascii(&modified),
                     timestamp,
                     false,
@@ -646,17 +680,16 @@ impl Load {
                     for (line, range) in offsets
                         .windows(2)
                         .skip(self.description_first)
-                        .take(9)
+                        .take(self.info_layout.visible_rows())
                         .enumerate()
                     {
                         let end = range[1].saturating_sub(1).min(wrapped.len());
                         let row = &wrapped[range[0].min(end)..end];
-                        let top = info[1] + 2. + line as f32 * 10.;
                         ui::text_widget_style0(
                             &mut description_fonts,
                             &self.description_tab,
                             row,
-                            [info[0], top, info[2] - 18., top + 10.],
+                            self.info_layout.text_bounds(line),
                             0xffffffff,
                         )?;
                     }
@@ -668,13 +701,16 @@ impl Load {
                 0,
                 LIST_SCROLL,
                 self.first,
-                self.entries.len().saturating_sub(20),
+                self.entries
+                    .len()
+                    .saturating_sub(self.list_layout.visible_rows()),
             ),
             (
                 1,
                 INFO_SCROLL,
                 self.description_first,
-                self.info_rows().saturating_sub(9),
+                self.info_rows()
+                    .saturating_sub(self.info_layout.visible_rows()),
             ),
         ] {
             let slider = ui::Slider {
@@ -697,7 +733,11 @@ impl Load {
                 // Native 432a80 then gives the short list a half-track blue
                 // handle. The actual scroll limit remains `maximum` above.
                 let rows = self.info_rows();
-                let extent = if rows > 0 { rows.max(9) - 9 + 1 } else { 0 };
+                let extent = if rows > 0 {
+                    rows.max(self.info_layout.visible_rows()) - self.info_layout.visible_rows() + 1
+                } else {
+                    0
+                };
                 slider.paint_with_extent(
                     &mut slider_shapes,
                     &mut controls,
@@ -740,6 +780,7 @@ impl Load {
             )?;
         }
         let mut surfaces = self.base.clone();
+        crate::menu::modal_frame::set_alpha(&mut surfaces, panel_alpha);
         surfaces.push(shapes);
         surfaces.push(slider_shapes);
         surfaces.extend(controls);
@@ -747,6 +788,7 @@ impl Load {
         // parent headings; the y70 list arrow sits under the y71..94 title.
         surfaces.push(headings);
         surfaces.extend(fonts);
+        surfaces.extend(list_fonts);
         surfaces.extend(title_fonts);
         surfaces.extend(description_fonts);
         renderer.prepare(
@@ -791,7 +833,7 @@ pub(crate) fn ascii(s: &str) -> Vec<u8> {
 fn row_columns([left, top, right, bottom]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
     (
         [left + 3., top, left + 151., bottom],
-        [left + 155., top, right - 16., bottom],
+        [left + 155., top, right, bottom],
     )
 }
 /// Owned glyph text only: no script runtime, filesystem, or borrowed catalog.
@@ -1114,9 +1156,15 @@ mod tests {
         .unwrap();
         let mut load = Load {
             base: Vec::new(),
+            info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+                .unwrap(),
             bounds: vec![[0.; 4]; 25],
             fonts: Vec::new(),
             tab: Vec::new(),
+            list_fonts: Vec::new(),
+            list_tab: Vec::new(),
+            list_layout: openmt2001::frontend_list::Layout::new([20., 40., 284., 302.], 11., 3.)
+                .unwrap(),
             description_fonts: Vec::new(),
             description_tab: Vec::new(),
             slider_textures: Vec::new(),
@@ -1200,12 +1248,12 @@ mod tests {
         }
         let (name, time) = row_columns([20., 40., 300., 54.]);
         assert_eq!(name, [23., 40., 171., 54.]);
-        assert_eq!(time, [175., 40., 284., 54.]);
-        assert!(name[2] < time[0] && time[2] < 300.);
+        assert_eq!(time, [175., 40., 300., 54.]);
+        assert!(name[2] < time[0] && time[2] == 300.);
         let (next_name, next_time) = row_columns([20., 54., 300., 68.]);
         assert_eq!(next_name, [23., 54., 171., 68.]);
-        assert_eq!(next_time, [175., 54., 284., 68.]);
-        for i in 0..21 {
+        assert_eq!(next_time, [175., 54., 300., 68.]);
+        for i in 0..30 {
             load.entries.push(Entry {
                 path: root.join(format!("synthetic{i}.sav")),
                 name: ascii(&format!("synthetic{i}")),
@@ -1216,12 +1264,16 @@ mod tests {
         }
         load.bounds[8] = bounds[8];
         let list = bounds[8];
-        let unpainted_strip = [(list[0] + list[2]) * 0.5, list[1] + 20. * 14. + 1.];
+        let mut viewport = list;
+        viewport[3] -= 25.;
+        viewport[2] -= 16.;
+        load.list_layout = openmt2001::frontend_list::Layout::new(viewport, 11., 3.).unwrap();
+        let unpainted_strip = [(list[0] + list[2]) * 0.5, viewport[3] + 1.];
         assert!(unpainted_strip[1] < list[3]);
         assert_eq!(
             load.hit(unpainted_strip),
             None,
-            "native 42f91d rejects row20 below the twenty painted rows"
+            "native list viewport rejects the lower strip"
         );
         load.pointer(unpainted_strip);
         if let Some(index) = load.hit(unpainted_strip) {
@@ -1384,7 +1436,7 @@ mod tests {
             animated: true,
         })
         .unwrap();
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
@@ -1392,7 +1444,7 @@ mod tests {
             "work/frontend/load-open-unselected-city.png",
         );
         load.chosen = load.entries.iter().position(|entry| entry.path == original);
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 255).unwrap();
         crate::capture_test::capture_scene_overlays(
             &renderer,
             &scene,
@@ -1413,7 +1465,7 @@ mod tests {
         assert!(load.chosen.is_some());
         load.activate(2);
         assert!(load.delete_confirmation.is_some());
-        let panel = load.draw(&renderer, None, false).unwrap();
+        let panel = load.draw(&renderer, None, false, 125).unwrap();
         let prompt = prompt_assets
             .prepare_dialog(&renderer, load.generic_prompt().unwrap(), [-1.; 2], None)
             .unwrap();

@@ -1611,6 +1611,12 @@ impl SinglePlayer {
             }
         }
     }
+    fn scenario_list_layout(&self) -> Result<openmt2001::frontend_list::Layout, String> {
+        openmt2001::frontend_list::Layout::from_font(
+            self.scenario.bounds[8],
+            &self.scenario_list_tab,
+        )
+    }
     pub fn hit(&self, p: [f32; 2]) -> Option<usize> {
         if self.custom.is_some() && !self.character_screen {
             return self.custom_hit(p);
@@ -1646,9 +1652,12 @@ impl SinglePlayer {
                     return Some(i);
                 }
             }
-            if inside(self.scenario.bounds[8]) {
-                let row = ((p[1] - self.scenario.bounds[8][1]) / SCENARIO_ROW_HEIGHT) as usize;
-                return (row < self.scenario_rows.len()).then_some(5 + row);
+            if let Some(row) = self
+                .scenario_list_layout()
+                .ok()?
+                .hit(p, 0, self.scenario_rows.len())
+            {
+                return Some(5 + row);
             }
         }
         None
@@ -2029,21 +2038,23 @@ impl SinglePlayer {
                 r[1] += 4.;
                 ui::text(&mut fonts, &self.tab, label, r, true, 0xffffffff)?;
             }
-            let [l, t, r, _] = b[8];
             if self.custom.is_some() {
                 self.custom_list_draw(&mut shapes, &mut scenario_list_fonts)?;
                 self.custom_cups_draw(&mut completion_cups)?;
             }
+            let list_layout = self.scenario_list_layout()?;
             for (row, &id) in self
                 .scenario_rows
                 .iter()
                 .enumerate()
+                .take(list_layout.visible_rows())
                 .filter(|_| self.custom.is_none())
             {
-                let top = t + row as f32 * SCENARIO_ROW_HEIGHT;
+                let mut text_bounds = list_layout.text_bounds(row);
+                text_bounds[0] += 3.;
                 if self.scenario_id == Some(id) || selected == Some(5 + row) {
                     shapes.rect(
-                        [l, top, r, top + SCENARIO_ROW_HEIGHT],
+                        list_layout.highlight(row),
                         [if self.scenario_id == Some(id) {
                             0xff008ed0
                         } else {
@@ -2055,7 +2066,7 @@ impl SinglePlayer {
                     &mut scenario_list_fonts,
                     &self.scenario_list_tab,
                     &self.scenario_record_text_at(id, true),
-                    [l + 3., top, r, top + SCENARIO_ROW_HEIGHT],
+                    text_bounds,
                     false,
                     0xffffffff,
                 )?;

@@ -1,6 +1,7 @@
 //! Connected construction pins the command adapter to the admitted roster and
-//! actual world. Short property transfers/deadlines are qualified; auction
-//! barriers, chat, other command families and peer-loss handling remain follow-ons.
+//! actual world. Construction, short property transfers and deadlines are
+//! qualified; auction barriers, chat, other command families and peer-loss
+//! handling remain follow-ons.
 use super::*;
 use openmt2001::network::{
     self, Content, RowKind,
@@ -237,7 +238,7 @@ impl SceneInputs {
         hash_part(
             &mut hash,
             "startup-version",
-            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-2").as_bytes(),
+            concat!(env!("CARGO_PKG_VERSION"), "/connected-city-3").as_bytes(),
         );
         for (name, bytes) in [
             ("original-executable", self.executable.as_slice()),
@@ -325,7 +326,7 @@ impl SceneInputs {
         });
         let loaded = self.inspect_fresh(&mut session, camera, cache)?;
         eprintln!(
-            "Connected city initialized: level {}, local compact slot {}, players {}, seed {}, initial deadline 25. Property-transfer commands qualified; other command families remain unsupported.",
+            "Connected city initialized: level {}, local compact slot {}, players {}, seed {}, initial deadline 25. Construction/property-transfer commands qualified; other command families remain unsupported.",
             stage.launch.level_id,
             stage.local_slot,
             session.roster.manager.players.len(),

@@ -1,13 +1,13 @@
 //! Bounded remote command qualification (0x450490 -> 0x451720 -> 0x450a30).
 //!
 //! Native payload schemas below exclude the common 20-byte header (kind at +4,
-//! size +8, Total due +12, delayed byte +16). Only the short command16 transfer
-//! is qualified here. In particular the 52-byte command16 auction descriptor is
+//! size +8, Total due +12, delayed byte +16). Construction and the short
+//! command16 transfer are qualified. The 52-byte command16 auction descriptor is
 //! a DIFFERENT schema, not an alternative way to submit a property transfer.
 //!
 //! | Family | Native payload | Remote support |
 //! |---|---|---|
-//! | 0f construction | category i8, rectangle i8[4], height i8, variation/business/kind u32, quality/owner i8, components f32[4] (construction::Command::packet) | unsupported |
+//! | 0f construction | category i8, rectangle i8[4], height i8, variation/business/kind u32, quality/owner i8, components f32[4] (construction::Command::packet) | supported; quote components retained |
 //! | 10 demolition | category i8, building u16, amount f32 | unsupported |
 //! | 11 business open | kind u32, building u32, owner u32, stock_argument u8 | unsupported |
 //! | 12 conversion | kind u32, building u32, owner u32 | unsupported |
@@ -36,6 +36,43 @@ pub struct Request {
     pub payload: Vec<u8>,
 }
 impl Request {
+    pub fn construction(serial: u64, command: &crate::construction::Command) -> Self {
+        Self {
+            serial,
+            owner: command.owner as u8,
+            kind: 0x0f,
+            payload: command.packet()[20..].to_vec(),
+        }
+    }
+    pub fn construction_payload(&self) -> Result<crate::construction::Command> {
+        if self.kind != 0x0f || self.payload.len() != 40 {
+            return Err(Error::Unsupported);
+        }
+        let mut packet = [0; 60];
+        packet[4..8].copy_from_slice(&0x0fu32.to_le_bytes());
+        packet[20..].copy_from_slice(&self.payload);
+        let command = crate::construction::Command::from_packet(&packet).map_err(|_| Error::Row)?;
+        if !(0..52).contains(&command.category)
+            || !(1..=6).contains(&self.owner)
+            || command.owner as u8 != self.owner
+            || !crate::building_pool::can_place(&[0; 49], command.rectangle.map(i32::from))
+            || command.height < 0
+            || command.kind >= 3
+            || command.business >= 45
+            || !(0..3).contains(&command.quality)
+            || command.components.iter().any(|value| !value.is_finite())
+        {
+            return Err(Error::Row);
+        }
+        Ok(command)
+    }
+    pub(super) fn validate(&self) -> Result<()> {
+        match self.kind {
+            0x0f => self.construction_payload().map(|_| ()),
+            0x16 => self.transfer_payload().map(|_| ()),
+            _ => Err(Error::Unsupported),
+        }
+    }
     pub fn transfer(serial: u64, transfer: Transfer) -> Self {
         let mut payload = transfer.amount.to_le_bytes().to_vec();
         payload.extend_from_slice(&i16::from(transfer.category).to_le_bytes());
@@ -72,10 +109,11 @@ impl Request {
         })
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Commit {
     pub order: u64,
-    pub transfer: Transfer,
+    pub due: u32,
+    pub request: Request,
 }
 /// Minted by the worker after Owner::receive admits the ordered frame. It can
 /// only be consumed against the same completed world and adopted connection.
@@ -147,17 +185,34 @@ impl Adapter {
     pub fn is_host(&self) -> bool {
         self.host
     }
+    /// Original periodic dispatch skips kind1 AI when networked. Only the
+    /// authority runs those controllers; outgoing commands still use the real
+    /// network routing flags, independently of this controller-only gate.
+    pub fn configure_players(&self, controls: &mut crate::player_tick::Controls) {
+        controls.network_enabled = true;
+        controls.network_override = self.host;
+    }
+    /// 47f5cf..47f616 gates only the AI event-receiver ticks on authority.
+    /// The subsequent 470b80 bookkeeping/evaluation pass runs on every peer.
+    pub fn configure_hourly(&self, controls: &mut crate::hourly::Controls) {
+        controls.network_enabled = true;
+        controls.network_override = self.host;
+    }
     fn authorize(&self, peer: u8, request: &Request) -> Result<()> {
         let player = usize::from(request.owner)
             .checked_sub(1)
             .ok_or(Error::Row)?;
-        if self.owners.get(player) != Some(&Some(peer)) {
+        // AI rows have no connection. Only the authority may act for them;
+        // remote peers can act only for their admitted compact human row.
+        if !matches!(self.owners.get(player), Some(Some(p)) if *p == peer)
+            && !(peer == 0 && self.owners.get(player) == Some(&None))
+        {
             return Err(Error::Peer);
         }
         if self.requests[peer as usize].is_some_and(|last| request.serial <= last) {
             return Err(Error::Sequence);
         }
-        request.transfer_payload()?;
+        request.validate()?;
         Ok(())
     }
     /// Client only sends a request. Authority assigns Total+25 exactly once,
@@ -179,19 +234,27 @@ impl Adapter {
         self.next_request = serial.checked_add(1).ok_or(Error::Exhausted)?;
         Ok(Request::transfer(serial, transfer))
     }
+    pub fn next_construction(&mut self, command: &crate::construction::Command) -> Result<Request> {
+        let serial = self.next_request;
+        self.next_request = serial.checked_add(1).ok_or(Error::Exhausted)?;
+        Ok(Request::construction(serial, command))
+    }
     fn commit(&mut self, peer: u8, request: Request, tick: u32) -> Result<Message> {
         self.authorize(peer, &request)?;
-        let mut transfer = request.transfer_payload()?;
         // 451720 adds authority Total+25; clients never call that producer.
         // Reject the unresolved native -1/wrapped deadline instead of applying early.
-        transfer.due = tick
+        let due = tick
             .checked_add(25)
             .filter(|due| *due != u32::MAX)
             .ok_or(Error::Exhausted)?;
         let order = self.next_commit;
         self.next_commit = order.checked_add(1).ok_or(Error::Exhausted)?;
         self.requests[peer as usize] = Some(request.serial);
-        Ok(Message::CommandCommit(Commit { order, transfer }))
+        Ok(Message::CommandCommit(Commit {
+            order,
+            due,
+            request,
+        }))
     }
     pub fn rejection(&self, ingress: &Ingress) -> Option<(Connection, u64)> {
         match &ingress.message {
@@ -261,24 +324,28 @@ impl Adapter {
         worker: &super::lobby::worker::Handle,
         command: crate::live_commands::Command,
         queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
         tick: u32,
     ) -> std::result::Result<(), String> {
-        let crate::live_commands::Command::PropertyTransfer {
-            category,
-            owner,
-            amount,
-        } = command
-        else {
-            return Err(crate::network::Error::Unsupported.to_string());
+        let request = match command {
+            crate::live_commands::Command::Build(command) => self.next_construction(&command),
+            crate::live_commands::Command::PropertyTransfer {
+                category,
+                owner,
+                amount,
+            } => {
+                let category =
+                    u8::try_from(category).map_err(|_| "Remote category outside byte range")?;
+                self.next_transfer(Transfer {
+                    category,
+                    owner,
+                    amount,
+                    due: 0,
+                })
+            }
+            _ => return Err(Error::Unsupported.to_string()),
         };
-        let category = u8::try_from(category).map_err(|_| "Remote category outside byte range")?;
-        let transfer = crate::network::Transfer {
-            category,
-            owner,
-            amount,
-            due: 0,
-        };
-        let request = self.next_transfer(transfer).map_err(|e| e.to_string())?;
+        let request = request.map_err(|e| e.to_string())?;
         if self.host && self.closed_tick == Some(tick) {
             worker.validate_binding(self.binding)?;
             self.authorize(self.local_peer, &request)
@@ -289,11 +356,14 @@ impl Adapter {
             self.pending_local.push_back(request);
             return Ok(());
         }
+        self.authorize(self.local_peer, &request)
+            .map_err(|e| e.to_string())?;
+        check_placement(&request, categories).map_err(|e| e.to_string())?;
         let message = self
             .request(worker.gameplay_owner(), request, tick)
             .map_err(|e| e.to_string())?;
         if let crate::network::Message::CommandCommit(commit) = &message {
-            self.enqueue(*commit, queue, tick)
+            self.enqueue(commit, queue, categories, tick)
                 .map_err(|e| e.to_string())?;
         }
         worker.send_gameplay(self.binding, None, message)
@@ -306,6 +376,7 @@ impl Adapter {
         worker: &super::lobby::worker::Handle,
         tick: u32,
         queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
         pause: &mut crate::pause::State,
         tasks: &mut [[u8; 20]],
     ) -> std::result::Result<(), String> {
@@ -322,18 +393,27 @@ impl Adapter {
             return Ok(());
         }
         while let Some(request) = self.pending_local.pop_front() {
+            check_placement(&request, categories).map_err(|e| e.to_string())?;
             let message = self
                 .request(worker.gameplay_owner(), request, tick)
                 .map_err(|e| e.to_string())?;
             if let Message::CommandCommit(commit) = message {
-                self.enqueue(commit, queue, tick)
+                self.enqueue(&commit, queue, categories, tick)
                     .map_err(|e| e.to_string())?;
                 worker.send_gameplay(self.binding, None, Message::CommandCommit(commit))?;
             }
         }
         while let Some(ingress) = worker.poll_gameplay() {
             let rejection = self.rejection(&ingress);
-            let message = match self.receive(worker.gameplay_owner(), ingress, tick) {
+            let placement = match &ingress.message {
+                Message::CommandRequest(request) if self.host => {
+                    check_placement(request, categories)
+                }
+                _ => Ok(()),
+            };
+            let message = match placement
+                .and_then(|()| self.receive(worker.gameplay_owner(), ingress, tick))
+            {
                 Ok(message) => message,
                 Err(error) if self.is_host() => {
                     if let Some((target, serial)) = rejection {
@@ -352,7 +432,7 @@ impl Adapter {
             };
             match message {
                 Message::CommandCommit(commit) => {
-                    self.enqueue(commit, queue, tick)
+                    self.enqueue(&commit, queue, categories, tick)
                         .map_err(|e| e.to_string())?;
                     if self.is_host() {
                         worker.send_gameplay(self.binding, None, Message::CommandCommit(commit))?;
@@ -412,38 +492,60 @@ impl Adapter {
     #[cfg(feature = "lua4")]
     pub fn enqueue(
         &mut self,
-        commit: Commit,
+        commit: &Commit,
         queue: &mut crate::live_commands::Queue,
+        categories: &mut [[u8; 0x17c]; 52],
         tick: u32,
     ) -> Result<()> {
         // Authority incremented its order when minting this commit. Clients
         // advance only after admitting it into the actual live queue.
         let expected = self.next_enqueued;
-        if commit.order != expected
-            || commit.transfer.due <= tick
-            || commit.transfer.due == u32::MAX
-        {
+        if commit.order != expected || commit.due <= tick || commit.due == u32::MAX {
             return Err(Error::Sequence);
         }
-        let t = commit.transfer;
-        if t.category >= 52
-            || self
-                .owners
-                .get(usize::from(t.owner).wrapping_sub(1))
-                .is_none()
+        let request = &commit.request;
+        request.validate()?;
+        if self
+            .owners
+            .get(usize::from(request.owner).wrapping_sub(1))
+            .is_none()
         {
             return Err(Error::Row);
         }
         let next = self.next_enqueued.checked_add(1).ok_or(Error::Exhausted)?;
+        let command = match request.kind {
+            0x0f => {
+                check_placement(request, categories)?;
+                let command = request.construction_payload()?;
+                // Original Build0f reserves occupancy before the delayed consumer.
+                // Reserve on every peer only after authority admission, never on
+                // a speculative client request. The quote is never recomputed.
+                let occupancy = (&mut categories[command.category as usize][0x9c..0xcd])
+                    .try_into()
+                    .map_err(|_| Error::Row)?;
+                crate::building_pool::fill_occupancy(
+                    occupancy,
+                    command.rectangle.map(i32::from),
+                    command.height as u8,
+                )
+                .map_err(|_| Error::Row)?;
+                crate::live_commands::Command::Build(command)
+            }
+            0x16 => {
+                let t = request.transfer_payload()?;
+                crate::live_commands::Command::PropertyTransfer {
+                    category: i16::from(t.category),
+                    owner: t.owner,
+                    amount: t.amount,
+                }
+            }
+            _ => return Err(Error::Unsupported),
+        };
         queue.restore_queued(
-            crate::live_commands::Command::PropertyTransfer {
-                category: i16::from(t.category),
-                owner: t.owner,
-                amount: t.amount,
-            },
+            command,
             crate::scheduler::ClockDomain::Total,
-            t.due,
-            t.due,
+            commit.due,
+            commit.due,
             false,
         );
         self.next_enqueued = next;
@@ -452,6 +554,20 @@ impl Adapter {
         }
         Ok(())
     }
+}
+
+#[cfg(feature = "lua4")]
+fn check_placement(request: &Request, categories: &[[u8; 0x17c]; 52]) -> Result<()> {
+    if request.kind == 0x0f {
+        let command = request.construction_payload()?;
+        let occupancy = categories[command.category as usize][0x9c..0xcd]
+            .try_into()
+            .map_err(|_| Error::Row)?;
+        if !crate::building_pool::can_place(occupancy, command.rectangle.map(i32::from)) {
+            return Err(Error::Row);
+        }
+    }
+    Ok(())
 }
 
 /// Original 4bac90 reason1, idempotent at a network limit. The retained group2

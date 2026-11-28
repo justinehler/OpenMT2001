@@ -27,8 +27,6 @@ const VIEW: [f32; 16] = [
     0.,
     1.,
 ];
-const ROW_HEIGHT: f32 = 14.;
-const VISIBLE_ROWS: usize = 20;
 // Original 496c70 -> 43f510, with 43f510's sixteen-pixel arrow children.
 const LIST_SCROLL: [f32; 4] = [305., 70., 321., 383.];
 const INFO_SCROLL: [f32; 4] = [588., 287., 604., 378.];
@@ -70,6 +68,8 @@ enum CueTarget {
 pub struct Assets {
     base: Vec<Surface>,
     bounds: Vec<[f32; 4]>,
+    list_layout: openmt2001::frontend_list::Layout,
+    info_layout: openmt2001::frontend_list::Layout,
     font1: Vec<Surface>,
     font2: Vec<Surface>,
     font4: Vec<Surface>,
@@ -150,9 +150,19 @@ impl Assets {
                 .get(id)
                 .ok_or("Save Game localized caption missing")?;
         }
+        // 496c70 selects font2, gap2, inset3, and shortens the list by25.
+        let mut list_bounds = bounds[8];
+        list_bounds[3] -= 25.;
+        list_bounds[2] -= 16.;
+        let list_layout = openmt2001::frontend_list::Layout::from_font(list_bounds, &tab2)?;
+        let mut info_bounds = bounds[21];
+        info_bounds[2] -= 16.;
+        let info_layout = openmt2001::frontend_list::Layout::from_font(info_bounds, &tab2)?;
         Ok(Self {
             base,
             bounds,
+            list_layout,
+            info_layout,
             font1: atlas.textures[2..4].iter().map(Surface::new).collect(),
             font2: atlas.textures[4..6].iter().map(Surface::new).collect(),
             font4: atlas.textures[8..10].iter().map(Surface::new).collect(),
@@ -182,14 +192,7 @@ impl Assets {
             .find(|&button| inside(self.bounds(button), p))
     }
     fn list_hit(&self, p: [f32; 2], first: usize, len: usize) -> Option<usize> {
-        let b = self.bounds[8];
-        if inside(b, p) {
-            let visible = ((p[1] - b[1]) / ROW_HEIGHT) as usize;
-            let i = first + visible;
-            (visible < VISIBLE_ROWS && i < len).then_some(i)
-        } else {
-            None
-        }
+        self.list_layout.hit(p, first, len)
     }
     fn info_rows(&self, view: &View) -> usize {
         let Some(slot) = view.selected.and_then(|i| view.slots.get(i)) else {
@@ -262,22 +265,20 @@ impl Assets {
                 0xffffffff,
             )?;
         }
-        let list = b[8];
         for (i, slot) in view
             .slots
             .iter()
             .enumerate()
             .skip(view.first)
-            .take(VISIBLE_ROWS)
+            .take(self.list_layout.visible_rows())
         {
-            let top = list[1] + (i - view.first) as f32 * ROW_HEIGHT;
-            let row = [list[0], top, list[2], top + ROW_HEIGHT];
+            let row = self.list_layout.text_bounds(i - view.first);
             if view.selected == Some(i) {
-                shapes.rect(row, [0xff0037a6; 4]);
+                shapes.rect(self.list_layout.highlight(i - view.first), [0xff0037a6; 4]);
             }
             ui::text_fit(
-                &mut font1,
-                &self.tab1,
+                &mut font2,
+                &self.tab2,
                 &crate::load::ascii(&slot.name),
                 [row[0] + 3., row[1], row[0] + 151., row[3]],
                 false,
@@ -285,10 +286,10 @@ impl Assets {
             )?;
             if let Some(modified) = crate::save_menu::format_modified_local(slot.modified) {
                 ui::text_fit(
-                    &mut font1,
-                    &self.tab1,
+                    &mut font2,
+                    &self.tab2,
                     &crate::load::ascii(&modified),
-                    [row[0] + 155., row[1], row[2] - 16., row[3]],
+                    [row[0] + 155., row[1], row[2], row[3]],
                     false,
                     0xff6ed1e1,
                 )?;
@@ -334,17 +335,19 @@ impl Assets {
                         -1,
                     )?;
                     info_rows = offsets.len().saturating_sub(1);
-                    for (line, range) in
-                        offsets.windows(2).skip(view.info_first).take(9).enumerate()
+                    for (line, range) in offsets
+                        .windows(2)
+                        .skip(view.info_first)
+                        .take(self.info_layout.visible_rows())
+                        .enumerate()
                     {
                         let end = range[1].saturating_sub(1).min(wrapped.len());
                         let row = &wrapped[range[0].min(end)..end];
-                        let top = info[1] + 2. + line as f32 * 10.;
                         ui::text_widget_style0(
                             &mut font2,
                             &self.tab2,
                             row,
-                            [info[0], top, info[2] - 18., top + 10.],
+                            self.info_layout.text_bounds(line),
                             0xffffffff,
                         )?;
                     }
@@ -360,22 +363,27 @@ impl Assets {
                 0,
                 LIST_SCROLL,
                 view.first,
-                view.slots.len().saturating_sub(VISIBLE_ROWS),
+                view.slots
+                    .len()
+                    .saturating_sub(self.list_layout.visible_rows()),
                 if view.slots.is_empty() {
                     0
                 } else {
-                    view.slots.len().max(VISIBLE_ROWS) - VISIBLE_ROWS + 1
+                    view.slots.len().max(self.list_layout.visible_rows())
+                        - self.list_layout.visible_rows()
+                        + 1
                 },
             ),
             (
                 1,
                 INFO_SCROLL,
                 view.info_first,
-                info_rows.saturating_sub(9),
+                info_rows.saturating_sub(self.info_layout.visible_rows()),
                 if info_rows == 0 {
                     0
                 } else {
-                    info_rows.max(9) - 9 + 1
+                    info_rows.max(self.info_layout.visible_rows()) - self.info_layout.visible_rows()
+                        + 1
                 },
             ),
         ] {
@@ -683,10 +691,13 @@ impl View {
             .and_then(|i| self.slots.get(i))
             .map(|s| s.name.as_str())
     }
-    pub fn scroll(&mut self, delta: i32) {
-        self.first = (self.first as i32 + delta)
-            .clamp(0, self.slots.len().saturating_sub(VISIBLE_ROWS) as i32)
-            as usize;
+    pub fn scroll(&mut self, assets: &Assets, delta: i32) {
+        self.first = (self.first as i32 + delta).clamp(
+            0,
+            self.slots
+                .len()
+                .saturating_sub(assets.list_layout.visible_rows()) as i32,
+        ) as usize;
     }
     pub fn input(&mut self, text: &str) {
         if self.modal != Some(Modal::Name) {
@@ -796,9 +807,13 @@ impl View {
             let bounds = [LIST_SCROLL, INFO_SCROLL][index];
             if let Some(point) = pointer.filter(|&point| inside(bounds, point)) {
                 let maximum = if index == 0 {
-                    self.slots.len().saturating_sub(VISIBLE_ROWS)
+                    self.slots
+                        .len()
+                        .saturating_sub(assets.list_layout.visible_rows())
                 } else {
-                    assets.info_rows(self).saturating_sub(9)
+                    assets
+                        .info_rows(self)
+                        .saturating_sub(assets.info_layout.visible_rows())
                 };
                 let current = if index == 0 {
                     self.first
@@ -877,8 +892,18 @@ impl View {
                 return Some(CueTarget::Button(button));
             }
             for (index, (bounds, maximum)) in [
-                (LIST_SCROLL, self.slots.len().saturating_sub(VISIBLE_ROWS)),
-                (INFO_SCROLL, assets.info_rows(self).saturating_sub(9)),
+                (
+                    LIST_SCROLL,
+                    self.slots
+                        .len()
+                        .saturating_sub(assets.list_layout.visible_rows()),
+                ),
+                (
+                    INFO_SCROLL,
+                    assets
+                        .info_rows(self)
+                        .saturating_sub(assets.info_layout.visible_rows()),
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -948,7 +973,11 @@ mod tests {
         bounds[22] = [310., 360., 400., 390.];
         let assets = Assets {
             base: Vec::new(),
+            info_layout: openmt2001::frontend_list::Layout::new([338., 287., 588., 379.], 12., 3.)
+                .unwrap(),
             bounds,
+            list_layout: openmt2001::frontend_list::Layout::new([20., 40., 104., 302.], 12., 3.)
+                .unwrap(),
             font1: Vec::new(),
             font2: Vec::new(),
             font4: Vec::new(),
@@ -962,7 +991,7 @@ mod tests {
         assert_eq!(
             assets.list_hit([30., 326.], 0, 21),
             None,
-            "bottom seven pixels are outside the twenty painted rows"
+            "lower strip is outside the painted viewport"
         );
         let mut view = View {
             visible: true,
@@ -974,7 +1003,7 @@ mod tests {
             modified: None,
             metadata: Err("fixture".into()),
         });
-        for i in 1..21 {
+        for i in 1..25 {
             view.slots.push(crate::save_menu::Slot {
                 id: format!("slot{i}.sav"),
                 name: format!("slot{i}"),
@@ -992,7 +1021,10 @@ mod tests {
         view.mouse(&assets, Some([30., 326.]), true);
         assert!(!view.pointer_click_cue(&assets, Some([30., 326.])));
         view.mouse(&assets, Some([30., 326.]), false);
-        assert_eq!(view.selected, None, "unpainted 21st row is not selectable");
+        assert_eq!(
+            view.selected, None,
+            "unpainted lower strip is not selectable"
+        );
         view.mouse(&assets, Some([310., 375.]), true);
         assert!(view.pointer_click_cue(&assets, Some([310., 375.])));
         assert!(!view.pointer_click_cue(&assets, Some([310., 375.])));

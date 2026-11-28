@@ -87,7 +87,7 @@ fn validate(message: &Message) -> Result<()> {
             }
         }
         Message::CommandRejected { .. } | Message::CommandDeadline { .. } => {}
-        Message::CommandCommit(commit) => validate(&Message::Transfer(commit.transfer))?,
+        Message::CommandCommit(commit) => commit.request.validate()?,
         Message::Transfer(transfer) => {
             if transfer.category >= 52 || !(1..=6).contains(&transfer.owner) {
                 return Err(Error::Row);
@@ -197,9 +197,11 @@ pub fn encode(frame: &Frame) -> Result<Vec<u8>> {
         }
         Message::CommandCommit(commit) => {
             payload.extend_from_slice(&commit.order.to_le_bytes());
-            payload.extend_from_slice(&[commit.transfer.category, commit.transfer.owner]);
-            payload.extend_from_slice(&commit.transfer.amount.to_le_bytes());
-            payload.extend_from_slice(&commit.transfer.due.to_le_bytes());
+            payload.extend_from_slice(&commit.due.to_le_bytes());
+            payload.extend_from_slice(&commit.request.serial.to_le_bytes());
+            payload.push(commit.request.owner);
+            payload.extend_from_slice(&commit.request.kind.to_le_bytes());
+            blob(&mut payload, &commit.request.payload);
             14
         }
         Message::CommandDeadline { after, tick } => {
@@ -353,11 +355,12 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
         }),
         14 => Message::CommandCommit(super::commands::Commit {
             order: u64::from_le_bytes(reader.take()?),
-            transfer: Transfer {
-                category: reader.byte()?,
+            due: reader.word()?,
+            request: super::commands::Request {
+                serial: u64::from_le_bytes(reader.take()?),
                 owner: reader.byte()?,
-                amount: reader.word()? as i32,
-                due: reader.word()?,
+                kind: reader.word()?,
+                payload: reader.blob()?,
             },
         }),
         15 => Message::CommandDeadline {

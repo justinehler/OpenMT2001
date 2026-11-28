@@ -1507,9 +1507,6 @@ pub fn advance(
                                 |call,_|callback(Call::AuctionAction(call),player,profiles,world).map(|_|()))?;0
                         },
                         execution::Call::Producer{address:0x48ac20,arguments,count:11}=>{
-                            if world.message_routing.is_some_and(|r|r.network[0] && !r.network[1]) {
-                                return Err("AI construction requires unresolved network command transport".into());
-                            }
                             let references:Vec<_>=before.iter().map(|p|p.reference).chain(std::iter::once(player.reference)).chain(after.iter().map(|p|p.reference)).collect();
                             let mut context=crate::ai_actions::retained::World{building_parameters:world.building_parameters,
                                 categories:world.categories,buildings:world.buildings,catalog:world.catalog,
@@ -1525,6 +1522,12 @@ pub fn advance(
                             let descriptor=crate::ai_actions::construction::produce(player,arguments,[0;60],&mut context,image)?;
                             let command=crate::construction::Command::from_packet(&descriptor)?;
                             let routing=world.message_routing.ok_or("AI construction message routing unresolved")?;
+                            if routing.network[0] && !routing.network[1] {
+                                // The connected authority adapter performs admission and
+                                // reserves occupancy on every peer before delayed apply.
+                                callback(Call::ConstructionCommand{descriptor},player,profiles,world)?;
+                                return Ok(execution::Reply{value:0,..Default::default()});
+                            }
                             let mut arena=crate::player_messages::Arena{next:*world.allocation_next};
                             let mut external=None;
                             let admitted=crate::construction::admit(&command,world.categories,

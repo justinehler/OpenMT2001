@@ -19,15 +19,16 @@ pub fn performance_cap(quality: &str) -> Result<i32, String> {
 
 /// The map has already been assembled by the frontend. Only EVENT_Level runs
 /// here: EVENTINITIALISE_Level would load that map again and enable logos.
-/// The CLI quality caps the live process performance without overwriting it.
+/// With no CLI quality the live process performance is read unchanged. An
+/// explicit quality caps it without overwriting the process value.
 /// `random_state` is the caller-owned 93aee8 stream, seeded through startup_rng.
 pub fn select(
     source: &[u8],
-    quality: &str,
+    quality: Option<&str>,
     random_state: &mut u32,
     mut performance: impl FnMut() -> Result<i32, String>,
 ) -> Result<Selection, String> {
-    let cap = performance_cap(quality)?;
+    let cap = quality.map(performance_cap).transpose()?;
     let mut vm = Runtime::new()?;
     vm.register_number_properties("Game", 1)?;
     vm.register_number_properties("Calendar", 3)?;
@@ -45,7 +46,8 @@ pub fn select(
     let mut track = None;
     let mut handler = |id, args: &[Value]| match (id, args) {
         (1, [Value::Bytes(key)]) if key == b"performance" => {
-            Ok(Some(f64::from(performance()?.min(cap))))
+            let value = performance()?;
+            Ok(Some(f64::from(cap.map_or(value, |cap| value.min(cap)))))
         }
         (4, [Value::Bytes(key), Value::Number(value)]) if key == b"hour" => {
             let value = crate::economy::ftol_low_word(*value) as u32;
@@ -95,48 +97,71 @@ mod tests {
     "#;
 
     fn check_selections(source: &[u8]) {
-        for (quality, cap) in [("low", 0), ("medium", 1), ("high", 2)] {
-            let mut seen = [false; 3];
-            // Fixed startup seeds cover every allowed draw, using the same
-            // static-node initialization and RNG as the frontend and results.
-            for seed in 0..64 {
-                let mut state = crate::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
-                let mut expected_state = state;
-                let draw = crate::level_script::random::zero_to(
-                    &mut expected_state,
-                    &[Value::Number(f64::from(cap))],
-                )
-                .unwrap() as usize;
-                let selected = select(source, quality, &mut state, || Ok(2)).unwrap();
-                assert_eq!(selected.hour, [12, 20, 8][draw]);
-                assert_eq!(
-                    selected.track,
-                    ["intro_low.tm", "intro_medium.tm", "intro_high.tm"][draw]
-                );
-                assert_eq!(state, expected_state, "exactly one RNG draw");
-                seen[draw] = true;
-            }
-            for (draw, seen) in seen.into_iter().enumerate() {
-                assert_eq!(seen, draw <= cap as usize, "{quality}, draw {draw}");
+        for performance in 0..=2 {
+            for (quality, cap) in [
+                (None, performance),
+                (Some("low"), 0),
+                (Some("medium"), performance.min(1)),
+                (Some("high"), performance),
+            ] {
+                let mut seen = [false; 3];
+                // Fixed startup seeds cover every allowed draw, using the same
+                // static-node initialization and RNG as the frontend and results.
+                for seed in 0..64 {
+                    let mut state = crate::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
+                    let mut expected_state = state;
+                    let draw = crate::level_script::random::zero_to(
+                        &mut expected_state,
+                        &[Value::Number(f64::from(cap))],
+                    )
+                    .unwrap() as usize;
+                    let selected = select(source, quality, &mut state, || Ok(performance)).unwrap();
+                    assert_eq!(selected.hour, [12, 20, 8][draw]);
+                    assert_eq!(
+                        selected.track,
+                        ["intro_low.tm", "intro_medium.tm", "intro_high.tm"][draw]
+                    );
+                    assert_eq!(state, expected_state, "exactly one RNG draw");
+                    seen[draw] = true;
+                }
+                for (draw, seen) in seen.into_iter().enumerate() {
+                    assert_eq!(
+                        seen,
+                        draw <= cap as usize,
+                        "performance {performance}, {quality:?}, draw {draw}"
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn lua_event_selects_each_hour_and_track_within_quality_cap() {
+    fn default_follows_process_performance_and_explicit_quality_caps_it() {
         check_selections(HUB);
         assert!(performance_cap("ultra").is_err());
     }
 
     #[test]
-    fn live_performance_can_lower_the_cli_cap() {
-        for seed in 0..16 {
-            let mut state = crate::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
-            let selected = select(HUB, "high", &mut state, || Ok(0)).unwrap();
-            assert_eq!(selected.hour, 12);
-            assert_eq!(selected.track, "intro_low.tm");
-        }
-        assert!(select(HUB, "high", &mut 0, || Err("owner absent".into())).is_err());
+    fn uncapped_performance_is_read_live_without_an_implicit_high_cap() {
+        let source = br#"function EVENT_Level()
+            Calendar.hour=Game.performance
+            Camera.SetFlybyMode("gamedata/cut_scenes/custom.tm")
+        end"#;
+        let mut performance = 3;
+        let mut read = || {
+            performance += 1;
+            Ok(performance)
+        };
+        let mut state = 123;
+        assert_eq!(select(source, None, &mut state, &mut read).unwrap().hour, 4);
+        assert_eq!(select(source, None, &mut state, &mut read).unwrap().hour, 5);
+        assert_eq!(
+            select(source, Some("high"), &mut state, read).unwrap().hour,
+            2
+        );
+        assert_eq!(state, 123);
+        assert!(select(HUB, None, &mut 0, || Err("owner absent".into())).is_err());
+        assert!(select(HUB, Some("high"), &mut 0, || Err("owner absent".into())).is_err());
     }
 
     #[test]
@@ -146,7 +171,7 @@ mod tests {
             Camera.SetFlybyMode("gamedata\\cut_scenes\\custom.tm")
         end"#;
         let mut state = 123;
-        let selected = select(source, "low", &mut state, || Ok(2)).unwrap();
+        let selected = select(source, Some("low"), &mut state, || Ok(2)).unwrap();
         assert_eq!(selected.hour, 3);
         assert_eq!(selected.track, "custom.tm");
         assert_eq!(state, 123);
@@ -154,7 +179,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires supplied original FLYBY1 hub script"]
-    fn original_level_event_selects_each_hour_and_track_within_quality_cap() {
+    fn original_level_event_follows_process_performance_and_explicit_caps() {
         let source =
             std::fs::read(crate::fixtures::path("SCRIPTS").join("FLYBY1/hub.lua")).unwrap();
         check_selections(&source);
