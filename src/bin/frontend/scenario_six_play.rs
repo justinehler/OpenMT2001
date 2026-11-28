@@ -95,7 +95,7 @@ fn build_supported_apartment(
 }
 
 /// Observe the exact imminent canonical publication without touching the game.
-pub(crate) fn observe_before(
+fn observe_before(
     manager: &openmt2001::player_manager::Manager,
     city: &openmt2001::level_startup::City,
     current: u32,
@@ -137,7 +137,7 @@ pub(crate) fn observe_before(
     SHARE.with(|p| assert!(p.replace(Some(Capture { day, bytes })).is_none()));
 }
 
-pub(crate) fn observe_after(
+fn observe_after(
     manager: &openmt2001::player_manager::Manager,
     city: &openmt2001::level_startup::City,
 ) {
@@ -176,6 +176,10 @@ pub(crate) fn observe_after(
 fn legal_scenario_six_mayor_win_and_profile_reload() {
     assert!(std::env::var_os("OPENMT2001_SCENARIO6_SHARE_ORACLE").is_some());
     std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
+        openmt2001::player_share::observer::set(Some(openmt2001::player_share::observer::Hooks {
+            before: observe_before,
+            after: observe_after,
+        }));
         let read = |key| fs::read(openmt2001::fixtures::path(key)).unwrap();
         let executable = read("OPENMT2001_EXE");
         let archive = read("OPENMT2001_ARCHIVE_BIN");
