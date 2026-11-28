@@ -5,7 +5,6 @@
 use crate::ui::Surface;
 use openmt2001::{
     archive::ArchiveIndex,
-    font::{Font, Layout},
     mesh::CachedMesh,
     render::{PreparedScene, Renderer},
     texture::TextureSet,
@@ -537,47 +536,6 @@ impl Assets {
     pub fn label_for_test(&self, id: usize) -> &[u8] {
         self.label(id)
     }
-    fn text(
-        &self,
-        fonts: &mut [Surface],
-        text: &[u8],
-        bounds: [f32; 4],
-        scale: f32,
-    ) -> Result<(), String> {
-        self.text_colored(fonts, text, bounds, scale, 0xffffffff)
-    }
-    fn text_colored(
-        &self,
-        fonts: &mut [Surface],
-        text: &[u8],
-        bounds: [f32; 4],
-        scale: f32,
-        color: u32,
-    ) -> Result<(), String> {
-        let font = Font::parse(&self.tab)?;
-        let [l, t, r, b] = bounds;
-        let layout = |origin| {
-            font.layout(
-                text,
-                Layout {
-                    origin,
-                    depth: 0.5,
-                    scale,
-                    gap: 0,
-                    baseline: 0,
-                },
-            )
-        };
-        let measure = layout([0., 0.])?;
-        let width = measure
-            .iter()
-            .flat_map(|q| q.positions.iter().map(|p| p[0] + 0.5))
-            .fold(0f32, f32::max);
-        for q in layout([(l + r - width) / 2., t + (b - t - 25. * scale) / 2.])? {
-            fonts[q.page].quad(q.positions.map(|p| [p[0], p[1]]), q.uv, [color; 4]);
-        }
-        Ok(())
-    }
     fn button_surface(
         &self,
         surface: &mut Surface,
@@ -660,8 +618,18 @@ impl Assets {
             pressed: state_point(pressed),
         }
         .paint(art, icons, &self.slider_textures);
-        self.text(fonts, self.label(1130), panel.regions[low], 0.5)?;
-        self.text(fonts, self.label(1129), panel.regions[low + 1], 0.5)?;
+        // The Sound panel's Low/High labels (1130/1129) select font 3 at
+        // 0x49bdf1/0x49be66/0x49bedb/0x49bf50 and style 9 at 0x49be17 and
+        // the matching calls, like the Graphics and Gameplay slider captions.
+        for (label, region) in [(1130, low), (1129, low + 1)] {
+            crate::ui::text_widget_style9(
+                fonts,
+                &self.tab3,
+                self.label(label),
+                panel.regions[region],
+                0xffffffff,
+            )?;
+        }
         Ok(())
     }
     #[cfg(test)]
@@ -858,7 +826,7 @@ impl Assets {
                 self.slider(
                     &mut art,
                     &mut icons,
-                    &mut fonts,
+                    &mut font3,
                     panel,
                     levels.music,
                     [11, 13],
@@ -869,7 +837,7 @@ impl Assets {
                 self.slider(
                     &mut art,
                     &mut icons,
-                    &mut fonts,
+                    &mut font3,
                     panel,
                     levels.effects,
                     [19, 21],
@@ -1042,10 +1010,15 @@ impl Assets {
         self.button_surface(
             &mut art,
             back,
-            if page == Page::Main {
-                [80, 148, 34]
-            } else {
-                [0, 180, 0]
+            // The shared button widget (0x4428a0) takes the OK colour from
+            // each panel's button table: SOUND_OK_BUTTON (0x5435e0, read at
+            // 0x49ba70) is 80,148,24; GRAPHICS_OK_BUTTON (0x542678, read at
+            // 0x493550) and GAMEPLAY_OK_BUTTON (0x542390, read at 0x492af0)
+            // are 80,148,34, matching the main Settings button.
+            match page {
+                Page::Sound => [80, 148, 24],
+                Page::Main | Page::Graphics | Page::Gameplay => [80, 148, 34],
+                Page::Board => [0, 180, 0],
             },
             hovered == Some(Button::Back),
             pressed == Some(Button::Back),
