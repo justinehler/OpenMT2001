@@ -11,7 +11,7 @@ pub struct Tooltip {
     pages: Vec<Surface>,
     tab: Vec<u8>,
     names: Vec<Vec<u8>>,
-    icon_labels: [Vec<u8>; 7],
+    icon_labels: [Vec<u8>; 8],
     compass_labels: [Vec<u8>; 2],
 }
 impl Tooltip {
@@ -76,7 +76,7 @@ impl Tooltip {
         };
         let labels = packed.rows();
         //40d8f2's four five-word descriptors store these text IDs in child+34.
-        let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52]
+        let icon_labels = [1146, 1147, 1148, 12, 29, 50, 52, 1141]
             .map(|id| {
                 labels
                     .get(id)
@@ -117,6 +117,7 @@ impl Tooltip {
             29 => &self.icon_labels[4],
             50 => &self.icon_labels[5],
             52 => &self.icon_labels[6],
+            1141 => &self.icon_labels[7],
             id => self
                 .names
                 .get(id.checked_sub(2242).ok_or("tooltip text ID")? as usize + 1)

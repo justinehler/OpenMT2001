@@ -833,7 +833,12 @@ pub fn check_reset(view: &Inspection, which: Group) -> Result<(), String> {
         (PanelId::E, WidgetKind::Compass)
         | (PanelId::E, WidgetKind::Time(crate::time_panel::Button::Speed))
         | (PanelId::E, WidgetKind::Time(crate::time_panel::Button::Manager))
-        | (PanelId::Clock, WidgetKind::Time(crate::time_panel::Button::Options)) => Ok(()),
+        | (
+            PanelId::Clock,
+            WidgetKind::Time(
+                crate::time_panel::Button::Options | crate::time_panel::Button::ScenarioReminder,
+            ),
+        ) => Ok(()),
         _ => Err(format!(
             "Group {which:?} dwell {target:?} requires its actual phase3 consumer"
         )),

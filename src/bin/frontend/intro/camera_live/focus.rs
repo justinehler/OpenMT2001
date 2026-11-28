@@ -19,6 +19,7 @@ pub enum ChildKey {
     Toolbar(usize),
     Locator(u32),
     Compass,
+    PlayerPortrait,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Child {
@@ -198,7 +199,9 @@ pub fn present(
         None
     };
     let toolbar = menu.and_then(|menu| view.toolbar_target(menu, &assets.selection.blocks));
-    let child = if let Some(action) = toolbar {
+    let child = if let Some(id) = view.time_tooltip(&assets.time_panel) {
+        Some((ChildKey::PlayerPortrait, id))
+    } else if let Some(action) = toolbar {
         Some((ChildKey::Toolbar(action.index()), action.tooltip()))
     } else if let Some(id) = locator {
         Some((ChildKey::Locator(id), id))

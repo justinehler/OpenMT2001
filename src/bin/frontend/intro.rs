@@ -988,6 +988,7 @@ enum FreshRequest {
     Card(crate::fresh_city::cards::Action),
     AuctionButton(u32),
     Stats(crate::live_host::StatsAction),
+    ScenarioReminder,
     DismissMarketShare,
     HumanDialog(
         crate::human_dialog::Reply,
@@ -1841,6 +1842,11 @@ impl SceneInputs {
                                 if let Err(error) = host.select_comparison(&session, &assets, mode)
                                 {
                                     host.fail(error);
+                                }
+                            }
+                            FreshRequest::ScenarioReminder => {
+                                if let Some(level) = session.catalog.selected_level() {
+                                    host.scenario_reminder(level, session.world.objective.kind);
                                 }
                             }
                             FreshRequest::Stats(action) => {
@@ -3635,12 +3641,38 @@ impl Inspection {
         };
         use camera_live::ui_graph::PanelId;
         match target {
-            crate::time_panel::Button::Options => g.input(PanelId::Clock).then_some(target),
+            crate::time_panel::Button::Options | crate::time_panel::Button::ScenarioReminder => {
+                g.input(PanelId::Clock).then_some(target)
+            }
             crate::time_panel::Button::Manager => g.input(PanelId::E).then_some(target),
             crate::time_panel::Button::Speed => {
                 (g.input(PanelId::E) && g.speed_disabled == 0).then_some(target)
             }
         }
+    }
+    fn time_tooltip(&self, assets: &crate::time_panel::Assets) -> Option<u32> {
+        if self.options_visible()
+            || self.settings_visible()
+            || self.save_visible()
+            || self.stats_requested
+            || self.prompts.request().is_some()
+            || self.live_status.as_ref().is_none_or(|s| {
+                !s.time_display.visible
+                    || s.stats.is_some()
+                    || s.market_share.is_some()
+                    || s.tutorial_controls.all_disabled
+            })
+        {
+            return None;
+        }
+        let point = self.pointer?.map(|v| v as f32 * 0.5);
+        let auction = self
+            .live_status
+            .as_ref()
+            .is_some_and(|s| s.auction.is_some());
+        (self.time_target(assets, point, auction)
+            == Some(crate::time_panel::Button::ScenarioReminder))
+        .then_some(1141)
     }
     fn time_occupied(
         &self,
@@ -6170,6 +6202,16 @@ impl Intro {
                             crate::time_panel::Button::Options => {
                                 if let Err(error) = view.open_options() {
                                     eprintln!("[Options] {error}");
+                                }
+                            }
+                            crate::time_panel::Button::ScenarioReminder => {
+                                if let Some(sender) = &view._fresh_session {
+                                    let _ = sender.send(FreshRequest::ScenarioReminder);
+                                    view.keys = [false; 4];
+                                    view.taps = [false; 4];
+                                    view.drag = [0; 2];
+                                    view.last_status_query =
+                                        Instant::now() - std::time::Duration::from_secs(1);
                                 }
                             }
                             crate::time_panel::Button::Manager => {
@@ -9771,7 +9813,13 @@ impl Intro {
                     .and_then(|menu| view.toolbar_target(menu, &self.assets.selection.blocks))
                     .map(|a| a.tooltip());
                 let visible_icon = view.icon_tooltip_dwell.advance(side_icon.or(icon));
-                let tooltip_state = navigator_tooltip.or_else(|| visible_icon.zip(view.pointer));
+                let time_icon = view
+                    .time_tooltip(&self.assets.time_panel)
+                    .filter(|_| view.time_panel.tooltip_ready());
+                let tooltip_state = time_icon
+                    .zip(view.pointer.map(|p| p.map(|v| v / 2)))
+                    .or(navigator_tooltip)
+                    .or_else(|| visible_icon.zip(view.pointer));
                 if tooltip_state != view.tooltip_state {
                     view.tooltip = tooltip_state
                         .map(|(text_id, point)| {
