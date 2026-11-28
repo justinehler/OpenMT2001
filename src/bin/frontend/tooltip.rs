@@ -12,6 +12,7 @@ pub struct Tooltip {
     tab: Vec<u8>,
     names: Vec<Vec<u8>>,
     icon_labels: [Vec<u8>; 8],
+    city_labels: [Vec<u8>; 4],
     compass_labels: [Vec<u8>; 2],
     speed_labels: [Vec<u8>; 2],
 }
@@ -88,6 +89,18 @@ impl Tooltip {
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| "panel icon tooltip count")?;
+        //410dbd copies 533788's four descriptor IDs to the green children.
+        let city_labels = [1150, 1151, 1152, 1153]
+            .map(|id| {
+                labels
+                    .get(id)
+                    .map(|s| s.to_vec())
+                    .ok_or("city tab tooltip missing".to_owned())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| "city tab tooltip count")?;
         let compass_labels = [1142, 1143]
             .map(|id| {
                 labels
@@ -115,12 +128,14 @@ impl Tooltip {
             tab,
             names,
             icon_labels,
+            city_labels,
             compass_labels,
             speed_labels,
         })
     }
     fn focus_identifier(&self, text_id: u32) -> Result<&[u8], String> {
         let name = match text_id {
+            1150..=1153 => &self.city_labels[(text_id - 1150) as usize],
             1142 => &self.compass_labels[0],
             1143 => &self.compass_labels[1],
             1144 => &self.speed_labels[0],
@@ -331,10 +346,9 @@ mod tests {
         }
         let renderer = pollster::block_on(openmt2001::render::Renderer::new(descriptor)).unwrap();
         let assets = super::Tooltip::load(&index, &archive, &installer, &language).unwrap();
-        for id in ids
-            .into_iter()
-            .chain([1144, 1145, 1146, 1147, 1148, 12, 2242])
-        {
+        for id in ids.into_iter().chain([
+            1144, 1145, 1146, 1147, 1148, 1150, 1151, 1152, 1153, 12, 2242,
+        ]) {
             let panel = assets.prepare(&renderer, id, [40, 100]).unwrap();
             #[cfg(feature = "capture")]
             if ids.contains(&id)
@@ -373,13 +387,21 @@ mod tests {
         }
         let installer = openmt2001::fixtures::path("INSTALLER");
         let language = installer.join("US/language/usa");
+        let city = pe.at(0x533788, 32).unwrap();
+        for (row, (texture, id)) in [(290u32, 1150u32), (75, 1151), (21, 1152), (70, 1153)]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(&city[row * 8..row * 8 + 4], &texture.to_le_bytes());
+            assert_eq!(&city[row * 8 + 4..row * 8 + 8], &id.to_le_bytes());
+        }
         let off = std::fs::read(language.join("tycoon.off")).unwrap();
         let bin = std::fs::read(language.join("tycoon.bin")).unwrap();
         let tab = std::fs::read(installer.join("Standard/fonts/cust640p.tab")).unwrap();
         let mut at = 0;
         for (id, length) in off.chunks_exact(2).enumerate() {
             let end = at + u16::from_le_bytes(length.try_into().unwrap()) as usize;
-            if [12, 1146, 1147, 1148].contains(&id) {
+            if [12, 1146, 1147, 1148, 1150, 1151, 1152, 1153].contains(&id) {
                 assert!(
                     super::measure_with_gap(&tab, &bin[at..end], -1).unwrap() < 150,
                     "tooltip id {id} exceeds original one-line width"
