@@ -102,7 +102,8 @@ fn text_glyphs(
         i32::from_le_bytes(tab[4 + 55 * 44 + 36..4 + 55 * 44 + 40].try_into().unwrap());
     let mut glyphs = Vec::new();
     let [l, t, r, b] = label.bounds;
-    let (lines, copy) = crate::prompt::wrap_with_gap(tab, text, (r - l - 4.).trunc() as i32, -1)?;
+    let (lines, copy) =
+        openmt2001::prompt_queue::wrap_with_gap(tab, text, (r - l - 4.).trunc() as i32, -1)?;
     let count = lines.len().saturating_sub(1);
     let y = ((f64::from(b) - f64::from(t) - f64::from(line_height) * count as f64) * 0.5).trunc()
         as f32;

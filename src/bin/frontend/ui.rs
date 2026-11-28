@@ -615,7 +615,8 @@ pub fn text_widget_style3(
     if !width.is_finite() || !widget_height.is_finite() || width <= 0. || widget_height <= 0. {
         return Err("invalid text widget bounds".into());
     }
-    let (offsets, wrapped) = crate::prompt::wrap_with_gap(tab, encoded, width.trunc() as i32, -1)?;
+    let (offsets, wrapped) =
+        openmt2001::prompt_queue::wrap_with_gap(tab, encoded, width.trunc() as i32, -1)?;
     let rows = offsets.windows(2).collect::<Vec<_>>();
     let top = bounds[1].trunc()
         + ((widget_height - rows.len().max(1) as f64 * f64::from(height)) * 0.5).trunc() as f32;
@@ -665,7 +666,7 @@ pub fn text_widget_style4(
         return Err("invalid text widget bounds".into());
     }
     let (offsets, wrapped) =
-        crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
+        openmt2001::prompt_queue::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
     let rows = offsets.windows(2).collect::<Vec<_>>();
     let top = bounds[1].trunc()
         + ((span[1] - rows.len().max(1) as f64 * f64::from(height)) * 0.5).trunc() as f32;
@@ -755,7 +756,7 @@ pub fn text_widget_style9(
         return Err("invalid text widget bounds".into());
     }
     let (offsets, wrapped) =
-        crate::prompt::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
+        openmt2001::prompt_queue::wrap_with_gap(tab, encoded, span[0].trunc() as i32, -1)?;
     let rows = offsets
         .windows(2)
         .map(|range| {

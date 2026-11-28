@@ -164,7 +164,7 @@ fn text_quads_with_offset(
     x_offset: i32,
 ) -> Result<Vec<openmt2001::font::GlyphQuad>, String> {
     let font = openmt2001::font::Font::parse(tab)?;
-    let (offsets, value) = crate::prompt::wrap_with_gap(
+    let (offsets, value) = openmt2001::prompt_queue::wrap_with_gap(
         tab,
         value,
         (f64::from(bounds[2]) - f64::from(bounds[0]) - f64::from(x_offset) * 2.).trunc() as i32,

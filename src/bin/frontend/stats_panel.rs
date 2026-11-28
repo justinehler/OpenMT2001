@@ -583,7 +583,7 @@ pub fn text_quads(
         //Whole4e7a90/4419f0 emits one degenerate glyph, not an invented region.
         (vec![0, 2], vec![0, 0])
     } else {
-        crate::prompt::wrap_with_gap(tab, text, wrap_width, -1)?
+        openmt2001::prompt_queue::wrap_with_gap(tab, text, wrap_width, -1)?
     };
     let count = offsets.len() - 1;
     let first = &copy[offsets[0]..offsets[1].saturating_sub(1).min(copy.len())];

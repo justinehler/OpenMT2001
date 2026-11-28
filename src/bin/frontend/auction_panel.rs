@@ -545,7 +545,7 @@ impl Assets {
         text: &[u8],
     ) -> Result<(), String> {
         let mut pages = self.fonts[font].clone();
-        let (offsets, copy) = crate::prompt::wrap(
+        let (offsets, copy) = openmt2001::prompt_queue::wrap(
             &self.tabs[font],
             text,
             (bounds[2] - bounds[0]).trunc() as i32,
