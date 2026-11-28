@@ -587,10 +587,7 @@ mod tests {
         );
         let standard = Path::new(&suncols).parent().unwrap();
         let installer = standard.parent().unwrap();
-        let ffmpeg = std::env::var_os("OPENMT2001_FFMPEG").map(PathBuf::from)
-            .unwrap_or_else(|| if cfg!(windows) {
-                "work/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe".into()
-            } else { "ffmpeg".into() });
+        let ffmpeg = openmt2001::fixtures::ffmpeg();
         let assets = Assets::load(&image, installer, &ffmpeg).unwrap();
         assert_eq!(assets.before_six.len(), 95_385);
         assert!(assets.songs.iter().all(|song| song.is_file()));

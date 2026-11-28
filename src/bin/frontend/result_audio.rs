@@ -220,10 +220,7 @@ mod tests {
             assert_eq!(u32::from_le_bytes(push[1..5].try_into().unwrap()), song);
         }
         let installer = standard.parent().unwrap();
-        let ffmpeg = std::env::var_os("OPENMT2001_FFMPEG").map(std::path::PathBuf::from)
-            .unwrap_or_else(|| if cfg!(windows) {
-                "work/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe".into()
-            } else { "ffmpeg".into() });
+        let ffmpeg = openmt2001::fixtures::ffmpeg();
         let assets = Assets::load(&image, installer, &ffmpeg).unwrap();
         let seconds = |samples: &[f32]| samples.len() as f64 / (44100. * 2.);
         assert!(

@@ -31,10 +31,7 @@ fn rights_acquisition_services(
             crate::gameplay_sound::Assets::load(&image, &inputs.installer).unwrap());
         let mut auction = crate::live_host::auction_audio::Player::new(
             crate::live_host::auction_audio::Assets::load(&image, &inputs.installer).unwrap());
-        let ffmpeg = std::env::var_os("OPENMT2001_FFMPEG").map(PathBuf::from).unwrap_or_else(|| {
-            if cfg!(windows) { "work/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe".into() }
-            else { "ffmpeg".into() }
-        });
+        let ffmpeg = openmt2001::fixtures::ffmpeg();
         let mut era = crate::era_audio::Player::new(
             crate::era_audio::Assets::load(&image, &inputs.installer, &ffmpeg).unwrap());
         let mut transport = crate::transport_audio::Player::new(
@@ -302,16 +299,7 @@ fn saved_worker_rights_input_and_native_delay() {
     let mut auction = crate::live_host::auction_audio::Player::new(
         crate::live_host::auction_audio::Assets::load(&image, &inputs.installer).unwrap(),
     );
-    let ffmpeg = std::env::var_os("OPENMT2001_FFMPEG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                "work/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe"
-                    .into()
-            } else {
-                "ffmpeg".into()
-            }
-        });
+    let ffmpeg = openmt2001::fixtures::ffmpeg();
     let mut era = crate::era_audio::Player::new(
         crate::era_audio::Assets::load(&image, &inputs.installer, &ffmpeg).unwrap(),
     );
