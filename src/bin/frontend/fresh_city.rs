@@ -200,6 +200,7 @@ pub struct Session<'data> {
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     /// Original builder560a08 stream, independent of the script/process RNG.
     pub build_random_state: u32,
+    pub window_texture: openmt2001::window_texture::WindowTexture,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub allocation_next: u32,
     pub static_rng_tail_next: u32,
@@ -939,6 +940,9 @@ impl<'data> Session<'data> {
             openmt2001::render_scene::assemble_with_style(request, style)?
         };
         self.refresh_scene_records(&mut scene)?;
+        if let Some(image) = self.window_texture.current() {
+            scene.set_window_pixels(image.pixels)?;
+        }
         Ok(scene)
     }
 
@@ -1994,6 +1998,9 @@ impl<'data> Session<'data> {
             ),
             demolition_points: vec![],
             build_random_state: startup.state(0x560a08),
+            window_texture: openmt2001::window_texture::WindowTexture::new(
+                startup.state(openmt2001::window_texture::RNG_REFERENCE),
+            ),
             pulse_lights: openmt2001::pulse_lights::PulseLights::from_original(input.image)?,
             allocation_next,
             static_rng_tail_next,

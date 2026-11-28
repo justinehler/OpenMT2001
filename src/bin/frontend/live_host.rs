@@ -22,6 +22,7 @@ pub struct Status {
     pub autosave: Option<crate::save_menu::AutosaveStatus>,
     pub time_display: crate::time_panel::DisplayState,
     pub cash_arrow: crate::cash_arrow::State,
+    pub window_texture: Option<openmt2001::window_texture::Publication>,
     pub pulse_lights: openmt2001::pulse_lights::PulseLights,
     pub demolition_points: Vec<openmt2001::demolition_effect::Point>,
     pub stats: Option<crate::stats_panel::Snapshot>,
@@ -1403,6 +1404,7 @@ impl Host {
             autosave: self.autosave_status.clone(),
             time_display,
             cash_arrow: self.cash_arrow,
+            window_texture: session.window_texture.pending(),
             pulse_lights: session.pulse_lights.clone(),
             demolition_points: session.demolition_points.clone(),
             stats,
@@ -2575,7 +2577,7 @@ impl Host {
                 // They are visible outstanding features, not
                 // substitutes for simulation callbacks.
                 Event::Tick(scheduler::Event::Helper(
-                    address @ (0x4805b0 | 0x450080 | 0x4eb5b0 | 0x4b5db0),
+                    address @ (0x450080 | 0x4eb5b0 | 0x4b5db0),
                 )) => {
                     omitted.insert(address);
                     Ok(0)
