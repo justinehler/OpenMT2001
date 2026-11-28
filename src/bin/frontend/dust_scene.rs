@@ -1,6 +1,6 @@
 //! Native dust point streams using the retained portable billboard renderer.
 //! Texture1 is our local counterpart of original687c78, not a process pointer.
-use crate::fresh_city::result::{fireworks, particles_gpu};
+use crate::result_presentation::{fireworks, particles_gpu};
 use openmt2001::{
     archive::ArchiveIndex,
     demolition_effect::Point,

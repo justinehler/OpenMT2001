@@ -78,6 +78,8 @@ mod profile;
 mod profile_settings;
 #[path = "frontend/prompt.rs"]
 pub mod prompt;
+#[path = "frontend/result_presentation.rs"]
+pub mod result_presentation;
 #[path = "frontend/save_appearance.rs"]
 pub mod save_appearance;
 #[path = "frontend/save_dialog.rs"]
