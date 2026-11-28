@@ -30,6 +30,7 @@ pub mod pause;
 pub mod pe;
 pub mod people;
 pub mod picking;
+pub mod player_startup;
 pub mod polygon;
 pub mod prompt_format;
 pub mod pulse_lights;

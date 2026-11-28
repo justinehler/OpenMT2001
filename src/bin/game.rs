@@ -113,11 +113,17 @@ mod tooltip;
 pub mod tutorial_two_interaction;
 #[path = "frontend/ui.rs"]
 mod ui;
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::process::ExitCode {
     if std::env::args().nth(1).as_deref() == Some("headless") {
         std::process::exit(headless::main(std::env::args().skip(2)));
     }
-    app::run()
+    match app::run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(all(test, feature = "capture"))]
