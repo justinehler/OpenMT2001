@@ -214,8 +214,7 @@ fn exercise_objective_city_replacement_and_nonfinite_live_targets() {
     assert_eq!(first.world.objective.excess, excess);
     first.world.objective.cash_statuses = [9; 6];
     first.world.objective.reserved = [0xa5; 15];
-    let custody =
-        crate::process_dispatch::DispatchCustody::from_session(&mut first, timing).unwrap();
+    let custody = crate::process_dispatch::custody_from_session(&mut first, timing).unwrap();
     drop(first);
     let (seed, timing) = custody.prepare_start(true).unwrap();
     let mut second = Session::initialize_joined(
@@ -270,8 +269,7 @@ fn exercise_objective_city_replacement_and_nonfinite_live_targets() {
 
     // The departing city's newer values must not override the saved controller.
     second.world.objective.excess = [-777; 6];
-    let custody =
-        crate::process_dispatch::DispatchCustody::from_session(&mut second, timing).unwrap();
+    let custody = crate::process_dispatch::custody_from_session(&mut second, timing).unwrap();
     drop(second);
     let (seed, _) = custody.prepare_start(false).unwrap();
     let loaded = Session::load_original_joined(
