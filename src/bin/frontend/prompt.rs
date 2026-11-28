@@ -1,5 +1,4 @@
 use crate::ui::{self, Surface};
-use openmt2001::prompt_queue::script_field;
 pub use openmt2001::prompt_queue::*;
 use openmt2001::{
     archive::ArchiveIndex,
