@@ -107,6 +107,8 @@ pub mod startup_rng;
 pub mod water;
 
 pub mod flyby;
+#[cfg(feature = "lua4")]
+pub mod flyby_script;
 pub mod scene_assets;
 pub mod shopping;
 

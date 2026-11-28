@@ -362,22 +362,30 @@ impl Assets {
             &ui_text,
         )?);
         let suncols = read(paths.installer.join("Standard/SUNCOLS.tga"))?;
+        let hub = read(scripts.join("FLYBY1/hub.lua"))?;
+        // Offline original startup reseeds the static registry from CRT time.
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs() as u32;
+        let mut random_state = openmt2001::startup_rng::Snapshot::from_seed(seed).state(0x93aee8);
+        let backdrop =
+            openmt2001::flyby_script::select(&hub, &paths.quality, &mut random_state, || {
+                process_runtime
+                    .performance8b26cc()
+                    .map_err(|e| e.to_string())
+            })?;
         let track = read(
             paths
                 .installer
-                .join(format!("Standard/Cut_scenes/intro_{}.tm", paths.quality)),
+                .join("Standard/Cut_scenes")
+                .join(&backdrop.track),
         )?;
         let track = Flyby::parse(&track)?;
         let samples = (1..track.frame_count())
             .map(|i| track.sample(i))
             .collect::<Result<Vec<_>, _>>()?;
-        // Original FLYBY1/hub.lua associates these tracks with these hours.
-        let phase = match paths.quality.as_str() {
-            "low" => 12,
-            "medium" => 20,
-            "high" => 8,
-            _ => return Err("intro quality must be low, medium or high".into()),
-        };
+        let phase = backdrop.hour;
         let scene = render_scene::assemble_with_style(
             Request {
                 build_file: &build_file,
@@ -401,7 +409,7 @@ impl Assets {
             scene.building_count,
             scene.vertex_count,
             samples.len(),
-            paths.quality
+            backdrop.track
         );
         let inputs = Arc::new(SceneInputs {
             compatibility: paths.compatibility,
