@@ -1106,7 +1106,6 @@ struct Inspection {
     environment_pending: Option<mpsc::Receiver<crate::time_panel::ClockSample>>,
     environment_tick: u32,
     environment_time: Option<(u32, u32)>,
-    last_environment_query: Instant,
     last_status_query: Instant,
     last_snapshot: Instant,
     construction_active: bool,

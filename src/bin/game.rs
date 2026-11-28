@@ -45,6 +45,8 @@ pub mod dust_scene;
 pub mod event_list;
 #[path = "frontend/game_options.rs"]
 mod game_options;
+#[path = "frontend/headless.rs"]
+mod headless;
 #[path = "frontend/human_dialog.rs"]
 pub mod human_dialog;
 #[path = "frontend/intro.rs"]
@@ -111,8 +113,17 @@ mod tooltip;
 pub mod tutorial_two_interaction;
 #[path = "frontend/ui.rs"]
 mod ui;
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    app::run()
+fn main() -> std::process::ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("headless") {
+        std::process::exit(headless::main(std::env::args().skip(2)));
+    }
+    match app::run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(all(test, feature = "capture"))]

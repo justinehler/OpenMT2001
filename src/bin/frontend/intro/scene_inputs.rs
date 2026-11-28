@@ -307,7 +307,7 @@ impl SceneInputs {
                                 camera_producer::record_exit(&exit_failures, error.clone());
                             }
                             if joined {
-                                match crate::process_dispatch::DispatchCustody::from_session(
+                                match crate::process_dispatch::custody_from_session(
                                     &mut session,
                                     timing,
                                 ) {
@@ -919,6 +919,7 @@ impl SceneInputs {
                                 let _ = reply.send(crate::time_panel::ClockSample {
                                     ticks: clock.timing[0],
                                     interface_ticks: host.interface_ticks(),
+                                    prompt_updates: host.prompt_updates(),
                                     year: 1930 + clock.calendar[2] * 10 + clock.calendar[1],
                                     hour: clock.hour(),
                                     fraction: clock.timing[2],
@@ -981,10 +982,7 @@ impl SceneInputs {
                     }
                 }
                 if joined {
-                    match crate::process_dispatch::DispatchCustody::from_session(
-                        &mut session,
-                        timing,
-                    ) {
+                    match crate::process_dispatch::custody_from_session(&mut session, timing) {
                         Ok(custody) => {
                             drop(session);
                             return Some(custody);

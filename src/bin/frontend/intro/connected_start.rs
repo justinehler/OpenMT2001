@@ -3,7 +3,7 @@
 //! barriers, chat, other command families and peer-loss handling remain follow-ons.
 use super::*;
 use openmt2001::network::{
-    self, Content, RowKind, SessionBinding,
+    self, Content, RowKind,
     lobby::worker::{Handle, Ticket, Update},
 };
 use sha2::{Digest, Sha256};
@@ -70,11 +70,8 @@ impl Pending {
         })
     }
 }
-pub struct Connection {
-    pub binding: SessionBinding,
-    pub worker: Handle,
-    pub commands: network::commands::Adapter,
-}
+// The Session's multiplayer link moved into the library (#99).
+pub use openmt2001::network::SessionLink as Connection;
 
 pub(crate) struct Staged {
     pub catalog: openmt2001::level_catalog::Catalog,
