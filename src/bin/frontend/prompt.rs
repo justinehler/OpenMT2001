@@ -1010,11 +1010,19 @@ impl Assets {
         self.prepare_with_button(renderer, state, false, offset)
     }
     pub fn desktop_quit_hit_at(&self, cursor: [f32; 2], right: bool) -> Option<usize> {
+        self.frontend_dialog_hit_at(cursor, right, 2)
+    }
+    pub(crate) fn frontend_dialog_hit_at(
+        &self,
+        cursor: [f32; 2],
+        right: bool,
+        count: usize,
+    ) -> Option<usize> {
         use crate::menu::desktop_quit;
         if right || !desktop_quit::hit(self.input_bounds, cursor) {
             return None;
         }
-        self.dialog_buttons(2)
+        self.dialog_buttons(count)
             .iter()
             .position(|bounds| desktop_quit::hit(*bounds, cursor))
     }
@@ -1028,12 +1036,22 @@ impl Assets {
         renderer: &Renderer,
         modal: &crate::menu::desktop_quit::Modal,
     ) -> Result<PreparedScene, String> {
+        self.prepare_frontend_dialog(renderer, crate::menu::desktop_quit::dialog(), modal)
+    }
+    /// The frontend uses the same portrait-free prompt owner (88c0d4) for
+    /// Quit, profile deletion and duplicate registration.
+    pub(crate) fn prepare_frontend_dialog(
+        &self,
+        renderer: &Renderer,
+        dialog: crate::human_dialog::Dialog,
+        modal: &crate::menu::desktop_quit::Modal,
+    ) -> Result<PreparedScene, String> {
         let mut state = State::default();
         state.submit(Request {
             script: None,
-            dialog: Some(crate::menu::desktop_quit::dialog()),
-            title: 1765,
-            body: 1766,
+            dialog: Some(dialog),
+            title: dialog.title,
+            body: dialog.body,
             dismissal_id: 0,
             card: None,
         });
@@ -1100,7 +1118,11 @@ impl Assets {
                 state.pressed
             };
             if let Some(modal) = desktop {
-                let hover = self.desktop_quit_hit(modal) == Some(i);
+                let hover = self.frontend_dialog_hit_at(
+                    modal.pointer().unwrap_or([-1.; 2]),
+                    modal.blocked_by_right(),
+                    buttons.len(),
+                ) == Some(i);
                 let mut button = Surface::solid();
                 ui::button_state(
                     &mut button,

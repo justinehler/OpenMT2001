@@ -397,10 +397,13 @@ impl Menu {
         self.desktop_quit.active()
     }
     pub fn desktop_input_blocked(&self) -> bool {
-        self.desktop_quit.active() || self.desktop_exit_requested
+        self.desktop_quit.active()
+            || self.desktop_exit_requested
+            || self.profile.visible && self.profile.prompt_pending()
     }
     pub fn desktop_right_button(&mut self, down: bool) {
         self.desktop_quit.right(down);
+        self.profile.prompt_right(down);
     }
     /// Current/previous physical samples arrive once per App menu redraw.
     /// This is the host's eligible modal event1 cadence, not proven50Hz parity.
@@ -410,6 +413,10 @@ impl Menu {
             if edge && self.desktop_quit.active() {
                 self.desktop_reply(button);
             }
+        }
+        if !self.desktop_quit.active() && self.profile.visible && self.profile.ui_event1(sample) {
+            self.selected = None;
+            self.dirty = true;
         }
         if self.modal_fade.advance(self.frontend_modal_open()) {
             self.dirty = true;
@@ -441,6 +448,7 @@ impl Menu {
             self.pointer_position = None;
         }
         self.desktop_quit.cancel_pointer();
+        self.profile.cancel_input();
         self.settings.cancel_input();
         self.skirmish.cancel_input();
         self.multiplayer.cancel_input();
@@ -705,6 +713,9 @@ impl Menu {
                 .desktop_quit_hit(&self.desktop_quit)
                 .is_some();
         }
+        if self.profile.visible && self.profile.prompt_pending() {
+            return self.hit(p).is_some();
+        }
         // Placeholder overlays do not expose the background menu's hit regions.
         if self.pending.is_some() {
             return false;
@@ -783,6 +794,13 @@ impl Menu {
             return self.load.hit(p);
         }
         if self.profile.visible {
+            if self.profile.prompt_pending() {
+                return self.assets.prompts.frontend_dialog_hit_at(
+                    p,
+                    self.profile.prompt_controls().blocked_by_right(),
+                    self.profile.count(),
+                );
+            }
             return self.profile.hit(p);
         }
         (if self.single_mode {
@@ -811,6 +829,14 @@ impl Menu {
             if let Some(button) = self.desktop_quit.left(pressed, hit) {
                 self.desktop_reply(button);
             }
+            return;
+        }
+        if self.profile.visible && self.profile.prompt_pending() {
+            let hit = self.pointer_position.and_then(|p| self.hit(p));
+            if self.profile.prompt_mouse(pressed, hit) {
+                self.selected = None;
+            }
+            self.dirty = true;
             return;
         }
         if self.multiplayer.visible {
@@ -1047,9 +1073,13 @@ impl Menu {
         }
         if self.profile.visible {
             if let Some(i) = self.selected.or(self.profile.name.as_ref().map(|_| 0)) {
+                let modal_before = self.profile.modal_open();
                 self.profile.activate(i);
                 self.dirty = true;
-                if !self.profile.visible {
+                if !self.profile.visible
+                    || modal_before != self.profile.modal_open()
+                    || self.profile.prompt_pending()
+                {
                     self.selected = None;
                 }
             }
@@ -1409,6 +1439,14 @@ impl Menu {
                 self.dirty = false;
             }
             renderer.draw_overlay(color, depth, self.prepared.as_ref().unwrap());
+            if let Some(dialog) = self.profile.generic_prompt() {
+                let panel = self.assets.prompts.prepare_frontend_dialog(
+                    renderer,
+                    dialog,
+                    self.profile.prompt_controls(),
+                )?;
+                renderer.draw_overlay(color, depth, &panel);
+            }
             return Ok(());
         }
         if self.dirty {
