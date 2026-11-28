@@ -39,7 +39,7 @@ fn round(a: Sum) -> Result<Sum> {
     s(a.to_f32())
 }
 
-pub use openmt2001::navigator_inputs::{Inputs, Owned, Producer, Tables};
+pub use openmt2001::navigator_inputs::{Inputs, Producer, Tables};
 
 /// Actual93c5c0/dc logical coordinates and93c60d retained independently of
 /// display hover. The real source leaves these cells available off-window.
