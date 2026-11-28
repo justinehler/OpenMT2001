@@ -12,7 +12,8 @@ use crate::{
     prompt,
 };
 use openmt2001::{
-    audio_requests::era as era_requests, hourly, level_script, lua4::Value, scheduler,
+    audio_requests::era as era_requests, audio_requests::gameplay as gameplay_requests, hourly,
+    level_script, lua4::Value, scheduler,
 };
 
 fn property_refresh_broadcast(packet: &openmt2001::player_messages::Packet) -> bool {
@@ -336,7 +337,7 @@ pub struct Host {
     pub auction_audio: Option<std::sync::mpsc::Sender<auction_audio::Request>>,
     pub transport_audio: Option<std::sync::mpsc::Sender<crate::transport_audio::Request>>,
     pub era_audio: Option<std::sync::mpsc::Sender<era_requests::Request>>,
-    pub gameplay_sound: Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    pub gameplay_sound: Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     auction: Option<Auction>,
     pub running: bool,
     player_paused: bool,
@@ -494,9 +495,9 @@ impl Host {
             |call, _, _| {
                 use openmt2001::ai_messages::offers::auction::activation::Call;
                 match call {
-                    Call::Ambient => crate::gameplay_sound::request(
+                    Call::Ambient => gameplay_requests::request(
                         gameplay_sound,
-                        crate::gameplay_sound::Operation::AuctionAmbientCreate,
+                        gameplay_requests::Operation::AuctionAmbientCreate,
                     ),
                     Call::Camera => crate::auction_bridge::request(
                         renderer,
@@ -1740,11 +1741,10 @@ impl Host {
                             .as_ref()
                             .ok_or("Card activation has no presented panel")?
                             .card;
-                        let positive =
-                            crate::gameplay_sound::card_open_positive(assets.image, card)?;
-                        crate::gameplay_sound::enqueue(
+                        let positive = gameplay_requests::card_open_positive(assets.image, card)?;
+                        gameplay_requests::enqueue(
                             &self.gameplay_sound,
-                            crate::gameplay_sound::Operation::CardOpen { positive },
+                            gameplay_requests::Operation::CardOpen { positive },
                         )?;
                     }
                     self.card_visible = true;
@@ -1926,9 +1926,9 @@ impl Host {
                         [Value::Bytes(name)] => std::str::from_utf8(name)
                             .map_err(|_| "script sound filename is not UTF-8".to_owned())
                             .and_then(|name| {
-                                crate::gameplay_sound::enqueue(
+                                gameplay_requests::enqueue(
                                     &self.gameplay_sound,
-                                    crate::gameplay_sound::Operation::Script {
+                                    gameplay_requests::Operation::Script {
                                         name: name.to_owned(),
                                     },
                                 )
@@ -2446,8 +2446,8 @@ impl Host {
                 ),
                 Event::Command(openmt2001::live_commands::Event::AuctionActivation(
                     openmt2001::ai_messages::offers::auction::activation::Call::Ambient,
-                )) => crate::gameplay_sound::request(
-                    &gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientCreate),
+                )) => gameplay_requests::request(
+                    &gameplay_sound, gameplay_requests::Operation::AuctionAmbientCreate),
                 Event::Command(openmt2001::live_commands::Event::AuctionTimeShow { cash }) => {
                     time_runtime.lock().map_err(|_| "Time runtime poisoned")?.show(cash, 1)?;
                     Ok(0)
@@ -2499,9 +2499,9 @@ impl Host {
                         &transport_audio,
                         crate::transport_audio::Operation::Reset,
                     )?;
-                    crate::gameplay_sound::enqueue(
+                    gameplay_requests::enqueue(
                         &gameplay_sound,
-                        crate::gameplay_sound::Operation::Reset,
+                        gameplay_requests::Operation::Reset,
                     )?;
                     auction_audio::enqueue(&auction_audio, auction_audio::Operation::Reset)?;
                     Ok(0)
@@ -2511,8 +2511,8 @@ impl Host {
                 ))
                 | Event::Command(openmt2001::live_commands::Event::AuctionAdmission(
                     openmt2001::ai_messages::offers::auction::admission::Call::ReleaseAmbient(handle),
-                )) => crate::gameplay_sound::request(
-                    &gameplay_sound, crate::gameplay_sound::Operation::AuctionAmbientRelease(handle)),
+                )) => gameplay_requests::request(
+                    &gameplay_sound, gameplay_requests::Operation::AuctionAmbientRelease(handle)),
                 Event::Command(openmt2001::live_commands::Event::AuctionClosure(
                     openmt2001::ai_messages::offers::auction::closure::Call::Tutorial(_),
                 )) if tutorial_state != 1 => Ok(0),
@@ -2652,9 +2652,9 @@ impl Host {
                 }
                 Event::Command(openmt2001::live_commands::Event::EventCardTargeted(
                     openmt2001::event_cards::targeted::Call::Sound { actor_is_current },
-                )) => crate::gameplay_sound::request(
+                )) => gameplay_requests::request(
                     &gameplay_sound,
-                    crate::gameplay_sound::Operation::Targeted { actor_is_current }),
+                    gameplay_requests::Operation::Targeted { actor_is_current }),
                 // Reviewed original render-only state: animated texture tiles,
                 // category camera-distance cache and two particle systems.
                 // They are visible outstanding features, not
@@ -2866,9 +2866,9 @@ impl Host {
                 &self.transport_audio,
                 crate::transport_audio::Operation::Reset,
             );
-            let _ = crate::gameplay_sound::enqueue(
+            let _ = gameplay_requests::enqueue(
                 &self.gameplay_sound,
-                crate::gameplay_sound::Operation::Reset,
+                gameplay_requests::Operation::Reset,
             );
             let _ = auction_audio::enqueue(&self.auction_audio, auction_audio::Operation::Reset);
             self.result_context = Some(reply.context);
@@ -3572,7 +3572,7 @@ fn account_ui_post(
 /// Original48a5a0 presentation after the account has already been posted.
 fn ledger_ui_post(
     cash_arrow: &mut crate::cash_arrow::State,
-    sound: &Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    sound: &Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     current: bool,
     amount: f32,
     threshold: f32,
@@ -3620,7 +3620,7 @@ fn ledger_ui_post_with(
 
 fn ledger_ui_call(
     cash_arrow: &mut crate::cash_arrow::State,
-    sound: &Option<std::sync::mpsc::Sender<crate::gameplay_sound::Request>>,
+    sound: &Option<std::sync::mpsc::Sender<gameplay_requests::Request>>,
     call: openmt2001::category_ownership::Seam,
 ) -> Result<u32, String> {
     use openmt2001::category_ownership::Seam;
@@ -3635,10 +3635,7 @@ fn ledger_ui_call(
                 [0x541cb4, 0, 0, 0, 1, 0x3c] => false,
                 _ => return Err("property transfer sound call changed".into()),
             };
-            crate::gameplay_sound::enqueue(
-                sound,
-                crate::gameplay_sound::Operation::Ledger { sale },
-            )?;
+            gameplay_requests::enqueue(sound, gameplay_requests::Operation::Ledger { sale })?;
             Ok(0)
         }
         Seam::NativeUiCall {
